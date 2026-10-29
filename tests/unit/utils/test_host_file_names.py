@@ -20,6 +20,8 @@ from tests.utils.host_file_names import (
     skip_unless_the_host_can_name,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Names the tests use that Windows can hold.
 HOLDABLE = [
     "plain",

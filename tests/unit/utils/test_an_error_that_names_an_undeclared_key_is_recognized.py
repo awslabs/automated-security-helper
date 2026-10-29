@@ -29,6 +29,8 @@ from automated_security_helper.utils.unknown_keys import (
     unknown_keys_message,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _value_error(text: str) -> dict:
     """The entry pydantic reports for a ``ValueError`` a validator raised."""

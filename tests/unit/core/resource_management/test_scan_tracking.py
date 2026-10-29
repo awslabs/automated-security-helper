@@ -40,6 +40,8 @@ from automated_security_helper.core.resource_management.scan_tracking import (
     validate_result_structure,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Fixtures

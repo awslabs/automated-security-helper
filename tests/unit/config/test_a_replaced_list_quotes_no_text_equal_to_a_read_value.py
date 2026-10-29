@@ -22,6 +22,8 @@ from automated_security_helper.utils.suppression_matcher import (
     recorded_suppressions,
 )
 
+pytestmark = pytest.mark.unit
+
 VAR = "ASH_TEST_SUPP_A"
 VALUE = "supp-needle-3b/"
 

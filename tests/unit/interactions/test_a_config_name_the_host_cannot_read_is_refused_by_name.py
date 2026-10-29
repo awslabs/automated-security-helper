@@ -19,6 +19,8 @@ import pytest
 
 from automated_security_helper.interactions import run_ash_container as rac
 
+pytestmark = pytest.mark.unit
+
 CONFIG_TEXT = "project_name: unreadable-name\n"
 
 

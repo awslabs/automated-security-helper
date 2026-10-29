@@ -10,6 +10,10 @@ that way prints whole.
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 _VALUE = "one-value-not-fourteen"
 
 

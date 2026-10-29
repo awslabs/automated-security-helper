@@ -109,6 +109,7 @@ def _inputs_the_step_reads() -> list[str]:
     )
 
 
+@pytest.mark.unit
 def test_the_install_step_reads_the_four_default_scanners_inputs() -> None:
     assert _inputs_the_step_reads() == [
         "install-actionlint",
@@ -118,6 +119,7 @@ def test_the_install_step_reads_the_four_default_scanners_inputs() -> None:
     ]
 
 
+@pytest.mark.unit
 def test_every_input_the_install_step_reads_defaults_to_true() -> None:
     inputs = _inputs()
     wrong = {
@@ -131,6 +133,7 @@ def test_every_input_the_install_step_reads_defaults_to_true() -> None:
     )
 
 
+@pytest.mark.unit
 def test_each_of_those_inputs_says_what_it_downloads_and_how_to_turn_it_off() -> None:
     inputs = _inputs()
     for name in _inputs_the_step_reads():
@@ -145,6 +148,7 @@ def _install_inputs() -> dict[str, Any]:
     }
 
 
+@pytest.mark.unit
 def test_every_install_input_is_pinned() -> None:
     assert sorted(_install_inputs()) == [
         "install-actionlint",
@@ -158,6 +162,7 @@ def test_every_install_input_is_pinned() -> None:
     ]
 
 
+@pytest.mark.unit
 def test_every_install_input_defaults_to_true_and_says_how_to_turn_it_off() -> None:
     wrong = {
         name: spec.get("default")
@@ -170,6 +175,7 @@ def test_every_install_input_defaults_to_true_and_says_how_to_turn_it_off() -> N
         assert "MB" in spec["description"], (name, spec["description"])
 
 
+@pytest.mark.unit
 def test_every_install_input_names_a_scanner_on_by_default() -> None:
     from automated_security_helper.config.default_config import get_default_config
 
@@ -401,6 +407,7 @@ def _compared_event_names() -> set[str]:
     return set(re.findall(r"github\.event_name\s*[!=]=\s*'([a-z_]+)'", text))
 
 
+@pytest.mark.unit
 def test_the_events_cover_every_trigger_case() -> None:
     callers = _caller_triggers()
     compared = _compared_event_names()
@@ -511,6 +518,7 @@ def _run(step: dict[str, Any], ctx: dict[str, Any], tmp_path: Path) -> dict[str,
     return {"calls": calls, "tools": tools, "bin_paths": bin_paths, "on_path": on_path}
 
 
+@pytest.mark.unit
 def test_every_install_input_is_a_boolean() -> None:
     """A string input makes `inputs.install-x && 'x' || ''` true for 'false' too."""
     wrong = {
@@ -525,6 +533,7 @@ _FOUR = ("actionlint", "cfn_guard", "gitleaks", "trivy")
 _COMBINATIONS = list(itertools.product((False, True), repeat=len(_FOUR)))
 
 
+@pytest.mark.integration
 @runs_the_step_script
 @pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize(
@@ -558,6 +567,7 @@ def test_the_install_step_installs_exactly_the_tools_switched_on(
         assert call["ash_config"] == "<unset>", call
 
 
+@pytest.mark.integration
 @runs_the_step_script
 @pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize("tool", ["grype", "syft"])
@@ -575,6 +585,7 @@ def test_the_grype_and_syft_steps_install_their_tool(
     assert ran["bin_paths"] <= set(ran["on_path"]) and ran["bin_paths"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("event_name", EVENTS)
 def test_every_install_input_gates_a_step_that_can_run(
     tmp_path: Path, event_name: str
@@ -604,6 +615,7 @@ def test_every_install_input_gates_a_step_that_can_run(
     )
 
 
+@pytest.mark.integration
 @runs_the_step_script
 @pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize("enabled", [True, False])
@@ -633,6 +645,7 @@ def test_the_rules_dir_is_where_the_install_step_writes_it(
     assert Path(pointed_at) == rules_root()
 
 
+@pytest.mark.unit
 def test_the_evaluator_reads_the_expressions_the_way_github_does() -> None:
     """The control for the harness above: known expressions, known values."""
     ctx = {

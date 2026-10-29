@@ -18,6 +18,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # #176 — MCP path canonicalization: validate_directory_path must resolve()

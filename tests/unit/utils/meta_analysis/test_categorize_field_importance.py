@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.field_mapping import (
     categorize_field_importance,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_categorize_field_importance():

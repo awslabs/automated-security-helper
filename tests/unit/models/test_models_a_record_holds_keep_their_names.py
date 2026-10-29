@@ -27,6 +27,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -50,6 +51,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
+
+pytestmark = pytest.mark.unit
 
 # Decoded with surrogateescape on every platform: os.fsdecode gives that on POSIX,
 # but on Windows the filesystem encoding is UTF-8 with surrogatepass (PEP 529), so

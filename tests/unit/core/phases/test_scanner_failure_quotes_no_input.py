@@ -26,6 +26,8 @@ from tests.unit.core.phases.test_scanner_executor_lifecycle import (
     _targets,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e"
 
 

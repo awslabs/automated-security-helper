@@ -156,6 +156,7 @@ SPAWN_HELPERS = {
 
 
 @pytest.mark.parametrize("helper", sorted(SPAWN_HELPERS))
+@pytest.mark.integration
 def test_a_spawn_helper_gives_the_child_an_empty_stdin(tmp_path, helper):
     record = tmp_path / "read.log"
     with ash_stdin_holding_data():
@@ -163,6 +164,7 @@ def test_a_spawn_helper_gives_the_child_an_empty_stdin(tmp_path, helper):
     assert _reads(record) == ["b''"]
 
 
+@pytest.mark.integration
 def test_the_scanner_runner_gives_the_tool_an_empty_stdin(tmp_path):
     """``ScannerPluginBase._run_subprocess``, which every scanner's tool goes through."""
     from automated_security_helper.base.plugin_context import PluginContext
@@ -201,6 +203,7 @@ def test_the_scanner_runner_gives_the_tool_an_empty_stdin(tmp_path):
     assert _reads(record) == ["b''"]
 
 
+@pytest.mark.integration
 def test_input_passed_to_spawn_run_still_reaches_the_child(tmp_path):
     """A call that pipes input deliberately keeps doing so."""
     code = (
@@ -230,6 +233,7 @@ def test_input_passed_to_spawn_run_still_reaches_the_child(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_changed_files_mode_gives_git_an_empty_stdin(tmp_path, tools):
     from automated_security_helper.utils.get_scan_set import (
         get_changed_files,
@@ -245,6 +249,7 @@ def test_changed_files_mode_gives_git_an_empty_stdin(tmp_path, tools):
     assert _reads(record) == ["b''", "b''"]
 
 
+@pytest.mark.integration
 def test_mcp_source_delivery_gives_git_an_empty_stdin(tmp_path, tools):
     from automated_security_helper.cli.mcp.source_delivery import set_source_git
 
@@ -259,6 +264,7 @@ def test_mcp_source_delivery_gives_git_an_empty_stdin(tmp_path, tools):
     assert _reads(record) == ["b''"]
 
 
+@pytest.mark.integration
 def test_nix_mode_gives_nix_an_empty_stdin(tmp_path, tools, monkeypatch):
     from automated_security_helper.interactions.run_ash_nix import (
         ASH_IN_NIX_ENV_VAR,
@@ -273,6 +279,7 @@ def test_nix_mode_gives_nix_an_empty_stdin(tmp_path, tools, monkeypatch):
     assert _reads(record) == ["b''"]
 
 
+@pytest.mark.integration
 def test_the_sandbox_probes_give_the_probe_an_empty_stdin(tmp_path):
     from automated_security_helper.utils.sandbox import backends
 
@@ -282,6 +289,7 @@ def test_the_sandbox_probes_give_the_probe_an_empty_stdin(tmp_path):
     assert _reads(record) == ["b''"]
 
 
+@pytest.mark.unit
 def test_the_trust_root_export_gives_security_an_empty_stdin(tmp_path, monkeypatch):
     """macOS only in use; the call's arguments are checked here instead."""
     from automated_security_helper.utils.sandbox import backends
@@ -301,6 +309,7 @@ def test_the_trust_root_export_gives_security_an_empty_stdin(tmp_path, monkeypat
     assert calls and all(c.get("stdin") is subprocess.DEVNULL for c in calls)
 
 
+@pytest.mark.integration
 def test_the_jupyter_converter_gives_jupyter_an_empty_stdin(
     tmp_path, tools, test_plugin_context, monkeypatch
 ):
@@ -338,6 +347,7 @@ def _load_install_pinned_tool():
     return module
 
 
+@pytest.mark.integration
 def test_the_image_build_checks_give_the_tool_an_empty_stdin(tmp_path, tools):
     installer = _load_install_pinned_tool()
     record = tmp_path / "read.log"

@@ -50,6 +50,8 @@ from automated_security_helper.utils.subprocess_utils import create_completed_pr
 from tests.utils.config_link_layouts import config_through_links
 from tests.utils.helpers import link_walk_cannot_examine, mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 GRANT = "project_name: tier\nsandbox:\n  extra_read_paths:\n    - /opt/tier-grant\n"
 FIX = (
     "Keep --config, and every file it extends, outside the checkout around the "

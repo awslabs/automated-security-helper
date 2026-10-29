@@ -23,6 +23,8 @@ import pytest
 
 from tests.unit.walked_package import package_sources
 
+pytestmark = pytest.mark.unit
+
 REMOVED = {"update_progress", "_update_progress", "initialize_progress", "phase_task"}
 PACKAGE = Path(__file__).resolve().parents[4] / "automated_security_helper"
 

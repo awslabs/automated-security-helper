@@ -31,10 +31,13 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="_stop_tree stops a Windows tree with taskkill, not process groups",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="_stop_tree stops a Windows tree with taskkill, not process groups",
+    ),
+]
 
 #: Outside any real pid range this test could collide with.
 _FAKE_PGID = 2**30 + 41

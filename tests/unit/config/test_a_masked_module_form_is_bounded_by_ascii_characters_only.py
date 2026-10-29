@@ -25,6 +25,8 @@ import pytest
 from automated_security_helper.config.config_validator import redact_values
 from automated_security_helper.plugins.loader import _masked_module_forms
 
+pytestmark = pytest.mark.unit
+
 MASK = "<value>"
 LOOK_ALIKES = (chr(0x212A), chr(0x17F), chr(0x131), chr(0x130))
 LOOK_ALIKE_IDS = ("kelvin_sign", "long_s", "dotless_i", "dotted_capital_i")

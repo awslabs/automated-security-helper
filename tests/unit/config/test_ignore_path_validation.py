@@ -19,6 +19,8 @@ from automated_security_helper.config.config_linter import (
 )
 from automated_security_helper.config.config_validator import ConfigValidator
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def project_with_dirs(tmp_path):

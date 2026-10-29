@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
 
 from automated_security_helper.interactions.run_ash_scan import (
     _SEVERITY_RANK,
@@ -29,6 +30,8 @@ from automated_security_helper.interactions.run_ash_scan import (
     _severity_filters_finding,
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+
+pytestmark = pytest.mark.unit
 
 
 def _opts(tmp_path, min_severity="low"):

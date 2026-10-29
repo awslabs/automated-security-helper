@@ -19,6 +19,8 @@ from automated_security_helper.config.path_trust import (
     reset_path_refusal_warnings,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _fresh_warnings():

@@ -33,6 +33,8 @@ from automated_security_helper.utils.sandbox.fs_guard import (
     OutputLinkRefused,
 )
 
+pytestmark = pytest.mark.unit
+
 needs_symlinks = pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )

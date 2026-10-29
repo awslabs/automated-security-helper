@@ -23,6 +23,8 @@ from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.interactions import run_ash_scan
 from automated_security_helper.interactions.run_ash_scan import ScanRefusedExit
 
+pytestmark = pytest.mark.unit
+
 CANARY = "zzhandled-secret-5082"
 
 

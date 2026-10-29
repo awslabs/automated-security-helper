@@ -11,11 +11,15 @@ and ``automated_security_helper.utils.sarif_utils``.
 
 from datetime import date, datetime, timedelta
 
+import pytest
+
 from automated_security_helper.models.core import (
     AshSuppression,
     IgnorePathWithReason,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+
+pytestmark = pytest.mark.unit
 
 
 def _make_finding(

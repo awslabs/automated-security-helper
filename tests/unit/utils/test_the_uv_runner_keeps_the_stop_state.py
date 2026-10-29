@@ -16,6 +16,8 @@ from automated_security_helper.utils.uv_tool_runner import (
     _reset_uv_tool_runner_caches,
 )
 
+pytestmark = pytest.mark.unit
+
 _RCWOH = (
     "automated_security_helper.utils.subprocess_utils.run_command_with_output_handling"
 )

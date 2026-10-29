@@ -55,6 +55,7 @@ dv = _load()
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "ref,version,title,release",
     [
@@ -67,6 +68,7 @@ def test_main_and_release_tags_publish_a_version(ref, version, title, release):
     assert dv.plan(ref) == dv.Target(version, title, release)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "ref",
     [
@@ -92,12 +94,14 @@ def _entry(version, *aliases):
     return {"version": version, "title": version, "aliases": list(aliases)}
 
 
+@pytest.mark.unit
 def test_the_newest_release_takes_latest():
     published = [_entry("main"), _entry("3.7.0", "latest"), _entry("3.6.1")]
     assert dv.aliases_for(dv.plan("refs/tags/v3.8.0"), published) == ["latest"]
     assert dv.aliases_for(dv.plan("refs/tags/v3.8.0"), []) == ["latest"]
 
 
+@pytest.mark.unit
 def test_a_patch_for_an_older_line_does_not_take_latest():
     published = [_entry("3.8.0", "latest"), _entry("3.7.0")]
     assert dv.aliases_for(dv.plan("refs/tags/v3.7.1"), published) == []
@@ -106,15 +110,18 @@ def test_a_patch_for_an_older_line_does_not_take_latest():
     assert dv.aliases_for(dv.plan("refs/tags/v3.9.0"), published) == []
 
 
+@pytest.mark.unit
 def test_redeploying_the_latest_release_keeps_latest():
     published = [_entry("3.8.0", "latest")]
     assert dv.aliases_for(dv.plan("refs/tags/v3.8.0"), published) == ["latest"]
 
 
+@pytest.mark.unit
 def test_main_never_takes_an_alias():
     assert dv.aliases_for(dv.plan("refs/heads/main"), []) == []
 
 
+@pytest.mark.unit
 def test_the_root_serves_latest_then_main_then_nothing():
     assert dv.default_directory([_entry("main"), _entry("3.8.0", "latest")]) == "latest"
     assert dv.default_directory([_entry("main")]) == "main"
@@ -290,6 +297,7 @@ def _branches(repo: Path) -> list[str]:
     return _git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
 
 
+@pytest.mark.integration
 def test_check_passes_on_a_correct_site(tmp_path):
     repo = _site(tmp_path)
     problems, summary = dv.check(repo)
@@ -441,6 +449,7 @@ DEFECTS = [
 ]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("case,site,expected", DEFECTS, ids=[d[0] for d in DEFECTS])
 def test_check_reports_each_planted_defect(tmp_path, case, site, expected):
     repo = _site(tmp_path, **site)
@@ -452,6 +461,7 @@ def test_check_reports_each_planted_defect(tmp_path, case, site, expected):
     assert _branches(repo) == ["main"]
 
 
+@pytest.mark.integration
 def test_check_reports_a_root_left_unversioned(tmp_path, monkeypatch):
     repo = _site(tmp_path)
     monkeypatch.setattr(dv, "rewrite_root", lambda *args, **kwargs: None)
@@ -461,6 +471,7 @@ def test_check_reports_a_root_left_unversioned(tmp_path, monkeypatch):
     assert any("the old page /old/page/" in p for p in problems)
 
 
+@pytest.mark.integration
 def test_check_reports_an_older_release_taking_latest(tmp_path, monkeypatch):
     repo = _site(tmp_path)
     monkeypatch.setattr(
@@ -477,12 +488,14 @@ def test_check_reports_an_older_release_taking_latest(tmp_path, monkeypatch):
 # printing the problems left all of them green.
 
 
+@pytest.mark.integration
 def test_the_check_command_exits_0_on_a_correct_site(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(dv, "REPO_ROOT", _site(tmp_path))
     assert dv.main(["check"]) == 0
     assert "The versioned docs site checks out: 3 versions" in capsys.readouterr().out
 
 
+@pytest.mark.integration
 def test_the_check_command_exits_1_on_a_planted_defect(tmp_path, monkeypatch, capsys):
     site = _site(tmp_path, mkdocs=_without(MKDOCS, "    provider: mike\n"))
     monkeypatch.setattr(dv, "REPO_ROOT", site)
@@ -492,6 +505,7 @@ def test_the_check_command_exits_1_on_a_planted_defect(tmp_path, monkeypatch, ca
     assert "do not configure the version selector" in err, err
 
 
+@pytest.mark.integration
 def test_the_check_command_exits_1_when_it_cannot_publish(
     tmp_path, monkeypatch, capsys
 ):
@@ -524,6 +538,7 @@ def _remote_versions(bare: Path) -> dict[str, list[str]]:
     return {entry["version"]: entry["aliases"] for entry in listed}
 
 
+@pytest.mark.integration
 def test_the_first_deploy_replaces_an_unversioned_site(tmp_path):
     repo = _site(tmp_path)
     bare = _remote(tmp_path, repo)
@@ -571,6 +586,7 @@ def test_the_first_deploy_replaces_an_unversioned_site(tmp_path):
     assert "Deployed with MkDocs" in _git(bare, "log", "--format=%s", "gh-pages")
 
 
+@pytest.mark.integration
 def test_a_deploy_that_loses_the_push_race_redoes_its_version(tmp_path, monkeypatch):
     repo = _site(tmp_path)
     bare = _remote(tmp_path, repo)
@@ -633,6 +649,7 @@ def _text(out: Path, page: str) -> str:
     return dv.page_text((out / page / "index.html").read_bytes())
 
 
+@pytest.mark.integration
 def test_the_main_build_installs_main(tmp_path):
     repo = _site(tmp_path)
     out = _build(repo, tmp_path, "main")
@@ -662,6 +679,7 @@ def _install_forms():
     return dv._load_by_path(MANAGER_SCRIPT, "_test_forms").INSTALL_REF_FORMS
 
 
+@pytest.mark.unit
 def test_the_template_uses_every_install_form():
     """Positive control for the tests below: they cover each form the manager lists."""
     rendered = _manager().render(INSTALL_TEMPLATE, "1.2.3")
@@ -669,6 +687,7 @@ def test_the_template_uses_every_install_form():
     assert used == [form for form, *_ in _install_forms()], used
 
 
+@pytest.mark.integration
 def test_a_release_build_pins_that_release(tmp_path):
     repo = _site(tmp_path)
     text = _text(_build(repo, tmp_path, "1.2.3"), PINNED_URL)
@@ -678,6 +697,7 @@ def test_a_release_build_pins_that_release(tmp_path):
     assert "install commands in this version" not in text
 
 
+@pytest.mark.integration
 def test_any_other_build_uses_the_committed_page(tmp_path):
     repo = _site(tmp_path)
     text = _text(_build(repo, tmp_path, None), PINNED_URL)
@@ -685,6 +705,7 @@ def test_any_other_build_uses_the_committed_page(tmp_path):
     assert "install commands in this version" not in text
 
 
+@pytest.mark.integration
 def test_a_page_without_a_template_is_untouched(tmp_path):
     repo = _site(tmp_path)
     for version in ("main", "1.2.3"):
@@ -693,6 +714,7 @@ def test_a_page_without_a_template_is_untouched(tmp_path):
     assert _git(repo, "status", "--porcelain") == ""
 
 
+@pytest.mark.integration
 def test_a_pinned_page_without_its_template_stops_the_build(tmp_path):
     repo = _site(tmp_path)
     (repo / (PINNED_PAGE + ".template")).unlink()

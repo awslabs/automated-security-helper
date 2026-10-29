@@ -23,6 +23,8 @@ from automated_security_helper.interactions.run_ash_container import (
     ContainerInputError,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class _AsReparsePoint:
     """A file's stat, as Windows reports a reparse point with the given tag."""

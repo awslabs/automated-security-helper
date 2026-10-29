@@ -23,6 +23,9 @@ from automated_security_helper.utils.error_text import config_environment_values
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def logged():
     lines = []

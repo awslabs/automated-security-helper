@@ -40,9 +40,12 @@ from automated_security_helper.utils import subprocess_utils
 from tests.unit.converters.nbconvert_stand_in import accept_stand_in_nbconvert
 from tests.utils.processes import process_running
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="process groups and SIGKILL are POSIX"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="process groups and SIGKILL are POSIX"
+    ),
+]
 
 #: Far longer than a stand-in takes to start or to end once killed, and far
 #: shorter than the minute it sleeps: a stand-in nothing killed is still running.

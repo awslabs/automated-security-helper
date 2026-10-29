@@ -38,6 +38,8 @@ from tests.snapshot.support.fixture_model import (
 from tests.snapshot.support.normalize import default_normalizer
 from tests.snapshot.support.reporter_catalog import build_reporter, reporter_classes
 
+pytestmark = pytest.mark.unit
+
 
 def _flat_json_document(arm_dir: Path, path_value: str) -> Tuple[str, Optional[str]]:
     """One arm's rendered document, and what which() finds npm to be there."""

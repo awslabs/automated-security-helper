@@ -28,6 +28,10 @@ wrote and the chain loads with the value. The pre-check must answer with the
 same value and no refusal.
 """
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 _VALUE = "a-chain-value-the-pre-check-must-keep"
 
 

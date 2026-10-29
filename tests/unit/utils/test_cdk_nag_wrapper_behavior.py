@@ -63,6 +63,8 @@ from automated_security_helper.utils.cdk_nag_wrapper import (
 )
 from tests.utils.env_assertions import environ_names
 
+pytestmark = pytest.mark.unit
+
 STACK_NAME = "ASHCDKNagScanner"
 
 # The middle segment of a v3 construct path is the shortened template name that CfnInclude was

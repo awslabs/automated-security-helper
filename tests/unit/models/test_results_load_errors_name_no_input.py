@@ -38,6 +38,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+pytestmark = pytest.mark.unit
+
 RESULTS = "ash_aggregated_results.json"
 FIELD = "severity_threshold"
 # A value the record holds where the field refuses it, as an earlier ASH

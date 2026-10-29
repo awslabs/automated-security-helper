@@ -26,6 +26,8 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.plan import ProjectPlan
 
+pytestmark = pytest.mark.unit
+
 #: How long the stand-in scan runs when nothing cancels it. Long enough that a
 #: cell asserting a cancel arrived cannot be satisfied by the scan simply
 #: ending, short enough that a red run ends.

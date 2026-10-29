@@ -14,6 +14,8 @@ returns False is recorded MISSING per target by the executor, and that is the ca
 offline npm-audit with a lockfile.
 """
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
@@ -23,6 +25,8 @@ from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
     populate_metrics_from_unified_source,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _report(container: ScanResultsContainer) -> dict:

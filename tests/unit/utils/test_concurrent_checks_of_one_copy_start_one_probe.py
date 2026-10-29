@@ -39,6 +39,8 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.utils import pre_installed_tool, uv_tool_runner
 from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
 
+pytestmark = pytest.mark.unit
+
 _TOOL = "sampletool"
 _THREADS = 4
 #: Upper bound, in seconds, on every wait in this module.

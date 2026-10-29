@@ -36,7 +36,7 @@ import pytest
 
 from tests.utils.helpers import importing_this_checkout
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [pytest.mark.e2e]
 
 IGNORED = "thirdparty"
 MARKER = "IGNORED-5e2a"

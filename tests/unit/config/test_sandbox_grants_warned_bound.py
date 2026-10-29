@@ -12,6 +12,10 @@ forever.
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_warnings_past_the_bound_never_grow_the_set_past_the_bound():
     """A recorded loop adding keys past the bound, all under the None scope:

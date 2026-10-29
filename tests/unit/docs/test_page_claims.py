@@ -660,6 +660,7 @@ def _client_value(field: str) -> Any:
     )
 
 
+@pytest.mark.unit
 def test_a_delivered_config_may_not_set_any_option_the_mcp_page_lists(
     mcp_workspace_root: Path,
 ) -> None:
@@ -749,6 +750,7 @@ def test_a_delivered_config_may_not_set_any_option_the_mcp_page_lists(
         )
 
 
+@pytest.mark.unit
 def test_a_delivered_config_may_still_disable_scanners_switch_reporters_and_raise_thresholds(
     mcp_workspace_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -937,6 +939,7 @@ def test_a_delivered_config_may_still_disable_scanners_switch_reporters_and_rais
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_cli_scan_of_a_delivered_tree_refuses_a_config_that_reads_the_environment(
     tmp_path: Path,
     mcp_workspace_root: Path,
@@ -1037,6 +1040,7 @@ def _home_with_a_project(tmp_path: Path, home_is_a_checkout: bool) -> Tuple[Path
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_home_directory_checkout_makes_every_config_under_it_repository_tier(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1115,6 +1119,7 @@ def test_a_home_directory_checkout_makes_every_config_under_it_repository_tier(
         pytest.param(False, True, id="control-a-home-that-is-no-checkout"),
     ],
 )
+@pytest.mark.unit
 def test_a_home_directory_checkout_makes_the_whole_home_the_scanned_tree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1180,6 +1185,7 @@ def test_a_home_directory_checkout_makes_the_whole_home_the_scanned_tree(
         ),
     ],
 )
+@pytest.mark.unit
 def test_who_names_a_tool_config_path_decides_where_it_may_be(
     tmp_path: Path, named_by: str, honored: bool
 ) -> None:
@@ -1265,6 +1271,7 @@ AWS_PLUGINS = "plugins/aws.md"
         pytest.param("enabled", False, id="control-enabled-from-outside-is-kept"),
     ],
 )
+@pytest.mark.unit
 def test_a_config_in_an_ops_checkout_cannot_set_the_aws_reporters(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1474,6 +1481,7 @@ def _s3_config_file(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("named_by", ["--config", "ASH_CONFIG"])
+@pytest.mark.integration
 def test_ash_report_takes_no_aws_reporter_setting_from_a_config_file(
     tmp_path: Path, named_by: str
 ) -> None:
@@ -1541,6 +1549,7 @@ _REPORT_PREFLIGHT_REFUSED = (
 @pytest.mark.parametrize(
     "case", ["no-credentials", "no-region", "control-the-check-passes"]
 )
+@pytest.mark.integration
 def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
@@ -1613,6 +1622,7 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
         pytest.param(True, True, id="control-the-overrides-turn-it-on"),
     ],
 )
+@pytest.mark.integration
 def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
     tmp_path: Path, overrides: bool, sent: bool
 ) -> None:
@@ -1682,6 +1692,7 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
         pytest.param(True, True, False, id="output-formats-stop-them"),
     ],
 )
+@pytest.mark.integration
 def test_ash_merge_runs_the_aws_reporters_only_with_their_package_named_for_it(
     tmp_path: Path, named: bool, formats: bool, sent: bool
 ) -> None:
@@ -1804,6 +1815,7 @@ _BEDROCK_REGION_DEFAULTS = (
         ),
     ],
 )
+@pytest.mark.integration
 def test_an_enabled_aws_reporter_missing_a_setting_logs_an_error_naming_it(
     tmp_path: Path, reporter: str, given: Dict[str, str], missing: List[str]
 ) -> None:
@@ -1910,6 +1922,7 @@ for index in range(2):
 """
 
 
+@pytest.mark.integration
 def test_each_run_in_one_process_gives_the_error_for_a_missing_setting(
     tmp_path: Path,
 ) -> None:
@@ -1951,6 +1964,7 @@ def test_each_run_in_one_process_gives_the_error_for_a_missing_setting(
     assert counts == [1, 1], tail
 
 
+@pytest.mark.integration
 def test_a_workspace_run_gives_the_error_for_a_missing_setting_once(
     tmp_path: Path,
 ) -> None:
@@ -2051,6 +2065,7 @@ def _resolved_from_tier(tmp_path: Path, tier: str, document: Dict[str, Any]) -> 
         pytest.param("operator", True, id="control-the-operator-config-is-kept"),
     ],
 )
+@pytest.mark.unit
 def test_only_an_operator_config_chooses_honor_ignore_files(
     tmp_path: Path, tier: str, kept: bool
 ) -> None:
@@ -2084,6 +2099,7 @@ def test_only_an_operator_config_chooses_honor_ignore_files(
         pytest.param("operator", "higher", True, id="control-the-operator-raises-it"),
     ],
 )
+@pytest.mark.unit
 def test_a_repository_config_may_lower_an_archive_limit_but_not_raise_it(
     tmp_path: Path, option: str, tier: str, direction: str, kept: bool
 ) -> None:
@@ -2164,6 +2180,7 @@ def _plugin_modules_dir(tmp_path: Path) -> Path:
         pytest.param("flag", "page_claims_ok_ash_plugins", 0, id="control-it-loads"),
     ],
 )
+@pytest.mark.integration
 def test_every_source_of_plugin_modules_is_held_to_the_namespace_rule(
     tmp_path: Path, source: str, name: str, expected: int
 ) -> None:
@@ -2371,6 +2388,7 @@ _S3_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins.s3_report
         "control-a-name-of-its-own",
     ],
 )
+@pytest.mark.integration
 def test_two_plugins_whose_names_read_as_one_are_refused_by_each_command(
     tmp_path: Path, command: str, plugin: str
 ) -> None:
@@ -2507,6 +2525,7 @@ print(json.dumps(answer, default=str))
 """
 
 
+@pytest.mark.integration
 def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> None:
     """scale-large-repos.md (Workspace scans over MCP).
 
@@ -2661,6 +2680,7 @@ class PageClaimsAsOneConverter(ArchiveConverter):
 
 @pytest.mark.parametrize("command", ["scan", "report", "merge"])
 @pytest.mark.parametrize("kind", ["scanner", "converter"])
+@pytest.mark.integration
 def test_two_scanners_or_converters_whose_names_read_as_one_are_refused_by_a_scan(
     tmp_path: Path, kind: str, command: str
 ) -> None:
@@ -2731,6 +2751,7 @@ ASH_SCANNERS = [PageClaimsDetectSecretsScanner]
 """
 
 
+@pytest.mark.integration
 def test_a_scanner_subclass_of_the_same_name_is_refused_before_it_runs(
     tmp_path: Path,
 ) -> None:
@@ -2836,6 +2857,7 @@ def _page_copy_csv_module() -> str:
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_reporter_subclass_runs_beside_its_base_as_the_page_shows(
     tmp_path: Path, plugin: str, command: str
 ) -> None:
@@ -3006,6 +3028,7 @@ print("runs:", text.count("ran"))
         pytest.param(True, 2, id="control-a-later-scan-that-names-it"),
     ],
 )
+@pytest.mark.integration
 def test_a_scan_uses_only_the_plugin_modules_it_names(
     tmp_path: Path, second_names_it: bool, runs: int
 ) -> None:
@@ -3133,6 +3156,7 @@ def _client_supplied(suppression: Any) -> bool:
     return properties.get("clientSupplied") is True
 
 
+@pytest.mark.unit
 def test_a_client_supplied_entry_is_marked_in_the_sarif_justification_and_kind(
     tmp_path: Path, mcp_workspace_root: Path
 ) -> None:
@@ -3262,6 +3286,7 @@ _REPORTERS = "automated_security_helper.plugin_modules.ash_builtin.reporters"
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_reports_that_show_justifications_carry_the_client_mark(
     mcp_workspace_root: Path,
     module: str,
@@ -3421,6 +3446,7 @@ def _container_scan(
         pytest.param((), False, id="control-without-the-flag"),
     ],
 )
+@pytest.mark.integration
 def test_ignore_suppressions_reaches_the_scan_inside_the_container(
     tmp_path: Path, args: Tuple[str, ...], passed_in: bool
 ) -> None:
@@ -3621,6 +3647,7 @@ def _workspace_config_in(tmp_path: Path, workspace: Path, place: str) -> Path:
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
     tmp_path: Path, place: str, in_a_checkout: bool, refused: bool, marked: bool
 ) -> None:
@@ -3747,6 +3774,7 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
         pytest.param(False, False, id="control-the-copy-without-the-mark"),
     ],
 )
+@pytest.mark.integration
 def test_the_workspace_scan_inside_limits_a_marked_config_as_a_local_one_in_a_checkout(
     tmp_path: Path, marked: bool, limited: bool
 ) -> None:
@@ -3887,6 +3915,7 @@ def _nix_stand_in(tmp_path: Path, record: Path) -> Dict[str, str]:
 
 @pytest.mark.parametrize("mode", ["container", "nix"])
 @pytest.mark.parametrize("state", list(_ASH_CONFIG_FILE))
+@pytest.mark.integration
 def test_an_unusable_ash_config_file_beside_a_valid_config_is_refused_on_the_host(
     tmp_path: Path, mode: str, state: str
 ) -> None:
@@ -3987,6 +4016,7 @@ def test_an_unusable_ash_config_file_beside_a_valid_config_is_refused_on_the_hos
 
 @pytest.mark.parametrize("which", ["named", "ash-config", "discovered"])
 @pytest.mark.parametrize("state", list(_ASH_CONFIG_FILE))
+@pytest.mark.integration
 def test_a_nix_scan_resolves_its_config_on_the_host_before_the_shell_starts(
     tmp_path: Path, which: str, state: str
 ) -> None:
@@ -4101,6 +4131,7 @@ def test_a_nix_scan_resolves_its_config_on_the_host_before_the_shell_starts(
         ),
     ],
 )
+@pytest.mark.integration
 def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_it_is(
     tmp_path: Path, command: List[str], scan: str, place: str, marked: bool
 ) -> None:
@@ -4198,6 +4229,7 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     assert "--config-from-scanned-repository" not in inner, inner
 
 
+@pytest.mark.integration
 def test_the_scan_inside_reads_the_handed_over_file_as_its_ash_config(
     tmp_path: Path,
 ) -> None:
@@ -4270,6 +4302,7 @@ def test_the_scan_inside_reads_the_handed_over_file_as_its_ash_config(
     assert taken not in neither, neither
 
 
+@pytest.mark.integration
 def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
     tmp_path: Path, ash_log: List[logging.LogRecord]
 ) -> None:
@@ -4424,6 +4457,7 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
         pytest.param(True, False, id="control-in-an-ops-checkout-they-are-not"),
     ],
 )
+@pytest.mark.unit
 def test_the_operators_workspace_config_is_final_over_a_projects_own(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, in_a_checkout: bool, final: bool
 ) -> None:
@@ -4523,6 +4557,7 @@ def _trivy_finding(rule_id: str, level: str) -> Dict[str, Any]:
     }
 
 
+@pytest.mark.unit
 def test_ash_passes_no_threshold_to_trivy_and_applies_it_after_the_scan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4632,6 +4667,7 @@ def test_ash_passes_no_threshold_to_trivy_and_applies_it_after_the_scan(
         pytest.param("MEDIUM", "hihg", 5, id="another-value-is-a-usage-error"),
     ],
 )
+@pytest.mark.integration
 def test_min_severity_decides_which_findings_fail_the_scan_and_refuses_another_value(
     tmp_path: Path, finding_severity: str, min_severity: str, verdict: int
 ) -> None:
@@ -4680,6 +4716,7 @@ def test_min_severity_decides_which_findings_fail_the_scan_and_refuses_another_v
         pytest.param((), False, id="control-no-sandbox-no-warning"),
     ],
 )
+@pytest.mark.integration
 def test_container_mode_runs_the_scan_inside_unsandboxed_and_says_so(
     tmp_path: Path, sandbox_args: Tuple[str, ...], warned: bool
 ) -> None:
@@ -4770,6 +4807,7 @@ def _secret_tree(parent: Path) -> Path:
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_config_that_cannot_be_used_is_exit_3_in_any_format(
     tmp_path: Path, name: str, text: str | None, verdict: int
 ) -> None:
@@ -4861,6 +4899,7 @@ def _messages(records: Iterable[logging.LogRecord]) -> List[str]:
         ),
     ],
 )
+@pytest.mark.integration
 def test_an_ash_config_that_names_no_loadable_file_stops_the_mcp_server_with_exit_3(
     tmp_path: Path, transport: List[str]
 ) -> None:
@@ -5002,6 +5041,7 @@ ASH_SCANNERS = [UnevaluatingScanner]
 '''
 
 
+@pytest.mark.integration
 def test_workspace_mode_does_not_check_for_rules_that_could_not_be_evaluated(
     tmp_path: Path,
 ) -> None:
@@ -5198,6 +5238,7 @@ _ERROR_TYPE_SENTENCES = [
     _ERROR_TYPE_SENTENCES,
     ids=[f"{error}-{page.split('/')[-1]}" for error, page, _ in _ERROR_TYPE_SENTENCES],
 )
+@pytest.mark.unit
 def test_the_pages_say_which_error_type_each_mcp_refusal_returns(
     error_type: str, page: str, sentence: str
 ) -> None:
@@ -5321,6 +5362,7 @@ def _outputs_reporter_files(plugin: type) -> Set[str]:
     )
 
 
+@pytest.mark.integration
 def test_a_default_scan_writes_the_files_and_reports_the_output_files_page_lists(
     outputs_default_scan: Path,
 ) -> None:
@@ -5431,6 +5473,7 @@ def _outputs_prose_file_names(text: str) -> List[Tuple[int, str]]:
     return found
 
 
+@pytest.mark.unit
 def test_every_report_file_name_the_pages_mention_is_one_ash_writes() -> None:
     """output-files.md (Reports), and every page that names an output file.
 
@@ -5504,6 +5547,7 @@ def _outputs_left_over(output: Path) -> List[str]:
     ]
 
 
+@pytest.mark.integration
 def test_a_scan_replaces_everything_the_previous_run_left(tmp_path: Path) -> None:
     """output-files.md (Each scan replaces the last).
 
@@ -5563,6 +5607,7 @@ def _outputs_leaves(value: Any, path: str = "") -> Dict[str, Any]:
     return leaves
 
 
+@pytest.mark.integration
 def test_the_sarif_member_writes_every_field_and_ash_sarif_leaves_out_what_ash_did_not_set(
     outputs_default_scan: Path,
 ) -> None:
@@ -5609,6 +5654,7 @@ def test_the_sarif_member_writes_every_field_and_ash_sarif_leaves_out_what_ash_d
     assert not differ, f"(member, reports/ash.sarif) differ at: {differ}"
 
 
+@pytest.mark.unit
 def test_ash_sarif_points_each_result_at_its_rule_in_its_scanners_extension(
     tmp_path: Path,
 ) -> None:
@@ -5737,6 +5783,7 @@ ASH_REPORTERS = [RaisingReporter, WritingReporter]
         pytest.param(False, 0, id="no-finding-still-passes"),
     ],
 )
+@pytest.mark.integration
 def test_a_reporter_that_fails_does_not_change_the_exit_code(
     tmp_path: Path, secret: bool, verdict: int
 ) -> None:
@@ -5800,6 +5847,7 @@ def test_a_reporter_that_fails_does_not_change_the_exit_code(
         pytest.param(None, {}, "ash-scan", id="else-ash-scan"),
     ],
 )
+@pytest.mark.integration
 def test_the_results_metadata_names_the_configured_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -5868,6 +5916,7 @@ ASH_SCANNERS = [AbsentToolScanner]
 """
 
 
+@pytest.mark.integration
 def test_scanner_rows_say_whether_the_tool_was_found_was_left_out_and_how_it_exited(
     tmp_path: Path,
 ) -> None:
@@ -6128,6 +6177,7 @@ _CONFIG_ACCEPTED = "project_name: demo\nglobal_settings:\n  severity_threshold: 
         ),
     ],
 )
+@pytest.mark.integration
 def test_config_validate_exits_with_the_code_a_scan_would_give_the_config(
     tmp_path: Path,
     files: Dict[str, str],
@@ -6192,6 +6242,7 @@ def test_config_validate_exits_with_the_code_a_scan_would_give_the_config(
         pytest.param("lint", None, id="lint-has-no-such-option"),
     ],
 )
+@pytest.mark.integration
 def test_validate_and_get_take_config_overrides_and_lint_does_not(
     tmp_path: Path, command: str, verdict: int | None
 ) -> None:
@@ -6265,6 +6316,7 @@ _CHECK_REFUSES_A_MISSING_ASH_CONFIG = (
         ),
     ],
 )
+@pytest.mark.integration
 def test_config_commands_refuse_an_ash_config_naming_no_file_beside_one_that_loads(
     tmp_path: Path, command: str, named_by: str, ash_config: Optional[str]
 ) -> None:
@@ -6405,6 +6457,7 @@ def _scan_with_nothing_to_scan(
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_scan_whose_scanners_had_nothing_to_scan_exits_1_and_says_why(
     tmp_path: Path,
     files: Dict[str, str],
@@ -6459,6 +6512,7 @@ def test_a_scan_whose_scanners_had_nothing_to_scan_exits_1_and_says_why(
     assert "Scan ran no scanners" not in output, _output_tail(result)
 
 
+@pytest.mark.integration
 def test_a_scan_that_had_nothing_to_scan_exits_0_when_incomplete_scans_are_accepted(
     tmp_path: Path,
 ) -> None:
@@ -6493,6 +6547,7 @@ def test_a_scan_that_had_nothing_to_scan_exits_0_when_incomplete_scans_are_accep
     assert control.returncode == 1, _output_tail(control)
 
 
+@pytest.mark.integration
 def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
     tmp_path: Path,
 ) -> None:
@@ -6553,6 +6608,7 @@ def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
         ),
     ],
 )
+@pytest.mark.integration
 def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
     tmp_path: Path, change: Tuple[str, str] | None, verdict: int, named: str
 ) -> None:
@@ -6634,6 +6690,7 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
         pytest.param(False, 3, id="unquoted"),
     ],
 )
+@pytest.mark.integration
 def test_an_unquoted_expiration_date_makes_ash_refuse_the_whole_config(
     tmp_path: Path, page: str, heading: str, written: str, quoted: bool, verdict: int
 ) -> None:
@@ -6665,6 +6722,7 @@ def test_an_unquoted_expiration_date_makes_ash_refuse_the_whole_config(
     )
 
 
+@pytest.mark.unit
 def test_a_suppression_whose_expiration_date_has_passed_is_accepted_and_does_nothing(
     tmp_path: Path,
 ) -> None:
@@ -6728,6 +6786,7 @@ _CONFIG_LOG_LINE = re.compile(re.escape(_CONFIG_LOG_PREFIX) + r"(.+?)\s*$")
         pytest.param(None, 2, id="control-no-config"),
     ],
 )
+@pytest.mark.integration
 def test_ash_log_names_the_config_file_once_the_scan_has_loaded_it(
     tmp_path: Path, given: str | None, verdict: int
 ) -> None:
@@ -6845,6 +6904,7 @@ def test_ash_log_names_the_config_file_once_the_scan_has_loaded_it(
         pytest.param(None, False, id="control-unset"),
     ],
 )
+@pytest.mark.unit
 def test_ash_offline_turns_offline_mode_on_for_yes_true_and_1(
     monkeypatch: pytest.MonkeyPatch, value: str | None, offline: bool
 ) -> None:
@@ -6880,6 +6940,7 @@ _OFFLINE_GRYPE_WARNING = "Grype offline mode: GRYPE_DB_CACHE_DIR not set"
         pytest.param(False, "NO", False, id="control-online"),
     ],
 )
+@pytest.mark.integration
 def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6953,6 +7014,7 @@ def _offline_bound(cell: str) -> timedelta:
     return _one(amounts, f"bound in {cell!r}")
 
 
+@pytest.mark.unit
 def test_each_content_database_is_held_to_the_age_bound_the_pages_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -7072,6 +7134,7 @@ def _offline_shipped_scanner_classes() -> Dict[str, Any]:
     return found
 
 
+@pytest.mark.unit
 def test_the_content_database_table_names_the_scanners_that_read_each_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -7481,6 +7544,7 @@ _INTERRUPTED_SCANS = [
 @pytest.mark.parametrize(
     "mode, behavior, terminal, interrupts, windows", _INTERRUPTED_SCANS
 )
+@pytest.mark.integration
 def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
     tmp_path: Path,
     mode: str,
@@ -7657,6 +7721,7 @@ _BUILD_AND_SCAN_INTERRUPTED = (
         ),
     ],
 )
+@pytest.mark.integration
 def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
     tmp_path: Path, no_run: bool, message: str, windows: Optional[str]
 ) -> None:
@@ -7899,6 +7964,7 @@ _ASH_MODULE = [sys.executable, "-m", "automated_security_helper.cli.main"]
         ),
     ],
 )
+@pytest.mark.unit
 def test_ash_mcp_refuses_options_with_the_exit_code_the_mcp_page_gives(
     _mcp_cli: Callable[..., Any], tmp_path: Path, options: List[str], expected: int
 ) -> None:
@@ -8017,6 +8083,7 @@ def _mcp_client_closes(
         pytest.param(_mcp_client_closes, 0, None, id="stdio-client-closes"),
     ],
 )
+@pytest.mark.integration
 def test_ash_mcp_exit_code_when_the_server_cannot_start_or_its_client_leaves(
     _mcp_cli: Callable[..., Any],
     tmp_path: Path,
@@ -8233,6 +8300,7 @@ class _FakeTime:
         self.now += seconds
 
 
+@pytest.mark.unit
 def test_a_server_start_the_host_refuses_twice_is_made_a_third_time() -> None:
     """Two ``EAGAIN`` answers are waited out with a growing pause, and the third
     attempt's process is the result. Each attempt gets the same arguments. The clock
@@ -8252,6 +8320,7 @@ def test_a_server_start_the_host_refuses_twice_is_made_a_third_time() -> None:
     assert pauses == pytest.approx([0.5, 1.0]), pauses
 
 
+@pytest.mark.unit
 def test_a_server_start_the_host_always_refuses_raises_the_last_refusal() -> None:
     """The retry gives up once the window is spent on the injected clock: the pauses
     grow by half a second to the cap and stay there, there is no pause after the last
@@ -8283,6 +8352,7 @@ def test_a_server_start_the_host_always_refuses_raises_the_last_refusal() -> Non
     assert f"{len(calls)} times" in text, text
 
 
+@pytest.mark.unit
 def test_a_server_start_the_host_refuses_for_ten_seconds_is_made_when_it_allows_one() -> (
     None
 ):
@@ -8320,6 +8390,7 @@ def test_a_server_start_the_host_refuses_for_ten_seconds_is_made_when_it_allows_
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_server_start_failing_for_another_reason_is_not_tried_again(
     error: OSError,
 ) -> None:
@@ -8335,6 +8406,7 @@ def test_a_server_start_failing_for_another_reason_is_not_tried_again(
     assert pauses == []
 
 
+@pytest.mark.unit
 def test_a_server_start_made_by_the_helper_the_tests_use_goes_through_the_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -8484,6 +8556,7 @@ def _mcp_stopped(
 
 
 @pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
+@pytest.mark.integration
 def test_ash_mcp_on_stdio_exits_0_on_sigterm_or_sighup(
     tmp_path: Path, name: str
 ) -> None:
@@ -8513,6 +8586,7 @@ def test_ash_mcp_on_stdio_exits_0_on_sigterm_or_sighup(
     )
 
 
+@pytest.mark.integration
 def test_ctrl_c_stops_a_stdio_mcp_server_with_exit_code_130(tmp_path: Path) -> None:
     """mcp-server.md (How the server runs scans), and exit-codes.md (ash mcp).
 
@@ -8603,6 +8677,7 @@ def _mcp_http_server(
     return process, port, stderr
 
 
+@pytest.mark.integration
 def test_ctrl_c_stops_an_http_mcp_server_with_exit_code_130(tmp_path: Path) -> None:
     """mcp-server.md (How the server runs scans).
 
@@ -8621,6 +8696,7 @@ def test_ctrl_c_stops_an_http_mcp_server_with_exit_code_130(tmp_path: Path) -> N
     assert code == 130, f"Ctrl-C: exit {code}, expected 130:\n{stderr[-1500:]}"
 
 
+@pytest.mark.integration
 def test_sigterm_ends_an_http_mcp_server_with_the_signal(tmp_path: Path) -> None:
     """mcp-server.md (How the server runs scans; Run over stdio).
 
@@ -8655,6 +8731,7 @@ def test_sigterm_ends_an_http_mcp_server_with_the_signal(tmp_path: Path) -> None
         )
 
 
+@pytest.mark.integration
 def test_sighup_stops_an_http_mcp_server_which_then_exits_0(tmp_path: Path) -> None:
     """mcp-server.md (How the server runs scans).
 
@@ -8713,6 +8790,7 @@ def test_2_its_server_is_gone():
         *(["a-worker-that-is-killed"] if sys.platform == "linux" else []),
     ],
 )
+@pytest.mark.integration
 def test_no_mcp_server_outlives_the_cell_that_started_it(
     tmp_path: Path, ending: str
 ) -> None:
@@ -8811,6 +8889,7 @@ def _end_leftover_server(pid: int, root: Path) -> None:
 @pytest.mark.parametrize(
     "child", ["reaped-by-the-test", *(["control-unreaped"] if os.name != "nt" else [])]
 )
+@pytest.mark.integration
 def test_ending_a_server_child_signals_its_group_only_while_its_leader_is_unreaped(
     monkeypatch: pytest.MonkeyPatch, child: str
 ) -> None:
@@ -8851,6 +8930,7 @@ def test_ending_a_server_child_signals_its_group_only_while_its_leader_is_unreap
         else ["off-linux-nothing-is-signaled"]
     ),
 )
+@pytest.mark.integration
 def test_a_leftover_server_is_ended_only_when_it_runs_under_the_root(
     tmp_path: Path, where: str
 ) -> None:
@@ -9338,6 +9418,7 @@ def _assert_previous_results_intact(output: Path) -> None:
 
 
 @pytest.mark.parametrize("stop", ["sigterm", "sighup", "ctrl-c"])
+@pytest.mark.e2e
 def test_a_signal_stops_a_stdio_scan_while_the_client_keeps_the_connection_open(
     tmp_path: Path, stop: str
 ) -> None:
@@ -9413,6 +9494,7 @@ def test_a_signal_stops_a_stdio_scan_while_the_client_keeps_the_connection_open(
 
 @pytest.mark.parametrize("ignored", ["SIGINT", "SIGHUP"])
 @pytest.mark.parametrize("transport", ["stdio", "streamable-http", "sse"])
+@pytest.mark.e2e
 def test_an_mcp_server_started_with_a_signal_ignored_keeps_ignoring_it(
     tmp_path: Path, transport: str, ignored: str
 ) -> None:
@@ -9498,6 +9580,7 @@ def test_an_mcp_server_started_with_a_signal_ignored_keeps_ignoring_it(
         pytest.param(False, "report", id="a-report-phase-cancel-removes-its-reports"),
     ],
 )
+@pytest.mark.e2e
 def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
     tmp_path: Path, previous: bool, phase: str
 ) -> None:
@@ -9716,6 +9799,7 @@ def _gone_soon(pid: int) -> bool:
         pytest.param("ctrl-c", False, id="control-no-request-open"),
     ],
 )
+@pytest.mark.e2e
 def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_stops(
     tmp_path: Path, stop: str, held_open: bool
 ) -> None:
@@ -9919,6 +10003,7 @@ _ENV_PROBE_VALUE = "page-claims-environment-value-7d41"
         ),
     ],
 )
+@pytest.mark.e2e
 def test_get_config_shows_a_value_read_from_the_environment_as_its_reference(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -9984,6 +10069,7 @@ def _profile_reading_the_environment(setup: _McpStopSetup) -> Path:
 
 
 @pytest.mark.parametrize("changed", [False, True], ids=["as-registered", "changed"])
+@pytest.mark.e2e
 def test_a_sessions_profile_copy_holds_the_reference_and_its_scan_the_value(
     tmp_path: Path, changed: bool
 ) -> None:
@@ -10177,6 +10263,7 @@ def _stop_server(process: subprocess.Popen) -> None:
 
 
 @pytest.mark.parametrize("tool", ["set_source_zip_chunk", "select_profile"])
+@pytest.mark.e2e
 def test_a_session_write_is_refused_as_busy_while_the_sweep_holds_the_session(
     tmp_path: Path, tool: str
 ) -> None:
@@ -10219,6 +10306,7 @@ def test_a_session_write_is_refused_as_busy_while_the_sweep_holds_the_session(
     assert refused.get("error_type") == "session_workspace_busy", refused
 
 
+@pytest.mark.e2e
 def test_a_removed_workspace_takes_the_upload_and_the_bound_profile_with_it(
     tmp_path: Path,
 ) -> None:
@@ -10270,6 +10358,7 @@ def test_a_removed_workspace_takes_the_upload_and_the_bound_profile_with_it(
 @pytest.mark.parametrize(
     "check", ["removes-nothing-more-until-its-next-sweep", "ctrl-c-is-not-held-up"]
 )
+@pytest.mark.e2e
 def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
     tmp_path: Path, check: str
 ) -> None:
@@ -10345,6 +10434,7 @@ def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
         pytest.param(" Streamable-HTTP ", 0, id="case-and-whitespace-ignored"),
     ],
 )
+@pytest.mark.unit
 def test_ash_mcp_refuses_an_ash_mcp_transport_that_names_no_transport(
     _mcp_cli: Callable[..., Any], value: str, expected: int
 ) -> None:
@@ -10468,6 +10558,7 @@ def _mcp_page_host() -> str:
         ),
     ],
 )
+@pytest.mark.unit
 def test_allowed_host_accepts_exactly_the_host_headers_the_mcp_page_says(
     _mcp_cli: Callable[..., Any], options: List[str], expected: Dict[str, int]
 ) -> None:
@@ -10598,6 +10689,7 @@ def _delivery_deliver(entries: Dict[str, bytes], upload_id: str) -> Dict[str, An
         pytest.param({"app/main.py": b"second\n"}, True, id="control-a-good-zip"),
     ],
 )
+@pytest.mark.unit
 def test_a_zip_that_fails_to_extract_leaves_the_delivered_tree(
     _delivery_workspace: Path, second: Dict[str, bytes], replaced: bool
 ) -> None:
@@ -10679,6 +10771,7 @@ def _delivery_git_stand_in(
     "script with this interpreter (through cmd on Windows), writes one file, "
     "and starts nothing beyond that",
 )
+@pytest.mark.unit
 def test_while_a_scan_of_the_session_runs_delivery_is_refused_and_chunks_accepted(
     _delivery_workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -10766,6 +10859,7 @@ def _sandbox_config_file(parent: Path, mode_line: str) -> Path:
         pytest.param('mode: "off"', 0, id="control-quoted-off"),
     ],
 )
+@pytest.mark.integration
 def test_an_unquoted_off_sandbox_mode_makes_a_scan_exit_3(
     tmp_path: Path, mode_line: str, expected: int
 ) -> None:
@@ -10814,6 +10908,7 @@ def test_an_unquoted_off_sandbox_mode_makes_a_scan_exit_3(
         pytest.param('mode: "off"', 0, id="control-quoted-off"),
     ],
 )
+@pytest.mark.integration
 def test_ash_config_validate_gives_an_unquoted_off_sandbox_mode_the_scan_verdict(
     tmp_path: Path, mode_line: str, expected: int
 ) -> None:
@@ -10975,6 +11070,7 @@ def _sandbox_where(message: str) -> List[str]:
     )
 
 
+@pytest.mark.unit
 def test_the_sandbox_fix_table_lists_messages_the_code_gives() -> None:
     """scanner-sandbox.md (When a scanner cannot be sandboxed).
 
@@ -11094,6 +11190,7 @@ def _sandbox_processes_exit(
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_sandbox_backend_probes_give_the_fix_table_messages(
     _sandbox_fresh_probes: None,
     tmp_path: Path,
@@ -11150,6 +11247,7 @@ _SANDBOX_GRANTS = {
 }
 
 
+@pytest.mark.unit
 def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
 ) -> None:
@@ -11296,6 +11394,7 @@ def _repository_warnings(
     return warnings
 
 
+@pytest.mark.unit
 def test_the_dropped_grants_warning_reads_as_the_pages_quote(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
 ) -> None:
@@ -11383,6 +11482,7 @@ def test_the_dropped_grants_warning_reads_as_the_pages_quote(
         ),
     ],
 )
+@pytest.mark.unit
 def test_every_warning_that_ignores_a_repository_setting_says_how_to_keep_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -11416,6 +11516,7 @@ def test_every_warning_that_ignores_a_repository_setting_says_how_to_keep_it(
     assert _KEEP_A_SETTING in ignored[0], ignored[0]
 
 
+@pytest.mark.unit
 def test_the_warning_for_an_aws_reporter_a_repository_turns_on_reads_as_quoted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
 ) -> None:
@@ -11490,6 +11591,7 @@ def _sandbox_lines(backend: str) -> Tuple[str, str]:
 
 
 @pytest.mark.parametrize("system", sorted(_SANDBOX_AUTO))
+@pytest.mark.unit
 def test_resolving_the_sandbox_backend_logs_the_backend_auto_picks_on_each_platform(
     _sandbox_fresh_probes: None,
     tmp_path: Path,
@@ -11553,6 +11655,7 @@ def test_resolving_the_sandbox_backend_logs_the_backend_auto_picks_on_each_platf
     assert backend_lines() == []
 
 
+@pytest.mark.integration
 def test_a_sandboxed_scan_logs_each_scanners_backend_and_records_the_requested_mode(
     tmp_path: Path,
 ) -> None:
@@ -11779,6 +11882,7 @@ def _ci_env_module_reads(module: Any) -> Set[str]:
     return names
 
 
+@pytest.mark.unit
 def test_the_ci_variables_do_not_choose_the_image_stage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -12042,6 +12146,7 @@ def _uv_listed(sentence: str, names: Set[str]) -> Set[str]:
     return {w for w in re.findall(r"[a-z][a-z0-9-]*[a-z0-9]", sentence) if w in names}
 
 
+@pytest.mark.unit
 def test_the_pages_list_the_tools_ash_installs_with_uv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -12177,6 +12282,7 @@ def _same_file(found: Optional[str], expected: Optional[Path]) -> bool:
         pytest.param([("bin", "exec")], id="control-an-executable-in-ash-bin-path"),
     ],
 )
+@pytest.mark.unit
 def test_only_an_executable_file_counts_where_ash_looks_for_a_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: List[Tuple[str, str]]
 ) -> None:
@@ -12221,6 +12327,7 @@ def test_only_an_executable_file_counts_where_ash_looks_for_a_tool(
         "the-file-loses-its-execute-bit",
     ],
 )
+@pytest.mark.unit
 def test_ash_remembers_a_tool_for_path_and_ash_bin_path_and_looks_again_when_they_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
@@ -12275,6 +12382,7 @@ def test_ash_remembers_a_tool_for_path_and_ash_bin_path_and_looks_again_when_the
     [True, False],
     ids=["installed-after-the-miss", "control-not-installed"],
 )
+@pytest.mark.unit
 def test_ash_looks_again_for_a_tool_it_did_not_find(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed: bool
 ) -> None:
@@ -12331,6 +12439,7 @@ def _normcase_names(message: str, path: Path) -> bool:
         "own-program-removed",
     ],
 )
+@pytest.mark.unit
 def test_a_uv_run_tool_keeps_the_file_it_found_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -12463,6 +12572,7 @@ def test_a_uv_run_tool_keeps_the_file_it_found_first(
 @pytest.mark.parametrize(
     "mode", ["lost-its-execute-bit", "control-executable"], ids=lambda mode: mode
 )
+@pytest.mark.unit
 def test_dependencies_install_downloads_a_binary_again_that_lost_its_execute_bit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -12551,6 +12661,7 @@ TRIVY_PLUGIN = "docs/plugins/community/trivy-plugin.md"
         pytest.param([("bin", "exec")], id="control-an-executable-trivy"),
     ],
 )
+@pytest.mark.unit
 def test_trivy_repo_counts_only_an_executable_trivy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: List[Tuple[str, str]]
 ) -> None:
@@ -12658,6 +12769,7 @@ def _suppressed_by_file(output: Path) -> Dict[str, bool]:
     return {name: all(flags) for name, flags in found.items()}
 
 
+@pytest.mark.integration
 def test_a_suppression_path_ending_in_a_slash_suppresses_nothing_and_the_scan_says_so(
     tmp_path: Path,
 ) -> None:
@@ -12741,6 +12853,7 @@ def test_a_suppression_path_ending_in_a_slash_suppresses_nothing_and_the_scan_sa
         ),
     ],
 )
+@pytest.mark.integration
 def test_config_checks_warn_and_exit_0_on_a_path_that_names_an_existing_directory(
     tmp_path: Path, command: str, paths: Tuple[str, str, str], errors: List[str]
 ) -> None:
@@ -12828,6 +12941,7 @@ _SUPPRESSION_PATHS_MATCH_CASE_SENSITIVELY = [
         pytest.param("Tests/secret.py", True, id="control-the-file-as-named"),
     ],
 )
+@pytest.mark.integration
 def test_a_suppression_path_matches_case_sensitively_and_not_with_a_leading_dot(
     tmp_path: Path, path: str, suppresses: bool
 ) -> None:
@@ -12917,6 +13031,7 @@ _CHECKS_WARN_ABOUT_A_PATH_THAT_MATCHES_NOTHING = [
         pytest.param("ignore_paths", "src/**", "", id="control-ignore-a-glob"),
     ],
 )
+@pytest.mark.integration
 def test_config_checks_warn_and_exit_0_on_a_path_that_matches_nothing(
     tmp_path: Path, command: str, setting: str, path: str, advice: Optional[str]
 ) -> None:
@@ -12990,6 +13105,7 @@ def _source_dir_tree(parent: Path) -> Dict[str, Path]:
 
 
 @pytest.mark.parametrize("command", ["validate", "lint", "get"])
+@pytest.mark.integration
 def test_config_checks_judge_a_config_against_the_source_dir(
     tmp_path: Path, command: str
 ) -> None:
@@ -13184,6 +13300,7 @@ def _untouched(target: Path) -> bool:
         pytest.param("merge", "reports/ash.sarif", 1, id="merge-sarif"),
     ],
 )
+@pytest.mark.integration
 def test_a_link_at_or_in_the_output_directory_stops_the_run_with_the_pages_code(
     tmp_path: Path, command: str, link: str, code: int
 ) -> None:
@@ -13342,6 +13459,7 @@ def _no_container_runtime(parent: Path) -> Tuple[Dict[str, str], Path]:
         pytest.param("build-image", "control-no-link", id="build-image-run-control"),
     ],
 )
+@pytest.mark.integration
 def test_container_mode_refuses_a_linked_output_directory_before_it_runs_anything(
     tmp_path: Path, command: str, link: str
 ) -> None:
@@ -13443,6 +13561,7 @@ def _directory_state(directory: Path) -> Tuple[List[str], int]:
 
 @pytest.mark.parametrize("link", ["the-output-directory", ".ash", "control-no-link"])
 @pytest.mark.parametrize("mode", list(_LINK_CHECK_MODES))
+@pytest.mark.integration
 def test_a_linked_output_directory_is_refused_in_every_mode_before_the_write_check(
     tmp_path: Path, mode: str, link: str
 ) -> None:
@@ -13569,6 +13688,7 @@ def _built_in_scanner_names() -> Set[str]:
         "no-list",
     ],
 )
+@pytest.mark.integration
 def test_a_scanners_name_that_matched_no_scanner_is_recorded_and_listed(
     tmp_path: Path, case: str
 ) -> None:
@@ -13634,6 +13754,7 @@ def test_a_scanners_name_that_matched_no_scanner_is_recorded_and_listed(
         )
 
 
+@pytest.mark.integration
 def test_ash_merge_records_every_shards_scanners_names_that_matched_nothing(
     tmp_path: Path,
 ) -> None:
@@ -13719,6 +13840,7 @@ def _tree_entries(root: Path) -> Dict[str, int]:
         pytest.param([], id="control-no-scan-option"),
     ],
 )
+@pytest.mark.integration
 def test_ash_build_image_refuses_a_scan_option_with_exit_5_before_it_builds(
     tmp_path: Path, option: List[str], no_run: bool
 ) -> None:
@@ -13800,6 +13922,7 @@ _UNUSABLE_DIRECTORIES = {
     ["container", "container-no-run", *(["dot-ash"] if os.name != "nt" else [])],
 )
 @pytest.mark.parametrize("case", list(_UNUSABLE_DIRECTORIES))
+@pytest.mark.integration
 def test_container_mode_and_dot_ash_refuse_a_directory_a_local_scan_refuses(
     tmp_path: Path, case: str, runner: str
 ) -> None:
@@ -14048,6 +14171,7 @@ def _assert_a_record_of_the_config(record: Dict[str, Any], where: str) -> None:
 
 
 @pytest.mark.parametrize("record", ["results", "merged-results", "config-get"])
+@pytest.mark.integration
 def test_what_ash_records_of_a_config_holds_the_reference_and_not_the_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record: str
 ) -> None:
@@ -14105,6 +14229,7 @@ def test_what_ash_records_of_a_config_holds_the_reference_and_not_the_value(
         pytest.param("", None, id="empty-records-null"),
     ],
 )
+@pytest.mark.integration
 def test_a_reference_is_recorded_only_where_it_read_a_value(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -14185,6 +14310,7 @@ def _moto_child_environment(cwd: Path, endpoint: str) -> Dict[str, str]:
     return env
 
 
+@pytest.mark.integration
 def test_the_s3_reporter_sends_a_value_read_from_the_environment_as_its_reference(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -14262,6 +14388,7 @@ _THE_SCANS_REPORTS_SHOW_THE_VALUES = [
 @pytest.mark.parametrize(
     "written", ["from-the-environment", "control-the-literal-value"]
 )
+@pytest.mark.integration
 def test_the_html_report_a_scan_writes_is_built_from_the_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, written: str
 ) -> None:
@@ -14306,6 +14433,7 @@ def test_the_html_report_a_scan_writes_is_built_from_the_values(
 
 @pytest.mark.parametrize("supplied", ["nothing", "config-overrides", "config"])
 @pytest.mark.parametrize("command", ["merge", "report"])
+@pytest.mark.integration
 def test_merge_and_report_exit_3_for_a_recorded_reference_a_field_cannot_hold(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str, supplied: str
 ) -> None:
@@ -14382,6 +14510,7 @@ def test_merge_and_report_exit_3_for_a_recorded_reference_a_field_cannot_hold(
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_failed_patch_entry_is_named_by_its_file_place_op_and_path(
     tmp_path: Path, command: str, operation: Dict[str, str], named: str
 ) -> None:
@@ -14493,6 +14622,7 @@ def _enabled(resolved: Any, kind: str, name: str) -> Any:
         pytest.param("reporter", None, "csv", id="control-no-section"),
     ],
 )
+@pytest.mark.unit
 def test_a_plugins_section_is_found_by_its_name_whatever_the_spelling(
     tmp_path: Path, kind: str, written: Optional[str], name: str
 ) -> None:
@@ -14519,6 +14649,7 @@ def test_a_plugins_section_is_found_by_its_name_whatever_the_spelling(
 
 
 @pytest.mark.parametrize("child_writes", [True, False], ids=["child", "control-base"])
+@pytest.mark.unit
 def test_a_childs_spelling_of_a_section_its_base_writes_is_that_section(
     tmp_path: Path, child_writes: bool
 ) -> None:
@@ -14566,6 +14697,7 @@ def test_a_childs_spelling_of_a_section_its_base_writes_is_that_section(
 
 @pytest.mark.parametrize("command", ["scan", "validate"])
 @pytest.mark.parametrize("spellings", [2, 1], ids=["two-spellings", "control-one"])
+@pytest.mark.integration
 def test_a_file_that_writes_two_spellings_of_a_section_is_refused(
     tmp_path: Path, command: str, spellings: int
 ) -> None:
@@ -14613,6 +14745,7 @@ def test_a_file_that_writes_two_spellings_of_a_section_is_refused(
 @pytest.mark.parametrize(
     "how", ["patch", "overrides", "control-neither"], ids=lambda how: how
 )
+@pytest.mark.unit
 def test_patch_paths_and_overrides_reach_a_section_as_its_name_is_matched(
     tmp_path: Path, how: str
 ) -> None:
@@ -14688,6 +14821,7 @@ _A_RECORDED_CONFIG_IS_READ_NOT_REFUSED = (
     "recorded",
     ["CSV-sets-other-values", "control-CSV-agrees", "control-one-spelling"],
 )
+@pytest.mark.integration
 def test_report_and_merge_read_a_recorded_section_as_the_recording_scan_read_it(
     tmp_path: Path, command: str, recorded: str
 ) -> None:
@@ -14888,6 +15022,7 @@ def _finished_mcp_scan(client: "_McpStdioClient", project: Path) -> Dict[str, An
         ),
     ],
 )
+@pytest.mark.e2e
 def test_a_clients_runtime_change_cannot_turn_an_off_host_reporter_on_or_off(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -15058,6 +15193,7 @@ def _profile_reading_a_value(directory: Path) -> Path:
         ),
     ],
 )
+@pytest.mark.e2e
 def test_a_refused_runtime_change_is_reported_without_its_value(
     tmp_path: Path, how: str, change: Any, named: str
 ) -> None:
@@ -15191,6 +15327,7 @@ def _files_holding(root: Path, text: str) -> List[str]:
         pytest.param("select_profile", "absolute", id="control-an-absolute-value"),
     ],
 )
+@pytest.mark.e2e
 def test_a_profile_holding_an_environment_value_inside_a_path_is_refused_without_it(
     tmp_path: Path, how: str, value: str
 ) -> None:
@@ -15252,6 +15389,7 @@ def test_a_profile_holding_an_environment_value_inside_a_path_is_refused_without
         pytest.param("workspace_scan", id="a-workspace-scan-with-it"),
     ],
 )
+@pytest.mark.e2e
 def test_a_refused_profile_leaves_no_file_holding_the_environment_value(
     tmp_path: Path, how: str
 ) -> None:
@@ -15295,6 +15433,7 @@ def test_a_refused_profile_leaves_no_file_holding_the_environment_value(
     assert _files_holding(tmp_path, _ENV_PROBE_VALUE) == []
 
 
+@pytest.mark.e2e
 def test_a_workspace_scan_refuses_a_value_inside_a_path_under_the_select_profile_error_type(
     tmp_path: Path,
 ) -> None:
@@ -15366,6 +15505,7 @@ _MESSAGES_SHOW_A_VALUE_AS_A_MARKER = (
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_message_never_prints_a_value_read_from_the_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -15459,6 +15599,7 @@ def _git(cwd: Path, *args: str) -> str:
     return result.stdout
 
 
+@pytest.mark.integration
 def test_a_changed_files_scan_counts_every_file_in_a_moved_submodule_as_changed(
     tmp_path: Path,
 ) -> None:
@@ -15584,6 +15725,7 @@ _A_CONFIG_READING_THE_AWS_VARIABLES = (
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_container_scan_passes_only_the_aws_settings_the_operators_config_reads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -15829,6 +15971,7 @@ def _child_answer(
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_relative_ash_bin_path_is_not_used_and_the_default_bin_directory_is(
     tmp_path: Path, value: str, home_kind: str, holder: Optional[str]
 ) -> None:
@@ -15885,6 +16028,7 @@ def test_a_relative_ash_bin_path_is_not_used_and_the_default_bin_directory_is(
 
 
 @pytest.mark.parametrize("given", ["option", "environment"])
+@pytest.mark.integration
 def test_ash_dependencies_install_reads_a_relative_bin_path_where_it_was_typed(
     tmp_path: Path, given: str
 ) -> None:
@@ -15931,6 +16075,7 @@ def test_ash_dependencies_install_reads_a_relative_bin_path_where_it_was_typed(
         pytest.param("absolute", True, id="control-an-absolute-home-with-bin-path"),
     ],
 )
+@pytest.mark.integration
 def test_ash_dependencies_install_installs_nothing_without_a_usable_home(
     tmp_path: Path, home_kind: str, bin_path: bool
 ) -> None:
@@ -15989,6 +16134,7 @@ _DEPENDENCIES_BAD_SELECTION_INTRO = (
         "a-plugin-type-there-is-not",
     ],
 )
+@pytest.mark.integration
 def test_ash_dependencies_install_exits_2_on_a_tool_it_cannot_select(
     tmp_path: Path, case: str
 ) -> None:
@@ -16058,6 +16204,7 @@ _INSTALL_STARTS_CODE = (
         "control-a-tool-it-installs",
     ],
 )
+@pytest.mark.integration
 def test_ash_dependencies_install_starts_no_program_for_a_tool_it_cannot_select(
     tmp_path: Path, case: str
 ) -> None:
@@ -16108,6 +16255,7 @@ _AN_UNKNOWN_TOOL_EXITS_2 = (
 )
 
 
+@pytest.mark.integration
 def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_knows(
     tmp_path: Path,
 ) -> None:
@@ -16240,6 +16388,7 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
     tmp_path: Path, runner: str, wrapper: str, home_kind: str, expected: Dict[str, Any]
 ) -> None:
@@ -16324,6 +16473,7 @@ _RECORDING_RUNTIME_SCRIPT = (
         pytest.param({}, "absolute", "path", id="control-no-runner-named"),
     ],
 )
+@pytest.mark.integration
 def test_a_documents_oci_runner_is_read_as_typed(
     tmp_path: Path, document: Dict[str, str], home_kind: str, runs: str
 ) -> None:
@@ -16415,6 +16565,7 @@ def _install_supported_minors() -> List[int]:
     return [m for m in range(40) if allowed.contains(f"3.{m}", prereleases=True)]
 
 
+@pytest.mark.unit
 def test_every_python_range_the_pages_give_is_requires_python() -> None:
     """install.md (Requirements; Install with pip), and every other page that gives a
     range of Python versions.
@@ -16467,6 +16618,7 @@ def _install_extras_table() -> Dict[str, str]:
     return rows
 
 
+@pytest.mark.unit
 def test_the_extras_table_lists_each_extra_and_what_it_adds() -> None:
     """install.md (Extras).
 
@@ -16532,6 +16684,7 @@ def _install_matrix(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
+@pytest.mark.unit
 def test_ci_installs_ash_on_the_pythons_and_runners_the_page_names() -> None:
     """install.md (Requirements).
 
@@ -16603,6 +16756,7 @@ def _coverage_names(cell: str) -> Set[str]:
     }
 
 
+@pytest.mark.unit
 def test_the_coverage_tables_name_every_shipped_scanner_by_where_it_comes_from(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -16651,6 +16805,7 @@ def test_the_coverage_tables_name_every_shipped_scanner_by_where_it_comes_from(
     )
 
 
+@pytest.mark.unit
 def test_the_coverage_table_columns_match_each_scanner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -16773,6 +16928,7 @@ def _workflow_page_jobs() -> Tuple[Tuple[str, Dict[str, Any]], Dict[str, Any]]:
     return scan, sarif
 
 
+@pytest.mark.unit
 def test_the_ci_tutorial_names_the_job_check_and_artifact_ci_creates() -> None:
     """ci.md (2. Open a pull request and watch the scan; 4. Upload results to code
     scanning; 5. See a finding on a pull request).
@@ -16844,6 +17000,7 @@ def test_the_ci_tutorial_names_the_job_check_and_artifact_ci_creates() -> None:
     assert downloads == {"ash_output"}, downloads
 
 
+@pytest.mark.unit
 def test_the_ci_tutorial_lists_the_install_inputs_and_their_defaults() -> None:
     """ci.md (1. Add the workflow).
 
@@ -16929,6 +17086,7 @@ _INPUT_CHECK_ERRORS: List[Tuple[str, str, Optional[str]]] = [
         for index, entry in enumerate(_INPUT_CHECK_ERRORS)
     ],
 )
+@pytest.mark.unit
 def test_each_quoted_input_check_error_is_the_workflows_own(
     quote: str, step_id: str, input_name: Optional[str]
 ) -> None:
@@ -16981,6 +17139,7 @@ _INPUT_CHECK_VALUES = [
 
 
 @pytest.mark.parametrize("value, refused", _INPUT_CHECK_VALUES)
+@pytest.mark.integration
 def test_the_input_check_refuses_each_value_the_page_names_in_any_locale(
     tmp_path: Path, value: str, refused: bool
 ) -> None:
@@ -17138,6 +17297,7 @@ def _commands_acted_on(output: str) -> List[str]:
 @pytest.mark.parametrize(
     "stopped", [True, False], ids=["as-the-page-writes-it", "control-without-the-stop"]
 )
+@pytest.mark.integration
 def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
     tmp_path: Path, stopped: bool
 ) -> None:
@@ -17313,6 +17473,7 @@ _AFTER_THE_COMMAND = "::notice::the step goes on after the command"
         "no-random-token",
     ],
 )
+@pytest.mark.integration
 def test_the_scan_job_shows_what_a_tool_prints_as_text(
     tmp_path: Path, case: str
 ) -> None:
@@ -17447,6 +17608,7 @@ def _steps_using(node: Any, action: str) -> Iterator[Dict[str, Any]]:
             yield from _steps_using(value, action)
 
 
+@pytest.mark.unit
 def test_the_pages_setup_uv_steps_pin_the_uv_version_the_scan_workflow_pins() -> None:
     """github-actions.md (Write the steps yourself) and scale-large-repos.md (Sharding
     in GitHub Actions).
@@ -17497,6 +17659,7 @@ _INPUTS_AN_EARLIER_RELEASE_LACKS = (
 
 
 @pytest.mark.parametrize("tag", ["v3.7.0", "v3.7.1", "control-this-tree"])
+@pytest.mark.integration
 def test_the_scan_workflow_at_v3_7_0_and_v3_7_1_has_the_inputs_the_page_names(
     tag: str,
 ) -> None:
@@ -17583,6 +17746,7 @@ def _tools_a_step_installs(step: Dict[str, Any], name: str) -> Set[str]:
     return tools
 
 
+@pytest.mark.unit
 def test_each_install_input_row_names_the_tool_the_input_installs() -> None:
     """github-actions.md (Inputs of run-ash-security-scan.yml).
 
@@ -17756,6 +17920,7 @@ def _built_in_reporter_names() -> Set[str]:
         pytest.param("sarif", ["--debug"], "DEBUG", id="sarif-debug"),
     ],
 )
+@pytest.mark.integration
 def test_ash_report_writes_its_log_to_stderr_and_only_the_report_to_stdout(
     tmp_path: Path, report_format: str, log_option: List[str], level: str
 ) -> None:
@@ -17856,6 +18021,7 @@ def _without_search_permission(directory: Path) -> Iterator[None]:
         *(["under-an-unsearchable-directory"] if _SEARCH_BIT_HOLDS else []),
     ],
 )
+@pytest.mark.integration
 def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
 ) -> None:
@@ -17930,6 +18096,7 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
         "control-an-enterable-directory",
     ],
 )
+@pytest.mark.integration
 def test_ash_report_refuses_an_output_directory_it_cannot_enter_with_exit_5(
     tmp_path: Path, given: str
 ) -> None:
@@ -17974,6 +18141,7 @@ def test_ash_report_refuses_an_output_directory_it_cannot_enter_with_exit_5(
 @pytest.mark.parametrize(
     "given", ["a-file", "a-nul-in-the-path", "control-a-directory"]
 )
+@pytest.mark.integration
 def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
     tmp_path: Path, given: str
 ) -> None:
@@ -18025,6 +18193,7 @@ def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
 
 
 @pytest.mark.parametrize("places", ["two-places", "control-one-place"])
+@pytest.mark.integration
 def test_ash_report_with_results_in_two_places_reports_on_none_and_exits_5(
     tmp_path: Path, places: str
 ) -> None:
@@ -18068,6 +18237,7 @@ def test_ash_report_with_results_in_two_places_reports_on_none_and_exits_5(
 @pytest.mark.parametrize(
     "results", ["no-results-file", "unreadable-results-file", "a-results-file"]
 )
+@pytest.mark.integration
 def test_ash_report_refuses_an_unknown_format_before_it_reads_the_results(
     tmp_path: Path, results: str
 ) -> None:
@@ -18294,6 +18464,7 @@ if os.name != "nt":
 
 
 @pytest.mark.parametrize("sink, how, report_format, expected", _REPORT_OUTPUT_CELLS)
+@pytest.mark.integration
 def test_ash_report_writes_the_reporters_output_unless_a_color_terminal_renders_it(
     tmp_path: Path, sink: str, how: str, report_format: str, expected: str
 ) -> None:
@@ -18447,6 +18618,7 @@ if os.name != "nt":
 
 @pytest.mark.parametrize("report_format", ["text", "markdown", "sarif"])
 @pytest.mark.parametrize("sink, env, expected", _CI_COMMAND_CELLS)
+@pytest.mark.integration
 def test_ash_report_writes_ci_command_lines_as_written_only_to_a_file(
     tmp_path: Path,
     sink: str,
@@ -18508,6 +18680,7 @@ _A_JSON_REPORT_STILL_PARSES = (
 
 
 @pytest.mark.parametrize("report_format", ["sarif", "flat-json"])
+@pytest.mark.integration
 def test_a_json_report_on_a_pipe_parses_to_the_reporters_document(
     tmp_path: Path, report_format: str
 ) -> None:
@@ -18583,6 +18756,7 @@ _ESCAPE_IN_A_NAME = "title\x1b]0;page-claims\x07.txt"
         pytest.param("color-on", "markdown", None, id="color-on-rendered-markdown"),
     ],
 )
+@pytest.mark.integration
 def test_a_terminal_shows_the_characters_it_acts_on_as_escapes(
     tmp_path: Path, how: str, report_format: str, shown_as: Optional[str]
 ) -> None:
@@ -18642,6 +18816,7 @@ _C1_IN_A_NAME = "csi\u009bselect.txt"
 
 @pytest.mark.skipif(os.name == "nt", reason="the test's own terminal is a POSIX pty")
 @pytest.mark.parametrize("how", ["no-color", "color-on"])
+@pytest.mark.integration
 def test_a_c1_control_in_a_name_is_escaped_in_a_json_report(
     tmp_path: Path, how: str
 ) -> None:
@@ -18702,6 +18877,7 @@ def test_a_c1_control_in_a_name_is_escaped_in_a_json_report(
         ),
     ],
 )
+@pytest.mark.integration
 def test_ash_report_refusing_a_path_writes_no_ci_command_line_even_to_a_file(
     tmp_path: Path, sink: str, env: Dict[str, str]
 ) -> None:
@@ -18749,6 +18925,7 @@ _NUL_OUTPUT_DIR_REFUSAL = "Output directory is not a valid path: out\\x00dir"
 
 
 @pytest.mark.parametrize("command", ["scan", "merge"])
+@pytest.mark.integration
 def test_an_output_directory_holding_a_nul_is_refused_with_exit_5(
     tmp_path: Path, command: str
 ) -> None:
@@ -18818,6 +18995,7 @@ _NUL_SOURCE_DIR = [
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_source_directory_holding_a_nul_is_refused_with_exit_5(
     tmp_path: Path, source_dir: str, mode: str, refusal: str
 ) -> None:
@@ -18894,6 +19072,7 @@ _CONFIG_UPDATE_SET = [
         ),
     ],
 )
+@pytest.mark.integration
 def test_config_update_writes_nothing_for_a_set_it_cannot_apply(
     tmp_path: Path, sets: List[str], refused: bool
 ) -> None:
@@ -18980,6 +19159,7 @@ _DRY_RUN_IMPORTS_THE_MODULES = (
         pytest.param("own", None, id="control-a-reporter-with-a-name-of-its-own"),
     ],
 )
+@pytest.mark.integration
 def test_a_workspace_dry_run_refuses_what_the_run_refuses_before_any_project(
     tmp_path: Path, case: str, refusal: Optional[str]
 ) -> None:
@@ -19093,6 +19273,7 @@ def _write_non_utf8_name(tree: Path) -> None:
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_path_matches_a_name_that_is_not_utf8_as_the_report_writes_it(
     tmp_path: Path, setting: str, pattern: str, matches: bool
 ) -> None:
@@ -19145,6 +19326,7 @@ def test_a_path_matches_a_name_that_is_not_utf8_as_the_report_writes_it(
 
 
 @pytest.mark.parametrize("suppressed_by", [None, "secr?udce9t.py"])
+@pytest.mark.integration
 def test_a_utf8_name_that_spells_the_escape_reads_as_the_same_name(
     tmp_path: Path, suppressed_by: Optional[str]
 ) -> None:
@@ -19358,6 +19540,7 @@ _SANDBOX_BACKEND_OF = {
 }
 
 
+@pytest.mark.unit
 def test_the_read_back_absence_phrases_are_ashs_wording() -> None:
     """Where this tree carries the read-back's source, both phrases the scan
     cells assert absent are held to it here, once and under its own name: a
@@ -19645,6 +19828,7 @@ def _skip_unless_backend_runs(backend_name: str, class_name: str) -> None:
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_tool_a_signal_ended_is_an_error_naming_the_signal(
     tmp_path: Path,
     signal_name: Optional[str],
@@ -19770,6 +19954,7 @@ def test_a_tool_a_signal_ended_is_an_error_naming_the_signal(
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_count_exit_scanner_opts_out_of_the_read_back(
     tmp_path: Path,
     signal_name: Optional[str],
@@ -19843,6 +20028,7 @@ def test_a_count_exit_scanner_opts_out_of_the_read_back(
         assert f"{signal_name} (signal" in text, _output_tail(result)
 
 
+@pytest.mark.unit
 def test_cfn_nag_declares_its_tool_exit_code_a_count() -> None:
     """read-results.md (the read-back note): the note names cfn_nag as the
     shipped scanner whose exit code is a count of findings. The cells above take
@@ -19882,6 +20068,7 @@ def test_cfn_nag_declares_its_tool_exit_code_a_count() -> None:
 
 @_POSIX_SIGNALS
 @pytest.mark.parametrize("dying_target", ["source", "converted"])
+@pytest.mark.integration
 def test_a_signal_on_one_target_makes_the_row_an_error(
     tmp_path: Path, dying_target: str
 ) -> None:
@@ -19989,6 +20176,7 @@ sys.exit(0)
     "(through cmd on Windows), answers the probes, dies by the named signal for "
     "a real tool run, and starts nothing beyond that",
 )
+@pytest.mark.unit
 def test_a_uv_tool_scanners_tool_ended_by_a_signal_is_the_same_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -20189,6 +20377,7 @@ _THE_GATE_LISTS_A_TOOL_THAT_COULD_NOT_START = (
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_sandbox_ash_cannot_provide_is_an_error_with_code_127(
     tmp_path: Path, cell: str, status: str, exit_code: int, returncode: int
 ) -> None:
@@ -20302,6 +20491,7 @@ _A_REFUSED_SANDBOX_STOPS_THE_CONVERTERS_TOOL = (
         pytest.param(False, id="control-no-notebooks-lose-nothing"),
     ],
 )
+@pytest.mark.integration
 def test_a_converter_sandbox_ash_cannot_provide_stops_its_tool(
     tmp_path: Path, with_notebook: bool
 ) -> None:
@@ -20471,6 +20661,7 @@ _OUTPUT_FORMATS_NARROW = (
         ),
     ],
 )
+@pytest.mark.integration
 def test_output_formats_take_every_shipped_reporters_name(
     tmp_path: Path,
     formats: str,
@@ -20524,6 +20715,7 @@ def test_output_formats_take_every_shipped_reporters_name(
             assert any("ERROR" in line for line in held_lines), held_lines
 
 
+@pytest.mark.integration
 def test_merge_output_formats_take_a_shipped_reporters_name(tmp_path: Path) -> None:
     """export-reports.md: ``ash merge --output-formats`` takes the same names."""
     assert_on_page(EXPORT_REPORTS, _OUTPUT_FORMATS_ACCEPTS)
@@ -20625,6 +20817,7 @@ ASH_SCANNERS = [ProbeScanner]
         pytest.param("off", False, id="control-off"),
     ],
 )
+@pytest.mark.integration
 def test_a_scanners_dependency_probe_runs_only_inside_the_sandbox(
     tmp_path: Path, mode: str, wrapped: bool
 ) -> None:

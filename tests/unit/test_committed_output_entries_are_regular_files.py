@@ -80,6 +80,7 @@ def _layout(tmp_path: Path, output_rel: str):
     return source, output, marker
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("output_rel", OUTPUTS)
 def test_git_index_entries_are_taken_only_as_regular_files(tmp_path, output_rel):
     source, output, _marker = _layout(tmp_path, output_rel)
@@ -89,6 +90,7 @@ def test_git_index_entries_are_taken_only_as_regular_files(tmp_path, output_rel)
     assert found == [output / "hidden" / "regular.py"], found
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("output_rel", OUTPUTS)
 def test_the_scan_set_holds_only_the_regular_file(tmp_path, monkeypatch, output_rel):
     source, output, _marker = _layout(tmp_path, output_rel)
@@ -104,6 +106,7 @@ def test_the_scan_set_holds_only_the_regular_file(tmp_path, monkeypatch, output_
     assert under_output == ["hidden/regular.py"], files
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("output_rel", OUTPUTS)
 def test_detect_secrets_reads_no_linked_file(tmp_path, monkeypatch, output_rel):
     """detect-secrets reads its files in worker processes, so what it read is told
@@ -139,6 +142,7 @@ def test_detect_secrets_reads_no_linked_file(tmp_path, monkeypatch, output_rel):
     assert uris == {f"{output_rel}/hidden/regular.py"}, uris
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("output_rel", OUTPUTS)
 def test_a_link_in_the_scan_set_is_not_taken_as_a_committed_file(tmp_path, output_rel):
     """The drop keeps a result only in a committed file: a scan set naming a link,
@@ -155,6 +159,7 @@ def test_a_link_in_the_scan_set_is_not_taken_as_a_committed_file(tmp_path, outpu
     assert committed == {(hidden / "regular.py").resolve()}, committed
 
 
+@pytest.mark.unit
 def test_git_is_asked_with_the_repositorys_hooks_and_fsmonitor_turned_off(
     tmp_path, monkeypatch
 ):
@@ -186,6 +191,7 @@ def test_git_is_asked_with_the_repositorys_hooks_and_fsmonitor_turned_off(
     assert argv[0] == "git" and "ls-files" in argv and "-z" in argv, argv
 
 
+@pytest.mark.unit
 def test_git_is_asked_about_the_repository_the_directory_is_in(tmp_path, monkeypatch):
     """The repository is named on the command line, found from the directory's
     ancestors, so git's own search from inside the directory plays no part; the
@@ -220,6 +226,7 @@ def test_git_is_asked_about_the_repository_the_directory_is_in(tmp_path, monkeyp
     assert Path(seen["cwd"]) == root
 
 
+@pytest.mark.unit
 def test_outside_a_repository_git_is_not_asked(tmp_path, monkeypatch):
     from automated_security_helper.utils import scan_output_dirs
     from automated_security_helper.utils import subprocess_utils
@@ -244,6 +251,7 @@ def test_outside_a_repository_git_is_not_asked(tmp_path, monkeypatch):
     assert asked == []
 
 
+@pytest.mark.unit
 def test_a_name_that_leaves_the_directory_is_not_taken(tmp_path, monkeypatch):
     """git does not index a name with a '..' component; one is fed to the parsing
     here directly, through a stand-in for git's output."""
@@ -291,6 +299,7 @@ def _plant_repository_layout(directory: Path, elsewhere: Path) -> list[str]:
     return list(files)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("output_rel", OUTPUTS)
 def test_files_in_a_directory_laid_out_like_a_repository_are_still_listed(
     tmp_path, output_rel
@@ -314,6 +323,7 @@ def test_files_in_a_directory_laid_out_like_a_repository_are_still_listed(
     ), found
 
 
+@pytest.mark.integration
 def test_a_file_reached_through_a_linked_directory_is_not_taken(tmp_path):
     """The index lists ``hidden/regular.py``, and the working tree's ``hidden`` has
     become a link to a directory outside the repository holding a regular file of
@@ -337,6 +347,7 @@ def test_a_file_reached_through_a_linked_directory_is_not_taken(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_the_fsmonitor_program_the_repository_names_is_not_run(tmp_path):
     """``core.fsmonitor`` in the repository's own config can name a program, which
     git runs when it reads the index, ``git ls-files`` included. Listing the files
@@ -376,6 +387,7 @@ def _scanned_under(files, directory: Path) -> list[str]:
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("output_rel", OUTPUTS)
 def test_a_committed_link_to_a_directory_of_the_repository_is_not_taken(
     tmp_path, monkeypatch, output_rel
@@ -408,6 +420,7 @@ def test_a_committed_link_to_a_directory_of_the_repository_is_not_taken(
     ], files
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("output_rel", OUTPUTS)
 def test_a_gitlink_in_the_output_directory_is_not_taken(
     tmp_path, monkeypatch, output_rel
@@ -442,6 +455,7 @@ def test_a_gitlink_in_the_output_directory_is_not_taken(
     assert _scanned_under(files, output) == [], files
 
 
+@pytest.mark.integration
 def test_a_committed_file_replaced_by_a_fifo_is_not_taken(tmp_path):
     """git's index lists the name as a regular file, and the working tree holds a
     FIFO there now, which a scanner opening it would wait on for a writer."""

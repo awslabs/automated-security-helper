@@ -36,6 +36,8 @@ import pytest
 
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 
+pytestmark = pytest.mark.unit
+
 SENTINEL = "value-from-the-servers-environment"
 
 

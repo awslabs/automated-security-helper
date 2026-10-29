@@ -28,6 +28,8 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.models.core import AshSuppression
 
+pytestmark = pytest.mark.unit
+
 #: Values a suppression can hold, each with a line that is a CI command unless
 #: the writer writes it on one line.
 VALUES = {

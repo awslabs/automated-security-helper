@@ -104,6 +104,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTION = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
 

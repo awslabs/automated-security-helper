@@ -6,11 +6,14 @@
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
 
 from automated_security_helper.utils.suppression_matcher import (
     InlineSuppression,
     find_inline_suppressions,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

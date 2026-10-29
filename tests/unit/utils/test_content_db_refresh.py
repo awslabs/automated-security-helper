@@ -113,12 +113,14 @@ def recorder(monkeypatch):
     return rec
 
 
+@pytest.mark.unit
 def test_a_tool_that_is_not_installed_is_an_error(monkeypatch, tmp_path):
     monkeypatch.setattr(refresh, "find_executable", lambda tool: None)
     with pytest.raises(ScannerError, match="grype is not installed"):
         refresh.prepare_content_db("grype", tmp_path, offline=False, **_where(tmp_path))
 
 
+@pytest.mark.unit
 def test_offline_nothing_runs(recorder, tmp_path):
     refresh.prepare_content_db(
         "grype", tmp_path, offline=True, **_where(tmp_path), executable="grype"
@@ -129,6 +131,7 @@ def test_offline_nothing_runs(recorder, tmp_path):
     assert recorder.calls == []
 
 
+@pytest.mark.unit
 def test_grype_is_updated_outside_the_sandbox_and_away_from_the_repo(
     recorder, tmp_path
 ):
@@ -150,6 +153,7 @@ def test_grype_is_updated_outside_the_sandbox_and_away_from_the_repo(
     assert not any((p / ".git").exists() for p in [call.cwd, *call.cwd.parents])
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("tool", ["grype", "trivy"])
 def test_a_temporary_directory_inside_a_checkout_is_not_the_working_directory(
     recorder, tmp_path, monkeypatch, tool
@@ -175,6 +179,7 @@ def test_a_temporary_directory_inside_a_checkout_is_not_the_working_directory(
     assert call.cwd == Path(call.cwd.anchor)
 
 
+@pytest.mark.unit
 def test_trivy_gets_its_database_and_when_asked_its_checks_bundle(recorder, tmp_path):
     cache = tmp_path / "trivy"
     refresh.prepare_content_db(
@@ -196,6 +201,7 @@ def test_trivy_gets_its_database_and_when_asked_its_checks_bundle(recorder, tmp_
     assert checks.argv[1] == "config" and checks.last_is_empty_dir
 
 
+@pytest.mark.unit
 def test_trivy_takes_the_operators_config_when_given_one(recorder, tmp_path):
     """A database mirror in the operator's trivy.yaml applies to the update too."""
     operator = tmp_path / "operator" / "trivy.yaml"
@@ -218,6 +224,7 @@ def test_trivy_takes_the_operators_config_when_given_one(recorder, tmp_path):
     assert operator.is_file()
 
 
+@pytest.mark.unit
 def test_grype_takes_no_config_file(recorder, tmp_path):
     with pytest.raises(ValueError):
         refresh.prepare_content_db(
@@ -231,6 +238,7 @@ def test_grype_takes_no_config_file(recorder, tmp_path):
     assert recorder.calls == []
 
 
+@pytest.mark.unit
 def test_without_checks_trivy_only_updates_its_database(recorder, tmp_path):
     refresh.prepare_content_db(
         "trivy", tmp_path, offline=False, **_where(tmp_path), executable="trivy"
@@ -238,6 +246,7 @@ def test_without_checks_trivy_only_updates_its_database(recorder, tmp_path):
     assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
 
 
+@pytest.mark.unit
 def test_the_java_database_is_updated_only_when_asked(recorder, tmp_path):
     """About 935 MiB, and only modes that analyze JAR, WAR and EAR files read it."""
     refresh.prepare_content_db(
@@ -274,6 +283,7 @@ def test_the_java_database_is_updated_only_when_asked(recorder, tmp_path):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "env, skips",
     [
@@ -310,6 +320,7 @@ def test_an_operators_environment_can_turn_the_database_update_off(
     assert ran[-1][:1] == ["config"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "config, skips",
     [
@@ -346,6 +357,7 @@ def test_an_operators_trivy_config_can_turn_the_database_update_off(
     assert (recorder.calls == []) is skips
 
 
+@pytest.mark.unit
 def test_the_environment_outranks_the_operators_config(recorder, tmp_path, monkeypatch):
     operator = tmp_path / "trivy.yaml"
     operator.write_text("db:\n  skip-update: true\n")
@@ -361,6 +373,7 @@ def test_the_environment_outranks_the_operators_config(recorder, tmp_path, monke
     assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
 
 
+@pytest.mark.unit
 def test_the_java_database_has_its_own_opt_out(recorder, tmp_path, monkeypatch):
     monkeypatch.setenv("TRIVY_SKIP_JAVA_DB_UPDATE", "true")
     refresh.prepare_content_db(
@@ -389,6 +402,7 @@ def test_the_java_database_has_its_own_opt_out(recorder, tmp_path, monkeypatch):
     assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
 
 
+@pytest.mark.unit
 def test_a_skipped_update_is_logged_with_the_setting_that_skipped_it(
     recorder, tmp_path, monkeypatch, caplog
 ):
@@ -402,6 +416,7 @@ def test_a_skipped_update_is_logged_with_the_setting_that_skipped_it(
     assert "did not update" in caplog.text
 
 
+@pytest.mark.unit
 def test_once_per_scan(recorder, tmp_path):
     for _ in range(3):
         refresh.prepare_content_db(
@@ -423,6 +438,7 @@ def test_once_per_scan(recorder, tmp_path):
     assert len(recorder.calls) == 2
 
 
+@pytest.mark.unit
 def test_a_failed_update_raises_with_the_tools_words_and_is_retried(
     monkeypatch, tmp_path
 ):
@@ -441,6 +457,7 @@ def test_a_failed_update_raises_with_the_tools_words_and_is_retried(
     assert len(failing.calls) == 2, "a failure must not count as prepared"
 
 
+@pytest.mark.unit
 def test_the_lock_lives_in_the_cache_or_beside_it(tmp_path):
     cache = tmp_path / "cache"
     cache.mkdir()
@@ -478,6 +495,7 @@ _POSIX_CASES = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX paths")
 @pytest.mark.parametrize("platform,xdg,grype,trivy", _POSIX_CASES)
 def test_the_cache_is_where_the_tool_itself_looks(
@@ -500,6 +518,7 @@ def test_the_cache_is_where_the_tool_itself_looks(
         assert refresh.default_cache_dir(tool, env, platform) == spelled(expected), tool
 
 
+@pytest.mark.unit
 def test_on_windows_the_cache_is_under_local_app_data(tmp_path):
     local = str(tmp_path / "Local")
     env = {"LocalAppData": local}  # Windows variable names are case-insensitive
@@ -516,6 +535,7 @@ def test_on_windows_the_cache_is_under_local_app_data(tmp_path):
     assert refresh.default_cache_dir("trivy", env, "win32") == Path(local) / "trivy"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("platform", ["linux", "darwin", "win32"])
 def test_the_tools_own_variables_win_and_are_made_absolute(
     monkeypatch, tmp_path, platform
@@ -574,6 +594,7 @@ def _within(path: Path, roots) -> bool:
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("tool", ["grype", "trivy"])
 @pytest.mark.parametrize("xdg", [False, True], ids=["no-xdg", "xdg"])
 @pytest.mark.parametrize("platform", ["linux", "darwin"])
@@ -603,6 +624,7 @@ def test_every_cache_default_cache_dir_names_is_mounted(
     assert not _within(cache, policy.executable), "a database is not a program"
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
 @pytest.mark.parametrize("backend", sorted(BACKENDS))
 @pytest.mark.parametrize("tool", ["grype", "trivy"])
@@ -641,6 +663,7 @@ def test_the_pinned_cache_reaches_the_sandboxed_tool_and_xdg_does_not(
         plan.run_cleanup()
 
 
+@pytest.mark.unit
 def test_threads_of_one_scan_take_turns(monkeypatch, tmp_path):
     spans = []
 
@@ -666,6 +689,7 @@ def test_threads_of_one_scan_take_turns(monkeypatch, tmp_path):
     _assert_no_overlap(spans)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="the cross-process lock is POSIX flock")
 def test_two_scans_in_separate_processes_take_turns(tmp_path):
     """Two ASH processes sharing a cache must not update it at the same time."""
@@ -712,6 +736,7 @@ def _assert_no_overlap(spans):
         assert start >= end, f"two updates ran at once: {ordered}"
 
 
+@pytest.mark.unit
 class TestScannersUseThePreparedDatabase:
     """The scanners refresh before a sandboxed online scan, then skip their own."""
 
@@ -824,6 +849,7 @@ class TestScannersUseThePreparedDatabase:
         assert "--cache-backend=memory" in command
 
 
+@pytest.mark.unit
 class TestTrivyScanCacheUnderASandbox:
     """trivy-repo keeps its scan cache in memory in every run, sandboxed or not.
 
@@ -940,6 +966,7 @@ def _probe_recorder(monkeypatch, stdout: str):
     return calls
 
 
+@pytest.mark.unit
 class TestOneCacheForTheScanTheRefreshAndTheCheck:
     """With XDG_CACHE_HOME set, all three name the directory the tool itself uses.
 
@@ -1023,6 +1050,7 @@ def _flag(argv, name: str) -> str:
     return ""
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("checkout", [False, True], ids=["plain-tree", "git-checkout"])
 def test_the_refresh_runs_outside_the_scanned_tree_when_the_temp_dir_is_in_it(
     recorder, monkeypatch, tmp_path, checkout
@@ -1049,6 +1077,7 @@ def test_the_refresh_runs_outside_the_scanned_tree_when_the_temp_dir_is_in_it(
     assert not in_scanned_tree(call.cwd, tree), call.cwd
 
 
+@pytest.mark.unit
 class TestOncePerScan:
     """The memo is per scan, keyed on PluginContext.scan_id, not on the object's address."""
 
@@ -1092,6 +1121,7 @@ class TestOncePerScan:
         assert len(recorder.calls) == 2
 
 
+@pytest.mark.unit
 def test_a_failed_updates_excerpt_hides_a_value_straddling_its_cut(
     monkeypatch, tmp_path
 ):

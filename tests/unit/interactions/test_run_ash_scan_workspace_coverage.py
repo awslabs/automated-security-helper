@@ -73,6 +73,8 @@ from automated_security_helper.workspace.execution import WorkspaceRunResult
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from tests.utils.env_assertions import environ_names
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 

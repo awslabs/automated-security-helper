@@ -122,6 +122,7 @@ def _stub(preamble: str) -> str:
     )
 
 
+@pytest.mark.integration
 def test_a_healthy_run_still_reports(tmp_path):
     """Positive control: with streams intact the sentinel is observable.
 
@@ -139,6 +140,7 @@ def test_a_healthy_run_still_reports(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_startup_failure_is_reported_when_stderr_is_none(tmp_path):
     """The regression. A failure with no console attached must still say why.
 
@@ -163,6 +165,7 @@ def test_startup_failure_is_reported_when_stderr_is_none(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_report_names_the_missing_console_as_the_cause(tmp_path):
     """The report must say the process had no console, not just print a traceback.
 
@@ -184,6 +187,7 @@ def test_report_names_the_missing_console_as_the_cause(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_startup_failure_is_reported_when_both_streams_are_none(tmp_path):
     """Same guarantee when stdout is gone too.
 
@@ -200,6 +204,7 @@ def test_startup_failure_is_reported_when_both_streams_are_none(tmp_path):
     assert SENTINEL in combined, f"stdout={result.stdout!r} stderr={result.stderr!r}"
 
 
+@pytest.mark.integration
 def test_startup_failure_is_reported_when_saved_originals_are_none(tmp_path):
     """``sys.__stderr__`` can be ``None`` as well, per the CPython docs.
 
@@ -221,6 +226,7 @@ def test_startup_failure_is_reported_when_saved_originals_are_none(tmp_path):
     assert SENTINEL in combined, f"stdout={result.stdout!r} stderr={result.stderr!r}"
 
 
+@pytest.mark.integration
 def test_version_prints_when_stdout_is_none(tmp_path):
     """The originally reported symptom, as the CI check ran it.
 
@@ -250,6 +256,7 @@ def test_version_prints_when_stdout_is_none(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_scan_exit_codes_are_not_rewritten(tmp_path):
     """The floor must not touch ``SystemExit``.
 
@@ -299,6 +306,7 @@ def test_scan_exit_codes_are_not_rewritten(tmp_path):
         "[node_modules]",
     ],
 )
+@pytest.mark.integration
 def test_bracketed_failure_messages_survive_the_report(tmp_path, payload):
     """Rich markup in a failure message must not destroy the report.
 
@@ -370,6 +378,7 @@ def test_bracketed_failure_messages_survive_the_report(tmp_path, payload):
 class TestStreamRepair:
     """Unit-level checks on the repair itself."""
 
+    @pytest.mark.unit
     def test_healthy_streams_are_left_alone(self):
         """Repair acts only on ``None``.
 
@@ -389,6 +398,7 @@ class TestStreamRepair:
         assert sys.stdout is before_out
         assert sys.stderr is before_err
 
+    @pytest.mark.unit
     def test_raw_write_reaches_a_descriptor(self, capfd):
         """The last resort writes even with no stream object to hand.
 
@@ -405,6 +415,7 @@ class TestStreamRepair:
         assert SENTINEL in capfd.readouterr().err
 
 
+@pytest.mark.unit
 def test_the_interpreters_own_hook_does_not_write_the_error_as_given(
     monkeypatch, capsys
 ):
@@ -422,6 +433,7 @@ def test_the_interpreters_own_hook_does_not_write_the_error_as_given(
     assert chr(0x1B) not in err, err
 
 
+@pytest.mark.unit
 def test_typers_hook_is_reported_through_ashs_traceback(monkeypatch, capsys):
     """typer's hook prints with typer's own console, which writes the exception's
     text as given: the floor reports through ASH's traceback in its place, once,
@@ -448,6 +460,7 @@ def test_typers_hook_is_reported_through_ashs_traceback(monkeypatch, capsys):
     assert chr(0x1B) not in err, err
 
 
+@pytest.mark.unit
 def test_a_wrapper_of_richs_hook_is_called(monkeypatch, capsys):
     """A crash reporter that wraps rich.traceback's hook with functools.wraps
     takes its module name, but does more than print: it is called, once, as any
@@ -487,6 +500,7 @@ def test_a_wrapper_of_richs_hook_is_called(monkeypatch, capsys):
     assert "boom\\x1b[31m red" in err and chr(0x1B) not in err, err
 
 
+@pytest.mark.integration
 def test_an_installed_hook_that_exits_sets_the_exit_code(tmp_path):
     """A hook's sys.exit ends the process as it says, as CPython's own handling
     of an uncaught exception does: the hook's code, and no report on top."""
@@ -506,6 +520,7 @@ def test_an_installed_hook_that_exits_sets_the_exit_code(tmp_path):
     "where",
     ["installed-hook", "ash-traceback", "fallback-shown", "fallback-emit", "banner"],
 )
+@pytest.mark.unit
 def test_an_interrupt_while_reporting_is_not_reported_past(where, monkeypatch):
     """Ctrl-C while the failure is reported, in an installed hook, in ASH's own
     traceback, in the plain traceback written when neither could report, or in
@@ -589,6 +604,7 @@ def _run_child_on_a_pty(body: str, tmp_path: Path) -> tuple[int, str]:
 
 @pytest.mark.parametrize("stream", ["pipe", "pty"])
 @pytest.mark.parametrize("where", ["installed-hook", "ash-traceback", "fallback"])
+@pytest.mark.integration
 def test_an_interrupt_while_reporting_prints_nothing_raw(where, stream, tmp_path):
     """The whole process: a Ctrl-C while the failure is reported ends it with 130,
     the interrupted reporter called once, and none of the failure's text written
@@ -650,6 +666,7 @@ def test_an_interrupt_while_reporting_prints_nothing_raw(where, stream, tmp_path
     assert chr(0x1B) not in written and chr(0x202E) not in written, ascii(written)
 
 
+@pytest.mark.unit
 def test_an_interrupt_before_the_cli_runs_ends_with_130(monkeypatch):
     """A Ctrl-C that escapes the CLI itself, during its import say, before Click
     has a handler of its own, ends the process as an interrupted one ends, with
@@ -683,6 +700,7 @@ def test_an_interrupt_before_the_cli_runs_ends_with_130(monkeypatch):
 
 
 @pytest.mark.parametrize("stream", ["pipe", "pty"])
+@pytest.mark.integration
 def test_an_interrupt_during_the_cli_import_prints_nothing_raw(stream, tmp_path):
     """The whole process: a Ctrl-C while the CLI is imported, as an import error
     holding an ESC and a right-to-left override is handled, exits 130 and writes
@@ -757,6 +775,7 @@ def _raw_printing_hook(calls, raises=False):
         "hook-that-raises",
     ],
 )
+@pytest.mark.unit
 def test_an_installed_hook_runs_and_what_it_writes_is_shown(
     installed, monkeypatch, capsys
 ):

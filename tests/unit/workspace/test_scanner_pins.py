@@ -16,6 +16,8 @@ from automated_security_helper.workspace.scanner_pins import (
     compare_pins,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Identical and trivially-overlapping pins

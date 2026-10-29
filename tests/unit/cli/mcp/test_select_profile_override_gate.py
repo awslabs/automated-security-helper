@@ -44,6 +44,8 @@ from automated_security_helper.config.ash_config import (
     SandboxConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolate_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

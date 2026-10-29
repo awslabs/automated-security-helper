@@ -324,6 +324,7 @@ def _required_checks_from_the_release_docs() -> list[str]:
 # --------------------------------------------------------------------------- 1 and 2
 
 
+@pytest.mark.unit
 class TestTheRequiredCheckInstallsTheBaseBranchsAsh:
     @pytest.mark.parametrize("context", PULL_REQUESTS)
     def test_every_ash_source_of_the_required_check_names_the_base_branch(
@@ -378,6 +379,7 @@ class TestTheRequiredCheckInstallsTheBaseBranchsAsh:
 # --------------------------------------------------------------------------- 3
 
 
+@pytest.mark.unit
 class TestThePullRequestsOwnAshRunsForInformationOnly:
     @pytest.mark.parametrize("context", PULL_REQUESTS[:2])
     def test_a_separate_job_scans_with_the_pull_requests_own_ash(self, context):
@@ -460,6 +462,7 @@ class TestThePullRequestsOwnAshRunsForInformationOnly:
 # --------------------------------------------------------------------------- 4
 
 
+@pytest.mark.unit
 class TestAnotherScanCannotBreakTheRequiredOne:
     """Guards. Both pass before the fix; they stop the new job from breaking the gate."""
 
@@ -556,6 +559,7 @@ def _run_cfn_nag_install(
     return sandbox, run
 
 
+@pytest.mark.integration
 @_REQUIRES_BASH
 class TestCfnNagComesFromTheInstalledAshRef:
     def test_cfn_nag_is_not_installed_from_the_checkouts_gemfile(self, tmp_path):

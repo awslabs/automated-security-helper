@@ -29,6 +29,8 @@ from automated_security_helper.config.config_sources import (
     FileIdentity,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "replaced-file-canary-2e68"
 
 #: Each layer from the tool's call down to the root read, called with a config

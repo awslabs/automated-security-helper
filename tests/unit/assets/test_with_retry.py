@@ -69,6 +69,7 @@ def run_with_retry(command: str, attempts: int = 3, extra_env: dict | None = Non
     )
 
 
+@pytest.mark.integration
 class TestPipedFailuresAreDetected:
     """The regression: a failing pipeline must not look like success."""
 
@@ -104,6 +105,7 @@ class TestPipedFailuresAreDetected:
         assert "All 2 attempts failed" in result.stderr
 
 
+@pytest.mark.integration
 class TestRetrySucceeds:
     """A transient failure must be recovered from, not just reported."""
 
@@ -123,6 +125,7 @@ class TestRetrySucceeds:
         assert "retrying" not in result.stderr
 
 
+@pytest.mark.integration
 class TestExitStatus:
     def test_total_failure_exits_one(self):
         result = run_with_retry("false", attempts=2)
@@ -166,6 +169,7 @@ def _sleep_recorder(tmp_path):
     return shim_dir, log
 
 
+@pytest.mark.integration
 class TestTheIntervalItActuallySleeps:
     """What `sleep` is handed -- not what the log line says it was handed.
 
@@ -213,6 +217,7 @@ class TestTheIntervalItActuallySleeps:
         )
 
 
+@pytest.mark.integration
 class TestMalformedKnobsAreRejectedNotSilentlyHonoured:
     """A non-integer delay used to truncate the loop to a single attempt.
 
@@ -274,6 +279,7 @@ class TestMalformedKnobsAreRejectedNotSilentlyHonoured:
         assert result.returncode == 1
 
 
+@pytest.mark.integration
 class TestTheSummaryCountMatchesWhatRan:
     """The defect was a disagreement between two observables, so compare them.
 
@@ -365,6 +371,7 @@ def _run_recording_sleeps(
     return result, (log.read_text().split() if log.is_file() else [])
 
 
+@pytest.mark.integration
 class TestNothingFollowsTheFinalAttempt:
     """The last attempt has no retry after it, so the wait after it is dead time.
 
@@ -434,6 +441,7 @@ class TestNothingFollowsTheFinalAttempt:
         assert result.stderr.count("failed, retrying in") == 1
 
 
+@pytest.mark.integration
 class TestALeadingZeroDelayIsReadAsBaseTen:
     """The guard above closed the non-integer route and left an all-digits one open.
 
@@ -555,6 +563,7 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
         assert slept == ["0", "0"]
 
 
+@pytest.mark.integration
 class TestADelayTooLargeToSleepIsRejected:
     """All digits is not the same as in range, and the overflow is silent.
 
@@ -662,6 +671,7 @@ class TestADelayTooLargeToSleepIsRejected:
         assert slept == ["5", "10"]
 
 
+@pytest.mark.integration
 class TestTheAttemptCountIsNotAffected:
     """Positive control for the half of the pair that was already correct.
 
@@ -723,6 +733,7 @@ def _run_argv(*argv: str, attempts: int = 3, delay: int = 0):
     )
 
 
+@pytest.mark.integration
 class TestAnEmptyCommandIsRejectedRatherThanReportedAsSuccess:
     """``bash -c ""`` exits 0, so an empty invocation looked like a clean run.
 
@@ -794,6 +805,7 @@ class TestAnEmptyCommandIsRejectedRatherThanReportedAsSuccess:
         assert marker.read_text() == "ok"
 
 
+@pytest.mark.unit
 def test_script_is_present_and_executable_source():
     """A missing script would make every test above skip-shaped rather than fail."""
     assert WITH_RETRY.is_file(), f"expected with-retry.sh at {WITH_RETRY}"

@@ -16,6 +16,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 )
 from tests.unit.converters.nbconvert_routes import use_stand_in_nbconvert
 
+pytestmark = pytest.mark.unit
+
 
 class TestArchiveConverter:
     """Test cases for ArchiveConverter."""

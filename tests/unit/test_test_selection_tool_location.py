@@ -35,6 +35,7 @@ def _selection_doc_text() -> str:
     return (TESTING_DOCS / "test_selection.md").read_text(encoding="utf-8") + section
 
 
+@pytest.mark.unit
 def test_every_module_the_selection_docs_name_imports():
     text = _selection_doc_text()
     commands = re.findall(r"python -m (tests\.[\w.]+)", text)
@@ -48,6 +49,7 @@ def test_every_module_the_selection_docs_name_imports():
             assert hasattr(imported, name), f"{module} has no {name}"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("module", TOOLS)
 def test_the_tool_runs_from_the_repository_root(module):
     result = subprocess.run(
@@ -62,6 +64,7 @@ def test_the_tool_runs_from_the_repository_root(module):
     assert "usage:" in result.stdout
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("module", TOOLS)
 def test_the_tools_own_imports_resolve(module):
     """optimization.py imported tests.utils.test_selection, which did not exist."""
@@ -103,6 +106,7 @@ def _defines_a_test(tree: ast.Module) -> bool:
     return False
 
 
+@pytest.mark.integration
 def test_no_tool_is_named_like_a_test_module():
     """pytest collects tests/**/test_*.py; a tool there is imported for nothing.
 
@@ -136,6 +140,7 @@ def test_no_tool_is_named_like_a_test_module():
     )
 
 
+@pytest.mark.unit
 def test_the_test_finder_recognises_each_shape():
     """Positive and negative controls for _defines_a_test."""
 
@@ -177,6 +182,7 @@ def _every_pytest_invocation(monkeypatch) -> list:
     return calls
 
 
+@pytest.mark.unit
 def test_the_tools_run_pytest_with_the_interpreter_they_run_under(monkeypatch):
     """A bare `pytest` is whatever PATH finds first, or nothing, outside an activated venv.
 

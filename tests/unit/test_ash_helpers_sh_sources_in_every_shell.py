@@ -36,6 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "utils" / "ash_helpers.sh"
 
 pytestmark = [
+    pytest.mark.integration,
     # The helper is for POSIX shells. On a GitHub Windows runner shutil.which("bash")
     # finds the WSL launcher stub, which exits 1 without a distribution installed, so
     # a which() guard is not enough to keep these off Windows.

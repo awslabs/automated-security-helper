@@ -39,6 +39,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 UPLOAD = Path("/zz-delcwd-upload/config.yaml")

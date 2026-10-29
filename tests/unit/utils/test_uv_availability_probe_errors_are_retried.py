@@ -79,6 +79,7 @@ def _rewind(runner) -> None:
     }
 
 
+@pytest.mark.unit
 def test_a_timed_out_probe_waits_out_the_retry_window(monkeypatch):
     """A hung uv is probed once per window, not once per call, and a
     recovered uv is noticed once the window passes."""
@@ -110,6 +111,7 @@ def test_a_timed_out_probe_waits_out_the_retry_window(monkeypatch):
         pytest.param(OSError(8, "Exec format error"), id="enoexec"),
     ],
 )
+@pytest.mark.unit
 def test_a_transient_os_error_is_probed_again_next_call(monkeypatch, error):
     """An OS error that is not absence answers False for this call only.
     A failed spawn costs microseconds to retry, so it takes no window: one
@@ -123,6 +125,7 @@ def test_a_transient_os_error_is_probed_again_next_call(monkeypatch, error):
     assert len(calls) == 2, calls
 
 
+@pytest.mark.unit
 def test_a_probe_killed_by_a_signal_is_probed_again_after_the_window(monkeypatch):
     """A negative returncode is the signal's, not uv's answer: never
     memoized for the process, answered from the window instead."""
@@ -179,6 +182,7 @@ class _Collector:
         ]
 
 
+@pytest.mark.unit
 def test_an_answer_from_the_window_names_itself(monkeypatch):
     """Inside the window the refusal is not silent: without a line saying
     the answer comes from the window after a failed probe, "UV is not
@@ -195,6 +199,7 @@ def test_an_answer_from_the_window_names_itself(monkeypatch):
     assert warned.window_warnings(), "the window's False was silent"
 
 
+@pytest.mark.unit
 def test_the_window_warns_once_not_on_every_answer(monkeypatch, clock):
     """One hung uv is one line, not a line per call: every uv-backed
     scanner asks is_uv_available, so a per-answer warning prints dozens of
@@ -221,6 +226,7 @@ def test_the_window_warns_once_not_on_every_answer(monkeypatch, clock):
     assert len(calls) == 2, calls
 
 
+@pytest.mark.unit
 def test_concurrent_callers_wait_for_one_probe(monkeypatch):
     """Two threads probing at once run ONE uv --version: the second waits
     for the first's answer instead of starting its own probe. Without the
@@ -256,6 +262,7 @@ def test_concurrent_callers_wait_for_one_probe(monkeypatch):
     assert (answers, len(calls)) == ([True, True], 1), calls
 
 
+@pytest.mark.unit
 def test_a_probe_error_that_is_no_os_error_is_retried_next_call(monkeypatch):
     """An unforeseen error outside the named classes keeps the old shape:
     False for this call, probed again on the next one."""
@@ -267,6 +274,7 @@ def test_a_probe_error_that_is_no_os_error_is_retried_next_call(monkeypatch):
     assert len(calls) == 2, calls
 
 
+@pytest.mark.unit
 def test_a_cancel_propagates_and_is_not_memoized(monkeypatch):
     # Constructed with its message: ScanCancelled requires one wherever the
     # could_not_stop records exist, and the message form constructs on both
@@ -282,6 +290,7 @@ def test_a_cancel_propagates_and_is_not_memoized(monkeypatch):
     assert len(calls) == 2, calls
 
 
+@pytest.mark.unit
 def test_a_missing_uv_executable_is_memoized_as_absent(monkeypatch):
     """No executable is a definite answer: cached, not re-probed."""
     calls = []
@@ -298,6 +307,7 @@ def test_a_missing_uv_executable_is_memoized_as_absent(monkeypatch):
     assert len(calls) == 1, calls
 
 
+@pytest.mark.unit
 def test_a_probe_that_answered_present_is_memoized(monkeypatch):
     """Exit 0 is uv's definite answer: one probe, cached for the process."""
     calls = _counting(monkeypatch, [0])
@@ -308,6 +318,7 @@ def test_a_probe_that_answered_present_is_memoized(monkeypatch):
     assert len(calls) == 1, calls
 
 
+@pytest.mark.unit
 def test_a_completed_nonzero_exit_is_probed_again_next_call(monkeypatch):
     """A completed nonzero exit is not memoized and takes no window: 75
     means "try again", and a sandbox wrapper's own exit code is not uv's
@@ -335,6 +346,7 @@ def _script(tmp_path, name: str, body: str) -> str:
 
 @pytestmark_posix
 @pytest.mark.parametrize("signal_name", ["KILL", "TERM", "SEGV"])
+@pytest.mark.integration
 def test_end_to_end_a_probe_killed_by_a_signal_is_probed_again(
     tmp_path, clock, attempts, signal_name
 ):
@@ -357,6 +369,7 @@ def test_end_to_end_a_probe_killed_by_a_signal_is_probed_again(
 
 
 @pytestmark_posix
+@pytest.mark.integration
 def test_end_to_end_a_real_timeout_is_probed_again_after_the_window(
     tmp_path, clock, attempts
 ):
@@ -431,6 +444,7 @@ def attempts(monkeypatch):
 
 
 @pytestmark_posix
+@pytest.mark.integration
 def test_the_retry_window_is_sixty_seconds_measured_by_the_clock(
     tmp_path, clock, attempts
 ):
@@ -461,6 +475,7 @@ def test_the_retry_window_is_sixty_seconds_measured_by_the_clock(
 
 
 @pytestmark_posix
+@pytest.mark.integration
 def test_an_exit_code_meaning_try_again_is_probed_next_call(tmp_path, attempts):
     """End to end: a stand-in that exits 75 (EX_TEMPFAIL) is not memoized
     and takes no window; the very next call probes the SAME executable
@@ -477,6 +492,7 @@ def test_an_exit_code_meaning_try_again_is_probed_next_call(tmp_path, attempts):
 
 
 @pytestmark_posix
+@pytest.mark.integration
 def test_a_refusal_of_one_scope_does_not_answer_for_a_call_outside_it(
     tmp_path, clock, attempts
 ):
@@ -502,6 +518,7 @@ def test_a_refusal_of_one_scope_does_not_answer_for_a_call_outside_it(
 
 
 @pytestmark_posix
+@pytest.mark.integration
 def test_a_sandbox_wrappers_failure_is_not_uvs_answer(tmp_path, monkeypatch, attempts):
     """A backend wrapper that runs and fails before the tool starts exits
     non-zero itself. Outside the scope, the very next call probes uv."""
@@ -548,6 +565,7 @@ def _zz_sandbox_scope(tmp_path):
         pytest.param("exec sleep 30", "raised", "TimeoutExpired", id="wrapper-hung"),
     ],
 )
+@pytest.mark.integration
 def test_one_scopes_wrapper_window_does_not_answer_outside_the_scope(
     tmp_path, monkeypatch, attempts, body, premise_key, premise_value
 ):
@@ -614,6 +632,7 @@ def _runner_warnings(collector):
         pytest.param("exit 75", "rc", 75, "exited 75", id="exit-75"),
     ],
 )
+@pytest.mark.integration
 def test_a_failed_probe_names_its_cause_on_the_failing_call(
     tmp_path, attempts, body, premise_key, premise_value, names
 ):
@@ -638,6 +657,7 @@ def test_a_failed_probe_names_its_cause_on_the_failing_call(
 
 
 @pytestmark_posix
+@pytest.mark.unit
 def test_a_refused_spawns_warning_names_the_refusal(tmp_path, attempts):
     """A sandbox scope's refusal is named as the spawn failure it is, so the
     scanner's "uv is not available" can say the scope refused, not that uv
@@ -662,6 +682,7 @@ def test_a_refused_spawns_warning_names_the_refusal(tmp_path, attempts):
     ]
 
 
+@pytest.mark.unit
 def test_a_transient_os_errors_warning_names_the_error_and_a_success_clears_it(
     monkeypatch,
 ):
@@ -684,6 +705,7 @@ def test_a_transient_os_errors_warning_names_the_error_and_a_success_clears_it(
     assert failure is None, failure
 
 
+@pytest.mark.unit
 def test_a_missing_uv_adds_no_failure_detail(monkeypatch):
     """The must-not-flag control: an absent executable is uv genuinely not
     available, so the probe stays silent and remembers no failure -- the
@@ -698,6 +720,7 @@ def test_a_missing_uv_adds_no_failure_detail(monkeypatch):
     assert not _runner_warnings(warned), [r.getMessage() for r in warned.records]
 
 
+@pytest.mark.unit
 def test_the_window_warning_carries_the_remembered_failure(monkeypatch):
     """A caller answered from the window sees the failing probe's cause in
     the window's own warning, not only the caller whose probe failed."""
@@ -745,6 +768,7 @@ def _parallel(count, target):
 
 
 @pytestmark_posix
+@pytest.mark.integration
 def test_threads_arriving_during_a_hung_probe_share_its_one_timeout(tmp_path, attempts):
     """Four callers behind one hung uv cost one probe timeout: the prober
     pays it, the waiters answer from the window it opened (which warns
@@ -768,6 +792,7 @@ def test_threads_arriving_during_a_hung_probe_share_its_one_timeout(tmp_path, at
 
 
 @pytestmark_posix
+@pytest.mark.integration
 def test_waiters_behind_a_slow_unanswered_probe_pay_for_one_probe(tmp_path, attempts):
     """A probe whose outcome is neither memoized nor windowed (a wrapper
     that fails slowly) must still answer its waiters: without the probe
@@ -783,6 +808,7 @@ def test_waiters_behind_a_slow_unanswered_probe_pay_for_one_probe(tmp_path, atte
 
 
 @pytestmark_posix
+@pytest.mark.integration
 def test_a_waiters_own_scope_does_not_take_another_scopes_answer(
     tmp_path, monkeypatch, attempts
 ):
@@ -825,6 +851,7 @@ def test_a_waiters_own_scope_does_not_take_another_scopes_answer(
     assert len(attempts.log) == 2, attempts.log
 
 
+@pytest.mark.integration
 def test_a_cancel_reaches_a_thread_waiting_on_another_callers_probe(tmp_path, attempts):
     """A scan cancelled while its thread is parked on the probe lock stops
     within the poll interval and raises ScanCancelled; it does not wait out
@@ -874,6 +901,7 @@ def _wait_for(condition, seconds):
     return False
 
 
+@pytest.mark.unit
 def test_a_new_executable_waits_for_the_in_flight_probe_of_the_old(monkeypatch):
     """Forced interleaving: the old executable's probe is in flight when the
     setter runs. Its answer (present) must not land after the reset; the new

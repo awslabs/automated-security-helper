@@ -47,6 +47,8 @@ import yaml
 
 from tests.utils import github_actions as ga
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 STATUS_CALL = re.compile(r"\b(?:success|always|cancelled|failure)\s*\(", re.IGNORECASE)

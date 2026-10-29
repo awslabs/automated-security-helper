@@ -20,6 +20,8 @@ control is told apart from the name's own text.
 import html
 import re
 
+import pytest
+
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
@@ -27,6 +29,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporte
 )
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils.terminal_text import is_shown_as_escape
+
+pytestmark = pytest.mark.unit
 
 #: The right-to-left override (a format character), named by code point.
 RLO = chr(0x202E)

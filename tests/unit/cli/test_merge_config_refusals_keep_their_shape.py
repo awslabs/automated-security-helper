@@ -31,6 +31,8 @@ from automated_security_helper.cli.merge import resolve_operator_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 from tests.unit.cli.merge_shard_support import _build_config, build_shards, write_shards
 
+pytestmark = pytest.mark.unit
+
 
 def _merge(args):
     """``ash merge`` through the registered command, with no reporter discovered."""

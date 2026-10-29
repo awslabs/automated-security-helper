@@ -33,6 +33,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.integration
+
 
 class _Quiet(http.server.BaseHTTPRequestHandler):
     """No stderr chatter from either listener."""

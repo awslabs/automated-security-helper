@@ -38,6 +38,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporte
     TextReporter,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The marker each probe value ends with, after its line feed.
 MARKER = "probe-mark"
 

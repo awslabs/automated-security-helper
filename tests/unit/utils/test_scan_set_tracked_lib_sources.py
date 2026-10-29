@@ -28,6 +28,8 @@ import pytest
 
 from automated_security_helper.utils.get_scan_set import scan_set
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 CDK_LIB = REPO_ROOT / "deploy" / "cdk" / "lib"

@@ -31,6 +31,8 @@ from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.report_path_links import ReportPathRefused
 
+pytestmark = pytest.mark.unit
+
 ESCAPING = "../companion-escape.md"
 
 

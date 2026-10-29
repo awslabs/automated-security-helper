@@ -30,6 +30,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 _ACTIVE: dict = {"opens": None}
 
 #: The function that opens a base so the grant is asked about the file the

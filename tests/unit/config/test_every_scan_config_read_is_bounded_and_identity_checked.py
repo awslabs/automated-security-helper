@@ -25,6 +25,8 @@ from automated_security_helper.config import config_sources
 from automated_security_helper.config.resolve_config import load_config_file_for_run
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 
 def _write(path: Path, document: Dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)

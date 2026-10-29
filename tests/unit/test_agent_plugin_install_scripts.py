@@ -125,6 +125,7 @@ def _siblings(target: Path) -> set[str]:
     return {entry.name for entry in target.parent.iterdir()}
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("platform_name", sorted(JSON_TARGETS))
 class TestJsonConfigMerge:
     def test_other_servers_and_settings_are_kept(self, tmp_path, platform_name):
@@ -363,6 +364,7 @@ def _merge_program():
     return module
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("existing", [True, False], ids=["existing", "new"])
 def test_an_unwritable_config_directory_prints_the_entry_not_a_traceback(
     tmp_path, monkeypatch, capsys, existing
@@ -421,6 +423,7 @@ _WITHOUT_FCHMOD = (
 )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("platform_name", sorted(JSON_TARGETS))
 @pytest.mark.parametrize("mode", [0o600, 0o644], ids=oct)
 def test_the_merge_works_without_os_fchmod(tmp_path, platform_name, mode):
@@ -465,6 +468,7 @@ def test_the_merge_works_without_os_fchmod(tmp_path, platform_name, mode):
     assert stat.S_IMODE(target.stat().st_mode) == mode
 
 
+@pytest.mark.unit
 def test_a_backup_that_cannot_be_written_is_removed(tmp_path, monkeypatch, capsys):
     """A failed backup must not leave a partial copy that looks like a good one."""
     merge = _merge_program()
@@ -520,6 +524,7 @@ def test_a_backup_that_cannot_be_written_is_removed(tmp_path, monkeypatch, capsy
     assert target.read_text(encoding="utf-8") == original
 
 
+@pytest.mark.integration
 def test_cline_names_an_unsupported_os(
     tmp_path,
 ):
@@ -541,6 +546,7 @@ def test_cline_names_an_unsupported_os(
 GOOSE_SCRIPT_TARGET = Path(".config") / "goose" / "config.yaml"
 
 
+@pytest.mark.integration
 class TestGooseConfig:
     def _target(self, tmp_path: Path) -> tuple[Path, Path]:
         home = tmp_path / "home"

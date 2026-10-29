@@ -24,6 +24,8 @@ from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.utils.env_assertions import environ_names, environ_value
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def observed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list:

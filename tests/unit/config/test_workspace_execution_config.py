@@ -17,6 +17,8 @@ from automated_security_helper.config.ash_config import (
     WorkspaceExecutionConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestDefaults:
     def test_max_parallel_projects_defaults_to_unset(self):

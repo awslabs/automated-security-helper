@@ -203,6 +203,7 @@ def _block(marker: str, body: str, lang: str = "yaml") -> str:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_circleci_is_a_kind_whose_run_steps_get_the_cli_check(tmp_path):
     """A run step is a string or a mapping with command:. A bad ash flag in either is
     reported, and the marker itself is accepted."""
@@ -237,6 +238,7 @@ jobs:
     assert checks.check_config_blocks([page], tmp_path) == []
 
 
+@pytest.mark.unit
 def test_jenkinsfile_is_a_kind_of_groovy_block_whose_sh_steps_get_the_cli_check(
     tmp_path,
 ):
@@ -254,6 +256,7 @@ def test_jenkinsfile_is_a_kind_of_groovy_block_whose_sh_steps_get_the_cli_check(
     assert any("--bogus-in-sh is not an option of 'ash scan'" in m for m in cli), cli
 
 
+@pytest.mark.unit
 def test_jenkinsfile_on_a_yaml_block_is_refused_and_the_yaml_jenkins_kind_is_unchanged(
     tmp_path,
 ):
@@ -287,6 +290,7 @@ GROOVY_MISTAKES = [
 ]
 
 
+@pytest.mark.unit
 def test_every_groovy_block_is_marked_as_a_jenkinsfile(tmp_path):
     """The census counts a groovy block only when its marker names it a Jenkinsfile, so
     an unmarked one, or one marked only save-as=, would drop out of what the runners
@@ -325,6 +329,7 @@ plugins {
 """
 
 
+@pytest.mark.unit
 def test_an_illustrative_groovy_block_is_accepted_with_a_reason(tmp_path):
     """Groovy that is not a Jenkinsfile (a Gradle build file, a test class) has no
     truthful config kind: kind=jenkinsfile would mislabel it and put its sh steps
@@ -375,6 +380,7 @@ JENKINSFILE_FENCE_MISTAKES = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "text",
     [text for _, text in JENKINSFILE_FENCE_MISTAKES],
@@ -445,6 +451,7 @@ ACCEPTED = "\n".join(
 )
 
 
+@pytest.mark.unit
 def test_every_new_key_is_accepted_on_the_kinds_that_have_a_runner(tmp_path):
     findings = _marker_findings(tmp_path, ACCEPTED)
     assert findings == [], (
@@ -454,6 +461,7 @@ def test_every_new_key_is_accepted_on_the_kinds_that_have_a_runner(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_a_fragment_that_extends_a_saved_block_passes_the_config_check(tmp_path):
     """The lint merges each fragment into the block it extends; these two merge."""
     page = _write(tmp_path, "docs/page.md", ACCEPTED)
@@ -627,6 +635,7 @@ MARKER_DEFECTS = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "case,error,text,line,expected",
     MARKER_DEFECTS,
@@ -648,6 +657,7 @@ def test_each_wrong_use_of_the_new_keys_is_reported(
     )
 
 
+@pytest.mark.unit
 def test_the_messages_of_different_mistakes_differ(tmp_path):
     seen: dict[str, set[str]] = {}
     for case, error, text, line, expected in MARKER_DEFECTS:
@@ -668,6 +678,7 @@ def test_the_messages_of_different_mistakes_differ(tmp_path):
             )
 
 
+@pytest.mark.unit
 def test_an_unknown_key_is_reported_alone(tmp_path):
     """The one unknown key is named; the valid key beside it is not."""
     findings = _marker_findings(
@@ -705,6 +716,7 @@ def _saves_then_extends(kind: str, body: str, lang: str, path: str) -> tuple[str
     return saved + "\n" + fragment, len(saved.split("\n")) + 1
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "kind,body,lang,path",
     NO_MERGE_RULE_KINDS,
@@ -744,6 +756,7 @@ def test_extends_on_a_kind_with_no_merge_rule_is_refused(
     )
 
 
+@pytest.mark.unit
 def test_the_no_merge_rule_message_says_to_drop_extends_on_a_runner_none_block(
     tmp_path,
 ):
@@ -763,6 +776,7 @@ def test_the_no_merge_rule_message_says_to_drop_extends_on_a_runner_none_block(
     assert "drop extends=" in message, message
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "kind,body,lang,path",
     NO_MERGE_RULE_KINDS,
@@ -847,6 +861,7 @@ EVENT_NOT_TRIGGERED = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "case,text,line,event",
     EVENT_NOT_TRIGGERED,
@@ -874,6 +889,7 @@ def test_an_event_the_workflow_does_not_run_on_is_reported(
     assert message not in others, message
 
 
+@pytest.mark.unit
 def test_an_event_the_workflow_runs_on_is_accepted(tmp_path):
     """The control: the same blocks with the event their on: has."""
     text = "\n".join(
@@ -903,6 +919,7 @@ def test_an_event_the_workflow_runs_on_is_accepted(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_ci_marker_reads_every_key_of_a_ci_block(tmp_path):
     page_text = "\n".join(
         [
@@ -960,6 +977,7 @@ EXISTING_MARKERS = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "kind,body", EXISTING_MARKERS, ids=[k for k, _ in EXISTING_MARKERS]
 )
@@ -1008,6 +1026,7 @@ def _ci_pages() -> list[Path]:
     return pages
 
 
+@pytest.mark.integration
 def test_every_ci_marker_on_the_real_pages_parses_and_reads_as_written():
     """The regression row over the corpus: whatever CI markers the pages carry, the
     marker check accepts them, and ci_marker reads back exactly the keys they hold."""

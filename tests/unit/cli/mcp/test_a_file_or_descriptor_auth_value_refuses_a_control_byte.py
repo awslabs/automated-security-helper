@@ -27,6 +27,8 @@ from automated_security_helper.cli.mcp import (
 )
 from automated_security_helper.core.exceptions import ASHValidationError
 
+pytestmark = pytest.mark.unit
+
 #: The refusal for such a value, whichever form carried it.
 CONTROL_MESSAGE = "control character"
 

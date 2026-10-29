@@ -11,9 +11,12 @@ point's own floor for the CLI's load and its failure report, give the same code.
 
 from __future__ import annotations
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+
+pytestmark = pytest.mark.unit
 
 
 def test_config_get_stopped_while_it_runs_exits_130(monkeypatch):

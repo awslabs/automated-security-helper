@@ -21,6 +21,8 @@ import pytest
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def workspace(tmp_path, monkeypatch) -> Path:

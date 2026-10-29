@@ -188,6 +188,7 @@ def _downloads(tmp_path: Path) -> dict[str, tuple[Path, dict]]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_verified_download_is_installed_with_its_layout_and_execute_bits(
     tmp_path, monkeypatch
 ):
@@ -219,6 +220,7 @@ def test_a_verified_download_is_installed_with_its_layout_and_execute_bits(
     assert os.environ.get("PATH") == path_before
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("form", ["tar", "zip", "file"])
 def test_a_download_that_does_not_match_its_sha256_is_refused_and_leaves_nothing(
     tmp_path, monkeypatch, form
@@ -243,6 +245,7 @@ def test_a_download_that_does_not_match_its_sha256_is_refused_and_leaves_nothing
     assert github_path.read_text(encoding="utf-8") == ""
 
 
+@pytest.mark.unit
 def test_an_archive_member_outside_the_bin_directory_is_refused(tmp_path):
     install_tool = _api("install_tools", "install_tool")
     integrity_error = _api("install_tools", "IntegrityError")
@@ -359,6 +362,7 @@ HOSTILE_ARCHIVES = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("case", sorted(HOSTILE_ARCHIVES))
 def test_an_archive_member_that_is_not_a_plain_file_or_dir_inside_is_refused(
     tmp_path, case
@@ -380,6 +384,7 @@ def test_an_archive_member_that_is_not_a_plain_file_or_dir_inside_is_refused(
     assert _tree(tmp_path) == before, f"created: {sorted(_tree(tmp_path) - before)}"
 
 
+@pytest.mark.unit
 def test_a_tar_whose_members_start_with_dot_slash_installs(tmp_path):
     """Control for the refusals above: a ./ prefix and the archive's root directory
     entry are plain names."""
@@ -398,6 +403,7 @@ def test_a_tar_whose_members_start_with_dot_slash_installs(tmp_path):
     assert (tmp_path / "bin" / "act").read_bytes() == b"x"
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits")
 @pytest.mark.parametrize(
     "bits", [0o4000, 0o2000, 0o1000], ids=["setuid", "setgid", "sticky"]
@@ -425,6 +431,7 @@ def test_setuid_setgid_and_sticky_bits_are_not_installed(tmp_path, form, bits):
     assert mode & 0o111, "the execute bits stay"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("pin", ["", "abc", "A" * 64, "g" * 64, None], ids=repr)
 def test_a_pin_that_is_not_64_lowercase_hex_is_a_manifest_error(tmp_path, pin):
     """A malformed pin is a mistake in the manifest, not a download that failed its
@@ -438,6 +445,7 @@ def test_a_pin_that_is_not_64_lowercase_hex_is_a_manifest_error(tmp_path, pin):
     assert _tree(tmp_path) == before
 
 
+@pytest.mark.unit
 def test_a_download_url_must_be_https_before_anything_is_fetched(tmp_path):
     download_file = _api("install_tools", "download_file")
     # A refused connection on this port would raise something else: the check comes
@@ -576,6 +584,7 @@ def _assert_refused(error: Exception, url: str, target: str) -> None:
     assert type(error) is _api("install_tools", "NotHttpsError"), repr(error)
 
 
+@pytest.mark.unit
 def test_a_download_follows_absolute_relative_and_scheme_relative_https_redirects(
     tmp_path, monkeypatch
 ):
@@ -597,6 +606,7 @@ def test_a_download_follows_absolute_relative_and_scheme_relative_https_redirect
     assert asked == list(routes)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("handler", HANDLERS)
 def test_an_https_308_is_followed_on_every_python(tmp_path, monkeypatch, handler):
     """A 308 to an https url is followed like a 307, on Python 3.10 too, whose urllib
@@ -615,6 +625,7 @@ def test_an_https_308_is_followed_on_every_python(tmp_path, monkeypatch, handler
     assert asked == list(routes)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("handler", HANDLERS)
 @pytest.mark.parametrize("location", NOT_HTTPS)
 @pytest.mark.parametrize("code", range(300, 309))
@@ -633,6 +644,7 @@ def test_a_redirect_away_from_https_is_refused_and_leaves_nothing(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("location", NOT_HTTPS)
 def test_a_308_that_reaches_the_opener_as_an_http_error_gets_the_same_refusal(
     tmp_path, monkeypatch, location
@@ -658,6 +670,7 @@ def test_a_308_that_reaches_the_opener_as_an_http_error_gets_the_same_refusal(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("handler", HANDLERS)
 @pytest.mark.parametrize("code", [302, 308])
 def test_an_https_hop_then_an_http_hop_is_refused_at_the_second(
@@ -679,6 +692,7 @@ def test_an_https_hop_then_an_http_hop_is_refused_at_the_second(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.unit
 def test_a_response_that_reports_a_plain_http_url_is_refused(tmp_path, monkeypatch):
     """The url the response was served from is checked too, not only each redirect."""
     download_file = _api("install_tools", "download_file")
@@ -734,6 +748,7 @@ RAW_LOCATIONS = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("code", [300, 302, 308])
 @pytest.mark.parametrize("case", sorted(RAW_LOCATIONS))
 def test_a_refused_redirect_names_its_target_on_one_printable_line(
@@ -753,6 +768,7 @@ def test_a_refused_redirect_names_its_target_on_one_printable_line(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("handler", HANDLERS)
 @pytest.mark.parametrize(
     "newurl,shown",
@@ -778,6 +794,7 @@ def test_the_redirect_handler_refuses_a_new_url_that_is_not_https(
     _assert_refused(error, SITE, shown)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("handler", HANDLERS)
 @pytest.mark.parametrize("code", [301, 302, 303, 307, 308])
 def test_the_redirect_handler_hands_on_a_new_https_url(monkeypatch, code, handler):
@@ -798,6 +815,7 @@ def test_the_redirect_handler_hands_on_a_new_https_url(monkeypatch, code, handle
     assert (request.full_url, request.get_method()) == (newurl, "GET")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("handler", HANDLERS)
 @pytest.mark.parametrize("location", ["http://b.example.invalid/g", "file:///b/g"])
 @pytest.mark.parametrize("code", [300, 302, 307, 308])
@@ -815,6 +833,7 @@ def test_a_redirect_named_only_by_a_uri_header_is_held_to_https(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.unit
 def test_a_uri_header_to_https_is_followed_and_a_location_comes_first(
     tmp_path, monkeypatch
 ):
@@ -838,6 +857,7 @@ def test_a_uri_header_to_https_is_followed_and_a_location_comes_first(
     assert asked == list(routes)
 
 
+@pytest.mark.unit
 def test_a_refused_redirect_fails_the_install_without_a_retry(tmp_path, monkeypatch):
     """The refusal is final: the tool's download is not tried again, and nothing of
     it is installed."""
@@ -861,6 +881,7 @@ def test_a_refused_redirect_fails_the_install_without_a_retry(tmp_path, monkeypa
     assert list((tmp_path / "bin").iterdir()) == []
 
 
+@pytest.mark.unit
 def test_a_download_past_the_size_cap_is_refused_and_removed(tmp_path, monkeypatch):
     download_file = _api("install_tools", "download_file")
     monkeypatch.setattr(_module("install_tools"), "MAX_DOWNLOAD_BYTES", 2 << 20)
@@ -879,6 +900,7 @@ def test_a_download_past_the_size_cap_is_refused_and_removed(tmp_path, monkeypat
     assert kept.stat().st_size == 2 << 20
 
 
+@pytest.mark.unit
 def test_the_download_size_cap_holds_every_pinned_download_and_stays_between_128_mib_and_1_gib():
     """The largest pinned download, the 2.375.4 Jenkins WAR, is about 94 MB; the cap
     leaves room for a later pin and stays at most 1 GiB of the runner's disk."""
@@ -928,6 +950,7 @@ def _installed_jenkins() -> set[str]:
     return {"jenkins.war", "plugins"} | {f"plugins/{n}.hpi" for n in JENKINS_PLUGINS}
 
 
+@pytest.mark.unit
 def test_a_jenkins_core_and_its_plugins_get_their_names_only_after_their_checks(
     tmp_path, monkeypatch
 ):
@@ -976,6 +999,7 @@ def test_a_jenkins_core_and_its_plugins_get_their_names_only_after_their_checks(
         )
 
 
+@pytest.mark.unit
 def test_a_jenkins_war_that_does_not_match_leaves_no_war_and_no_plugin(tmp_path):
     install = _api("install_tools", "install_jenkins_core")
     integrity_error = _api("install_tools", "IntegrityError")
@@ -993,6 +1017,7 @@ def test_a_jenkins_war_that_does_not_match_leaves_no_war_and_no_plugin(tmp_path)
     assert _tree(tmp_path) - {"jenkins"} == before
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("bad", JENKINS_PLUGINS)
 def test_a_plugin_that_does_not_match_leaves_no_war_and_no_plugin(tmp_path, bad):
     install = _api("install_tools", "install_jenkins_core")
@@ -1010,6 +1035,7 @@ def test_a_plugin_that_does_not_match_leaves_no_war_and_no_plugin(tmp_path, bad)
     assert _tree(tmp_path) - {"jenkins"} == before
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("name", ["../escaped", "sub/escaped", ".escaped"])
 def test_a_plugin_name_that_is_not_a_plain_file_name_is_refused(tmp_path, name):
     install = _api("install_tools", "install_jenkins_core")
@@ -1025,6 +1051,7 @@ def test_a_plugin_name_that_is_not_a_plain_file_name_is_refused(tmp_path, name):
     assert not (tmp_path / "escaped.hpi").exists()
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("bad", ["war", *JENKINS_PLUGINS])
 def test_a_jenkins_pin_that_is_not_64_lowercase_hex_is_a_manifest_error(tmp_path, bad):
     """Every pin is read before anything is copied, so a malformed one leaves no
@@ -1046,6 +1073,7 @@ def test_a_jenkins_pin_that_is_not_64_lowercase_hex_is_a_manifest_error(tmp_path
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_an_image_is_pulled_only_by_digest():
     docker_pull_argv = _api("install_tools", "docker_pull_argv")
     ref = f"public.ecr.aws/docker/library/python@sha256:{DIGEST}"
@@ -1060,6 +1088,7 @@ def test_an_image_is_pulled_only_by_digest():
             docker_pull_argv(bad)
 
 
+@pytest.mark.unit
 def test_pull_image_hands_the_argv_to_its_runner_and_records_the_pull(tmp_path):
     pull_image = _api("install_tools", "pull_image")
     ref = f"public.ecr.aws/codebuild/local-builds@sha256:{DIGEST}"
@@ -1081,6 +1110,7 @@ def test_pull_image_hands_the_argv_to_its_runner_and_records_the_pull(tmp_path):
     assert pull_log.read_text(encoding="utf-8").split() == [ref]
 
 
+@pytest.mark.unit
 def test_a_failed_pull_is_not_logged(tmp_path, monkeypatch):
     """The log lists pulls that happened, so the allowlist check can ask the events
     file for each one."""
@@ -1096,6 +1126,7 @@ def test_a_failed_pull_is_not_logged(tmp_path, monkeypatch):
     assert not pull_log.exists() or pull_log.read_text(encoding="utf-8") == ""
 
 
+@pytest.mark.unit
 def test_a_pull_the_registry_throttles_is_tried_again_and_logged_once(
     tmp_path, monkeypatch, capsys
 ):
@@ -1121,6 +1152,7 @@ def test_a_pull_the_registry_throttles_is_tried_again_and_logged_once(
     assert capsys.readouterr().err.count("trying again") == attempts_allowed - 1
 
 
+@pytest.mark.unit
 def test_a_pull_that_fails_every_time_is_tried_the_set_number_of_times(
     tmp_path, monkeypatch
 ):
@@ -1138,6 +1170,7 @@ def test_a_pull_that_fails_every_time_is_tried_the_set_number_of_times(
     assert len(calls) == attempts_allowed
 
 
+@pytest.mark.unit
 def test_a_timed_out_pull_is_not_tried_again(tmp_path, monkeypatch):
     pull_image = _api("install_tools", "pull_image")
     slept = _no_sleep(monkeypatch)
@@ -1152,6 +1185,7 @@ def test_a_timed_out_pull_is_not_tried_again(tmp_path, monkeypatch):
     assert len(calls) == 1 and slept == []
 
 
+@pytest.mark.unit
 def test_a_pull_has_a_timeout_and_a_timed_out_pull_is_not_logged(tmp_path):
     pull_image = _api("install_tools", "pull_image")
     timeout = _api("install_tools", "PULL_TIMEOUT_SECONDS")
@@ -1169,6 +1203,7 @@ def test_a_pull_has_a_timeout_and_a_timed_out_pull_is_not_logged(tmp_path):
     assert not pull_log.exists() or pull_log.read_text(encoding="utf-8") == ""
 
 
+@pytest.mark.unit
 def test_a_timed_out_pull_fails_the_install_with_exit_1(tmp_path, monkeypatch, capsys):
     main = _api("install_tools", "main")
     module = _module("install_tools")
@@ -1204,11 +1239,13 @@ REFUSED = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("case,environ", ALLOWED, ids=[c[0] for c in ALLOWED])
 def test_install_tools_runs_on_a_github_hosted_runner(case, environ):
     assert _api("install_tools", "runner_environment_problem")(environ) is None
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("case,environ", REFUSED, ids=[c[0] for c in REFUSED])
 def test_install_tools_refuses_anywhere_else(case, environ):
     problem = _api("install_tools", "runner_environment_problem")(environ)
@@ -1238,6 +1275,7 @@ def _run_isolated(script: Path, args: list[str], env: dict[str, str]):
     )
 
 
+@pytest.mark.integration
 def test_install_tools_runs_standalone_in_isolated_mode(tmp_path):
     result = _run_isolated(
         _script("install_tools"),
@@ -1248,6 +1286,7 @@ def test_install_tools_runs_standalone_in_isolated_mode(tmp_path):
     assert "--runner" in result.stdout and "--bin-dir" in result.stdout
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "environ",
     [{}, {**HOSTED, "ACT": "true"}],
@@ -1316,6 +1355,7 @@ def _argv(tmp_path: Path, leg: str, *extra: str) -> list[str]:
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_a_jenkins_leg_without_a_jenkins_dir_is_a_usage_error(
     tmp_path, monkeypatch, capsys, leg
@@ -1327,6 +1367,7 @@ def test_a_jenkins_leg_without_a_jenkins_dir_is_a_usage_error(
     assert _tree(tmp_path) == set(), "a usage error creates nothing"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", OTHER_LEGS)
 def test_a_jenkins_dir_on_another_leg_is_a_usage_error(
     tmp_path, monkeypatch, capsys, leg
@@ -1339,6 +1380,7 @@ def test_a_jenkins_dir_on_another_leg_is_a_usage_error(
     assert _tree(tmp_path) == set(), "a usage error creates nothing"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_a_jenkins_leg_with_a_jenkins_dir_goes_on_to_its_downloads(
     tmp_path, monkeypatch, leg
@@ -1369,6 +1411,7 @@ def _fake_run(calls: list[list[str]]):
     return run
 
 
+@pytest.mark.unit
 def test_each_tool_gets_its_own_directory_holding_its_executable(tmp_path):
     install_pins = _api("install_tools", "install_pins")
     downloads = _downloads(tmp_path)
@@ -1412,6 +1455,7 @@ def test_each_tool_gets_its_own_directory_holding_its_executable(tmp_path):
         assert any(key in line for line in lines), (key, lines)
 
 
+@pytest.mark.unit
 def test_a_tool_whose_executable_is_not_installed_is_refused_and_removed(tmp_path):
     install_pins = _api("install_tools", "install_pins")
     integrity_error = _api("install_tools", "IntegrityError")
@@ -1431,6 +1475,7 @@ def test_a_tool_whose_executable_is_not_installed_is_refused_and_removed(tmp_pat
     assert not (tmp_path / "bin" / "tar").exists()
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bits")
 def test_the_named_executable_is_made_executable_when_its_archive_stores_no_bit(
     tmp_path,
@@ -1463,6 +1508,7 @@ def test_the_named_executable_is_made_executable_when_its_archive_stores_no_bit(
     assert not os.access(tmp_path / "bin" / "runner" / "lib" / "a.jar", os.X_OK)
 
 
+@pytest.mark.unit
 def test_a_jenkins_core_is_installed_from_its_plugins_file(tmp_path):
     install_pins = _api("install_tools", "install_pins")
     core, plugins, war, hpis = _jenkins_downloads(tmp_path)
@@ -1499,6 +1545,7 @@ def test_a_jenkins_core_is_installed_from_its_plugins_file(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_a_plugins_file_that_lists_bundled_plugins_is_refused_before_any_download(
     tmp_path,
 ):
@@ -1603,6 +1650,7 @@ def _install_leg(tmp_path: Path, tables, files, fetched: list, calls: list, **ch
     return lambda: install_pins(keys, manifest, **arguments)
 
 
+@pytest.mark.unit
 def test_the_jenkins_shaped_leg_installs_when_its_entries_are_right(tmp_path):
     """Control for the two tests below: the same leg, unchanged, installs everything."""
     tables, files = _jenkins_leg(tmp_path)
@@ -1669,6 +1717,7 @@ LEG_MISTAKES = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("mistake", sorted(LEG_MISTAKES))
 def test_a_mistake_in_any_entry_of_a_leg_is_refused_before_anything_is_fetched(
     tmp_path, mistake
@@ -1694,6 +1743,7 @@ def test_a_mistake_in_any_entry_of_a_leg_is_refused_before_anything_is_fetched(
     assert _tree(tmp_path) == before, sorted(_tree(tmp_path) ^ before)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "taken", ["bin/runner", "jenkins/jenkins.war", "jenkins/plugins"]
 )
@@ -1765,6 +1815,7 @@ CALL_MISTAKES = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("mistake", sorted(CALL_MISTAKES))
 def test_a_leg_called_wrongly_is_refused_before_anything_is_fetched(tmp_path, mistake):
     """The call as a whole is checked with its entries, before anything is created or
@@ -1903,6 +1954,7 @@ PLACE_MISTAKES = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "mistake",
     [
@@ -1953,6 +2005,7 @@ SHARED_LAYOUTS = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("layout", sorted(SHARED_LAYOUTS))
 def test_places_that_share_a_directory_without_overlapping_are_installed(
     tmp_path, layout
@@ -1979,6 +2032,7 @@ def test_places_that_share_a_directory_without_overlapping_are_installed(
     assert pull_log.read_text(encoding="utf-8").split() == [REF]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_a_jenkins_dir_that_is_a_file_fails_the_install_before_anything_is_made(
     tmp_path, monkeypatch, capsys, leg
@@ -1998,6 +2052,7 @@ def test_a_jenkins_dir_that_is_a_file_fails_the_install_before_anything_is_made(
     assert _tree(tmp_path) == {"jenkins"}
 
 
+@pytest.mark.unit
 def test_a_directory_where_the_executable_should_be_is_refused(tmp_path):
     install_pins = _api("install_tools", "install_pins")
     integrity_error = _api("install_tools", "IntegrityError")
@@ -2029,6 +2084,7 @@ def test_a_directory_where_the_executable_should_be_is_refused(tmp_path):
     assert _tree(tmp_path / "bin") == set(), "the tool's directory is removed"
 
 
+@pytest.mark.unit
 def test_a_tool_download_has_a_neutral_name_until_it_is_checked(tmp_path):
     """Nothing is given its final name before its sha256 check: the download is kept
     under <bin-dir>/.download-*/<name>.download, not under its url's file name."""
@@ -2057,6 +2113,7 @@ def test_a_tool_download_has_a_neutral_name_until_it_is_checked(tmp_path):
     assert (tmp_path / "bin" / "file" / "codebuild_build.sh").is_file()
 
 
+@pytest.mark.unit
 def test_a_malformed_pin_is_refused_before_the_tool_is_downloaded(tmp_path):
     install_pins = _api("install_tools", "install_pins")
     path, entry = _downloads(tmp_path)["tar"]
@@ -2099,6 +2156,7 @@ def _no_sleep(monkeypatch) -> list[float]:
     return slept
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("code", [408, 429, 500, 503])
 def test_a_download_is_tried_again_after_a_timeout_a_throttle_or_a_server_error(
     tmp_path, monkeypatch, code
@@ -2120,6 +2178,7 @@ def test_a_download_is_tried_again_after_a_timeout_a_throttle_or_a_server_error(
     assert (tmp_path / "bin" / "tar" / "act").is_file()
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("code", [403, 404, 410])
 def test_a_download_the_server_refuses_for_good_is_not_tried_again(
     tmp_path, monkeypatch, code
@@ -2142,6 +2201,7 @@ def test_a_download_the_server_refuses_for_good_is_not_tried_again(
     assert not (tmp_path / "bin" / "tar").exists()
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("code", [404, 503])
 def test_each_message_about_a_failed_download_is_one_printable_line(
     tmp_path, monkeypatch, capsys, code
@@ -2163,6 +2223,7 @@ def test_each_message_about_a_failed_download_is_one_printable_line(
     assert all("Not\\x1b[2J Found\\x07\\x85\\tnow" in line for line in printed[:-1])
 
 
+@pytest.mark.unit
 def test_the_host_refusal_is_one_printable_line(tmp_path, capsys):
     main = _api("install_tools", "main")
     environ = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "self-hosted\nsecond"}
@@ -2225,6 +2286,7 @@ def _problems(tmp_path, events, pulls, built=()):
     return check(events_path, pulls_path, _manifest(tmp_path), built=built)
 
 
+@pytest.mark.unit
 def test_pulls_of_listed_digests_and_built_images_pass(tmp_path):
     problems = _problems(
         tmp_path,
@@ -2235,6 +2297,7 @@ def test_pulls_of_listed_digests_and_built_images_pass(tmp_path):
     assert problems == []
 
 
+@pytest.mark.unit
 def test_a_docker_hub_image_matches_in_its_short_and_its_full_form(tmp_path):
     short_cimg = f"cimg/python@sha256:{DIGEST}"
     full_picard = f"docker.io/circleci/picard@sha256:{OTHER_DIGEST}"
@@ -2256,6 +2319,7 @@ def _problems_with(tmp_path, refs, events, pulls=()):
     return check(events_path, pulls_path, manifest)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "pulled",
     [
@@ -2272,6 +2336,7 @@ def test_a_docker_hub_official_image_matches_in_every_spelling(tmp_path, pulled)
     assert _problems_with(tmp_path, listed, [_event(pulled)]) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "pulled",
     [
@@ -2283,6 +2348,7 @@ def test_docker_hub_s_other_registry_names_are_docker_hub(tmp_path, pulled):
     assert _problems_with(tmp_path, [CIMG], [_event(pulled)]) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "pulled",
     [
@@ -2306,6 +2372,7 @@ def _legacy_event(ref: str, status: str = "pull") -> str:
     )
 
 
+@pytest.mark.unit
 def test_a_legacy_event_s_id_and_status_are_read(tmp_path):
     problems = _problems(
         tmp_path,
@@ -2319,6 +2386,7 @@ def test_a_legacy_event_s_id_and_status_are_read(tmp_path):
     assert len(problems) == 1 and "python:3.12" in problems[0], problems
 
 
+@pytest.mark.unit
 def test_tag_events_and_events_of_other_types_are_not_pulls(tmp_path):
     unlisted = f"docker.io/library/ruby@sha256:{DIGEST}"
     others = [
@@ -2333,6 +2401,7 @@ def test_tag_events_and_events_of_other_types_are_not_pulls(tmp_path):
     assert any(unlisted in p for p in problems), problems
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "ref",
     [
@@ -2348,11 +2417,13 @@ def test_a_pull_of_anything_else_fails(tmp_path, ref):
     assert any(ref in problem for problem in problems), problems
 
 
+@pytest.mark.unit
 def test_a_missing_events_file_fails(tmp_path):
     problems = _problems(tmp_path, None, [])
     assert problems and any("docker-events.jsonl" in p for p in problems), problems
 
 
+@pytest.mark.unit
 def test_a_missing_pull_log_fails(tmp_path):
     """Without install_tools.py's pull log, the check that the recording covered the
     installs cannot run, so it is a failure, not an empty log."""
@@ -2363,6 +2434,7 @@ def test_a_missing_pull_log_fails(tmp_path):
     assert any("pulls.txt" in p for p in problems), problems
 
 
+@pytest.mark.unit
 def test_an_events_file_that_missed_the_installs_pulls_fails(tmp_path):
     """Empty, as a recording started after the installs would be."""
     problems = _problems(tmp_path, [], [PYTHON, PICARD])
@@ -2371,11 +2443,13 @@ def test_an_events_file_that_missed_the_installs_pulls_fails(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_an_events_line_that_is_not_json_fails(tmp_path):
     problems = _problems(tmp_path, [_event(PYTHON), "not json"], [PYTHON])
     assert any("line 2" in p for p in problems), problems
 
 
+@pytest.mark.unit
 def test_the_allowlist_check_runs_standalone_and_fails_the_step(tmp_path):
     script = _script("image_allowlist")
     events_path, pulls_path = _files(tmp_path, [_event("python:3.12")], [])

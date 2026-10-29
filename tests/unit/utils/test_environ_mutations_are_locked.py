@@ -11,7 +11,11 @@ import ast
 from pathlib import Path
 from typing import List
 
+import pytest
+
 import automated_security_helper
+
+pytestmark = pytest.mark.unit
 
 PACKAGE_ROOT = Path(automated_security_helper.__file__).parent
 ALLOWED = {PACKAGE_ROOT / "utils" / "process_env.py"}

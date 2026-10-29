@@ -25,6 +25,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from tests.utils.process_guard import refuse_process_starts
 
+pytestmark = pytest.mark.unit
+
 USAGE_ERROR_EXIT = 5
 
 

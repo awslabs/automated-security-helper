@@ -31,6 +31,8 @@ from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 MASK = "<value>"
 LEFT_OUT_BODY = (
     "from automated_security_helper.plugins.decorators import ash_scanner_plugin\n"

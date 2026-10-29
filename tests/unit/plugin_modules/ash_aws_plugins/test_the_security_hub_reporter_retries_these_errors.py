@@ -11,9 +11,13 @@ what this reporter retries, so the names are written out here: such a change
 has to be made on purpose.
 """
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_aws_plugins import (
     security_hub_reporter,
 )
+
+pytestmark = pytest.mark.unit
 
 #: Written out, not read from the module: a name added to the list or dropped
 #: from it must fail this test, not move it.

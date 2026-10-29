@@ -36,6 +36,8 @@ from automated_security_helper.utils.scanned_tree import (
     relative_display,
 )
 
+pytestmark = pytest.mark.unit
+
 MARKER = b"HOST-ONLY-CONTENT-7c1e"
 IN_TREE = b"in-tree content\n"
 

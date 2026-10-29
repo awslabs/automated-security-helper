@@ -22,6 +22,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
 
+pytestmark = pytest.mark.integration
+
 #: Bound at import, before the directory's autouse pin replaces the attribute.
 _REAL_THIS_HOST_TOKEN = mcp_tools._this_host_token
 

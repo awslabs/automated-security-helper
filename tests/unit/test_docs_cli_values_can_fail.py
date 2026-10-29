@@ -244,10 +244,12 @@ VALUE_DEFECTS = [
 ]
 
 
+@pytest.mark.unit
 def test_option_values_pass_every_valid_form(cli_root):
     assert _check(cli_root, CLEAN_VALUES) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "case,text,expected,line", VALUE_DEFECTS, ids=[c[0] for c in VALUE_DEFECTS]
 )
@@ -255,6 +257,7 @@ def test_option_values_can_fail(cli_root, case, text, expected, line):
     _assert_reports(_check(cli_root, text), expected, line)
 
 
+@pytest.mark.unit
 def test_the_cli_model_records_click_choices():
     """The choices come from click's own parameter types, not a copy of them."""
     import typer
@@ -273,6 +276,7 @@ def test_the_cli_model_records_click_choices():
     assert scan.options["--source-dir"].choices is None
 
 
+@pytest.mark.unit
 def test_the_registries_match_the_inventories_the_reference_checks_read():
     """Plugin names come from the plugin modules' ASH_* lists. The gate's scanner and
     reporter checks read the same plugins another way, so the two must agree."""
@@ -289,6 +293,7 @@ def test_the_registries_match_the_inventories_the_reference_checks_read():
     assert CONVERTER in dc.plugin_names("converter")
 
 
+@pytest.mark.unit
 def test_output_formats_are_the_export_formats():
     from automated_security_helper.core.enums import ExportFormat
 
@@ -298,6 +303,7 @@ def test_output_formats_are_the_export_formats():
         assert values.names == frozenset(f.value for f in ExportFormat)
 
 
+@pytest.mark.unit
 def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
     cli_root, monkeypatch
 ):
@@ -324,6 +330,7 @@ def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "first,second,reported,line",
     [
@@ -356,6 +363,7 @@ def test_an_expected_refusal_covers_only_the_command_that_refuses(
     assert _check(cli_root, control) == []
 
 
+@pytest.mark.unit
 def test_a_subshell_paren_ends_the_word_before_it():
     """`(cd x && ash dependencies install --tool trivy)` passes trivy, not 'trivy)'."""
     (command,) = [
@@ -518,10 +526,12 @@ FORM_DEFECTS = [
 ]
 
 
+@pytest.mark.unit
 def test_commands_in_every_form_pass_when_valid(cli_root):
     assert _check(cli_root, CLEAN_FORMS) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "case,text,line", FORM_DEFECTS, ids=[c[0] for c in FORM_DEFECTS]
 )
@@ -529,6 +539,7 @@ def test_commands_in_every_form_can_fail(cli_root, case, text, line):
     _assert_reports(_check(cli_root, text), NOT_AN_OPTION, line)
 
 
+@pytest.mark.unit
 def test_an_output_marker_binds_only_to_a_block_that_is_not_run():
     """`output` is for samples; on a shell, python or config block it is a mistake."""
     root = Path(__file__).parent
@@ -543,6 +554,7 @@ def test_an_output_marker_binds_only_to_a_block_that_is_not_run():
     assert any("takes no keys" in p for p in problems[1]), problems
 
 
+@pytest.mark.unit
 def test_shell_session_blocks_are_console_blocks():
     assert {"shell-session", "bash-session"} <= dc.CONSOLE_LANGS <= dc.RUNNER_SHELLS
 
@@ -619,11 +631,13 @@ TS_DEFECTS = [
 ]
 
 
+@pytest.mark.integration
 def test_typescript_blocks_pass_with_declared_props(construct):
     root, code = construct
     assert _check(root, CLEAN_TS, rel="deploy/cdk/README.md", code=code) == []
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case,text,expected,line", TS_DEFECTS, ids=[c[0] for c in TS_DEFECTS]
 )
@@ -634,6 +648,7 @@ def test_typescript_blocks_can_fail(construct, case, text, expected, line):
     )
 
 
+@pytest.mark.integration
 def test_the_real_construct_readme_names_declared_props():
     """The README's blocks are read against the real construct, and they call it."""
     readme = REPO_ROOT / "deploy" / "cdk-constructs" / "README.md"

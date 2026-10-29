@@ -1,5 +1,7 @@
 """Tests for SARIF suppression processing."""
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
@@ -16,6 +18,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Region,
 )
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+
+pytestmark = pytest.mark.unit
 
 
 class TestSarifSuppressions:

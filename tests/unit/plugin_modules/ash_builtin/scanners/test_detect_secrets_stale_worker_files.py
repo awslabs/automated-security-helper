@@ -27,6 +27,8 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 
 def _lockfile_only_scanner(tmp_path, monkeypatch):
     """A scanner whose scan starts and ends at "no scannable files".

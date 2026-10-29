@@ -41,6 +41,8 @@ import yaml
 
 from automated_security_helper.utils.suppression_matcher import _rule_id_matches
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ASH_CONFIG_DIR = REPO_ROOT / ".ash"
 

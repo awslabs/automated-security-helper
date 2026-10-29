@@ -95,6 +95,7 @@ def _scan_envs(scanner, ctx, monkeypatch) -> List[Dict[str, str]]:
     return envs
 
 
+@pytest.mark.unit
 def test_offline_environment_keeps_go_tooling_local(offline):
     env = offline_tool_environment()
 
@@ -103,6 +104,7 @@ def test_offline_environment_keeps_go_tooling_local(offline):
         assert env.get(name) == value, name
 
 
+@pytest.mark.unit
 def test_offline_syft_does_not_use_the_go_toolchain(offline, context):
     envs = _scan_envs(
         SyftScanner(context=context, config=SyftScannerConfig()), context, offline
@@ -114,6 +116,7 @@ def test_offline_syft_does_not_use_the_go_toolchain(offline, context):
             assert env.get(name) == value, name
 
 
+@pytest.mark.unit
 def test_offline_grype_keeps_the_go_toolchain_local(offline, context):
     """grype runs ``go list`` with no setting to stop it; the toolchain stays local."""
     envs = _scan_envs(
@@ -131,6 +134,7 @@ def test_offline_grype_keeps_the_go_toolchain_local(offline, context):
 @pytest.mark.runs_real_tools(
     reason="whether syft hands the module to the go on PATH is syft's own behavior"
 )
+@pytest.mark.integration
 def test_a_real_offline_syft_runs_no_go_command(offline, context, tmp_path):
     """syft itself, with a ``go`` first on PATH that records every invocation.
 

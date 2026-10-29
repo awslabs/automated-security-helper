@@ -43,6 +43,8 @@ from tests.snapshot.support.cli import (
     simulated_host,
 )
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 

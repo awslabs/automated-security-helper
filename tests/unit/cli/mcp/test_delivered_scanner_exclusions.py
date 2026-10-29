@@ -34,6 +34,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_all_session_state,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-1"
 
 

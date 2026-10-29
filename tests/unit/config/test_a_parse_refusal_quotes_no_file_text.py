@@ -54,6 +54,8 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 #: shape name -> (text template, the parser error's type name). The canary sits
 #: on the line the parser's mark points at. undefined-alias and unknown-tag are
 #: the shapes whose parser message quotes the canary token itself; the others

@@ -12,6 +12,8 @@ can be used to verify that they work as expected.
 import json
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.core.resource_management.error_handling import (
     safe_read_json_file,
     safe_write_json_file,
@@ -30,6 +32,8 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+
+pytestmark = pytest.mark.unit
 
 logger = ASH_LOGGER
 

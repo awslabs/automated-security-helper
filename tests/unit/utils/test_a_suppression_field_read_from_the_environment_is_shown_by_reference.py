@@ -41,6 +41,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppr
     UnusedSuppressionsReporter,
 )
 
+pytestmark = pytest.mark.unit
+
 REFERENCE = "${ASH_GATE_FIELD}"
 #: The two spellings a config file reads the environment with; each is shown as
 #: written, the tag included.

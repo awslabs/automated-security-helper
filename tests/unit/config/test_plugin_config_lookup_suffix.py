@@ -53,6 +53,8 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import apply_config_overrides
 
+pytestmark = pytest.mark.unit
+
 
 def _config_with(override: str) -> AshConfig:
     return apply_config_overrides(AshConfig(project_name="probe"), [override])

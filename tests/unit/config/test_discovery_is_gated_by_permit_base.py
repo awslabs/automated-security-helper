@@ -25,6 +25,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigInputNotPermittedError,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_operator_config(monkeypatch: pytest.MonkeyPatch) -> None:

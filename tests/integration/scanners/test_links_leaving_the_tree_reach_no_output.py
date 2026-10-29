@@ -51,7 +51,7 @@ from tests.utils.helpers import importing_this_checkout
 FIXTURES = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.e2e,
     pytest.mark.skipif(
         sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
     ),

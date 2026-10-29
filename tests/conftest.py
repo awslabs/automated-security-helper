@@ -551,6 +551,11 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "integration: Integration tests that test component interactions"
     )
+    config.addinivalue_line(
+        "markers",
+        "e2e: End-to-end tests that run the product as an operator would (the ash "
+        "CLI, the container, the MCP server) against real tools",
+    )
     config.addinivalue_line("markers", "slow: Tests that take a long time to run")
     config.addinivalue_line(
         "markers", "scanner: Tests related to scanner functionality"
@@ -1030,7 +1035,7 @@ def pytest_addoption(parser):
         "--run-integration",
         action="store_true",
         default=False,
-        help="Run integration tests",
+        help="Run integration and e2e tests",
     )
     for marker, flag in _RUNTIME_SNAPSHOT_MARKERS.items():
         parser.addoption(
@@ -1143,9 +1148,77 @@ def _ci_runner_unselected(item, config) -> bool:
     return False
 
 
+#: The test tiers. Every collected test carries exactly one of these markers.
+#:
+#: Why this exists. The CI jobs select tests by tier: ``-m unit`` runs the in-process
+#: tests and is not sharded, ``-m integration`` runs the tests that start a real tool or
+#: a product subprocess and is sharded, and ``-m e2e`` runs the whole product as an
+#: operator would. The request that set this up was to "separate our testing groups and
+#: require categorizing tests as unit vs integration vs e2e", with integration sharded
+#: and unit not. A test with no tier would be left out of every one of those jobs, and a
+#: test with two would run in two of them.
+#:
+#: - unit: runs in-process; starts no subprocess, touches no network, runs no real
+#:   external tool, and writes only under tmp_path.
+#: - integration: starts a real external tool or a product subprocess, or exercises one
+#:   component against a real dependency (a sandbox backend, boto3 with moto).
+#: - e2e: drives the whole product as an operator would: the ash CLI against a real
+#:   target tree, the container image, or the MCP server as a child process.
+#:
+#: Markers, not ``item.keywords``. The keywords also hold the names of the item's
+#: directories, module and function, so a test under tests/integration/ or one named
+#: test_integration_x would read as marked. ``get_closest_marker`` sees only markers: a
+#: module-level ``pytestmark``, a class decorator or a function decorator. There is no
+#: directory default, and none should be added: each author states the tier.
+#:
+#: A usage error, not a skip or a warning. An uncategorized test must never run green
+#: or be left out of every tier job without anyone noticing; a usage error fails the
+#: whole session before any test runs and names the offenders. The check is the first
+#: thing the tryfirst hook below does, so it sees every collected item before -k, -m or
+#: any deselection removes one.
+#:
+#: tests/unit/test_every_test_carries_one_tier_marker.py pins this check.
+_TEST_TIERS = ("unit", "integration", "e2e")
+
+#: How many offenders the refusal names. The count it prints is always the whole count.
+_TIER_REFUSAL_LISTED = 50
+
+
+def _items_without_one_tier(items) -> List[Tuple[str, List[str]]]:
+    """``(node id, tiers carried)`` for every item without exactly one tier marker."""
+    offenders = []
+    for item in items:
+        tiers = {
+            name for name in _TEST_TIERS if item.get_closest_marker(name) is not None
+        }
+        if len(tiers) != 1:
+            offenders.append((item.nodeid, sorted(tiers)))
+    return offenders
+
+
+def _tier_refusal_message(offenders: List[Tuple[str, List[str]]]) -> str:
+    """The usage error's text: the count, the rule, and the first offenders."""
+    listed = [
+        f"{nodeid} -> {', '.join(tiers) if tiers else 'none'}"
+        for nodeid, tiers in offenders[:_TIER_REFUSAL_LISTED]
+    ]
+    unlisted = len(offenders) - len(listed)
+    if unlisted:
+        listed.append(f"... and {unlisted} more")
+    return (
+        f"{len(offenders)} collected test(s) do not carry exactly one tier marker: "
+        "every test needs exactly one of the unit, integration or e2e markers; "
+        "see tests/NAMING_CONVENTIONS.md\n" + "\n".join(listed)
+    )
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     """Modify the collected test items based on command-line options."""
+    untiered = _items_without_one_tier(items)
+    if untiered:
+        raise pytest.UsageError(_tier_refusal_message(untiered))
+
     deselected = [
         item
         for item in items
@@ -1166,13 +1239,16 @@ def pytest_collection_modifyitems(config, items):
             if "slow" in item.keywords:
                 item.add_marker(skip_slow)
 
-    # Skip integration tests unless --run-integration is specified
+    # Skip integration and e2e tests unless --run-integration is specified. The tier
+    # marker is what selects them, not a name in the item's keywords. The tests under
+    # tests/integration/ are covered because every file there carries a tier marker
+    # (the check at the top of this hook), not because of the directory's name.
     if not config.getoption("--run-integration"):
         skip_integration = pytest.mark.skip(
             reason="Need --run-integration option to run"
         )
         for item in items:
-            if "integration" in item.keywords:
+            if item.get_closest_marker("integration") or item.get_closest_marker("e2e"):
                 item.add_marker(skip_integration)
 
 

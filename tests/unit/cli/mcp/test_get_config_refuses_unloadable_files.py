@@ -16,6 +16,8 @@ import pytest
 
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 
+pytestmark = pytest.mark.unit
+
 BAD_YAML = "project_name: demo\nscanners: [bandit\n"
 
 

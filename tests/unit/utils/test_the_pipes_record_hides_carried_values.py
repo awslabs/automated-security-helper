@@ -21,6 +21,8 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils
 
+pytestmark = pytest.mark.unit
+
 #: A value the configuration chain reads from the environment. Nothing
 #: secret: a recognizable marker whose absence from the record is asserted.
 CARRIED = "ash-carried-value-6a1d-0123456789"

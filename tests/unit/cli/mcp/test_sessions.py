@@ -34,6 +34,8 @@ from automated_security_helper.cli.mcp.sessions import (
     reset_default_registry_for_tests,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def registry(tmp_path: Path) -> MCPSessionRegistry:

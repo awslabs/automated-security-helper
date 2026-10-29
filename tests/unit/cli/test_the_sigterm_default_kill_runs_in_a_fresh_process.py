@@ -26,10 +26,13 @@ import pytest
 
 from tests.utils.helpers import checkout_env
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="dying by a re-raised SIGTERM under SIG_DFL is POSIX",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="dying by a re-raised SIGTERM under SIG_DFL is POSIX",
+    ),
+]
 
 
 def _run_probe(tmp_path, source: str) -> subprocess.CompletedProcess:

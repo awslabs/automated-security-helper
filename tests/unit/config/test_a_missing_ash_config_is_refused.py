@@ -28,6 +28,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 #: The scan's refusal, from get_default_config.
 NOT_THERE = "which does not exist"
 

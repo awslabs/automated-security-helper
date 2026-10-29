@@ -26,6 +26,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 )
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolate_registry() -> None:

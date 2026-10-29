@@ -27,6 +27,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 WORDS = "ASH_CONFIG names it, and it is not a file"
 
 

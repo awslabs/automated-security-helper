@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = "astral.sh/uv/"
 SUFFIXES = {".md", ".yaml", ".yml", ".template", ".sh", ".ps1", ".toml", ".txt"}

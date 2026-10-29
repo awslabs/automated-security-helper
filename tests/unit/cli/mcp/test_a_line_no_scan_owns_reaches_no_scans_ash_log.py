@@ -35,6 +35,8 @@ from tests.utils.stand_in_uv import (
     stand_in_env,
 )
 
+pytestmark = pytest.mark.integration
+
 #: Every built-in scanner, disabled in the test configs so each scan runs only
 #: its own zq9 scanner: a built-in left enabled whose tool is absent (gitleaks,
 #: trivy) is MISSING, and run_ash_scan ends the scan "incomplete", which the

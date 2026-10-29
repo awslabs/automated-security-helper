@@ -49,6 +49,8 @@ from automated_security_helper.core.exceptions import ToolNotProvisionableError
 from automated_security_helper.utils.process_env import snapshot_environ
 from tests.unit.utils.pygit2_bundle_fixture import fake_pygit2_site
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 

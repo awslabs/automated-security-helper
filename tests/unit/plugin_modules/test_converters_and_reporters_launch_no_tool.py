@@ -25,6 +25,8 @@ import pytest
 import automated_security_helper.plugin_modules as plugin_modules
 
 #: The decorators that register a converter or a reporter.
+pytestmark = pytest.mark.unit
+
 DECORATORS = {"ash_converter_plugin", "ash_reporter_plugin"}
 
 #: The names a program is started with: ASH's launchers, uv's runner, the base

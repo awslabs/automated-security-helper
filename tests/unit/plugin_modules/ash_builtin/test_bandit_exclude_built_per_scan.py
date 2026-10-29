@@ -42,9 +42,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
 
 PluginContext.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="bandit exclude entries are POSIX paths here"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="bandit exclude entries are POSIX paths here"
+    ),
+]
 
 
 def _ignore(*paths: str) -> list[IgnorePathWithReason]:

@@ -282,6 +282,7 @@ def _assert_left_to_the_scan_inside(stage: Stage, code, output):
 
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("make", REASONS)
+@pytest.mark.unit
 def test_a_named_config(stage, mode, make):
     make(stage.named)
     before = stage.output_snapshot()
@@ -295,6 +296,7 @@ def test_a_named_config(stage, mode, make):
 
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("make", REASONS)
+@pytest.mark.integration
 def test_the_file_ash_config_names(stage, mode, make):
     make(stage.named)
     before = stage.output_snapshot()
@@ -315,6 +317,7 @@ def test_the_file_ash_config_names(stage, mode, make):
 
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("make", REASONS)
+@pytest.mark.integration
 def test_ash_config_when_an_api_caller_names_no_config(
     stage, mode, make, monkeypatch, capsys
 ):
@@ -336,6 +339,7 @@ def test_ash_config_when_an_api_caller_names_no_config(
 @pytest.mark.parametrize("entry", ["cli", "api"])
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("make", REASONS)
+@pytest.mark.integration
 def test_ash_config_beside_a_valid_named_config(
     stage, mode, make, entry, monkeypatch, capsys
 ):
@@ -367,6 +371,7 @@ def test_ash_config_beside_a_valid_named_config(
 
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("make", DISCOVERED_REASONS)
+@pytest.mark.unit
 def test_a_discovered_config(stage, mode, make):
     make(stage.discovered)
     before = stage.output_snapshot()
@@ -377,6 +382,7 @@ def test_a_discovered_config(stage, mode, make):
 
 
 @pytest.mark.parametrize("mode", MODES)
+@pytest.mark.unit
 def test_a_discovered_link_to_nothing(stage, mode):
     stage.discovered.symlink_to(stage.root / "absent.yaml")
     before = stage.output_snapshot()
@@ -396,6 +402,7 @@ BAD_OVERRIDES = [
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("override", BAD_OVERRIDES)
 @pytest.mark.parametrize("with_config", [False, True], ids=["defaults", "config"])
+@pytest.mark.unit
 def test_an_override_a_local_scan_refuses(stage, mode, override, with_config):
     """--config-overrides are applied on the host as a local scan applies them."""
     extra = ["--config-overrides", override]
@@ -419,6 +426,7 @@ def _assert_started(stage: Stage, mode: str, output: str) -> None:
 
 
 @pytest.mark.parametrize("mode", MODES)
+@pytest.mark.integration
 def test_control_a_valid_named_config_starts(stage, mode):
     stage.named.write_text("project_name: fine\n", encoding="utf-8")
 
@@ -428,6 +436,7 @@ def test_control_a_valid_named_config_starts(stage, mode):
 
 
 @pytest.mark.parametrize("mode", MODES)
+@pytest.mark.integration
 def test_control_a_valid_discovered_config_starts(stage, mode):
     stage.discovered.write_text("project_name: fine\n", encoding="utf-8")
 
@@ -437,6 +446,7 @@ def test_control_a_valid_discovered_config_starts(stage, mode):
 
 
 @pytest.mark.parametrize("mode", MODES)
+@pytest.mark.integration
 def test_control_no_config_file_starts(stage, mode):
     """No --config, no ASH_CONFIG and nothing at a discovered name: the defaults."""
     result = _cli(stage, mode)
@@ -452,6 +462,7 @@ def test_control_no_config_file_starts(stage, mode):
         pytest.param("scanners.image-only-scanner.options.depth=3", id="plugin-option"),
     ],
 )
+@pytest.mark.integration
 def test_control_an_override_a_local_scan_accepts_starts(stage, mode, override):
     result = _cli(stage, mode, "--config-overrides", override)
 
@@ -459,6 +470,7 @@ def test_control_an_override_a_local_scan_accepts_starts(stage, mode, override):
 
 
 @pytest.mark.parametrize("mode", MODES)
+@pytest.mark.integration
 def test_control_options_of_a_plugin_only_the_image_holds_start(stage, mode):
     """Plugin options are checked by the scan inside, which can load the plugin."""
     stage.discovered.write_text(
@@ -478,6 +490,7 @@ def test_control_options_of_a_plugin_only_the_image_holds_start(stage, mode):
     _assert_started(stage, mode, result.output)
 
 
+@pytest.mark.integration
 def test_control_container_no_run_builds_without_judging_the_config(stage):
     """``--no-run`` builds an image and scans nothing, so the config is not judged."""
     _make_unparsable(stage.named)

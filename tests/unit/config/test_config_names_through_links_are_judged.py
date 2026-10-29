@@ -27,6 +27,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 #: Turns the S3 upload on, to a bucket the repository picked the file for.
 _UPLOAD = (
     "reporters:\n  s3:\n    enabled: true\n    options:\n      bucket_name: picked\n"

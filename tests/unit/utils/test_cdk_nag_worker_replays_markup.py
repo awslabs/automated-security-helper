@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
+
 from automated_security_helper.utils.cdk_nag_worker import (
     _RecordCollector,
     _replay_logs,
@@ -28,6 +30,8 @@ from automated_security_helper.utils.log import (
     escape_markup,
     get_logger,
 )
+
+pytestmark = pytest.mark.unit
 
 #: A rule id a template chose: an OSC title write, BEL, and a closing Rich tag.
 _RULE = "AwsSolutions-IAM5\x1b]0;t\x07[/x]"

@@ -22,6 +22,8 @@ from automated_security_helper.cli.dependencies import (
     _report_and_exit,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _outcome(**kwargs) -> PluginInstallOutcome:
     base = {"name": "tool", "plugin_type": "scanner", "command": "tool"}

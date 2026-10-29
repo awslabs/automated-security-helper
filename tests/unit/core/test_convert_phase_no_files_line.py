@@ -25,6 +25,8 @@ from tests.unit.core.test_convert_phase_failure_recording import (
     _run,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def context(tmp_path) -> PluginContext:

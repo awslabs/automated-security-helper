@@ -26,6 +26,8 @@ from automated_security_helper.cli.mcp import profile_registry, sessions
 from automated_security_helper.cli.mcp.sandbox import CLIENT_CONFIG_DIR_NAME
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def root(tmp_path, monkeypatch) -> Path:

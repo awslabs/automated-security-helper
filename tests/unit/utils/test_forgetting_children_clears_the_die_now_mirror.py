@@ -23,10 +23,13 @@ from automated_security_helper.core import cancellation
 from automated_security_helper.utils import subprocess_utils
 from tests.utils.processes import forget_running_groups
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="the registry records nothing on Windows: see _RUNNING_GROUPS",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="the registry records nothing on Windows: see _RUNNING_GROUPS",
+    ),
+]
 
 
 def _registered_sleeper() -> subprocess.Popen:

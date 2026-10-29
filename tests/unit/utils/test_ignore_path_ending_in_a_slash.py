@@ -53,6 +53,8 @@ from automated_security_helper.utils.sarif_utils import (
     ignore_paths_for_locations,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _sarif(*uris: str) -> SarifReport:
     results = [

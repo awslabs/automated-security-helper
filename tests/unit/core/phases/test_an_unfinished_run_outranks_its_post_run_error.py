@@ -20,6 +20,8 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -29,6 +31,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils import subprocess_utils
+
+pytestmark = pytest.mark.unit
 
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()

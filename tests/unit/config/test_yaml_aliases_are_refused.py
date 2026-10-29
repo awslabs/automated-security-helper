@@ -50,6 +50,8 @@ from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 from automated_security_helper.utils.yaml_aliases import NoRecursiveAliasLoader
 
+pytestmark = pytest.mark.unit
+
 ALIASED = "project_name: &name repeated\nglobal_settings:\n  ignore_paths: [*name]\n"
 
 

@@ -28,6 +28,8 @@ from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+pytestmark = pytest.mark.unit
+
 
 def _run_command(tmp_path: Path, **overrides: Any) -> List[str]:
     kwargs: Dict[str, Any] = {

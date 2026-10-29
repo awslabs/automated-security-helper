@@ -71,6 +71,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
 from automated_security_helper.utils import cdk_nag_wrapper as wrapper_module
 from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
 
+pytestmark = pytest.mark.unit
+
 CFN_TEMPLATE = """Resources:
   MyDataBucket:
     Type: AWS::S3::Bucket

@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 from automated_security_helper.config.resolve_config import resolve_config
 from tests.unit.plugins.test_refused_plugin_modules import (
     REFUSED,
@@ -37,6 +39,7 @@ def _in_tree_config(run: _Run, name: str) -> None:
     )
 
 
+@pytest.mark.integration
 class TestAnInTreeConfigNamingAModuleOutsideTheNamespace:
     def test_a_name_that_cannot_be_imported(self, tmp_path):
         run = _Run(tmp_path)
@@ -76,6 +79,7 @@ class TestAnInTreeConfigNamingAModuleOutsideTheNamespace:
         _assert_refused(run, run.run("cli", {"args": run.scan_args()}))
 
 
+@pytest.mark.unit
 class TestTheTrustFilterLeavesTheNameToTheRefusal:
     def test_the_resolved_config_keeps_a_name_outside_the_namespace(
         self, tmp_path, monkeypatch

@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     find_matching_result,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_find_matching_result_with_empty_results():

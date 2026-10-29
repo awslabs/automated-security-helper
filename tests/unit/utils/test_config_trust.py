@@ -29,6 +29,8 @@ from automated_security_helper.utils.config_trust import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 KEY = "scanners.actionlint.options.shellcheck"
 
 

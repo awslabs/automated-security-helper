@@ -38,6 +38,8 @@ from automated_security_helper.utils.rules_bundles import (
 )
 from automated_security_helper.utils.tool_downloads import RULES_BUNDLES
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "automated_security_helper" / "assets" / "install-pinned-tool.py"
 REAL = RULES_BUNDLES["aws-guard-rules-registry"]

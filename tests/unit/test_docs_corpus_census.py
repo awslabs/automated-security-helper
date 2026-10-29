@@ -304,6 +304,7 @@ def pages(corpus):
     return checks.load_pages(corpus, gate.REPO_ROOT)
 
 
+@pytest.mark.integration
 def test_the_gate_collects_every_markdown_file(corpus):
     collected = {path.relative_to(gate.REPO_ROOT).as_posix() for path in corpus}
     walked = _walk_md_files(REPO_ROOT)
@@ -314,11 +315,13 @@ def test_the_gate_collects_every_markdown_file(corpus):
     )
 
 
+@pytest.mark.integration
 def test_every_collected_file_is_parsed_into_one_page(corpus, pages):
     assert len(pages) == len(corpus)
     assert [page.path for page in pages] == list(corpus)
 
 
+@pytest.mark.integration
 def test_every_fence_on_every_page_is_a_block(pages):
     """Per page, the parser's blocks are the fences counted here, at the same lines."""
     differ = {}
@@ -389,6 +392,7 @@ def _expected_runner_pages() -> dict[str, dict[str, list[int]]]:
     return expected
 
 
+@pytest.mark.integration
 def test_the_runner_runs_every_page_with_an_example(runner_pages):
     expected = _expected_runner_pages()
     got = {page.rel for page in runner_pages}
@@ -433,12 +437,14 @@ def _compared_sample_problems(runner_pages, compared_samples) -> tuple[int, list
     return total, problems
 
 
+@pytest.mark.integration
 def test_the_runner_compares_every_output_sample(runner_pages):
     total, problems = _compared_sample_problems(runner_pages, runner.compared_samples)
     assert not problems, problems
     assert total >= COMPARED_SAMPLES_FLOOR
 
 
+@pytest.mark.integration
 def test_a_sample_the_runner_stops_comparing_fails_the_count(runner_pages):
     """The planted defect for the count above: a runner that drops one sample, and one
     that compares none."""
@@ -460,6 +466,7 @@ def test_a_sample_the_runner_stops_comparing_fails_the_count(runner_pages):
     assert any("down from" in problem for problem in problems), problems
 
 
+@pytest.mark.integration
 def test_every_output_marker_is_compared_or_reported(corpus, pages):
     """A sample marker the runner does not compare is reported by the marker check, so
     no marker can sit on a page without one of the two looking at it."""
@@ -485,6 +492,7 @@ def test_every_output_marker_is_compared_or_reported(corpus, pages):
     )
 
 
+@pytest.mark.integration
 def test_the_runner_runs_no_fewer_examples_than_it_did(runner_pages):
     executed = sum(len(runner.runnable_blocks(page)) for page in runner_pages)
     assert len(runner_pages) >= RUNNABLE_PAGES_FLOOR, (
@@ -504,6 +512,7 @@ def test_the_runner_runs_no_fewer_examples_than_it_did(runner_pages):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_fence_count_sees_what_the_parser_must_not_lose():
     """Indented fences, tildes and longer fences count; inline code and markers do not."""
     page = """\
@@ -590,12 +599,14 @@ a marker on a shell block is not a sample
 """
 
 
+@pytest.mark.unit
 def test_the_sample_count_sees_only_samples_after_a_run_block():
     blocks = _blocks(SAMPLES_PAGE)
     assert [b["line"] for b in blocks if _is_sample(b)] == [6, 11, 21]
     assert _compared(blocks) == [6]
 
 
+@pytest.mark.unit
 def test_the_runner_compares_the_samples_counted_here_on_that_page(tmp_path):
     """Control for the count above, through the docs parser and the runner, and the
     marker check reports the two samples that are not compared."""
@@ -612,6 +623,7 @@ def test_the_runner_compares_the_samples_counted_here_on_that_page(tmp_path):
     assert reported == [10, 20]
 
 
+@pytest.mark.unit
 def test_the_parser_agrees_with_the_fence_count_on_that_page(tmp_path):
     """Control for the comparison above: the same page, through the docs parser."""
     path = tmp_path / "page.md"

@@ -35,6 +35,8 @@ from tests.unit.utils.test_environ_mutations_are_locked import (
     _is_os_environ,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Scripts that run as interpreters of their own and never in ASH's process, so
 #: ASH's lock cannot order their reads against anything and has nothing to order:
 #: the image build runs install-pinned-tool before ASH is installed, and the

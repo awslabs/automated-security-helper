@@ -43,6 +43,8 @@ from automated_security_helper.cli.mcp import (
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 
+pytestmark = pytest.mark.unit
+
 HEADER = "X-Ash-Token"
 #: A character latin-1 carries as one byte, and two it does not carry, by code point.
 E_ACUTE = chr(0xE9)

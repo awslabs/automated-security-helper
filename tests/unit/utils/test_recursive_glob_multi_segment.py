@@ -40,6 +40,8 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
 )
 
+pytestmark = pytest.mark.unit
+
 # (pattern, path, expected). The first block is the defect; the rest pin the
 # shapes the old matcher already handled, so the rewrite is shown not to have
 # moved them.

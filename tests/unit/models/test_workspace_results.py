@@ -23,6 +23,8 @@ from automated_security_helper.models.workspace import (
     workspace_exit_code,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _completed(key: str, *, exceeds: bool = False) -> WorkspaceProjectResult:
     return WorkspaceProjectResult(

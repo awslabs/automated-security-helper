@@ -20,6 +20,8 @@ import pytest
 
 from automated_security_helper.utils.process_env import hold_environ, release_environ
 
+pytestmark = pytest.mark.unit
+
 KEY = "ASH_TEST_HELD_VARIABLE"
 
 

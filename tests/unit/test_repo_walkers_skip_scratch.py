@@ -411,6 +411,7 @@ def offenders(sweep) -> dict:
 
 
 class TestNoWalkTheTestsRunEntersAPerRunDirectory:
+    @pytest.mark.unit
     def test_the_sweep_reads_the_tests_and_the_scripts_they_reach(self, sweep):
         """Anti-vacuity: an empty sweep would make every assertion below pass."""
         names = {source.rel.name for source in sweep.tests}
@@ -421,6 +422,7 @@ class TestNoWalkTheTestsRunEntersAPerRunDirectory:
         assert "find_orphans" in reached[".github/scripts/check-snapshot-trailers.py"]
         assert sum(1 for _ in sweep.walks()) > 50, "the sweep found almost no walks"
 
+    @pytest.mark.integration
     def test_no_walk_the_tests_run_can_enter_a_per_run_directory(self, offenders):
         unexempted = {
             key: lines for key, lines in offenders.items() if key not in _EXEMPT
@@ -435,11 +437,13 @@ class TestNoWalkTheTestsRunEntersAPerRunDirectory:
             + "\n".join(line for lines in unexempted.values() for line in lines)
         )
 
+    @pytest.mark.integration
     def test_every_exemption_still_names_a_flagged_walk(self, offenders):
         """An exemption that matches nothing is either stale or misspelled."""
         stale = sorted(set(_EXEMPT) - set(offenders))
         assert stale == [], f"remove these from _EXEMPT: {stale}"
 
+    @pytest.mark.unit
     def test_the_version_files_exemption_is_still_sound(self):
         """The one exemption holds only while no entry carries a wildcard.
 
@@ -484,6 +488,7 @@ def _flagged(*sources: Source, scripts: tuple = ()) -> dict:
     return {(fn, receiver): lines for (_, fn, receiver), lines in found.items()}
 
 
+@pytest.mark.unit
 class TestTheEvaluator:
     """What a receiver can be, read from the AST; nothing is imported or run."""
 
@@ -560,6 +565,7 @@ class TestTheEvaluator:
             )
 
 
+@pytest.mark.unit
 class TestTheDetector:
     """Synthetic trees: what is flagged, and what is not."""
 
@@ -712,6 +718,7 @@ class TestTheDetector:
         assert set(flagged) == {("iter_repo_files", "root")}, flagged
 
 
+@pytest.mark.unit
 class TestIterRepoFilesPrunesTheScratchTree:
     """The helper's own behavior, since five call sites now depend on it."""
 
@@ -856,6 +863,7 @@ print(json.dumps({"error": error, "entered": state["entered"],
 """
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", sorted(_SCRIPT_WALKERS))
 class TestScriptWalkersStayOutOfTheScratchTree:
     """Two walkers in scripts that tests run on the real checkout, under xdist.

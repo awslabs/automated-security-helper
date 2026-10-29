@@ -38,6 +38,8 @@ from automated_security_helper.config import config_sources
 from automated_security_helper.core.exceptions import ASHConfigInputNotPermittedError
 from tests.utils.open_audit import record_opens
 
+pytestmark = pytest.mark.unit
+
 _SESSION = "client-one"
 _MARKER = "TARGET-CONTENT-MARKER"
 _REFUSED = "config_input_not_permitted"

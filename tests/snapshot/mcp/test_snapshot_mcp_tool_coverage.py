@@ -21,6 +21,10 @@ import asyncio
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 SNAPSHOT_DIR = Path(__file__).resolve().parent / "__snapshots__"
 
 # Amber renders a record's name line as `    'tool': 'run_ash_scan',`.

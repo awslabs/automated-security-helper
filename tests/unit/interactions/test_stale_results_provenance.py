@@ -58,6 +58,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+pytestmark = pytest.mark.unit
+
 # A name that cannot have come from this invocation. Asserting on it, rather than on a
 # finding count, is what makes "the wrapper answered from the stale file" observable: the
 # wrapper either hands back a model carrying this name or it does not.

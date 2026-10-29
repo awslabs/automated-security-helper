@@ -26,6 +26,8 @@ from tests.utils.secret_bearing_scan import (
     opengrep_secret_sarif,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _scanner_report(scanner_name, sarif):
     report = SarifReport.model_validate(sarif)

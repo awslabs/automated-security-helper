@@ -29,6 +29,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.content_db_staleness import ContentDbAgeRecord
 
+pytestmark = pytest.mark.unit
+
 #: ESC, and a newline that would start a GitHub Actions workflow command.
 _HOSTILE = "x\x1b[31m\n::error title=merge::orphan"
 

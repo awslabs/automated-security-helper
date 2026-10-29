@@ -27,6 +27,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 #: The refusal's own words, which both cells must see with exit 3.
 WORDS = "which failed to import, so the plugins it declares are not loaded"
 

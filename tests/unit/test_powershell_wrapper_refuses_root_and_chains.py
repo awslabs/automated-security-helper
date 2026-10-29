@@ -68,6 +68,7 @@ def _code_lines() -> list:
     return lines
 
 
+@pytest.mark.unit
 def test_nothing_in_the_helpers_exits():
     """``exit`` in a dot-sourced function ends the caller's whole script."""
     exits = [line for line in _code_lines() if re.search(r"(^|[;{]\s*)exit\b", line)]
@@ -116,6 +117,7 @@ def _workflow_steps_calling_invoke_ash() -> list:
     return found
 
 
+@pytest.mark.unit
 def test_the_documented_catch_is_the_one_form():
     for path in DOCUMENTED:
         text = path.read_text(encoding="utf-8")
@@ -123,6 +125,7 @@ def test_the_documented_catch_is_the_one_form():
         assert "[Console]::Error.WriteLine($_.Exception.Message)" not in text, path
 
 
+@pytest.mark.unit
 def test_every_step_calling_invoke_ash_wraps_it_under_pwsh_file():
     """``shell: pwsh`` runs ``pwsh -command ". '<script>'"``, which reports every
     non-zero ``exit`` as 1, so a refusal's 3 needs ``pwsh -File {0}``. That custom
@@ -146,6 +149,7 @@ def test_every_step_calling_invoke_ash_wraps_it_under_pwsh_file():
         )
 
 
+@pytest.mark.unit
 def test_the_session_detection_is_gone():
     """Exit or throw used to depend on the call stack and the command line."""
     text = _text()
@@ -154,6 +158,7 @@ def test_the_session_detection_is_gone():
         assert name not in text
 
 
+@pytest.mark.unit
 def test_the_root_refusal_names_the_opt_in():
     text = _text()
 
@@ -229,6 +234,7 @@ def src(tmp_path) -> Path:
     return path
 
 
+@pytest.mark.integration
 def test_a_dot_sourcing_script_catches_a_refusal_and_carries_on(pwsh, src, tmp_path):
     """The refusal throws, with $LASTEXITCODE set, and does not end the caller."""
     result = _pwsh_script(
@@ -244,6 +250,7 @@ def test_a_dot_sourcing_script_catches_a_refusal_and_carries_on(pwsh, src, tmp_p
     assert result.stdout.split() == ["caught", "3", "carried", "on"], result.stdout
 
 
+@pytest.mark.integration
 def test_the_wrapped_call_exits_with_the_refusal_code(pwsh, src, tmp_path):
     """``pwsh -File`` with the documented wrapper, under ``Stop`` as on GitHub."""
     result = _pwsh_script(
@@ -256,6 +263,7 @@ def test_the_wrapped_call_exits_with_the_refusal_code(pwsh, src, tmp_path):
     assert result.stderr.count(REFUSAL_TEXT) == 1, result.stderr
 
 
+@pytest.mark.integration
 def test_an_uncaught_refusal_under_file_exits_1(pwsh, src, tmp_path):
     """PowerShell's exit code for any uncaught error; documented, not ASH's choice."""
     result = _pwsh_script(pwsh, tmp_path, f"{REFUSED}\n'after'")
@@ -269,6 +277,7 @@ def test_an_uncaught_refusal_under_file_exits_1(pwsh, src, tmp_path):
     assert flattened.count(REFUSAL_TEXT) == 1, result.stderr
 
 
+@pytest.mark.integration
 def test_a_no_exit_session_stays_open_after_a_refusal(pwsh, src, tmp_path):
     """The session reads the next commands from stdin after the refusal."""
     result = _pwsh_script(
@@ -284,6 +293,7 @@ def test_a_no_exit_session_stays_open_after_a_refusal(pwsh, src, tmp_path):
     assert "alive 3" in result.stdout
 
 
+@pytest.mark.integration
 def test_an_output_directory_under_a_file_leaves_ashs_usage_code(pwsh, src, tmp_path):
     """So ``catch { exit $LASTEXITCODE }`` cannot exit 0 after a failure before any
     runner is looked for: an output directory that cannot be created, here under a
@@ -302,6 +312,7 @@ def test_an_output_directory_under_a_file_leaves_ashs_usage_code(pwsh, src, tmp_
     assert result.stdout.split() == ["code", "5"], result.stdout + result.stderr
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt", reason="the stand-in runner is a POSIX shell script"
 )
@@ -330,6 +341,7 @@ def test_another_error_in_the_run_leaves_the_code_non_zero(pwsh, src, tmp_path):
     assert result.stdout.splitlines()[-1:] == ["code 1"], result.stdout + result.stderr
 
 
+@pytest.mark.integration
 def test_a_refusal_is_printed_once(pwsh, src, tmp_path):
     """Uncaught, PowerShell prints the error; Invoke-ASH does not print it as well."""
     result = _pwsh_script(
@@ -406,6 +418,7 @@ pytestmark_posix = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_a_root_caller_is_refused_with_the_opt_in_named(host):
     result, calls = host("-NoRun", uid="0")
@@ -415,6 +428,7 @@ def test_a_root_caller_is_refused_with_the_opt_in_named(host):
     assert "-BuildTarget ci" in result.stderr
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_a_root_caller_that_asks_for_ci_builds_it(host):
     result, calls = host("-NoRun -BuildTarget ci", uid="0")
@@ -423,6 +437,7 @@ def test_a_root_caller_that_asks_for_ci_builds_it(host):
     assert "build" in calls and "ci" in calls
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_an_unprivileged_caller_builds_non_root(host):
     """Control."""
@@ -432,6 +447,7 @@ def test_an_unprivileged_caller_builds_non_root(host):
     assert calls[calls.index("--target") + 1] == "non-root"
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_the_caller_ids_are_the_default_ids_of_the_non_root_user(host):
     """As ./ash and ash --mode container do: the user owns what the caller made."""
@@ -441,6 +457,7 @@ def test_the_caller_ids_are_the_default_ids_of_the_non_root_user(host):
     assert "UID=1234" in calls and "GID=1235" in calls
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_a_root_caller_with_another_uid_still_gets_gid_0_refused(host):
     """The GID comes from the caller too, so root's group 0 is refused, as ./ash
@@ -452,6 +469,7 @@ def test_a_root_caller_with_another_uid_still_gets_gid_0_refused(host):
     assert "GID 0" in " ".join(result.stderr.split())
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_explicit_ids_win_over_the_caller_ids(host):
     """Control."""
@@ -463,6 +481,7 @@ def test_explicit_ids_win_over_the_caller_ids(host):
     assert "UID=2000" in calls and "GID=2001" in calls
 
 
+@pytest.mark.integration
 @pytestmark_posix
 @pytest.mark.parametrize(
     ("arguments", "uid", "id_flag"),
@@ -489,6 +508,7 @@ def test_the_refusal_names_ci_first_and_other_ids_only_with_a_writable_output(
     assert "output directory is writable" in advice[advice.index(id_flag) :]
 
 
+@pytest.mark.integration
 @pytestmark_posix
 @pytest.mark.parametrize("written", ["NON-ROOT", "Ci"])
 def test_the_stage_is_built_by_its_lower_case_name(written, host):
@@ -501,6 +521,7 @@ def test_the_stage_is_built_by_its_lower_case_name(written, host):
     )
 
 
+@pytest.mark.integration
 @pytestmark_posix
 @pytest.mark.parametrize(
     "arguments",
@@ -541,6 +562,7 @@ EXTENDS_SPELLINGS = [
 ]
 
 
+@pytest.mark.integration
 @pytestmark_posix
 @pytest.mark.parametrize(("name", "text"), EXTENDS_SPELLINGS)
 def test_an_outside_config_with_extends_is_refused(name, text, host, tmp_path):
@@ -555,6 +577,7 @@ def test_an_outside_config_with_extends_is_refused(name, text, host, tmp_path):
     assert "extends" in result.stderr
 
 
+@pytest.mark.integration
 @pytestmark_posix
 @pytest.mark.parametrize(("name", "text"), EXTENDS_SPELLINGS)
 def test_an_explicit_config_with_extends_is_passed_as_written(
@@ -573,6 +596,7 @@ def test_an_explicit_config_with_extends_is_passed_as_written(
     assert [call for call in calls if "destination=/ash" in call] == []
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_an_outside_config_without_extends_still_runs(host, tmp_path):
     """Control."""
@@ -585,6 +609,7 @@ def test_an_outside_config_without_extends_still_runs(host, tmp_path):
     assert "run" in calls
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_an_outside_ash_config_without_extends_still_runs(host, tmp_path):
     """Control for the refusal above: the same file, without the entry, is carried
@@ -600,6 +625,7 @@ def test_an_outside_ash_config_without_extends_still_runs(host, tmp_path):
     assert carried == "/ash-env-config/ash.yaml"
 
 
+@pytest.mark.integration
 @pytestmark_posix
 def test_a_missing_config_names_the_path(host):
     result, calls = host("-NoBuild", extra_env={"ASH_CONFIG": "missing.yaml"})

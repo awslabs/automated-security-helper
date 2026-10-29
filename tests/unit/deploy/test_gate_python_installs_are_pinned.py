@@ -40,6 +40,8 @@ from typing import Any, Iterator
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 GATE_FILES = REPO_ROOT / "deploy/terraform/modules/codecommit-gate/files"
 GATE_DOCKERFILE = GATE_FILES / "gate.Dockerfile"

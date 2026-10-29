@@ -32,9 +32,12 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 def orchestrator(source_dir: Path, output_dir: Path) -> ASHScanOrchestrator:

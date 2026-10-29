@@ -12,7 +12,11 @@ which typer.echo and typer.secho do not.
 import ast
 from pathlib import Path
 
+import pytest
+
 import automated_security_helper.cli.config as config_module
+
+pytestmark = pytest.mark.unit
 
 RAW_WRITERS = {"echo", "secho"}
 

@@ -32,6 +32,8 @@ from automated_security_helper.config.ash_config import resolve_env_references
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 VALUE = "${ASH_PROBE_VALUE}"
 

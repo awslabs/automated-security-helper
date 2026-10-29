@@ -5,6 +5,7 @@ import sys
 import pytest
 
 
+@pytest.mark.unit
 class TestImportLocation:
     def test_import_from_utils(self):
         from automated_security_helper.utils.sarif_field_analysis import (
@@ -47,6 +48,7 @@ class TestImportLocation:
         assert found, "shim must call warnings.warn with 'deprecated'"
 
 
+@pytest.mark.unit
 class TestAnalyzeSarifFieldsLogic:
     def test_returns_field_set_from_minimal_sarif(self, tmp_path):
         import json
@@ -109,6 +111,7 @@ class TestAnalyzeSarifFieldsLogic:
         assert any("ruleId" in key for key in data)
 
 
+@pytest.mark.unit
 class TestInAggregatePercentage:
     """`% in Aggregate` is the share of a scanner's included fields in the aggregate.
 
@@ -186,6 +189,7 @@ class TestInAggregatePercentage:
         assert cells[1:] == ["9", "8", "8", "1", "11.1%"]
 
 
+@pytest.mark.unit
 class TestHtmlReportWithNoFindings:
     def test_matched_share_with_zero_findings_does_not_divide_by_zero(self, tmp_path):
         from automated_security_helper.utils.meta_analysis.reporting import (
@@ -208,6 +212,7 @@ class TestHtmlReportWithNoFindings:
         assert "Matched Findings: 0 (0.00%)" in out.read_text(encoding="utf-8")
 
 
+@pytest.mark.integration
 class TestTheCsvFilesUnderAnAsciiLocale:
     """The CSV files are UTF-8 whatever the locale, as the JSON files are."""
 

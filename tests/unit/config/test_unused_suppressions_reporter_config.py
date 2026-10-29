@@ -33,6 +33,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppr
     UnusedSuppressionsReporterConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 # Every spelling a caller uses to look the reporter up. report_phase passes the
 # lowercased class name; cli/report.py passes the --output-format value; the
 # others are the config key in each spelling.

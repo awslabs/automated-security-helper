@@ -35,6 +35,7 @@ NUMBER_NAME = "ASH_TEST_BACKSTOP_NUMBER"
 SHORT_VALUE = "q7z"
 
 
+@pytest.mark.unit
 def test_an_environment_value_in_text_is_redacted_and_other_text_is_left(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -51,6 +52,7 @@ def test_an_environment_value_in_text_is_redacted_and_other_text_is_left(
     assert shown == (False, True, True, True)
 
 
+@pytest.mark.unit
 def test_a_value_glued_into_a_test_path_keeps_the_report_readable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -67,6 +69,7 @@ def test_a_value_glued_into_a_test_path_keeps_the_report_readable(
     assert "runner7" not in standalone
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("word", ["true", "False", "YES", "no", "On", "off"])
 def test_a_word_that_carries_no_secret_is_left(
     monkeypatch: pytest.MonkeyPatch, word: str
@@ -78,6 +81,7 @@ def test_a_word_that_carries_no_secret_is_left(
     assert left
 
 
+@pytest.mark.unit
 def test_a_short_value_not_on_the_list_is_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -89,6 +93,7 @@ def test_a_short_value_not_on_the_list_is_redacted(
     assert len(value) == env_assertions.MIN_REDACTED_LENGTH and not held
 
 
+@pytest.mark.unit
 def test_a_value_a_message_escaped_is_redacted_where_a_report_escapes_it_again(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -114,6 +119,7 @@ def test_a_value_a_message_escaped_is_redacted_where_a_report_escapes_it_again(
     )
 
 
+@pytest.mark.unit
 def test_a_value_the_session_started_with_is_redacted_after_it_is_removed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -144,6 +150,7 @@ def test_a_value_the_session_started_with_is_redacted_after_it_is_removed(
     assert not held
 
 
+@pytest.mark.unit
 def test_a_fragment_of_a_long_value_is_redacted_whatever_cut_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -185,6 +192,7 @@ def test_a_fragment_of_a_long_value_is_redacted_whatever_cut_it(
     assert below[:12] in survivors, "a fragment of a value below the band was replaced"
 
 
+@pytest.mark.unit
 def test_a_value_is_redacted_when_the_products_redaction_cannot_be_imported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -219,6 +227,7 @@ def test_a_value_is_redacted_when_the_products_redaction_cannot_be_imported(
     )
 
 
+@pytest.mark.unit
 def test_the_form_caches_hold_across_reports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -270,6 +279,7 @@ def _report(
     )
 
 
+@pytest.mark.unit
 def test_a_failed_reports_longrepr_and_sections_are_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -297,6 +307,7 @@ def test_a_failed_reports_longrepr_and_sections_are_redacted(
     assert [value in text for _, text in shown.sections] == [False]
 
 
+@pytest.mark.unit
 def test_an_xfail_reason_and_a_recorded_property_are_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -324,6 +335,7 @@ def test_an_xfail_reason_and_a_recorded_property_are_redacted(
     assert passed.user_properties == [("key", "<value>"), ("count", 3)]
 
 
+@pytest.mark.unit
 def test_the_live_log_shows_no_environment_value_and_leaves_the_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -348,6 +360,7 @@ def test_the_live_log_shows_no_environment_value_and_leaves_the_record(
     assert formatter.format(plain) == f"holds {other}"
 
 
+@pytest.mark.unit
 def test_the_live_log_redacts_a_value_in_every_form_a_report_does(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -398,6 +411,11 @@ def test_a_failure_after_its_variable_is_removed(monkeypatch):
     value = os.environ[{removed!r}]
     monkeypatch.delenv({removed!r})
     raise AssertionError("removed " + value)
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
@@ -428,6 +446,7 @@ def _run_under_the_suites_conftest(
     return completed.returncode, completed.stdout + completed.stderr, junit
 
 
+@pytest.mark.integration
 def test_a_failing_tests_report_shows_no_environment_value(tmp_path: Path) -> None:
     """Under the suite's conftest, a failing test that prints an environment
     value to stdout, stderr and a log, and fails with it in its message, shows
@@ -473,9 +492,15 @@ class TestShortened(unittest.TestCase):
     def test_a_long_value_cut_by_the_assertion_message(self):
         value = os.environ[{canary!r}]
         self.assertEqual({{"key": value}}, {{"key": "expected"}})
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_cut_values_windows_are_in_no_report_at_default_verbosity(
     tmp_path: Path,
 ) -> None:
@@ -511,6 +536,11 @@ import os
 
 def test_a_passing_test_that_logs_an_environment_value():
     logging.getLogger("probe").warning("live log holds %s", os.environ[{canary!r}])
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
@@ -521,6 +551,7 @@ raise ImportError("cannot import with " + os.environ[{canary!r}])
 """
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("workers", ["0", "2"], ids=["one process", "with workers"])
 def test_a_collection_errors_text_shows_no_environment_value(
     tmp_path: Path, workers: str
@@ -558,6 +589,7 @@ pytest.skip("skipped with " + os.environ[{canary!r}], allow_module_level=True)
 """
 
 
+@pytest.mark.integration
 def test_a_module_level_skips_reason_shows_no_environment_value(
     tmp_path: Path,
 ) -> None:
@@ -597,9 +629,15 @@ def test_a_failure_recording_properties(record_property, record_testsuite_proper
     record_testsuite_property("suite-named-" + value, "sn")
     record_property("sentinel-prop", "SENTINEL-TEXT")
     assert False
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_recorded_properties_show_no_environment_value_in_any_form(
     tmp_path: Path,
 ) -> None:
@@ -646,9 +684,15 @@ def test_a_passing_test_recording_both_property_kinds(
     value = os.environ[{canary!r}]
     record_testsuite_property("esc-suite-holder", "esc " + value + " end")
     record_property("esc-case-holder", "esc " + value + " end")
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_suite_property_value_with_an_xml_illegal_character_stays_hidden(
     tmp_path: Path,
 ) -> None:
@@ -697,9 +741,15 @@ def test_a_property_appended_directly(request):
     xml.global_properties.append(
         ("appended-named-" + os.environ[{canary!r}], "an")
     )
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_a_property_appended_directly_to_the_plugins_state_stays_hidden(
     tmp_path: Path,
 ) -> None:
@@ -753,9 +803,15 @@ class _Plant:
 
 def test_x(request):
     request.config.pluginmanager.register(_Plant(), "backstop-plant")
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("workers", ["0", "2"], ids=["one process", "with workers"])
 def test_a_value_set_only_in_a_worker_is_hidden_in_the_writes_report(
     tmp_path: Path, workers: str
@@ -842,9 +898,15 @@ def test_a(request):
 
 def test_b(request):
     _register(request.config)
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
@@ -903,6 +965,11 @@ import warnings
 def test_a_warning_holding_a_path():
     value = os.environ[{canary!r}]
     warnings.warn(UserWarning(pathlib.PurePosixPath("/warned/" + value + "/tail")))
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 _A_WARNING_WHOSE_STR_IGNORES_ARGS = """\
@@ -921,6 +988,11 @@ class _Carried(UserWarning):
 
 def test_a_warning_with_its_own_str():
     warnings.warn(_Carried(os.environ[{canary!r}]))
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 _A_WARNING_AT_COLLECTION = """\
@@ -932,6 +1004,11 @@ warnings.warn("collected with " + os.environ[{canary!r}])
 
 def test_a_test_after_the_collection_warning():
     pass
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 _A_WARNING_BUILT_WITH_NO_ARGS = """\
@@ -950,9 +1027,15 @@ class _NoArgs(UserWarning):
 
 def test_a_warning_built_with_no_args():
     warnings.warn(_NoArgs(os.environ[{canary!r}]))
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "shape, child, control",
     [
@@ -1014,6 +1097,7 @@ class _StubbornStr(UserWarning):
         return "stubborn text the args do not control"
 
 
+@pytest.mark.unit
 def test_a_warning_that_cannot_be_redacted_is_replaced_by_the_notice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1051,9 +1135,15 @@ import warnings
 
 def test_a_warning_that_prints_an_environment_value():
     warnings.warn("careful with " + os.environ[{canary!r}])
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_the_warnings_summary_shows_no_environment_value(tmp_path: Path) -> None:
     """A warning's message is printed by the warnings summary outside every
     test report: a value it holds is redacted there too."""
@@ -1083,6 +1173,11 @@ def test_the_runs_containment_names_are_kept():
         name for name, value in expected.items() if os.environ.get(name) != value
     )
     assert missing == [], missing
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 #: What a disarmed parent run sets, with benign stand-in values. Both proxy
@@ -1110,6 +1205,7 @@ _CONTAINMENT_SET = {
 }
 
 
+@pytest.mark.integration
 def test_the_childs_environment_keeps_this_runs_containment_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1149,9 +1245,15 @@ def test_the_childs_aws_file_settings():
         ),
     }}
     assert read == expected, read
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_the_childs_aws_file_settings_point_at_devnull_not_the_parents(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1198,9 +1300,15 @@ def test_the_childs_aws_file_settings_point_at_devnull_not_the_parents(
 _A_PASSING_TEST = """\
 def test_nothing():
     pass
+
+import pytest
+
+# The collection hook of the suite requires one tier per test.
+pytestmark = pytest.mark.unit
 """
 
 
+@pytest.mark.integration
 def test_the_junit_hostname_attribute_hides_a_value_that_is_the_host_name(
     tmp_path: Path,
 ) -> None:
@@ -1239,6 +1347,7 @@ def test_the_junit_hostname_attribute_hides_a_value_that_is_the_host_name(
     )
 
 
+@pytest.mark.integration
 def test_the_live_log_shows_no_environment_value(tmp_path: Path) -> None:
     """pytest.ini's log_cli prints each record as it is logged, for a test
     that passes too, outside every report: the live line holds the marker,

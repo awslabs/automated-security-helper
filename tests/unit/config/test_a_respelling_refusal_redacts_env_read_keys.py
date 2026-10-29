@@ -24,6 +24,8 @@ from automated_security_helper.config.resolve_config import (
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.error_text import config_environment_values
 
+pytestmark = pytest.mark.unit
+
 VAR = "ASH_RESPELL_SECT"
 VALUE = "env-read-sect"
 ENV_CONFIG = "project_name: t\nreporters:\n  ${ASH_RESPELL_SECT}:\n    enabled: true\n"

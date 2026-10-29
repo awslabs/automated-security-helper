@@ -30,6 +30,8 @@ from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def root(tmp_path, monkeypatch) -> Path:

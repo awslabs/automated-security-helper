@@ -37,6 +37,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 REMOTE = "client-1"
 PROBE_VAR = "ASH_NAMED_ENV_PROBE"
 PROBE_VALUE = "probe-value-from-the-servers-environment"

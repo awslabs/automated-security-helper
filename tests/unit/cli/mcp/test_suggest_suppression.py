@@ -13,6 +13,8 @@ from automated_security_helper.cli.mcp_tools import mcp_suggest_suppression
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
+pytestmark = pytest.mark.unit
+
 
 def _make_vuln(
     finding_id: str = "bandit-B101-abc12345",

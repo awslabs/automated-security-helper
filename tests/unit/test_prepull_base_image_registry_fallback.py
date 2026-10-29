@@ -554,6 +554,7 @@ def _run(
     )
 
 
+@pytest.mark.integration
 class TestThePrimaryRegistryIsUnchanged:
     """Case 1. ECR Public first, and a success there touches nothing else."""
 
@@ -655,6 +656,7 @@ class TestThePrimaryRegistryIsUnchanged:
         )
 
 
+@pytest.mark.integration
 class TestTheDataLimitFallsThroughToDockerHub:
     """Case 2. The refusal that cannot be waited out is the one the fallback is for."""
 
@@ -708,6 +710,7 @@ class TestTheDataLimitFallsThroughToDockerHub:
         )
 
 
+@pytest.mark.integration
 class TestTheFallbackReachesTheBuild:
     """The local tag is not how the build finds the fallback image. Measured, not assumed.
 
@@ -926,6 +929,7 @@ class TestTheFallbackReachesTheBuild:
         )
 
 
+@pytest.mark.integration
 class TestTheRateLimitRetriesBeforeFallingThrough:
     """Case 3. One quota is worth waiting on, and it is not the other one."""
 
@@ -984,6 +988,7 @@ class TestTheRateLimitRetriesBeforeFallingThrough:
         )
 
 
+@pytest.mark.integration
 class TestBothRegistriesRefusing:
     """Case 4. When there is nothing left to try, say so and say what to do."""
 
@@ -1029,6 +1034,7 @@ class TestBothRegistriesRefusing:
         )
 
 
+@pytest.mark.integration
 class TestAWrongDigestIsRefused:
     """Case 5. The one this whole design exists to make impossible."""
 
@@ -1121,6 +1127,7 @@ class TestAWrongDigestIsRefused:
         assert result.tags == [], f"{result.describe()}"
 
 
+@pytest.mark.integration
 class TestARuntimeThatRefusesADigestReference:
     """The finch failure. A runtime can pull `repo@sha256:...` and still not inspect it.
 
@@ -1291,6 +1298,7 @@ class TestARuntimeThatRefusesADigestReference:
         )
 
 
+@pytest.mark.integration
 class TestANonQuotaErrorFailsImmediately:
     """Case 6. The failure mode a fallback introduces, closed on purpose."""
 
@@ -1331,6 +1339,7 @@ class TestANonQuotaErrorFailsImmediately:
 class TestThePinsAreReadFromTheDockerfile:
     """Neither value may be duplicated into the action, and both must be present."""
 
+    @pytest.mark.unit
     def test_the_action_reads_both_args_from_the_dockerfile(self):
         script = _prepull_script()
         assert "ARG BASE_IMAGE=" in script and "ARG BASE_IMAGE_DIGEST=" in script, (
@@ -1345,11 +1354,13 @@ class TestThePinsAreReadFromTheDockerfile:
             "the action must not hardcode the digest either"
         )
 
+    @pytest.mark.unit
     def test_the_dockerfile_pins_a_well_formed_index_digest(self):
         assert re.fullmatch(r"sha256:[0-9a-f]{64}", BASE_IMAGE_DIGEST), (
             f"ARG BASE_IMAGE_DIGEST is {BASE_IMAGE_DIGEST!r}, which is not a sha256 digest"
         )
 
+    @pytest.mark.unit
     def test_the_digest_sits_next_to_the_tag(self):
         """The visible-omission argument is a diff-context argument, so measure the distance.
 
@@ -1373,6 +1384,7 @@ class TestThePinsAreReadFromTheDockerfile:
             "digest visible to a reviewer."
         )
 
+    @pytest.mark.integration
     @_requires_bash
     def test_a_dockerfile_without_a_digest_is_refused(self, tmp_path: Path):
         """No pin means no way to establish the two registries agree, so no pre-pull."""
@@ -1392,6 +1404,7 @@ class TestTheHarnessCanFail:
 
     pytestmark = _REQUIRES_BASH
 
+    @pytest.mark.integration
     def test_the_frozen_single_registry_script_fails_the_fallback_assertions(
         self, tmp_path: Path
     ):
@@ -1411,6 +1424,7 @@ class TestTheHarnessCanFail:
             f"something other than what it was handed\n{result.describe()}"
         )
 
+    @pytest.mark.integration
     def test_the_frozen_script_also_fails_the_digest_assertions(self, tmp_path: Path):
         """Nothing in the pre-fallback script looks at a digest."""
         result = _run(
@@ -1425,6 +1439,7 @@ class TestTheHarnessCanFail:
         )
         assert "DIGEST MISMATCH" not in result.output, f"{result.describe()}"
 
+    @pytest.mark.integration
     def test_a_mutant_that_proceeds_on_an_unverifiable_image_is_caught(
         self, tmp_path: Path
     ):
@@ -1466,6 +1481,7 @@ class TestTheHarnessCanFail:
             f"assertion\n{real.describe()}"
         )
 
+    @pytest.mark.integration
     def test_a_mutant_that_only_retags_is_caught(self, tmp_path: Path):
         """The state the action was actually in, applied on purpose.
 
@@ -1505,6 +1521,7 @@ class TestTheHarnessCanFail:
             f"{real.describe()}"
         )
 
+    @pytest.mark.integration
     def test_the_stub_refuses_an_invocation_it_was_not_taught(self, tmp_path: Path):
         """A stub that tolerated unknown verbs would hide the action growing a dependency."""
         result = _run(tmp_path, script="docker frobnicate 2>&1 || echo rc=$?\n")
@@ -1512,6 +1529,7 @@ class TestTheHarnessCanFail:
             f"expected the stub to reject an unknown subcommand\n{result.describe()}"
         )
 
+    @pytest.mark.unit
     def test_the_pull_step_is_the_one_that_pulls(self):
         """The locator resolves the step by id, so the id has to be on the step that pulls.
 
@@ -1526,6 +1544,7 @@ class TestTheHarnessCanFail:
         )
 
 
+@pytest.mark.unit
 class TestNoPublishSurfacesAreAdded:
     """Only the approved base-image cache may leave the job. This repository is public.
 
@@ -1652,6 +1671,7 @@ def _unguarded_array_expansions(script: str) -> list[str]:
     return [f"${{{name}[{sub}]}}" for name, sub in _ARRAY_EXPANSION.findall(stripped)]
 
 
+@pytest.mark.unit
 class TestTheStepRunsUnderTheBashMacOSShips:
     """No array expansion may be unguarded, because macOS bash is 3.2 and `set -u` is on.
 

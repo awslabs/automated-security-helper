@@ -24,6 +24,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_rep
 )
 from automated_security_helper.schemas.sarif_schema_model import Result
 
+pytestmark = pytest.mark.unit
+
 #: Each character ``_text`` backslash-escapes: Markdown reads every one as syntax.
 MARKDOWN_SYNTAX = "\\`*_[]{}#|~"
 

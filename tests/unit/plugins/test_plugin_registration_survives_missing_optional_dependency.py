@@ -50,6 +50,8 @@ import pytest
 
 from tests.utils.helpers import importing_this_checkout
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Raising from find_spec is what makes the module genuinely unimportable. Setting

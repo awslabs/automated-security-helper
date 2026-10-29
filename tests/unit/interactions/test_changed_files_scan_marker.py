@@ -34,6 +34,8 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
+pytestmark = pytest.mark.unit
+
 #: The variables that make a scan record the container launcher's label. Unset
 #: for every test, so the suite gives the same answers when it runs inside the
 #: ASH image (which sets ASH_IN_CONTAINER); the container tests set them.

@@ -38,6 +38,8 @@ from automated_security_helper.utils.redacted_model import (
     env_resolved_scalar,
 )
 
+pytestmark = pytest.mark.unit
+
 VARIABLE = "ASH_DEGRADE_SEV"
 SCANNER = "zz-ext-scanner"
 

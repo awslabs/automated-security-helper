@@ -20,6 +20,8 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import scanning_tree
 
+pytestmark = pytest.mark.unit
+
 
 def test_scanner_threads_see_the_scans_trees(tmp_path):
     seen: list = []

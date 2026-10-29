@@ -248,6 +248,7 @@ def _jenkins_argv(
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 @pytest.mark.parametrize("command", ["run", "lint"])
 def test_jenkinsfile_runner_is_given_the_war_and_the_plugins_dir(
@@ -336,6 +337,7 @@ BREAKAGES = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 @pytest.mark.parametrize("breakage", sorted(BREAKAGES))
 def test_a_core_or_plugin_that_is_not_the_pinned_one_is_refused(
@@ -350,6 +352,7 @@ def test_a_core_or_plugin_that_is_not_the_pinned_one_is_refused(
     assert named in str(raised.value), str(raised.value)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_the_install_is_hashed_again_at_every_launch(tmp_path, leg):
     install = _jenkins_install(tmp_path, leg)
@@ -360,6 +363,7 @@ def test_the_install_is_hashed_again_at_every_launch(tmp_path, leg):
         _jenkins_argv(install, leg)
 
 
+@pytest.mark.unit
 def test_exploded_plugin_directories_are_jenkins_own_and_allowed(tmp_path):
     """Jenkins explodes each plugin into a directory beside it in the -p directory."""
     leg = "jenkinsfile-runner-lts"
@@ -368,6 +372,7 @@ def test_exploded_plugin_directories_are_jenkins_own_and_allowed(tmp_path):
     assert _jenkins_argv(install, leg)
 
 
+@pytest.mark.unit
 def test_a_plugin_copy_that_already_exists_is_refused(tmp_path):
     leg = "jenkinsfile-runner-lts"
     install = _jenkins_install(tmp_path, leg)
@@ -378,6 +383,7 @@ def test_a_plugin_copy_that_already_exists_is_refused(tmp_path):
     assert str(copy) in str(raised.value)
 
 
+@pytest.mark.unit
 def test_a_copy_that_is_not_the_pinned_plugin_never_starts(tmp_path, monkeypatch):
     """The copies are hashed again, so a copy that came out different is refused."""
     leg = "jenkinsfile-runner-lts"
@@ -396,6 +402,7 @@ def test_a_copy_that_is_not_the_pinned_plugin_never_starts(tmp_path, monkeypatch
     assert fake.calls == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_what_jenkins_does_to_one_launch_s_plugins_never_reaches_the_next(
     tmp_path, leg
@@ -442,6 +449,7 @@ def _run_jenkins(
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_jenkinsfile_runner_runs_with_the_java_of_its_core(tmp_path, leg):
     install = _jenkins_install(tmp_path, leg)
@@ -456,6 +464,7 @@ def test_jenkinsfile_runner_runs_with_the_java_of_its_core(tmp_path, leg):
     assert (tmp_path / "logs" / f"{leg}.log").is_file()
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_the_jenkins_home_exists_when_jenkinsfile_runner_starts(tmp_path, leg):
     """Jenkinsfile Runner refuses a --runHome that is not a directory."""
@@ -474,6 +483,7 @@ def test_the_jenkins_home_exists_when_jenkinsfile_runner_starts(tmp_path, leg):
     assert list(home.iterdir()) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_jenkinsfile_runner_s_launch_has_its_time_limit(tmp_path, leg):
     install = _jenkins_install(tmp_path, leg)
@@ -489,6 +499,7 @@ def _plain_env(tmp_path: Path) -> dict[str, str]:
     return {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"}
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "argv",
     [
@@ -513,6 +524,7 @@ def test_an_argv_that_starts_jenkinsfile_runner_unchecked_is_refused(tmp_path, a
     assert fake.calls == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_the_checked_argv_is_the_one_that_starts(tmp_path, leg):
     install = _jenkins_install(tmp_path, leg)
@@ -524,6 +536,7 @@ def test_the_checked_argv_is_the_one_that_starts(tmp_path, leg):
         _api("env", "launch_argv")(_plain_env(tmp_path), plain)
 
 
+@pytest.mark.unit
 def test_other_runners_argvs_are_not_refused(tmp_path):
     for argv in (
         ["/b/act/act", "pull_request"],
@@ -581,6 +594,7 @@ UNCHECKED_JAVA_STARTS = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("form", sorted(UNCHECKED_JAVA_STARTS))
 def test_the_guard_refuses_java_behind_a_wrapper_or_in_a_shell_string(tmp_path, form):
     argv = UNCHECKED_JAVA_STARTS[form]
@@ -594,6 +608,7 @@ def test_the_guard_refuses_java_behind_a_wrapper_or_in_a_shell_string(tmp_path, 
     assert fake.calls == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "argv",
     [
@@ -608,6 +623,7 @@ def test_the_java_guard_leaves_other_words_alone(tmp_path, argv):
     assert _api("env", "launch_argv")(_plain_env(tmp_path), argv)[-len(argv) :] == argv
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("form", sorted(UNCHECKED_STARTS))
 def test_the_guard_refuses_every_form_of_an_unchecked_start(tmp_path, form):
     argv = UNCHECKED_STARTS[form]
@@ -621,6 +637,7 @@ def test_the_guard_refuses_every_form_of_an_unchecked_start(tmp_path, form):
     assert fake.calls == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_a_refused_install_never_starts_the_runner(tmp_path, leg):
     install = _jenkins_install(tmp_path, leg)
@@ -904,6 +921,7 @@ def _harness_sources() -> list[tuple[str, str]]:
     ]
 
 
+@pytest.mark.unit
 def test_jenkinsfile_runner_is_started_only_through_the_function_that_checks_it():
     problems = [
         problem
@@ -1070,12 +1088,14 @@ EVASIONS = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("evasion", sorted(EVASIONS))
 def test_the_check_flags_a_start_that_skips_the_hash_check(evasion):
     module, lines = EVASIONS[evasion]
     assert _jenkins_launch_violations("\n".join(lines) + "\n", module)
 
 
+@pytest.mark.unit
 def test_the_holders_may_name_the_program_where_they_must():
     """T's RUNNER_PINS and env.py's CHECKED_PROGRAMS are the two places outside the
     launcher where a name of the program has a reason to stand."""
@@ -1092,6 +1112,7 @@ def test_the_holders_may_name_the_program_where_they_must():
     )
 
 
+@pytest.mark.unit
 def test_the_workflow_starts_jenkinsfile_runner_only_through_pytest():
     if not WORKFLOW.is_file():
         return
@@ -1105,6 +1126,7 @@ def test_the_workflow_starts_jenkinsfile_runner_only_through_pytest():
     assert not [run for run in runs if NAMES_THE_PROGRAM.search(run)]
 
 
+@pytest.mark.unit
 def test_the_workflow_check_sees_a_run_that_names_the_program():
     run = 'java -version\n"$BIN/jenkinsfile-runner/bin/jenkinsfile-runner" run -f x\n'
     assert NAMES_THE_PROGRAM.search(run)
@@ -1114,6 +1136,7 @@ def test_the_workflow_check_sees_a_run_that_names_the_program():
 # The init hook ------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_init_hook_labels_the_built_in_node_linux():
     hooks = sorted((CI_RUNNERS / "jenkins" / "init.groovy.d").glob("*.groovy"))
     assert hooks, (
@@ -1143,6 +1166,7 @@ SWITCHES = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("cli", sorted(SWITCHES))
 def test_each_circleci_cli_gets_exactly_its_switches_and_never_ci(tmp_path, cli):
     launch_env = _api("env", "launch_env")
@@ -1169,6 +1193,7 @@ def test_each_circleci_cli_gets_exactly_its_switches_and_never_ci(tmp_path, cli)
     assert "CI" not in env
 
 
+@pytest.mark.unit
 def test_an_unknown_circleci_cli_is_refused(tmp_path):
     with pytest.raises(ValueError):
         _api("run_circleci", "circleci_launch_env")(
@@ -1180,6 +1205,7 @@ def test_an_unknown_circleci_cli_is_refused(tmp_path):
         )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("command", ["validate", "process"])
 def test_circleci_config_commands_skip_the_update_check(tmp_path, command):
     argv = _api("run_circleci", "circleci_config_argv")(
@@ -1191,6 +1217,7 @@ def test_circleci_config_commands_skip_the_update_check(tmp_path, command):
     assert "--skip-update-check" in argv and argv[-1] == ".circleci/config.yml"
 
 
+@pytest.mark.unit
 def test_local_execute_mounts_the_wheel_and_the_reports_and_pins_the_build_agent(
     tmp_path,
 ):
@@ -1219,6 +1246,7 @@ def test_local_execute_mounts_the_wheel_and_the_reports_and_pins_the_build_agent
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_codebuild_agent_runs_under_script_with_the_pinned_images(tmp_path):
     out = tmp_path / "out"
     script = tmp_path / "bin" / "codebuild_build.sh"
@@ -1252,6 +1280,7 @@ def test_the_codebuild_agent_runs_under_script_with_the_pinned_images(tmp_path):
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("character", [" ", "'", '"', "$", "`", "\\", ";", "\n"])
 @pytest.mark.parametrize("where", ["script", "source", "out_dir"])
 def test_the_codebuild_agent_is_given_only_paths_its_script_cannot_misread(
@@ -1271,6 +1300,7 @@ def test_the_codebuild_agent_is_given_only_paths_its_script_cannot_misread(
         _api("run_codebuild_agent", "codebuild_argv")(MANIFEST, **paths)
 
 
+@pytest.mark.unit
 def test_the_codebuild_agent_is_given_only_digest_references(tmp_path):
     manifest = {
         **MANIFEST,
@@ -1315,6 +1345,7 @@ def _act_argv(tmp_path: Path, writer_refs=()) -> list[str]:
     )
 
 
+@pytest.mark.unit
 def test_act_runs_jobs_on_the_host_one_at_a_time_with_json_logs(tmp_path):
     argv = _act_argv(tmp_path)
     assert argv[0] == str(tmp_path / "bin" / "act") and argv[1] == "pull_request"
@@ -1335,6 +1366,7 @@ def test_act_runs_jobs_on_the_host_one_at_a_time_with_json_logs(tmp_path):
     assert f"DOCTEST_STUB_RECORDS={tmp_path / 'out' / 'stubs'}" in _value(argv, "--env")
 
 
+@pytest.mark.unit
 def test_every_writer_action_is_replaced_with_its_stub(tmp_path):
     texts = [
         "jobs:\n  a:\n    steps:\n"
@@ -1366,6 +1398,7 @@ def test_every_writer_action_is_replaced_with_its_stub(tmp_path):
         assert (Path(directory) / subpath / "action.yml").is_file(), ref
 
 
+@pytest.mark.unit
 def test_the_stubs_cover_every_writer_action_the_fixture_workflows_use():
     texts = [
         (REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
@@ -1386,6 +1419,7 @@ def test_the_stubs_cover_every_writer_action_the_fixture_workflows_use():
     assert refs, "the fixture workflows use writer actions"
 
 
+@pytest.mark.unit
 def test_the_act_event_names_the_head_and_the_base_of_the_pull_request():
     event = _api("run_act", "act_event")(
         "pull_request",
@@ -1410,6 +1444,7 @@ def test_the_act_event_names_the_head_and_the_base_of_the_pull_request():
         )
 
 
+@pytest.mark.unit
 def test_local_uses_reads_uses_keys_and_not_comments_or_prose():
     local_uses = _api("run_act", "local_uses")
     comment = "      # (`uses: ./.github/workflows/...`) has that repository as\n"
@@ -1434,6 +1469,7 @@ def test_local_uses_reads_uses_keys_and_not_comments_or_prose():
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("name", ["run-ash-security-scan.yml", "upload-ash-sarif.yml"])
 def test_every_local_uses_of_a_fixture_workflow_names_a_file_in_the_repository(name):
     text = (REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
@@ -1457,6 +1493,7 @@ def _gitlab_argv(tmp_path: Path, event, **extra):
     )
 
 
+@pytest.mark.unit
 def test_gitlab_ci_local_gets_a_relative_cwd(tmp_path):
     """gitlab-ci-local 4.76.1 refuses an absolute --cwd, so the option is the project
     relative to the directory the launch runs it in."""
@@ -1469,6 +1506,7 @@ def test_gitlab_ci_local_gets_a_relative_cwd(tmp_path):
         assert not Path(_value(argv, "--cwd")[0]).is_absolute()
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("event", [None, "push", "merge_request"])
 def test_gitlab_ci_local_uses_the_built_helper_and_the_wheel_mount(tmp_path, event):
     argv = _gitlab_argv(tmp_path, event)
@@ -1487,11 +1525,13 @@ def test_gitlab_ci_local_uses_the_built_helper_and_the_wheel_mount(tmp_path, eve
         assert variables == []
 
 
+@pytest.mark.unit
 def test_gitlab_ci_local_refuses_an_event_gitlab_has_not(tmp_path):
     with pytest.raises(ValueError):
         _gitlab_argv(tmp_path, "pull_request")
 
 
+@pytest.mark.unit
 def test_the_helper_image_is_built_from_the_pinned_debian_digest():
     dockerfile = CI_RUNNERS / "gitlab-helper" / "Dockerfile"
     assert dockerfile.is_file(), "missing gitlab-helper/Dockerfile"
@@ -1575,6 +1615,7 @@ LAUNCHERS = (
 )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("launcher", LAUNCHERS)
 def test_each_launcher_starts_its_runner_with_env_i(tmp_path, launcher):
     fake = FakeRun(returncode=2)
@@ -1595,6 +1636,7 @@ def test_each_launcher_starts_its_runner_with_env_i(tmp_path, launcher):
     assert (tmp_path / "logs" / "runner.log").is_file()
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("launcher", LAUNCHERS)
 def test_each_launcher_passes_its_time_limit_on(tmp_path, launcher):
     fake = FakeRun(returncode=0)
@@ -1602,6 +1644,7 @@ def test_each_launcher_passes_its_time_limit_on(tmp_path, launcher):
     assert fake.calls[0][1].get("timeout") == 37
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("launcher", LAUNCHERS)
 def test_each_launcher_runs_its_runner_in_a_new_session_and_sweeps_containers(
     tmp_path, launcher
@@ -1618,6 +1661,7 @@ def test_each_launcher_runs_its_runner_in_a_new_session_and_sweeps_containers(
     assert dict(sweep.env) == env, "docker is run with the launch's own environment"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_jenkinsfile_runner_runs_in_a_new_session_and_sweeps_containers(tmp_path, leg):
     install = _jenkins_install(tmp_path, leg)
@@ -1638,6 +1682,7 @@ LAUNCHER_FUNCTIONS = (
 )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("stem,name", LAUNCHER_FUNCTIONS)
 def test_each_launcher_defaults_to_the_runner_that_stops_the_group(stem, name):
     """subprocess.run on a timeout stops only the process it started, env, which
@@ -1646,6 +1691,7 @@ def test_each_launcher_defaults_to_the_runner_that_stops_the_group(stem, name):
     assert default is _api("env", "run_in_new_session"), (stem, name, default)
 
 
+@pytest.mark.unit
 def test_a_launch_that_runs_out_of_time_fails_naming_its_log(tmp_path):
     def expires(argv, **kwargs):
         raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
@@ -1667,6 +1713,7 @@ def test_a_launch_that_runs_out_of_time_fails_naming_its_log(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_the_system_path_has_the_runner_image_s_tool_directories():
     """act runs JavaScript actions with node from /usr/local/bin; git, docker, python3
     and util-linux's script are in /usr/bin."""
@@ -1675,6 +1722,7 @@ def test_the_system_path_has_the_runner_image_s_tool_directories():
     assert entries.index("/usr/local/bin") < entries.index("/usr/bin")
 
 
+@pytest.mark.integration
 def test_the_runner_s_output_goes_to_its_log(tmp_path):
     """A real child, the system ``env``: what it prints lands in the log, nothing else."""
     if not sys.platform.startswith("linux"):
@@ -1705,6 +1753,7 @@ LAUNCHER_LEGS = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("stem", sorted(LAUNCHER_LEGS))
 def test_each_launcher_names_only_pins_its_leg_installs(stem):
     keys = _api(stem, "MANIFEST_KEYS")
@@ -1717,6 +1766,7 @@ def test_each_launcher_names_only_pins_its_leg_installs(stem):
         assert name in manifest[section], key
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("leg", JENKINS_LEGS)
 def test_the_jenkins_launcher_names_only_pins_its_leg_installs(leg):
     keys = _api("run_jenkinsfile_runner", "MANIFEST_KEYS")[leg]
@@ -1737,6 +1787,7 @@ def _install_tools():
     return sys.modules[name]
 
 
+@pytest.mark.unit
 def test_the_wheel_is_mounted_where_the_rewrite_installs_it_from():
     mount = _api("rewrite", "WHEEL_MOUNT")
     assert _api("run_gitlab_ci_local", "WHEEL_MOUNT") == mount
@@ -1795,6 +1846,7 @@ def _not_a_hosted_runner() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in HOST_VARIABLES}
 
 
+@pytest.mark.integration
 def test_the_leg_and_page_options_deselect_every_other_block():
     census = _api("census", "census_runs")()
     by_leg: dict[tuple[str, str], int] = {}
@@ -1814,6 +1866,7 @@ def test_the_leg_and_page_options_deselect_every_other_block():
         assert f"{others} deselected" in selected.stdout, selected.stdout[-2000:]
 
 
+@pytest.mark.integration
 def test_an_unknown_leg_is_a_usage_error():
     result = _collect(RUNNER_TESTS[0], "--ci-runner", "travis")
     assert result.returncode not in (0, 5), result.stdout[-1000:]

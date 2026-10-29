@@ -48,6 +48,8 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
 
+pytestmark = pytest.mark.unit
+
 MASK = "<value>"
 MASKED = "kqwsread_ash_plugins"
 

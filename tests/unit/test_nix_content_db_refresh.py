@@ -86,6 +86,7 @@ def _run(tmp_path: Path) -> list:
     return [{**c, "repo": str(repo)} for c in calls]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("tool", ["grype", "trivy"])
 def test_the_download_reads_no_config_from_the_repository(tmp_path, tool):
     calls = [c for c in _run(tmp_path) if c["tool"] == tool]
@@ -103,6 +104,7 @@ def test_the_download_reads_no_config_from_the_repository(tmp_path, tool):
         )
 
 
+@pytest.mark.integration
 def test_the_downloads_keep_their_cache_and_subcommand(tmp_path):
     calls = {c["tool"]: c for c in _run(tmp_path)}
     assert calls["grype"]["argv"][:2] == ["db", "update"]
@@ -111,6 +113,7 @@ def test_the_downloads_keep_their_cache_and_subcommand(tmp_path):
     assert trivy[trivy.index("--cache-dir") + 1] == str(tmp_path / "trivy-cache")
 
 
+@pytest.mark.unit
 def test_the_shell_hook_downloads_only_through_the_script():
     text = FLAKE.read_text(encoding="utf-8")
     assert "${self}/nix/refresh-content-dbs.sh" in text

@@ -30,6 +30,8 @@ from tests.unit.cli.mcp.test_select_profile_override_gate import (
     _restated,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e"
 
 

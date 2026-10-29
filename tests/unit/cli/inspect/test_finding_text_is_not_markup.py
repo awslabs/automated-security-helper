@@ -44,6 +44,8 @@ from automated_security_helper.cli.inspect.inspect_findings_app import (
     FindingsExplorerApp,
 )
 
+pytestmark = pytest.mark.unit
+
 SCREEN = (260, 60)
 OSC52 = "\x1b]52;c;ZXZpbA==\x07"
 #: How the screen shows OSC52: each control as an escape.

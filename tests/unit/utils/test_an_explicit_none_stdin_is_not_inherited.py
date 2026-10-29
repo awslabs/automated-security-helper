@@ -31,6 +31,8 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils
 
+pytestmark = pytest.mark.unit
+
 
 class _Captured(Exception):
     """Raised by the recorder so no runner goes on to wait for a child."""

@@ -50,6 +50,8 @@ from automated_security_helper.interactions.run_ash_scan import (
     _compute_exit_code,
 )
 
+pytestmark = pytest.mark.unit
+
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
 
 

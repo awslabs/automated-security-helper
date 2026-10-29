@@ -30,6 +30,8 @@ from typer.testing import CliRunner
 from automated_security_helper.utils.log import MARKUP, ConsoleHandler, escape_markup
 from automated_security_helper.utils.terminal_text import commands_broken
 
+pytestmark = pytest.mark.unit
+
 VALUES = [":warning:", ":lock:", "a:smile:b", "::warning::x", ":x:lock:"]
 
 

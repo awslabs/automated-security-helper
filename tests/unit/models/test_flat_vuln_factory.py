@@ -11,6 +11,8 @@ AshAggregatedResults.to_flat_vulnerabilities().
 
 import json
 
+import pytest
+
 from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
     _extract_location_info,
@@ -33,6 +35,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_result(

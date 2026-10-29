@@ -17,6 +17,8 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import profile_registry
 from automated_security_helper.config import config_sources
@@ -25,6 +27,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     MCScanStatus,
     ScanRegistry,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _session_config_dir(tmp_path):

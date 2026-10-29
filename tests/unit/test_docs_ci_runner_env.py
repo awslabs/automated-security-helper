@@ -127,6 +127,7 @@ def _launch_env(tmp_path: Path, runner: str, java: str | None = None, outer=None
 JAVA = {"jenkinsfile-runner-lts": "21", "jenkinsfile-runner-bundled": "11"}
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("runner", LEG_RUNNERS)
 def test_the_launch_environment_is_built_from_nothing(tmp_path, runner):
     system_path = _api("env", "SYSTEM_PATH")
@@ -145,6 +146,7 @@ def test_the_launch_environment_is_built_from_nothing(tmp_path, runner):
     assert ".venv" not in env["PATH"] and "/opt/poison/bin" not in env["PATH"]
 
 
+@pytest.mark.unit
 def test_the_system_path_is_fixed_and_holds_no_virtualenv():
     system_path = _api("env", "SYSTEM_PATH")
     entries = system_path.split(os.pathsep)
@@ -153,6 +155,7 @@ def test_the_system_path_is_fixed_and_holds_no_virtualenv():
     assert not any(".venv" in entry or "uv" in entry.split("/") for entry in entries)
 
 
+@pytest.mark.unit
 def test_act_gets_the_runner_image_variables_the_setup_actions_read(tmp_path):
     env = _launch_env(tmp_path, "act")
     assert env["ImageOS"] == OUTER["ImageOS"]
@@ -160,6 +163,7 @@ def test_act_gets_the_runner_image_variables_the_setup_actions_read(tmp_path):
     assert "JAVA_HOME" not in env
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("runner,java", sorted(JAVA.items()))
 def test_jenkinsfile_runner_gets_the_java_its_core_needs(tmp_path, runner, java):
     env = _launch_env(tmp_path, runner, java)
@@ -167,12 +171,14 @@ def test_jenkinsfile_runner_gets_the_java_its_core_needs(tmp_path, runner, java)
     assert "ImageOS" not in env
 
 
+@pytest.mark.unit
 def test_a_missing_java_is_an_error_naming_the_variable(tmp_path):
     outer = {k: v for k, v in OUTER.items() if k != "JAVA_HOME_11_X64"}
     with pytest.raises(ValueError, match="JAVA_HOME_11_X64"):
         _launch_env(tmp_path, "jenkinsfile-runner-bundled", "11", outer)
 
 
+@pytest.mark.unit
 def test_home_must_be_fresh(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
@@ -181,6 +187,7 @@ def test_home_must_be_fresh(tmp_path):
         _launch_env(tmp_path, "act")
 
 
+@pytest.mark.unit
 def test_the_runner_is_started_with_env_i_and_exactly_its_environment(tmp_path):
     launch_argv = _api("env", "launch_argv")
     env = _launch_env(tmp_path, "act")
@@ -190,6 +197,7 @@ def test_the_runner_is_started_with_env_i_and_exactly_its_environment(tmp_path):
     assert sorted(argv[2:-3]) == sorted(f"{k}={v}" for k, v in env.items())
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the runners run on Linux; env -i is POSIX"
 )
@@ -232,6 +240,7 @@ def _launch_marking_runner(env, tmp_path: Path, runner: Path) -> int:
     )
 
 
+@pytest.mark.unit
 def test_a_launch_where_the_test_process_cannot_be_a_subreaper_is_refused(
     tmp_path, monkeypatch
 ):
@@ -248,6 +257,7 @@ def test_a_launch_where_the_test_process_cannot_be_a_subreaper_is_refused(
     assert not ran.exists(), "the runner started"
 
 
+@pytest.mark.unit
 def test_a_host_that_is_not_linux_is_refused_before_any_library_is_loaded(
     tmp_path, monkeypatch
 ):
@@ -266,6 +276,7 @@ def test_a_host_that_is_not_linux_is_refused_before_any_library_is_loaded(
     assert not ran.exists(), "the runner started"
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="anywhere but Linux the subreaper refusal comes first",
@@ -297,6 +308,7 @@ def _subreaper_flag() -> int:
     return value.value
 
 
+@pytest.mark.unit
 def test_the_host_refusal_says_the_docker_daemon_must_not_be_shared():
     """Each launch removes every container the daemon gained while it ran, so a
     machine given DOCTEST_CI_RUNNERS_ANYWHERE=1 must have a daemon of its own."""
@@ -309,6 +321,7 @@ def test_the_host_refusal_says_the_docker_daemon_must_not_be_shared():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the runners run on Linux; ash is a sh script"
 )
@@ -346,6 +359,7 @@ REFUSED = [
 ]
 
 
+@pytest.mark.unit
 def test_the_runner_tests_run_on_a_github_hosted_runner_or_with_the_override():
     host_problem = _api("env", "host_problem")
     require = _api("env", "require_github_hosted")
@@ -354,6 +368,7 @@ def test_the_runner_tests_run_on_a_github_hosted_runner_or_with_the_override():
         require(environ)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("environ", REFUSED)
 def test_anywhere_else_is_an_error_and_not_a_skip(environ):
     host_problem = _api("env", "host_problem")
@@ -377,6 +392,7 @@ RUNNER_TESTS = (
 )
 
 
+@pytest.mark.unit
 def test_the_ci_runner_marker_is_selected_by_its_flag():
     tree = ast.parse((REPO_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8"))
     markers = next(
@@ -400,6 +416,7 @@ def test_the_ci_runner_marker_is_selected_by_its_flag():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("path", RUNNER_TESTS, ids=[p.name for p in RUNNER_TESTS])
 def test_each_runner_test_module_is_marked_ci_runner(path):
     if not path.is_file():
@@ -436,6 +453,7 @@ def _collect(*flags: str) -> subprocess.CompletedProcess:
     )
 
 
+@pytest.mark.integration
 def test_the_flag_collects_one_test_per_census_block_and_without_it_none():
     """Collection only: nothing runs, so the host check does not apply."""
     if not RUNNER_TESTS[0].is_file():

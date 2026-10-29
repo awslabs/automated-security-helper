@@ -31,6 +31,8 @@ import yaml
 from automated_security_helper.config.resolve_config import resolve_config
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 SITES = ["the-selected-config", "the-file-ASH_CONFIG-names", "the-trusted-config"]
 
 

@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.field_mapping import (
     get_value_from_path,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_get_value_from_path_simple():

@@ -29,6 +29,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     set_profile_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class _Context:
     headers = {"mcp-session-id": "non-mapping-override"}

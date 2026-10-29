@@ -41,9 +41,12 @@ from automated_security_helper.workspace.execution import (
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.reporting import MANIFEST_FILENAME
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 MARKER = "TARGET-OF-A-LINK-IN-REPORTS-71c4"
 

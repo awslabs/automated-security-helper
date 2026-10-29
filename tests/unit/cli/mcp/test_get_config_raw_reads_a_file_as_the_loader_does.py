@@ -27,6 +27,8 @@ import pytest
 
 from automated_security_helper.cli.mcp_tools import _config_as_written, mcp_get_config
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _environment(monkeypatch: pytest.MonkeyPatch) -> None:

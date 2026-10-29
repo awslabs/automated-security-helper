@@ -41,6 +41,8 @@ try:
 except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 

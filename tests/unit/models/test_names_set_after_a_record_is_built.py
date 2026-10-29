@@ -40,6 +40,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 
+pytestmark = pytest.mark.unit
+
 # The constant below is a file name that is not UTF-8.
 if os.name == "nt":
     pytest.skip(

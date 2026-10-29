@@ -33,6 +33,8 @@ from automated_security_helper.config.resolve_config import (
     resolve_config,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_operator_config(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -46,6 +46,8 @@ from tests.utils.npm_audit_reports import (
     YARN_1_NO_ADVISORIES,
 )
 
+pytestmark = pytest.mark.unit
+
 #: In every file outside the scanned tree; it must reach no output.
 MARKER = "outside-content-7f3a"
 REASON = "link leaves the scanned tree"

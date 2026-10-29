@@ -135,6 +135,7 @@ def http():
 
 
 class TestStatefulSessionTermination:
+    @pytest.mark.unit
     def test_delete_removes_the_sessions_sandbox(self, http, workspace_root) -> None:
         session_id, headers = http.open_session()
         source_dir = _deliver_http(http, headers)
@@ -148,6 +149,7 @@ class TestStatefulSessionTermination:
             f"the sandbox of a terminated session is still on disk: {sandbox}"
         )
 
+    @pytest.mark.unit
     def test_delete_clears_the_sessions_bound_profile(self, http, tmp_path) -> None:
         profile_file = tmp_path / "profile.yaml"
         profile_file.write_text(
@@ -169,6 +171,7 @@ class TestStatefulSessionTermination:
             f"a terminated session's profile file is still on disk: {materialized}"
         )
 
+    @pytest.mark.unit
     def test_ending_one_session_leaves_another_sessions_sandbox(
         self, http, workspace_root
     ) -> None:
@@ -184,6 +187,7 @@ class TestStatefulSessionTermination:
         still_served = http.call_tool("list_profiles", {}, live)
         assert "profiles" in still_served, still_served
 
+    @pytest.mark.unit
     def test_clear_source_removes_the_callers_sandbox(
         self, http, workspace_root
     ) -> None:
@@ -202,6 +206,7 @@ class TestStatefulSessionTermination:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_an_sse_disconnect_removes_the_sessions_sandbox() -> None:
     async def _run() -> Path:
         app = build_sse_app(mount_path="/sse", host="127.0.0.1", port=LOOPBACK_PORT)
@@ -256,6 +261,7 @@ def _exchange(
     raise AssertionError(f"the stdio server closed stdout before answering {method}")
 
 
+@pytest.mark.e2e
 def test_stdio_server_shutdown_removes_the_default_sessions_sandbox(
     workspace_root, tmp_path
 ) -> None:
@@ -337,6 +343,7 @@ def _sandbox_with_age(root: Path, session_id: str, age_seconds: float) -> Path:
     return sandbox
 
 
+@pytest.mark.unit
 def test_a_stateless_server_sweeps_sandboxes_older_than_the_ttl(workspace_root) -> None:
     stale = _sandbox_with_age(workspace_root, "stale-session", STALE_AGE_SECONDS)
     fresh = _sandbox_with_age(workspace_root, "fresh-session", 0)
@@ -360,6 +367,7 @@ def test_a_stateless_server_sweeps_sandboxes_older_than_the_ttl(workspace_root) 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_session_registry_removes_the_tree_source_delivery_wrote(
     workspace_root,
 ) -> None:

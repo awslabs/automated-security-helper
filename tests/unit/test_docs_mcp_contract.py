@@ -157,6 +157,7 @@ RENAMED_SUCCESS_KEY = {
 }
 
 
+@pytest.mark.integration
 def test_a_renamed_error_type_is_reported_where_the_pages_name_it(tmp_path: Path):
     """The pages name output_dir_not_permitted in prose, in the steering guide's
     error table and as a troubleshooting heading; each is reported."""
@@ -185,6 +186,7 @@ def test_a_renamed_error_type_is_reported_where_the_pages_name_it(tmp_path: Path
         assert on_page <= places, sorted(on_page - places)
 
 
+@pytest.mark.integration
 def test_a_renamed_response_key_is_reported_on_every_example(tmp_path: Path):
     """Every run_ash_scan example shows directory_path; with the key renamed, each
     of them is reported, and the unchanged server gives no such finding."""
@@ -208,6 +210,7 @@ def test_a_renamed_response_key_is_reported_on_every_example(tmp_path: Path):
     assert all("[mcp-response]" in line for line in reported)
 
 
+@pytest.mark.integration
 def test_the_generator_check_fails_on_a_renamed_error_type(tmp_path: Path):
     """--check of the MCP reference fails on the renamed refusal, naming both spellings.
 
@@ -272,6 +275,7 @@ def _spans(tmp_path: Path, text: str, rel: str = MCP_PAGE) -> list[tuple[int, st
     ]
 
 
+@pytest.mark.unit
 def test_each_phrasing_names_an_error_type(tmp_path: Path):
     spans = _spans(
         tmp_path,
@@ -321,6 +325,7 @@ def test_each_phrasing_names_an_error_type(tmp_path: Path):
     assert {v: line for line, v in spans}["beta_refused"] == 3
 
 
+@pytest.mark.unit
 def test_what_is_not_an_error_type_name(tmp_path: Path):
     """A clause after the name, a tool after it, and prose without a context."""
     spans = _spans(
@@ -364,6 +369,7 @@ def _plant_server(root: Path, body: str) -> Path:
     return package
 
 
+@pytest.mark.unit
 def test_mcp_contract_check_can_fail(tmp_path: Path):
     """The gate's registered check: each kind of finding, and a clean control."""
     package = _plant_server(
@@ -440,6 +446,7 @@ def test_mcp_contract_check_can_fail(tmp_path: Path):
     assert any("the example has no keys" in m for m in messages), messages
 
 
+@pytest.mark.unit
 def test_a_check_that_reads_nothing_fails(tmp_path: Path):
     """No error-type names and no examples is a finding, never a pass."""
     package = _plant_server(
@@ -459,6 +466,7 @@ def test_a_check_that_reads_nothing_fails(tmp_path: Path):
     assert any("found no config kind=mcp-response examples" in m for m in messages)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "marker, lang, expected",
     [
@@ -639,6 +647,7 @@ def planted_contracts(tmp_path: Path):
     return _reader().tool_contracts(package), package
 
 
+@pytest.mark.unit
 def test_error_types_through_constants_calls_attributes_and_guards(planted_contracts):
     """Imported constants, a helper's dict, a NamedTuple's field, a conditional,
     and type(e).__name__; under the guard, only the start() responses whose
@@ -654,6 +663,7 @@ def test_error_types_through_constants_calls_attributes_and_guards(planted_contr
     assert {"scan_id", "important", "operation"} <= set(keys)
 
 
+@pytest.mark.unit
 def test_response_keys_through_methods_stores_updates_and_spreads(planted_contracts):
     """A method found from a return annotation, keys a subscript store and update()
     add, a dict spread, and a parameter bound at the call (_with_session)."""
@@ -680,6 +690,7 @@ def test_response_keys_through_methods_stores_updates_and_spreads(planted_contra
     ]
 
 
+@pytest.mark.unit
 def test_entry_types_and_what_cannot_be_read(planted_contracts):
     """validate_config's errors[].type, through a nested function and append();
     an error_type computed at run time is reported as unread, never guessed."""
@@ -697,6 +708,7 @@ def test_entry_types_and_what_cannot_be_read(planted_contracts):
     assert _reader().enum_values(package, "Category") == {"scan_not_found"}
 
 
+@pytest.mark.unit
 def test_error_types_carried_by_a_caught_exception(planted_contracts):
     """``except CloneRefused as e: ... e.error_type``: each value the package
     builds the exception with, and only that handler's exception, not the
@@ -790,6 +802,7 @@ def planted_step_contracts(tmp_path: Path):
     return _reader().tool_contracts(package)
 
 
+@pytest.mark.unit
 def test_a_type_passed_to_a_helper_and_a_type_raised_again_are_read(
     planted_step_contracts,
 ):
@@ -801,6 +814,7 @@ def test_a_type_passed_to_a_helper_and_a_type_raised_again_are_read(
     assert fetch.error_types_unread == ()
 
 
+@pytest.mark.unit
 def test_a_helper_reached_other_than_by_a_call_keeps_its_type_unread(
     planted_step_contracts,
 ):
@@ -1016,6 +1030,7 @@ def _edge_line(text: str) -> str:
     return f"automated_security_helper/cli/tools.py:{number}"
 
 
+@pytest.mark.unit
 def test_a_helper_called_by_position_or_by_default_gives_its_types(
     planted_edge_contracts,
 ):
@@ -1028,6 +1043,7 @@ def test_a_helper_called_by_position_or_by_default_gives_its_types(
     assert default.error_types_unread == ()
 
 
+@pytest.mark.unit
 def test_a_helper_imported_under_another_name_keeps_its_type_unread(
     planted_edge_contracts,
 ):
@@ -1038,6 +1054,7 @@ def test_a_helper_imported_under_another_name_keeps_its_type_unread(
     assert renamed.error_types == ()
 
 
+@pytest.mark.unit
 def test_a_construction_in_a_lambda_does_not_read_the_functions_parameter(
     planted_edge_contracts,
 ):
@@ -1047,6 +1064,7 @@ def test_a_construction_in_a_lambda_does_not_read_the_functions_parameter(
     assert not {"caller_value", "lam_arg"} & set(built.error_types)
 
 
+@pytest.mark.unit
 def test_a_type_raised_again_from_another_class_stays_unread(
     planted_edge_contracts,
 ):
@@ -1059,6 +1077,7 @@ def test_a_type_raised_again_from_another_class_stays_unread(
     )
 
 
+@pytest.mark.unit
 def test_a_type_the_init_transforms_is_not_raised_again_as_it_was(
     planted_edge_contracts,
 ):
@@ -1072,6 +1091,7 @@ def test_a_type_the_init_transforms_is_not_raised_again_as_it_was(
     )
 
 
+@pytest.mark.unit
 def test_a_class_built_only_by_raising_again_is_not_a_complete_empty_list(
     planted_edge_contracts,
 ):
@@ -1179,6 +1199,7 @@ def planted_executor_contracts(tmp_path: Path):
     return _reader().tool_contracts(package)
 
 
+@pytest.mark.unit
 def test_a_tool_that_runs_its_implementation_on_an_executor_returns_its_types(
     planted_executor_contracts,
 ):
@@ -1202,6 +1223,7 @@ def test_a_tool_that_runs_its_implementation_on_an_executor_returns_its_types(
     assert any(getattr(v, "open_at", ()) for v in elsewhere.response.variants)
 
 
+@pytest.mark.unit
 def test_the_runners_the_reader_follows_are_defined_by_the_server():
     reader = _reader()
     server = ast.parse(
@@ -1219,6 +1241,7 @@ def test_the_runners_the_reader_follows_are_defined_by_the_server():
         assert name in defined, dotted
 
 
+@pytest.mark.unit
 def test_the_source_delivery_tools_return_the_types_their_implementations_do():
     """The clone and upload tools run on executors; their refusals still reach the
     pages' check (the `clone_*` types, and `session_workspace_busy` from a chunk)."""
@@ -1662,6 +1685,7 @@ def planted_forms(tmp_path: Path):
     return _reader().tool_contracts(_plant_server(tmp_path, PLANTED_FORMS))
 
 
+@pytest.mark.unit
 def test_a_key_of_each_dict_a_name_can_be(planted_forms):
     """``result["error_type"]``: the error_type of each dict ``result`` can be;
     the success dict, which has none, adds nothing."""
@@ -1670,6 +1694,7 @@ def test_a_key_of_each_dict_a_name_can_be(planted_forms):
     assert scan.error_types_unread == ()
 
 
+@pytest.mark.unit
 def test_a_conditional_error_type_narrowed_by_its_own_test(planted_forms):
     """``x["K"] if x.get("K") in (A, B) else LITERAL``: the ``x["K"]`` branch can
     only be A or B, never another type ``x`` holds."""
@@ -1678,6 +1703,7 @@ def test_a_conditional_error_type_narrowed_by_its_own_test(planted_forms):
     assert scan.error_types_unread == ()
 
 
+@pytest.mark.unit
 def test_a_conditional_error_type_narrowed_by_a_named_test(planted_forms):
     """The same with ``kept = x.get("K") in (A, B)`` set once, after ``x``."""
     scan = planted_forms["scan_kept"]
@@ -1686,6 +1712,7 @@ def test_a_conditional_error_type_narrowed_by_a_named_test(planted_forms):
     assert "policy_refused" not in scan.error_types
 
 
+@pytest.mark.unit
 def test_entry_types_from_a_helper_that_returns_tuples(planted_forms):
     """``field, kind = helper(raw)``: ``kind`` is the second element of each tuple
     the helper returns, constants followed; no ``field`` value becomes a type."""
@@ -1699,6 +1726,7 @@ def test_entry_types_from_a_helper_that_returns_tuples(planted_forms):
     assert validate.entry_types_unread == ()
 
 
+@pytest.mark.unit
 def test_run_ash_scan_keeps_only_the_types_its_start_can_return(planted_forms):
     """run_ash_scan's start-failure branch: the refusal it returns as is, the
     kept types the start call can return (source_delivery_busy; it never returns
@@ -1715,6 +1743,7 @@ def test_run_ash_scan_keeps_only_the_types_its_start_can_return(planted_forms):
     assert "scanner_broken" not in scan.error_types
 
 
+@pytest.mark.unit
 def test_validate_config_entry_types_are_its_ten_kinds(planted_forms):
     """validate_config's classifier: its ten kinds, and none of the field names
     it returns beside them."""
@@ -1737,6 +1766,7 @@ def test_validate_config_entry_types_are_its_ten_kinds(planted_forms):
     assert "" not in validate.entry_types
 
 
+@pytest.mark.unit
 def test_tests_the_reader_cannot_follow_stop_it(planted_forms):
     """A test over the name the branch reads that the reader does not understand,
     and narrowing the reader cannot show is sound, are unread, with the reason:
@@ -1785,6 +1815,7 @@ def test_tests_the_reader_cannot_follow_stop_it(planted_forms):
         assert "policy_refused" not in planted_forms[name].error_types, name
 
 
+@pytest.mark.unit
 def test_unpacking_a_helper_that_is_not_all_pairs_stops_the_reader(planted_forms):
     """``field, kind = helper(raw)`` with a helper that can return something that
     is not a pair (a dict, a bare ``return``), can end without returning, or is
@@ -1832,6 +1863,7 @@ def test_unpacking_a_helper_that_is_not_all_pairs_stops_the_reader(planted_forms
         assert planted_forms[name].entry_types == (), name
 
 
+@pytest.mark.unit
 def test_a_constant_flag_selects_its_branch(planted_forms):
     """``X if output else Y`` and ``if quiet: return ...`` in a helper: a caller that
     passes the flag as a constant, or leaves it at a constant default, gets only
@@ -1849,6 +1881,7 @@ def test_a_constant_flag_selects_its_branch(planted_forms):
     }
 
 
+@pytest.mark.unit
 def test_a_flag_is_read_per_call_across_modules(tmp_path: Path):
     """A helper imported from another module of the package: each call reads the
     branch its own constant selects, whoever else calls the helper, since the
@@ -1936,6 +1969,7 @@ def test_a_flag_is_read_per_call_across_modules(tmp_path: Path):
     assert contracts["read_decorated"].error_types == both
 
 
+@pytest.mark.unit
 def test_a_rebindable_flag_keeps_both_branches(tmp_path: Path):
     """A test name that is not a parameter the function binds exactly once keeps
     both branches: a module global, whether a ``global`` elsewhere rebinds it
@@ -2170,6 +2204,7 @@ def test_a_rebindable_flag_keeps_both_branches(tmp_path: Path):
         assert contract.error_types_unread == (), (name, contract.error_types_unread)
 
 
+@pytest.mark.unit
 def test_an_augmented_assignment_is_read_as_a_merge_or_its_operation(tmp_path: Path):
     """``x |= v`` reads as ``x.update(v)``, and any other ``x op= v`` as
     ``x = x op v``, never as nothing: a condition built with ``|=`` still
@@ -2204,6 +2239,7 @@ def test_an_augmented_assignment_is_read_as_a_merge_or_its_operation(tmp_path: P
     assert contracts["read_rewrapped"].error_types == ("rewrapped_refusal",)
 
 
+@pytest.mark.unit
 def test_a_flag_rebound_by_a_merge_is_not_a_constant(planted_forms):
     """``strict |= cond`` can turn the flag on after its constant default was
     bound, so the default no longer stands for the value: the strict branch's
@@ -2211,6 +2247,7 @@ def test_a_flag_rebound_by_a_merge_is_not_a_constant(planted_forms):
     assert "strict_refused" in planted_forms["read_strict"].error_types
 
 
+@pytest.mark.unit
 def test_a_merge_on_an_alternative_that_cannot_reach_it_adds_no_unread(planted_forms):
     """``result = None; ... result = {...}; result |= {...}``: the None
     alternative raises at the ``|=`` and never survives it, so the tool stays
@@ -2233,6 +2270,7 @@ def test_a_merge_on_an_alternative_that_cannot_reach_it_adds_no_unread(planted_f
     assert all(not value.unread for value in tags)
 
 
+@pytest.mark.unit
 def test_an_uncertain_key_after_a_spread_only_widens(planted_forms):
     """A key that may or may not be the string (``"error_type" if label else
     None``) cannot wipe the spread's value: at runtime that key can land
@@ -2242,6 +2280,7 @@ def test_an_uncertain_key_after_a_spread_only_widens(planted_forms):
     assert "relabel_refused" in relabeled
 
 
+@pytest.mark.unit
 def test_a_name_rebound_by_a_merge_is_not_one_plain_assignment():
     """``y = {}; y |= {...}`` rebinds ``y``, so ``_set_by_one_assignment``
     refuses it on its own, not only through the callers' ``_set_once`` check:
@@ -2262,6 +2301,7 @@ def test_a_name_rebound_by_a_merge_is_not_one_plain_assignment():
     assert reader._set_by_one_assignment(local, "y") is False
 
 
+@pytest.mark.unit
 def test_the_cap_keeps_errorless_open_dicts_apart():
     """Past MAX_VARIANTS the dicts are merged, and one refusal among many
     success alternatives would give the merged dict an error_type, hiding the
@@ -2286,6 +2326,7 @@ def test_the_cap_keeps_errorless_open_dicts_apart():
     assert errorless[0].open_at == ("open_site_a",)
 
 
+@pytest.mark.unit
 def test_a_nonlocal_in_another_function_does_not_poison_a_local(tmp_path: Path):
     """A ``nonlocal`` can only rebind a name in its own enclosing function, and
     a ``global`` elsewhere can never rebind a function's local. So a flag
@@ -2370,6 +2411,7 @@ def test_a_nonlocal_in_another_function_does_not_poison_a_local(tmp_path: Path):
     assert contracts["read_plain_mode"].error_types == ("output_unusable",)
 
 
+@pytest.mark.unit
 def test_the_generator_stops_on_a_value_it_cannot_narrow(tmp_path, monkeypatch):
     """The generator, given the planted server: its run stops, with exit status 1
     and the reason, on a value reassigned between its test and its read, on a
@@ -2400,6 +2442,7 @@ def test_the_generator_stops_on_a_value_it_cannot_narrow(tmp_path, monkeypatch):
         assert reason in stopped.value.code
 
 
+@pytest.mark.unit
 def test_the_check_reports_a_response_the_reader_cannot_read_at_all(
     tmp_path, monkeypatch
 ):
@@ -2597,6 +2640,7 @@ def _function_named(tree: ast.AST, name: str):
     )
 
 
+@pytest.mark.unit
 def test_run_ash_scan_reads_its_kept_start_types():
     """The real run_ash_scan: what narrowing decides at its start-failure branch.
 
@@ -2623,6 +2667,7 @@ def test_run_ash_scan_reads_its_kept_start_types():
     assert KEPT_START_TYPES | {START_FAILURE} <= set(scan.error_types)
 
 
+@pytest.mark.unit
 def test_validate_config_entry_types_hold_its_classifier_kinds():
     """The real validate_config: each kind ``_field_and_kind`` gives is an entry
     type, none of the field names it returns beside them is, and nothing is
@@ -2682,6 +2727,7 @@ def _chain_server(levels: int) -> str:
     return "\n".join(lines) + "\n"
 
 
+@pytest.mark.unit
 def test_a_helper_called_with_the_same_arguments_is_read_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2704,6 +2750,7 @@ def test_a_helper_called_with_the_same_arguments_is_read_once(
     assert len(reads) < 100, f"{len(reads)} reads of 16 functions"
 
 
+@pytest.mark.unit
 def test_a_cached_read_does_not_depend_on_what_was_read_first(tmp_path: Path):
     """``g`` and ``h`` call each other. Read from ``g``, ``h``'s answer stops at
     ``g``, which is on the stack; read first, it does not. A result that stopped at
@@ -2754,6 +2801,7 @@ def test_a_cached_read_does_not_depend_on_what_was_read_first(tmp_path: Path):
         assert together[name].response == alone, name
 
 
+@pytest.mark.unit
 def test_example_keys_read_json_and_sketches():
     reader = _reader()
     sketch = """{

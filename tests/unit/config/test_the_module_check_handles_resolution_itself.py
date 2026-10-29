@@ -21,6 +21,8 @@ from automated_security_helper.config import resolve_config as resolve_config_mo
 from automated_security_helper.config.config_validator import ConfigValidator
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def source(tmp_path, monkeypatch) -> Path:

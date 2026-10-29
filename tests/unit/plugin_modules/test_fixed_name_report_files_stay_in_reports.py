@@ -23,6 +23,8 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 AWS = "automated_security_helper.plugin_modules.ash_aws_plugins"
 
 

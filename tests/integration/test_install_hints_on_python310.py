@@ -46,7 +46,7 @@ from packaging.utils import canonicalize_name
 
 import automated_security_helper
 
-pytestmark = pytest.mark.slow
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 GIT_RECORD = {

@@ -40,6 +40,7 @@ def connections(monkeypatch) -> list:
     return tried
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("value", ["YES", "true", "1"])
 def test_offline_a_missing_pinned_tool_is_refused_without_a_connection(
     connections, monkeypatch, tmp_path, value
@@ -55,6 +56,7 @@ def test_offline_a_missing_pinned_tool_is_refused_without_a_connection(
     assert not any((tmp_path / "bin").glob("grype*"))
 
 
+@pytest.mark.unit
 def test_offline_a_url_install_is_refused_without_a_connection(
     connections, monkeypatch, tmp_path
 ):
@@ -72,6 +74,7 @@ def test_offline_a_url_install_is_refused_without_a_connection(
     assert not (tmp_path / "bin" / "tool").exists()
 
 
+@pytest.mark.integration
 def test_online_the_same_install_tries_to_connect(connections, monkeypatch, tmp_path):
     """The control: the recorder sees the download a non-offline install starts."""
     from automated_security_helper.utils import download_utils

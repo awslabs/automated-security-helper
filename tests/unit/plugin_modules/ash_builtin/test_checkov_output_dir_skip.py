@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 # checkov joins walked paths with os.sep; the exclusion is POSIX-only, and on
 # Windows nothing is emitted (see test_nothing_is_emitted_on_windows).
 posix_only = pytest.mark.skipif(os.sep != "/", reason="exclusion is POSIX-only")

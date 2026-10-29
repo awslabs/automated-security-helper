@@ -8,6 +8,8 @@ from automated_security_helper.interactions.run_ash_scan import (
     format_duration,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_logger():

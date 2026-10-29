@@ -22,6 +22,8 @@ from automated_security_helper.utils.inner_run_outcome import (
     record_refusal_outcome,
 )
 
+pytestmark = pytest.mark.unit
+
 RUN = "0123456789abcdef0123456789abcdef"  # pragma: allowlist secret
 
 

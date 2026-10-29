@@ -33,8 +33,12 @@ variant glued into a word, a short canonical); and the str-behavior control
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.config.config_validator import redact_values
 from automated_security_helper.plugins.loader import _masked_module_forms
+
+pytestmark = pytest.mark.unit
 
 MASKED = "segtop_ash_plugins.import_module"
 DIST = "segtop_ash_plugins"

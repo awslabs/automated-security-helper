@@ -14,6 +14,8 @@ import sys
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -25,6 +27,8 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.core.phases import scanner_executor
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.integration
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

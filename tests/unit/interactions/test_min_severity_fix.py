@@ -8,6 +8,10 @@ without running the full scan orchestrator.
 
 from types import SimpleNamespace
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Inline replica of the severity-filtering block from run_ash_scan.py

@@ -111,6 +111,7 @@ def console_logger(request, capsys, monkeypatch):
     logger.handlers = []
 
 
+@pytest.mark.unit
 def test_a_path_with_a_lone_surrogate_is_logged_once(tmp_path, monkeypatch):
     """A name read from bytes that are not UTF-8 holds a lone surrogate
     (os.fsdecode, a tar member read with surrogateescape). Logged as it is, it is
@@ -154,6 +155,7 @@ def _windows_filter_on(logger) -> bool:
     return any(isinstance(f, WindowsSafeFilter) and f._active for f in logger.filters)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("console_logger", ["native", "windows-ci"], indirect=True)
 @pytest.mark.parametrize("text, shown", OBEYED)
 def test_the_console_shows_a_control_sequence(console_logger, capsys, text, shown):
@@ -168,6 +170,7 @@ def test_the_console_shows_a_control_sequence(console_logger, capsys, text, show
     assert not re.search(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", out), repr(out)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("text", COMMANDS)
 def test_no_line_of_the_console_is_a_workflow_command(console_logger, capsys, text):
     console_logger.warning(text)
@@ -177,6 +180,7 @@ def test_no_line_of_the_console_is_a_workflow_command(console_logger, capsys, te
     assert "\\x3a:" in out or "\\x23" in out, repr(out)
 
 
+@pytest.mark.unit
 def test_tab_and_newline_lay_out_a_message(console_logger, capsys):
     console_logger.info("first line\nsecond\tline")
 
@@ -185,6 +189,7 @@ def test_tab_and_newline_lay_out_a_message(console_logger, capsys):
     assert "first line" in out and "second" in out, repr(out)
 
 
+@pytest.mark.unit
 def test_a_message_that_asks_for_markup_shows_controls_too(console_logger, capsys):
     key = escape_markup("a\x1b[2Kb")
     console_logger.info(f"[bold]Key[/bold] {key}", extra=MARKUP)
@@ -193,6 +198,7 @@ def test_a_message_that_asks_for_markup_shows_controls_too(console_logger, capsy
     assert "Key a\\x1b[2Kb" in out, repr(out)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("text, shown", OBEYED)
 def test_the_live_panel_shows_a_control_sequence(text, shown):
     panel = RichLogPanel(max_lines=5)
@@ -210,6 +216,7 @@ def test_the_live_panel_shows_a_control_sequence(text, shown):
     assert shown in rendered, repr(rendered)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("text", COMMANDS)
 def test_no_line_of_the_live_panel_is_a_workflow_command(text):
     """The panel breaks a command in the message itself, as the console handler does.
@@ -303,6 +310,7 @@ def _source_named(tmp_path) -> None:
     _raise_from(str(path), "plain")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "raise_it",
     [
@@ -334,6 +342,7 @@ def test_a_traceback_shows_what_the_error_carries(
     assert not _COMMAND_LINE.search(out), repr(out)
 
 
+@pytest.mark.unit
 def test_a_traceback_names_the_error(traceback_logger, capsys):
     try:
         _raise_from("app.py", "could not read pkgs/a[/x]/b")
@@ -377,6 +386,7 @@ def _ash_log(tmp_path, log) -> str:
     return (tmp_path / f"{name}.log").read_bytes().decode("utf-8")
 
 
+@pytest.mark.unit
 def test_the_log_file_shows_a_messages_controls_once(tmp_path):
     """ash.log is read in a terminal and printed in CI logs, so it shows what a
     message carries as the console does: each control escaped once, CI commands
@@ -400,6 +410,7 @@ _UNSHOWN = [0x200B, 0x200C, 0x200D, 0x2060, 0x2064, 0xFEFF, 0x2028, 0x2029]
 _UNSHOWN += [0xE000, 0xFFFE, 0xFDD0]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("code", _UNSHOWN, ids=lambda code: "u%04x" % code)
 def test_the_console_and_the_log_file_show_it_once(tmp_path, capsys, monkeypatch, code):
     """One set for every sink: the console and ash.log, the same escape, once.
@@ -424,6 +435,7 @@ def test_the_console_and_the_log_file_show_it_once(tmp_path, capsys, monkeypatch
 _UNDECODABLE = "out" + chr(0xDC80) + "dir"
 
 
+@pytest.mark.unit
 def test_a_lone_surrogate_is_shown_in_both_log_files(tmp_path):
     """ash.log could not encode it, so the whole record was dropped with a
     "--- Logging error ---" report. The JSONL log keeps the text, as JSON's own
@@ -457,6 +469,7 @@ def test_a_lone_surrogate_is_shown_in_both_log_files(tmp_path):
     assert [r["message"] for r in records] == [f"Cannot read {_UNDECODABLE}"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("errors", ["strict", "surrogateescape"])
 def test_a_lone_surrogate_on_the_console_is_shown_once(monkeypatch, errors):
     """On a strict stdout and on a lenient one, the record is written with the
@@ -484,6 +497,7 @@ def test_a_lone_surrogate_on_the_console_is_shown_once(monkeypatch, errors):
     assert b"\x80" not in written, written
 
 
+@pytest.mark.unit
 def test_the_log_file_shows_a_markup_records_values_once(tmp_path):
     """A MARKUP record's values were shown by escape_markup already; the file writes
     its text without the tags and does not show them a second time."""
@@ -500,6 +514,7 @@ def test_the_log_file_shows_a_markup_records_values_once(tmp_path):
     assert "\\x1b[2K" in written and "\\\\x" not in written, repr(written)
 
 
+@pytest.mark.unit
 def test_the_log_file_shows_a_tracebacks_controls(tmp_path, monkeypatch):
     """The exception's text in ash.log, as on the console."""
     monkeypatch.delenv("ASH_LOG_TO_STDERR", raising=False)
@@ -517,6 +532,7 @@ def test_the_log_file_shows_a_tracebacks_controls(tmp_path, monkeypatch):
     assert not _COMMAND_LINE.search(written), repr(written)
 
 
+@pytest.mark.unit
 def test_a_traceback_ash_log_formatted_first_is_shown_once_by_the_live_panel(
     tmp_path,
 ):
@@ -556,6 +572,7 @@ def test_a_traceback_ash_log_formatted_first_is_shown_once_by_the_live_panel(
         assert "\\\\x1b" not in text and "\x1b" not in text, text
 
 
+@pytest.mark.unit
 def test_a_record_carrying_only_cached_traceback_text_keeps_it(tmp_path):
     """A filter can render a record's traceback itself, setting exc_text and
     dropping exc_info. ash.log writes that cached text, shown: the formatter's
@@ -651,6 +668,7 @@ def _fresh_process_stderr(case: str) -> str:
     return stderr
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("case", ["warning", "exception"])
 def test_a_warning_logged_before_the_logger_is_set_up_is_shown(case):
     """Until get_logger runs, ASH's logger has no handler, so a warning logged then
@@ -667,11 +685,13 @@ def test_a_warning_logged_before_the_logger_is_set_up_is_shown(case):
     assert "\\x1b]52;c;ZXZpbA==\\x07" in stderr and "\\\\x" not in stderr, repr(stderr)
 
 
+@pytest.mark.integration
 def test_the_stand_in_steps_aside_once_the_logger_has_a_handler():
     """As logging's last resort does: any handler of the logger's own replaces it."""
     assert _fresh_process_stderr("with-a-handler") == ""
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case", ["after-reset", "child-without-propagation", "reloaded"]
 )
@@ -688,6 +708,7 @@ def test_a_warning_no_handler_takes_is_shown_once_however_it_got_there(case):
     assert not _COMMAND_LINE.search(stderr), repr(stderr)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("case", ["made-before-the-import", "another-logger-class"])
 def test_a_warning_of_an_ash_logger_of_another_class_is_shown(case):
     """A stand-in run only through ASH's logger class would miss a logger under
@@ -701,10 +722,12 @@ def test_a_warning_of_an_ash_logger_of_another_class_is_shown(case):
     assert not _COMMAND_LINE.search(stderr), repr(stderr)
 
 
+@pytest.mark.integration
 def test_any_other_logger_keeps_logging_last_resort():
     assert _fresh_process_stderr("not-ash") == "plain text\n"
 
 
+@pytest.mark.integration
 def test_a_child_logger_with_its_own_handler_is_printed_once():
     """Its own handler takes the record, so the stand-in does not write it too."""
     assert _fresh_process_stderr("child-with-a-handler") == "child: plain\n"

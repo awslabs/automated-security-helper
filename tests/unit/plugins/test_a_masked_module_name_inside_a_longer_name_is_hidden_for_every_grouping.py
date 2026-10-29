@@ -44,6 +44,8 @@ from automated_security_helper.plugins.loader import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 MASK = "<value>"
 MASKED = "kqgrpmasked_ash_plugins"
 LITERAL = "kqgrplit_ash_plugins"

@@ -49,6 +49,8 @@ from tests.utils.refusing_proxy import (
     scrub_cloud_credentials,
 )
 
+pytestmark = pytest.mark.integration
+
 # Assembled at runtime so this file holds no key-shaped literal for ASH's own
 # self-scan to report. AWS's documentation placeholder.
 PLANTED_KEY = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002

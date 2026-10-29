@@ -20,10 +20,13 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+import pytest
 import yaml
 
 from tests.unit.cli.test_merge import build_shards, write_shards
 from tests.utils.helpers import importing_this_checkout
+
+pytestmark = pytest.mark.integration
 
 PROBE = "importprobe_ash_plugins"
 PROBE_SOURCE = (

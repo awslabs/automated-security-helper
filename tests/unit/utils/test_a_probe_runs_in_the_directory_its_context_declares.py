@@ -25,6 +25,8 @@ import pytest
 
 from automated_security_helper.utils import content_db_staleness as staleness
 
+pytestmark = pytest.mark.unit
+
 COMMAND = ["grype", "db", "status", "-o", "json"]
 
 

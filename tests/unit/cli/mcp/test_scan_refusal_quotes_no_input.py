@@ -32,6 +32,8 @@ from automated_security_helper.core.enums import RunMode
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.interactions import run_ash_scan as run_module
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-5d1b"
 
 

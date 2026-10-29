@@ -15,6 +15,8 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestEventSubscriptionManager:
     """Test cases for EventSubscriptionManager class."""

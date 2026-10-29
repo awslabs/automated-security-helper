@@ -14,10 +14,14 @@ wins verbatim, even when it is empty.
 
 import subprocess
 
+import pytest
+
 from automated_security_helper.interactions.run_ash_scan import (
     _shown_container_command,
 )
 from automated_security_helper.utils import subprocess_utils
+
+pytestmark = pytest.mark.unit
 
 
 def _result_without_attached_text(args):

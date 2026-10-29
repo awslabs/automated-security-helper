@@ -36,6 +36,8 @@ import pytest
 from automated_security_helper.cli import mcp_tools
 from tests.utils.tool_guard import stub_tool_probes
 
+pytestmark = pytest.mark.unit
+
 
 def _entry(
     name: str, enabled: bool, satisfied: Optional[bool], first_scan: bool = False

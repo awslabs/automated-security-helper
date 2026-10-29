@@ -94,6 +94,7 @@ OWN = f"http://{OWN_HOST}"
         "http://other.example",
     ],
 )
+@pytest.mark.unit
 def test_another_origin_is_refused(status, origin) -> None:
     assert status(OWN_HOST, origin) == 403
 
@@ -102,6 +103,7 @@ def test_another_origin_is_refused(status, origin) -> None:
 @pytest.mark.parametrize(
     "host", ["127.0.0.1:9999", "localhost:3000", "[::1]:5173", "127.0.0.1"]
 )
+@pytest.mark.unit
 def test_another_port_in_the_host_is_refused(status, host) -> None:
     assert status(host, None) == 421
 
@@ -115,11 +117,13 @@ def test_another_port_in_the_host_is_refused(status, host) -> None:
         (f"[::1]:{PORT}", f"http://[::1]:{PORT}"),
     ],
 )
+@pytest.mark.unit
 def test_the_servers_own_origin_is_served(host, origin) -> None:
     assert _streamable_status(host, origin) == 200
     assert _sse_status(host, origin) == 400
 
 
+@pytest.mark.unit
 def test_mcp_command_builds_for_the_port_it_binds(monkeypatch) -> None:
     seen = {}
 
@@ -157,12 +161,14 @@ class _Ctx:
         ("127.0.0.1:80", "http://127.0.0.1"),
     ],
 )
+@pytest.mark.unit
 def test_port_80_serves_its_own_address_written_without_the_port(host, origin) -> None:
     """Clients and browsers leave out the default port."""
     assert _streamable_status(host, origin, port=80) == 200
     assert _sse_status(host, origin, port=80) == 400
 
 
+@pytest.mark.unit
 def test_port_80_still_refuses_another_port() -> None:
     assert _streamable_status("127.0.0.1:8080", None, port=80) == 421
     assert _streamable_status("127.0.0.1", "http://127.0.0.1:8080", port=80) == 403
@@ -172,6 +178,7 @@ def test_port_80_still_refuses_another_port() -> None:
     "transport, post, served_status",
     [("streamable-http", _post_streamable, 200), ("sse", _post_sse, 400)],
 )
+@pytest.mark.integration
 def test_port_0_serves_the_port_the_system_chose(
     monkeypatch, transport, post, served_status
 ) -> None:
@@ -193,6 +200,7 @@ def test_port_0_serves_the_port_the_system_chose(
     assert served["listen_socket"].fileno() == -1, "the socket was left open"
 
 
+@pytest.mark.unit
 def test_a_refused_bind_with_port_0_binds_nothing(monkeypatch) -> None:
     import socket
 
@@ -219,6 +227,7 @@ def test_a_refused_bind_with_port_0_binds_nothing(monkeypatch) -> None:
 
 @pytest.mark.parametrize("build", [build_streamable_http_app, build_sse_app])
 @pytest.mark.parametrize("port", [None, 0])
+@pytest.mark.unit
 def test_a_loopback_app_is_refused_without_the_port_it_listens_on(build, port) -> None:
     """Built for the wrong port, the app would answer 421 to every request."""
     arguments = {} if port is None else {"port": port}
@@ -228,6 +237,7 @@ def test_a_loopback_app_is_refused_without_the_port_it_listens_on(build, port) -
 
 
 @pytest.mark.parametrize("build", [build_streamable_http_app, build_sse_app])
+@pytest.mark.unit
 def test_an_app_that_does_not_check_the_port_needs_none(build) -> None:
     build(mount_path="/x", host="0.0.0.0", allowed_hosts=["ash.example"])  # nosec B104
     build(mount_path="/x", host="0.0.0.0", trust_upstream_host_check=True)  # nosec B104

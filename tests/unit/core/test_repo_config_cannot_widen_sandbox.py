@@ -25,6 +25,8 @@ from automated_security_helper.utils.sandbox.policy import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 REPO_CONFIG = """project_name: scanned
 sandbox:
   mode: bwrap

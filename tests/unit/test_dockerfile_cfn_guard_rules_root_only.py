@@ -50,6 +50,8 @@ from typing import Iterator, List, Optional, Tuple
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 RULES_ENV = "ASH_CFN_GUARD_RULES_DIR"

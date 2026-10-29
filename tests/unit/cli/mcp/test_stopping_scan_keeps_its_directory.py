@@ -50,6 +50,7 @@ def _directory(tmp_path):
     return source, output
 
 
+@pytest.mark.unit
 def test_a_closed_entry_whose_runner_runs_still_occupies_the_directory(tmp_path):
     source, output = _directory(tmp_path)
     registry = get_scan_registry()
@@ -76,6 +77,7 @@ def test_a_closed_entry_whose_runner_runs_still_occupies_the_directory(tmp_path)
     )
 
 
+@pytest.mark.unit
 def test_an_entry_without_a_runner_frees_the_directory_when_it_closes(tmp_path):
     """Workspace projects and direct registrations have no runner to wait for."""
     source, output = _directory(tmp_path)
@@ -92,6 +94,7 @@ def test_an_entry_without_a_runner_frees_the_directory_when_it_closes(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_rescan_right_after_a_cancel_waits_for_the_cancelled_one(
     tmp_path, monkeypatch
 ):

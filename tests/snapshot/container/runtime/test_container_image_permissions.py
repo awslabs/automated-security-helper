@@ -44,7 +44,7 @@ import pytest
 
 from tests.utils.runner_state import developer_runner_env
 
-pytestmark = [pytest.mark.container_runtime]
+pytestmark = [pytest.mark.container_runtime, pytest.mark.e2e]
 
 # The ``ci`` stage's tag, which every leg running this module builds with an explicit
 # ``--build-target ci``; see test_snapshot_container_runtime.py.

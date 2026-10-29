@@ -139,6 +139,7 @@ class TestTheRecorderKnowsGit:
         ],
         ids=["bare", "posix", "windows-backslash", "windows-slash-upper"],
     )
+    @pytest.mark.unit
     def test_git_is_recognized_by_its_file_name(self, program) -> None:
         recorder = GitRecorder()
         recorder(["ssh", "-G"])
@@ -157,6 +158,7 @@ class TestTheRecorderKnowsGit:
         ],
         ids=["ssh", "git-lfs", "git-lfs-exe", "gitk", "directory-named-git"],
     )
+    @pytest.mark.unit
     def test_another_program_is_not_git(self, program) -> None:
         recorder = GitRecorder()
         recorder([program, "clone"])
@@ -205,6 +207,7 @@ def _deliver(workspace: Path, url: str, ref: Optional[str] = None, **kwargs) -> 
 
 class TestGitEnvironment:
     @pytest.mark.parametrize("url", REMOTE_URLS[:2], ids=["https", "ssh"])
+    @pytest.mark.unit
     def test_git_runs_without_the_servers_ssh_agent_askpass_or_prompts(
         self, git, clean_policy_env, monkeypatch, url
     ) -> None:
@@ -234,6 +237,7 @@ class TestGitEnvironment:
             )
 
     @pytest.mark.parametrize("url", REMOTE_URLS[:2], ids=["https", "ssh"])
+    @pytest.mark.unit
     def test_git_runs_without_inherited_proxy_or_token_variables(
         self, git, clean_policy_env, monkeypatch, url
     ) -> None:
@@ -249,6 +253,7 @@ class TestGitEnvironment:
             leaked = sorted(k for k, v in env.items() if v in leaked_values)
             assert not leaked, f"{leaked} reached `{' '.join(call['cmd'])}`"
 
+    @pytest.mark.integration
     def test_git_reads_no_system_global_or_inherited_configuration(
         self, git, clean_policy_env, tmp_path, monkeypatch
     ) -> None:
@@ -331,6 +336,7 @@ class TestGitEnvironment:
                 f"the server's http.proxy applies to `{' '.join(call['cmd'])}`"
             )
 
+    @pytest.mark.unit
     def test_git_is_reached_with_the_url_after_the_end_of_options_marker(
         self, git, clean_policy_env
     ) -> None:
@@ -361,6 +367,7 @@ def _config_flags(cmd: List[str]) -> List[str]:
 
 
 class TestSshKeyId:
+    @pytest.mark.unit
     def test_an_unregistered_ssh_key_id_is_refused_before_git_runs(
         self, git, clean_policy_env
     ) -> None:
@@ -388,6 +395,7 @@ class TestSetSourceGitTool:
     @pytest.mark.parametrize(
         "url", REMOTE_URLS, ids=["https", "ssh", "scp-like", "git", "http-metadata"]
     )
+    @pytest.mark.unit
     def test_a_remote_host_not_on_the_operator_allowlist_is_refused(
         self, http, git, url
     ) -> None:
@@ -400,6 +408,7 @@ class TestSetSourceGitTool:
         )
         assert not git.git_calls, f"git ran for {url}"
 
+    @pytest.mark.unit
     def test_an_unregistered_ssh_key_id_is_refused(self, http, git) -> None:
         _session, headers = http.open_session()
 
@@ -413,6 +422,7 @@ class TestSetSourceGitTool:
         assert not git.git_calls
 
     @pytest.mark.parametrize("form", ["file-url", "plain-path"])
+    @pytest.mark.unit
     def test_a_local_source_is_refused_even_inside_a_grant(
         self, http, git, tmp_path, monkeypatch, form
     ) -> None:
@@ -430,6 +440,7 @@ class TestSetSourceGitTool:
         )
         assert not git.git_calls
 
+    @pytest.mark.unit
     def test_the_python_api_refuses_a_local_source_for_the_stdio_session(
         self, git, tmp_path
     ) -> None:
@@ -450,6 +461,7 @@ class TestSetSourceGitTool:
         ["--upload-pack=touch /tmp/never", "ext::sh -c true"],
         ids=["option", "ext"],
     )
+    @pytest.mark.unit
     def test_a_command_executing_url_is_refused(self, http, git, url) -> None:
         """Control: refused, so the tool path is reached."""
         _session, headers = http.open_session()

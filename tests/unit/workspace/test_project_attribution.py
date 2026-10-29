@@ -50,6 +50,8 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
+pytestmark = pytest.mark.unit
+
 WORKSPACE_PROJECT_KEY = "workspace_project"
 
 

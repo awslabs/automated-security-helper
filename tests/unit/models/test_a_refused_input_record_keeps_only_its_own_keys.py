@@ -31,6 +31,8 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 RESULTS = "ash_aggregated_results.json"
 PLANTED_KEYS = {"x_planted_key": "planted-value-1", "y_planted_key": "planted-value-2"}
 

@@ -137,6 +137,7 @@ def _finish(process: subprocess.Popen) -> None:
     process.stdout.close()
 
 
+@pytest.mark.integration
 def test_a_wrapper_stopped_while_its_scanner_runs_finishes_inside_the_grace():
     process, scanner = _driver("stop")
     try:
@@ -151,6 +152,7 @@ def test_a_wrapper_stopped_while_its_scanner_runs_finishes_inside_the_grace():
     assert scanner in killed, "the stop did not end the running scanner"
 
 
+@pytest.mark.integration
 def test_a_wrapper_stopped_while_it_reaps_finishes_inside_the_grace():
     """The scanner exited on its own; the stop comes during the reap.
 
@@ -171,6 +173,7 @@ def test_a_wrapper_stopped_while_it_reaps_finishes_inside_the_grace():
     assert scanner not in killed, "the stop signalled the reaped scanner's pid"
 
 
+@pytest.mark.integration
 def test_a_stop_whose_deadline_passed_before_the_scanner_exited_still_reaps_once():
     """The scanner outlived STOP_REAP_DEADLINE_SECONDS after the stop.
 
@@ -190,6 +193,7 @@ def test_a_stop_whose_deadline_passed_before_the_scanner_exited_still_reaps_once
     assert b"reaping" in lines, "no reap pass after a stop that outlived its deadline"
 
 
+@pytest.mark.integration
 def test_without_a_stop_the_reap_runs_to_its_own_deadline():
     """Control: the descendant that never goes away keeps the loop running."""
     process, _scanner = _driver("exit")
@@ -206,6 +210,7 @@ def test_without_a_stop_the_reap_runs_to_its_own_deadline():
     assert process.returncode == 0
 
 
+@pytest.mark.unit
 def test_the_stop_deadline_is_inside_the_grace_and_the_normal_one():
     assert 0 < landlock_exec.STOP_REAP_DEADLINE_SECONDS < GRACE_SECONDS
     assert (

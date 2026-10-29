@@ -13,6 +13,8 @@ AshAggregatedResults.model_rebuild()
 
 from automated_security_helper.core.phases.inspect_phase import InspectPhase
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_plugin_context(tmp_path):

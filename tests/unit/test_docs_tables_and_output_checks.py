@@ -201,11 +201,13 @@ OUTPUT_MARKER_DEFECTS = [
 ]
 
 
+@pytest.mark.unit
 def test_output_markers_pass_every_valid_form(fixture_root):
     page = _write(fixture_root, "docs/page.md", CLEAN_OUTPUT_MARKERS)
     assert dc.check_markers([page], fixture_root) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "case,text,line",
     OUTPUT_MARKER_DEFECTS,
@@ -223,6 +225,7 @@ def test_an_output_marker_that_follows_no_run_block_is_reported(
     assert len([f for f in findings if FOLLOWS_NO_RUN_BLOCK in f.message]) == 1
 
 
+@pytest.mark.unit
 def test_an_output_sample_is_compared_exactly_where_the_cli_check_skips_it(
     fixture_root,
 ):
@@ -248,6 +251,7 @@ def test_an_output_sample_is_compared_exactly_where_the_cli_check_skips_it(
         assert (id(block) in samples) != (block.marker.line in reported), block
 
 
+@pytest.mark.unit
 def test_output_normalization_strips_color_box_lines_timings_and_paths():
     """What the comparison ignores: ANSI, Rich's box drawing, durations, the session's
     paths, and runs of whitespace. Nothing else is rewritten."""
@@ -271,6 +275,7 @@ def test_output_normalization_strips_color_box_lines_timings_and_paths():
 OUTPUT_TEXT = "Scanning . with 1 scanner\n│ detect-secrets │ 0 │ 2 │ PASSED │\nResults written to .ash/ash_output\nExit code: 0"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "sample",
     [
@@ -285,6 +290,7 @@ def test_an_output_sample_matches_when_every_line_is_in_the_output(sample):
     assert dc.output_sample_problem(sample, OUTPUT_TEXT, ()) is None
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "sample,missing",
     [
@@ -302,6 +308,7 @@ def test_an_output_sample_fails_on_a_line_the_output_lacks(sample, missing):
     assert line == missing
 
 
+@pytest.mark.unit
 def test_a_changed_count_in_the_reporter_tutorials_sample_is_caught():
     """The count changed to `2 actionable` in the sample of the reporter tutorial's
     "Scan with it" step, where the reporter writes the count of actionable findings on
@@ -437,12 +444,14 @@ ASH_OUTPUT_DEFECTS = [
 ]
 
 
+@pytest.mark.unit
 def test_ash_output_blocks_pass_every_valid_form(fixture_root):
     page = _write(fixture_root, "docs/page.md", CLEAN_ASH_OUTPUT)
     assert dc.check_markers([page], fixture_root) == []
     assert dc.check_config_blocks([page], fixture_root) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "case,text,expected", ASH_OUTPUT_DEFECTS, ids=[c[0] for c in ASH_OUTPUT_DEFECTS]
 )
@@ -454,6 +463,7 @@ def test_ash_output_check_can_fail(fixture_root, case, text, expected):
     _assert_reports(findings, expected)
 
 
+@pytest.mark.unit
 def test_the_status_models_allow_extras_so_pydantic_alone_misses_a_renamed_key():
     """Why the keys are compared explicitly: pydantic keeps an undeclared key here."""
     from automated_security_helper.models.asharp_model import ScannerTargetStatusInfo
@@ -462,6 +472,7 @@ def test_the_status_models_allow_extras_so_pydantic_alone_misses_a_renamed_key()
     ScannerTargetStatusInfo.model_validate({**STATUS_ROW, "missing_reasons": "x"})
 
 
+@pytest.mark.unit
 def test_open_output_models_are_the_sarif_property_bag():
     """OPEN_OUTPUT_MODELS exempts these from the key comparison; pin why."""
     from automated_security_helper.schemas import sarif_schema_model
@@ -592,11 +603,13 @@ DEFAULT_DEFECTS = [
 ]
 
 
+@pytest.mark.unit
 def test_default_columns_pass_every_valid_form(tmp_path):
     page = _write(tmp_path, "docs/page.md", CLEAN_DEFAULTS)
     assert dc.check_option_tables([page], tmp_path) == []
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case,text,expected,line", DEFAULT_DEFECTS, ids=[c[0] for c in DEFAULT_DEFECTS]
 )
@@ -605,6 +618,7 @@ def test_default_columns_can_fail(tmp_path, case, text, expected, line):
     _assert_reports(dc.check_option_tables([page], tmp_path), expected, line)
 
 
+@pytest.mark.unit
 def test_default_phrases_not_compared_are_pinned():
     """Four phrases stand for a default; each is one the reference generators write,
     and each is accepted only where the code's default is what it says."""
@@ -648,6 +662,7 @@ class _PlatformModel:
         return Computed
 
 
+@pytest.mark.unit
 def test_a_phrase_is_accepted_only_where_the_code_computes_the_default():
     keys = dc._model_keys(_PlatformModel.build())
     assert dc.default_problem("computed at run time", keys["workers"]) is None
@@ -693,11 +708,13 @@ CLEAN_ENV_TABLE = """# Variables
 """
 
 
+@pytest.mark.unit
 def test_env_table_defaults_pass_when_the_code_gives_them(tmp_path):
     page = _write(tmp_path, "docs/page.md", CLEAN_ENV_TABLE)
     assert dc.check_env_vars([page], tmp_path, read=_read_set(**ENV_DEFAULTS)) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "row,expected",
     [
@@ -725,6 +742,7 @@ def test_env_table_defaults_can_fail(tmp_path, row, expected):
     )
 
 
+@pytest.mark.integration
 def test_the_generator_gives_each_variables_default_entries():
     """The check's defaults are the generator's: what its Default column renders."""
     generator = dc._load_by_path(
@@ -859,12 +877,14 @@ TERRAFORM_DEFECTS = [
 ]
 
 
+@pytest.mark.integration
 def test_terraform_tables_pass_every_valid_form(tmp_path, terraform_code):
     page = _write(tmp_path, "docs/page.md", CLEAN_TERRAFORM)
     assert dc.check_option_tables([page], tmp_path, terraform_code) == []
     assert dc.check_env_vars([page], tmp_path, read=_read_set()) == []
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case,text,expected,line", TERRAFORM_DEFECTS, ids=[c[0] for c in TERRAFORM_DEFECTS]
 )
@@ -913,6 +933,7 @@ def _listed(section) -> list[str]:
     return sorted({spec.names[0] for spec in section.keys.values() if spec.listed})
 
 
+@pytest.mark.integration
 def test_a_complete_table_passes_when_every_key_has_a_row(tmp_path, workflow_code):
     page = _write(tmp_path, "docs/page.md", CLEAN_COMPLETE)
     assert dc.check_option_tables([page], tmp_path, workflow_code) == []
@@ -930,6 +951,7 @@ def test_a_complete_table_passes_when_every_key_has_a_row(tmp_path, workflow_cod
     assert "--help" not in _listed(section)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case,text,expected,line",
     [
@@ -995,6 +1017,7 @@ def test_a_complete_table_reports_each_key_no_row_names(
     _assert_reports(findings, expected, line)
 
 
+@pytest.mark.unit
 def test_generic_and_help_keys_need_no_row_in_a_complete_table(tmp_path):
     """--help, and an option ASH reads from every scanner undeclared, are not the
     section's own."""
@@ -1101,11 +1124,13 @@ FILE_DEFECTS = [
 ]
 
 
+@pytest.mark.integration
 def test_file_names_pass_every_valid_form(tmp_path, file_code):
     page = _write(tmp_path, "docs/page.md", CLEAN_FILES)
     assert dc.check_report_files([page], tmp_path, file_code) == []
 
 
+@pytest.mark.integration
 def test_the_files_a_reporter_writes_are_read_from_its_code(tmp_path, file_code):
     """The S3 reporter keeps a local copy of what it uploads, named in its report()
     from the format it uploads in, with no companion_file_names to declare it."""
@@ -1136,6 +1161,7 @@ class FakeReporter(ReporterPluginBase):
 """
 
 
+@pytest.mark.unit
 def test_reporter_writes_name_only_files_the_code_spells_out():
     """A name built from a value the code does not spell out (an option) is not
     guessed; options' file defaults are read from the options model instead."""
@@ -1149,6 +1175,7 @@ def test_reporter_writes_name_only_files_the_code_spells_out():
     }
 
 
+@pytest.mark.unit
 def test_declared_companion_names_cover_every_choice_of_an_option():
     """A reporter that declares its companion file from an option with a fixed set
     of values (the S3 reporter's file_format) declares one name per value, not only
@@ -1180,6 +1207,7 @@ def test_declared_companion_names_cover_every_choice_of_an_option():
     }
 
 
+@pytest.mark.integration
 def test_an_example_plugins_report_passes_where_its_plugin_is_documented(
     tmp_path, file_code
 ):
@@ -1198,6 +1226,7 @@ def test_an_example_plugins_report_passes_where_its_plugin_is_documented(
     assert [(f.path, f.line) for f in findings] == [("docs/other.md", 1)], findings
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case,text,expected", FILE_DEFECTS, ids=[c[0] for c in FILE_DEFECTS]
 )
@@ -1206,6 +1235,7 @@ def test_report_file_check_can_fail(tmp_path, file_code, case, text, expected):
     _assert_reports(dc.check_report_files([page], tmp_path, file_code), expected, 1)
 
 
+@pytest.mark.integration
 def test_renaming_a_reporters_extension_fails_the_pages_that_name_it(
     tmp_path, file_code
 ):
@@ -1241,6 +1271,7 @@ def test_renaming_a_reporters_extension_fails_the_pages_that_name_it(
     )
 
 
+@pytest.mark.integration
 def test_historical_docs_are_not_held_to_todays_file_names(tmp_path, file_code):
     page = _write(tmp_path, "CHANGELOG.md", "Removed `ash.sarf`.\n")
     assert dc.check_report_files([page], tmp_path, file_code) == []
@@ -1306,11 +1337,13 @@ SCANNER_DEFECTS = [
 ]
 
 
+@pytest.mark.unit
 def test_scanner_tables_pass_every_valid_form(tmp_path):
     page = _write(tmp_path, "docs/page.md", CLEAN_SCANNER_TABLES)
     assert dc.check_scanner_names([page], tmp_path) == []
 
 
+@pytest.mark.unit
 def test_the_scanner_check_counts_what_it_examined(tmp_path):
     """A note with the count, so a check that stopped finding its columns or names
     shows it, beside the findings."""
@@ -1322,6 +1355,7 @@ def test_the_scanner_check_counts_what_it_examined(tmp_path):
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "case,text,expected", SCANNER_DEFECTS, ids=[c[0] for c in SCANNER_DEFECTS]
 )
@@ -1330,6 +1364,7 @@ def test_scanner_name_check_can_fail(tmp_path, case, text, expected):
     _assert_reports(dc.check_scanner_names([page], tmp_path), expected, 3)
 
 
+@pytest.mark.unit
 def test_a_scanner_inventory_table_is_checked_in_both_directions(tmp_path):
     """coverage.md's By scanner table, marked complete: a missing row fails too."""
     section, _problem = dc.options_section("scanners", dc.load_config_models())
@@ -1385,6 +1420,7 @@ def _with_config(config: str) -> str:
     return PAGE_PLUGIN + f"{FENCE}yaml\n{config}{FENCE}\n"
 
 
+@pytest.mark.integration
 def test_a_page_plugin_config_validates_against_the_pages_module(tmp_path):
     page = _write(
         tmp_path,
@@ -1399,6 +1435,7 @@ def test_a_page_plugin_config_validates_against_the_pages_module(tmp_path):
     assert "acme_plugins" not in sys.modules, "the page's module was imported here"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case,config,expected",
     [
@@ -1443,6 +1480,7 @@ def test_plugin_names_next_to_an_outside_module_can_fail(
     _assert_reports(dc.check_config_blocks([page], tmp_path), expected)
 
 
+@pytest.mark.unit
 def test_a_name_far_from_every_builtin_next_to_an_uninstalled_module_passes(tmp_path):
     """A third-party plugin the docs environment cannot import is not checked further."""
     page = _write(
@@ -1454,6 +1492,7 @@ def test_a_name_far_from_every_builtin_next_to_an_uninstalled_module_passes(tmp_
     assert dc.check_config_blocks([page], tmp_path) == []
 
 
+@pytest.mark.unit
 def test_plugin_configs_are_found_by_base_class():
     """RuffSecurityConfig does not end in ScannerConfig; it is still a scanner config."""
     import types
@@ -1472,6 +1511,7 @@ def test_plugin_configs_are_found_by_base_class():
     assert found["scanners"] == {"ruff-security": RuffSecurityConfig}
 
 
+@pytest.mark.unit
 def test_the_package_configs_found_by_base_class_are_the_ones_found_by_suffix():
     models = dc.load_config_models()
     for section, suffix in (
@@ -1492,6 +1532,7 @@ def test_the_package_configs_found_by_base_class_are_the_ones_found_by_suffix():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "reason",
     [
@@ -1516,6 +1557,7 @@ def test_a_reason_that_names_no_cause_is_a_placeholder(fixture_root, reason):
     _assert_reports(dc.check_markers([page], fixture_root), "names no cause", 1)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "reason",
     [
@@ -1535,6 +1577,7 @@ def test_a_reason_that_names_a_cause_passes(fixture_root, reason):
     assert dc.check_markers([page], fixture_root) == []
 
 
+@pytest.mark.unit
 def test_a_kind_other_reason_must_say_what_the_file_is(fixture_root):
     vague = _write(
         fixture_root,
@@ -1553,6 +1596,7 @@ def test_a_kind_other_reason_must_say_what_the_file_is(fixture_root):
         assert dc.check_markers([fine], fixture_root) == [], reason
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "span,expected",
     [
@@ -1573,6 +1617,7 @@ def test_config_paths_the_check_used_to_skip_are_checked(tmp_path, span, expecte
     _assert_reports(dc.check_option_tables([page], tmp_path), expected, 1)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "span",
     [
@@ -1600,6 +1645,7 @@ def _env_read_set():
     return read
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "text,expected",
     [
@@ -1632,6 +1678,7 @@ def test_env_families_and_env_tables_are_checked_strictly(tmp_path, text, expect
     _assert_reports(dc.check_env_vars([page], tmp_path, read=_env_read_set()), expected)
 
 
+@pytest.mark.unit
 def test_env_families_and_tables_pass_their_valid_forms(tmp_path):
     page = _write(
         tmp_path,
@@ -1642,6 +1689,7 @@ def test_env_families_and_tables_pass_their_valid_forms(tmp_path):
     assert dc.check_env_vars([page], tmp_path, read=_env_read_set()) == []
 
 
+@pytest.mark.unit
 def test_reporter_classes_come_from_the_modules_not_the_managers_cache():
     """The plugin manager caches its reporter list on first use, which can be before
     the AWS plugin module is imported; the companion files must not depend on that."""
@@ -1655,6 +1703,7 @@ def test_reporter_classes_come_from_the_modules_not_the_managers_cache():
     assert "S3Reporter" in found
 
 
+@pytest.mark.unit
 def test_a_variable_table_is_an_env_table_when_most_rows_name_env_variables(tmp_path):
     """environment-variables.md lists http_proxy among upper-case names; a Terraform
     module's lower-case variables are not environment variables."""
@@ -1671,6 +1720,7 @@ def test_a_variable_table_is_an_env_table_when_most_rows_name_env_variables(tmp_
     assert not dc._is_env_table(terraform) and dc._is_options_table(terraform, keys)
 
 
+@pytest.mark.unit
 def test_expect_exit_any_needs_an_output_sample(fixture_root):
     """expect-exit=any passes on any exit code; only a compared sample checks the block."""
     unchecked = _write(
@@ -1694,6 +1744,7 @@ def test_expect_exit_any_needs_an_output_sample(fixture_root):
     assert dc.check_markers([checked], fixture_root) == []
 
 
+@pytest.mark.unit
 def test_a_column_headed_environment_is_not_a_column_of_variables(tmp_path):
     page = _write(
         tmp_path,
@@ -1703,6 +1754,7 @@ def test_a_column_headed_environment_is_not_a_column_of_variables(tmp_path):
     assert dc.check_env_vars([page], tmp_path, read=_env_read_set()) == []
 
 
+@pytest.mark.unit
 def test_an_env_default_cell_saying_none_passes_when_the_code_gives_none_too(tmp_path):
     read = _read_set(ASH_FAKE_DIR=["`.ash/.ash.yaml`", "not set"])
     page = _write(
@@ -1720,6 +1772,7 @@ def _typo_config() -> str:
     )
 
 
+@pytest.mark.integration
 def test_a_plugin_module_saved_at_the_project_root_is_imported(tmp_path):
     page = _write(
         tmp_path,
@@ -1735,6 +1788,7 @@ def test_a_plugin_module_saved_at_the_project_root_is_imported(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_the_page_module_runs_without_the_callers_credentials(tmp_path, monkeypatch):
     """The saved module refuses to import when it can see AWS_PROFILE. The typo is
     reported only when the module imported, so the report shows the variable stayed
@@ -1751,6 +1805,7 @@ def test_the_page_module_runs_without_the_callers_credentials(tmp_path, monkeypa
     )
 
 
+@pytest.mark.unit
 def test_expect_exit_any_needs_a_sample_with_something_to_compare(fixture_root):
     page = _write(
         fixture_root,
@@ -1765,6 +1820,7 @@ def test_expect_exit_any_needs_a_sample_with_something_to_compare(fixture_root):
     )
 
 
+@pytest.mark.unit
 def test_a_sample_word_matches_only_a_whole_word_of_the_output():
     assert dc.output_sample_problem("OK", "BROKEN", ()) == (0, "OK")
     assert dc.output_sample_problem("OK", "status: OK.", ()) is None
@@ -1780,6 +1836,7 @@ def test_a_sample_word_matches_only_a_whole_word_of_the_output():
     assert dc.output_sample_problem("Findings...", "MyFindingsList", ()) is not None
 
 
+@pytest.mark.unit
 def test_terraform_variables_read_one_line_blocks_comments_and_trailing_commas():
     text = (
         'variable "a" {}\nvariable "b" { default = 1 }\n'
@@ -1795,6 +1852,7 @@ def test_terraform_variables_read_one_line_blocks_comments_and_trailing_commas()
     }
 
 
+@pytest.mark.integration
 def test_urls_and_calls_are_not_file_names(tmp_path, file_code):
     page = _write(
         tmp_path,
@@ -1804,6 +1862,7 @@ def test_urls_and_calls_are_not_file_names(tmp_path, file_code):
     assert dc.check_report_files([page], tmp_path, file_code) == []
 
 
+@pytest.mark.unit
 def test_a_capitalized_invented_scanner_is_checked(tmp_path):
     page = _write(
         tmp_path, "docs/page.md", "| Scanner | Type |\n|---|---|\n| Gitleakz | x |\n"
@@ -1896,6 +1955,7 @@ KEY_TABLES = [
 ]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case,text", NOT_KEY_TABLES, ids=[case for case, _text in NOT_KEY_TABLES]
 )
@@ -1906,6 +1966,7 @@ def test_a_table_whose_rows_name_no_keys_needs_no_marker(tmp_path, case, text):
     assert dc.check_option_tables([page], tmp_path, REPO_ROOT) == []
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "case,text", KEY_TABLES, ids=[case for case, _text in KEY_TABLES]
 )
@@ -1916,6 +1977,7 @@ def test_a_table_whose_rows_name_keys_needs_a_marker(tmp_path, case, text):
     )
 
 
+@pytest.mark.integration
 def test_the_keys_a_row_may_name_come_from_every_section_kind(tmp_path):
     """One key from each kind of section an options marker can name, in a code tree
     that has one of each."""

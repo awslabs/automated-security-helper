@@ -34,6 +34,8 @@ from tests.unit.test_powershell_wrapper_matches_ash import (
     _IMAGE_NAMES,
 )
 
+pytestmark = pytest.mark.unit
+
 SCAN = [
     "scan",
     "--mode",

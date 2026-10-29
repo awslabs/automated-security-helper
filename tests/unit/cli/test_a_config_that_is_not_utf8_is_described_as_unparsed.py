@@ -34,6 +34,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 #: Valid YAML in Latin-1: "é" is the single byte 0xE9, which UTF-8 refuses. The
 #: alias-like value is a canary: no refusal of this file may quote its text.
 LATIN1 = "project_name: café\napi_key: *Abc123secretcanary\n".encode("latin-1")

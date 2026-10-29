@@ -52,6 +52,8 @@ from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils.inner_run_outcome import mark_run_completed
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+pytestmark = pytest.mark.unit
+
 REFERENCE = "${ASH_PROBE_SEV:LOW}"
 FIELD = "global_settings.severity_threshold"
 RESULTS = "ash_aggregated_results.json"

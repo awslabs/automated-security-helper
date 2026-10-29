@@ -31,6 +31,8 @@ from automated_security_helper.utils.error_text import (
     traceback_text,
 )
 
+pytestmark = pytest.mark.unit
+
 SGR_ON = "\x1b[1m"
 SGR_OFF = "\x1b[0m"
 CSI_K = "\x1b[K"

@@ -56,6 +56,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
 )
 from tests.utils.secret_bearing_scan import isolate_from_aws
 
+pytestmark = pytest.mark.unit
+
 AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 OPERATOR_BUCKET = "operator-bucket"
 OPERATOR_REGION = "us-west-2"

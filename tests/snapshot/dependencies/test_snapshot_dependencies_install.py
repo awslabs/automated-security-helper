@@ -39,6 +39,8 @@ from tests.snapshot.support.cli import (
     simulated_host,
 )
 
+pytestmark = pytest.mark.unit
+
 PINNED_PYTHON = "python3"
 REAL_PYTHON = sys.executable
 

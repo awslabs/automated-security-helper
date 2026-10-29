@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 ESC, BEL = chr(0x1B), chr(0x07)
 OSC52 = ESC + "]52;c;ZXZpbA==" + BEL
 MASK = "::add-mask::explorer-mask-831"

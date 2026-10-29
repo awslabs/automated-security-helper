@@ -36,6 +36,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLUGINS = "ash-agent-plugins/agentic-coding/plugins/"
 BASE_MCP = "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json"

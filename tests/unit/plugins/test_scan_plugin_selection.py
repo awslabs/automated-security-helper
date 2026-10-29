@@ -473,6 +473,7 @@ def _assert_no_snyk_on_the_scans_path(proc: _Process) -> None:
     )
 
 
+@pytest.mark.integration
 class TestALaterScansModulesTakePart:
     def test_a_module_only_the_second_scan_names_gets_a_missing_row(self, tmp_path):
         """The first scan resolves the registry; the second names snyk, absent here."""
@@ -560,6 +561,7 @@ def _records(scan: dict, level: str) -> List[str]:
     return [r["message"] for r in scan["left_out"] if r["level"] == level]
 
 
+@pytest.mark.integration
 class TestWhatAScanLeavesOutIsLogged:
     """A scan counts the registered plugins it leaves out at INFO, and names them at DEBUG.
 
@@ -622,6 +624,7 @@ class TestWhatAScanLeavesOutIsLogged:
         assert "HelperScanner" in debug, debug
 
 
+@pytest.mark.integration
 class TestThePluginRootNamesNoPlugin:
     """ASH's plugin root holds every package ASH ships; naming it refuses the scan.
 
@@ -668,6 +671,7 @@ class TestThePluginRootNamesNoPlugin:
         assert scan["rows"] is None, scan
 
 
+@pytest.mark.integration
 class TestEventHandlersFollowTheScansModules:
     def test_a_handler_an_earlier_scan_named_does_not_fire_in_a_later_scan(
         self, tmp_path
@@ -785,6 +789,7 @@ class TestEventHandlersFollowTheScansModules:
         )
 
 
+@pytest.mark.integration
 class TestConvertersFollowTheScansModules:
     def test_a_converter_an_earlier_scan_named_does_not_run_in_a_later_scan(
         self, tmp_path
@@ -814,6 +819,7 @@ class TestConvertersFollowTheScansModules:
         )
 
 
+@pytest.mark.integration
 class TestReportersFollowTheScansModules:
     def test_a_reporter_an_earlier_scan_named_does_not_run_in_a_workspace_scan(
         self, tmp_path
@@ -907,6 +913,7 @@ PARENT_PACKAGE = "zzparent_ash_plugins"
 CHILD_PACKAGE = f"{PARENT_PACKAGE}.cloud"
 
 
+@pytest.mark.integration
 class TestAPackageDoesNotSelectItsSubpackagesPlugins:
     """Naming a package selects what it defines, imports or lists, in either order.
 
@@ -980,6 +987,7 @@ class TestAPackageDoesNotSelectItsSubpackagesPlugins:
         )
 
 
+@pytest.mark.integration
 class TestPluginClassesWithTheSameName:
     """Registrations are told apart by module path and class name.
 
@@ -1095,6 +1103,7 @@ def _plugin_module(root: Path, name: str, class_name: str) -> type:
     return getattr(importlib.import_module(name), class_name)
 
 
+@pytest.mark.unit
 class TestTheResolvedListFollowsRegistration:
     """On a private manager, so the process-wide registry is not touched."""
 
@@ -1129,6 +1138,7 @@ class TestTheResolvedListFollowsRegistration:
         ) == [late]
 
 
+@pytest.mark.unit
 class TestRegistrationsAreKeyedByModuleAndName:
     """On a private manager, so the process-wide registry is not touched."""
 

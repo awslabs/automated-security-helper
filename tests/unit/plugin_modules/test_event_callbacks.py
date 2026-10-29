@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker import (
     handle_suppression_expiration_check,
 )
@@ -14,6 +16,9 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     AshConfigGlobalSettingsSection,
 )
+
+
+pytestmark = pytest.mark.unit
 
 
 class TestSuppressionExpirationChecker:

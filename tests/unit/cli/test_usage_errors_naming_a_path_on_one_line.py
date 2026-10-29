@@ -27,6 +27,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import AshTyperGroup, app
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def long_dir(tmp_path) -> Path:

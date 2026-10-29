@@ -43,6 +43,8 @@ from automated_security_helper.utils.subprocess_utils import (
 )
 from tests.utils.cmd_exe_model import delivered, reads_as_a_command
 
+pytestmark = pytest.mark.unit
+
 
 @patch("platform.system", new=lambda: "Windows")
 @patch("subprocess.Popen")

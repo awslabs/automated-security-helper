@@ -52,6 +52,8 @@ from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 from tests.utils.stand_ins import on_windows, write_stand_in
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

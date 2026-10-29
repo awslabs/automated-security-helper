@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
+import pytest
 from rich.text import Text
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -35,6 +36,8 @@ from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 PHASES = (
     Path(__file__).resolve().parents[4]

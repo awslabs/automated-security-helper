@@ -65,7 +65,10 @@ PluginContext.model_rebuild()
 
 #: A tree built without ``git init`` is outside git wherever tmp_path is
 #: (tests/unit/conftest.py).
-pytestmark = pytest.mark.usefixtures("no_checkout_above_tmp_path")
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.usefixtures("no_checkout_above_tmp_path"),
+]
 
 DEFAULT_OUTPUT = ".ash/ash_output"
 

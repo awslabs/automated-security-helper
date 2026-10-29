@@ -52,7 +52,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
@@ -66,11 +65,6 @@ from tests.utils.bare_install_names import (
     normalize,
 )
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, iter_repo_files
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - exercised only on 3.10
-    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -173,6 +167,7 @@ def _offenders(root: Path) -> list[str]:
     ]
 
 
+@pytest.mark.integration
 def test_no_code_or_docs_page_installs_ash_by_a_bare_name():
     offenders = _offenders(REPO_ROOT)
     assert offenders == [], (
@@ -184,6 +179,7 @@ def test_no_code_or_docs_page_installs_ash_by_a_bare_name():
     )
 
 
+@pytest.mark.integration
 def test_the_gate_reads_the_files_that_carried_bare_name_hints():
     """A walk that silently read nothing would pass the gate above."""
     scanned = {p.relative_to(REPO_ROOT).as_posix() for p in _scanned_files(REPO_ROOT)}
@@ -454,6 +450,7 @@ RESOLVING_OR_UNRELATED = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "text", BARE_NAME_INSTALLS.values(), ids=BARE_NAME_INSTALLS.keys()
 )
@@ -461,6 +458,7 @@ def test_bare_name_installs_are_reported(text):
     assert find_bare_installs(text), f"not reported: {text!r}"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "text", RESOLVING_OR_UNRELATED.values(), ids=RESOLVING_OR_UNRELATED.keys()
 )
@@ -570,6 +568,7 @@ PYTHON_RESOLVING_OR_UNRELATED = {
 }
 
 
+@pytest.mark.unit
 def test_the_exported_constants_the_matcher_folds_are_the_real_ones():
     """The matcher reads ``ASH_DISTRIBUTION_NAME`` from other modules by value."""
     from automated_security_helper.utils import ash_install
@@ -579,6 +578,7 @@ def test_the_exported_constants_the_matcher_folds_are_the_real_ones():
     }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "source",
     PYTHON_BARE_NAME_INSTALLS.values(),
@@ -590,6 +590,7 @@ def test_python_shapes_are_reported(tmp_path, source):
     assert find_in_file(path), source
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "source",
     PYTHON_RESOLVING_OR_UNRELATED.values(),
@@ -601,6 +602,7 @@ def test_python_shapes_that_resolve_or_are_unrelated_are_not_reported(tmp_path, 
     assert find_in_file(path) == []
 
 
+@pytest.mark.integration
 def test_a_planted_tree_is_reported_line_by_line(tmp_path):
     """The gate's own walk, run over a planted tree, reports exactly the bad lines."""
     guide = tmp_path / "docs" / "content" / "docs" / "guide.md"
@@ -670,6 +672,7 @@ def test_a_planted_tree_is_reported_line_by_line(tmp_path):
     }
 
 
+@pytest.mark.integration
 def test_planted_lines_for_other_installers_are_reported(tmp_path):
     """pipenv, rye, conda and uv add lines are reported through the gate's own walk."""
     page = tmp_path / "docs" / "content" / "docs" / "installers.md"
@@ -715,6 +718,7 @@ def _git(root: Path, *args: str) -> None:
     )
 
 
+@pytest.mark.integration
 def test_in_a_checkout_only_tracked_files_are_read(tmp_path):
     """An editor's swap file or a build output is not a file the repository ships.
 
@@ -735,6 +739,7 @@ def test_in_a_checkout_only_tracked_files_are_read(tmp_path):
     ]
 
 
+@pytest.mark.integration
 def test_without_a_checkout_the_walk_skips_dependency_trees(tmp_path):
     """No git (an unpacked sdist, say): every file is read, node_modules excepted."""
     readme = tmp_path / "deploy" / "README.md"
@@ -753,6 +758,7 @@ def test_without_a_checkout_the_walk_skips_dependency_trees(tmp_path):
     ]
 
 
+@pytest.mark.integration
 def test_a_file_the_gate_cannot_read_fails_it(tmp_path):
     """A text file that is not UTF-8 is an error, not a file skipped unread."""
     page = tmp_path / "docs" / "page.md"
@@ -762,6 +768,7 @@ def test_a_file_the_gate_cannot_read_fails_it(tmp_path):
         _offenders(tmp_path)
 
 
+@pytest.mark.unit
 def test_the_mcp_testing_guide_keeps_the_checkouts_extras():
     """Every ``uv sync`` command line in the guide keeps the developer's extras.
 
@@ -781,6 +788,7 @@ def test_the_mcp_testing_guide_keeps_the_checkouts_extras():
     assert [line for line in syncs if "--inexact" not in line] == [], syncs
 
 
+@pytest.mark.unit
 def test_the_mcp_testing_guide_does_not_call_the_ash_package_warning_harmless():
     """uv's warning about a package named ``ash`` means the unrelated project ran.
 
@@ -809,6 +817,7 @@ def _requirement_names(requirements: list[str]) -> list[str]:
     ]
 
 
+@pytest.mark.unit
 def test_the_example_plugin_package_declares_no_dependency_on_ash():
     """The example is a ``[project]`` package with no requirement on ASH's name.
 
@@ -846,6 +855,7 @@ def test_the_example_plugin_package_declares_no_dependency_on_ash():
     ), entries
 
 
+@pytest.mark.unit
 def test_the_example_plugin_package_says_why_ash_is_not_a_dependency():
     """The pyproject and the README both tell a copier not to add the dependency.
 
@@ -866,6 +876,7 @@ def test_the_example_plugin_package_says_why_ash_is_not_a_dependency():
     assert "./examples/ash_plugins_example" in readme
 
 
+@pytest.mark.unit
 def test_the_example_plugin_package_offers_no_version_constraint_on_ash():
     """No line, commented out or not, offers ``automated-security-helper = "*"``.
 

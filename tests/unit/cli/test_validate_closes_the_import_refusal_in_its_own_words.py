@@ -23,6 +23,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 IMPORT_NAMING = "which failed to import, so the plugins it declares are not loaded."
 IMPORT_CLOSING = (
     "Nothing was imported. Install what the module needs, or remove the entry "

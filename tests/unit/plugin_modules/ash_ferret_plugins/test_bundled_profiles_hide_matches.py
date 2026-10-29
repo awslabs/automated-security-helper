@@ -9,11 +9,14 @@ output, so no profile ASH ships turns it on: choosing a bundled profile must not
 put matched values on disk.
 """
 
+import pytest
 import yaml
 
 from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
     DEFAULT_FERRET_CONFIG,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _bundled():

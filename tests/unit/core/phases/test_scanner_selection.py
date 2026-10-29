@@ -11,6 +11,8 @@ import pytest
 
 from automated_security_helper.core.phases.scanner_selection import operator_selection
 
+pytestmark = pytest.mark.unit
+
 
 def _scanner(enabled=True, python_only=True):
     def is_python_only():

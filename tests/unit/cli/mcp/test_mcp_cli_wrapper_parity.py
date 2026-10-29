@@ -43,6 +43,8 @@ from automated_security_helper.cli.main import app as ash_app
 from automated_security_helper.cli.mcp import mcp_command
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 
+pytestmark = pytest.mark.unit
+
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 

@@ -49,6 +49,8 @@ from automated_security_helper.utils.rich_log_handler import (
     RichLogPanel,
 )
 
+pytestmark = pytest.mark.unit
+
 _names = itertools.count()
 
 #: A raw control, other than tab and newline, that a terminal acts on.

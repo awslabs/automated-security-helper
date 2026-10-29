@@ -41,6 +41,8 @@ from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins.events import AshEventType
 
+pytestmark = pytest.mark.unit
+
 
 class _StubReporterConfig(ReporterPluginConfigBase):
     name: Literal["stub-reporter"] = "stub-reporter"

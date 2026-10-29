@@ -25,6 +25,8 @@ from automated_security_helper.utils.terminal_text import (
     shown_not_obeyed,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The bidirectional and format controls the console shows: they reorder or hide
 #: the text around them, so they are written as escapes like any other control.
 BIDI_AND_FORMAT = (

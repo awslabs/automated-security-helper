@@ -22,6 +22,8 @@ from automated_security_helper.cli.mcp.workspace import (
     mcp_scan_workspace,
 )
 
+pytestmark = pytest.mark.unit
+
 MARKER = "OUTSIDE-THE-ROOTS-4c1d"
 
 

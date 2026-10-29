@@ -24,6 +24,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.integration
+
 
 def _git_env(home: Path) -> Dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}

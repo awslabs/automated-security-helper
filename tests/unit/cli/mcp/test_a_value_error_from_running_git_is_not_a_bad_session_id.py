@@ -100,6 +100,7 @@ def _subcommand(cmd: List[str]) -> str:
 
 
 @pytest.mark.parametrize("step", ["clone", "fetch", "checkout"])
+@pytest.mark.unit
 def test_a_value_error_from_a_git_step_is_a_git_failure(
     delivery, monkeypatch, step
 ) -> None:
@@ -122,6 +123,7 @@ def test_a_value_error_from_a_git_step_is_a_git_failure(
     assert not _source_tree(delivery).exists(), "the failed step left its tree"
 
 
+@pytest.mark.unit
 def test_a_nul_character_in_the_ref_is_refused_before_git_runs(delivery) -> None:
     """The ref is refused with the other refs git would read as something else, before
     the session's workspace is made: Popen never has to refuse the fetch's argv."""
@@ -133,6 +135,7 @@ def test_a_nul_character_in_the_ref_is_refused_before_git_runs(delivery) -> None
     assert not _source_tree(delivery).exists(), "a refused ref made a tree"
 
 
+@pytest.mark.unit
 def test_a_url_the_file_system_encoding_cannot_write_is_refused_before_git_runs(
     delivery,
 ) -> None:
@@ -148,6 +151,7 @@ def test_a_url_the_file_system_encoding_cannot_write_is_refused_before_git_runs(
     assert not _source_tree(delivery).exists(), "a refused url made a tree"
 
 
+@pytest.mark.integration
 def test_a_second_delivery_git_cannot_run_for_leaves_the_first_tree_to_scan(
     delivery, monkeypatch
 ) -> None:
@@ -183,6 +187,7 @@ def test_a_second_delivery_git_cannot_run_for_leaves_the_first_tree_to_scan(
 
 
 @pytest.mark.parametrize("session_id", REFUSED_SESSION_IDS)
+@pytest.mark.unit
 def test_a_session_id_the_workspace_cannot_be_made_for_is_still_invalid_session_id(
     delivery, session_id
 ) -> None:
@@ -194,6 +199,7 @@ def test_a_session_id_the_workspace_cannot_be_made_for_is_still_invalid_session_
 
 
 @pytest.mark.parametrize("session_id", REFUSED_SESSION_IDS)
+@pytest.mark.unit
 def test_set_source_git_refuses_the_session_id_with_its_own_error(
     delivery, session_id
 ) -> None:
@@ -206,6 +212,7 @@ def test_set_source_git_refuses_the_session_id_with_its_own_error(
     assert not delivery["workspace"].exists(), "a refused session id made a workspace"
 
 
+@pytest.mark.unit
 def test_a_runtime_error_from_set_source_git_is_still_a_failed_clone(
     delivery, monkeypatch
 ) -> None:
@@ -225,6 +232,7 @@ def test_a_runtime_error_from_set_source_git_is_still_a_failed_clone(
     assert "git was not found on PATH" in result["error"], result
 
 
+@pytest.mark.integration
 def test_a_delivery_git_can_run_for_is_delivered(delivery) -> None:
     """The control for the stand-in: nothing raised, the tree is delivered."""
     result = _deliver(ref="release")

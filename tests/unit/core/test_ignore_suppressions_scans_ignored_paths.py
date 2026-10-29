@@ -33,6 +33,8 @@ from automated_security_helper.models.core import (
     ignore_paths_that_skip_scanning,
 )
 
+pytestmark = pytest.mark.unit
+
 # Built at runtime so this file holds no secret-shaped literal. AWS's documented
 # example key, which detect-secrets reports.
 PLANTED_KEY = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002

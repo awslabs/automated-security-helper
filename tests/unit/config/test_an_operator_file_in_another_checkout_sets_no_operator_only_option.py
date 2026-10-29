@@ -33,6 +33,8 @@ from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 OPTION = "scanners.detect-secrets.options.max_worker_output_mib"
 
 #: The sentence a warning explains the drop of a file outside the scanned trees with.

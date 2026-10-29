@@ -14,6 +14,8 @@ import pytest
 
 from automated_security_helper.cli import dependencies
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "platform_name, arch",

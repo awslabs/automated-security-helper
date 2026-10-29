@@ -16,6 +16,8 @@ import pytest
 
 from automated_security_helper.cli import mcp_tools
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("named", [True, False], ids=["named-file", "discovery"])
 def test_a_search_dir_no_scan_could_target_is_refused_as_a_scan_refuses_it(

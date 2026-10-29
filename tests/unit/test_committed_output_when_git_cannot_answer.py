@@ -152,6 +152,7 @@ def _no_orchestrator(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_the_cli_exits_3_and_deletes_nothing_when_git_cannot_answer(
     tmp_path, monkeypatch, capsys
 ):
@@ -178,6 +179,7 @@ def test_the_cli_exits_3_and_deletes_nothing_when_git_cannot_answer(
     assert _snapshot(output) == before
 
 
+@pytest.mark.integration
 def test_the_cli_counts_a_previous_log_before_its_logger_truncates_it(
     tmp_path, monkeypatch, capsys
 ):
@@ -202,6 +204,7 @@ def test_the_cli_counts_a_previous_log_before_its_logger_truncates_it(
     assert (output / "ash.log").read_text(encoding="utf-8") == "previous log\n"
 
 
+@pytest.mark.integration
 def test_inside_nix_mode_the_hosts_log_files_do_not_stop_the_inner_scan(
     tmp_path, monkeypatch, capsys
 ):
@@ -234,6 +237,7 @@ def test_inside_nix_mode_the_hosts_log_files_do_not_stop_the_inner_scan(
     assert exited.value.code != 3, printed
 
 
+@pytest.mark.integration
 def test_the_local_run_exits_3_from_the_orchestrator_and_keeps_the_results(
     tmp_path, monkeypatch, capsys
 ):
@@ -258,6 +262,7 @@ def test_the_local_run_exits_3_from_the_orchestrator_and_keeps_the_results(
     assert results.read_bytes() == kept
 
 
+@pytest.mark.integration
 def test_the_orchestrator_refuses_and_clears_nothing(tmp_path, monkeypatch):
     source, output = _broken_repo(tmp_path, monkeypatch)
     (output / "scanners" / "grype").mkdir(parents=True)
@@ -277,6 +282,7 @@ def test_the_orchestrator_refuses_and_clears_nothing(tmp_path, monkeypatch):
     assert _snapshot(output) == before
 
 
+@pytest.mark.integration
 def test_a_scan_into_an_empty_output_dir_starts_when_git_cannot_answer(
     tmp_path, monkeypatch, capsys
 ):
@@ -311,6 +317,7 @@ def test_a_scan_into_an_empty_output_dir_starts_when_git_cannot_answer(
     assert (output / "ash.log").exists(), "the logger did not open its file"
 
 
+@pytest.mark.integration
 def test_a_report_over_results_read_from_elsewhere_is_not_stopped_by_this_runs_log(
     tmp_path, monkeypatch
 ):
@@ -359,6 +366,7 @@ def _report_over_existing_results(tmp_path, source, output) -> int:
     return exited.value.code
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "git_answers", [False, True], ids=["git-cannot-answer", "committed"]
 )
@@ -386,6 +394,7 @@ def test_a_refused_report_over_existing_results_is_not_called_a_scan(
     assert "this run did not start" in printed, printed
 
 
+@pytest.mark.integration
 def test_a_refused_scan_says_this_run_did_not_start(tmp_path, monkeypatch, capsys):
     source, output = _broken_repo(tmp_path, monkeypatch)
     _confined(tmp_path, source, output)
@@ -410,6 +419,7 @@ def test_a_refused_scan_says_this_run_did_not_start(tmp_path, monkeypatch, capsy
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_outside_a_repository_the_previous_runs_files_are_removed(
     tmp_path, monkeypatch
 ):
@@ -456,6 +466,7 @@ def _mark_safe(monkeypatch, tmp_path: Path, source: Path) -> None:
     assert listed.returncode == 0, listed
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("safe_directory", [False, True], ids=["unlisted", "listed"])
 def test_a_checkout_owned_by_another_user_has_its_previous_results_removed(
     tmp_path, monkeypatch, safe_directory
@@ -478,6 +489,7 @@ def test_a_checkout_owned_by_another_user_has_its_previous_results_removed(
     assert (output / "keep.txt").read_text(encoding="utf-8") == "kept\n"
 
 
+@pytest.mark.integration
 def test_a_checkout_owned_by_another_user_still_has_its_committed_results_refused(
     tmp_path, monkeypatch
 ):
@@ -518,6 +530,7 @@ def _broken_workspace(tmp_path: Path, monkeypatch):
     return source, output, _workspace_plan(source)
 
 
+@pytest.mark.integration
 def test_a_workspace_scan_exits_3_naming_every_leftover_when_git_cannot_answer(
     tmp_path, monkeypatch, capsys
 ):
@@ -543,6 +556,7 @@ def test_a_workspace_scan_exits_3_naming_every_leftover_when_git_cannot_answer(
     assert _snapshot(output) == before
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_the_mcp_workspace_tool_returns_exit_3_when_git_cannot_answer(
     tmp_path, monkeypatch, isolated_registry
@@ -573,6 +587,7 @@ async def test_the_mcp_workspace_tool_returns_exit_3_when_git_cannot_answer(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_the_mcp_scan_directory_tool_returns_the_refusal(
     tmp_path, monkeypatch, isolated_registry
@@ -601,6 +616,7 @@ async def test_the_mcp_scan_directory_tool_returns_the_refusal(
     assert _snapshot(output) == before
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_the_mcp_scan_tool_returns_the_refusal_before_clean_output(
     tmp_path, monkeypatch, mcp_ctx, isolated_registry
@@ -646,6 +662,7 @@ def _committed_entries_in_the_way(output: Path, **kwargs):
     return committed_entries_in_the_way(output, **kwargs)
 
 
+@pytest.mark.integration
 def test_a_git_file_naming_a_missing_directory_is_named_in_the_refusal(
     tmp_path, monkeypatch
 ):
@@ -669,6 +686,7 @@ def test_a_git_file_naming_a_missing_directory_is_named_in_the_refusal(
     assert "ash_aggregated_results.json" in message, message
 
 
+@pytest.mark.integration
 def test_git_missing_from_path_is_named_in_the_refusal(tmp_path, monkeypatch):
     source, output = _repo(tmp_path, monkeypatch)
     empty = tmp_path / "no-git-here"
@@ -684,6 +702,7 @@ def test_git_missing_from_path_is_named_in_the_refusal(tmp_path, monkeypatch):
     assert "remove the old results" in message, message
 
 
+@pytest.mark.integration
 def test_git_timing_out_is_named_in_the_refusal(tmp_path, monkeypatch):
     from automated_security_helper.utils import subprocess_utils
 
@@ -702,6 +721,7 @@ def test_git_timing_out_is_named_in_the_refusal(tmp_path, monkeypatch):
     assert "reports/ash.sarif" in message, message
 
 
+@pytest.mark.integration
 def test_an_ownership_refusal_names_the_safe_directory_fix(tmp_path, monkeypatch):
     """git does not check ownership for the repository ASH names on its command
     line (see the module docstring); were it to refuse one, the message gives
@@ -733,6 +753,7 @@ def test_an_ownership_refusal_names_the_safe_directory_fix(tmp_path, monkeypatch
     assert command in message, message
 
 
+@pytest.mark.integration
 def test_only_the_paths_a_run_writes_are_counted_on_disk(tmp_path, monkeypatch):
     """The same scoping as for committed entries: a report over existing results
     writes reports/, the results file and the log files, and not scanners/."""
@@ -755,6 +776,7 @@ def test_only_the_paths_a_run_writes_are_counted_on_disk(tmp_path, monkeypatch):
     assert "scanners/bandit/old.sarif" not in message, message
 
 
+@pytest.mark.integration
 def test_empty_working_directories_and_files_elsewhere_are_not_counted(
     tmp_path, monkeypatch
 ):
@@ -767,6 +789,7 @@ def test_empty_working_directories_and_files_elsewhere_are_not_counted(
     assert _committed_entries_in_the_way(output) == []
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
@@ -791,6 +814,7 @@ def test_a_link_at_a_results_path_counts_and_is_not_followed(tmp_path, monkeypat
     assert (outside / "theirs.txt").read_text(encoding="utf-8") == "theirs\n"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "held",
     [
@@ -824,6 +848,7 @@ def test_previous_results_set_aside_are_counted_on_disk(tmp_path, monkeypatch, h
     assert held in str(refused.value), refused.value
 
 
+@pytest.mark.integration
 def test_the_refusal_names_ten_entries_and_counts_the_rest(tmp_path, monkeypatch):
     source, output = _broken_repo(tmp_path, monkeypatch, files={"keep.txt": "kept\n"})
     (output / "reports").mkdir()
@@ -839,6 +864,7 @@ def test_the_refusal_names_ten_entries_and_counts_the_rest(tmp_path, monkeypatch
     assert "and 3 more" in message, message
 
 
+@pytest.mark.integration
 def test_git_not_answering_in_the_scan_set_walk_is_a_warning(tmp_path, monkeypatch):
     """The walk leaves a named output directory out whole when git cannot say
     which of its files are committed; debug level alone would hide that."""

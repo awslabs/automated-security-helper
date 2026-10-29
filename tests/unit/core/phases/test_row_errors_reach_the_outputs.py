@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -23,6 +25,8 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
+
+pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

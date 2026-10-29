@@ -53,7 +53,7 @@ from tests.unit.converters.nbconvert_stand_in import expand
 # nbconvert jupyter-nbconvert --version``), which started the tool wherever uv could
 # reach it. These tests are about the converter's own decisions, so the probes answer
 # without a process (tests/unit/conftest.py).
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
 MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter"

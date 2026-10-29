@@ -43,6 +43,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.utils.log import ASHLogger
 
+pytestmark = pytest.mark.unit
+
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 #: How long a held step waits before it gives up: far past any cell, so a cell
 #: that fails early cannot leave a thread behind for long.

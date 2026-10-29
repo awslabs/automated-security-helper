@@ -55,6 +55,8 @@ from tests.utils.npm_audit_reports import (
     YARN_BERRY_NO_ADVISORIES,
 )
 
+pytestmark = pytest.mark.unit
+
 REPOSITORY_REGISTRY = "http://127.0.0.1:9/marker-from-the-repository/"
 OPERATOR_REGISTRY = "http://127.0.0.1:9/marker-from-the-operator/"
 #: Each tool's own clean report (tests/utils/npm_audit_reports.py): pnpm's is

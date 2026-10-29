@@ -23,6 +23,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
 )
 from tests.utils.archive_builders import zip_bytes
 
+pytestmark = pytest.mark.unit
+
 ARCHIVE_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter"
 )

@@ -28,6 +28,8 @@ import pytest
 from automated_security_helper.config.config_validator import environment_record_read
 from automated_security_helper.utils.error_text import text_without_values
 
+pytestmark = pytest.mark.unit
+
 VARIABLE = "ASH_NUMERIC_NEEDLE"
 
 

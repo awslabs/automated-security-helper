@@ -1,11 +1,16 @@
 """Simple tests for config resolution functionality."""
 
 from pathlib import Path
+
+import pytest
+
 from automated_security_helper.config.resolve_config import (
     apply_config_overrides,
     resolve_config,
 )
 from automated_security_helper.config.ash_config import AshConfig
+
+pytestmark = pytest.mark.unit
 
 
 def test_apply_config_overrides_empty_list():

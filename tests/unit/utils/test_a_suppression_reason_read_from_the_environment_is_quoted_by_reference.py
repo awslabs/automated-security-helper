@@ -36,6 +36,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppr
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+pytestmark = pytest.mark.unit
+
 FORMS = ["${ASH_GATE_REASON}", "!ENV ${ASH_GATE_REASON}"]
 
 

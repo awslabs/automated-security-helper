@@ -62,6 +62,8 @@ from automated_security_helper.utils.log import (
     TextFileFormatter,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # The exact line podman/buildah writes to stderr while building the ASH image.
 # buildah renders the Dockerfile SHELL directive's argv as a Go slice, which is

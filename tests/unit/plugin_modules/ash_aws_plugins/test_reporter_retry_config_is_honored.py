@@ -47,6 +47,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
 # The module defaults the bare decorator fell back to. Every parameterized case
 # below avoids 3 so that "config ignored" and "config honored" give different
 # answers.
+pytestmark = pytest.mark.unit
+
 MODULE_DEFAULT_MAX_RETRIES = 3
 
 

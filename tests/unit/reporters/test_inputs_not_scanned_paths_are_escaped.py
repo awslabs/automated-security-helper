@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import io
 
+import pytest
 from rich.console import Console
 
 from automated_security_helper.core.metrics_table import print_inputs_not_scanned
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 HOSTILE = "web`x\n## injected heading\x1b[31m/package-lock.json"
 

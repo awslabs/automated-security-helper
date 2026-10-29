@@ -62,6 +62,12 @@ from typing import Any
 import pytest
 import yaml
 
+# The unit-test matrix is three jobs, one per runner pool, so each pool has its own
+# max-parallel cap. tests/unit/test_unit_test_shards.py holds the three to one another.
+from tests.utils.ci_tiers import UNIT_TEST_JOB_IDS
+
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 ACTIONS = REPO_ROOT / ".github" / "actions"
@@ -70,10 +76,6 @@ UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 INSTALL_METHODS = WORKFLOWS / "ash-install-methods.yml"
 RUN_SCAN_TEST = ACTIONS / "run-scan-test" / "action.yml"
 RUN_UNIT_TESTS = ACTIONS / "run-unit-tests" / "action.yml"
-
-# The unit-test matrix is three jobs, one per runner pool, so each pool has its own
-# max-parallel cap. tests/unit/test_unit_test_shards.py holds the three to one another.
-UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
 
 # The two install-validation surfaces, as (label, workflow path, job key). Both are
 # checked by everything in TestInstallMethodRoutingIsClosed; a check that ran on only one
@@ -658,7 +660,9 @@ class TestUnitTestArchIsDerived:
             product = 1
             for values in axes.values():
                 product *= len(values)
-            assert product >= 20, (
+            # The unit tier has no shard axis, so the smallest job (windows) is one
+            # runner image by five Python versions.
+            assert product >= 5, (
                 f"{job_id}'s axis product is {product}, too small for this comparison "
                 "to mean anything -- the matrix has been gutted."
             )

@@ -32,6 +32,8 @@ from automated_security_helper.utils import log
 from automated_security_helper.utils.log import get_logger
 from tests.utils.windows_console import windows_logging_kept_in_the_test
 
+pytestmark = pytest.mark.unit
+
 _names = itertools.count()
 
 #: Holds a number, which the highlighter colors on a terminal. Rich lays a log

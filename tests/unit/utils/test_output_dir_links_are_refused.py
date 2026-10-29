@@ -100,6 +100,7 @@ def _context(source: Path, output: Path, mode: str = "off") -> PluginContext:
     )
 
 
+@pytest.mark.unit
 class TestOpenForWrite:
     def test_a_link_at_the_file_name_is_refused(self, layout):
         source, output, target = layout
@@ -177,6 +178,7 @@ class TestOpenForWrite:
         assert target.read_text() == "written\n"
 
 
+@pytest.mark.unit
 class TestWithoutDirectoryDescriptors:
     """Windows has no O_NOFOLLOW or dir_fd; open_for_write checks each component.
 
@@ -273,6 +275,7 @@ class TestWithoutDirectoryDescriptors:
         assert path.read_text() == "written\n"
 
 
+@pytest.mark.unit
 class TestRefuseLinksBelow:
     """The check of a sandboxed scanner's results directory before the scanner runs."""
 
@@ -298,6 +301,7 @@ class TestRefuseLinksBelow:
         fs_guard.refuse_links_below(results)
 
 
+@pytest.mark.integration
 class TestStreamLogs:
     def test_a_link_at_a_stream_log_is_not_written_through(self, layout):
         from automated_security_helper.utils.subprocess_utils import (
@@ -392,6 +396,7 @@ def _detect_secrets_row(context: PluginContext):
     return scanner, row
 
 
+@pytest.mark.integration
 @pytest.mark.usefixtures("recorder_backend")
 class TestDetectSecretsWrites:
     @pytest.mark.parametrize("mode", ["off", "bwrap"])
@@ -506,6 +511,7 @@ def _get_logger(name: str, output: Path, truncate_log: bool = True):
     )
 
 
+@pytest.mark.unit
 class TestTheLogFile:
     """``<output>/<name>.log`` and ``.log.jsonl``, which the logger opens itself."""
 
@@ -585,6 +591,7 @@ class TestTheLogFile:
         assert "written by this run" in text
 
 
+@pytest.mark.unit
 class TestAtomicWrites:
     """``write_text_atomically``: a staging file in the target's directory, renamed."""
 
@@ -654,6 +661,7 @@ class TestAtomicWrites:
         assert path.read_text() == "merged\n"
 
 
+@pytest.mark.unit
 class TestOtherOutputWriters:
     def test_the_unused_suppressions_markdown_is_not_written_through_a_link(
         self, layout
@@ -691,6 +699,7 @@ class TestOtherOutputWriters:
         assert error is not None and REFUSAL in str(error), error
 
 
+@pytest.mark.unit
 class TestTheWorkerOutput:
     """The worker child writes its output file; ASH removes any entry there first."""
 
@@ -772,6 +781,7 @@ def _stream_log_scanner_class():
     return StreamToolScanner, _Config
 
 
+@pytest.mark.integration
 @pytest.mark.usefixtures("recorder_backend")
 class TestStreamLogsThroughTheExecutor:
     """The template writes its tool's stdout to ``<ClassName>.stdout.log``."""

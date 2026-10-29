@@ -50,6 +50,8 @@ from tests.snapshot.console.console_inputs import (
     stdout_console,
 )
 
+pytestmark = pytest.mark.unit
+
 
 #: The instant every reporter reads as "now" while a report renders.
 REPORT_RENDERED_AT = datetime(2026, 1, 15, 12, 30, 0, tzinfo=timezone.utc)

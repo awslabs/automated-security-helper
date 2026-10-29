@@ -52,7 +52,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 # bandit's version (``uv tool run --from 'bandit[sarif,toml]...' bandit --version``),
 # which starts bandit wherever uv can reach it, so the probes answer without a process
 # (tests/unit/conftest.py).
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
 
 @pytest.fixture

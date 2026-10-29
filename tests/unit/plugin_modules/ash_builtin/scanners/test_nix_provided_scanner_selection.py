@@ -37,6 +37,7 @@ from automated_security_helper.utils.pre_installed_tool import (
 )
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.skipif(
         sys.platform == "win32", reason="nixpkgs wrappers are POSIX shell scripts"
     ),

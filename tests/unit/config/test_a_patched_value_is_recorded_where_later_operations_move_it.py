@@ -29,6 +29,8 @@ import yaml
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 REFERENCE = "${ASH_PROBE_MOVED}"
 POINTER = "/global_settings/ignore_paths"
 

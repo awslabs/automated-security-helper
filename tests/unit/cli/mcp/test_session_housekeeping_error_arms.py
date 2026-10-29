@@ -50,6 +50,8 @@ from automated_security_helper.cli.mcp.sessions import (
     StdioServerPresence,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def root(tmp_path, monkeypatch) -> Path:

@@ -36,10 +36,13 @@ import pytest
 
 from tests.utils import github_actions as ga
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt" or shutil.which("bash") is None,
-    reason="the step under test is a bash step that runs on ubuntu-latest",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt" or shutil.which("bash") is None,
+        reason="the step under test is a bash step that runs on ubuntu-latest",
+    ),
+]
 
 SCAN_WORKFLOW = ga.WORKFLOWS_DIR / "run-ash-security-scan.yml"
 STEP_NAME = "Update step summary"

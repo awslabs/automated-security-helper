@@ -40,6 +40,8 @@ from automated_security_helper.config.runtime_patch import (
     check_runtime_ops,
 )
 
+pytestmark = pytest.mark.unit
+
 VERIFICATION_FILTER = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
 )

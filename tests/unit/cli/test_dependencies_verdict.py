@@ -55,6 +55,7 @@ def _outcome(**kwargs) -> PluginInstallOutcome:
     return PluginInstallOutcome(**base)
 
 
+@pytest.mark.unit
 class TestVerdictIsDerivedFromCounts:
     def test_every_command_list_empty_does_not_report_success(self):
         """The named requirement: nothing installed must not read as success.
@@ -222,6 +223,7 @@ class TestVerdictIsDerivedFromCounts:
         assert "npm-audit" in capsys.readouterr().out
 
 
+@pytest.mark.unit
 class TestOutcomeStatus:
     def test_no_install_path_when_a_tool_is_needed_and_absent(self):
         assert _outcome(name="grype").status == "NO INSTALL PATH"
@@ -275,6 +277,7 @@ class TestOutcomeStatus:
         assert _outcome(name="grype").declared_no_commands is True
 
 
+@pytest.mark.unit
 class TestEmptyArgvIsSkipped:
     """Drives the install loop, because the counters are what the verdict reads.
 
@@ -339,6 +342,7 @@ class TestEmptyArgvIsSkipped:
         assert "no install commands were run" in result.output
 
 
+@pytest.mark.unit
 class TestToolSelectionScopesFailures:
     """A --tool run must not fail for an unrelated plugin that would not construct.
 
@@ -474,6 +478,7 @@ class TestToolSelection:
             Console(file=self.panels, width=200, no_color=True),
         )
 
+    @pytest.mark.unit
     def test_unknown_tool_exits_two_and_lists_what_exists(self):
         result = runner.invoke(
             dependencies_app, ["--tool", "nonexistent", *self.bin_args]
@@ -484,6 +489,7 @@ class TestToolSelection:
         # The available list is what makes the error actionable rather than a wall.
         assert "grype" in printed
 
+    @pytest.mark.unit
     def test_unknown_tool_installs_nothing(self):
         """A bad selection must be refused before any command runs.
 
@@ -499,6 +505,7 @@ class TestToolSelection:
         assert "Nothing installed" in printed
         assert "Running command" not in printed
 
+    @pytest.mark.integration
     def test_unknown_tool_reaches_a_real_stdout(self, tmp_path, monkeypatch):
         """The rejection has to be visible to a person, not only to a test double.
 
@@ -837,6 +844,7 @@ def _install_fake_scanners(
     )
 
 
+@pytest.mark.unit
 class TestAPluginLoadRefusalIsRedacted:
     """The catch-all invalid-configuration arm redacts the run's values.
 
@@ -903,6 +911,7 @@ class TestAPluginLoadRefusalIsRedacted:
         )
 
 
+@pytest.mark.unit
 class TestScanResolutionSatisfiesARequest:
     """A requested tool a scan can start is an install success, PATH or not.
 
@@ -1295,6 +1304,7 @@ class TestScanResolutionSatisfiesARequest:
         assert "RUNNABLE BY SCAN" in result.output
 
 
+@pytest.mark.unit
 class TestSweepConsultsTheScansResolution:
     """The post-install sweep asks the plugin's check only when the tool is not
     found otherwise."""
@@ -1358,6 +1368,7 @@ class TestSweepConsultsTheScansResolution:
         fake.validate_plugin_dependencies.assert_not_called()
 
 
+@pytest.mark.unit
 class TestARaisingCheckGivesNoAnswer:
     """A dependency check that raises gives no answer (``_scan_can_run`` returns
     None, not False), and the crash is shown.
@@ -1505,6 +1516,7 @@ class TestARaisingCheckGivesNoAnswer:
         assert _scan_can_run(raising, "fake-scanner") is None
 
 
+@pytest.mark.unit
 class TestAFailedInstallIsNotAskedAgain:
     """An outcome with a failed command keeps its exit-1 verdict unasked.
 
@@ -1539,6 +1551,7 @@ class TestAFailedInstallIsNotAskedAgain:
         fake.validate_plugin_dependencies.assert_not_called()
 
 
+@pytest.mark.unit
 class TestEachOutcomeIsJudgedByItsOwnPlugin:
     """Two plugins that answer to one name are each judged by their own check.
 
@@ -1566,6 +1579,7 @@ class TestEachOutcomeIsJudgedByItsOwnPlugin:
         declared.validate_plugin_dependencies.assert_called_once()
 
 
+@pytest.mark.unit
 class TestADeclarationThatRaises:
     """A plugin whose declaration raises is undeclared, and the run goes on.
 
@@ -1594,6 +1608,7 @@ class TestADeclarationThatRaises:
         fake.validate_plugin_dependencies.assert_not_called()
 
 
+@pytest.mark.unit
 class TestTheDeclarationIsPartOfThePluginContract:
     """The class attribute the sweep reads, declared where an author finds it."""
 
@@ -1612,6 +1627,7 @@ class TestTheDeclarationIsPartOfThePluginContract:
         assert DetectSecretsScanner.resolves_tool_off_path is True
 
 
+@pytest.mark.unit
 class TestTheCellsRunFromTheirOwnDirectory:
     """A cell's verdict does not depend on the directory pytest was started in."""
 
@@ -1702,6 +1718,7 @@ class TestTheCheckRunsInTheScansProbeScope:
         )
         return result, probes
 
+    @pytest.mark.integration
     def test_with_the_sandbox_off_the_probe_runs_and_answers(
         self, tmp_path, monkeypatch
     ):
@@ -1710,6 +1727,7 @@ class TestTheCheckRunsInTheScansProbeScope:
         assert probes == ["ran"]
         assert result.exit_code == EXIT_OK, result.output
 
+    @pytest.mark.unit
     def test_a_sandbox_the_host_cannot_provide_refuses_the_probe(
         self, tmp_path, monkeypatch
     ):
@@ -1717,6 +1735,7 @@ class TestTheCheckRunsInTheScansProbeScope:
         assert probes == ["refused"], "the check's probe ran outside the scan's scope"
         assert result.exit_code == EXIT_INSTALL_FAILED, result.output
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("mode", ["bwrap", "auto"])
     def test_the_reason_is_asked_in_the_probe_scope_too(
         self, tmp_path, monkeypatch, mode
@@ -1731,6 +1750,7 @@ class TestTheCheckRunsInTheScansProbeScope:
         assert probes == ["refused", "refused"], probes
         assert result.exit_code == EXIT_INSTALL_FAILED, result.output
 
+    @pytest.mark.integration
     def test_with_the_sandbox_off_the_reason_hook_is_not_reached(
         self, tmp_path, monkeypatch
     ):

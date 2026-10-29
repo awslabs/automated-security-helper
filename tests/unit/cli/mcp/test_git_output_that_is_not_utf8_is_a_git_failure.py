@@ -139,6 +139,7 @@ def _nothing_of_the_clone_is_left(git: Dict[str, Any], what: str) -> None:
     assert left == [], f"{what} left {left} beside source/"
 
 
+@pytest.mark.integration
 def test_a_clone_git_fails_with_output_that_is_not_utf8_is_a_failed_clone(
     stand_in_git,
 ) -> None:
@@ -157,6 +158,7 @@ def test_a_clone_git_fails_with_output_that_is_not_utf8_is_a_failed_clone(
     assert sd.get_session_source_dir(SESSION) is None
 
 
+@pytest.mark.integration
 def test_a_fetch_git_fails_with_output_that_is_not_utf8_is_still_tolerated(
     stand_in_git,
 ) -> None:
@@ -175,6 +177,7 @@ def test_a_fetch_git_fails_with_output_that_is_not_utf8_is_still_tolerated(
     assert sd.get_session_source_dir(SESSION) == stand_in_git["source"]
 
 
+@pytest.mark.integration
 def test_a_checkout_git_fails_with_output_that_is_not_utf8_is_a_failed_checkout(
     stand_in_git,
 ) -> None:
@@ -194,6 +197,7 @@ def test_a_checkout_git_fails_with_output_that_is_not_utf8_is_a_failed_checkout(
 
 
 @pytest.mark.parametrize("step", ["clone", "fetch", "checkout"])
+@pytest.mark.integration
 def test_a_step_git_completes_with_output_that_is_not_utf8_delivers(
     stand_in_git, step
 ) -> None:
@@ -219,6 +223,7 @@ def test_a_step_git_completes_with_output_that_is_not_utf8_delivers(
     assert sd.get_session_source_dir(SESSION) == stand_in_git["source"]
 
 
+@pytest.mark.integration
 def test_a_clone_git_fails_with_a_utf8_message_is_unchanged(stand_in_git) -> None:
     """The control: output that decodes was reported this way before the change."""
     stand_in_git["install"](clone=(128, b"", b"fatal: repository not found\n"))
@@ -232,6 +237,7 @@ def test_a_clone_git_fails_with_a_utf8_message_is_unchanged(stand_in_git) -> Non
     _nothing_of_the_clone_is_left(stand_in_git, "the failed clone")
 
 
+@pytest.mark.unit
 def test_a_session_id_the_workspace_cannot_be_made_for_is_still_refused(
     stand_in_git,
 ) -> None:

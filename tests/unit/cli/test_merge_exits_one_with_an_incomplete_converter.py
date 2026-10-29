@@ -25,6 +25,8 @@ from automated_security_helper.models.asharp_model import (
 )
 from tests.unit.cli.test_merge import build_shards, write_shards
 
+pytestmark = pytest.mark.unit
+
 SUMMARY_LINE = "conversion in the merged scan was incomplete"
 
 

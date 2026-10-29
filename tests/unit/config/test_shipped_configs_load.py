@@ -33,6 +33,8 @@ from automated_security_helper.config.plugin_option_check import (
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[3]
 SEGMENTS = ("scanners", "reporters", "converters")
 

@@ -30,6 +30,8 @@ import pytest
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import PostRunErrorProcess
 
+pytestmark = pytest.mark.unit
+
 #: What ASH says when it could not record a run's output.
 _NOT_RECORDED = "ASH could not record the output of tool: No space left on device"
 

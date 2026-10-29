@@ -26,6 +26,8 @@ from automated_security_helper.config.runtime_patch import (
     known_plugin_keys,
 )
 
+pytestmark = pytest.mark.unit
+
 # "detect-ſecrets": the long s casefolds to "s" but is not an ASCII letter.
 LONG_S = "detect-ſecrets"
 ASCII_SPELLINGS = [

@@ -140,6 +140,7 @@ def _cleanup_fails_after_the_tool_exited(monkeypatch) -> List[Any]:
 # -- 1-4: after the start, any failure on ASH's side is 255 ----------------------
 
 
+@pytest.mark.integration
 def test_relaying_the_output_raises(monkeypatch):
     relayed = _relaying_fails(monkeypatch)
 
@@ -149,6 +150,7 @@ def test_relaying_the_output_raises(monkeypatch):
     assert code == UNRECORDED, code
 
 
+@pytest.mark.integration
 def test_waiting_on_the_tool_raises(monkeypatch):
     failed = _waiting_fails(monkeypatch)
 
@@ -158,6 +160,7 @@ def test_waiting_on_the_tool_raises(monkeypatch):
     assert code == UNRECORDED, code
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "exit_code",
     [pytest.param(0, id="tool-exited-0"), pytest.param(3, id="tool-exited-3")],
@@ -178,12 +181,14 @@ def test_the_later_kill_raising_after_the_tool_exited_fails_closed(
 # -- 5-6: the pins ------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_control_a_tool_that_cannot_start_is_127(tmp_path):
     code = run_command_stream_output([str(tmp_path / "no-such-tool"), _MARK])
 
     assert code == SPAWN_FAILURE_RETURNCODE, code
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("exit_code", [0, 3])
 def test_control_a_clean_run_keeps_the_tools_code(exit_code):
     assert run_command_stream_output(_tool(exit_code)) == exit_code
@@ -223,6 +228,7 @@ def _closing_raises_a_value_error(monkeypatch) -> List[Any]:
     return pipes
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("exit_code", [0, 3])
 def test_a_close_that_raises_something_other_than_oserror_keeps_the_tools_code(
     monkeypatch, caplog, exit_code
@@ -258,6 +264,7 @@ FAILURES = [
 ]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("arrange, tool", FAILURES)
 def test_each_failure_is_logged_once_on_one_escaped_line(
     monkeypatch, caplog, arrange, tool
@@ -275,6 +282,7 @@ def test_each_failure_is_logged_once_on_one_escaped_line(
     assert "\n" not in naming[0] and "\x1b" not in naming[0], naming
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("arrange, tool", FAILURES)
 def test_each_failure_shows_markup_in_the_error_as_text(
     monkeypatch, markup_console, arrange, tool
@@ -296,6 +304,7 @@ def test_each_failure_shows_markup_in_the_error_as_text(
 # -- 8: the constant and the documented limit ---------------------------------------
 
 
+@pytest.mark.unit
 def test_the_code_for_a_run_ash_could_not_record_is_one_documented_constant():
     assert subprocess_utils.UNRECORDED_RUN_RETURNCODE == 255
 
@@ -308,6 +317,7 @@ def test_the_code_for_a_run_ash_could_not_record_is_one_documented_constant():
     assert source[at - 1].startswith("#:"), "the constant has no doc comment"
 
 
+@pytest.mark.unit
 def test_the_docstring_states_the_limit_and_points_at_the_flagged_runner():
     doc = run_command_stream_output.__doc__ or ""
 

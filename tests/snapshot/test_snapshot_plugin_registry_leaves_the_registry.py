@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import defusedxml.ElementTree as ET
+import pytest
 
 from tests.utils.helpers import checkout_env
 
@@ -44,6 +45,10 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 # autouse so both placements run the same no-op.
 _PLACEMENT_SHADOW = """\
 import pytest
+
+# The run loads the repository's tests/conftest.py, which refuses a test
+# that carries no tier marker.
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
@@ -95,6 +100,7 @@ def test_the_registry_is_as_it_was():
 A_TEST_OF_THE_FILE = "test_a_plugin_registered_under_another_name"
 
 
+@pytest.mark.integration
 def test_the_tests_restore_the_registry(tmp_path):
     (tmp_path / "test_probe_before.py").write_text(BEFORE, encoding="utf-8")
     (tmp_path / "test_probe_after.py").write_text(AFTER, encoding="utf-8")
@@ -149,6 +155,7 @@ def test_the_tests_restore_the_registry(tmp_path):
     assert restored, run.stdout[-3000:]
 
 
+@pytest.mark.unit
 def test_a_registration_changed_in_place_is_listed():
     """registry_changes_since compares each registration whole, its fields too:
     one a test disabled in place and left is listed."""
@@ -172,6 +179,7 @@ def test_a_registration_changed_in_place_is_listed():
     ], left
 
 
+@pytest.mark.unit
 def test_a_registration_whose_module_holds_another_class_is_listed(monkeypatch):
     """A registration names its class by module and name. When the module holds
     another class under that name, a replacement a test left, it is listed."""
@@ -204,6 +212,7 @@ def test_a_registration_whose_module_holds_another_class_is_listed(monkeypatch):
     ], left
 
 
+@pytest.mark.unit
 def test_a_replacement_with_the_same_qualified_name_is_listed(monkeypatch):
     """A registration's class is recorded by where it is defined as well as by
     its name: a replacement left in the module whose __qualname__ matches the
@@ -250,6 +259,7 @@ def test_a_replacement_with_the_same_qualified_name_is_listed(monkeypatch):
     ], left
 
 
+@pytest.mark.unit
 def test_a_replacement_subclass_with_the_originals_names_is_listed(monkeypatch):
     """A registration's class is recorded by identity as well as by its names:
     a replacement left in the module that carries the original's module and
@@ -289,6 +299,7 @@ def test_a_replacement_subclass_with_the_originals_names_is_listed(monkeypatch):
     ], left
 
 
+@pytest.mark.unit
 def test_a_module_that_grows_while_being_read_is_still_read(monkeypatch):
     """Reading one module attribute can run code (a metaclass property, a lazy
     import) that adds a name to the module. The read works from a snapshot of
@@ -324,6 +335,7 @@ def test_a_module_that_grows_while_being_read_is_still_read(monkeypatch):
     assert _plugin_classes({module_name}) == {module_name: ["Plugin"]}
 
 
+@pytest.mark.unit
 def test_an_instance_with_a_plugin_type_is_not_a_plugin_class(monkeypatch):
     """The loader registers classes only, so the read counts classes only: an
     instance whose class carries ash_plugin_type, or a MagicMock, which answers
@@ -349,6 +361,7 @@ def test_an_instance_with_a_plugin_type_is_not_a_plugin_class(monkeypatch):
     assert _plugin_classes({module_name}) == {module_name: ["Plugin"]}
 
 
+@pytest.mark.unit
 def test_an_extra_plugin_class_left_in_a_module_is_listed(monkeypatch):
     """A plugin class a test left in a registration's module without
     registering it is listed: the next run that loads plugins from the module

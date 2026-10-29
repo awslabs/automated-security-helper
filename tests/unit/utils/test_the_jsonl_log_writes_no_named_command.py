@@ -18,7 +18,11 @@ import json
 import logging
 import re
 
+import pytest
+
 from automated_security_helper.utils.log import get_logger
+
+pytestmark = pytest.mark.unit
 
 #: A record quoting a file name that holds each runner's named-command form.
 MESSAGE = "scanned x##vso[task.setvariable variable=x]1 ##[warning]y ##teamcity[z]"

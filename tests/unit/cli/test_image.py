@@ -3,8 +3,12 @@
 import platform
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from automated_security_helper.cli.image import build_ash_image_cli_command
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
+
+pytestmark = pytest.mark.unit
 
 
 @patch("automated_security_helper.cli.image.run_ash_scan")

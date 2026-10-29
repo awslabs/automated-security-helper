@@ -105,6 +105,7 @@ def _use_layout(tree, monkeypatch, layout: str, name: str = TOOL) -> Path:
 
 @posix_only
 @pytest.mark.parametrize("layout", sorted(LAYOUTS))
+@pytest.mark.unit
 def test_find_executable_does_not_answer_from_a_non_absolute_entry(
     tree, monkeypatch, layout
 ):
@@ -114,6 +115,7 @@ def test_find_executable_does_not_answer_from_a_non_absolute_entry(
 
 @posix_only
 @pytest.mark.parametrize("layout", sorted(LAYOUTS))
+@pytest.mark.unit
 def test_uv_tool_runner_lookups_do_not_answer_from_a_non_absolute_entry(
     tree, monkeypatch, layout
 ):
@@ -125,6 +127,7 @@ def test_uv_tool_runner_lookups_do_not_answer_from_a_non_absolute_entry(
 
 
 @posix_only
+@pytest.mark.unit
 def test_a_tool_on_an_absolute_entry_is_found(tree, monkeypatch):
     """The control: an absolute entry is still searched."""
     planted = _plant(tree.anchored, TOOL, tree.marker)
@@ -134,6 +137,7 @@ def test_a_tool_on_an_absolute_entry_is_found(tree, monkeypatch):
 
 
 @posix_only
+@pytest.mark.unit
 def test_an_absolute_copy_after_a_relative_entry_is_the_answer(tree, monkeypatch):
     _plant(tree.repo / "bin", TOOL, tree.marker)
     planted = _plant(tree.anchored, TOOL, tree.marker)
@@ -142,6 +146,7 @@ def test_an_absolute_copy_after_a_relative_entry_is_the_answer(tree, monkeypatch
 
 
 @posix_only
+@pytest.mark.unit
 def test_a_relative_command_path_is_not_answered(tree, monkeypatch):
     _plant(tree.repo / "bin", TOOL, tree.marker)
     monkeypatch.setenv("PATH", str(tree.anchored))
@@ -162,6 +167,7 @@ def test_a_relative_command_path_is_not_answered(tree, monkeypatch):
         (ntpath, "tools", False),
     ],
 )
+@pytest.mark.unit
 def test_an_entry_is_anchored_only_when_it_does_not_depend_on_the_cwd(
     pathmod, path, anchored
 ):
@@ -228,6 +234,7 @@ SPAWN_HELPERS = {
 @pytest.mark.parametrize("helper", sorted(SPAWN_HELPERS))
 @pytest.mark.parametrize("layout", ["relative-entry", "leading-empty-entry"])
 @pytest.mark.parametrize("where", ["ash-cwd", "child-cwd"])
+@pytest.mark.unit
 def test_a_spawn_helper_does_not_start_a_tool_from_a_non_absolute_entry(
     tree, monkeypatch, helper, layout, where
 ):
@@ -251,6 +258,7 @@ def test_a_spawn_helper_does_not_start_a_tool_from_a_non_absolute_entry(
 
 @posix_only
 @pytest.mark.parametrize("helper", sorted(SPAWN_HELPERS))
+@pytest.mark.integration
 def test_a_spawn_helper_still_starts_a_tool_on_an_absolute_entry(
     tree, monkeypatch, helper
 ):
@@ -263,6 +271,7 @@ def test_a_spawn_helper_still_starts_a_tool_on_an_absolute_entry(
 
 @posix_only
 @pytest.mark.parametrize("layout", ["relative-entry", "leading-empty-entry"])
+@pytest.mark.unit
 def test_the_refusal_says_why_the_tool_did_not_start(tree, monkeypatch, layout):
     """Refused by ASH with a reason, not left to the child's own failed search."""
     _use_layout(tree, monkeypatch, layout)
@@ -274,6 +283,7 @@ def test_the_refusal_says_why_the_tool_did_not_start(tree, monkeypatch, layout):
 
 
 @posix_only
+@pytest.mark.unit
 def test_a_relative_program_path_is_refused(tree, monkeypatch):
     _plant(tree.repo / "bin", TOOL, tree.marker)
     monkeypatch.setenv("PATH", str(tree.anchored))
@@ -285,6 +295,7 @@ def test_a_relative_program_path_is_refused(tree, monkeypatch):
 
 
 @posix_only
+@pytest.mark.integration
 def test_a_child_gets_only_the_absolute_path_entries(tree, monkeypatch):
     """The child's own lookups (a ``#!/usr/bin/env`` line, a binstub) see them too."""
     monkeypatch.setenv(
@@ -297,6 +308,7 @@ def test_a_child_gets_only_the_absolute_path_entries(tree, monkeypatch):
 
 
 @posix_only
+@pytest.mark.integration
 def test_a_child_whose_path_has_no_absolute_entry_gets_the_default_path(
     tree, monkeypatch
 ):
@@ -314,6 +326,7 @@ def test_a_child_whose_path_has_no_absolute_entry_gets_the_default_path(
 
 
 @posix_only
+@pytest.mark.unit
 def test_the_sandbox_does_not_take_its_programs_from_a_relative_entry(
     tree, monkeypatch
 ):
@@ -332,6 +345,7 @@ def test_the_sandbox_does_not_take_its_programs_from_a_relative_entry(
 
 
 @posix_only
+@pytest.mark.unit
 def test_the_sandbox_policy_does_not_mount_a_relative_entry_tool_prefix(
     tree, monkeypatch
 ):
@@ -342,6 +356,7 @@ def test_the_sandbox_policy_does_not_mount_a_relative_entry_tool_prefix(
 
 
 @posix_only
+@pytest.mark.unit
 def test_a_shebang_interpreter_is_looked_up_through_absolute_entries(tree, monkeypatch):
     from automated_security_helper.utils.sandbox import policy
 
@@ -356,6 +371,7 @@ def test_a_shebang_interpreter_is_looked_up_through_absolute_entries(tree, monke
 
 
 @posix_only
+@pytest.mark.unit
 def test_a_pre_installed_tool_interpreter_is_not_taken_from_a_relative_entry(
     tree, monkeypatch
 ):
@@ -372,6 +388,7 @@ def test_a_pre_installed_tool_interpreter_is_not_taken_from_a_relative_entry(
 
 
 @posix_only
+@pytest.mark.unit
 def test_changed_files_mode_does_not_start_git_from_a_relative_entry(tree, monkeypatch):
     from automated_security_helper.utils.get_scan_set import (
         get_changed_files,
@@ -385,6 +402,7 @@ def test_changed_files_mode_does_not_start_git_from_a_relative_entry(tree, monke
 
 
 @posix_only
+@pytest.mark.unit
 def test_mcp_source_delivery_does_not_start_git_from_a_relative_entry(
     tree, monkeypatch
 ):
@@ -401,6 +419,7 @@ def test_mcp_source_delivery_does_not_start_git_from_a_relative_entry(
 
 
 @posix_only
+@pytest.mark.unit
 def test_the_jupyter_converter_does_not_start_jupyter_from_a_relative_entry(
     tree, monkeypatch, test_plugin_context
 ):
@@ -432,6 +451,7 @@ def _load_install_pinned_tool():
 
 
 @posix_only
+@pytest.mark.unit
 def test_the_image_check_counts_copies_on_absolute_entries_only(tree, monkeypatch):
     installer = _load_install_pinned_tool()
     _plant(tree.repo / "bin", TOOL, tree.marker)
@@ -441,6 +461,7 @@ def test_the_image_check_counts_copies_on_absolute_entries_only(tree, monkeypatc
 
 
 @posix_only
+@pytest.mark.unit
 def test_the_image_build_does_not_start_uv_from_a_relative_entry(tree, monkeypatch):
     installer = _load_install_pinned_tool()
     _use_layout(tree, monkeypatch, "relative-entry", name="uv")
@@ -481,6 +502,7 @@ def _scan_status(tree) -> str:
 
 @posix_only
 @pytest.mark.parametrize("layout", ["relative-entry", "leading-empty-entry"])
+@pytest.mark.integration
 def test_a_scan_reports_a_tool_on_a_non_absolute_entry_as_missing(
     tree, monkeypatch, layout
 ):
@@ -490,6 +512,7 @@ def test_a_scan_reports_a_tool_on_a_non_absolute_entry_as_missing(
 
 
 @posix_only
+@pytest.mark.integration
 def test_a_scan_starts_the_tool_on_an_absolute_entry(tree, monkeypatch):
     """The control: the same scan with the tool on an absolute entry starts it."""
     _plant(tree.anchored, TOOL, tree.marker)

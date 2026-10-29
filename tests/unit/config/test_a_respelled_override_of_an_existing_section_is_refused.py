@@ -25,6 +25,8 @@ from automated_security_helper.config.resolve_config import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def off_host_config(tmp_path, monkeypatch):

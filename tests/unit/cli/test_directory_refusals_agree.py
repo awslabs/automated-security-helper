@@ -27,6 +27,8 @@ import pytest
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.utils.helpers import module_from_this_checkout
 
+pytestmark = pytest.mark.integration
+
 _ROOT = Path(__file__).resolve().parents[3]
 _ASH_SCRIPT = _ROOT / "ash"
 _HELPERS_PS1 = _ROOT / "utils" / "ash_helpers.ps1"

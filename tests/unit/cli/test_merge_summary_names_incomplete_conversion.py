@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.cli.merge import _merged_exit_code, _print_merge_summary
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -20,6 +22,8 @@ from automated_security_helper.models.asharp_model import (
     FailedInputInfo,
     RefusedInputInfo,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def merged_with_incomplete_conversion() -> AshAggregatedResults:

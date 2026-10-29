@@ -8,9 +8,10 @@ omit =
 [report]
 # Show missing lines in reports
 show_missing = True
-# No fail_under. The 80% threshold is passed as --cov-fail-under=80 by the one run
-# it applies to, the full suite in .github/actions/run-unit-tests/action.yml. Here
-# it also gated every `pytest --cov` of a subset.
+# No fail_under. The 80% threshold is passed as --fail-under 80 by the unit-coverage
+# job in .github/workflows/ash-unified-ci.yml, to the combine step of the unit tier's
+# coverage data (.github/scripts/combine-unit-coverage.py). Here it also gated every
+# `pytest --cov` of a subset.
 
 [html]
 directory = test-results/coverage_html

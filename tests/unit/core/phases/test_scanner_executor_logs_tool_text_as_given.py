@@ -56,6 +56,8 @@ from automated_security_helper.utils.sandbox.scope import (
     SandboxUnavailable,
 )
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

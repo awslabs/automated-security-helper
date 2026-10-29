@@ -28,7 +28,11 @@ import ast
 from pathlib import Path
 from typing import List
 
+import pytest
+
 from automated_security_helper.utils import subprocess_utils
+
+pytestmark = pytest.mark.unit
 
 _SUFFIX = "which may still be running"
 

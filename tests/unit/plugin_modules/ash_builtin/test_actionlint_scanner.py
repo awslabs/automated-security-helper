@@ -212,6 +212,7 @@ def _run(scanner, monkeypatch, stdout, returncode, **extra) -> FakeRun:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_the_scanner_is_on_by_default():
     assert ActionlintScannerConfig().enabled is True
     assert ActionlintScannerConfig().name == "actionlint"
@@ -222,6 +223,7 @@ def test_the_scanner_is_on_by_default():
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_captured_default_output_maps_to_the_expected_findings():
     sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
 
@@ -247,6 +249,7 @@ def test_captured_default_output_maps_to_the_expected_findings():
         ),
     ],
 )
+@pytest.mark.unit
 def test_negative_control_a_mutated_finding_fails_the_expectation(mutate):
     """The expectation above bites: change any field of one finding and it fails."""
     payload = _load("actionlint-1.7.12-default.json")
@@ -257,6 +260,7 @@ def test_negative_control_a_mutated_finding_fails_the_expectation(mutate):
         _assert_matches_default(build_sarif(payload, exit_code=1))
 
 
+@pytest.mark.unit
 def test_region_carries_snippet_and_exclusive_end_column():
     sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
     region = sarif["runs"][0]["results"][1]["locations"][0]["physicalLocation"][
@@ -275,6 +279,7 @@ def test_region_carries_snippet_and_exclusive_end_column():
     }
 
 
+@pytest.mark.unit
 def test_rules_list_each_kind_once_with_its_default_level():
     sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
     rules = sarif["runs"][0]["tool"]["driver"]["rules"]
@@ -284,6 +289,7 @@ def test_rules_list_each_kind_once_with_its_default_level():
     assert by_id["expression"] == "note"
 
 
+@pytest.mark.unit
 def test_captured_shellcheck_output_reports_shellcheck_as_low():
     sarif = build_sarif(_load("actionlint-1.7.12-shellcheck.json"), exit_code=1)
     shellcheck = [row for row in _summary(sarif) if row[0] == "shellcheck"]
@@ -292,6 +298,7 @@ def test_captured_shellcheck_output_reports_shellcheck_as_low():
     ]
 
 
+@pytest.mark.unit
 def test_captured_clean_output_is_zero_findings():
     sarif = build_sarif(_load("actionlint-1.7.12-clean.json"), exit_code=0)
     assert sarif["runs"][0]["results"] == []
@@ -302,6 +309,7 @@ def test_captured_clean_output_is_zero_findings():
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_every_kind_of_the_pinned_version_has_a_deliberate_severity():
     """The 18 kinds ``allKinds`` lists in 1.7.12, each mapped explicitly."""
     assert sorted(KIND_SEVERITY) == [
@@ -355,10 +363,12 @@ def test_every_kind_of_the_pinned_version_has_a_deliberate_severity():
         ("brand-new-kind", "anything", "LOW"),
     ],
 )
+@pytest.mark.unit
 def test_severity_for(kind, message, expected):
     assert severity_for(kind, message) == expected
 
 
+@pytest.mark.unit
 def test_an_unknown_kind_is_reported_low_and_logged_once(caplog):
     payload = {
         "version": "9.9.9",
@@ -404,11 +414,13 @@ def test_an_unknown_kind_is_reported_low_and_logged_once(caplog):
         ),
     ],
 )
+@pytest.mark.unit
 def test_malformed_output_raises(payload, exit_code, match):
     with pytest.raises(ScannerError, match=match):
         build_sarif(payload, exit_code)
 
 
+@pytest.mark.unit
 def test_null_errors_with_exit_zero_is_clean():
     assert build_sarif({"version": "1", "errors": None}, 0)["runs"][0]["results"] == []
 
@@ -432,6 +444,7 @@ def test_null_errors_with_exit_zero_is_clean():
         ("config/not-a-workflow.yml", False),
     ],
 )
+@pytest.mark.unit
 def test_is_workflow_file(path, expected):
     assert is_workflow_file(path) is expected
 
@@ -441,6 +454,7 @@ def test_is_workflow_file(path, expected):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_argv_disables_shellcheck_and_pyflakes_and_passes_workflows_explicitly(
     repo, monkeypatch, on_path
 ):
@@ -477,6 +491,7 @@ def test_argv_disables_shellcheck_and_pyflakes_and_passes_workflows_explicitly(
     assert report.runs[0].invocations[0].executionSuccessful is True
 
 
+@pytest.mark.unit
 def test_configured_shellcheck_is_passed_by_resolved_path(repo, monkeypatch):
     monkeypatch.setattr(
         module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
@@ -491,6 +506,7 @@ def test_configured_shellcheck_is_passed_by_resolved_path(repo, monkeypatch):
     assert "-pyflakes=" in argv
 
 
+@pytest.mark.unit
 def test_configured_shellcheck_that_is_absent_is_missing_not_skipped(
     repo, monkeypatch, on_path
 ):
@@ -502,6 +518,7 @@ def test_configured_shellcheck_that_is_absent_is_missing_not_skipped(
     assert "shellcheck" in scanner.dependency_unavailable_reason
 
 
+@pytest.mark.unit
 def test_configured_pyflakes_path_that_does_not_exist_is_missing(
     repo, monkeypatch, on_path, tmp_path
 ):
@@ -512,6 +529,7 @@ def test_configured_pyflakes_path_that_does_not_exist_is_missing(
     assert "pyflakes" in scanner.dependency_unavailable_reason
 
 
+@pytest.mark.unit
 def test_missing_actionlint_is_missing(repo, monkeypatch):
     monkeypatch.setattr(module, "find_absolute_executable", lambda name: None)
     scanner = _scanner(repo)
@@ -521,6 +539,7 @@ def test_missing_actionlint_is_missing(repo, monkeypatch):
     assert fake.calls == []
 
 
+@pytest.mark.unit
 def test_non_workflow_yaml_and_ash_output_are_not_passed(repo, monkeypatch, on_path):
     output = repo / ".ash" / "ash_output"
     stale = output / "copy" / ".github" / "workflows"
@@ -537,6 +556,7 @@ def test_non_workflow_yaml_and_ash_output_are_not_passed(repo, monkeypatch, on_p
     assert not any(".ash/" in f for f in files)
 
 
+@pytest.mark.unit
 def test_global_ignore_paths_are_respected(repo, monkeypatch, on_path):
     scanner = _scanner(repo)
     fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
@@ -554,6 +574,7 @@ def test_global_ignore_paths_are_respected(repo, monkeypatch, on_path):
 
 
 @pytest.mark.parametrize("pattern", [".github/workflows/", "**/.github/"])
+@pytest.mark.unit
 def test_an_ignore_path_ending_in_a_slash_leaves_out_what_is_inside(repo, pattern):
     """An ignore path ending in ``/`` names what is inside that directory, as every
     other place ASH matches an ignore path reads it (``ignore_path_matches``)."""
@@ -567,6 +588,7 @@ def test_an_ignore_path_ending_in_a_slash_leaves_out_what_is_inside(repo, patter
     assert scanner._workflow_files(repo, "source", ignores) == []
 
 
+@pytest.mark.unit
 def test_an_ignore_path_ending_in_a_slash_keeps_a_file_of_that_name(repo):
     """``clean.yml/`` names a directory, so the workflow file clean.yml is kept."""
     scanner = _scanner(repo)
@@ -578,6 +600,7 @@ def test_an_ignore_path_ending_in_a_slash_keeps_a_file_of_that_name(repo):
     ]
 
 
+@pytest.mark.unit
 def test_gitignore_is_respected(repo, monkeypatch, on_path):
     (repo / ".gitignore").write_text(".github/workflows/vulnerable.yml\n")
     scanner = _scanner(repo)
@@ -590,6 +613,7 @@ def test_gitignore_is_respected(repo, monkeypatch, on_path):
 
 
 @pytest.mark.parametrize("honor", [True, False])
+@pytest.mark.unit
 def test_the_gitignore_applies_as_the_config_says(tmp_path, repo, honor):
     """A scan set actionlint computes itself follows ``honor_ignore_files``."""
     (repo / ".gitignore").write_text(".github/workflows/vulnerable.yml\n")
@@ -602,6 +626,7 @@ def test_the_gitignore_applies_as_the_config_says(tmp_path, repo, honor):
     assert ".github/workflows/clean.yml" in linted
 
 
+@pytest.mark.unit
 def test_a_workflow_path_starting_with_a_dash_is_after_the_separator(
     tmp_path, monkeypatch, on_path
 ):
@@ -618,6 +643,7 @@ def test_a_workflow_path_starting_with_a_dash_is_after_the_separator(
     assert argv[argv.index("--") + 1 :] == ["-svc/.github/workflows/ci.yml"]
 
 
+@pytest.mark.unit
 def test_no_workflows_does_not_run_actionlint_and_evaluates_nothing(
     tmp_path, monkeypatch, on_path
 ):
@@ -655,6 +681,7 @@ def _executor_row(scanner: ActionlintScanner, source: Path):
     return row
 
 
+@pytest.mark.unit
 def test_a_tree_with_no_workflows_is_skipped_not_incomplete_through_the_executor(
     tmp_path, monkeypatch, on_path
 ):
@@ -678,6 +705,7 @@ def test_a_tree_with_no_workflows_is_skipped_not_incomplete_through_the_executor
     assert not any("no SARIF run" in str(error) for error in row.errors), row.errors
 
 
+@pytest.mark.unit
 def test_a_tree_with_a_flagged_workflow_still_reports_its_finding_through_the_executor(
     repo, monkeypatch, on_path
 ):
@@ -695,6 +723,7 @@ def test_a_tree_with_a_flagged_workflow_still_reports_its_finding_through_the_ex
     assert row.finding_count == len(EXPECTED_DEFAULT)
 
 
+@pytest.mark.unit
 def test_an_actionlint_that_failed_still_reads_error_through_the_executor(
     repo, monkeypatch, on_path
 ):
@@ -707,6 +736,7 @@ def test_an_actionlint_that_failed_still_reads_error_through_the_executor(
     assert row.status.value in _INCOMPLETE_SCANNER_STATUSES
 
 
+@pytest.mark.unit
 def test_without_a_config_an_empty_one_is_passed_from_outside_the_tree(
     repo, monkeypatch, on_path
 ):
@@ -722,6 +752,7 @@ def test_without_a_config_an_empty_one_is_passed_from_outside_the_tree(
 
 
 @pytest.mark.parametrize("name", ["actionlint.yaml", "actionlint.yml"])
+@pytest.mark.unit
 def test_the_scanned_trees_actionlint_config_is_not_read(
     repo, monkeypatch, on_path, caplog, name
 ):
@@ -743,6 +774,7 @@ def test_the_scanned_trees_actionlint_config_is_not_read(
 
 
 @pytest.mark.parametrize("operator", [True, False])
+@pytest.mark.unit
 def test_config_file_is_passed_only_when_the_operator_set_it(
     repo, monkeypatch, on_path, caplog, operator
 ):
@@ -764,6 +796,7 @@ def test_config_file_is_passed_only_when_the_operator_set_it(
         assert "Ignoring scanners.actionlint.options.config_file" in caplog.text
 
 
+@pytest.mark.unit
 def test_an_operator_config_file_that_does_not_exist_is_an_error(
     repo, monkeypatch, on_path
 ):
@@ -811,6 +844,7 @@ def _config_linked_out(repo: Path, shape: str) -> str:
 @pytest.mark.parametrize(
     "shape", ["file", "chain", "dangling", "directory", "nested directory"]
 )
+@pytest.mark.unit
 def test_an_operator_config_file_in_the_tree_cannot_link_out_of_it(
     repo, monkeypatch, on_path, caplog, shape
 ):
@@ -834,6 +868,7 @@ def test_an_operator_config_file_in_the_tree_cannot_link_out_of_it(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks")
+@pytest.mark.unit
 def test_an_operator_config_file_in_the_tree_may_link_inside_it(
     repo, monkeypatch, on_path
 ):
@@ -849,6 +884,7 @@ def test_an_operator_config_file_in_the_tree_may_link_inside_it(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks")
+@pytest.mark.unit
 def test_an_operator_config_file_outside_the_tree_may_be_a_link(
     repo, monkeypatch, on_path
 ):
@@ -865,6 +901,7 @@ def test_an_operator_config_file_outside_the_tree_may_be_a_link(
     assert config == (shared / "actionlint.yaml").resolve()
 
 
+@pytest.mark.unit
 def test_an_operator_config_that_ignores_findings_is_warned_about(
     repo, monkeypatch, on_path, caplog
 ):
@@ -889,6 +926,7 @@ ALIASED_IGNORES = (
 )
 
 
+@pytest.mark.unit
 def test_an_operator_config_whose_ignores_cannot_be_listed_is_warned_about(
     repo, monkeypatch, on_path, caplog
 ):
@@ -911,6 +949,7 @@ def test_an_operator_config_whose_ignores_cannot_be_listed_is_warned_about(
     ), warnings
 
 
+@pytest.mark.unit
 def test_an_aliased_config_is_not_read_for_its_ignore_patterns(tmp_path):
     config = tmp_path / "actionlint.yaml"
     config.write_text(ALIASED_IGNORES)
@@ -928,6 +967,7 @@ def test_an_aliased_config_is_not_read_for_its_ignore_patterns(tmp_path):
         ("", []),
     ],
 )
+@pytest.mark.unit
 def test_config_ignore_patterns(tmp_path, body, expected):
     config = tmp_path / "actionlint.yaml"
     config.write_text(body)
@@ -943,6 +983,7 @@ def test_config_ignore_patterns(tmp_path, body, expected):
         (1, '{"version":"1","errors":[]}'),
     ],
 )
+@pytest.mark.unit
 def test_tool_errors_raise_rather_than_report_clean(
     repo, monkeypatch, on_path, returncode, stdout
 ):
@@ -954,6 +995,7 @@ def test_tool_errors_raise_rather_than_report_clean(
     assert scanner.targets_failed == scanner.targets_attempted == 2
 
 
+@pytest.mark.unit
 def test_a_timeout_says_timed_out(repo, monkeypatch, on_path):
     scanner = _scanner(repo)
     _run(scanner, monkeypatch, "", 124, timed_out=True)
@@ -962,6 +1004,7 @@ def test_a_timeout_says_timed_out(repo, monkeypatch, on_path):
         scanner.scan(target=repo, target_type="source")
 
 
+@pytest.mark.unit
 def test_the_raw_output_and_sarif_are_kept_in_the_results_dir(
     repo, monkeypatch, on_path
 ):
@@ -1011,6 +1054,7 @@ def default_report() -> SarifReport:
     )
 
 
+@pytest.mark.unit
 def test_rule_suppression(default_report, tmp_path):
     suppressed = _suppressed_rules(
         default_report,
@@ -1020,6 +1064,7 @@ def test_rule_suppression(default_report, tmp_path):
     assert suppressed == [("credentials", 17)]
 
 
+@pytest.mark.unit
 def test_path_and_line_suppression(default_report, tmp_path):
     suppressed = _suppressed_rules(
         default_report,
@@ -1037,6 +1082,7 @@ def test_path_and_line_suppression(default_report, tmp_path):
     assert suppressed == [("deprecated-commands", 24)]
 
 
+@pytest.mark.unit
 def test_path_suppression_for_another_file_suppresses_nothing(default_report, tmp_path):
     assert (
         _suppressed_rules(
@@ -1054,6 +1100,7 @@ def test_path_suppression_for_another_file_suppresses_nothing(default_report, tm
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+@pytest.mark.unit
 def test_a_workflow_symlinked_outside_the_root_is_not_passed(
     repo, tmp_path, monkeypatch, on_path
 ):
@@ -1072,6 +1119,7 @@ def test_a_workflow_symlinked_outside_the_root_is_not_passed(
 
 
 @pytest.mark.parametrize("kind", ["dangling", "loop"])
+@pytest.mark.unit
 def test_a_workflow_link_that_resolves_to_no_file_is_skipped_with_a_warning(
     repo, monkeypatch, on_path, caplog, kind
 ):
@@ -1099,6 +1147,7 @@ def test_a_workflow_link_that_resolves_to_no_file_is_skipped_with_a_warning(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.unit
 def test_a_non_executable_integration_path_is_missing(
     repo, monkeypatch, on_path, tmp_path
 ):
@@ -1114,6 +1163,7 @@ def test_a_non_executable_integration_path_is_missing(
 
 
 @pytest.mark.parametrize("returncode", [2, 3])
+@pytest.mark.unit
 def test_a_failing_exit_code_raises_even_with_valid_json(
     repo, monkeypatch, on_path, returncode
 ):
@@ -1153,6 +1203,7 @@ def _converted_target(output: Path, workflow: Path | None) -> Path:
 
 
 @pytest.mark.parametrize("converted_has_workflows", [True, False])
+@pytest.mark.unit
 def test_each_target_starts_from_a_clean_exit_code(
     repo, monkeypatch, on_path, converted_has_workflows
 ):
@@ -1198,6 +1249,7 @@ def test_each_target_starts_from_a_clean_exit_code(
         assert converted is True
 
 
+@pytest.mark.unit
 def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
     sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
     credentials = sarif["runs"][0]["results"][0]
@@ -1207,6 +1259,7 @@ def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
     assert "hunter2" not in json.dumps(sarif)
 
 
+@pytest.mark.unit
 def test_a_version_other_than_the_pin_is_warned_about(
     repo, monkeypatch, on_path, caplog
 ):
@@ -1219,6 +1272,7 @@ def test_a_version_other_than_the_pin_is_warned_about(
     assert any("not the pinned v1.7.12" in r.getMessage() for r in caplog.records)
 
 
+@pytest.mark.unit
 def test_the_pinned_version_is_not_warned_about(repo, monkeypatch, on_path, caplog):
     scanner = _scanner(repo)
     _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
@@ -1229,6 +1283,7 @@ def test_the_pinned_version_is_not_warned_about(repo, monkeypatch, on_path, capl
     assert not any("not the pinned" in r.getMessage() for r in caplog.records)
 
 
+@pytest.mark.unit
 def test_a_scan_set_path_outside_the_target_is_not_passed(
     repo, tmp_path, monkeypatch, on_path
 ):
@@ -1274,6 +1329,7 @@ def _argv(scanner, monkeypatch, repo) -> list:
 
 @pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
 @pytest.mark.parametrize("value", ["sh", "bash", "python3", "env"])
+@pytest.mark.unit
 def test_the_scanned_tree_cannot_choose_another_program_by_name(
     repo, monkeypatch, caplog, flag, value
 ):
@@ -1297,6 +1353,7 @@ def test_the_scanned_tree_cannot_choose_another_program_by_name(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
 @pytest.mark.parametrize("spelling", ["absolute", "relative", "dot-relative"])
+@pytest.mark.unit
 def test_the_scanned_tree_cannot_point_an_integration_at_its_own_file(
     repo, monkeypatch, on_path, spelling
 ):
@@ -1316,6 +1373,7 @@ def test_the_scanned_tree_cannot_point_an_integration_at_its_own_file(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.unit
 def test_the_operator_cannot_point_an_integration_inside_the_scanned_tree(
     repo, monkeypatch, on_path
 ):
@@ -1331,6 +1389,7 @@ def test_the_operator_cannot_point_an_integration_inside_the_scanned_tree(
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit and symlinks")
 @pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
 @pytest.mark.parametrize("shape", ["file", "directory"])
+@pytest.mark.unit
 def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
     repo, monkeypatch, on_path, caplog, flag, shape
 ):
@@ -1356,6 +1415,7 @@ def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
     assert "symbolic link" in caplog.text
 
 
+@pytest.mark.unit
 def test_a_name_that_resolves_inside_the_scanned_tree_is_refused(repo, monkeypatch):
     # A relative PATH entry such as "." finds a file the repository committed.
     inside = (repo / "shellcheck").as_posix()
@@ -1373,6 +1433,7 @@ def test_a_name_that_resolves_inside_the_scanned_tree_is_refused(repo, monkeypat
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit and symlinks")
+@pytest.mark.unit
 def test_a_name_found_through_a_link_in_the_scanned_tree_is_refused(repo, monkeypatch):
     """An absolute PATH entry inside the tree that is a link out of it: the name
     is found at <tree>/bin/shellcheck, which resolves outside the tree, but the
@@ -1403,6 +1464,7 @@ def _only_path(monkeypatch, *entries) -> None:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
 @pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
+@pytest.mark.unit
 def test_a_relative_path_entry_never_chooses_an_integration(
     repo, tmp_path, monkeypatch, flag
 ):
@@ -1424,6 +1486,7 @@ def test_a_relative_path_entry_never_chooses_an_integration(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.unit
 def test_an_integration_reachable_only_through_a_relative_path_entry_is_missing(
     repo, tmp_path, monkeypatch
 ):
@@ -1439,6 +1502,7 @@ def test_an_integration_reachable_only_through_a_relative_path_entry_is_missing(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX shebang scripts")
+@pytest.mark.integration
 def test_actionlint_itself_is_started_by_its_absolute_path(repo, tmp_path, monkeypatch):
     """actionlint runs from the scan target. Started by a path a relative PATH entry
     produced, it would be the repository's own ``bin/actionlint``."""
@@ -1464,6 +1528,7 @@ def test_actionlint_itself_is_started_by_its_absolute_path(repo, tmp_path, monke
     assert report.runs[0].invocations[0].executionSuccessful is True
 
 
+@pytest.mark.unit
 def test_the_scanned_tree_may_turn_shellcheck_on_by_its_own_name(repo, monkeypatch):
     monkeypatch.setattr(
         module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
@@ -1476,6 +1541,7 @@ def test_the_scanned_tree_may_turn_shellcheck_on_by_its_own_name(repo, monkeypat
     assert "-pyflakes=/opt/bin/pyflakes" in argv
 
 
+@pytest.mark.unit
 def test_an_operator_override_may_name_another_program(repo, monkeypatch):
     monkeypatch.setattr(
         module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
@@ -1492,6 +1558,7 @@ def test_an_operator_override_may_name_another_program(repo, monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.unit
 def test_an_operator_config_may_name_an_absolute_path_outside_the_tree(
     repo, monkeypatch, on_path, tmp_path
 ):
@@ -1503,6 +1570,7 @@ def test_an_operator_config_may_name_an_absolute_path_outside_the_tree(
     assert f"-shellcheck={tool.as_posix()}" in argv
 
 
+@pytest.mark.unit
 def test_an_override_of_another_option_does_not_vouch_for_shellcheck(
     repo, monkeypatch, on_path
 ):
@@ -1518,6 +1586,7 @@ def test_an_override_of_another_option_does_not_vouch_for_shellcheck(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.unit
 def test_the_scanned_tree_cannot_name_an_absolute_program_outside_it(
     repo, monkeypatch, on_path, tmp_path
 ):
@@ -1539,6 +1608,7 @@ def test_the_scanned_tree_cannot_name_an_absolute_program_outside_it(
 @pytest.mark.parametrize(
     "vendored", ["node_modules/pkg", "web/node_modules/pkg", ".venv/lib", "venv"]
 )
+@pytest.mark.unit
 def test_workflows_under_vendored_directories_are_not_passed(
     repo, monkeypatch, on_path, vendored
 ):
@@ -1559,6 +1629,7 @@ def test_workflows_under_vendored_directories_are_not_passed(
 
 
 @pytest.mark.parametrize("source_dir", [".github", ".github/workflows"])
+@pytest.mark.unit
 def test_a_source_dir_that_is_a_github_or_workflows_dir_is_linted(
     repo, monkeypatch, on_path, source_dir
 ):
@@ -1591,6 +1662,7 @@ def test_a_source_dir_that_is_a_github_or_workflows_dir_is_linted(
         (".github/workflows/ci.yml", "/r/anything", True),
     ],
 )
+@pytest.mark.unit
 def test_is_workflow_file_counts_the_scan_roots_own_name(relative, scan_root, expected):
     root = None if scan_root is None else Path(scan_root)
     assert is_workflow_file(relative, scan_root=root) is expected
@@ -1635,6 +1707,7 @@ _PARITY_LAYOUT = [
         ),
     ],
 )
+@pytest.mark.unit
 def test_actionlint_lints_exactly_the_workflows_zizmor_audits(
     tmp_path, monkeypatch, on_path, target_name, expected
 ):
@@ -1760,6 +1833,7 @@ def _local_reference_layout(repo: Path, outside: Path, case: str) -> None:
         "flow-mapping",
     ],
 )
+@pytest.mark.unit
 def test_a_workflow_whose_local_reference_leaves_the_tree_is_not_linted(
     repo, tmp_path, monkeypatch, on_path, caplog, case
 ):
@@ -1790,6 +1864,7 @@ def test_a_workflow_whose_local_reference_leaves_the_tree_is_not_linted(
     ],
     ids=["in-tree-action", "root-action", "in-tree-reusable", "remote", "expression"],
 )
+@pytest.mark.unit
 def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
     repo, monkeypatch, on_path, body
 ):
@@ -1836,6 +1911,7 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "not-uses",
     ],
 )
+@pytest.mark.unit
 def test_local_uses_references(text, expected):
     """Every form actionlint's parser could read a local ``uses`` from."""
     assert module.local_uses_references(text) == expected

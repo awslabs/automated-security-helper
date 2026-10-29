@@ -36,6 +36,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
+pytestmark = pytest.mark.unit
+
 needs_symlinks = pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )

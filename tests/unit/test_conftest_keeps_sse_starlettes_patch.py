@@ -15,6 +15,10 @@ every later server in the worker stopped without ending its event streams.
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_sse_starlettes_import_time_patch_is_kept() -> None:
     import sse_starlette.sse as sse

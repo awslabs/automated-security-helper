@@ -48,6 +48,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
 )
 
+pytestmark = pytest.mark.unit
+
 PLACEHOLDER = "ash-test-placeholder-value"
 
 # The reference form the docs and ASH's own config use. The bare ``${VAR}``

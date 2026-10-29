@@ -39,6 +39,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 
+pytestmark = pytest.mark.unit
+
 MODULE = (
     "automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter"
 )

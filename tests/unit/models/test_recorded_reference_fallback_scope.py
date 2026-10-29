@@ -26,6 +26,8 @@ from pydantic import ValidationError
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 
 def _record(**changes: Any) -> Dict[str, Any]:
     """Results whose stored configuration has ``changes`` applied, each a dotted

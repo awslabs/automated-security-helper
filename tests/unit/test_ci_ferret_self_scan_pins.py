@@ -60,6 +60,8 @@ from typing import Any
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMUNITY_CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
 RULE = "SECRET-SECRET-KEYWORD"

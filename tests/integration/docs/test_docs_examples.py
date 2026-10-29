@@ -86,6 +86,7 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("page", pages, ids=[page.rel for page in pages])
 
 
+@pytest.mark.integration
 def test_the_docs_have_runnable_examples(request):
     """No pages would mean no parametrized tests below, which passes by running nothing."""
     assert pages_with_examples(docs_root_of(request.config)), (
@@ -93,6 +94,7 @@ def test_the_docs_have_runnable_examples(request):
     )
 
 
+@pytest.mark.e2e
 def test_doc_examples_run(page, tmp_path, request):
     results = runner.PageRunner(
         page, tmp_path, docs_root=docs_root_of(request.config)

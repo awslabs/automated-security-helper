@@ -84,6 +84,8 @@ from automated_security_helper.utils.get_scan_set import (
     yellow,
 )
 
+pytestmark = pytest.mark.unit
+
 IGNORE_REPORT_NAME = "ash-ignore-report.txt"
 SCAN_SET_NAME = "ash-scan-set-files-list.txt"
 

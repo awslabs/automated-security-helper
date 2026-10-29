@@ -120,6 +120,7 @@ def _stored_results(output_dir):
     )
 
 
+@pytest.mark.integration
 class TestAScanChecksOnlyTheReportersItUses:
     def test_an_enabled_cloud_reporter_is_not_checked_when_other_formats_are_asked_for(
         self, tmp_path, requests, sessions, security_hub_runs
@@ -199,6 +200,7 @@ COMPLETE_SECTIONS = {
 }
 
 
+@pytest.mark.integration
 class TestACompleteSectionWithoutEnabledContactsNothing:
     """Options alone do not turn a cloud reporter on; its ``enabled`` default does not either."""
 
@@ -287,10 +289,12 @@ def _aws_reporter_configs():
 @pytest.mark.parametrize(
     "config_class", _aws_reporter_configs(), ids=lambda cls: cls.__name__
 )
+@pytest.mark.unit
 def test_every_aws_reporter_ships_disabled(config_class):
     assert config_class().enabled is False
 
 
+@pytest.mark.unit
 class TestTheEnvironmentIsReadWhenAConfigIsBuilt:
     """A reporter's region and profile come from the environment of the run, not of the import.
 
@@ -328,6 +332,7 @@ class TestTheEnvironmentIsReadWhenAConfigIsBuilt:
             assert options.aws_profile is None
 
 
+@pytest.mark.unit
 class TestReportCommand:
     def _report(self, output_dir, *extra, report_format="aws-security-hub"):
         from automated_security_helper.cli.main import app
@@ -485,6 +490,7 @@ class TestReportCommand:
         assert ("s3", "PutObject") in requests
 
 
+@pytest.mark.unit
 class TestMergeCommand:
     """``ash merge`` sends merged findings off the host only on the operator's ``--config-overrides``.
 
@@ -663,6 +669,7 @@ class TestMergeCommand:
         assert all(s[3] in (None, "operator-bucket") for s in sent), sent
 
 
+@pytest.mark.unit
 class TestWorkspaceReporting:
     def test_a_per_project_reporter_is_not_checked_at_workspace_level(
         self, tmp_path, requests, sessions
@@ -778,6 +785,7 @@ AWS_REPORTER_NAMES = {
 }
 
 
+@pytest.mark.unit
 def test_the_aws_reporter_names_are_output_formats_of_the_aws_plugin_module():
     """`-f <name>` parses for each AWS reporter; ExportFormat lists the four.
 
@@ -799,6 +807,7 @@ def test_the_aws_reporter_names_are_output_formats_of_the_aws_plugin_module():
     assert {member.value for member in AWS_PLUGIN_MODULE_FORMATS} == aws_names
 
 
+@pytest.mark.unit
 def test_no_built_in_output_format_names_an_aws_reporter():
     """Control: the AWS names are listed only as the AWS plugin module's formats.
 

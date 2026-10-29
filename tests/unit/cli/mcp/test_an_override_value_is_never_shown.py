@@ -36,6 +36,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     set_profile_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "override-values-client"
 
 NARROW = ["/project_name", "/missing_parent/**", "/no_such_field"]

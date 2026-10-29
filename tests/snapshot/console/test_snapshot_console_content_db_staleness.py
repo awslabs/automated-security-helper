@@ -17,9 +17,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils.content_db_staleness import OPT_OUT_HINT
 from tests.snapshot.console.console_inputs import content_db_record
+
+pytestmark = pytest.mark.unit
 
 
 def test_message_variants(snapshot):

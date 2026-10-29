@@ -56,6 +56,8 @@ from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 
+pytestmark = pytest.mark.unit
+
 #: Named with a hyphen because the real registered names use hyphens and the typo
 #: this file exists for is an underscore. A fixture whose names had no punctuation
 #: could not tell the two apart.

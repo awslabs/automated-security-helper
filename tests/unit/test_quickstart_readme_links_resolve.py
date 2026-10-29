@@ -28,9 +28,10 @@ DOCS_DIR = REPO_ROOT / "docs" / "content"
 SITE = "https://awslabs.github.io/automated-security-helper/"
 _VERSION = re.compile(r"^(latest|v?\d+(\.\d+)*)/")
 
-pytestmark = pytest.mark.skipif(
-    not README.is_file(), reason="quickstart/README.md not present"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(not README.is_file(), reason="quickstart/README.md not present"),
+]
 
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 

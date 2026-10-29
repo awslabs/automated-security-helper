@@ -100,6 +100,7 @@ def _no_longer_runs(tool: Path, how: str, tmp_path: Path) -> None:
     "how",
     ["gone", "no execute bit", "a directory", "a FIFO", "a dangling link"],
 )
+@pytest.mark.unit
 def test_a_direct_command_whose_binary_no_longer_runs_is_not_the_answer(
     tmp_path, monkeypatch, tool_name, caplog, how
 ):
@@ -116,6 +117,7 @@ def test_a_direct_command_whose_binary_no_longer_runs_is_not_the_answer(
     assert str(tool) in caplog.text, caplog.text
 
 
+@pytest.mark.unit
 def test_a_direct_command_whose_binary_became_a_link_to_one_is_the_answer(
     tmp_path, monkeypatch, tool_name, caplog
 ):
@@ -132,6 +134,7 @@ def test_a_direct_command_whose_binary_became_a_link_to_one_is_the_answer(
     assert "no longer an executable file" not in caplog.text, caplog.text
 
 
+@pytest.mark.integration
 def test_a_uv_command_whose_uv_is_gone_is_an_error_not_a_new_probe(
     tmp_path, monkeypatch, tool_name, caplog
 ):
@@ -153,6 +156,7 @@ def test_a_uv_command_whose_uv_is_gone_is_an_error_not_a_new_probe(
     assert _probes(other_calls) == []
 
 
+@pytest.mark.integration
 def test_a_remembered_command_whose_file_is_still_there_is_the_answer(
     tmp_path, monkeypatch, tool_name, caplog
 ):
@@ -170,6 +174,7 @@ def test_a_remembered_command_whose_file_is_still_there_is_the_answer(
 
 
 @pytest.mark.parametrize("how", ["no execute bit", "a directory"])
+@pytest.mark.unit
 def test_a_file_in_the_bin_directory_that_does_not_run_is_not_the_tool(
     tmp_path, monkeypatch, tool_name, caplog, how
 ):
@@ -190,6 +195,7 @@ def test_a_file_in_the_bin_directory_that_does_not_run_is_not_the_tool(
     assert "no longer an executable file" not in caplog.text, caplog.text
 
 
+@pytest.mark.unit
 def test_an_executable_file_in_the_bin_directory_is_the_tool(
     tmp_path, monkeypatch, tool_name
 ):

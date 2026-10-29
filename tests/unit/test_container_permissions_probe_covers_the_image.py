@@ -46,6 +46,7 @@ def probe():
     return module
 
 
+@pytest.mark.unit
 def test_the_probe_starts_at_the_root_of_the_image(probe, monkeypatch):
     seen = []
 
@@ -92,6 +93,7 @@ def _find_supports_printf() -> bool:
     return completed.returncode == 0
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt" or not _find_supports_printf(),
     reason="POSIX file modes and GNU find -printf, as inside the image",

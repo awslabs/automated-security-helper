@@ -39,6 +39,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporte
 )
 from automated_security_helper.schemas.sarif_schema_model import Result
 
+pytestmark = pytest.mark.unit
+
 #: The marker each probe text ends with, after its line feed.
 MARKER = "probe-mark"
 

@@ -34,17 +34,23 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+
+from tests.utils.ci_tiers import (
+    E2E_TEST_JOB_IDS,
+    INTEGRATION_TEST_JOB_IDS,
+    UNIT_TEST_JOB_IDS,
+)
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 IAC_DRIFT = WORKFLOWS / "ash-iac-drift.yml"
 
-#: The unit-test matrix is three jobs, one per runner pool, so each pool has its own
-#: max-parallel cap. The workflow's comments count the three as one family, "unit-test",
-#: which is also what every one of their check names starts with.
-UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
+RUN_UNIT_TESTS_USES = "./.github/actions/run-unit-tests"
 
 
 def _jobs(path: Path) -> dict[str, Any]:
@@ -120,10 +126,17 @@ def _one(pattern: str, text: str) -> re.Match:
 JOBS = _jobs(UNIFIED_CI)
 LEGS = {name: _legs(job) for name, job in JOBS.items()}
 #: The legs of the whole unit-test family, which the old single job counted by itself.
-#: Each leg publishes one `PyTest - ...` check run from inside the job
-#: (mikepenz/action-junit-report), which is not a job of its own, so this is also the
-#: number of those check runs.
 UNIT_TEST_LEGS = sum(LEGS[name] for name in UNIT_TEST_JOB_IDS)
+#: Every job that calls run-unit-tests, whatever its tier. Each of their legs publishes
+#: one `PyTest - ...` check run from inside the job (mikepenz/action-junit-report), which
+#: is not a job of its own, so the legs of these jobs are also the number of those check
+#: runs. Found from the steps, so a tier job added later is counted without an edit here.
+PYTEST_JOB_IDS = [
+    name
+    for name, job in JOBS.items()
+    if any(step.get("uses") == RUN_UNIT_TESTS_USES for step in job.get("steps") or [])
+]
+PYTEST_CHECK_RUNS = sum(LEGS[name] for name in PYTEST_JOB_IDS)
 #: LEGS as the workflow's comments list it: the three unit-test jobs under one name.
 COMMENT_LEGS = {
     **{name: n for name, n in LEGS.items() if name not in UNIT_TEST_JOB_IDS},
@@ -141,24 +154,37 @@ class TestTheExpansion:
         assert LEGS["lint"] == 1
 
     def test_an_axis_product_less_its_excludes(self):
-        # 25 OS and Python combinations, each split into 8 shards (tests/unit/test_unit_test_shards.py
-        # holds the shard axis itself to one list of eight), cut into three jobs by OS:
-        # 2 Linux and 2 macOS images and 1 Windows image, each on 5 Python versions.
-        assert LEGS["unit-test-linux"] == 2 * 5 * 8
-        assert LEGS["unit-test-macos"] == 2 * 5 * 8
-        assert LEGS["unit-test-windows"] == 1 * 5 * 8
-        assert UNIT_TEST_LEGS == 25 * 8
+        # 25 OS and Python combinations, cut into three jobs by OS: 2 Linux and 2 macOS
+        # images and 1 Windows image, each on 5 Python versions. The unit tier is not
+        # sharded; the integration tier splits each combination into 4 shards
+        # (tests/unit/test_unit_test_shards.py holds that axis itself to one list of
+        # four); the e2e tier runs once per image, on one Python version.
+        assert LEGS["unit-test-linux"] == 2 * 5
+        assert LEGS["unit-test-macos"] == 2 * 5
+        assert LEGS["unit-test-windows"] == 1 * 5
+        assert UNIT_TEST_LEGS == 25
+        assert LEGS["integration-test-linux"] == 2 * 5 * 4
+        assert LEGS["integration-test-macos"] == 2 * 5 * 4
+        assert LEGS["integration-test-windows"] == 1 * 5 * 4
+        assert sum(LEGS[name] for name in INTEGRATION_TEST_JOB_IDS) == 25 * 4
+        assert [LEGS[name] for name in E2E_TEST_JOB_IDS] == [2, 2, 1]
+
+    def test_the_jobs_that_publish_a_pytest_check_run_are_the_three_tiers(self):
+        """The check-run note counts one run per leg of every job that calls the action."""
+        assert sorted(PYTEST_JOB_IDS) == sorted(
+            [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
+        ), PYTEST_JOB_IDS
+        assert PYTEST_CHECK_RUNS == 25 + 100 + 5
 
     def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
         """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
 
-        The limit applies to each matrix, and the unit-test matrix is three of them. As
-        one job it was the closest, at 200 legs; its largest part is now 80, and the
-        family as a whole is still 200.
+        The limit applies to each matrix. The unit-test matrix was the closest, at 200
+        legs as one job; the tiers are nine matrices now and the largest is 40.
         """
         too_big = {name: legs for name, legs in LEGS.items() if legs > 256}
         assert not too_big, too_big
-        assert max(LEGS[name] for name in UNIT_TEST_JOB_IDS) <= 256
+        assert max(LEGS[name] for name in PYTEST_JOB_IDS) <= 256
 
     def test_an_include_that_merges_adds_no_cell(self):
         job = {
@@ -214,7 +240,7 @@ class TestTheCommentsMatchTheWorkflow:
         )
         check_runs, jobs, junit = map(int, match.groups())
 
-        assert (jobs, junit) == (ON_PULL_REQUEST, UNIT_TEST_LEGS)
+        assert (jobs, junit) == (ON_PULL_REQUEST, PYTEST_CHECK_RUNS)
         assert check_runs == jobs + junit
         assert re.search(
             rf"this workflow contributes {check_runs} check runs to a pull request",
@@ -249,6 +275,12 @@ class TestTheCommentsMatchTheWorkflow:
             "expands to 280 jobs",
             "contributes 478 check",
             "478 is this",
+            "expands to 286 jobs",
+            "contributes 484 check",
+            "484 is this",
+            "expands to 316 jobs",
+            "contributes 544 check",
+            "544 is this",
         ):
             assert stale not in COMMENTS
 

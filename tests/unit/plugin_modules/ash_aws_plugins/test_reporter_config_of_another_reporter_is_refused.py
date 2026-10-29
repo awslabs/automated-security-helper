@@ -39,6 +39,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_repor
     SecurityHubReporterConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 REPORTERS = [
     (SecurityHubReporter, SecurityHubReporterConfig),
     (S3Reporter, S3ReporterConfig),

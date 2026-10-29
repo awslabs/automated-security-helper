@@ -32,7 +32,7 @@ from tests.snapshot.support.normalize import REPO_ROOT
 
 ASH_SCRIPT = REPO_ROOT / "ash"
 
-pytestmark = pytest.mark.container_runtime
+pytestmark = [pytest.mark.container_runtime, pytest.mark.integration]
 
 #: The utilities ./ash calls besides bash builtins and the runner. tr lower-cases the
 #: build target, so without it the image tag is empty and every run prints

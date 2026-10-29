@@ -28,6 +28,8 @@ from mcp.server.mcpserver import Context
 from automated_security_helper.cli import mcp_server
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.unit
+
 URL = "https://git.example.invalid/team/repo.git"
 
 

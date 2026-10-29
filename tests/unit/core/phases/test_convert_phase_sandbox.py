@@ -131,6 +131,7 @@ def _ran() -> List[str]:
     return sorted(p.name for p in MARKERS["dir"].iterdir())
 
 
+@pytest.mark.integration
 def test_every_spawn_of_a_converter_is_planned_by_the_sandbox(tmp_path, backend):
     context = _context(tmp_path, "bwrap")
 
@@ -152,6 +153,7 @@ def test_every_spawn_of_a_converter_is_planned_by_the_sandbox(tmp_path, backend)
         ]
 
 
+@pytest.mark.unit
 def test_an_unavailable_sandbox_refuses_the_converters_spawns(tmp_path, backend):
     backend.unavailable_reason = "bwrap: cannot create a user namespace"
 
@@ -163,6 +165,7 @@ def test_an_unavailable_sandbox_refuses_the_converters_spawns(tmp_path, backend)
     )
 
 
+@pytest.mark.integration
 def test_without_a_sandbox_nothing_is_planned(tmp_path, backend):
     """Control: sandbox mode off runs the converter as before."""
     _run(_context(tmp_path, "off"))
@@ -178,6 +181,7 @@ class TestRefusedSpawnsAreLostCoverage:
     converter's row has to say the same, so the completeness gate lists it.
     """
 
+    @pytest.mark.unit
     def test_an_unavailable_sandbox_makes_the_converter_incomplete(
         self, tmp_path, backend
     ):
@@ -194,6 +198,7 @@ class TestRefusedSpawnsAreLostCoverage:
             results.converter_results["spawning"].model_dump(mode="json")
         )
 
+    @pytest.mark.integration
     def test_a_spawn_the_backend_refuses_makes_the_converter_incomplete(
         self, tmp_path, backend, monkeypatch
     ):
@@ -217,6 +222,7 @@ class TestRefusedSpawnsAreLostCoverage:
         assert [row.name for row in listed] == ["spawning"], listed
         assert "refused" in listed[0][1]
 
+    @pytest.mark.integration
     def test_a_converter_whose_spawns_ran_is_complete(self, tmp_path, backend):
         """Control: every spawn planned and run, nothing lost."""
         from automated_security_helper.interactions.run_ash_scan import (

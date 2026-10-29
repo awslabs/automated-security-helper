@@ -44,6 +44,7 @@ def _shipped_denied_paths() -> list[str]:
 _BLANKET_SUPPRESSION = {"path": "**", "reason": "silence everything"}
 
 
+@pytest.mark.unit
 class TestAllowlistDisabled:
     def test_disabled_allowlist_denies_all_patches(self) -> None:
         base = _base_config()
@@ -62,6 +63,7 @@ class TestAllowlistDisabled:
             apply_runtime_patch(base, [], allowlist=allowlist)
 
 
+@pytest.mark.unit
 class TestAllowedPaths:
     def test_allowed_path_replace_applied(self) -> None:
         base = _base_config()
@@ -140,6 +142,7 @@ class TestAllowedPaths:
         assert "not in allowed_paths" in excinfo.value.rule
 
 
+@pytest.mark.unit
 class TestDeniedPaths:
     def test_denied_path_overlapping_allowed_is_denied(self) -> None:
         """Denied wins when a path is both allowed and denied."""
@@ -190,6 +193,7 @@ class TestDeniedPaths:
             apply_runtime_patch(base, ops, allowlist=allowlist)
 
 
+@pytest.mark.unit
 class TestForbiddenOps:
     def test_move_op_denied(self) -> None:
         base = _base_config()
@@ -222,6 +226,7 @@ class TestForbiddenOps:
         assert "copy" in excinfo.value.rule.lower()
 
 
+@pytest.mark.unit
 class TestSizeLimit:
     def test_patch_over_64kib_denied(self) -> None:
         base = _base_config()
@@ -252,6 +257,7 @@ class TestSizeLimit:
         assert result.project_name == "ok"
 
 
+@pytest.mark.unit
 class TestDeniedValuePatterns:
     def test_value_pattern_match_denies(self) -> None:
         base = _base_config()
@@ -279,6 +285,7 @@ class TestDeniedValuePatterns:
         assert result.project_name == "fine-name"
 
 
+@pytest.mark.unit
 class TestValidationAfterApply:
     def test_invalid_resulting_config_rejected(self) -> None:
         """Patches that produce an invalid AshConfig must be rejected."""
@@ -300,6 +307,7 @@ class TestValidationAfterApply:
         assert "validation" in excinfo.value.rule.lower()
 
 
+@pytest.mark.unit
 class TestAtomicMultiOp:
     def test_one_denied_op_fails_entire_patch(self) -> None:
         """Atomicity: a single denied op aborts the whole patch and leaves the
@@ -341,6 +349,7 @@ class TestAtomicMultiOp:
         assert "/work/r.sarif" in result.external_reports_to_include
 
 
+@pytest.mark.unit
 class TestDefaults:
     def test_default_runtime_overrides_disabled(self) -> None:
         cfg = AshConfig()
@@ -443,6 +452,7 @@ class TestDefaults:
         )
 
 
+@pytest.mark.unit
 class TestRecursiveValuePattern:
     def test_value_pattern_matches_string_leaf_in_list(self) -> None:
         """#72 regression: a forbidden token hidden in a list value must be
@@ -544,6 +554,7 @@ class TestRecursiveValuePattern:
         apply_runtime_patch(base, ops, allowlist=allowlist)
 
 
+@pytest.mark.unit
 class TestRfc6901Escapes:
     def test_path_with_escaped_slash_matches_pattern(self) -> None:
         """#74 regression: `~1` decodes to `/` in pointer segments. A patch
@@ -593,6 +604,7 @@ class TestRfc6901Escapes:
         assert "not in allowed_paths" in excinfo.value.rule
 
 
+@pytest.mark.unit
 class TestRootPointerRefused:
     """A write at the root pointer replaces the whole document, so no
     per-field `denied_paths` entry can constrain what it sets. The allowlist
@@ -694,6 +706,7 @@ class TestRootPointerRefused:
         assert "denied_paths entry" in excinfo.value.rule
 
 
+@pytest.mark.unit
 class TestDenyListIsSubtreeClosed:
     """Each `denied_paths` entry names a subtree, not one pointer.
 
@@ -882,6 +895,7 @@ class TestDenyListIsSubtreeClosed:
         assert result.project_name == "renamed"
 
 
+@pytest.mark.unit
 class TestDeniedValuePatternsAreSubtreeClosed:
     """`denied_value_patterns` keys are pointer patterns, so they bind to a
     subtree the same way `denied_paths` entries do. An exact dict lookup on the
@@ -965,6 +979,7 @@ class TestDeniedValuePatternsAreSubtreeClosed:
         assert result.global_settings.severity_threshold == "HIGH"
 
 
+@pytest.mark.unit
 class TestOverrideAsPatch:
     """A whole-document override is gated as the patch that produces it.
 
@@ -1083,6 +1098,7 @@ class TestOverrideAsPatch:
         assert "does not reproduce the override" in excinfo.value.rule
 
 
+@pytest.mark.unit
 class TestDenialsMatchEitherSeparator:
     """Config merging treats '-' and '_' in a key as one key, per segment, so a
     denial written with one has to refuse a write spelled with the other, in any
@@ -1175,6 +1191,7 @@ _BEDROCK_SPELLINGS = [
 ]
 
 
+@pytest.mark.unit
 class TestDenialsMatchEveryPluginSpelling:
     """A plugin's config section is looked up ignoring case, punctuation and the
     Scanner/Reporter/Converter word (AshConfig.get_plugin_config), so a denial on
@@ -1358,6 +1375,7 @@ _OFF_HOST_WRITES = {
 }
 
 
+@pytest.mark.unit
 class TestOffHostReporterSections:
     """Only the operator's trusted config sets an off-host reporter's section.
 
@@ -1592,6 +1610,7 @@ def _write(section: str, written: str, field: str) -> Dict[str, Any]:
     return {"op": "add", "path": f"/{section}/{plugin}/{field}", "value": "x"}
 
 
+@pytest.mark.unit
 class TestGlobPluginDenials:
     """A denial whose plugin segment is a glob covers every plugin key the glob
     matches, so it has to refuse every spelling get_plugin_config reads as one of
@@ -1691,6 +1710,7 @@ class TestGlobDenialsNameKnownPlugins:
             ("reporters", "*json*"),
         ],
     )
+    @pytest.mark.unit
     def test_only_keys_the_glob_matches_are_refused(
         self, section: str, glob: str
     ) -> None:
@@ -1733,6 +1753,7 @@ class TestGlobDenialsNameKnownPlugins:
             "/[s]canners/trivy-repo/options/ignore_file",
         ],
     )
+    @pytest.mark.unit
     def test_a_glob_section_segment_is_respelled_too(self, denial: str) -> None:
         allowlist = RuntimeOverridesConfig(
             enabled=True, allowed_paths=["/**"], denied_paths=[denial]
@@ -1744,6 +1765,7 @@ class TestGlobDenialsNameKnownPlugins:
                 config=None,
             )
 
+    @pytest.mark.unit
     def test_a_section_the_config_already_has_is_a_known_key(self) -> None:
         base = AshConfig.model_validate({"scanners": {"acme-scan": {"enabled": False}}})
         allowlist = RuntimeOverridesConfig(
@@ -1765,6 +1787,7 @@ class TestGlobDenialsNameKnownPlugins:
             )
         assert "denied_paths" in excinfo.value.rule
 
+    @pytest.mark.integration
     def test_the_shipped_table_matches_the_plugin_packages(self, tmp_path) -> None:
         """The table stands in for importing the packages; this imports them, apart.
 
@@ -1809,6 +1832,7 @@ class TestGlobDenialsNameKnownPlugins:
             section: sorted(keys) for section, keys in _SHIPPED_PLUGIN_KEYS.items()
         }
 
+    @pytest.mark.integration
     def test_building_the_keys_imports_no_plugin_module(self, tmp_path) -> None:
         """Importing a plugin module registers its plugins, and a scan runs them all."""
         import subprocess  # nosec B404 - starts a fresh interpreter to watch imports
@@ -1851,6 +1875,7 @@ def _operator_with_s3() -> AshConfig:
     )
 
 
+@pytest.mark.unit
 class TestTurningAnOffHostReporterOffHasNoEffect:
     """A client's ``enabled: false`` on an off-host reporter is accepted, and dropped.
 

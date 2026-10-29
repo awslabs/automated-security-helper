@@ -50,6 +50,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 CAPTURES = (
     Path(__file__).resolve().parents[4] / "test_data" / "scanners" / "npmaudit" / "yarn"
 )

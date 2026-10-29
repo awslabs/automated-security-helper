@@ -16,6 +16,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Suppression,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_result(rule_id, level, text, suppressed=False, justification=None):
     r = Result(ruleId=rule_id, level=level, message={"text": text})

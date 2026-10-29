@@ -18,9 +18,13 @@ from __future__ import annotations
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 from automated_security_helper.utils import get_scan_set
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.scan_output_dirs import git_index_below
+
+pytestmark = pytest.mark.unit
 
 CANARY = "zz-ops-canary-7421"
 

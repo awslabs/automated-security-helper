@@ -31,6 +31,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScanSettingsFiltersUsed,
 )
 
+pytestmark = pytest.mark.unit
+
 VERIFICATION_FILTER = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
 )

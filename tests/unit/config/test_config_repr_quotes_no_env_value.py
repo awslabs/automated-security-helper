@@ -22,6 +22,8 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config import resolve_config as resolve_config_module
 from automated_security_helper.utils.error_text import config_environment_values
 
+pytestmark = pytest.mark.unit
+
 #: The values the config's file reads from the environment: one for a top-level
 #: list field, one for a field inside a nested section. Nothing else in the
 #: config prints them.

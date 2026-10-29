@@ -47,6 +47,8 @@ from tests.unit.interactions.test_container_image_revision import (
     _stage,
 )
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMMIT_ID = "0123456789abcdef0123456789abcdef01234567"
 BRANCHES = ["main", "beta", "feature/scan-cache", "v3", "abc1234"]

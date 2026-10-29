@@ -81,6 +81,7 @@ def _targeted() -> list[str]:
     return texts
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform != "linux", reason="the wrapper loads Linux's libc")
 def test_the_wrapper_shows_text_as_shown_on_one_line_does():
     shown = _wrapper_module()._shown
@@ -90,6 +91,7 @@ def test_the_wrapper_shows_text_as_shown_on_one_line_does():
         assert shown(text) == shown_on_one_line(text), ascii(text)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform != "linux", reason="the wrapper loads Linux's libc")
 def test_the_wrapper_shows_each_class_as_shown_on_one_line_does():
     """The random strings alone left whole classes untried: no \\u or \\U text, no
@@ -99,6 +101,7 @@ def test_the_wrapper_shows_each_class_as_shown_on_one_line_does():
         assert shown(text) == shown_on_one_line(text), ascii(text)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="the wrapper loads Linux's libc")
 def test_a_scanner_the_wrapper_cannot_exec_is_refused_shown(tmp_path):
     """fail() quotes the scanner's path and the exec error, which quotes it again."""

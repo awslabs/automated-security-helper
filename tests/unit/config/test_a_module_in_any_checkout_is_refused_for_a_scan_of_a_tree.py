@@ -25,6 +25,8 @@ from automated_security_helper.config import resolve_config as rc
 from automated_security_helper.config.plugin_module_trust import refusal_reason
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 
 def _package(root: Path, name: str) -> Path:
     package = root / name

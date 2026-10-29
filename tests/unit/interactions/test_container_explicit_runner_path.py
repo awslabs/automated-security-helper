@@ -21,9 +21,12 @@ import pytest
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
+    ),
+]
 
 
 def _self_recording_runner(directory: Path, log: Path) -> Path:

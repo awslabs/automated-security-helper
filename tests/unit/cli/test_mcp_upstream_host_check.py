@@ -25,6 +25,8 @@ from automated_security_helper.cli.mcp import (
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 
+pytestmark = pytest.mark.unit
+
 # Every all-interfaces host below is the non-loopback bind the opt-out exists
 # for, so the address is the condition under test. The trailing bandit markers
 # say that to B104.

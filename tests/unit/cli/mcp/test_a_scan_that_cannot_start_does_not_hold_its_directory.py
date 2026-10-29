@@ -38,6 +38,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
 from automated_security_helper.utils.log import ASHLogger
 from tests.utils.scan_task_stubs import end_the_scans_scope_as_its_task_would
 
+pytestmark = pytest.mark.unit
+
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 _MGMT = "automated_security_helper.core.resource_management.scan_management"
 _RESULTS = "ash_aggregated_results.json"

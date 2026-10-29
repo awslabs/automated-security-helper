@@ -27,6 +27,8 @@ from automated_security_helper.utils.sandbox.backends import (
     LandlockBackend,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def kernel_abi(monkeypatch):

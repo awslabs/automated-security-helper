@@ -45,6 +45,8 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 

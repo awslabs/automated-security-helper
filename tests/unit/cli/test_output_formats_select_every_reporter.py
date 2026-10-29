@@ -54,6 +54,8 @@ from automated_security_helper.cli.merge import _parse_output_formats
 from automated_security_helper.cli.report import get_report_formats
 from automated_security_helper.core.enums import ExportFormat
 
+pytestmark = pytest.mark.unit
+
 RUN_ASH_SCAN = "automated_security_helper.cli.scan.run_ash_scan"
 
 #: The packages whose reporter classes ASH ships. Importing them fires the

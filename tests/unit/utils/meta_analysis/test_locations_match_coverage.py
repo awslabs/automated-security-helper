@@ -1,8 +1,12 @@
 """Unit tests for locations_match module to increase coverage."""
 
+import pytest
+
 from automated_security_helper.utils.meta_analysis.locations_match import (
     locations_match,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_locations_match_exact_match():

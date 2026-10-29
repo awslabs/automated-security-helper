@@ -36,6 +36,8 @@ from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 PLUGIN = "example-plugin"
 PLUGIN_KEY = f"scanners.{PLUGIN}.options.rules_file"
 REMEDY = (

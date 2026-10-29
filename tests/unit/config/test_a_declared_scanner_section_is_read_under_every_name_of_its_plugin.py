@@ -24,6 +24,8 @@ from automated_security_helper.config.ash_config import (
     plugin_section_lookup,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 DECLARED = "detect-secrets"

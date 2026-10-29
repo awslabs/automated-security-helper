@@ -36,6 +36,8 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.core.phases import scanner_executor as module
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 
+pytestmark = pytest.mark.unit
+
 WAIT_BOUND_SECONDS = 5.0
 
 

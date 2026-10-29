@@ -44,6 +44,8 @@ findings had failed the scan.
 :func:`test_result_filters_grades_as_the_gate` pin the agreement.
 """
 
+import pytest
+
 from automated_security_helper.core.constants import VALID_SEVERITY_VALUES
 from automated_security_helper.core.resource_management.result_filters import (
     _get_finding_severity,
@@ -63,6 +65,8 @@ from automated_security_helper.utils.severity_ladder import (
     _SARIF_LEVEL_TO_SEVERITY,
     SEVERITIES,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_named_severity_copies_agree_as_sets():

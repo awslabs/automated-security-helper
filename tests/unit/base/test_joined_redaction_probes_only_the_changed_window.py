@@ -31,6 +31,8 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 
+pytestmark = pytest.mark.unit
+
 SPAN_VALUE = "--tok alpha-secret-one"
 HEAD = ["scanner", "--tok", "alpha-secret-one"]
 

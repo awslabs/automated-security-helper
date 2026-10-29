@@ -29,6 +29,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 BROKEN = "warnleak_ash_plugins"
 #: The env-read value nothing may print.
 SECRET = "warnleak-secret-4417"

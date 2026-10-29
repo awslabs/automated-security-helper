@@ -19,6 +19,8 @@ import yaml
 
 from automated_security_helper.config.resolve_config import resolve_config
 
+pytestmark = pytest.mark.unit
+
 _ENTRY = {"path": "vendor/**", "reason": "third party", "client_supplied": True}
 
 

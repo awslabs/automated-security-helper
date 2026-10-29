@@ -44,6 +44,8 @@ from automated_security_helper.plugin_modules.ash_builtin.event_handlers import 
 )
 from automated_security_helper.utils import suppression_matcher as matcher
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 REFERENCE = "${ASH_PROBE_EXP}"
 

@@ -67,6 +67,8 @@ import pytest
 
 from tests.utils import github_actions as ga
 
+pytestmark = pytest.mark.unit
+
 REPO = "awslabs/automated-security-helper"
 
 # Real or realistic tags that are not releases. `doctest-pre-rebase2-e85e438ba` is a

@@ -57,6 +57,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.unit
+
 SESSION = "rename-retry"
 URL = "https://example.com/foo.git"
 GIT = "/opt/git/bin/git"

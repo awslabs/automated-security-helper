@@ -74,20 +74,24 @@ def _not_nested(root):
     return False
 
 
+@pytest.mark.unit
 def test_the_repository_root_is_dot(tmp_path):
     assert scan_source_label(tmp_path, tmp_path) == "."
 
 
+@pytest.mark.unit
 def test_a_directory_below_the_root_is_relative_to_it(tmp_path):
     narrow = tmp_path / "services" / "api"
     narrow.mkdir(parents=True)
     assert scan_source_label(narrow, tmp_path) == "services/api"
 
 
+@pytest.mark.unit
 def test_outside_a_repository_the_absolute_path_is_used(tmp_path):
     assert scan_source_label(tmp_path, None) == tmp_path.resolve().as_posix()
 
 
+@pytest.mark.unit
 def test_a_root_that_does_not_contain_the_directory_gives_its_absolute_path(
     tmp_path,
 ):
@@ -98,6 +102,7 @@ def test_a_root_that_does_not_contain_the_directory_gives_its_absolute_path(
     assert scan_source_label(elsewhere, root) == elsewhere.resolve().as_posix()
 
 
+@pytest.mark.unit
 def test_a_relative_source_dir_is_resolved_first(tmp_path, monkeypatch):
     (tmp_path / "app").mkdir()
     monkeypatch.chdir(tmp_path)
@@ -140,12 +145,14 @@ def _repository_at(root):
     return root
 
 
+@pytest.mark.unit
 def test_outside_the_container_the_scan_works_it_out(tmp_path):
     narrow = tmp_path / "services" / "api"
     narrow.mkdir(parents=True)
     assert _record(narrow, _repository_at(tmp_path), {}) == "services/api"
 
 
+@pytest.mark.unit
 def test_outside_the_container_the_variable_is_ignored(tmp_path):
     """Only the ASH image sets ASH_IN_CONTAINER; a host environment that happens
     to carry ASH_SCAN_SOURCE does not choose the scope."""
@@ -153,6 +160,7 @@ def test_outside_the_container_the_variable_is_ignored(tmp_path):
     assert _record(tmp_path, _repository_at(tmp_path), environ) == "."
 
 
+@pytest.mark.unit
 def test_inside_the_container_the_launchers_label_wins(tmp_path):
     find_root = _root_at(tmp_path)
     environ = _launcher("services/api")
@@ -163,6 +171,7 @@ def test_inside_the_container_the_launchers_label_wins(tmp_path):
     assert find_root.calls == []
 
 
+@pytest.mark.unit
 def test_the_launchers_empty_label_records_nothing(tmp_path):
     """The launcher passes "" when the host saw no repository, or one nested in
     another. Git in the container sees only the mount, so it would call a nested
@@ -176,6 +185,7 @@ def test_the_launchers_empty_label_records_nothing(tmp_path):
     assert find_root.calls == []
 
 
+@pytest.mark.unit
 def test_a_wrapper_run_records_nothing_even_where_git_sees_a_repository(tmp_path):
     """The legacy wrappers pass no label at all. Git in the container sees only
     the mount, so a nested clone's mount, or a subdirectory mount of a linked
@@ -190,6 +200,7 @@ def test_a_wrapper_run_records_nothing_even_where_git_sees_a_repository(tmp_path
     assert find_root.calls == []
 
 
+@pytest.mark.unit
 def test_a_wrapper_run_git_cannot_see_into_records_nothing_rather_than_src(
     tmp_path,
 ):
@@ -233,6 +244,7 @@ def test_a_wrapper_run_git_cannot_see_into_records_nothing_rather_than_src(
         "not-utf-8",
     ],
 )
+@pytest.mark.unit
 def test_a_label_that_is_not_a_plain_relative_path_is_not_used(tmp_path, label):
     """And git in the container is not asked instead: the root it would find
     is the one the label already failed to describe."""
@@ -241,6 +253,7 @@ def test_a_label_that_is_not_a_plain_relative_path_is_not_used(tmp_path, label):
 
 
 @pytest.mark.parametrize("label", [".", "app", "services/api", "a-b_c.d/e"])
+@pytest.mark.unit
 def test_plain_relative_labels_are_used(tmp_path, label):
     assert _record(tmp_path, None, _launcher(label)) == label
 
@@ -255,6 +268,7 @@ def test_plain_relative_labels_are_used(tmp_path, label):
 # subdirectory of a repository, git in the container sees a different root.
 
 
+@pytest.mark.unit
 def test_a_workspace_project_under_a_mount_at_a_repository_root_lets_git_decide(
     tmp_path,
 ):
@@ -265,6 +279,7 @@ def test_a_workspace_project_under_a_mount_at_a_repository_root_lets_git_decide(
 
 
 @pytest.mark.parametrize("mount_label", ["", "services"])
+@pytest.mark.unit
 def test_a_workspace_project_under_any_other_mount_records_nothing(
     tmp_path, mount_label
 ):
@@ -274,6 +289,7 @@ def test_a_workspace_project_under_any_other_mount_records_nothing(
     assert _record(project, tmp_path, environ, workspace_project=True) is None
 
 
+@pytest.mark.unit
 def test_a_workspace_project_in_a_wrapper_run_records_nothing(tmp_path):
     project = tmp_path / "api"
     project.mkdir()
@@ -293,6 +309,7 @@ def test_a_workspace_project_in_a_wrapper_run_records_nothing(tmp_path):
 # recording nothing meant it never archived.
 
 
+@pytest.mark.unit
 def test_the_image_without_the_launcher_records_the_directory_as_a_host_would(
     tmp_path,
 ):
@@ -301,11 +318,13 @@ def test_the_image_without_the_launcher_records_the_directory_as_a_host_would(
     assert _record(builds, None, IMAGE_ONLY) == builds.resolve().as_posix()
 
 
+@pytest.mark.unit
 def test_the_image_without_the_launcher_ignores_a_label(tmp_path):
     environ = {**IMAGE_ONLY, SCAN_SOURCE_ENV: "services/api"}
     assert _record(tmp_path, _repository_at(tmp_path), environ) == "."
 
 
+@pytest.mark.unit
 def test_a_scan_of_src_inside_the_image_counts_as_the_launchers(tmp_path):
     """The legacy wrapper mounts the source at /src and passes no label, so the
     scan records nothing, even where git there reports a repository root above
@@ -380,6 +399,7 @@ def superproject(isolated_tmp):
     return root
 
 
+@pytest.mark.integration
 def test_a_submodule_records_no_scan_source(superproject):
     lib = superproject / "vendor" / "lib"
     assert git_repository_root(lib) == lib.resolve()  # the innermost repository
@@ -404,6 +424,7 @@ def test_a_submodule_records_no_scan_source(superproject):
 # in git).
 
 
+@pytest.mark.integration
 def test_a_ceiling_at_the_superproject_leaves_its_submodule_nested(
     superproject, monkeypatch
 ):
@@ -418,6 +439,7 @@ def test_a_ceiling_at_the_superproject_leaves_its_submodule_nested(
     assert host_scan_source_label(lib, git_repository_root) is None
 
 
+@pytest.mark.integration
 def test_with_no_ceiling_a_repository_inside_another_is_nested(
     isolated_tmp, monkeypatch
 ):
@@ -428,6 +450,7 @@ def test_with_no_ceiling_a_repository_inside_another_is_nested(
     assert repository_is_nested(inner)
 
 
+@pytest.mark.integration
 def test_with_no_ceiling_a_repository_outside_every_other_records_dot(
     tmp_path, monkeypatch
 ):
@@ -445,11 +468,13 @@ def test_with_no_ceiling_a_repository_outside_every_other_records_dot(
     assert recorded_scan_source(root, git_repository_root, {}) == "."
 
 
+@pytest.mark.integration
 def test_the_superprojects_own_root_is_dot(superproject):
     assert recorded_scan_source(superproject, git_repository_root, {}) == "."
     assert host_scan_source_label(superproject, git_repository_root) == "."
 
 
+@pytest.mark.integration
 def test_a_clone_nested_in_another_repository_records_no_scan_source(isolated_tmp):
     outer = _repo_with_a_commit(isolated_tmp / "outer")
     inner = _repo_with_a_commit(outer / "third_party" / "inner")
@@ -462,6 +487,7 @@ def test_a_clone_nested_in_another_repository_records_no_scan_source(isolated_tm
     )
 
 
+@pytest.mark.integration
 def test_an_empty_git_directory_above_the_root_does_not_nest_it(isolated_tmp):
     """What a stray mkdir or a transient mount point leaves in an ancestor.
 
@@ -476,6 +502,7 @@ def test_an_empty_git_directory_above_the_root_does_not_nest_it(isolated_tmp):
     assert recorded_scan_source(root, git_repository_root, {}) == "."
 
 
+@pytest.mark.integration
 def test_a_git_file_without_the_gitfile_format_above_the_root_does_not_nest_it(
     isolated_tmp,
 ):
@@ -491,6 +518,7 @@ def test_a_git_file_without_the_gitfile_format_above_the_root_does_not_nest_it(
     assert recorded_scan_source(root, git_repository_root, {}) == "."
 
 
+@pytest.mark.integration
 def test_a_gitfile_above_the_root_nests_it(isolated_tmp):
     """An ancestor whose ``.git`` is a gitfile in git's format -- a linked
     worktree created outside its checkout (``git worktree add ../wt``) -- is
@@ -508,6 +536,7 @@ def test_a_gitfile_above_the_root_nests_it(isolated_tmp):
     assert recorded_scan_source(inner, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_hand_made_git_directory_with_a_head_above_the_root_nests_it(isolated_tmp):
     """A ``.git`` directory holding ``HEAD`` is the shape git's discovery
     opens, so it counts even when git itself cannot use it (no objects or
@@ -534,6 +563,7 @@ _GETEUID_NEEDED = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 def test_a_git_symlink_to_a_real_git_dir_above_the_root_nests_it(isolated_tmp):
     """git follows a ``.git`` symlink to a real git directory, so an ancestor
     laid out that way is a repository above the root. This pins the link arm
@@ -549,6 +579,7 @@ def test_a_git_symlink_to_a_real_git_dir_above_the_root_nests_it(isolated_tmp):
     assert recorded_scan_source(root, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_dangling_git_symlink_above_the_root_nests_it(isolated_tmp):
     """A ``.git`` symlink above the root counts even dangling: placed
     content, so the conservative answer stands. ``os.path.lexists`` used to
@@ -564,6 +595,7 @@ def test_a_dangling_git_symlink_above_the_root_nests_it(isolated_tmp):
 
 
 @_POSIX_MODES_NEEDED
+@pytest.mark.integration
 def test_an_unreadable_git_file_above_the_root_nests_it(isolated_tmp):
     """A regular ``.git`` file whose first bytes cannot be read counts: a
     repository marker cannot be ruled out there, so the walk fails closed
@@ -585,6 +617,7 @@ def test_an_unreadable_git_file_above_the_root_nests_it(isolated_tmp):
         os.chmod(marker, 0o644)
 
 
+@pytest.mark.integration
 def test_a_gitfile_without_gits_trailing_space_above_the_root_nests_it(isolated_tmp):
     """``_GITFILE_PREFIX`` is deliberately one byte looser than git's
     ``"gitdir: "``: ``gitdir:/x``, which git refuses, still counts, the side
@@ -599,6 +632,7 @@ def test_a_gitfile_without_gits_trailing_space_above_the_root_nests_it(isolated_
     assert recorded_scan_source(root, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_fifo_git_above_the_root_does_not_nest_it(isolated_tmp):
     """A FIFO named ``.git`` is nothing git opens, and reading it could wait
     on a writer: the walk answers from the lstat alone, with no open."""
@@ -613,6 +647,7 @@ def test_a_fifo_git_above_the_root_does_not_nest_it(isolated_tmp):
     assert recorded_scan_source(root, git_repository_root, {}) == "."
 
 
+@pytest.mark.integration
 def test_a_git_entry_swapped_for_a_fifo_after_the_type_check_counts(
     isolated_tmp, monkeypatch
 ):
@@ -649,6 +684,7 @@ def test_a_git_entry_swapped_for_a_fifo_after_the_type_check_counts(
         pytest.param(OSError, errno.ESTALE, id="ESTALE"),
     ],
 )
+@pytest.mark.integration
 def test_a_git_entry_whose_lookup_is_refused_counts(
     isolated_tmp, monkeypatch, exc_type, err
 ):
@@ -682,6 +718,7 @@ def test_a_git_entry_whose_lookup_is_refused_counts(
 
 
 @_POSIX_MODES_NEEDED
+@pytest.mark.integration
 def test_an_unsearchable_git_directory_above_the_root_nests_it(isolated_tmp):
     """A ``.git`` directory whose ``HEAD`` the scanning user cannot look up
     counts: a repository cannot be ruled out there, so the walk fails closed
@@ -703,6 +740,7 @@ def test_an_unsearchable_git_directory_above_the_root_nests_it(isolated_tmp):
         os.chmod(unsearchable, 0o755)
 
 
+@pytest.mark.integration
 def test_an_empty_git_directory_at_a_ceiling_does_not_nest_the_root(
     isolated_tmp, monkeypatch
 ):
@@ -745,6 +783,7 @@ def _reported_owner_of(monkeypatch, attribute, path, uid):
 
 
 @_GETEUID_NEEDED
+@pytest.mark.integration
 def test_a_strangers_repository_in_a_shared_drop_still_nests_the_root(
     isolated_tmp, monkeypatch
 ):
@@ -770,6 +809,7 @@ def test_a_strangers_repository_in_a_shared_drop_still_nests_the_root(
         os.chmod(outer, 0o755)
 
 
+@pytest.mark.integration
 def test_a_nested_clone_seen_alone_in_the_launchers_container_records_nothing(
     isolated_tmp,
 ):
@@ -782,6 +822,7 @@ def test_a_nested_clone_seen_alone_in_the_launchers_container_records_nothing(
     assert recorded_scan_source(mount, git_repository_root, _launcher("")) is None
 
 
+@pytest.mark.integration
 def test_a_linked_worktree_inside_the_checkout_keeps_its_own_label(isolated_tmp):
     """A worktree of the same repository (git worktree add inside the checkout,
     as agent tooling does) is not a nested repository."""
@@ -797,6 +838,7 @@ def test_a_linked_worktree_inside_the_checkout_keeps_its_own_label(isolated_tmp)
     )
 
 
+@pytest.mark.integration
 def test_a_repository_below_an_enclosing_one_records_nothing(isolated_tmp):
     """A home directory kept in git encloses every checkout below it."""
     home = _repo_with_a_commit(isolated_tmp / "home")
@@ -831,6 +873,7 @@ def _forged(parent: Path, name: str, gitdir: str) -> Path:
     return forged
 
 
+@pytest.mark.integration
 def test_a_gitfile_pointing_at_the_outer_git_dir_is_nested(isolated_tmp):
     root = _repo_with_a_commit(isolated_tmp / "super")
     forged = _forged(root, "gf_rel", "../../.git")
@@ -843,6 +886,7 @@ def test_a_gitfile_pointing_at_the_outer_git_dir_is_nested(isolated_tmp):
     assert host_scan_source_label(forged, git_repository_root) is None
 
 
+@pytest.mark.integration
 def test_a_gitfile_pointing_at_a_real_worktrees_admin_dir_is_nested(isolated_tmp):
     root = _repo_with_a_commit(isolated_tmp / "super")
     _git("worktree", "add", "-q", "-b", "side", "wt/x", cwd=root)
@@ -857,6 +901,7 @@ def test_a_gitfile_pointing_at_a_real_worktrees_admin_dir_is_nested(isolated_tmp
     assert recorded_scan_source(root / "wt" / "x", git_repository_root, {}) == "."
 
 
+@pytest.mark.integration
 def test_git_dir_set_to_a_worktree_admin_dir_records_nothing(isolated_tmp, monkeypatch):
     """A pre-commit hook in a linked worktree runs with GIT_DIR set to that
     worktree's admin dir (git 2.50.1). git then calls the current directory the
@@ -872,6 +917,7 @@ def test_git_dir_set_to_a_worktree_admin_dir_records_nothing(isolated_tmp, monke
     assert host_scan_source_label(api, git_repository_root) is None
 
 
+@pytest.mark.integration
 def test_the_list_check_holds_against_a_git_that_cannot_list_worktrees(
     isolated_tmp, monkeypatch
 ):
@@ -892,6 +938,7 @@ def test_the_list_check_holds_against_a_git_that_cannot_list_worktrees(
     assert recorded_scan_source(worktree, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_worktree_whose_common_dir_git_cannot_give_is_nested(
     isolated_tmp, monkeypatch
 ):
@@ -909,6 +956,7 @@ def test_a_worktree_whose_common_dir_git_cannot_give_is_nested(
     assert recorded_scan_source(worktree, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_the_common_dir_check_holds_against_an_admin_commondir_edited_in_the_outer_git_dir(
     isolated_tmp,
 ):
@@ -948,6 +996,7 @@ def _registered_within(seconds: float, root: Path, common: Path):
 @pytest.mark.parametrize(
     "kind", ["fifo", "symlink", "directory", "oversized", "unreadable"]
 )
+@pytest.mark.integration
 def test_an_admin_gitdir_that_is_not_a_small_regular_file_is_not_a_record(
     isolated_tmp, kind
 ):
@@ -1002,6 +1051,7 @@ def test_an_admin_gitdir_that_is_not_a_small_regular_file_is_not_a_record(
     assert answers == [False]
 
 
+@pytest.mark.integration
 def test_a_record_ending_in_crlf_is_read_as_git_reads_it(isolated_tmp):
     """git trims the line end of the gitdir record when it reads it, and lists
     the worktree; a record written with CRLF (an editor, a Windows checkout of
@@ -1077,6 +1127,7 @@ def _git_lists_it(checkout: Path, worktree: Path) -> bool:
         "mixed",
     ],
 )
+@pytest.mark.integration
 def test_a_records_line_end_is_trimmed_as_git_trims_it(isolated_tmp, ending):
     """Where git lists the worktree after reading the gitdir record back, so
     does this check, and where git does not, neither does it: the answer is
@@ -1103,6 +1154,7 @@ def test_a_records_line_end_is_trimmed_as_git_trims_it(isolated_tmp, ending):
     [("checkout", f"a{chr(13)}b"), (f"check{chr(13)}out", "x")],
     ids=["in the worktree's name", "in the checkout's name"],
 )
+@pytest.mark.integration
 def test_a_carriage_return_in_a_worktree_path_is_read_as_written(
     isolated_tmp, checkout_name, worktree_name
 ):
@@ -1119,6 +1171,7 @@ def test_a_carriage_return_in_a_worktree_path_is_read_as_written(
 
 
 @pytest.mark.parametrize("kind", ["symlink", "fifo"])
+@pytest.mark.integration
 def test_a_record_is_refused_where_the_open_cannot_refuse_it(
     isolated_tmp, monkeypatch, kind
 ):
@@ -1175,6 +1228,7 @@ def _fifo_holding(record: Path, text: str) -> int:
     return keep
 
 
+@pytest.mark.integration
 def test_a_fifo_its_writer_filled_and_closed_is_not_a_record(isolated_tmp):
     """O_NONBLOCK keeps an empty FIFO from blocking, but a writer can put the
     record into the FIFO and close it, and a read then returns the record. A
@@ -1189,6 +1243,7 @@ def test_a_fifo_its_writer_filled_and_closed_is_not_a_record(isolated_tmp):
         os.close(keep)
 
 
+@pytest.mark.integration
 def test_a_record_replaced_by_a_fifo_after_the_entry_check_is_refused(
     isolated_tmp, monkeypatch
 ):
@@ -1220,6 +1275,7 @@ def _answer_within(seconds: float, call):
 
 
 @pytest.mark.parametrize("entry", ["gitdir", "HEAD", "a linked admin dir"])
+@pytest.mark.integration
 def test_a_fifo_in_a_peers_admin_dir_makes_the_worktree_nested_at_once(
     isolated_tmp, entry
 ):
@@ -1276,6 +1332,7 @@ def _nested_within(seconds: float, root: Path, fifo: Path):
 
 
 @pytest.mark.parametrize("entry", ["gitdir", "HEAD", "a linked admin dir"])
+@pytest.mark.integration
 def test_a_fifo_in_the_admin_dirs_of_a_repository_a_ceiling_hides_holds_the_root_at_once(
     isolated_tmp, monkeypatch, entry
 ):
@@ -1328,6 +1385,7 @@ def _socket_at(path: Path) -> None:
 
 
 @pytest.mark.parametrize("whose", ["its own", "a peer's"])
+@pytest.mark.integration
 def test_an_fsmonitor_socket_in_an_admin_dir_is_not_nesting(isolated_tmp, whose):
     """git's builtin fsmonitor on macOS keeps its socket in a linked worktree's
     admin dir (fsm-ipc-darwin's default path), so every worktree of such a
@@ -1353,6 +1411,7 @@ def test_an_fsmonitor_socket_in_an_admin_dir_is_not_nesting(isolated_tmp, whose)
         "packed-refs, a symlink to a FIFO outside the git dir",
     ],
 )
+@pytest.mark.integration
 def test_a_fifo_git_reads_to_list_the_worktrees_makes_them_nested_at_once(
     isolated_tmp, where
 ):
@@ -1409,6 +1468,7 @@ def test_a_fifo_git_reads_to_list_the_worktrees_makes_them_nested_at_once(
     assert "a FIFO or a symlink where git reads its worktrees" in (NO_SCAN_SOURCE_CASES)
 
 
+@pytest.mark.integration
 def test_a_head_naming_a_ref_outside_the_refs_is_not_followed(isolated_tmp):
     """git refuses a ref name with a ".." part; the check does not follow one out
     of the common dir, and counts it as not plain rather than as nothing."""
@@ -1480,6 +1540,7 @@ _HEAD_CASES = [
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
 @pytest.mark.parametrize("kind, prefix, ending, unfollowed", _HEAD_CASES)
+@pytest.mark.integration
 def test_a_head_is_read_as_git_reads_it(isolated_tmp, kind, prefix, ending, unfollowed):
     """Where git follows a HEAD to the branch, so does this check: the answer is
     git's, measured here. git 2.50 drops trailing spaces, tabs, carriage returns
@@ -1521,6 +1582,7 @@ def test_a_head_is_read_as_git_reads_it(isolated_tmp, kind, prefix, ending, unfo
 
 @pytest.mark.skipif(os.name == "nt", reason="file names are not bytes here")
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+@pytest.mark.integration
 def test_a_branch_whose_name_is_not_utf8_is_followed_as_git_follows_it(
     isolated_tmp,
 ):
@@ -1568,6 +1630,7 @@ def test_a_branch_whose_name_is_not_utf8_is_followed_as_git_follows_it(
     assert answers == [True]
 
 
+@pytest.mark.unit
 def test_a_name_holding_a_nul_is_not_plain():
     """lstat refuses a path with a NUL (ValueError). The check never builds one
     from a HEAD, and if it is ever given one, the entry counts as not plain
@@ -1577,6 +1640,7 @@ def test_a_name_holding_a_nul_is_not_plain():
     assert _plain_entry(Path("refs") / f"side{chr(0)}junk") is False
 
 
+@pytest.mark.integration
 def test_a_chain_of_nested_worktrees_costs_one_git_call_per_ancestor(
     isolated_tmp, monkeypatch
 ):
@@ -1607,6 +1671,7 @@ def test_a_chain_of_nested_worktrees_costs_one_git_call_per_ancestor(
     assert len(calls) <= 2 * depth + 3, calls
 
 
+@pytest.mark.integration
 def test_a_verified_worktree_of_a_nested_repository_is_still_nested(isolated_tmp):
     """The skip covers only ancestors of the common dir already verified. wt/x is
     a worktree of the inner clone, and that clone sits inside another
@@ -1634,6 +1699,7 @@ _GIT_HELPERS = [
 @pytest.mark.parametrize(
     "helper, rest", _GIT_HELPERS, ids=[name for name, _ in _GIT_HELPERS]
 )
+@pytest.mark.unit
 def test_each_git_helper_gives_git_no_stdin(tmp_path, monkeypatch, helper, rest):
     """Each git helper gives git /dev/null as stdin, so a file a repository links
     to /dev/stdin reads nothing from ASH's terminal."""
@@ -1652,6 +1718,7 @@ def test_each_git_helper_gives_git_no_stdin(tmp_path, monkeypatch, helper, rest)
     assert calls and all(call.get("stdin") is subprocess.DEVNULL for call in calls)
 
 
+@pytest.mark.unit
 def test_the_index_listing_for_output_dirs_gives_git_no_stdin(tmp_path, monkeypatch):
     """git_index_below names the repository on git's command line, and git still
     reads the files its git dir names: with a worktree's admin commondir linked
@@ -1673,6 +1740,7 @@ def test_the_index_listing_for_output_dirs_gives_git_no_stdin(tmp_path, monkeypa
     assert calls and all(call.get("stdin") is subprocess.DEVNULL for call in calls)
 
 
+@pytest.mark.unit
 def test_get_changed_files_gives_git_no_stdin(tmp_path, monkeypatch):
     from automated_security_helper.utils import get_scan_set
 
@@ -1697,6 +1765,7 @@ print(git_common_dir(Path(sys.argv[1])))
 """
 
 
+@pytest.mark.integration
 def test_a_commondir_linked_to_stdin_does_not_wait_on_the_callers_stdin(
     isolated_tmp,
 ):
@@ -1780,6 +1849,7 @@ def checkout_with_worktree(isolated_tmp):
     return root
 
 
+@pytest.mark.integration
 def test_a_listed_worktree_path_symlinked_to_a_nested_clone_is_nested(
     checkout_with_worktree,
 ):
@@ -1796,6 +1866,7 @@ def test_a_listed_worktree_path_symlinked_to_a_nested_clone_is_nested(
     assert recorded_scan_source(root / "wt" / "x", git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_symlinked_parent_of_a_listed_worktree_exempts_nothing_it_reaches(
     checkout_with_worktree,
 ):
@@ -1810,6 +1881,7 @@ def test_a_symlinked_parent_of_a_listed_worktree_exempts_nothing_it_reaches(
     assert recorded_scan_source(clone, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_listed_worktree_path_now_holding_another_repository_is_nested(
     checkout_with_worktree,
 ):
@@ -1827,6 +1899,7 @@ def test_a_listed_worktree_path_now_holding_another_repository_is_nested(
     assert recorded_scan_source(other, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_listed_worktree_path_symlinked_to_a_forged_gitfile_is_nested(
     checkout_with_worktree,
 ):
@@ -1845,6 +1918,7 @@ def test_a_listed_worktree_path_symlinked_to_a_forged_gitfile_is_nested(
     assert recorded_scan_source(root / "wt" / "x", git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_worktree_of_a_checkout_reached_through_a_symlink_keeps_its_label(
     isolated_tmp,
 ):
@@ -1863,6 +1937,7 @@ def test_a_worktree_of_a_checkout_reached_through_a_symlink_keeps_its_label(
     )
 
 
+@pytest.mark.integration
 def test_a_worktree_whose_path_holds_a_newline_is_read_whole(isolated_tmp):
     """`git worktree list --porcelain -z` ends each field with NUL. Split on
     newlines instead, the worktree at "wt/a<newline>b" reads as wt/a: the
@@ -1914,6 +1989,7 @@ def checkout_with_relative_worktree(isolated_tmp):
     return root
 
 
+@pytest.mark.integration
 def test_a_relative_worktree_keeps_its_label(checkout_with_relative_worktree):
     root = checkout_with_relative_worktree
     worktree = root / "wt" / "x"
@@ -1926,6 +2002,7 @@ def test_a_relative_worktree_keeps_its_label(checkout_with_relative_worktree):
     )
 
 
+@pytest.mark.integration
 def test_a_relative_worktrees_path_symlinked_to_a_forged_gitfile_is_nested(
     checkout_with_relative_worktree,
 ):
@@ -1942,6 +2019,7 @@ def test_a_relative_worktrees_path_symlinked_to_a_forged_gitfile_is_nested(
     assert recorded_scan_source(root / "wt" / "x", git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_relative_worktrees_path_symlinked_to_an_outer_gitfile_is_nested(
     checkout_with_relative_worktree,
 ):
@@ -1956,6 +2034,7 @@ def test_a_relative_worktrees_path_symlinked_to_an_outer_gitfile_is_nested(
     assert recorded_scan_source(forged, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_relative_worktrees_parent_symlinked_to_a_forged_gitfile_is_nested(
     checkout_with_relative_worktree,
 ):
@@ -1973,6 +2052,7 @@ def test_a_relative_worktrees_parent_symlinked_to_a_forged_gitfile_is_nested(
 @pytest.mark.parametrize(
     "records_itself", [False, True], ids=["plain", "with-its-own-gitdir-file"]
 )
+@pytest.mark.integration
 def test_a_git_dir_at_a_listed_path_sharing_the_outer_common_dir_is_nested(
     checkout_with_worktree, records_itself
 ):
@@ -1995,6 +2075,7 @@ def test_a_git_dir_at_a_listed_path_sharing_the_outer_common_dir_is_nested(
     assert recorded_scan_source(other, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_relative_worktree_of_a_checkout_reached_through_a_symlink_keeps_its_label(
     isolated_tmp,
 ):
@@ -2024,6 +2105,7 @@ def test_a_relative_worktree_of_a_checkout_reached_through_a_symlink_keeps_its_l
     assert recorded_scan_source(via_link, git_repository_root, {}) == "."
 
 
+@pytest.mark.integration
 def test_git_location_variables_do_not_answer_for_the_ancestor(
     isolated_tmp, monkeypatch
 ):
@@ -2038,6 +2120,7 @@ def test_git_location_variables_do_not_answer_for_the_ancestor(
     assert recorded_scan_source(inner, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_below_the_superproject_leaves_its_submodule_nested(
     superproject, monkeypatch
 ):
@@ -2050,6 +2133,7 @@ def test_a_ceiling_below_the_superproject_leaves_its_submodule_nested(
     assert recorded_scan_source(lib, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_through_a_symlinked_path_leaves_the_submodule_nested(
     superproject, isolated_tmp, monkeypatch
 ):
@@ -2064,6 +2148,7 @@ def test_a_ceiling_through_a_symlinked_path_leaves_the_submodule_nested(
     assert recorded_scan_source(lib, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_leaves_a_clone_inside_a_gitlink_path_nested(
     superproject, monkeypatch
 ):
@@ -2080,6 +2165,7 @@ def test_a_ceiling_leaves_a_clone_inside_a_gitlink_path_nested(
 
 
 @pytest.mark.parametrize("ceiling", ["outer", "outer/third_party"])
+@pytest.mark.integration
 def test_a_ceiling_leaves_a_nested_clone_nested(isolated_tmp, monkeypatch, ceiling):
     """The outer repository lists third_party/x as untracked."""
     outer = _repo_with_a_commit(isolated_tmp / "outer")
@@ -2090,6 +2176,7 @@ def test_a_ceiling_leaves_a_nested_clone_nested(isolated_tmp, monkeypatch, ceili
     assert host_scan_source_label(inner, git_repository_root) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_leaves_a_planted_gitfile_nested(isolated_tmp, monkeypatch):
     root = _repo_with_a_commit(isolated_tmp / "super")
     forged = _forged(root, "gf_rel", "../../.git")
@@ -2120,6 +2207,7 @@ def _planted_in_ignored_build(superproject: Path, kind: str) -> Path:
 
 @pytest.mark.parametrize("ceiling", ["super", "super/build"])
 @pytest.mark.parametrize("kind", ["gf_rel", "gf_wtadmin", "sym_in"])
+@pytest.mark.integration
 def test_a_ceiling_leaves_a_root_sharing_the_hidden_git_dir_nested(
     isolated_tmp, monkeypatch, ceiling, kind
 ):
@@ -2139,6 +2227,7 @@ def test_a_ceiling_leaves_a_root_sharing_the_hidden_git_dir_nested(
     assert recorded_scan_source(planted, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_root_git_cannot_give_a_common_dir_for_below_a_ceiling_is_nested(
     isolated_tmp, monkeypatch
 ):
@@ -2166,6 +2255,7 @@ def test_a_root_git_cannot_give_a_common_dir_for_below_a_ceiling_is_nested(
     assert asked, "the checkout's own common dir was never asked for"
 
 
+@pytest.mark.integration
 def test_a_ceiling_keeps_a_linked_worktree_of_the_hidden_repository_its_label(
     checkout_with_worktree, monkeypatch
 ):
@@ -2191,6 +2281,7 @@ def _home_with_a_project(parent: Path, ignore: str = "") -> "tuple[Path, Path]":
     return home, project
 
 
+@pytest.mark.integration
 def test_a_ceiling_at_a_home_repository_that_ignores_the_checkout_is_honored(
     isolated_tmp, monkeypatch
 ):
@@ -2205,6 +2296,7 @@ def test_a_ceiling_at_a_home_repository_that_ignores_the_checkout_is_honored(
     assert host_scan_source_label(project, git_repository_root) == "."
 
 
+@pytest.mark.integration
 def test_a_ceiling_at_a_home_repository_that_lists_the_checkout_changes_nothing(
     isolated_tmp, monkeypatch
 ):
@@ -2217,6 +2309,7 @@ def test_a_ceiling_at_a_home_repository_that_lists_the_checkout_changes_nothing(
     assert recorded_scan_source(project, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_at_a_submodule_that_ignores_a_clone_leaves_it_nested(
     isolated_tmp, monkeypatch
 ):
@@ -2237,6 +2330,7 @@ def test_a_ceiling_at_a_submodule_that_ignores_a_clone_leaves_it_nested(
     assert recorded_scan_source(clone, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_at_a_repository_a_home_repository_lists_leaves_its_clone_nested(
     isolated_tmp, monkeypatch
 ):
@@ -2256,6 +2350,7 @@ def test_a_ceiling_at_a_repository_a_home_repository_lists_leaves_its_clone_nest
     assert recorded_scan_source(clone, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_at_a_repository_nothing_above_holds_keeps_its_ignored_clone_dot(
     isolated_tmp, monkeypatch
 ):
@@ -2276,6 +2371,7 @@ def test_a_ceiling_at_a_repository_nothing_above_holds_keeps_its_ignored_clone_d
     assert recorded_scan_source(clone, git_repository_root, {}) == "."
 
 
+@pytest.mark.integration
 def test_a_ceiling_at_a_repository_that_tracks_files_in_the_checkout_changes_nothing(
     isolated_tmp, monkeypatch
 ):
@@ -2300,6 +2396,7 @@ def test_a_ceiling_at_a_repository_that_tracks_files_in_the_checkout_changes_not
 @pytest.mark.parametrize(
     "ceilings", [["super"], ["super/vendor"], ["super", "super/vendor"]]
 )
+@pytest.mark.integration
 def test_a_vendored_copy_with_a_git_dir_of_its_own_is_held_by_its_tracked_files(
     isolated_tmp, monkeypatch, ceilings
 ):
@@ -2326,6 +2423,7 @@ def test_a_vendored_copy_with_a_git_dir_of_its_own_is_held_by_its_tracked_files(
     assert recorded_scan_source(copy, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_the_hidden_repository_is_not_listed_beside_the_root(isolated_tmp, monkeypatch):
     """Only the root, what is below it and the paths between it and the hidden
     repository are looked up. A listing of the top directory the root is in
@@ -2359,6 +2457,7 @@ def test_the_hidden_repository_is_not_listed_beside_the_root(isolated_tmp, monke
     assert not [output for output in outputs if b"beside" in output]
 
 
+@pytest.mark.integration
 def test_a_ceiling_at_a_repository_that_tracks_a_file_where_the_checkout_now_is(
     isolated_tmp, monkeypatch
 ):
@@ -2378,6 +2477,7 @@ def test_a_ceiling_at_a_repository_that_tracks_a_file_where_the_checkout_now_is(
     assert recorded_scan_source(project, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_leaves_a_clone_inside_a_conflicted_gitlink_path_nested(
     isolated_tmp, monkeypatch
 ):
@@ -2405,6 +2505,7 @@ def test_a_ceiling_leaves_a_clone_inside_a_conflicted_gitlink_path_nested(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="no file name holds a carriage return")
+@pytest.mark.integration
 def test_a_carriage_return_in_a_path_the_hidden_repository_tracks_is_read_as_written(
     isolated_tmp, monkeypatch
 ):
@@ -2433,6 +2534,7 @@ def test_a_carriage_return_in_a_path_the_hidden_repository_tracks_is_read_as_wri
     "helper",
     ["git_index_paths_below", "git_untracked_paths_below"],
 )
+@pytest.mark.integration
 def test_a_hidden_repository_git_cannot_answer_for_makes_it_nested(
     isolated_tmp, monkeypatch, helper
 ):
@@ -2451,6 +2553,7 @@ def test_a_hidden_repository_git_cannot_answer_for_makes_it_nested(
     assert recorded_scan_source(project, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_an_entry_after_an_empty_entry_is_compared_as_written(
     isolated_tmp, monkeypatch
 ):
@@ -2473,6 +2576,7 @@ def test_an_entry_after_an_empty_entry_is_compared_as_written(
     assert recorded_scan_source(project, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_an_entry_git_cannot_resolve_is_dropped_as_git_drops_it(
     isolated_tmp, monkeypatch
 ):
@@ -2488,6 +2592,7 @@ def test_an_entry_git_cannot_resolve_is_dropped_as_git_drops_it(
     assert recorded_scan_source(project, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_a_ceiling_with_a_trailing_separator_is_the_directory(
     isolated_tmp, monkeypatch
 ):
@@ -2498,6 +2603,7 @@ def test_a_ceiling_with_a_trailing_separator_is_the_directory(
     assert recorded_scan_source(project, git_repository_root, {}) == "."
 
 
+@pytest.mark.integration
 def test_a_relative_ceiling_entry_is_ignored_as_git_ignores_it(
     superproject, isolated_tmp, monkeypatch
 ):
@@ -2512,6 +2618,7 @@ def test_a_relative_ceiling_entry_is_ignored_as_git_ignores_it(
     assert recorded_scan_source(lib, git_repository_root, {}) is None
 
 
+@pytest.mark.integration
 def test_the_ceiling_is_the_processs_as_it_is_for_git(superproject):
     """GIT_CEILING_DIRECTORIES comes from the process environment, where git
     reads it too, not from the mapping recorded_scan_source is given: the walk
@@ -2548,12 +2655,14 @@ def _not_utf8_dir(parent: Path) -> Path:
     return odd
 
 
+@pytest.mark.unit
 def test_a_directory_name_that_is_not_utf8_records_no_scan_source(tmp_path):
     odd = _not_utf8_dir(tmp_path)
     assert _record(odd, tmp_path, {}) is None
     assert _record(odd, None, {}) is None
 
 
+@pytest.mark.integration
 def test_a_repository_root_that_is_not_utf8_is_still_the_root(isolated_tmp):
     """git works in such a checkout, and the labels recorded for it are relative
     to its root, so none of them holds the name the results file cannot."""
@@ -2568,6 +2677,7 @@ def test_a_repository_root_that_is_not_utf8_is_still_the_root(isolated_tmp):
     assert recorded_scan_source(odd / "sub", git_repository_root, {}) == "sub"
 
 
+@pytest.mark.integration
 def test_a_directory_that_is_not_utf8_below_a_utf8_root_records_no_label(
     isolated_tmp,
 ):
@@ -2586,6 +2696,7 @@ def test_a_directory_that_is_not_utf8_below_a_utf8_root_records_no_label(
         assert recorded_scan_source(directory, git_repository_root, {}) is None
 
 
+@pytest.mark.unit
 class TestTheGitEntryWalkStopsWhereGitsDiscoveryStops:
     """``_a_git_entry_may_exist`` against GIT_CEILING_DIRECTORIES, directly.
 
@@ -2748,6 +2859,7 @@ _AFTER_EMPTY_AS_WRITTEN = [
 ]
 
 
+@pytest.mark.integration
 class TestTheWalkAgreesWithRealGitDiscovery:
     """The git-entry walk read against real git itself, scenario by scenario.
 

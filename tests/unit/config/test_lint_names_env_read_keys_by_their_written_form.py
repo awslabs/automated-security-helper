@@ -17,6 +17,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 VAR_EXT = "ASH_TEST_LINT_EXT"
 EXT_VALUE = "lint-needle-9f.json"
 VAR_SECT = "ASH_TEST_LINT_SECT"

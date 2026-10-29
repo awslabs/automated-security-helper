@@ -11,6 +11,8 @@ from automated_security_helper.models.scanner_validation import (
     ValidationCheckpointer,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def tracker():

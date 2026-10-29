@@ -18,10 +18,13 @@ which a hash of the path cannot.
 
 from __future__ import annotations
 
+import pytest
 import typer.main
 
 from automated_security_helper.cli import mcp_server
 from automated_security_helper.cli.main import app as ash_app
+
+pytestmark = pytest.mark.unit
 
 
 def _profile_option():

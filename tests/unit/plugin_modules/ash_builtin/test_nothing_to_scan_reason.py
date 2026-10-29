@@ -58,6 +58,8 @@ from automated_security_helper.utils.cfn_template_discovery import (
 )
 from automated_security_helper.utils.scan_targets import scan_targets
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

@@ -434,6 +434,7 @@ def _config_argument(argv: list[str]) -> str | None:
 
 
 class TestTheRequiredCheckScansWithTheBaseCommitsConfig:
+    @pytest.mark.unit
     def test_the_locators_find_the_steps(self):
         found = _config_ref_steps()
         assert found and found[0].get("id") == "config-ref", (
@@ -442,6 +443,7 @@ class TestTheRequiredCheckScansWithTheBaseCommitsConfig:
         names = {str(s.get("name")) for s in _ash_steps()}
         assert len(names) >= 2, f"expected the scan and the report steps, found {names}"
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("make_context", EVENTS)
     def test_every_ash_step_gets_the_base_commits_config(self, tmp_path, make_context):
         repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
@@ -478,6 +480,7 @@ class TestTheRequiredCheckScansWithTheBaseCommitsConfig:
                 "variable would see another file"
             )
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "missing",
         [
@@ -509,6 +512,7 @@ class TestTheRequiredCheckScansWithTheBaseCommitsConfig:
         )
         assert "::warning::" not in run.proc.stdout, run.describe()
 
+    @pytest.mark.integration
     def test_the_bootstrap_opt_in_scans_with_ash_defaults(self, tmp_path):
         """`config-ref-missing: defaults` is for the pull request adding a first config."""
         repo = Repository(tmp_path, base_files={})
@@ -526,6 +530,7 @@ class TestTheRequiredCheckScansWithTheBaseCommitsConfig:
                 f"step {name!r} does not scan with an empty (default) config"
             )
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("value", ["checkout", "Defaults", "true", "skip"])
     def test_an_unknown_config_ref_missing_value_is_refused(self, tmp_path, value):
         repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
@@ -551,6 +556,7 @@ def _run_config_ref_steps_or_fail(repo, context, inputs):
 # --------------------------------------------------------------------------- 3
 
 
+@pytest.mark.integration
 class TestTheConfigRefStepRefusesWhatItCannotReadExactly:
     def _inputs(self, config: str, ref: str) -> dict[str, Any]:
         workflow, _ = _job()
@@ -651,6 +657,7 @@ class TestTheConfigRefStepRefusesWhatItCannotReadExactly:
 class TestOtherScansKeepTheCheckoutsConfig:
     """Controls: both pass before the fix."""
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "fork", [False, True], ids=["same-repository PR", "fork PR"]
     )
@@ -671,6 +678,7 @@ class TestOtherScansKeepTheCheckoutsConfig:
                     repo.sandbox.workspace / config
                 ), f"step {name!r} scans the informational job with {config}"
 
+    @pytest.mark.integration
     def test_a_caller_that_sets_neither_input_gets_no_config_argument(self, tmp_path):
         repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
         context = _pull_request(repo.base_sha, fork=False)
@@ -682,6 +690,7 @@ class TestOtherScansKeepTheCheckoutsConfig:
             assert _config_argument(call["argv"]) is None, (name, call["argv"])
             assert call["env"]["ASH_CONFIG"] in (None, ""), (name, sorted(call["env"]))
 
+    @pytest.mark.unit
     def test_workflow_dispatch_reads_the_dispatched_refs_config(self):
         """No config-ref, and not the string `false` an `a && b` would render."""
         context = ga.base_context(
@@ -758,6 +767,7 @@ def _tool_config_paths_of(text: str) -> dict[str, Any]:
     }
 
 
+@pytest.mark.integration
 class TestToolConfigFilesComeFromTheBaseCommit:
     """The base config's relative scanners.*.options.config_file are fetched too.
 
@@ -990,6 +1000,7 @@ class TestToolConfigFilesComeFromTheBaseCommit:
         )
 
 
+@pytest.mark.unit
 class TestTheMergeQueueResolvesItsOwnTarget:
     def test_a_queue_into_another_branch_installs_and_reads_from_that_branch(self):
         """`merge_group.base_ref` names the queue's target; the default branch need not be it."""
@@ -1029,6 +1040,7 @@ def _rule_option(config: Path, scanner: str) -> Any:
     return document["scanners"][scanner]["options"]["config"]
 
 
+@pytest.mark.integration
 class TestRuleFilesComeFromTheBaseCommit:
     """opengrep's and semgrep's `config` option names rules by a path in the checkout.
 
@@ -1167,6 +1179,7 @@ CHECKOV_CONFIG_BASE = (
 )
 
 
+@pytest.mark.integration
 class TestFetchedToolConfigsLoadNoCodeFromTheCheckout:
     """A fetched tool config applies as the operator's file, but paths inside it do not move.
 
@@ -1240,6 +1253,7 @@ class TestFetchedToolConfigsLoadNoCodeFromTheCheckout:
 # --------------------------------------------------------------------------- 8
 
 
+@pytest.mark.integration
 class TestTheConfigComesFromTheCommitTheAshInstallIsPinnedTo:
     """In the merge queue, config-ref and ash-version both name refs/heads/main.
 
@@ -1326,6 +1340,7 @@ UNPARSABLE = [
 ]
 
 
+@pytest.mark.integration
 class TestTheToolConfigStepPrintsTheConfigOnOneLine:
     def _repo(self, tmp_path, config: str, **files: str) -> Repository:
         return Repository(tmp_path, base_files={CONFIG_PATH: config, **files})

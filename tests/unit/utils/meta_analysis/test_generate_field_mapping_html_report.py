@@ -1,8 +1,12 @@
 """Unit tests for generate_field_mapping_html_report.py."""
 
+import pytest
+
 from automated_security_helper.utils.meta_analysis.reporting import (
     generate_html_report,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_generate_html_report(tmp_path):

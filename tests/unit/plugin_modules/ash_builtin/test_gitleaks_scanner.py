@@ -163,6 +163,7 @@ def _assert_expected_findings(report: SarifReport) -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_gitleaks_is_on_by_default():
     assert GitleaksScannerConfig().enabled is True
     assert AshConfig().scanners.gitleaks.enabled is True
@@ -173,6 +174,7 @@ def test_gitleaks_is_on_by_default():
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_argv_for_the_source_target(tmp_path):
     scanner = _scanner(tmp_path)
     source = scanner.context.source_dir
@@ -203,6 +205,7 @@ def test_argv_for_the_source_target(tmp_path):
     assert "--follow-symlinks" not in args
 
 
+@pytest.mark.unit
 def test_inline_allow_comments_are_off_by_default(tmp_path):
     """A gitleaks:allow comment in the scanned tree drops a finding before ASH sees
     it, so it would be neither reported nor counted as suppressed."""
@@ -211,6 +214,7 @@ def test_inline_allow_comments_are_off_by_default(tmp_path):
     assert "--ignore-gitleaks-allow" in args[: args.index("--")]
 
 
+@pytest.mark.unit
 def test_the_operator_can_honor_inline_allow_comments(tmp_path):
     scanner = _scanner(tmp_path, operator=True, honor_inline_ignores=True)
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
@@ -218,6 +222,7 @@ def test_the_operator_can_honor_inline_allow_comments(tmp_path):
 
 
 @pytest.mark.parametrize("operator", [False, None])
+@pytest.mark.unit
 def test_honor_inline_ignores_from_the_scanned_tree_is_ignored(
     tmp_path, caplog, operator
 ):
@@ -232,6 +237,7 @@ def test_honor_inline_ignores_from_the_scanned_tree_is_ignored(
 
 
 @pytest.mark.parametrize("operator", [False, None])
+@pytest.mark.unit
 def test_max_target_megabytes_from_the_scanned_tree_is_ignored(
     tmp_path, caplog, operator
 ):
@@ -246,12 +252,14 @@ def test_max_target_megabytes_from_the_scanned_tree_is_ignored(
     assert caplog.text.count("scanners.gitleaks.options.max_target_megabytes") == 1
 
 
+@pytest.mark.unit
 def test_the_operators_max_target_megabytes_applies(tmp_path):
     scanner = _scanner(tmp_path, operator=True, max_target_megabytes=3)
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
     assert "--max-target-megabytes=3" in args
 
 
+@pytest.mark.unit
 def test_the_re_scan_skips_large_files_only_at_the_operators_limit(
     tmp_path, monkeypatch
 ):
@@ -267,6 +275,7 @@ def test_the_re_scan_skips_large_files_only_at_the_operators_limit(
     assert [call["files"] for call in calls] == [["app/big.py"]]
 
 
+@pytest.mark.unit
 def test_argv_for_the_converted_target_is_absolute(tmp_path):
     scanner = _scanner(tmp_path)
     converted = scanner.context.work_dir
@@ -275,6 +284,7 @@ def test_argv_for_the_converted_target_is_absolute(tmp_path):
     assert args[-2:] == ["--", converted.absolute().as_posix()]
 
 
+@pytest.mark.unit
 def test_every_option_is_one_token_so_no_value_can_become_a_flag(tmp_path):
     """A path starting with "-" stays a value, and the scan path follows "--"."""
     scanner = _scanner(
@@ -299,6 +309,7 @@ def test_every_option_is_one_token_so_no_value_can_become_a_flag(tmp_path):
 
 
 @pytest.mark.parametrize("name", [".gitleaks.toml", ".ash/.gitleaks.toml"])
+@pytest.mark.unit
 def test_a_gitleaks_config_in_the_scanned_tree_is_not_read(
     tmp_path, monkeypatch, caplog, name
 ):
@@ -318,6 +329,7 @@ def test_a_gitleaks_config_in_the_scanned_tree_is_not_read(
 
 
 @pytest.mark.parametrize("variable", ["GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"])
+@pytest.mark.unit
 def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, variable):
     """The operator's environment, not the tree: gitleaks resolves it."""
     monkeypatch.setenv(variable, "anything")
@@ -327,6 +339,7 @@ def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, va
     assert not any(a.startswith("--config") for a in args)
 
 
+@pytest.mark.unit
 def test_the_operators_config_file_wins_over_env_and_the_tree(tmp_path, monkeypatch):
     monkeypatch.setenv("GITLEAKS_CONFIG", "elsewhere.toml")
     scanner = _scanner(tmp_path, operator=True, config_file="rules/custom.toml")
@@ -342,6 +355,7 @@ def test_the_operators_config_file_wins_over_env_and_the_tree(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("operator", [False, None])
+@pytest.mark.unit
 def test_config_file_and_baseline_from_the_scanned_tree_are_ignored(
     tmp_path, monkeypatch, caplog, operator
 ):
@@ -366,6 +380,7 @@ def test_config_file_and_baseline_from_the_scanned_tree_are_ignored(
 
 
 @pytest.mark.parametrize("option", ["config_file", "baseline_path"])
+@pytest.mark.unit
 def test_an_operator_path_that_does_not_exist_fails_the_scan(tmp_path, option):
     """Falling back to default rules would scan with rules nobody asked for."""
     scanner = _scanner(tmp_path, operator=True, **{option: "missing.file"})
@@ -373,6 +388,7 @@ def test_an_operator_path_that_does_not_exist_fails_the_scan(tmp_path, option):
         scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
 
 
+@pytest.mark.unit
 def test_a_stale_report_is_removed_before_the_run(tmp_path):
     scanner = _scanner(tmp_path)
     source = scanner.context.source_dir
@@ -390,6 +406,7 @@ def test_a_stale_report_is_removed_before_the_run(tmp_path):
 
 
 @pytest.mark.parametrize("code", [0, LEAKS_EXIT_CODE])
+@pytest.mark.unit
 def test_success_exit_codes_read_the_report(tmp_path, code):
     scanner = _scanner(tmp_path)
     scanner.exit_code = code
@@ -397,6 +414,7 @@ def test_success_exit_codes_read_the_report(tmp_path, code):
 
 
 @pytest.mark.parametrize("code", [1, 3, 126, -9])
+@pytest.mark.unit
 def test_a_failing_exit_code_refuses_even_a_present_report(tmp_path, code):
     """gitleaks exits 1 on every fatal error, so 1 must never read as "leaks"."""
     scanner = _scanner(tmp_path)
@@ -405,6 +423,7 @@ def test_a_failing_exit_code_refuses_even_a_present_report(tmp_path, code):
         scanner._read_results_file(CAPTURED_SARIF)
 
 
+@pytest.mark.integration
 def test_a_tool_that_hangs_is_killed_and_reported_as_timed_out(tmp_path, monkeypatch):
     """The error names the scanner and the limit as the configuration guide shows
     it, ``<scanner> timed out after '1800' s``: the limit is its own quoted token,
@@ -429,6 +448,7 @@ def test_a_tool_that_hangs_is_killed_and_reported_as_timed_out(tmp_path, monkeyp
     assert scanner.scan_could_not_stop is None
 
 
+@pytest.mark.unit
 def test_a_tool_that_finishes_under_the_limit_is_not_reported_as_timed_out(
     tmp_path, monkeypatch
 ):
@@ -458,6 +478,7 @@ def test_a_tool_that_finishes_under_the_limit_is_not_reported_as_timed_out(
     assert scanner.scan_could_not_stop is None
 
 
+@pytest.mark.unit
 def test_missing_binary_is_reported_unavailable(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
     monkeypatch.setattr(
@@ -473,6 +494,7 @@ def test_missing_binary_is_reported_unavailable(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_captured_report_parses_to_the_expected_findings(tmp_path):
     _assert_expected_findings(_parse(_scanner(tmp_path), _raw_report()))
 
@@ -498,6 +520,7 @@ def _drop_result(raw):
 @pytest.mark.parametrize(
     "mutate", [_mutate_rule, _mutate_line, _mutate_uri, _drop_result]
 )
+@pytest.mark.unit
 def test_the_parser_assertions_fail_on_a_mutated_finding(tmp_path, mutate):
     raw = _raw_report()
     mutate(raw)
@@ -505,6 +528,7 @@ def test_the_parser_assertions_fail_on_a_mutated_finding(tmp_path, mutate):
         _assert_expected_findings(_parse(_scanner(tmp_path), raw))
 
 
+@pytest.mark.unit
 def test_the_parser_assertions_fail_on_a_wrong_level(tmp_path):
     report = _parse(_scanner(tmp_path), _raw_report())
     report.runs[0].results[0].level = "warning"
@@ -512,6 +536,7 @@ def test_the_parser_assertions_fail_on_a_wrong_level(tmp_path):
         _assert_expected_findings(report)
 
 
+@pytest.mark.unit
 def test_the_level_is_written_out_rather_than_left_to_a_default(tmp_path):
     """gitleaks writes no level; the scanner writes one that survives serialization.
 
@@ -536,6 +561,7 @@ def test_the_level_is_written_out_rather_than_left_to_a_default(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_every_finding_is_critical_like_detect_secrets(tmp_path):
     scanner = _scanner(tmp_path)
     report = _parse(scanner, _raw_report())
@@ -544,6 +570,7 @@ def test_every_finding_is_critical_like_detect_secrets(tmp_path):
     assert (counts.high, counts.medium, counts.low, counts.info) == (0, 0, 0, 0)
 
 
+@pytest.mark.unit
 def test_the_flat_reports_read_critical_too(tmp_path):
     """A bare level "error" reads HIGH in the flat reporters (flat JSON, CSV)."""
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
@@ -557,12 +584,14 @@ def test_the_flat_reports_read_critical_too(tmp_path):
     assert {f.severity for f in flat} == {"CRITICAL"}
 
 
+@pytest.mark.unit
 def test_tags_mark_findings_as_secrets(tmp_path):
     report = _parse(_scanner(tmp_path), _raw_report())
     for result in report.get_all_results():
         assert {"secret", "security"} <= set(result.properties.tags)
 
 
+@pytest.mark.unit
 def test_snippets_are_redacted(tmp_path):
     report = _parse(_scanner(tmp_path), _raw_report())
     snippets = [
@@ -572,6 +601,7 @@ def test_snippets_are_redacted(tmp_path):
     assert snippets == [REDACTED] * len(EXPECTED)
 
 
+@pytest.mark.unit
 def test_an_unredacted_snippet_is_overwritten(tmp_path):
     """Defense in depth: a snippet carrying a value never reaches ASH's outputs."""
     raw = _raw_report()
@@ -581,6 +611,7 @@ def test_an_unredacted_snippet_is_overwritten(tmp_path):
     assert "value-that-must-not-survive" not in report.model_dump_json()
 
 
+@pytest.mark.unit
 def test_empty_fingerprints_and_the_wrong_version_are_dropped(tmp_path):
     raw = _raw_report()
     assert raw["runs"][0]["tool"]["driver"]["semanticVersion"] == "v8.0.0"
@@ -589,6 +620,7 @@ def test_empty_fingerprints_and_the_wrong_version_are_dropped(tmp_path):
     assert report.runs[0].tool.driver.semanticVersion is None
 
 
+@pytest.mark.unit
 def test_a_non_empty_fingerprint_is_kept(tmp_path):
     raw = _raw_report()
     raw["runs"][0]["results"][0]["partialFingerprints"]["commitSha"] = "abc123"
@@ -626,11 +658,13 @@ def _suppressed(tmp_path, *, suppressions=(), ignore_paths=()) -> dict:
     }
 
 
+@pytest.mark.unit
 def test_no_suppressions_suppresses_nothing(tmp_path):
     state = _suppressed(tmp_path)
     assert state == {(rule, uri): False for rule, uri, _ in EXPECTED}
 
 
+@pytest.mark.unit
 def test_a_line_pinned_rule_suppression_suppresses_only_that_finding(tmp_path):
     state = _suppressed(
         tmp_path,
@@ -653,6 +687,7 @@ def test_a_line_pinned_rule_suppression_suppresses_only_that_finding(tmp_path):
     }
 
 
+@pytest.mark.unit
 def test_a_suppression_on_the_wrong_line_suppresses_nothing(tmp_path):
     state = _suppressed(
         tmp_path,
@@ -669,6 +704,7 @@ def test_a_suppression_on_the_wrong_line_suppresses_nothing(tmp_path):
     assert not any(state.values())
 
 
+@pytest.mark.unit
 def test_a_path_suppression_suppresses_every_finding_in_the_file(tmp_path):
     state = _suppressed(
         tmp_path,
@@ -677,6 +713,7 @@ def test_a_path_suppression_suppresses_every_finding_in_the_file(tmp_path):
     assert state == {(rule, uri): uri == "app/settings.py" for rule, uri, _ in EXPECTED}
 
 
+@pytest.mark.unit
 def test_a_global_ignore_path_removes_the_findings(tmp_path):
     state = _suppressed(
         tmp_path,
@@ -705,6 +742,7 @@ OUTPUT_DIR_COPIES = (
 )
 
 
+@pytest.mark.unit
 def test_findings_under_the_output_dir_are_dropped(tmp_path):
     """The source run reads ASH's output directory, gitleaks having no flag to skip
     it. The converted target's run already reports the converted files, so a copy
@@ -719,6 +757,7 @@ def test_findings_under_the_output_dir_are_dropped(tmp_path):
     _assert_expected_findings(apply_suppressions_to_sarif(parsed, context))
 
 
+@pytest.mark.unit
 def test_the_converted_runs_findings_under_work_dir_are_kept(tmp_path):
     """The converted target is work_dir itself, under the output directory: its
     findings are the converted files' only report."""
@@ -735,6 +774,7 @@ def test_the_converted_runs_findings_under_work_dir_are_kept(tmp_path):
     ] == [uri]
 
 
+@pytest.mark.unit
 def test_nothing_is_dropped_when_the_output_dir_is_outside_the_source(tmp_path):
     """A path that only looks like ASH's default output directory is the tree's."""
     source = tmp_path / "src"
@@ -791,6 +831,7 @@ def _uris_under_the_output_dir(report: SarifReport) -> list[str]:
 
 
 @pytest.mark.usefixtures("no_checkout_above_tmp_path")
+@pytest.mark.integration
 def test_findings_in_files_the_repository_committed_under_the_output_dir_are_kept(
     tmp_path,
 ):
@@ -812,6 +853,7 @@ def test_findings_in_files_the_repository_committed_under_the_output_dir_are_kep
 
 
 @pytest.mark.usefixtures("no_checkout_above_tmp_path")
+@pytest.mark.integration
 def test_what_ash_wrote_under_the_output_dir_is_still_dropped_beside_committed_files(
     tmp_path,
 ):
@@ -829,6 +871,7 @@ def test_what_ash_wrote_under_the_output_dir_is_still_dropped_beside_committed_f
     _assert_expected_findings(parsed)
 
 
+@pytest.mark.unit
 def test_post_processing_with_a_context_finds_the_output_dir_in_the_base(tmp_path):
     """``_post_process_sarif`` asks the scanner base where ASH's output directory
     sits (``ScannerPluginBase._output_dir_inside``) before it reads a result. The
@@ -845,6 +888,7 @@ def test_post_processing_with_a_context_finds_the_output_dir_in_the_base(tmp_pat
     _assert_expected_findings(_parse(scanner, _raw_report()))
 
 
+@pytest.mark.unit
 def test_gitleaks_config_variables_are_left_to_gitleaks_outside_a_sandbox(
     tmp_path, monkeypatch
 ):
@@ -855,6 +899,7 @@ def test_gitleaks_config_variables_are_left_to_gitleaks_outside_a_sandbox(
     assert scanner._resolve_config_file() is None
 
 
+@pytest.mark.unit
 def test_under_a_sandbox_gitleaks_config_variables_give_the_default_rules(
     tmp_path, monkeypatch, caplog
 ):
@@ -971,6 +1016,7 @@ def _write(source: Path, name: str, text: str = "x") -> Path:
     return path
 
 
+@pytest.mark.unit
 def test_findings_the_trees_gitleaksignore_drops_are_added_back(tmp_path, monkeypatch):
     kept = _result("app/settings.py", "aws-access-token", 5)
     dropped = _result("app/settings.py", "github-pat", 4)
@@ -1037,6 +1083,7 @@ def test_findings_the_trees_gitleaksignore_drops_are_added_back(tmp_path, monkey
     assert not call["cwd"].parent.exists()
 
 
+@pytest.mark.unit
 def test_without_a_gitleaksignore_nothing_is_re_scanned(tmp_path, monkeypatch):
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
     source = Path(scanner.context.source_dir)
@@ -1049,6 +1096,7 @@ def test_without_a_gitleaksignore_nothing_is_re_scanned(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("code", [1, 126])
+@pytest.mark.unit
 def test_a_failed_re_scan_fails_the_scan(tmp_path, monkeypatch, code):
     """Reporting the first run alone would hide what the ignore file dropped."""
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, code=code)
@@ -1084,6 +1132,7 @@ def _add_back(scanner, source: Path, raw: dict, tmp_path: Path) -> list:
     )
 
 
+@pytest.mark.unit
 def test_two_secrets_of_one_rule_on_one_line_are_both_added_back(tmp_path, monkeypatch):
     """A dir-scan fingerprint is <file>:<rule>:<line>, so one .gitleaksignore entry
     hides every match of that rule on the line. The re-scan reports each of them,
@@ -1104,6 +1153,7 @@ def test_two_secrets_of_one_rule_on_one_line_are_both_added_back(tmp_path, monke
     assert len(calls) == 1
 
 
+@pytest.mark.unit
 def test_a_finding_the_first_run_kept_is_not_added_twice(tmp_path, monkeypatch):
     """The control for the column in the key: the same match, same column, is the
     same finding."""
@@ -1129,6 +1179,7 @@ def test_a_finding_the_first_run_kept_is_not_added_twice(tmp_path, monkeypatch):
         "{source}/app/settings.py:github-pat:4",
     ],
 )
+@pytest.mark.unit
 def test_an_entry_spelled_another_way_adds_no_duplicate(tmp_path, monkeypatch, entry):
     """gitleaks reports a file in the spelling it was given. The re-scan reaches
     each file by the path the directory scan does, so its findings match the first
@@ -1148,6 +1199,7 @@ def test_an_entry_spelled_another_way_adds_no_duplicate(tmp_path, monkeypatch, e
     assert [call["files"] for call in calls] == [["app/settings.py"]]
 
 
+@pytest.mark.unit
 def test_what_the_directory_scan_does_not_read_is_not_re_scanned(tmp_path, monkeypatch):
     """gitleaks follows no symlink, at the file or a parent; skips a FIFO and an
     empty file; and does not scan its own baseline. ASH's output directory is
@@ -1193,6 +1245,7 @@ def test_what_the_directory_scan_does_not_read_is_not_re_scanned(tmp_path, monke
 
 
 @pytest.mark.usefixtures("no_checkout_above_tmp_path")
+@pytest.mark.integration
 def test_only_what_ash_wrote_under_the_output_dir_is_not_re_scanned(
     tmp_path, monkeypatch
 ):
@@ -1218,6 +1271,7 @@ def test_only_what_ash_wrote_under_the_output_dir_is_not_re_scanned(
     assert [call["files"] for call in calls] == [[COMMITTED_IN_OUTPUT_DIR[0]]]
 
 
+@pytest.mark.unit
 def test_a_gitleaksignore_that_names_itself_is_re_scanned_as_a_file(
     tmp_path, monkeypatch
 ):
@@ -1245,6 +1299,7 @@ def test_a_gitleaksignore_that_names_itself_is_re_scanned_as_a_file(
     assert itself["cwd"] != tree["cwd"]
 
 
+@pytest.mark.unit
 def test_the_converted_targets_re_scan_reports_absolute_uris(tmp_path, monkeypatch):
     """The converted target is scanned by its absolute path, so its first run's
     URIs are absolute, and the re-scan's are made so to compare with them."""
@@ -1262,6 +1317,7 @@ def test_the_converted_targets_re_scan_reports_absolute_uris(tmp_path, monkeypat
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+@pytest.mark.unit
 def test_the_copies_are_private_to_their_owner(tmp_path, monkeypatch):
     scanner, _ = _rescan_harness(tmp_path, monkeypatch, {})
     modes = []
@@ -1282,6 +1338,7 @@ def test_the_copies_are_private_to_their_owner(tmp_path, monkeypatch):
     assert modes == [0o600]
 
 
+@pytest.mark.unit
 def test_a_relative_gitleaks_config_variable_is_resolved_from_the_source(
     tmp_path, monkeypatch
 ):
@@ -1348,6 +1405,7 @@ IGNORE_FILE_KINDS = [
 
 
 @pytest.mark.parametrize("kind", IGNORE_FILE_KINDS)
+@pytest.mark.unit
 def test_a_gitleaksignore_that_is_not_a_regular_file_stops_the_scan(tmp_path, kind):
     """gitleaks opens the file by name, follows a symlink, blocks on a FIFO, and
     logs every line it cannot parse; ASH refuses before gitleaks runs."""
@@ -1361,6 +1419,7 @@ def test_a_gitleaksignore_that_is_not_a_regular_file_stops_the_scan(tmp_path, ki
 
 
 @pytest.mark.parametrize("kind", IGNORE_FILE_KINDS)
+@pytest.mark.unit
 def test_the_re_scan_reads_no_gitleaksignore_that_is_not_a_regular_file(
     tmp_path, monkeypatch, kind
 ):
@@ -1378,6 +1437,7 @@ def test_the_re_scan_reads_no_gitleaksignore_that_is_not_a_regular_file(
     assert MARKER not in str(excinfo.value)
 
 
+@pytest.mark.unit
 def test_a_regular_gitleaksignore_lets_the_scan_run(tmp_path):
     scanner = _scanner(tmp_path)
     source = Path(scanner.context.source_dir)
@@ -1386,6 +1446,7 @@ def test_a_regular_gitleaksignore_lets_the_scan_run(tmp_path):
     assert final_args[-2:] == ["--", "."]
 
 
+@pytest.mark.unit
 def test_a_failure_names_gitleaks_log_but_does_not_quote_it(tmp_path):
     """gitleaks' stderr can repeat lines of the tree's .gitleaksignore."""
     scanner = _scanner(tmp_path)
@@ -1402,6 +1463,7 @@ def test_a_failure_names_gitleaks_log_but_does_not_quote_it(tmp_path):
     assert "gitleaks exited 1" in message
 
 
+@pytest.mark.unit
 def test_gitleaks_stderr_is_not_kept_as_the_scanners_errors(tmp_path):
     """A timed-out run returns its stderr, which the executor copies into the
     scan's results."""
@@ -1413,6 +1475,7 @@ def test_gitleaks_stderr_is_not_kept_as_the_scanners_errors(tmp_path):
     assert scanner.exit_code == 124
 
 
+@pytest.mark.unit
 def test_a_directory_named_gitleaksignore_is_not_a_reason_to_stop(tmp_path):
     """gitleaks reads the name only when it is not a directory."""
     scanner = _refused_ignore_file(tmp_path, "directory")
@@ -1449,6 +1512,7 @@ def _copied_for(tmp_path, monkeypatch, entries: bytes, *files: bytes) -> list:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
 @pytest.mark.parametrize("char", NOT_A_BREAK_TO_GITLEAKS, ids=repr)
+@pytest.mark.unit
 def test_a_name_with_a_character_python_breaks_lines_on_is_one_entry(
     tmp_path, monkeypatch, char
 ):
@@ -1458,6 +1522,7 @@ def test_a_name_with_a_character_python_breaks_lines_on_is_one_entry(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
 @pytest.mark.parametrize("char", ["\x1c", "\x1d", "\x1e", "\x1f"], ids=repr)
+@pytest.mark.unit
 def test_a_leading_character_go_does_not_trim_stays_in_the_name(
     tmp_path, monkeypatch, char
 ):
@@ -1466,6 +1531,7 @@ def test_a_leading_character_go_does_not_trim_stays_in_the_name(
     assert _copied_for(tmp_path, monkeypatch, name + b":github-pat:1\n", name) == [name]
 
 
+@pytest.mark.unit
 def test_a_backslash_in_the_file_part_is_a_slash(tmp_path, monkeypatch):
     """gitleaks replaces "\\" with "/" in a fingerprint's file before matching."""
     assert _copied_for(
@@ -1474,6 +1540,7 @@ def test_a_backslash_in_the_file_part_is_a_slash(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="':' in a file name")
+@pytest.mark.unit
 def test_a_four_part_entry_is_normalized_where_gitleaks_normalizes_it(
     tmp_path, monkeypatch
 ):
@@ -1485,6 +1552,7 @@ def test_a_four_part_entry_is_normalized_where_gitleaks_normalizes_it(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.unit
 def test_a_name_that_is_not_utf_8_is_kept_byte_for_byte(tmp_path, monkeypatch):
     name = b"app/\xff\xfe.py"
     # APFS (the macOS runners) refuses a name that is not valid UTF-8 with
@@ -1502,6 +1570,7 @@ def test_a_name_that_is_not_utf_8_is_kept_byte_for_byte(tmp_path, monkeypatch):
     assert _copied_for(tmp_path, monkeypatch, name + b":github-pat:1\n", name) == [name]
 
 
+@pytest.mark.unit
 def test_gitleaks_stops_reading_at_a_line_it_cannot_buffer(tmp_path, monkeypatch):
     """bufio.Scanner's 64 KiB token limit ends gitleaks' read, unreported, so no
     entry after such a line hides anything."""
@@ -1516,6 +1585,7 @@ def test_gitleaks_stops_reading_at_a_line_it_cannot_buffer(tmp_path, monkeypatch
     ) == [b"app/before.py"]
 
 
+@pytest.mark.unit
 def test_a_line_gitleaks_can_buffer_is_read(tmp_path, monkeypatch):
     """The control: 65535 bytes and its newline fit."""
     entries = b"#" * 65535 + b"\n" + b"app/after.py:github-pat:1\n"
@@ -1545,6 +1615,7 @@ def _capped(tmp_path, monkeypatch, names: list, limit: int):
     return scanner, calls, source
 
 
+@pytest.mark.unit
 def test_the_re_scan_copies_at_most_the_limit_and_says_how_many_it_skipped(
     tmp_path, monkeypatch, caplog
 ):
@@ -1558,6 +1629,7 @@ def test_the_re_scan_copies_at_most_the_limit_and_says_how_many_it_skipped(
         assert name not in caplog.text
 
 
+@pytest.mark.unit
 def test_files_past_the_limit_are_reported_as_not_evaluated(tmp_path, monkeypatch):
     """An error-level run notification: the scan gate reads it as incomplete."""
     from types import SimpleNamespace
@@ -1587,6 +1659,7 @@ def test_files_past_the_limit_are_reported_as_not_evaluated(tmp_path, monkeypatc
     assert unevaluated_rules(SimpleNamespace(sarif=again)) == []
 
 
+@pytest.mark.unit
 def test_within_the_limit_nothing_is_reported_as_not_evaluated(tmp_path, monkeypatch):
     names = [f"app/f{index}.py" for index in range(2)]
     scanner, calls, source = _capped(tmp_path, monkeypatch, names, limit=2)
@@ -1611,6 +1684,7 @@ def _another_thread_reads_the_clock() -> None:
     thread.join()
 
 
+@pytest.mark.unit
 def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
     """Each run is given what is left of one scan_timeout, not a fresh one."""
     from automated_security_helper.plugin_modules.ash_builtin.scanners import (
@@ -1638,6 +1712,7 @@ def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
     assert timeouts == [50.0, 20.0]
 
 
+@pytest.mark.unit
 def test_a_re_scan_with_no_time_left_fails_the_scan(tmp_path, monkeypatch):
     from automated_security_helper.plugin_modules.ash_builtin.scanners import (
         gitleaks_scanner as module,
@@ -1695,15 +1770,18 @@ def _run_targets(tmp_path, monkeypatch, codes: list) -> list:
     return outcomes
 
 
+@pytest.mark.unit
 def test_a_failed_source_run_does_not_fail_a_clean_converted_one(tmp_path, monkeypatch):
     assert _run_targets(tmp_path, monkeypatch, [1, 0]) == ["error", "ok"]
 
 
+@pytest.mark.unit
 def test_leaks_in_the_source_do_not_hide_a_failed_converted_run(tmp_path, monkeypatch):
     """The worst code across runs was 2, which is accepted, so exit 1 read as leaks."""
     assert _run_targets(tmp_path, monkeypatch, [LEAKS_EXIT_CODE, 1]) == ["ok", "error"]
 
 
+@pytest.mark.unit
 def test_a_copy_the_re_scan_cannot_write_fails_the_scan(tmp_path, monkeypatch):
     """Skipping it would leave what the tree's file hides there unreported."""
     import errno
@@ -1725,6 +1803,7 @@ def test_a_copy_the_re_scan_cannot_write_fails_the_scan(tmp_path, monkeypatch):
     assert calls == []
 
 
+@pytest.mark.unit
 def test_a_copies_directory_that_cannot_be_made_fails_the_scan(tmp_path, monkeypatch):
     """The re-scan's directory outside the tree is ASH's to make; without it the
     files the ignore file hides would not be re-scanned."""
@@ -1777,6 +1856,7 @@ def _linked_out(tmp_path: Path, shape: str) -> str:
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
 @pytest.mark.parametrize("option", ["config_file", "baseline_path"])
 @pytest.mark.parametrize("shape", ["file", "directory", "nested directory"])
+@pytest.mark.unit
 def test_an_operator_path_in_the_tree_cannot_link_out_of_it(tmp_path, option, shape):
     """The scanned repository decides what is at a path inside it; a link there
     could hand gitleaks any file the scan can read."""
@@ -1791,6 +1871,7 @@ def test_an_operator_path_in_the_tree_cannot_link_out_of_it(tmp_path, option, sh
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
 @pytest.mark.parametrize("option", ["config_file", "baseline_path"])
+@pytest.mark.unit
 def test_a_link_inside_the_tree_to_a_file_inside_it_is_still_honored(tmp_path, option):
     scanner = _scanner(tmp_path, operator=True, **{option: "named.json"})
     source = Path(scanner.context.source_dir)
@@ -1803,6 +1884,7 @@ def test_a_link_inside_the_tree_to_a_file_inside_it_is_still_honored(tmp_path, o
 
 @pytest.mark.parametrize("option", ["config_file", "baseline_path"])
 @pytest.mark.parametrize("written", ["relative", "absolute"])
+@pytest.mark.unit
 def test_an_operator_path_that_leaves_the_tree_by_dot_dot_is_honored(
     tmp_path, option, written
 ):
@@ -1818,6 +1900,7 @@ def test_an_operator_path_that_leaves_the_tree_by_dot_dot_is_honored(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+@pytest.mark.unit
 def test_an_operator_path_outside_the_tree_may_be_a_link(tmp_path):
     """Outside the tree the operator controls both the path and the link."""
     scanner = _scanner(tmp_path, operator=True, baseline_path=str(tmp_path / "b.json"))

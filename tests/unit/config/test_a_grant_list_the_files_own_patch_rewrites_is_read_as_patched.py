@@ -69,6 +69,8 @@ from automated_security_helper.config.sandbox_grants import scanned_trees
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 ADDITIVE_LISTS = ("extra_read_paths", "read_path_scanners", "env_scanners")
 #: A setting no list in the code names: the section keeps nothing a patch touched
 #: just because its name is on a list.

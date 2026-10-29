@@ -25,6 +25,8 @@ from automated_security_helper.config.runtime_patch import (
     apply_runtime_patch,
 )
 
+pytestmark = pytest.mark.unit
+
 LIMITS = ("max_members", "max_member_bytes", "max_total_bytes", "max_compression_ratio")
 
 

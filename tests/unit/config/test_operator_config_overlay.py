@@ -21,6 +21,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
 )
 
+pytestmark = pytest.mark.unit
+
 #: In the refusal of an overlay a file of which is not the operator's.
 _NOT_THE_OPERATORS = "must be the operator's"
 

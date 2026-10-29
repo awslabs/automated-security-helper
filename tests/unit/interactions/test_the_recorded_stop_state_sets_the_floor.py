@@ -9,10 +9,14 @@ wait whose stop the kernel refused records post_run_error and the carrier, and
 the floor holds for it too.
 """
 
+import pytest
+
 from interactions.test_a_child_ash_could_not_stop_fails_the_run import (
     _exit_code_and_log,
     _results_of_a_run,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_a_post_run_could_not_stop_sets_the_floor_without_a_timeout(tmp_path):

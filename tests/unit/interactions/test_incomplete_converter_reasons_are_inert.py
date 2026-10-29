@@ -13,6 +13,8 @@ terminal) went through raw. Each name is now passed through ``inert_text``.
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.interactions.run_ash_scan import (
     incomplete_converters,
     print_incompleteness_message,
@@ -23,6 +25,8 @@ from automated_security_helper.models.asharp_model import (
     FailedInputInfo,
     RefusedInputInfo,
 )
+
+pytestmark = pytest.mark.unit
 
 ESCAPE_RESET = "a\x1bcz.zip"
 REORDERED = "b\u202ex.tar"

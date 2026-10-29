@@ -39,6 +39,8 @@ import yaml
 
 from automated_security_helper.config.ash_config import ContentDbStalenessOverride
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_CONFIGS = sorted((REPO_ROOT / ".ash").glob(".ash*.yaml"))
 COMMUNITY_CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"

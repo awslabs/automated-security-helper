@@ -37,6 +37,8 @@ from automated_security_helper.utils.terminal_text import (
     only_controls_shown,
 )
 
+pytestmark = pytest.mark.unit
+
 # The ESC is followed by "c", not "[" or "]": a complete escape sequence is
 # removed from an error's text in every print, a lone ESC is shown.
 VALUE = "p\x1bcq out\\x64\\Release"

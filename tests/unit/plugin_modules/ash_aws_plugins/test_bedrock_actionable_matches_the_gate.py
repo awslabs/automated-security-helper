@@ -28,6 +28,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_re
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
+pytestmark = pytest.mark.unit
+
 AshAggregatedResults.model_rebuild()
 BedrockSummaryReporterConfig.model_rebuild()
 BedrockSummaryReporter.model_rebuild()

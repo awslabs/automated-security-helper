@@ -48,6 +48,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

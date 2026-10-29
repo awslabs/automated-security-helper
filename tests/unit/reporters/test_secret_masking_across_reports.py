@@ -49,6 +49,8 @@ from tests.utils.secret_bearing_scan import (
     snippet,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_aws(monkeypatch, tmp_path):

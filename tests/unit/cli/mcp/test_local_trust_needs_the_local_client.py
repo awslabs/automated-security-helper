@@ -27,6 +27,8 @@ from automated_security_helper.cli.mcp.session_identity import (
     resolve_caller_session_id,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _request_is_none() -> Context:
     return Context(request_context=SimpleNamespace(request=None))

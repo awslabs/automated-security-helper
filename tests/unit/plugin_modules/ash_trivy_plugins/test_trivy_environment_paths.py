@@ -37,6 +37,8 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 )
 from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
 
+pytestmark = pytest.mark.unit
+
 VARIABLES = ("TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG")
 
 #: What each variable chooses, read from the scanner.

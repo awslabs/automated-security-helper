@@ -137,6 +137,7 @@ def _fake_uv_tool_entry(pins: Any, tool: str) -> Any:
     return dataclasses.replace(template, tool=tool, version="2.0.0", distribution=tool)
 
 
+@pytest.mark.unit
 class TestEnumerationCoversEveryPin:
     def test_every_pin_in_the_module_is_enumerated(self, pins):
         enumerated = checker.enumerate_pins(pins)
@@ -251,6 +252,7 @@ class TestEnumerationCoversEveryPin:
         )
 
 
+@pytest.mark.unit
 class TestVersionComparison:
     @pytest.mark.parametrize(
         ("pinned", "latest", "status"),
@@ -333,6 +335,7 @@ def _fetchers(latest: dict[str, str]):
     }
 
 
+@pytest.mark.unit
 class TestCheckWithMockedFetchers:
     def test_equal_behind_and_ahead(self):
         pins = [
@@ -383,6 +386,7 @@ class TestExitCode:
             for p in checker.enumerate_pins(checker.load_pins_module())
         }
 
+    @pytest.mark.unit
     def test_all_current_exits_zero_with_the_flag(self, monkeypatch, capsys):
         versions = self._pinned_versions()
         code, out = self._run(
@@ -391,6 +395,7 @@ class TestExitCode:
         assert code == 0, out
         assert "outdated" not in out
 
+    @pytest.mark.integration
     def test_one_outdated_pin_exits_one_with_the_flag(self, monkeypatch, capsys):
         versions = self._pinned_versions()
         bumped = dict(versions, **{"anchore/grype": "v999.0.0"})
@@ -400,6 +405,7 @@ class TestExitCode:
         assert code == 1
         assert re.search(r"grype\s+v\S+\s+v999\.0\.0\s+outdated", out), out
 
+    @pytest.mark.unit
     def test_a_stale_bundler_is_reported_outdated(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -421,12 +427,14 @@ class TestExitCode:
         assert "BUNDLED WITH" in out
         assert "required Ruby version" in out
 
+    @pytest.mark.integration
     def test_outdated_without_the_flag_exits_zero(self, monkeypatch, capsys):
         versions = self._pinned_versions()
         bumped = dict(versions, **{"anchore/grype": "v999.0.0"})
         code, _ = self._run(monkeypatch, capsys, bumped.__getitem__, [])
         assert code == 0
 
+    @pytest.mark.unit
     def test_ahead_does_not_fail(self, monkeypatch, capsys):
         versions = self._pinned_versions()
         older = dict(versions, semgrep="1.0.0")
@@ -436,6 +444,7 @@ class TestExitCode:
         assert code == 0
         assert "ahead" in out
 
+    @pytest.mark.unit
     def test_a_lookup_error_exits_two_even_without_the_flag(self, monkeypatch, capsys):
         def broken(project: str) -> str:
             raise OSError("no route to host")
@@ -471,6 +480,7 @@ def _judged(pin: Any, releases: Any, ruby: "tuple[int, int]" = (3, 1)) -> Any:
     return checker.check([pin], fetchers, ruby=ruby)[0]
 
 
+@pytest.mark.unit
 class TestGemsAreJudgedByTheImagesRuby:
     """A gem is outdated only when a newer release the image's Ruby can run exists."""
 
@@ -643,6 +653,7 @@ class TestGemsAreJudgedByTheImagesRuby:
         assert re.search(rf"bundler\s+{re.escape(bundler)}\s+98\.0\.0\s+outdated", out)
 
 
+@pytest.mark.integration
 class TestBumpGuidance:
     def _steps(self, pins, tool: str, latest: str) -> str:
         pin = {p.tool: p for p in checker.enumerate_pins(pins)}[tool]
@@ -914,6 +925,7 @@ _EXPECTED_PINS = sorted(_expected_pins(checker.load_pins_module()).items())
 
 
 class TestBumpStepsNameEveryValueABumpChanges:
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         ("tool", "version"),
         [(tool, version) for tool, (version, _) in _EXPECTED_PINS],
@@ -933,6 +945,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
             f"{steps}"
         )
 
+    @pytest.mark.unit
     def test_every_pin_is_a_known_kind_and_every_kind_is_tested(
         self, pins: Any
     ) -> None:
@@ -951,10 +964,12 @@ class TestBumpStepsNameEveryValueABumpChanges:
         assert set(checker.PIN_KINDS) == set(kinds.values())
         assert set(checker._KIND_STEPS) == set(checker.PIN_KINDS)
 
+    @pytest.mark.unit
     def test_each_pin_reports_the_kind_its_tables_give(self, pins: Any) -> None:
         for pin in checker.enumerate_pins(pins):
             assert pin.kind == _kind(pins, pin.tool), pin
 
+    @pytest.mark.unit
     def test_a_license_entry_no_download_pin_names_is_refused(
         self, pins: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -966,6 +981,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
         with pytest.raises(checker.PinEnumerationError, match="PIN_KINDS"):
             checker.enumerate_pins(pins)
 
+    @pytest.mark.unit
     def test_a_tool_in_both_download_tables_is_refused(
         self, pins: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -974,6 +990,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
         with pytest.raises(checker.PinEnumerationError, match="pick one"):
             checker.enumerate_pins(pins)
 
+    @pytest.mark.unit
     def test_a_half_applied_rules_bundle_bump_is_refused(
         self, pins: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -986,11 +1003,13 @@ class TestBumpStepsNameEveryValueABumpChanges:
         with pytest.raises(checker.PinEnumerationError, match="half-applied"):
             checker.enumerate_pins(pins)
 
+    @pytest.mark.unit
     def test_a_pin_of_another_kind_has_no_steps(self, pins: Any) -> None:
         pin = dataclasses.replace(_pin(), kind="future")
         with pytest.raises(ValueError, match="'future'"):
             checker.bump_steps(pins, checker.Result(pin, "v9.9.9", "outdated"))
 
+    @pytest.mark.integration
     def test_the_rules_registry_names_its_release_and_both_digests(
         self, pins: Any
     ) -> None:
@@ -1010,6 +1029,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
         ):
             assert needle in steps, f"{needle!r} missing from:\n{steps}"
 
+    @pytest.mark.integration
     def test_the_needles_are_not_vacuous(self, pins: Any) -> None:
         """Positive control: what the test above requires, for three pins."""
         expected = {tool: version for tool, (version, _) in _EXPECTED_PINS}
@@ -1026,6 +1046,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
         assert "BUNDLER_VERSION" in bundler and "BUNDLED WITH" in bundler, bundler
         assert any(n.startswith("Dockerfile:") for n in bundler), bundler
 
+    @pytest.mark.unit
     def test_the_bundler_pin_and_its_copies_agree(self, pins: Any) -> None:
         """The Dockerfile ARG and the lockfile's BUNDLED WITH are the same pin."""
         arg = re.search(
@@ -1045,6 +1066,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
             "a bundler bump is half-applied"
         )
 
+    @pytest.mark.integration
     def test_a_step_left_out_is_caught(self, pins: Any) -> None:
         """Negative control: the same steps with one dropped fail the check."""
         pin = {p.tool: p for p in checker.enumerate_pins(pins)}["grype"]
@@ -1055,6 +1077,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
         ]
         assert "_EXECUTABLE_DIGESTS:" in _unnamed(pins, pin, "\n".join(steps))
 
+    @pytest.mark.integration
     def test_a_new_table_keyed_by_a_tool_is_caught(
         self, pins: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1063,6 +1086,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
         pin = {p.tool: p for p in checker.enumerate_pins(pins)}["grype"]
         assert "_GRYPE_SIGNATURES" in _unnamed(pins, pin, _steps_text(pins, pin))
 
+    @pytest.mark.unit
     def test_every_dockerfile_version_arg_belongs_to_a_pin(self, pins: Any) -> None:
         """A version pinned in the Dockerfile that no pin owns would get no step."""
         stems = {p.tool.upper().replace("-", "_") for p in checker.enumerate_pins(pins)}
@@ -1077,6 +1101,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
         )
         assert not unowned, unowned
 
+    @pytest.mark.unit
     def test_an_apt_pin_names_the_new_version_and_every_line(self) -> None:
         """The Dockerfile's apt pins: the report gives the edit and every line."""
         pin = checker.enumerate_apt_pins()[0]
@@ -1088,6 +1113,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
             assert f"Dockerfile:{number}" in report
 
 
+@pytest.mark.unit
 class TestWorkflow:
     @pytest.fixture(scope="class")
     def workflow(self) -> dict[str, Any]:
@@ -1135,6 +1161,7 @@ class TestWorkflow:
                     assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"])
 
 
+@pytest.mark.unit
 class TestOnlyAllowlistedHttpsUrlsAreFetched:
     """_get_json refuses anything but https to the three upstream APIs, before opening."""
 
@@ -1190,6 +1217,7 @@ class TestOnlyAllowlistedHttpsUrlsAreFetched:
         assert opened == [url]
 
 
+@pytest.mark.unit
 class TestBundledLibrariesAreListedButNotLookedUp:
     """A library a wheel bundles cannot be bumped on its own (its version is the
     wheel's), so comparing it with its project's latest release would make the

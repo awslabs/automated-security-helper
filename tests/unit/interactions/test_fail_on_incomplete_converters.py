@@ -59,6 +59,8 @@ from automated_security_helper.models.asharp_model import (
     FailedInputInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
 
 

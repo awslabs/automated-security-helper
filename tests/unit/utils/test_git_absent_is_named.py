@@ -58,6 +58,7 @@ def _project(path: Path) -> ProjectPlan:
     )
 
 
+@pytest.mark.integration
 def test_the_workspace_warning_says_git_is_missing(
     repository, no_git, tmp_path, caplog
 ):
@@ -69,6 +70,7 @@ def test_the_workspace_warning_says_git_is_missing(
     assert "is not a git repository" not in warned
 
 
+@pytest.mark.integration
 def test_the_workspace_warning_names_a_directory_that_is_not_a_repository(
     tmp_path, caplog
 ):
@@ -80,6 +82,7 @@ def test_the_workspace_warning_names_a_directory_that_is_not_a_repository(
     assert "is not inside a git repository" in " ".join(caplog.messages)
 
 
+@pytest.mark.integration
 def test_the_problem_names_git_when_it_is_missing(repository, no_git):
     from automated_security_helper.utils.get_scan_set import (
         GIT_NOT_INSTALLED,
@@ -91,6 +94,7 @@ def test_the_problem_names_git_when_it_is_missing(repository, no_git):
     assert git_repository_root_problem(repository) == GIT_NOT_INSTALLED
 
 
+@pytest.mark.integration
 def test_a_missing_directory_is_not_reported_as_missing_git(tmp_path):
     from automated_security_helper.utils.get_scan_set import (
         git_repository_root_problem,
@@ -100,6 +104,7 @@ def test_a_missing_directory_is_not_reported_as_missing_git(tmp_path):
     assert "does not exist" in problem
 
 
+@pytest.mark.integration
 def test_get_changed_files_says_git_is_missing(repository, no_git, caplog):
     from automated_security_helper.utils.get_scan_set import get_changed_files
 
@@ -110,6 +115,7 @@ def test_get_changed_files_says_git_is_missing(repository, no_git, caplog):
     assert "timed out" not in warned
 
 
+@pytest.mark.integration
 def test_get_changed_files_with_a_missing_directory_does_not_blame_git(
     tmp_path, caplog
 ):
@@ -138,6 +144,7 @@ class _HungGit:
         raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
 
 
+@pytest.mark.unit
 def test_a_hung_git_is_waited_for_once(tmp_path, monkeypatch):
     """The problem comes from the lookup that failed, not from running git again.
 
@@ -154,6 +161,7 @@ def test_a_hung_git_is_waited_for_once(tmp_path, monkeypatch):
     assert len(git.started) == 1, git.started
 
 
+@pytest.mark.unit
 def test_the_workspace_warning_runs_git_once_when_it_hangs(
     tmp_path, monkeypatch, caplog
 ):
@@ -168,6 +176,7 @@ def test_the_workspace_warning_runs_git_once_when_it_hangs(
     assert len(git.started) == 1, git.started
 
 
+@pytest.mark.unit
 def test_a_later_lookup_is_not_answered_by_an_earlier_failure(tmp_path, monkeypatch):
     """A problem is remembered only until the next lookup of the same directory."""
     from automated_security_helper.utils import get_scan_set
@@ -188,6 +197,7 @@ def test_a_later_lookup_is_not_answered_by_an_earlier_failure(tmp_path, monkeypa
     )
 
 
+@pytest.mark.unit
 def test_a_successful_lookup_forgets_the_earlier_failure(tmp_path, monkeypatch):
     """After a lookup that finds the root, the old cause must not be reported."""
     from automated_security_helper.utils import get_scan_set
@@ -260,6 +270,7 @@ def _printed(buffer) -> str:
     return " ".join(buffer.getvalue().split())
 
 
+@pytest.mark.integration
 def test_the_workspace_warning_prints_a_bracketed_path_verbatim(
     tmp_path, markup_console
 ):
@@ -272,6 +283,7 @@ def test_the_workspace_warning_prints_a_bracketed_path_verbatim(
     assert "scanning it in full" not in printed, printed
 
 
+@pytest.mark.integration
 def test_get_changed_files_prints_a_bracketed_path_verbatim(tmp_path, markup_console):
     from automated_security_helper.utils.get_scan_set import get_changed_files
 
@@ -283,6 +295,7 @@ def test_get_changed_files_prints_a_bracketed_path_verbatim(tmp_path, markup_con
     assert "falling back" not in printed, printed
 
 
+@pytest.mark.unit
 def test_an_invalid_base_ref_is_refused_and_named_verbatim(tmp_path, monkeypatch):
     """--base-ref is named in the refusal; "a[/x]" reads as a closing Rich tag.
 
@@ -300,6 +313,7 @@ def test_an_invalid_base_ref_is_refused_and_named_verbatim(tmp_path, monkeypatch
     assert git.started == [], git.started
 
 
+@pytest.mark.unit
 def test_a_hung_git_diff_is_named(tmp_path, monkeypatch, caplog):
     from automated_security_helper.utils import get_scan_set
 
@@ -313,6 +327,7 @@ def test_a_hung_git_diff_is_named(tmp_path, monkeypatch, caplog):
     assert "reporting every finding" in warned, warned
 
 
+@pytest.mark.unit
 def test_a_git_that_will_not_start_is_not_called_missing(tmp_path, monkeypatch, caplog):
     """FileNotFoundError while git is on PATH: say it could not be started."""
     from automated_security_helper.utils import get_scan_set
@@ -330,6 +345,7 @@ def test_a_git_that_will_not_start_is_not_called_missing(tmp_path, monkeypatch, 
     assert "git is not installed" not in warned, warned
 
 
+@pytest.mark.unit
 def test_a_failed_git_diff_says_every_finding_is_reported(
     tmp_path, monkeypatch, caplog
 ):
@@ -349,6 +365,7 @@ def test_a_failed_git_diff_says_every_finding_is_reported(
     assert "falling back" not in warned, warned
 
 
+@pytest.mark.unit
 def test_an_invalid_base_ref_is_refused_before_git_starts(tmp_path, monkeypatch):
     """A base ref with a space is not a fallback to every finding: it is refused."""
     from automated_security_helper.utils import get_scan_set

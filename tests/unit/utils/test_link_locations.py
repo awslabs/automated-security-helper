@@ -15,6 +15,8 @@ from automated_security_helper.utils.link_locations import (
     without_extended_prefix,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "readlink, spelled",

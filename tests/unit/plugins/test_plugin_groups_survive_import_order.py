@@ -134,6 +134,7 @@ def control() -> dict:
 
 
 @pytest.mark.parametrize("first_import", FIRST_IMPORTS)
+@pytest.mark.integration
 def test_every_plugin_group_registers_whichever_module_is_imported_first(
     control, first_import
 ):
@@ -155,6 +156,7 @@ def test_every_plugin_group_registers_whichever_module_is_imported_first(
 REPORTERS = "automated_security_helper.plugin_modules.ash_builtin.reporters"
 
 
+@pytest.mark.unit
 def test_a_group_recovered_on_a_later_call_is_no_longer_reported(monkeypatch):
     """An error recorded by an earlier call is dropped once the group loads.
 
@@ -175,6 +177,7 @@ def test_a_group_recovered_on_a_later_call_is_no_longer_reported(monkeypatch):
     assert REPORTERS not in loader._PLUGIN_LOAD_ERRORS
 
 
+@pytest.mark.unit
 def test_control_a_group_that_is_still_lost_stays_reported(monkeypatch):
     import automated_security_helper.plugin_modules.ash_builtin as ash_builtin
     from automated_security_helper.plugins import loader

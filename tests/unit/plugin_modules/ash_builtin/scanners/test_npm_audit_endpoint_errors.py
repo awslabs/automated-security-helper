@@ -41,6 +41,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 NPM_ENDPOINT_STDERR = (
     "npm warn audit {message}\n"
     "npm error audit endpoint returned an error\n"

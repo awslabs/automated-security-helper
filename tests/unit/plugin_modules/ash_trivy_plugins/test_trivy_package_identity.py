@@ -19,10 +19,14 @@ npm lockfile, resolves each location's line to its ``packages`` key, giving
 import json
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+pytestmark = pytest.mark.unit
 
 BUNDLED_KEY = "node_modules/aws-cdk-lib/node_modules/brace-expansion"
 TOP_KEY = "node_modules/brace-expansion"

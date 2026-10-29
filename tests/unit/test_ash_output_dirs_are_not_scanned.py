@@ -83,7 +83,7 @@ PluginContext.model_rebuild()
 capture = test_merge.capture
 
 #: The scanners built here start no tool (tests/unit/conftest.py).
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_tool_probes")]
 
 #: Directories ASH names as its own output in this tree.
 NAMED = (".ash/ash_output", "shard-1")

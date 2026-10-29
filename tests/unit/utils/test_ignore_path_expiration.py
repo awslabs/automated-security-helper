@@ -96,6 +96,8 @@ from automated_security_helper.utils import suppression_matcher
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 TODAY = date(2026, 6, 15)

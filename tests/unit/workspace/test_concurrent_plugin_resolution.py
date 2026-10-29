@@ -47,6 +47,8 @@ from automated_security_helper.plugins.plugin_manager import (
     AshPluginRegistration,
 )
 
+pytestmark = pytest.mark.unit
+
 #: A real, importable scanner module, so the loop body does the work it does in
 #: production. A non-importable path would be caught as ImportError and skipped,
 #: which would hide the hazard rather than expose it.

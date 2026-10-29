@@ -60,6 +60,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
 
+pytestmark = pytest.mark.unit
+
 _SERVER = "automated_security_helper.cli.mcp_server"
 _MANAGEMENT = "automated_security_helper.core.resource_management.scan_management"
 _TOOLS = "automated_security_helper.cli.mcp_tools"

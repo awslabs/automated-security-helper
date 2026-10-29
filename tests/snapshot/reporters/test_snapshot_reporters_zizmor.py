@@ -25,6 +25,8 @@ from tests.snapshot.support.normalize import REPO_ROOT
 from tests.snapshot.support.reporter_catalog import build_reporter, reporter_classes
 from tests.snapshot.support.reporter_catalog import snapshot_extension
 
+pytestmark = pytest.mark.unit
+
 ZIZMOR_FIXTURE = REPO_ROOT / "tests" / "test_data" / "scanners" / "zizmor"
 
 #: The reporters a person reads a finding in, plus the machine-readable SARIF.

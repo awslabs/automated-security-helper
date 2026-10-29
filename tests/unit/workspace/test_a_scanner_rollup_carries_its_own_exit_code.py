@@ -49,6 +49,8 @@ from automated_security_helper.workspace.execution import (
 from tests.unit.workspace.test_execution import FakeOrchestrator, _make_workspace
 from tests.unit.workspace.test_workspace_reporting import _plan
 
+pytestmark = pytest.mark.unit
+
 #: The code a scanner reads when its project row recorded none.
 NO_CODE = 125
 

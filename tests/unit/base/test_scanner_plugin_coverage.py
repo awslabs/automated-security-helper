@@ -32,6 +32,8 @@ from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 
 class StubConfig(ScannerPluginConfigBase):
     name: Literal["stub"] = "stub"

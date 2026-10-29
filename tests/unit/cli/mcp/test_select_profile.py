@@ -36,6 +36,8 @@ from automated_security_helper.config.ash_config import (
     RuntimeOverridesConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolate_state() -> None:

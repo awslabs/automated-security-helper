@@ -31,6 +31,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 #: Longer than any console, with rich markup and Markdown in it: rendering would
 #: wrap the long line and read the markup, the emphasis and the heading as formatting.
 MARKDOWN_TEXT = (

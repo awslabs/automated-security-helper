@@ -25,6 +25,8 @@ from typing import Any, Dict
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 MODULE_UNDER_TEST = "automated_security_helper.cli.mcp.workspace"
 SESSION = "session-a"
 

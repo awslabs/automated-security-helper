@@ -247,6 +247,7 @@ def a_scanner_registration():
     return name, scanners[name]
 
 
+@pytest.mark.unit
 def test_a_replacement_at_a_collected_classs_id_is_a_change(monkeypatch):
     """A record holds the class it saw, so the class cannot be collected and a
     replacement can never come back under the freed id reading as unchanged.
@@ -287,6 +288,7 @@ def test_a_replacement_at_a_collected_classs_id_is_a_change(monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_a_registration_a_test_removed_is_listed_as_gone(monkeypatch):
     """A registration a test removed and did not put back is listed as gone,
     and nothing else is: its module still holds its class, so the module's
@@ -323,6 +325,7 @@ def test_a_registration_a_test_removed_is_listed_as_gone(monkeypatch):
     assert left == [f"scanners: a-removed-probe from {module.__name__} is gone"], left
 
 
+@pytest.mark.unit
 def test_a_registration_a_test_added_is_listed_as_still_registered(monkeypatch):
     """A registration a test added from a module that is not ASH's own, and did
     not remove, is listed as still registered, and nothing else is. The added
@@ -374,6 +377,7 @@ def _handler_modules() -> list[str]:
     return [h.__module__ for h in handlers]
 
 
+@pytest.mark.unit
 @pytest.mark.usefixtures("probe_module")
 def test_a_plugin_first_imported_inside_is_kept_afterwards():
     library = ash_plugin_manager.plugin_library
@@ -391,6 +395,7 @@ def test_a_plugin_first_imported_inside_is_kept_afterwards():
     assert _handler_modules() == [_MODULE]
 
 
+@pytest.mark.unit
 def test_a_registration_from_an_already_imported_module_is_not_kept():
     """A test that registers a fake by hand gets it undone, as before."""
     library = ash_plugin_manager.plugin_library
@@ -403,6 +408,7 @@ def test_a_registration_from_an_already_imported_module_is_not_kept():
     assert "SnapshotRegistryHandMade" not in library.reporters
 
 
+@pytest.mark.unit
 def test_an_existing_registration_is_not_overwritten(monkeypatch):
     """A key the real registry already holds keeps the real registry's entry."""
     library = ash_plugin_manager.plugin_library
@@ -462,6 +468,7 @@ def _loaded_inside(module: str) -> set[str]:
             return set(ash_plugin_manager.plugin_library.reporters)
 
 
+@pytest.mark.unit
 def test_a_plugin_registered_under_another_name(planted):
     planted(
         {
@@ -476,6 +483,7 @@ def test_a_plugin_registered_under_another_name(planted):
     assert present, "the plugin registered under another name was not put back"
 
 
+@pytest.mark.unit
 def test_a_file_imported_under_two_names_loaded_by_the_second(planted, tmp_path):
     # Imported as probe_two_pkg.mod first, then as mod (its directory on the
     # path too): the second import's registration is skipped as a duplicate.
@@ -497,6 +505,7 @@ def test_a_file_imported_under_two_names_loaded_by_the_second(planted, tmp_path)
     assert present, "the plugin of a file loaded by its second name was not put back"
 
 
+@pytest.mark.unit
 def test_a_package_that_imports_only_its_submodule(planted):
     planted(
         {
@@ -512,6 +521,7 @@ def test_a_package_that_imports_only_its_submodule(planted):
     assert present, "the plugin of the package's submodule was not put back"
 
 
+@pytest.mark.unit
 def test_a_plugin_of_another_module_is_not_put_back(planted):
     """The control: only the loaded module's plugins come back."""
     planted(
@@ -557,6 +567,7 @@ def test_{second}(monkeypatch):
 """
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "first, second", [("a", "b"), ("b", "a")], ids=["a then b", "b then a"]
 )

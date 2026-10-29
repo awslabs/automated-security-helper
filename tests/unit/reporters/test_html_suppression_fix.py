@@ -6,6 +6,8 @@ by severity.  Now ``_is_suppressed`` detects the ``suppressions`` list and
 "SUPPRESSED" bucket instead of inflating the active severity counts.
 """
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
     HtmlReporter,
 )
@@ -16,6 +18,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     Suppression,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_result(*, level: Level, suppressed: bool = False) -> Result:

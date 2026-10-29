@@ -43,6 +43,8 @@ from tests.unit.utils.test_cdk_nag_worker import (
     _templates,
 )
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 _BASE = {

@@ -38,6 +38,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 MODULE_UNDER_TEST = "automated_security_helper.cli.mcp.workspace"
 
 

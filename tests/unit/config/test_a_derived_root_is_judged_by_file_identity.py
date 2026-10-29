@@ -20,6 +20,8 @@ import pytest
 
 from automated_security_helper.config.path_trust import refused_derived_product
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def same_file_pairs(monkeypatch):

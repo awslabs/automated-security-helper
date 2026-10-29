@@ -27,6 +27,8 @@ import pytest
 from automated_security_helper.interactions import run_ash_scan as run_ash_scan_module
 from automated_security_helper.interactions.run_ash_scan import ScanOptions
 
+pytestmark = pytest.mark.unit
+
 WAIT = 30
 
 

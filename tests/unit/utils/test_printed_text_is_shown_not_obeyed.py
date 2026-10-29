@@ -63,6 +63,7 @@ def _assert_shown(text: str) -> None:
     assert not _COMMAND_LINE.search(text), (_COMMAND_LINE.search(text), text)
 
 
+@pytest.mark.integration
 @posix_names
 def test_the_scan_set_listing_shows_the_file_names(tmp_path, capsys, monkeypatch):
     """`python -m automated_security_helper.utils.get_scan_set` lists the scan set
@@ -84,6 +85,7 @@ def test_the_scan_set_listing_shows_the_file_names(tmp_path, capsys, monkeypatch
     _assert_shown(err)
 
 
+@pytest.mark.unit
 def test_an_unknown_content_database_name_is_shown(capsys):
     from automated_security_helper.utils import content_databases
 
@@ -97,6 +99,7 @@ def test_an_unknown_content_database_name_is_shown(capsys):
     _assert_shown(err)
 
 
+@pytest.mark.unit
 def test_a_build_time_that_does_not_parse_is_refused_without_the_value(capsys):
     """--built is read from grype's own report of its database, and the workflows
     print this helper's output into a step log, where a line holding "::" or "##["
@@ -117,6 +120,7 @@ def test_a_build_time_that_does_not_parse_is_refused_without_the_value(capsys):
     _assert_shown(err)
 
 
+@pytest.mark.integration
 def test_a_streamed_tool_output_is_shown(capsys):
     from automated_security_helper.utils.subprocess_utils import (
         run_command_stream_output,
@@ -132,6 +136,7 @@ def test_a_streamed_tool_output_is_shown(capsys):
     _assert_shown(out)
 
 
+@pytest.mark.integration
 def test_container_mode_streams_the_inner_output_with_its_lines_checked(capsys):
     """Off a terminal, a line that starts with a command is broken; the inner ASH
     already showed the controls its own messages quote."""
@@ -153,6 +158,7 @@ def test_container_mode_streams_the_inner_output_with_its_lines_checked(capsys):
     assert not _COMMAND_LINE.search(err), err
 
 
+@pytest.mark.integration
 def test_container_mode_relays_text_the_inner_scan_already_showed_as_is(capsys):
     """Off a terminal, the containerized ASH has already shown the controls and
     broken the commands its text holds. The relay's line check finds nothing left
@@ -174,6 +180,7 @@ def test_container_mode_relays_text_the_inner_scan_already_showed_as_is(capsys):
     assert capsys.readouterr().out == shown
 
 
+@pytest.mark.integration
 def test_container_mode_streams_a_terminal_its_colors(monkeypatch):
     """On a terminal the inner ASH ran with -t and colored its output; that passes."""
     import io
@@ -200,6 +207,7 @@ def test_container_mode_streams_a_terminal_its_colors(monkeypatch):
 
 
 @pytest.mark.parametrize("errors", ["strict", "surrogateescape"])
+@pytest.mark.unit
 def test_a_summary_line_shows_the_path_it_quotes(monkeypatch, errors):
     """The scan's and the workspace's summaries print paths, project labels and
     errors through run_ash_scan's _print_text, which reads no markup in them and
@@ -222,6 +230,7 @@ def test_a_summary_line_shows_the_path_it_quotes(monkeypatch, errors):
     _assert_shown(written)
 
 
+@pytest.mark.unit
 def test_the_nix_debug_line_is_shown_and_not_a_literal_tag(capsys, monkeypatch):
     from automated_security_helper.interactions import run_ash_nix
 
@@ -252,6 +261,7 @@ def _assert_shown_once(text: str) -> None:
     assert "\\\\x" not in text, text
 
 
+@pytest.mark.unit
 def test_a_live_display_that_does_not_start_shows_the_traceback(capsys, monkeypatch):
     """The live display prints the error that stopped it, then its traceback."""
     from automated_security_helper.core import progress
@@ -312,6 +322,7 @@ def _handler(kind: str, tmp_path: Path) -> logging.Handler:
 
 
 @pytest.mark.parametrize("kind", ["jsonl", "tabular", "live"])
+@pytest.mark.unit
 def test_a_record_a_handler_cannot_write_is_reported_shown(
     kind, tmp_path, capsys, monkeypatch
 ):
@@ -336,6 +347,7 @@ def test_a_record_a_handler_cannot_write_is_reported_shown(
 
 
 @pytest.mark.parametrize("fails", ["argument", "markup"])
+@pytest.mark.unit
 def test_the_console_handler_reports_its_errors_shown(
     fails, tmp_path, capsys, monkeypatch
 ):
@@ -376,6 +388,7 @@ def test_the_console_handler_reports_its_errors_shown(
 
 
 @pytest.mark.parametrize("raw", ["parses", "raises"])
+@pytest.mark.unit
 def test_a_markup_error_the_raw_message_does_not_repeat_is_reported_as_raised(
     raw, tmp_path, capsys, monkeypatch
 ):
@@ -631,6 +644,7 @@ def _print_exemptions(source: str) -> list[str]:
     return [ast.unparse(call) for _, call, pragma in _builtin_prints(source) if pragma]
 
 
+@pytest.mark.unit
 def test_no_builtin_print_writes_text_as_given():
     offenders = []
     for source in _package_sources():
@@ -718,6 +732,7 @@ def test_no_builtin_print_writes_text_as_given():
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_print_guard_finds_each_way_to_print_text_as_given(source, line):
     offenders = _print_offenders(source, "fixture.py")
 
@@ -747,6 +762,7 @@ def test_the_print_guard_finds_each_way_to_print_text_as_given(source, line):
         pytest.param("print('a', end='', sep=' ')\n", id="constant-separators"),
     ],
 )
+@pytest.mark.unit
 def test_the_print_guard_passes_what_is_not_text_as_given(source):
     assert _print_offenders(source, "fixture.py") == []
 
@@ -760,6 +776,7 @@ EXEMPTED_CALLS = {
 }
 
 
+@pytest.mark.unit
 def test_the_exempted_prints_are_the_ones_listed():
     exempted = set()
     for source in _package_sources():
@@ -775,6 +792,7 @@ def test_the_exempted_prints_are_the_ones_listed():
     assert set(STANDALONE) == {"assets/install-pinned-tool.py"}
 
 
+@pytest.mark.unit
 def test_the_print_guard_refuses_a_tree_with_nothing_to_check(tmp_path):
     """Moved or pointed elsewhere, the guard would pass having read no module."""
     (tmp_path / "one.py").write_text("x = 1\n", encoding="utf-8")
@@ -887,6 +905,7 @@ def _stream_write_offenders(source: str, relative: str) -> list[str]:
     return offenders
 
 
+@pytest.mark.unit
 def test_no_stream_write_writes_text_as_given():
     """sys.stderr.write is print without its name: the standard-library-only
     helpers (the sandbox's exec wrapper, the workers) write their errors with it."""
@@ -924,6 +943,7 @@ def test_no_stream_write_writes_text_as_given():
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_stream_guard_finds_each_write_of_text_as_given(source, line):
     offenders = _stream_write_offenders(source, "fixture.py")
 
@@ -947,6 +967,7 @@ def test_the_stream_guard_finds_each_write_of_text_as_given(source, line):
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_stream_guard_passes_what_is_not_text_as_given(source):
     assert _stream_write_offenders(source, "fixture.py") == []
 
@@ -1075,6 +1096,7 @@ def _traceback_print_offenders(source: str, relative: str) -> list[str]:
     return offenders
 
 
+@pytest.mark.unit
 def test_no_traceback_is_printed_as_given():
     """A traceback quotes its error's text: print shown_not_obeyed(format_exc())."""
     offenders = []
@@ -1128,12 +1150,14 @@ def test_no_traceback_is_printed_as_given():
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_traceback_guard_finds_each_way_to_print_one(source, line):
     offenders = _traceback_print_offenders(source, "fixture.py")
 
     assert any(o.startswith(f"fixture.py:{line} ") for o in offenders), offenders
 
 
+@pytest.mark.unit
 def test_the_traceback_guard_passes_a_traceback_made_into_text():
     source = "import traceback\nprint(shown_not_obeyed(traceback.format_exc()))\n"
 
@@ -1240,6 +1264,7 @@ def _handler_offenders(source: str, relative: str) -> list[str]:
     return offenders
 
 
+@pytest.mark.unit
 def test_every_log_handler_reports_its_errors_shown():
     """logging.Handler.handleError prints the failed record's traceback as given."""
     offenders = []
@@ -1309,12 +1334,14 @@ def test_every_log_handler_reports_its_errors_shown():
         ),
     ],
 )
+@pytest.mark.unit
 def test_the_handler_guard_finds_a_handler_that_reports_as_given(source, line):
     offenders = _handler_offenders(source, "fixture.py")
 
     assert any(o.startswith(f"fixture.py:{line} ") for o in offenders), offenders
 
 
+@pytest.mark.unit
 def test_the_handler_guard_passes_a_handler_with_the_mix_in():
     source = "class H(ShownHandlerErrors, logging.Handler):\n    pass\n"
 

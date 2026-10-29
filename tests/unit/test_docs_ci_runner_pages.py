@@ -193,6 +193,7 @@ def _lacking(scans) -> list[tuple[str, int, list[str]]]:
     return [(page, line, missing) for page, line, _, missing in scans if missing]
 
 
+@pytest.mark.integration
 def test_every_gating_scan_on_the_ci_pages_keeps_the_gate_flags():
     scans = gating_scans(_corpus_pages())
     read = {(page, what) for page, _, what, _ in scans}
@@ -222,6 +223,7 @@ def test_every_gating_scan_on_the_ci_pages_keeps_the_gate_flags():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("flag", GATE_FLAGS)
 @pytest.mark.parametrize("rel", [GHA_PAGE, GITLAB_PAGE])
 def test_a_gating_scan_that_drops_a_gate_flag_is_reported(rel, flag):
@@ -237,6 +239,7 @@ def test_a_gating_scan_that_drops_a_gate_flag_is_reported(rel, flag):
     assert _lacking(scans) == [(rel, last, [flag])]
 
 
+@pytest.mark.unit
 def test_a_shard_scan_does_not_gate_until_it_drops_no_fail_on_findings():
     """The sharded example's shard scan, the page's last command with
     --no-fail-on-findings, is not held to the flags its merge job passes; without that
@@ -281,6 +284,7 @@ def _at(scans, fence: int) -> list[tuple[str, list[str]]]:
     return [(page, missing) for page, line, _, missing in scans if line == fence]
 
 
+@pytest.mark.unit
 def test_the_call_of_the_scan_workflow_is_read_with_the_flags_it_passes():
     """github-actions.md's call of run-ash-security-scan.yml: the workflow passes
     --fail-on-findings, since the call leaves fail-on-findings at its default, and
@@ -290,6 +294,7 @@ def test_the_call_of_the_scan_workflow_is_read_with_the_flags_it_passes():
     assert _at(gating_scans([_page(GHA_PAGE, text)]), fence) == [(GHA_PAGE, [])]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("flag", GATE_FLAGS[1:])
 def test_a_call_of_the_scan_workflow_that_drops_a_gate_flag_is_reported(flag):
     """A scratch copy whose ash-args line lacks one of its two flags is reported at that
@@ -302,6 +307,7 @@ def test_a_call_of_the_scan_workflow_that_drops_a_gate_flag_is_reported(flag):
     ]
 
 
+@pytest.mark.unit
 def test_a_call_of_the_scan_workflow_without_its_ash_args_line_is_reported():
     text = _text_with(GHA_PAGE, CALL_ARGS_LINE)
     fence = _fence_of(GHA_PAGE, text, CALL_ARGS_LINE)
@@ -311,6 +317,7 @@ def test_a_call_of_the_scan_workflow_without_its_ash_args_line_is_reported():
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("given", "read"),
     [
@@ -335,12 +342,14 @@ def test_the_fail_on_findings_input_is_read_as_the_workflow_passes_it(given, rea
     assert _at(gating_scans([_page(GHA_PAGE, changed)]), fence) == read
 
 
+@pytest.mark.unit
 def test_ash_merge_takes_the_findings_and_incomplete_scan_flags():
     """ash merge runs no scanner, so it has no content database to check, and takes two
     of the three."""
     assert _merge_flags() == ("--fail-on-findings", "--fail-on-incomplete-scanners")
 
 
+@pytest.mark.unit
 def test_the_sharded_example_is_read_with_its_shard_and_merge():
     text = _text_with(SHARDS_PAGE, MERGE_LINE)
     fence = _fence_of(SHARDS_PAGE, text, MERGE_LINE)
@@ -353,6 +362,7 @@ def test_the_sharded_example_is_read_with_its_shard_and_merge():
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "flag", ["--fail-on-findings", "--fail-on-incomplete-scanners"]
 )
@@ -367,6 +377,7 @@ def test_a_merge_that_drops_a_gate_flag_is_reported(flag):
     ]
 
 
+@pytest.mark.unit
 def test_a_shard_that_drops_no_allow_stale_content_db_is_reported():
     """ash merge cannot pass --no-allow-stale-content-db, so the shards that read the
     content databases have to."""

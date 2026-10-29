@@ -21,6 +21,8 @@ from typing import Any, Dict, Iterator, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 
 

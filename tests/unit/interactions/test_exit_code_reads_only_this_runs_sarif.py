@@ -20,6 +20,8 @@ import json
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -33,6 +35,8 @@ from automated_security_helper.interactions.run_ash_scan import (
     _compute_exit_code,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 #: A SARIF report with no findings: an earlier run's, of a clean tree.
 CLEAN_SARIF = {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "ASH"}}}]}

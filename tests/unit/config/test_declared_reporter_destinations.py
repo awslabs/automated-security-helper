@@ -249,6 +249,7 @@ def _ignoring(warnings: List[str], key: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_an_in_tree_config_does_not_choose_a_declared_destination(tmp_path, site):
     _write(
         tmp_path / "repo" / ".ash" / ".ash.yaml",
@@ -263,6 +264,7 @@ def test_an_in_tree_config_does_not_choose_a_declared_destination(tmp_path, site
     assert len(_ignoring(result["warnings"], KEY)) == 1, result["warnings"]
 
 
+@pytest.mark.integration
 def test_the_warning_is_the_one_a_built_in_reporter_gets(tmp_path, site):
     """Same values and the same message as config/reporter_trust.py gives for S3."""
     s3_key = "reporters.s3.options.bucket_name"
@@ -284,6 +286,7 @@ def test_the_warning_is_the_one_a_built_in_reporter_gets(tmp_path, site):
     assert result["sent"]["endpoint"] == DEFAULT_ENDPOINT
 
 
+@pytest.mark.integration
 def test_a_project_config_replacing_the_operators_keeps_the_operators_value(
     tmp_path, site
 ):
@@ -308,6 +311,7 @@ def test_a_project_config_replacing_the_operators_keeps_the_operators_value(
     assert len(_ignoring(result["warnings"], KEY)) == 1, result["warnings"]
 
 
+@pytest.mark.integration
 def test_a_project_config_without_the_section_keeps_the_operators_value(tmp_path, site):
     """The project config replaces the operator's, so leaving the section out
     would send to the default endpoint rather than the operator's."""
@@ -330,6 +334,7 @@ def test_a_project_config_without_the_section_keeps_the_operators_value(tmp_path
     assert not _ignoring(result["warnings"], KEY), result["warnings"]
 
 
+@pytest.mark.integration
 def test_a_base_the_tree_extends_does_not_choose_it_either(tmp_path, site):
     _write(
         tmp_path / "repo" / "shared" / "base.yaml",
@@ -345,6 +350,7 @@ def test_a_base_the_tree_extends_does_not_choose_it_either(tmp_path, site):
     assert result["sent"]["endpoint"] == DEFAULT_ENDPOINT, result
 
 
+@pytest.mark.integration
 def test_an_in_tree_config_that_loads_the_plugin_itself_does_not_choose_it(
     tmp_path, site
 ):
@@ -359,6 +365,7 @@ def test_an_in_tree_config_that_loads_the_plugin_itself_does_not_choose_it(
     assert result["sent"]["endpoint"] == DEFAULT_ENDPOINT, result
 
 
+@pytest.mark.integration
 def test_a_project_config_does_not_turn_on_a_reporter_the_operator_turned_off(
     tmp_path, site
 ):
@@ -385,6 +392,7 @@ def test_a_project_config_does_not_turn_on_a_reporter_the_operator_turned_off(
     assert len(_ignoring(result["warnings"], enabled_key)) == 1, result["warnings"]
 
 
+@pytest.mark.integration
 def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_off(
     tmp_path, site
 ):
@@ -411,6 +419,7 @@ def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_
     assert not _ignoring(result["warnings"], enabled_key), result["warnings"]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("on", [False, True], ids=["operator-off", "operator-on"])
 def test_a_null_section_in_a_project_config_reads_as_an_empty_one(tmp_path, site, on):
     """Left null, the section would build the reporter from its defaults: on, and
@@ -445,6 +454,7 @@ def test_a_null_section_in_a_project_config_reads_as_an_empty_one(tmp_path, site
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_config_overrides_set_it(tmp_path, site):
     _write(
         tmp_path / "repo" / ".ash" / ".ash.yaml",
@@ -457,6 +467,7 @@ def test_config_overrides_set_it(tmp_path, site):
     assert not _ignoring(result["warnings"], KEY), result["warnings"]
 
 
+@pytest.mark.integration
 def test_an_operator_config_outside_the_tree_sets_it(tmp_path, site):
     _write(
         tmp_path / "repo" / ".ash" / ".ash.yaml",
@@ -497,6 +508,7 @@ def mcp_server(tmp_path: Path) -> Dict[str, Any]:
     return {"root": root, "target": target, "env": env}
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("override", [False, True])
 def test_an_mcp_clients_upload_does_not_choose_it(tmp_path, site, mcp_server, override):
     """The upload loads the installed plugin itself, as a client's config may.
@@ -527,6 +539,7 @@ def test_an_mcp_clients_upload_does_not_choose_it(tmp_path, site, mcp_server, ov
     assert len(_ignoring(result["warnings"], KEY)) == 1, result["warnings"]
 
 
+@pytest.mark.integration
 def test_a_delivered_trees_own_config_does_not_choose_it(tmp_path, site, mcp_server):
     source = mcp_server["root"] / "session-a" / "source"
     _write(
@@ -546,6 +559,7 @@ def test_a_delivered_trees_own_config_does_not_choose_it(tmp_path, site, mcp_ser
     assert result["sent"]["endpoint"] == OPERATOR_ENDPOINT, result
 
 
+@pytest.mark.unit
 def test_an_operator_can_have_such_a_file_refused_with_denied_paths(tmp_path):
     """As the reporter guide says: the profile lists the option in denied_paths."""
     from automated_security_helper.config.ash_config import AshConfig
@@ -583,6 +597,7 @@ def test_an_operator_can_have_such_a_file_refused_with_denied_paths(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_ash_report_does_not_take_it_from_an_in_tree_config(tmp_path, site):
     repo = tmp_path / "repo"
     config = _write(
@@ -613,6 +628,7 @@ def test_ash_report_does_not_take_it_from_an_in_tree_config(tmp_path, site):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_the_built_in_reporters_are_confined_once_and_unchanged(tmp_path, site):
     _write(
         tmp_path / "repo" / ".ash" / ".ash.yaml",
@@ -643,6 +659,7 @@ def test_the_built_in_reporters_are_confined_once_and_unchanged(tmp_path, site):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_reporter_declares_no_destination_options_by_default():
     assert ReporterPluginBase.destination_options == ()
 
@@ -683,6 +700,7 @@ def ash_log():
         ASH_LOGGER.setLevel(previous)
 
 
+@pytest.mark.unit
 def test_an_aliased_option_is_covered_under_its_alias(tmp_path, ash_log):
     """The config writes an aliased field under its alias, so that is confined too."""
     from automated_security_helper.config.reporter_trust import (
@@ -714,6 +732,7 @@ def test_an_aliased_option_is_covered_under_its_alias(tmp_path, ash_log):
     assert "reporters.aliased-reporter.options.region" in warning
 
 
+@pytest.mark.unit
 def test_nothing_is_confined_for_a_config_with_no_file_in_the_tree(tmp_path, ash_log):
     from automated_security_helper.config.reporter_trust import (
         confine_declared_reporter_destinations,
@@ -761,6 +780,7 @@ def _enabled(config) -> Any:
     )
 
 
+@pytest.mark.unit
 def test_a_declared_reporters_enabled_comes_from_the_trusted_base(tmp_path, ash_log):
     from automated_security_helper.config.reporter_trust import (
         confine_declared_reporter_destinations,
@@ -777,6 +797,7 @@ def test_a_declared_reporters_enabled_comes_from_the_trusted_base(tmp_path, ash_
     assert "reporters.aliased-reporter.enabled" in warning
 
 
+@pytest.mark.unit
 def test_leaving_a_declared_reporter_out_keeps_the_operators_off(tmp_path, ash_log):
     """The project's config replaces the operator's, so leaving the section out
     would turn the reporter back on by its default."""
@@ -792,6 +813,7 @@ def test_leaving_a_declared_reporter_out_keeps_the_operators_off(tmp_path, ash_l
     assert not ash_log
 
 
+@pytest.mark.unit
 def test_a_tree_cannot_turn_a_declared_reporter_off(tmp_path, ash_log):
     """Whether it runs is the operator's in both directions, as for the
     built-in AWS reporters: here the reporter's default, which is on."""
@@ -813,6 +835,7 @@ def test_a_tree_cannot_turn_a_declared_reporter_off(tmp_path, ash_log):
     assert "reporters.aliased-reporter.enabled" in warning
 
 
+@pytest.mark.unit
 def test_a_reporter_with_no_destination_keeps_its_enabled_from_the_tree(
     tmp_path, ash_log
 ):

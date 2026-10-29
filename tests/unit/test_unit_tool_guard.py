@@ -75,6 +75,7 @@ PASSED_BY_THE_CHECK = (
 )
 
 
+@pytest.mark.unit
 def test_every_tool_location_is_inside_the_tests_home():
     home = Path(os.environ["HOME"])
 
@@ -87,6 +88,7 @@ def test_every_tool_location_is_inside_the_tests_home():
     assert outside == {}, (home, outside)
 
 
+@pytest.mark.unit
 def test_the_tool_guard_is_installed():
     from tests.utils import tool_guard
 
@@ -109,6 +111,7 @@ def _normalized_roots(roots) -> set:
     }
 
 
+@pytest.mark.unit
 def test_the_guards_own_directories_are_the_runs_own_by_the_home_rule(
     _unit_tool_guard, tmp_path_factory
 ):
@@ -124,6 +127,7 @@ def test_the_guards_own_directories_are_the_runs_own_by_the_home_rule(
     assert set(_unit_tool_guard.guard._own_roots) == _normalized_roots(own)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform == "win32", reason="a POSIX executable")
 def test_a_host_tool_under_the_shared_temp_root_is_still_a_tool_start(
     _unit_tool_guard, tmp_path_factory
@@ -156,6 +160,7 @@ def test_a_host_tool_under_the_shared_temp_root_is_still_a_tool_start(
             shutil.rmtree(host)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform == "win32", reason="a POSIX executable")
 def test_a_temp_directory_in_the_developers_ash_is_not_the_tests_own(
     monkeypatch, tmp_path
@@ -244,6 +249,7 @@ def _probe_environment(tmp_path: Path) -> dict[str, str]:
     }
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform == "win32", reason="the stand-ins are sh scripts")
 def test_the_probe_child_reaches_no_real_tool_and_no_real_home(tmp_path):
     env = _probe_environment(tmp_path)
@@ -280,6 +286,7 @@ def test_the_probe_child_reaches_no_real_tool_and_no_real_home(tmp_path):
     assert outside == [], outside
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the probe's programs are sh scripts"
 )

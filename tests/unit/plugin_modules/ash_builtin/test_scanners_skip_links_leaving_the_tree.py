@@ -50,9 +50,12 @@ from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 
 PluginContext.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 def _tree(base: Path, files: dict[str, str], links: dict[str, str]) -> Path:

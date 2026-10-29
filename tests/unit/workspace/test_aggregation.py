@@ -40,6 +40,8 @@ from automated_security_helper.utils.output_dir_links import OutputDirLinkRefuse
 from automated_security_helper.workspace.execution import _coverage_fields
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
+pytestmark = pytest.mark.unit
+
 
 def incomplete_scanners_for_project(results):
     """Names of the incomplete scanners, read as a single scan reads them."""

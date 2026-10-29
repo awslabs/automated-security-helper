@@ -68,6 +68,8 @@ from automated_security_helper.utils.symbol_spans import (
 )
 from tests.utils.bare_install_names import find_bare_installs, normalize
 
+pytestmark = pytest.mark.unit
+
 
 def _require_symbols_extra() -> None:
     try:

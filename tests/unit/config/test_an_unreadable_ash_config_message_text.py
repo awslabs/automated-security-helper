@@ -24,6 +24,8 @@ from automated_security_helper.config.default_config import (
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 
 def _skip_unless_permission_bits_hold():
     if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):

@@ -17,9 +17,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 import typer.main
 
 from automated_security_helper.cli.main import app
+
+pytestmark = pytest.mark.unit
 
 HELPERS = Path(__file__).resolve().parents[2] / "utils" / "ash_helpers.ps1"
 

@@ -55,6 +55,8 @@ from automated_security_helper.workspace.reporting import (
     emit_workspace_reports,
 )
 
+pytestmark = pytest.mark.unit
+
 # --------------------------------------------------------------------------- #
 # Fixtures: a real two-project workspace, aggregated the way production does.
 # --------------------------------------------------------------------------- #

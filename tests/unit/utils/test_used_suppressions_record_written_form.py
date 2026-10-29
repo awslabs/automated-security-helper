@@ -22,6 +22,8 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+pytestmark = pytest.mark.unit
+
 VALUE = "ENVCANARYG9/*.py"
 WRITTEN = "${ASH_G9_GLOB}"
 

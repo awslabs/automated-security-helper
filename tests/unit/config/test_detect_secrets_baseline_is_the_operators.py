@@ -26,6 +26,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 #: A plugin name only the host baseline lists, so its presence proves a read.
 MARKER = "HostBaselineMarkerDetector"
 

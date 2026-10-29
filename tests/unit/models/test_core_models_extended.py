@@ -7,6 +7,8 @@ from automated_security_helper.models.core import (
     AshSuppression,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_tool_extra_arg_model():
     """Test the ToolExtraArg model."""

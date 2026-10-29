@@ -26,6 +26,8 @@ from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 from tests.snapshot.conftest import pinned_uv_tool_version
 
+pytestmark = pytest.mark.unit
+
 # Captured at import, before any fixture patches the class.
 _REAL_GET_TOOL_VERSION = UVToolRunner.get_tool_version
 

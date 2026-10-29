@@ -28,6 +28,8 @@ from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.plugin_context import PluginContext
 
+pytestmark = pytest.mark.unit
+
 AshAggregatedResults.model_rebuild()
 
 

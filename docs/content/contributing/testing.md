@@ -48,13 +48,16 @@ when no test file differs. Its functions can also be imported, for example
 
 ## Measure coverage
 
-CI's unit-test job splits each operating system and Python version into eight shards.
-A shard runs every eighth test file and measures coverage of `automated_security_helper/`
-without a threshold. The `unit-coverage` job then combines the eight shards of each
-operating system family at Python 3.12 and fails when total coverage is under 80%. The
-unit-test step passes the options itself (`.github/actions/run-unit-tests/action.yml`);
-`.coveragerc` says what to measure and where to write the reports, and sets no
-threshold. To run the whole suite with the same options and the threshold:
+CI runs the suite by tier, selected by marker. The unit-test job runs `-m unit` once per
+operating system and Python version, unsharded, and measures coverage of
+`automated_security_helper/` without a threshold. The `unit-coverage` job then combines
+the unit tier's coverage data of each operating system family at Python 3.12 and fails
+when total coverage is under 80%. The integration-test jobs run `-m integration` in
+four shards per operating system and Python version, and the e2e-test jobs run `-m e2e`
+once per runner on Python 3.12; neither measures coverage. The test step passes the
+options itself (`.github/actions/run-unit-tests/action.yml`); `.coveragerc` says what to
+measure and where to write the reports, and sets no threshold. To run the whole suite
+with the same options and the threshold:
 
 <!-- doctest: illustrative reason="runs the full test suite in a checkout of this repository" -->
 ```bash
@@ -210,9 +213,12 @@ only the commits that touched the file. Then push with `git push --force-with-le
 CI never updates snapshots: `tests/snapshot/conftest.py` refuses `pytest --snapshot-update`
 when `CI` or `GITHUB_ACTIONS` is exactly `true`, and `tests/snapshot/test_snapshot_policy.py`
 fails if any workflow, action, script, or pytest configuration passes it. A missing
-snapshot fails, and so does a snapshot that no test asserts any more. syrupy cannot see
-the snapshots of a test module you deleted or renamed, so
-`check-snapshot-trailers.py --orphans` checks that every file under a
+snapshot fails, and so does a snapshot that no test asserts any more in a whole-suite run,
+which is syrupy's default and what a local `pytest` does. CI's tier runs and integration
+shards pass `--snapshot-warn-unused`, because each sees only part of the suite, so there
+an unused snapshot is reported as a warning in the run's snapshot summary and does not
+fail the leg. syrupy cannot see the snapshots of a test module you deleted or renamed,
+so `check-snapshot-trailers.py --orphans`, which still fails CI, checks that every file under a
 `__snapshots__/` directory belongs to a test module next to it, and that no
 `__snapshots__/` directory is empty. When you rename a module, move its snapshots; when
 you delete one, delete its snapshots, with a trailer either way. The orphan check reads

@@ -27,6 +27,8 @@ import pytest
 
 from tests.utils.archive_builders import TEBIBYTE, tar_bytes, zip_bytes
 
+pytestmark = pytest.mark.integration
+
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 

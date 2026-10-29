@@ -18,6 +18,8 @@ from tests.utils.throwaway_runner import (
     passwd_home_write_refusal,
 )
 
+pytestmark = pytest.mark.unit
+
 JOB = {"GITHUB_ACTIONS": "true", OPT_IN: "1"}
 HOSTED = {**JOB, "RUNNER_ENVIRONMENT": "github-hosted"}
 

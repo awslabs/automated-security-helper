@@ -130,6 +130,7 @@ def _older_than_the_bound():
 
 
 @pytest.mark.parametrize("identity", ["another-host", "no-identity"])
+@pytest.mark.integration
 def test_a_copy_written_elsewhere_survives_a_pid_that_is_dead_here(
     tmp_path, gone_pid, identity
 ):
@@ -142,6 +143,7 @@ def test_a_copy_written_elsewhere_survives_a_pid_that_is_dead_here(
     assert copy.exists(), "a copy written elsewhere was swept on a pid read here"
 
 
+@pytest.mark.integration
 def test_a_copy_written_elsewhere_survives_a_pid_that_is_live_here(tmp_path, live_pid):
     """A colliding live pid is no reason to remove it either: the pid is not asked."""
     profile = _profile(tmp_path)
@@ -152,6 +154,7 @@ def test_a_copy_written_elsewhere_survives_a_pid_that_is_live_here(tmp_path, liv
     assert copy.exists()
 
 
+@pytest.mark.integration
 def test_a_copy_written_here_by_a_dead_writer_still_goes(tmp_path, gone_pid):
     """The must-not twin: the pid is asked about for this host's own identity."""
     profile = _profile(tmp_path)
@@ -162,6 +165,7 @@ def test_a_copy_written_here_by_a_dead_writer_still_goes(tmp_path, gone_pid):
     assert not copy.exists(), "a dead writer's leftover on this host survived"
 
 
+@pytest.mark.integration
 def test_a_copy_written_here_by_a_live_writer_stays(tmp_path, live_pid):
     profile = _profile(tmp_path)
     copy = _copy(profile, live_pid, _here_token())
@@ -172,6 +176,7 @@ def test_a_copy_written_here_by_a_live_writer_stays(tmp_path, live_pid):
 
 
 @pytest.mark.parametrize("identity", ["another-host", "no-identity"])
+@pytest.mark.integration
 def test_a_copy_written_elsewhere_goes_once_it_is_older_than_the_bound(
     tmp_path, live_pid, identity
 ):
@@ -187,6 +192,7 @@ def test_a_copy_written_elsewhere_goes_once_it_is_older_than_the_bound(
     assert young.exists(), "a copy inside the age bound was swept"
 
 
+@pytest.mark.integration
 def test_an_unreadable_identity_here_matches_nothing(tmp_path, monkeypatch, gone_pid):
     """Fail safe: where this host cannot read its own identity, no copy is judged by
     pid, not even one that names this host's token. Both halves."""
@@ -203,6 +209,7 @@ def test_an_unreadable_identity_here_matches_nothing(tmp_path, monkeypatch, gone
     assert not old.exists()
 
 
+@pytest.mark.integration
 def test_the_identity_is_read_once_for_the_whole_sweep(tmp_path, gone_pid, monkeypatch):
     """The identity is a property of the sweeping process, read once per sweep.
 
@@ -240,6 +247,7 @@ def test_the_identity_is_read_once_for_the_whole_sweep(tmp_path, gone_pid, monke
     assert len(reads) == 1, len(reads)
 
 
+@pytest.mark.unit
 def test_the_writer_records_this_hosts_identity_in_its_names(tmp_path):
     from automated_security_helper.config.config_sources import scan_copy_writer_host
 
@@ -269,6 +277,7 @@ def test_the_writer_records_this_hosts_identity_in_its_names(tmp_path):
     "tail",
     ["-h", "-hABCDEF0123456789", "-h0123456789abcde", "-h0123456789abcdef0", "-hxyz"],
 )
+@pytest.mark.unit
 def test_a_malformed_identity_segment_is_no_scan_copys_name(tail):
     from automated_security_helper.config.config_sources import scan_copy_writer_host
 

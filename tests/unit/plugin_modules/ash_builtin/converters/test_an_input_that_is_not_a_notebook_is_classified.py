@@ -47,6 +47,8 @@ from tests.unit.plugin_modules.ash_builtin.converters import (
     test_notebook_conversion_launches_one_tool as launches,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The one-notebook tree, its converter, and a stand-in for every launch.
 world = launches.world
 

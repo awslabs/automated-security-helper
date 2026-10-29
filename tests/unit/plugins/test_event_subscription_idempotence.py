@@ -27,11 +27,15 @@ from __future__ import annotations
 import threading
 from typing import Callable, List
 
+import pytest
+
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.plugins.plugin_manager import (
     AshPluginLibrary,
     AshPluginManager,
 )
+
+pytestmark = pytest.mark.unit
 
 EVENT = AshEventType.SCAN_COMPLETE
 

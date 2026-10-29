@@ -10,7 +10,11 @@ the run's remaining lines would lose their home. The scope stays open and the
 mismatch is ignored; only the last of the real holders closes it.
 """
 
+import pytest
+
 from automated_security_helper.utils import log as ash_log
+
+pytestmark = pytest.mark.unit
 
 
 def test_an_unheld_release_leaves_a_live_scope_open():

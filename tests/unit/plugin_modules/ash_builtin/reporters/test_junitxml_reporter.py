@@ -9,6 +9,7 @@ suppressed findings handling, and XML output validity.
 
 import xml.etree.ElementTree as ET  # nosec B405
 
+import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
@@ -25,6 +26,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

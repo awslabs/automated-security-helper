@@ -20,6 +20,8 @@ sends nothing.
 
 from __future__ import annotations
 
+import pytest
+
 from tests.unit.cli.off_host_plugin_support import (
     DEFAULT_ENDPOINT,
     FILE_ENDPOINT,
@@ -27,6 +29,8 @@ from tests.unit.cli.off_host_plugin_support import (
     REPORTER,
     run_report,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def test_a_config_file_cannot_enable_it_or_supply_its_options(tmp_path, plugin_site):

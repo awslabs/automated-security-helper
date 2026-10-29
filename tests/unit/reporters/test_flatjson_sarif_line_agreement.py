@@ -52,6 +52,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 
+pytestmark = pytest.mark.unit
+
 # (rule_id, region start/end, contextRegion start/end) as emitted by
 # `bandit -f sarif`. See the module docstring for how these were obtained.
 BANDIT_SHAPES = [

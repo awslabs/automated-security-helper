@@ -29,6 +29,8 @@ from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config import resolve_config
 
+pytestmark = pytest.mark.unit
+
 CANARY = "outside-file-canary-7c41"
 
 

@@ -36,6 +36,8 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
+pytestmark = pytest.mark.unit
+
 #: One finding the exit code counts as actionable under the default threshold.
 _FINDING = {
     "ruleId": "RULE-1",

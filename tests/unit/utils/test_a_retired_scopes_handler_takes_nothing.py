@@ -13,8 +13,12 @@ record from the last resort.
 import logging
 import threading
 
+import pytest
+
 from automated_security_helper.utils import log as ash_log
 from automated_security_helper.utils.log import ASH_LOGGER, ash_handler
+
+pytestmark = pytest.mark.unit
 
 
 class _Recording(logging.Handler):

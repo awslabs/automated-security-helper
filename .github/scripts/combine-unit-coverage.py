@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Combine the coverage data of one set of unit-test shards and apply the threshold.
+"""Combine the coverage data of one set of unit-test artifacts and apply the threshold.
 
-Each unit-test shard runs a slice of the suite, so no single shard can meet the 80%
-total-coverage gate that the unsharded run applied. A shard measures coverage, writes
-``test-results/coverage.data`` and uploads it with the rest of its test results. This
-script runs in the ``unit-coverage`` job after they are downloaded, one subdirectory
-per artifact, and does what the unsharded "Run PyTest" step did in one process:
+The unit tier is not sharded, so a set is usually one artifact (``...-shard1of1``). The
+check below still guards a set that was sharded: no single shard of a split run can meet
+the 80% total-coverage gate. A run measures coverage, writes ``test-results/coverage.data``
+and uploads it with the rest of its test results. This script runs in the
+``unit-coverage`` job after they are downloaded, one subdirectory per artifact, and does
+what a single whole-suite "Run PyTest" step did in one process:
 
 1. Check that every shard of the set is there. The shard names carry their own count
    (``...-shard3of8``), so a shard that crashed before uploading, or a matrix entry that
    was deleted, shows as a missing index. Combining the shards that happen to exist would
-   report coverage for a subset and could pass. Each shard's data file must also read
-   back and hold measured files, because ``coverage combine`` skips a file it cannot read
-   with a warning.
+   report coverage for a subset and could pass. A single ``shard1of1`` artifact is a
+   complete set of one. Each data file must also read back and hold measured files,
+   because ``coverage combine`` skips a file it cannot read with a warning.
 2. ``coverage combine`` their data files.
 3. Print the Markdown table to the step summary when asked.
 4. ``coverage report --fail-under=<threshold>``, whose exit status is this script's.
 
 The set is named by the artifact name up to the shard suffix, which the run-unit-tests
-action builds from the operating system, the architecture and the Python version. This
-script rebuilds that name from ``--os``, ``--python-version`` and the runner's own
-``RUNNER_ARCH``, so it must run on the same kind of runner as the shards it combines.
+action builds from the operating system, the architecture, the Python version and the
+tier marker. This script rebuilds that name from ``--os``, ``--python-version``,
+``--marker`` and the runner's own ``RUNNER_ARCH``, so it must run on the same kind of
+runner as the runs it combines. Without ``--marker`` the name has no tier segment.
 That is also what makes path remapping unnecessary: coverage data records absolute source
 paths, and a runner of the same image has the same workspace path, so the combine finds
 every source file where the shard recorded it. A path that did not match would make
@@ -31,7 +33,7 @@ every source file where the shard recorded it. A path that did not match would m
 Usage::
 
     combine-unit-coverage.py --results-dir shard-results \\
-        --os ubuntu-latest --python-version 3.12 --fail-under 80 \\
+        --os ubuntu-latest --python-version 3.12 --marker unit --fail-under 80 \\
         --summary "$GITHUB_STEP_SUMMARY"
     combine-unit-coverage.py --self-test
 
@@ -56,14 +58,24 @@ _SHARD_SUFFIX = re.compile(r"-shard([1-9][0-9]*)of([1-9][0-9]*)$")
 ARCH_LABELS = {"X64": "x86_64", "ARM64": "arm64", "X86": "i686", "ARM": "armv7l"}
 
 
-def artifact_prefix(os_name: str, python_version: str, runner_arch: str) -> str:
-    """The artifact name a shard of this OS, Python and architecture uploads under."""
+def artifact_prefix(
+    os_name: str,
+    python_version: str,
+    runner_arch: str,
+    marker: str | None = None,
+) -> str:
+    """The artifact name a shard of this OS, Python, architecture and tier uploads under.
+
+    With ``marker`` the tier segment follows the Python version, as the run-unit-tests
+    action writes it; without one the name ends at the Python version.
+    """
     label = ARCH_LABELS.get(runner_arch)
     if label is None:
         raise ValueError(
             f"RUNNER_ARCH is {runner_arch!r}, which is not one of {sorted(ARCH_LABELS)}"
         )
-    return f"test-results-{os_name}-{label}-py{python_version}"
+    prefix = f"test-results-{os_name}-{label}-py{python_version}"
+    return prefix if marker is None else f"{prefix}-{marker}"
 
 
 def check_shards(names: list[str], prefix: str) -> list[str]:
@@ -150,6 +162,30 @@ def self_test() -> list[str]:
         pass
     else:
         failures.append("an unknown RUNNER_ARCH was accepted")
+
+    # The tier segment sits between the Python version and the shard suffix.
+    unit_prefix = artifact_prefix("ubuntu-latest", "3.12", "X64", "unit")
+    if unit_prefix != "test-results-ubuntu-latest-x86_64-py3.12-unit":
+        failures.append(f"artifact_prefix with a marker is {unit_prefix!r}")
+    tiered = [f"{unit_prefix}-shard{i}of3" for i in range(1, 4)]
+    tiered_cases = [
+        ("tiered complete set", tiered, False),
+        ("tiered last shard missing", tiered[:2], True),
+        # The unsharded unit run uploads one artifact, a complete set of one.
+        ("tiered single set", [f"{unit_prefix}-shard1of1"], False),
+        # An artifact from another tier is not one of this set's shards.
+        (
+            "another tier's artifact",
+            tiered + [f"{prefix}-integration-shard1of4"],
+            True,
+        ),
+    ]
+    for label, names, should_fail in tiered_cases:
+        problems = check_shards(names, unit_prefix)
+        if bool(problems) != should_fail:
+            failures.append(
+                f"{label}: expected {'problems' if should_fail else 'none'}, got {problems}"
+            )
     return failures
 
 
@@ -187,6 +223,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--python-version", help="the Python version of the shards")
     parser.add_argument(
+        "--marker",
+        default=None,
+        help="the tier marker in the artifact names, e.g. unit (default: none)",
+    )
+    parser.add_argument(
         "--fail-under", type=float, help="minimum total coverage, percent"
     )
     parser.add_argument(
@@ -219,7 +260,10 @@ def main(argv: list[str] | None = None) -> int:
         return 64
     try:
         prefix = artifact_prefix(
-            args.os, args.python_version, os.environ.get("RUNNER_ARCH", "")
+            args.os,
+            args.python_version,
+            os.environ.get("RUNNER_ARCH", ""),
+            args.marker,
         )
     except ValueError as error:
         print(f"combine-unit-coverage: {error}", file=sys.stderr)

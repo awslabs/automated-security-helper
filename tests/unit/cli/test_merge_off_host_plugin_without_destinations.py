@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from automated_security_helper.config.untrusted_source import MERGE_CONFIG_FILE
 from tests.unit.cli.off_host_plugin_support import (
     DEFAULT_ENDPOINT,
@@ -33,6 +35,8 @@ from tests.unit.cli.off_host_plugin_support import (
     reporter_texts,
     run_merge,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def test_a_config_file_cannot_enable_it_or_supply_its_options(tmp_path, plugin_site):

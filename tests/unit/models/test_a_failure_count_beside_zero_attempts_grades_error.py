@@ -24,6 +24,8 @@ from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _container(attempted, failed) -> ScanResultsContainer:
     container = ScanResultsContainer(scanner_name="probe")

@@ -69,12 +69,14 @@ def temp_inside_the_tree(tree, monkeypatch: pytest.MonkeyPatch) -> Path:
     return temp
 
 
+@pytest.mark.unit
 def test_a_scope_writes_nothing_until_asked(tree) -> None:
     with tool_config_scope(_context(tree.source, tree.inside)):
         assert active_tool_config_dir() is None
     assert active_tool_config_dir() is None
 
 
+@pytest.mark.unit
 def test_files_of_one_run_share_its_directory(tree) -> None:
     with tool_config_scope(_context(tree.source, tree.inside)):
         first = write_tool_config("a.yaml", "{}\n")
@@ -89,6 +91,7 @@ def test_files_of_one_run_share_its_directory(tree) -> None:
     assert not first.parent.exists()
 
 
+@pytest.mark.unit
 def test_the_same_name_twice_keeps_both_contents(tree) -> None:
     with tool_config_scope(_context(tree.source, tree.inside)):
         first = write_tool_config("x.yaml", "first\n")
@@ -99,12 +102,14 @@ def test_the_same_name_twice_keeps_both_contents(tree) -> None:
 
 
 @pytest.mark.parametrize("name", ["", ".", "..", "a/b.yaml", "../x.yaml"])
+@pytest.mark.unit
 def test_a_name_that_is_not_a_file_name_is_refused(tree, name: str) -> None:
     with tool_config_scope(_context(tree.source, tree.inside)):
         with pytest.raises(ValueError):
             write_tool_config(name, "{}\n")
 
 
+@pytest.mark.unit
 def test_a_temporary_directory_inside_the_tree_moves_it_to_the_output_directory(
     tree, temp_inside_the_tree: Path
 ) -> None:
@@ -116,6 +121,7 @@ def test_a_temporary_directory_inside_the_tree_moves_it_to_the_output_directory(
     assert list(temp_inside_the_tree.iterdir()) == []
 
 
+@pytest.mark.unit
 def test_with_nowhere_outside_the_tree_it_says_so(
     tree, temp_inside_the_tree: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -131,6 +137,7 @@ def test_with_nowhere_outside_the_tree_it_says_so(
     assert list(tree.inside.iterdir()) == []
 
 
+@pytest.mark.unit
 def test_outside_a_scope_each_file_gets_its_own_directory(tree) -> None:
     context = _context(tree.source, tree.inside)
     first = write_tool_config("x.yaml", "{}\n", context=context)
@@ -139,6 +146,7 @@ def test_outside_a_scope_each_file_gets_its_own_directory(tree) -> None:
     assert not in_scanned_tree(first, tree.source)
 
 
+@pytest.mark.integration
 def test_outside_a_scope_the_directory_is_removed_when_the_process_exits(
     tmp_path: Path,
 ) -> None:
@@ -188,6 +196,7 @@ def test_outside_a_scope_the_directory_is_removed_when_the_process_exits(
     assert list(temp.iterdir()) == []
 
 
+@pytest.mark.unit
 def test_a_wider_scanned_root_keeps_the_directory_out_of_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,6 +220,7 @@ def test_a_wider_scanned_root_keeps_the_directory_out_of_it(
     assert list(temp.iterdir()) == []
 
 
+@pytest.mark.unit
 def test_without_a_usable_temporary_directory_the_output_directory_is_used(
     tree, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -245,6 +255,7 @@ def _temp_dir(monkeypatch: pytest.MonkeyPatch, path: Path, mode: int) -> Path:
 
 
 @posix_only
+@pytest.mark.unit
 def test_a_temporary_directory_others_can_write_is_not_used(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -256,6 +267,7 @@ def test_a_temporary_directory_others_can_write_is_not_used(
 
 
 @posix_only
+@pytest.mark.unit
 def test_a_directory_above_it_that_others_can_write_is_not_used_either(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -268,6 +280,7 @@ def test_a_directory_above_it_that_others_can_write_is_not_used_either(
 
 
 @posix_only
+@pytest.mark.unit
 def test_a_sticky_temporary_directory_like_tmp_is_used(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -280,6 +293,7 @@ def test_a_sticky_temporary_directory_like_tmp_is_used(
 
 
 @posix_only
+@pytest.mark.unit
 def test_with_only_a_shared_temporary_directory_the_output_directory_is_used(
     tree,
     tmp_path: Path,
@@ -299,6 +313,7 @@ def test_with_only_a_shared_temporary_directory_the_output_directory_is_used(
 
 
 @posix_only
+@pytest.mark.unit
 def test_with_no_private_directory_nothing_is_written(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -317,6 +332,7 @@ def test_with_no_private_directory_nothing_is_written(
 
 @posix_only
 @not_root
+@pytest.mark.unit
 def test_a_directory_another_account_owns_is_not_used(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -365,6 +381,7 @@ def _policy(tree, results: Path, grant):
 
 
 @posix_only
+@pytest.mark.unit
 def test_the_grant_adds_the_directory_read_only_and_nothing_else(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -409,6 +426,7 @@ class _RecordingBackend:
 
 
 @posix_only
+@pytest.mark.unit
 def test_runs_in_two_threads_each_see_and_are_granted_only_their_own_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -477,6 +495,7 @@ def test_runs_in_two_threads_each_see_and_are_granted_only_their_own_directory(
 
 
 @posix_only
+@pytest.mark.unit
 def test_each_run_gets_a_new_directory_whose_name_is_not_known_in_advance(
     tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -502,6 +521,7 @@ def test_each_run_gets_a_new_directory_whose_name_is_not_known_in_advance(
     assert sorted(path.name for path in planted.iterdir()) == ["x.yaml"]
 
 
+@pytest.mark.unit
 def test_an_empty_directory_shares_the_runs_directory_and_goes_with_it(tree) -> None:
     with tool_config_scope(_context(tree.source, tree.inside)):
         config = write_tool_config("trivy-config.yaml", "")
@@ -515,6 +535,7 @@ def test_an_empty_directory_shares_the_runs_directory_and_goes_with_it(tree) -> 
     assert not modules.parent.exists()
 
 
+@pytest.mark.unit
 def test_the_same_directory_name_twice_gives_two_empty_directories(tree) -> None:
     with tool_config_scope(_context(tree.source, tree.inside)):
         first = make_tool_config_directory("trivy-modules")
@@ -525,6 +546,7 @@ def test_the_same_directory_name_twice_gives_two_empty_directories(tree) -> None
 
 
 @pytest.mark.parametrize("name", ["", ".", "..", "a/b", "../x"])
+@pytest.mark.unit
 def test_a_directory_name_that_is_not_a_name_is_refused(tree, name: str) -> None:
     with tool_config_scope(_context(tree.source, tree.inside)):
         with pytest.raises(ValueError):

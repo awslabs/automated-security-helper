@@ -25,6 +25,8 @@ from automated_security_helper.utils.workspace_paths import (
     to_workspace_pattern,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _down_suppression(pattern, prefix):
     """``to_project_pattern`` for a suppression.

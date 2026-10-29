@@ -29,6 +29,8 @@ from automated_security_helper.base import scanner_plugin
 from automated_security_helper.cli import dependencies
 from automated_security_helper.core.phases import scan_phase, scanner_executor
 
+pytestmark = pytest.mark.unit
+
 HOOK = "missing_dependency_reason"
 
 #: The one module that reads the hook: the reader and the base hook itself.

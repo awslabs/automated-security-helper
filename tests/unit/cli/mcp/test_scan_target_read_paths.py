@@ -24,6 +24,8 @@ import pytest
 
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_ctx():

@@ -33,6 +33,8 @@ from automated_security_helper.config.client_config_policy import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 CURRENT = sorted(RuntimeOverridesConfig().denied_paths)
 ALL_EXEMPTIONS = ccp.RESTRICT_ONLY_PATHS + (
     ccp.SUPPRESSION_PATHS if ccp.HONOR_DELIVERED_SUPPRESSIONS else ()

@@ -215,6 +215,7 @@ def _uses_aws(block: str) -> bool:
     return bool(re.search(r"^import boto3$", block, re.MULTILINE))
 
 
+@pytest.mark.unit
 def test_every_python_fence_is_a_sample():
     """A block is run however its fence is spelled, and only Python is.
 
@@ -235,6 +236,7 @@ def test_every_python_fence_is_a_sample():
     assert _python_blocks(page) == ["a = 1\n", "b = 2\n", "c = 3\n", "d = 4\n"]
 
 
+@pytest.mark.unit
 def test_the_page_has_its_samples():
     # The findings-list plugin, its test, the bucket sample and the environment
     # helper, in page order (write-a-reporter.md).
@@ -243,6 +245,7 @@ def test_the_page_has_its_samples():
     assert [i for i, block in enumerate(BLOCKS) if _uses_aws(block)] == [2]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("index", range(len(BLOCKS)), ids=lambda i: f"block-{i + 1}")
 def test_the_sample_runs(index, tmp_path):
     program = _program(index)

@@ -16,6 +16,10 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 SECRET = "/opt/qz4b/config"
 
 

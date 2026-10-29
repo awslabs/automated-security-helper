@@ -9,6 +9,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
     SemgrepScannerConfigOptions,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def test_semgrep_scanner(test_plugin_context):

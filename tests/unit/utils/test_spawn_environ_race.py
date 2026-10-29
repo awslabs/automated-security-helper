@@ -97,6 +97,7 @@ def _trivial_command() -> list:
         ),
     ],
 )
+@pytest.mark.integration
 def test_spawn_survives_concurrent_environ_mutation(spawn):
     """Spawns from the ASH helpers succeed while another thread churns the env.
 
@@ -160,6 +161,7 @@ def _assert_a_copy_of_the_environment(env) -> None:
     assert differing_names(env, os.environ) == []
 
 
+@pytest.mark.unit
 class TestSpawnHelpersPassExplicitEnv:
     """With ``env=None`` the helpers pass a copy of the environment, not None."""
 
@@ -205,6 +207,7 @@ class TestSpawnHelpersPassExplicitEnv:
         assert passed_through, "the explicit env was not passed through unchanged"
 
 
+@pytest.mark.unit
 class TestProcessEnvHelpers:
     _KEY = "ASH_TEST_PROCESS_ENV_HELPER"
 

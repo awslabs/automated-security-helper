@@ -48,6 +48,8 @@ from automated_security_helper.workspace.execution import (
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from tests.utils.env_assertions import environ_names, environ_value
 
+pytestmark = pytest.mark.unit
+
 
 def _plan(tmp_path: Path) -> WorkspacePlan:
     root = tmp_path / "workspace"

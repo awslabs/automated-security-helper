@@ -93,6 +93,7 @@ def _server(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_second_run_ash_scan_on_a_busy_directory(tmp_path, _server):
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.utils.subprocess_utils import run_command
@@ -144,6 +145,7 @@ async def test_a_second_run_ash_scan_on_a_busy_directory(tmp_path, _server):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_refused_rescan_right_after_a_cancel(tmp_path, _server, monkeypatch):
     """The stopping scan still puts the previous results back and marks them."""
     from automated_security_helper.utils import subprocess_utils
@@ -194,6 +196,7 @@ async def test_a_refused_rescan_right_after_a_cancel(tmp_path, _server, monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_refused_workspace_scan_leaves_the_running_projects_output(
     tmp_path, monkeypatch
 ):
@@ -242,6 +245,7 @@ async def test_a_refused_workspace_scan_leaves_the_running_projects_output(
     assert not holds_restored_results(project_output)
 
 
+@pytest.mark.unit
 def test_restore_takes_no_mark_argument():
     """Every restore leaves the marker: no caller restores without it."""
     import inspect

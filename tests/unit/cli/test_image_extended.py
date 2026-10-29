@@ -6,6 +6,8 @@ from unittest.mock import patch, MagicMock
 from automated_security_helper.cli.image import build_ash_image_cli_command
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_typer_context():

@@ -88,6 +88,8 @@ except ModuleNotFoundError:  # pragma: no cover - measured on the 3.10 legs
     # (TestTheFallbackParse).
     tomllib = None  # type: ignore[assignment]
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "sync_cdk_extra_fallback.py"
 REAL_PYPROJECT = REPO_ROOT / "pyproject.toml"

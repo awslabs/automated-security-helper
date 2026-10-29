@@ -24,6 +24,8 @@ from automated_security_helper.cli.inspect.inspect_findings_app import (
     FindingsExplorerApp,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Minified JavaScript, one token after another with no newline.
 _JS = "var a=function(b){return b+1};"
 

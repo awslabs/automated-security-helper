@@ -57,6 +57,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def reporter(tmp_path):

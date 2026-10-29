@@ -28,6 +28,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _profile_dir(tmp_path):
     config_dir = tmp_path / "session" / "config"

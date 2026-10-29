@@ -40,6 +40,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerTargetStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 AWS_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 AWS_NAMES = ("aws-security-hub", "bedrock-summary-reporter", "cloudwatch-logs", "s3")
 DISABLE_ALL = [f"reporters.{name}.enabled=false" for name in AWS_NAMES]

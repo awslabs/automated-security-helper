@@ -36,6 +36,8 @@ from automated_security_helper.cli.mcp.http_sessions import (
 )
 from automated_security_helper.cli.mcp.profile_registry import clear_session_state
 
+pytestmark = pytest.mark.unit
+
 LONG_AGO = 400 * 24 * 3600
 
 _REAL_END_SESSION = sessions.end_session

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
@@ -34,6 +35,8 @@ from automated_security_helper.config.sandbox_grants import (
     marked_files_repository_written,
     marked_repository_written,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_a_marked_config_counts_as_in_a_checkout(tmp_path):

@@ -31,7 +31,10 @@ from automated_security_helper.utils.scan_output_dirs import (
     output_dirs_to_exclude,
 )
 
-pytestmark = pytest.mark.usefixtures("no_checkout_above_tmp_path")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_checkout_above_tmp_path"),
+]
 
 
 def _workspace(tmp_path: Path) -> tuple[Path, Path, Path]:

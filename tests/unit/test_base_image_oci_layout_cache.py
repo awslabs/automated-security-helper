@@ -228,6 +228,7 @@ def _mutable_copy(layout: Path, tmp_path: Path) -> Path:
 # --------------------------------------------------------------------------- key
 
 
+@pytest.mark.unit
 class TestTheCacheKey:
     def test_it_is_tag_pin_and_arch_from_the_dockerfile(self):
         pin = next(
@@ -271,6 +272,7 @@ class TestTheCacheKey:
 # --------------------------------------------------------------------------- fetch
 
 
+@pytest.mark.unit
 class TestFetch:
     def test_it_writes_exactly_the_pinned_index_and_one_arch(self, layout, image):
         names = sorted(p.name for p in (layout / "blobs" / "sha256").iterdir())
@@ -349,6 +351,7 @@ def _flip_byte(path: Path) -> None:
     path.write_bytes(bytes(data))
 
 
+@pytest.mark.unit
 class TestVerify:
     def test_the_fetched_layout_verifies_and_names_the_arch_manifest(
         self, layout, image
@@ -441,6 +444,7 @@ class TestVerify:
 # --------------------------------------------------------------------------- docker-archive
 
 
+@pytest.mark.unit
 class TestDockerArchive:
     def test_it_holds_this_arch_only_tagged_under_the_from_reference(
         self, layout, image
@@ -623,6 +627,7 @@ _REQUIRES_BASH = pytest.mark.skipif(
 
 
 @_REQUIRES_BASH
+@pytest.mark.integration
 class TestTheHitStep:
     @pytest.fixture
     def writable(self, layout, tmp_path) -> Path:
@@ -735,6 +740,7 @@ class TestTheHitStep:
 # --------------------------------------------------------------------------- the wiring
 
 
+@pytest.mark.unit
 class TestTheActionWiring:
     @pytest.fixture
     def steps(self) -> dict:

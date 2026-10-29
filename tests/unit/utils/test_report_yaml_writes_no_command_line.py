@@ -20,6 +20,8 @@ import yaml
 
 from automated_security_helper.utils.report_yaml import report_yaml
 
+pytestmark = pytest.mark.unit
+
 #: One command of each form a runner reads.
 FORMS: Dict[str, str] = {
     "add-mask": "::add-mask::secret",

@@ -98,6 +98,7 @@ def _inner_argv(run_argv):
 SANDBOX_OFF = ["--sandbox", "off"]
 
 
+@pytest.mark.integration
 def test_the_mounted_paths_go_in_as_environment_variables(runner, tmp_path):
     run_argv = _run_argv(runner, tmp_path, "--scanners", "bandit")
 
@@ -106,6 +107,7 @@ def test_the_mounted_paths_go_in_as_environment_variables(runner, tmp_path):
     assert _inner_argv(run_argv) == ["ash", *SANDBOX_OFF, "--scanners", "bandit"]
 
 
+@pytest.mark.integration
 def test_a_subcommand_runs_on_its_own_arguments(runner, tmp_path):
     inner = _inner_argv(_run_argv(runner, tmp_path, "report", "--format", "text"))
 
@@ -115,6 +117,7 @@ def test_a_subcommand_runs_on_its_own_arguments(runner, tmp_path):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "args, expected",
     [
@@ -143,12 +146,14 @@ def test_format_reaches_ash(runner, tmp_path, args, expected):
     assert not any(arg.startswith("ASH_OUTPUT_FORMAT=") for arg in run_argv)
 
 
+@pytest.mark.integration
 def test_an_option_before_a_subcommand_is_left_where_it_was_typed(runner, tmp_path):
     inner = _inner_argv(_run_argv(runner, tmp_path, "--verbose", "report"))
 
     assert inner == ["ash", "--verbose", "report"]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "args, expected",
     [
@@ -196,6 +201,7 @@ def test_the_entrypoints_own_flags_go_only_where_ash_takes_them(
     assert _inner_argv(_run_argv(runner, tmp_path, *args)) == expected
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "args, expected",
     [
@@ -222,6 +228,7 @@ def test_the_subcommand_is_the_first_token_that_names_one(
     assert _inner_argv(_run_argv(runner, tmp_path, *args, cwd=tmp_path)) == expected
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "args, expected",
     [
@@ -264,6 +271,7 @@ def test_an_option_value_is_not_the_subcommand(runner, tmp_path, args, expected)
     assert _inner_argv(_run_argv(runner, tmp_path, *args)) == expected
 
 
+@pytest.mark.unit
 def test_the_options_that_take_a_value_are_the_roots():
     """The entrypoint's list of root options that take a value, checked against the
     real root command so a new option cannot be read as a subcommand's name."""
@@ -290,6 +298,7 @@ def test_the_options_that_take_a_value_are_the_roots():
     )
 
 
+@pytest.mark.unit
 def test_every_re_emitted_flag_is_one_the_subcommand_takes():
     """The entrypoint's table of which subcommands take --quiet and --color, checked
     against the real commands so it cannot drift from them."""

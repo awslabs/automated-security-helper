@@ -31,6 +31,10 @@ import ast
 from pathlib import Path
 from typing import List, Set
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = TESTS_ROOT.parent
 

@@ -32,6 +32,8 @@ from automated_security_helper.config.config_sources import (
 )
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 
 def _chain(tmp_path: Path):
     top = tmp_path / "top.yaml"

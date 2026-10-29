@@ -66,6 +66,7 @@ def _recorded(scanner, context, lines):
 
 
 @pytest.mark.parametrize("code", CODES)
+@pytest.mark.unit
 def test_text_without_values_hides_a_value_split_by_a_code(code):
     value = f"{HEAD}{TAIL}"
     shown = text_without_values(f"tool saw {HEAD}{code}{TAIL} here", [value])
@@ -73,6 +74,7 @@ def test_text_without_values_hides_a_value_split_by_a_code(code):
     assert HEAD not in shown and TAIL not in shown, repr(shown)
 
 
+@pytest.mark.unit
 def test_text_without_values_without_values_changes_nothing():
     """With nothing to redact there is nothing a code could split, so the
     text passes through as it is, codes included."""
@@ -81,6 +83,7 @@ def test_text_without_values_without_values_changes_nothing():
 
 
 @pytest.mark.parametrize("code", CODES)
+@pytest.mark.unit
 def test_an_errors_text_hides_a_value_split_by_a_code(code):
     value = f"{HEAD}{TAIL}"
     error = RuntimeError(f"tool saw {HEAD}{code}{TAIL} here")
@@ -92,6 +95,7 @@ def test_an_errors_text_hides_a_value_split_by_a_code(code):
 
 @pytest.mark.parametrize("code", CODES)
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.integration
 def test_the_record_of_a_real_child_hides_a_value_split_by_a_code(
     tmp_path, stream, code
 ):
@@ -112,6 +116,7 @@ def test_the_record_of_a_real_child_hides_a_value_split_by_a_code(
 
 
 @pytest.mark.parametrize("code", CODES)
+@pytest.mark.unit
 def test_a_value_that_itself_holds_a_code_is_hidden_in_its_stripped_spelling(code):
     """The shown layers strip every complete escape sequence from a tool's
     text before matching, so a value that itself holds such a code appears
@@ -125,6 +130,7 @@ def test_a_value_that_itself_holds_a_code_is_hidden_in_its_stripped_spelling(cod
 
 @pytest.mark.parametrize("code", CODES)
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.integration
 def test_the_record_hides_a_value_that_itself_holds_a_code(tmp_path, stream, code):
     value = f"{HEAD}{code}{TAIL}"
     context = _context(tmp_path, [value])
@@ -152,6 +158,7 @@ def _bootstrap_writing(text):
 
 
 @pytest.mark.parametrize("code", CODES)
+@pytest.mark.integration
 def test_the_cdk_nag_workers_reason_hides_a_value_split_by_a_code(
     tmp_path, monkeypatch, code
 ):

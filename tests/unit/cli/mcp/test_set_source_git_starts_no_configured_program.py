@@ -25,6 +25,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 
+pytestmark = pytest.mark.integration
+
 _SESSION = "session-hooks"
 
 

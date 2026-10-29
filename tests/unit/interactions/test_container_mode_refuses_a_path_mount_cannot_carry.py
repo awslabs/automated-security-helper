@@ -29,9 +29,12 @@ from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="these names are POSIX file names"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="these names are POSIX file names"
+    ),
+]
 
 REFUSED = "cannot be handed to the container runner"
 

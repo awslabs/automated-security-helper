@@ -21,6 +21,8 @@ from automated_security_helper.config import config_sources
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.resolve_config import lint_hint
 
+pytestmark = pytest.mark.unit
+
 #: A scan id as the writer spells one: str(uuid.uuid4()).
 _A_SCAN_ID = "0f0e0d0c-0b0a-4908-8706-050403020100"
 

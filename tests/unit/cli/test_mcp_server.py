@@ -23,6 +23,7 @@ if sys.version_info < (3, 11):
 
 from tests.utils.scan_task_stubs import closing_scan_task_start
 
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Fixtures

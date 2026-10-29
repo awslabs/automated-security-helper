@@ -300,6 +300,7 @@ def scanners(snapshot):
     return snapshot.entries
 
 
+@pytest.mark.integration
 class TestListScannersSchema:
     def test_returns_list(self, scanners):
         assert isinstance(scanners, list)
@@ -324,6 +325,7 @@ class TestListScannersSchema:
         assert not missing, f"Missing scanners: {missing}"
 
 
+@pytest.mark.integration
 class TestListScannersPerScanner:
     def _get_by_name(self, scanners: list, name: str) -> dict:
         matches = [e for e in scanners if e["name"] == name]
@@ -441,6 +443,7 @@ def injected(monkeypatch):
     return _install
 
 
+@pytest.mark.unit
 class TestDependenciesSatisfiedIsMeasured:
     def test_both_polarities_are_reported_from_one_call(self, injected):
         """The decisive test: two scanners, two different answers.
@@ -517,6 +520,7 @@ class TestDependenciesSatisfiedIsMeasured:
         assert entries["ok"]["dependencies_satisfied"] is True
 
 
+@pytest.mark.unit
 class TestVersionIsMeasured:
     def test_versions_are_reported_and_differ_per_scanner(self, injected):
         entries = injected(
@@ -563,6 +567,7 @@ class TestVersionIsMeasured:
         assert entries["late_version"]["version"] == "7.7.7"
 
 
+@pytest.mark.integration
 class TestTheSnapshotStartsOnlyStandIns:
     """Nothing the snapshot ran reached a tool on the host."""
 
@@ -674,6 +679,7 @@ def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]
     }
 
 
+@pytest.mark.integration
 class TestMeasuredAgainstTheStandIns:
     """Value assertions against the real scanner classes, not stubs.
 

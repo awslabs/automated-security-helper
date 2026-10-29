@@ -25,6 +25,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScannerConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 _VALUE = "tool-qz4b9secret"

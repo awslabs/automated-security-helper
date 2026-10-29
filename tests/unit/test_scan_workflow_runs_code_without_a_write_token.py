@@ -43,7 +43,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import pytest
+
 from tests.utils import github_actions as ga
+
+pytestmark = pytest.mark.unit
 
 SCAN_WORKFLOW = ga.WORKFLOWS_DIR / "run-ash-security-scan.yml"
 REPORTING_ACTIONS = (

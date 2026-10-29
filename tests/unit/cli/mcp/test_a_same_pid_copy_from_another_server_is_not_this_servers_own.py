@@ -26,6 +26,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Far past any age bound the sweep puts on a copy it did not write.
 A_MONTH = 30 * 24 * 3600
 

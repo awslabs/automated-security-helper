@@ -28,6 +28,8 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.utils.helpers import checkout_env
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
+pytestmark = pytest.mark.integration
+
 #: The checkout under test, which a child process is pointed at.
 _CHECKOUT = Path(automated_security_helper.__file__).resolve().parents[1]
 

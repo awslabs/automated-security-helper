@@ -38,6 +38,8 @@ from tests.snapshot.support.reporter_catalog import (
     snapshot_extension,
 )
 
+pytestmark = pytest.mark.unit
+
 ACTIONLINT_FIXTURES = REPO_ROOT / "tests" / "test_data" / "scanners" / "actionlint"
 MANIFEST_DIR = ACTIONLINT_FIXTURES / "snapshot_outputs"
 SOURCE_DIR = ACTIONLINT_FIXTURES / "repo"

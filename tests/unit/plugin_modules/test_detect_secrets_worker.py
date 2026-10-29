@@ -81,6 +81,7 @@ def _run_worker(tmp_path, root, paths, settings):
     return json.loads(output.read_text(encoding="utf-8"))
 
 
+@pytest.mark.integration
 def test_worker_reports_the_collection_the_in_process_scan_builds(tmp_path):
     src = tmp_path / "src"
     (src / "a").mkdir(parents=True)
@@ -128,6 +129,7 @@ NOT_LINE_BREAKS = {
 LINE_BREAKS = {"carriage-return": "\r", "crlf": "\r\n"}
 
 
+@pytest.mark.integration
 def test_a_separator_above_the_key_keeps_its_line_and_column(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
@@ -154,6 +156,7 @@ def test_a_separator_above_the_key_keeps_its_line_and_column(tmp_path):
     }
 
 
+@pytest.mark.unit
 def test_a_file_is_read_only_as_far_as_the_line_asked_for(tmp_path):
     source = tmp_path / "long.py"
     source.write_text(
@@ -186,6 +189,7 @@ def _scanner(tmp_path):
     return DetectSecretsScanner(context=ctx, config=DetectSecretsScannerConfig())
 
 
+@pytest.mark.unit
 def test_no_network_unless_secrets_are_verified_online(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     scanner = _scanner(tmp_path)
@@ -251,6 +255,7 @@ def _verifying_worker_run(tmp_path, verify):
 
 
 @pytest.mark.parametrize("verify", [False, None], ids=["verify-false", "no-verify-key"])
+@pytest.mark.integration
 def test_the_worker_sends_no_request_unless_the_scan_may_verify(
     tmp_path, monkeypatch, verify
 ):
@@ -269,6 +274,7 @@ def test_the_worker_sends_no_request_unless_the_scan_may_verify(
     assert scanned and scanned[0][1], "the key was not reported"
 
 
+@pytest.mark.integration
 def test_control_the_worker_verifies_when_the_scan_may(tmp_path, monkeypatch):
     """Control: with verify true the same run asks the issuer (the refusing local
     proxy answers), which shows the run above would have sent a request."""
@@ -363,6 +369,7 @@ def _spawn_pool_run(tmp_path, monkeypatch, refuse_env, verify=False):
     return proxy, json.loads(output.read_text(encoding="utf-8"))
 
 
+@pytest.mark.integration
 def test_spawned_pool_processes_send_no_request_either(tmp_path, monkeypatch):
     """The scanner starts the worker with ASH_DETECT_SECRETS_REFUSE_HTTP=1; pool
     processes started with 'spawn' import the worker again and refuse too."""
@@ -372,6 +379,7 @@ def test_spawned_pool_processes_send_no_request_either(tmp_path, monkeypatch):
     assert len(scanned) == 3, scanned
 
 
+@pytest.mark.integration
 def test_spawned_pool_processes_refuse_without_a_variable_from_the_caller(
     tmp_path, monkeypatch
 ):
@@ -384,6 +392,7 @@ def test_spawned_pool_processes_refuse_without_a_variable_from_the_caller(
     assert len(scanned) == 3, scanned
 
 
+@pytest.mark.integration
 def test_control_spawned_pool_processes_verify_when_the_scan_may(tmp_path, monkeypatch):
     """Control: with verify true and no variable the spawned pool processes ask the
     issuer, which shows the two runs above would have sent a request."""
@@ -398,6 +407,7 @@ ISSUER_HOST = "sts.amazonaws.com"
 
 
 @pytest.mark.parametrize("verify", [False, True])
+@pytest.mark.unit
 def test_the_scanner_starts_the_worker_with_the_refusal_unless_it_may_verify(
     tmp_path, monkeypatch, verify
 ):
@@ -430,6 +440,7 @@ def test_the_scanner_starts_the_worker_with_the_refusal_unless_it_may_verify(
     assert (env.get(REFUSE_HTTP_ENV) == "1") is (not verify), env.get(REFUSE_HTTP_ENV)
 
 
+@pytest.mark.unit
 def test_a_verifying_worker_does_not_inherit_the_refusal_from_the_parent(
     tmp_path, monkeypatch
 ):
@@ -477,6 +488,7 @@ def _in_process_run_request(tmp_path, verify):
 
 
 @pytest.mark.parametrize("preset", [None, "0", "1"], ids=["absent", "was-0", "was-1"])
+@pytest.mark.integration
 def test_run_leaves_the_refusal_variable_as_it_found_it(tmp_path, monkeypatch, preset):
     """run() sets the variable for the pool it starts and puts it back afterwards."""
     from automated_security_helper.utils import detect_secrets_worker
@@ -496,6 +508,7 @@ def test_run_leaves_the_refusal_variable_as_it_found_it(tmp_path, monkeypatch, p
     assert os.environ.get(REFUSE_HTTP_ENV) == preset
 
 
+@pytest.mark.unit
 def test_run_sets_the_refusal_variable_while_the_pool_runs(tmp_path, monkeypatch):
     """Control for the cell above: during the scan the variable is "1", so the
     restore is not satisfied by run() never setting it."""
@@ -519,6 +532,7 @@ def test_run_sets_the_refusal_variable_while_the_pool_runs(tmp_path, monkeypatch
     assert REFUSE_HTTP_ENV not in os.environ
 
 
+@pytest.mark.integration
 def test_importing_the_worker_module_in_ash_refuses_nothing(tmp_path):
     """The variable acts only in the worker's own processes: ASH imports the module
     for its constant, and must keep its own HTTP working whatever its environment."""

@@ -28,6 +28,8 @@ import yaml
 
 from tests.utils.helpers import checkout_env
 
+pytestmark = pytest.mark.integration
+
 FIXTURE = """\
 import subprocess
 

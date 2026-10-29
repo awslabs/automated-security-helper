@@ -32,6 +32,8 @@ from automated_security_helper.cli import mcp_server
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.sessions import reset_default_registry_for_tests
 
+pytestmark = pytest.mark.unit
+
 URL = "https://git.example.invalid/team/repo.git"
 SESSION = "failed-delivery-session"
 #: What ``_git_executable`` answers, so the delivery needs no git on this machine.

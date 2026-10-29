@@ -30,9 +30,12 @@ from automated_security_helper.utils.sandbox import backends as backends_module
 from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox.policy import build_scanner_policy
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 def _python(path: Path) -> Path:

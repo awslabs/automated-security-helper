@@ -72,6 +72,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def _model_with_target_statuses(
     source_status: str,

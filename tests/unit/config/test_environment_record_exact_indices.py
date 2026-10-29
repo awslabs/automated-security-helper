@@ -12,11 +12,15 @@ same text is shown as it is.
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.config.environment_record import (
     EnvironmentReference,
     environment_marker,
     record_environment_references,
 )
+
+pytestmark = pytest.mark.unit
 
 VALUE = "ash-canary-7f3e-0123456789"
 

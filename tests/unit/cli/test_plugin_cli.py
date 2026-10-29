@@ -3,11 +3,13 @@
 from unittest.mock import patch
 
 import click
+import pytest
 import typer
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.plugin import plugin_app
 
+pytestmark = pytest.mark.unit
 
 runner = CliRunner()
 

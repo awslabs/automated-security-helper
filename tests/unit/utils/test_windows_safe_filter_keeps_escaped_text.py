@@ -34,6 +34,8 @@ from automated_security_helper.utils.log import (
     escape_markup,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _filtered(message: str) -> logging.LogRecord:
     windows_filter = WindowsSafeFilter()
