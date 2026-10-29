@@ -137,6 +137,7 @@ import os
 import re
 import shutil
 import subprocess  # nosec B404 -- the gate runs ASH as a child process with cwd != source_dir
+import signal
 import sys
 import tempfile
 from contextlib import suppress
@@ -648,6 +649,44 @@ def check_some_scanner_ran(states: Sequence[ScannerState]) -> List[str]:
     ]
 
 
+def check_gate_scanners_ran(states: Sequence[ScannerState]) -> List[str]:
+    """Every scanner this gate selected must have run: present, not MISSING,
+    SKIPPED or excluded.
+
+    The gate names two scanners and asserts findings from both. Every other
+    check here skips a producer that did not run, which is right for those
+    checks, and ``check_exit_code`` catches a MISSING selected scanner only
+    through the product's exit code, which does not move for SKIPPED. So a
+    selected scanner that was SKIPPED (nothing to scan), excluded by an
+    environment variable, or absent from ``scanner_results`` altogether used to
+    halve the gate's coverage with no signal: the remaining scanner was
+    asserted and the gate printed PASS. This is the direct statement that both
+    ran.
+    """
+    by_name = {state.name: state for state in states}
+    violations: List[str] = []
+    for scanner in GATE_SCANNERS:
+        state = by_name.get(scanner)
+        if state is None:
+            violations.append(
+                f"scanner '{scanner}' is one of the two this gate selects "
+                f"(--scanners) but is absent from scanner_results entirely, so "
+                f"nothing it would have found could be asserted. Present: "
+                f"{sorted(by_name) or 'none'}"
+            )
+            continue
+        if not state.ran:
+            how = "excluded" if state.excluded else state.status
+            violations.append(
+                f"scanner '{scanner}' is one of the two this gate selects but "
+                f"did not run ({how}), so the gate would be asserting on one "
+                f"scanner while claiming both. A SKIPPED selected scanner does "
+                f"not move the scan's exit code, so this check is the only "
+                f"place that sees it"
+            )
+    return violations
+
+
 def check_findings_present(states: Sequence[ScannerState]) -> List[str]:
     """Positive assertion: the scanners that ran must have found something.
 
@@ -722,6 +761,9 @@ def check_expected_rules_present(
     Both behaviours are intended together. This gate asserts findings from two named
     scanners; if one of them never ran it cannot do its job, so the job failing is the
     correct outcome and this function simply is not the place that reports it.
+    ``check_gate_scanners_ran`` is: it names a selected scanner that is MISSING,
+    SKIPPED, excluded or absent directly, including the SKIPPED case the exit code
+    never sees.
     """
     by_name = {state.name: state for state in states}
     violations: List[str] = []
@@ -808,10 +850,16 @@ def check_findings_are_from_the_fixture(
     fixture_basenames = frozenset(FIXTURE_FILES)
     wrong_basename: List[str] = []
     inside_repository: List[str] = []
+    # A URI that normalizes to nothing ("./", a bare "file://") names no file,
+    # so neither test below can run on it. It used to be skipped while still
+    # counting as a located finding, so a run whose every URI was empty printed
+    # PASS having verified zero locations. It is reported instead.
+    unlocatable: List[str] = []
 
     for uri in evidence.uris:
         normalized = _normalize_uri(uri)
         if not normalized:
+            unlocatable.append(uri)
             continue
 
         # PurePosixPath because separators are already normalized to "/"; using it
@@ -851,6 +899,13 @@ def check_findings_are_from_the_fixture(
             "finding(s) name files inside the repository, which means the scan read "
             "the process working directory instead of --source-dir: "
             f"{_sample(inside_repository)}"
+        )
+    if unlocatable:
+        violations.append(
+            f"{len(unlocatable)} finding location(s) normalize to no path at all "
+            f"({_sample(unlocatable)}), so the gate cannot tell which file they "
+            "name, let alone whether it is the fixture's. Either the location "
+            "shape moved or URIs are being emptied"
         )
     return violations
 
@@ -919,6 +974,7 @@ def evaluate_results(
         check_no_scanner_errors(states, collect_recorded_errors(results))
     )
     outcome.violations.extend(check_some_scanner_ran(states))
+    outcome.violations.extend(check_gate_scanners_ran(states))
     outcome.violations.extend(check_findings_present(states))
     outcome.violations.extend(check_expected_producers_available(states))
     outcome.violations.extend(check_expected_rules_present(states, evidence))
@@ -1058,6 +1114,66 @@ def build_scan_command(source_dir: Path, output_dir: Path) -> List[str]:
     return command
 
 
+def child_environment(base: Mapping[str, str] | None = None) -> Dict[str, str]:
+    """The environment the scan child runs under.
+
+    Every ``ASH_*`` variable is dropped. The product reads options from the
+    environment too (``ASH_EXCLUDED_SCANNERS``, ``ASH_CONFIG``, ``ASH_SHARD_INDEX``
+    and ``ASH_SHARD_COUNT`` among them), so an operator's shell could drop one of
+    the two selected scanners or shard the run, and the gate would judge a scan
+    other than the one its command line describes, with no trace in its output.
+    The gate's inputs are its command line and nothing else.
+
+    The child renders a Rich table. UTF-8 is forced both ways so a cp1252 default
+    on Windows cannot turn a passing scan into an encoding traceback.
+    """
+    source = os.environ if base is None else base
+    env = {key: value for key, value in source.items() if not key.startswith("ASH_")}
+    env["PYTHONIOENCODING"] = "utf-8"
+    env.setdefault("PYTHONUTF8", "1")
+    return env
+
+
+#: Seconds the scan child gets to shut down after SIGTERM before it is killed.
+SHUTDOWN_GRACE_SECONDS = 15.0
+
+
+def _stop_process_group(
+    process: Any, grace_seconds: float = SHUTDOWN_GRACE_SECONDS
+) -> None:
+    """Stop the scan child and the tools it started, SIGTERM first.
+
+    ``subprocess.run(timeout=...)`` kills the child with SIGKILL, which skips ASH's
+    own SIGTERM shutdown, so the scanner tools ASH had started kept running after
+    the gate exited and kept writing into the kept evidence directory. The child
+    is started as the leader of its own process group (``start_new_session``), so
+    the signal reaches ASH and everything it spawned: SIGTERM to the group, a
+    grace period for ASH to stop its tools, then SIGKILL to whatever is left.
+    Where process groups are not available the child alone is terminated, then
+    killed, which is what ``subprocess.run`` did minus the grace period.
+    """
+    if process.poll() is not None:
+        return
+    group_signals = hasattr(os, "killpg") and hasattr(signal, "SIGKILL")
+    if group_signals:
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGTERM)
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    if group_signals:
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+    else:
+        process.kill()
+    with suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=grace_seconds)
+
+
 def run_scan(
     repo_root: Path,
     source_dir: Path,
@@ -1070,24 +1186,37 @@ def run_scan(
     the child rather than set with ``os.chdir``: this project deliberately removed
     process-wide cwd dependence, and reintroducing a global chdir previously took
     the unit suite from 2677 passed to 107 failed.
+
+    Raises ``subprocess.TimeoutExpired`` carrying the output read so far when the
+    scan outlives *timeout*; the child and its tools are stopped first
+    (``_stop_process_group``).
     """
     command = build_scan_command(source_dir, output_dir)
-    env = dict(os.environ)
-    # The child renders a Rich table. Force UTF-8 both ways so a cp1252 default on
-    # Windows cannot turn a passing scan into an encoding traceback.
-    env["PYTHONIOENCODING"] = "utf-8"
-    env.setdefault("PYTHONUTF8", "1")
-    return subprocess.run(  # nosec B603 -- list args, no shell, argv[0] is sys.executable
+    popen_options: Dict[str, Any] = {}
+    if hasattr(os, "setsid"):
+        # The child leads its own process group, so a timeout can stop it and
+        # every tool it started together; see _stop_process_group.
+        popen_options["start_new_session"] = True
+    with subprocess.Popen(  # nosec B603 -- list args, no shell, argv[0] is sys.executable
         command,
         cwd=str(repo_root),
-        env=env,
-        capture_output=True,
+        env=child_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=timeout,
-        check=False,
-    )
+        **popen_options,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as expired:
+            _stop_process_group(process)
+            stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(
+                command, timeout, output=stdout, stderr=stderr
+            ) from expired
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def load_results(output_dir: Path) -> Any:
