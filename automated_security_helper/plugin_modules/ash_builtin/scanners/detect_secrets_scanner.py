@@ -16,8 +16,10 @@ from typing import (
     ClassVar,
     Collection,
     Dict,
+    Iterable,
     List,
     Literal,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -362,11 +364,30 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         repository could otherwise give its own code a network. The sandbox
         grants it only when ``sandbox.network_scanners`` names detect-secrets.
         """
-        verifying = any(
-            is_verification_filter(item.path)
-            for item in self.config.options.scan_settings.filters_used
-        )
+        verifying = self._verifies(self.config.options.scan_settings.filters_used)
         return SandboxRequirements(network=verifying, network_requires_grant=True)
+
+    @staticmethod
+    def _verifies(filters: Optional[Iterable[Any]]) -> bool:
+        """Whether a ``filters_used`` list turns detect-secrets' verification on.
+
+        The one reading for every place that decides it. ``sandbox_requirements``
+        and ``_apply_settings_trust`` read the settings model, whose entries carry
+        a ``path`` attribute; ``scan`` reads the dictionary dumped for the worker,
+        whose entries are mappings with a ``path`` key. Each site used to spell
+        the check itself, and the two spellings could answer differently for the
+        same settings (a sandbox asked for no network while the worker was told
+        to verify, or the reverse). An entry of neither shape, or one with no
+        path, enables nothing.
+        """
+        for item in filters or ():
+            if isinstance(item, Mapping):
+                path = item.get("path")
+            else:
+                path = getattr(item, "path", None)
+            if is_verification_filter(path):
+                return True
+        return False
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -1067,9 +1088,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ]
             if dropped:
                 notes.append((dropped, "ASH is running in offline mode"))
-        self._verification_permitted = any(
-            is_verification_filter(item.path) for item in settings.filters_used
-        )
+        self._verification_permitted = self._verifies(settings.filters_used)
         for removed, why in notes:
             verification = [path for path in removed if is_verification_filter(path)]
             files = [path for path in removed if path not in verification]
@@ -1402,11 +1421,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # directory under it, where a `detect_secrets/` or
             # `automated_security_helper/` package would replace the real one. The
             # directory is under work_dir, which a sandboxed worker can see.
-            # Unless this scan may verify, the worker's environment carries
-            # REFUSE_HTTP_ENV, so every HTTP request detect-secrets tries fails
-            # before it leaves the process. The run's environment values go to
-            # the runner, so the lines it logs itself (a timeout's limit among
-            # them) name an env-typed limit as its option rather than print it.
+            # The worker's environment always states REFUSE_HTTP_ENV: "1" unless
+            # this scan may verify, "0" when it may, never absent. The worker
+            # refuses every HTTP request detect-secrets tries unless the value is
+            # exactly "0", so a variable an executor or environment filter drops
+            # or rewrites fails safe (findings reported unverified) instead of
+            # silently allowing the requests, as a worker keyed on "1" alone did
+            # for a dropped key. An inherited value of the same name is replaced,
+            # never passed through. The run's environment values go to the
+            # runner, so the lines it logs itself (a timeout's limit among them)
+            # name an env-typed limit as its option rather than print it.
             with python_child(
                 *self._worker_command(request_file, output_file), parent=work_dir
             ) as child:
@@ -1421,7 +1445,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             for key, value in snapshot_environ().items()
                             if key != REFUSE_HTTP_ENV
                         },
-                        **({} if verify else {REFUSE_HTTP_ENV: "1"}),
+                        REFUSE_HTTP_ENV: "0" if verify else "1",
                     },
                     encoding="utf-8",
                     errors="replace",
@@ -1874,10 +1898,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # Verification is decided again on the settings the worker gets, because
             # offline mode is read when it is used and the settings can change
             # after the scanner was configured. See _apply_settings_trust.
-            verify = any(
-                is_verification_filter(item.get("path"))
-                for item in scan_settings_dict.get("filters_used", [])
-            )
+            verify = self._verifies(scan_settings_dict.get("filters_used", []))
             if verify and (self._scanner_offline() or not self._verification_permitted):
                 scan_settings_dict["filters_used"] = [
                     item

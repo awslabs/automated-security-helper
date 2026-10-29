@@ -1,0 +1,109 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Whether detect-secrets verifies is one reading, wherever it is asked.
+
+Three places decide it: ``sandbox_requirements`` (does the sandbox need a
+network), ``_apply_settings_trust`` (may this scan verify at all) and ``scan``
+(is the worker told to verify). The first two read the settings model, whose
+filter entries carry a ``path`` attribute; the third reads the dictionary dumped
+for the worker, whose entries are mappings. Each used to spell the check for
+its own shape, and the spellings could drift: a sandbox asked for no network
+while the worker was told to verify, or the reverse. ``_verifies`` is the one
+helper every site calls, and it reads both shapes.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+    DetectSecretsScanner,
+    DetectSecretsScanSettingsFiltersUsed,
+)
+
+pytestmark = pytest.mark.unit
+
+MODULE_SPELLING = (
+    "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
+)
+FILE_SPELLING = "file:///opt/filters/mine.py::is_ignored_due_to_verification_policies"
+HEURISTIC = "detect_secrets.filters.heuristic.is_potential_uuid"
+
+
+@pytest.mark.parametrize("spelling", [MODULE_SPELLING, FILE_SPELLING])
+def test_model_entries_and_dumped_entries_read_the_same(spelling):
+    model = [
+        DetectSecretsScanSettingsFiltersUsed(path=HEURISTIC),
+        DetectSecretsScanSettingsFiltersUsed(path=spelling, min_level=2),
+    ]
+    dumped = [item.model_dump(exclude_none=True) for item in model]
+
+    assert DetectSecretsScanner._verifies(model) is True
+    assert DetectSecretsScanner._verifies(dumped) is True
+    assert DetectSecretsScanner._verifies(model) is DetectSecretsScanner._verifies(
+        dumped
+    )
+
+
+def test_settings_without_the_filter_do_not_verify_in_either_shape():
+    model = [DetectSecretsScanSettingsFiltersUsed(path=HEURISTIC)]
+    dumped = [item.model_dump(exclude_none=True) for item in model]
+
+    assert DetectSecretsScanner._verifies(model) is False
+    assert DetectSecretsScanner._verifies(dumped) is False
+
+
+def test_entries_of_no_known_shape_enable_nothing():
+    # No filters, an entry with no path, a path that is not a string, and a
+    # bare string (which has neither a ``path`` attribute nor a ``path`` key):
+    # none of them is read as the verification filter.
+    assert DetectSecretsScanner._verifies(None) is False
+    assert DetectSecretsScanner._verifies([]) is False
+    assert DetectSecretsScanner._verifies([{}]) is False
+    assert DetectSecretsScanner._verifies([{"path": None}]) is False
+    assert DetectSecretsScanner._verifies([{"path": 7}]) is False
+    assert DetectSecretsScanner._verifies([MODULE_SPELLING]) is False
+
+
+def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path):
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        DetectSecretsScannerConfig,
+        DetectSecretsScannerConfigOptions,
+        DetectSecretsScanSettings,
+    )
+
+    context = PluginContext(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    context.source_dir.mkdir(parents=True)
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(
+                scan_settings=DetectSecretsScanSettings(
+                    plugins_used=[{"name": "AWSKeyDetector"}],
+                    filters_used=[{"path": MODULE_SPELLING, "min_level": 2}],
+                )
+            )
+        ),
+    )
+    settings = scanner.config.options.scan_settings
+    # The dictionary ``scan`` hands the worker, built the way ``scan`` builds it.
+    dumped = settings.model_dump(
+        exclude_defaults=True, exclude_none=True, exclude_unset=True
+    )
+    dumped.setdefault(
+        "filters_used", [f.model_dump(exclude_none=True) for f in settings.filters_used]
+    )
+
+    assert scanner.sandbox_requirements.network is True
+    assert DetectSecretsScanner._verifies(dumped.get("filters_used", [])) is True
+    assert scanner.sandbox_requirements.network is DetectSecretsScanner._verifies(
+        dumped.get("filters_used", [])
+    )
