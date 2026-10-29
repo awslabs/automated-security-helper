@@ -2460,7 +2460,7 @@ def _decoded(captured: Any, process: subprocess.Popen) -> Any:
     encoding = getattr(process.stdout, "encoding", None) or getattr(
         process.stderr, "encoding", None
     )
-    return captured.decode(encoding or "utf-8", errors="replace")
+    return _as_text_mode_reads(captured, encoding or "utf-8")
 
 
 def _late_decoded(captured: Any, encoding: Optional[str]) -> Any:
@@ -2472,8 +2472,20 @@ def _late_decoded(captured: Any, encoding: Optional[str]) -> Any:
     TimeoutExpired carries the partial output undecoded, text mode or not."""
     if not isinstance(captured, bytes):
         return captured
-    return captured.decode(
-        encoding or locale.getpreferredencoding(False), errors="replace"
+    return _as_text_mode_reads(captured, encoding or locale.getpreferredencoding(False))
+
+
+def _as_text_mode_reads(captured: bytes, encoding: str) -> str:
+    """*captured* as Popen's text mode would have read it: decoded with
+    replacement, then with universal newlines (``\\r\\n`` and a lone ``\\r``
+    become ``\\n``), the translation communicate's own text-mode decode applies.
+    A late or partial read decoded without it kept the ``\\r`` a finished run
+    would have dropped, so the same bytes read differently by the way the wait
+    ended."""
+    return (
+        captured.decode(encoding, errors="replace")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
     )
 
 
