@@ -173,7 +173,10 @@ def test_the_suppression_save_refuses_a_recursive_alias_unchanged(
         )
 
     message = str(refused.value)
-    assert "could not be parsed (RecursiveAliasError at line" in message, message
+    # The save's loader now refuses every alias, as the scan's loader does
+    # (ash_config._NoAliasSafeLoader), so the cycle is refused as the first
+    # alias met, a ComposerError, in the same left-unchanged words.
+    assert "could not be parsed (ComposerError at line" in message, message
     assert message.endswith(f"{path} is unchanged"), message
     assert path.read_bytes() == before
 

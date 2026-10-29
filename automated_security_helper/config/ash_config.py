@@ -33,7 +33,6 @@ from typing import (
 )
 
 import yaml
-from automated_security_helper.utils.yaml_aliases import NoRecursiveAliasLoader
 from automated_security_helper.utils.redacted_model import (
     env_resolved_scalar,
     RedactedSection,
@@ -228,7 +227,11 @@ def config_env_var_is_secret_shaped(var_name: str) -> bool:
 
 # Group 2 captures the colon itself, so that ``${VAR}`` and ``${VAR:}`` can be
 # told apart; the strings the pattern matches are the same as without it.
-ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+)(:?)(.*)?}")
+# Group 3, the default, runs to the FIRST closing brace: with a greedy ``.*``
+# it ran to the last one, so in ``${VAR:x}/${OTHER}`` the default was read as
+# ``x}/${OTHER`` and everything after the first brace was dropped when VAR was
+# set, or became that garbled default when it was not.
+ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+)(:?)([^}]*)}")
 
 
 def resolve_env_references(value: str) -> Optional[str]:
@@ -280,10 +283,12 @@ def resolve_env_references(value: str) -> Optional[str]:
             "The reference is left as written."
         )
         return value.strip()
-    if not colon and default_text:
-        # No colon but more text before the closing brace, as in ``${VAR}x}``
-        # or ``${A}/${B}``: not a reference this function resolves, so it is
-        # left as written, as it always was.
+    if not colon and "}" in value[match.end() :]:
+        # No colon and another closing brace later in the text, as in
+        # ``${VAR}x}`` or ``${A}/${B}``: not a reference this function
+        # resolves, so it is left as written, as it always was. (The pattern
+        # used to read everything up to that brace as group 3, and this test
+        # read that group; the text after the match says the same thing.)
         return value.strip()
     if colon and default_text.startswith("-"):
         # The shell's ``${VAR:-default}``. ASH reads everything after the colon
@@ -1418,6 +1423,25 @@ class RuntimeOverridesConfig(RedactedSection):
             self.denied_paths = [*self.denied_paths, *missing]
         return self
 
+    @field_serializer("denied_paths")
+    def _denied_paths_as_written(self, value: List[str]) -> List[str]:
+        """Serialize ``denied_paths`` as the profile wrote it.
+
+        The validator above appends the ALWAYS_DENIED_PATHS entries a written
+        list leaves out, on the field itself. Dumped as the field holds it, a
+        rebuild of the config from its dump (``apply_config_overrides``, a
+        saved and reloaded file) read the augmented list as the operator's
+        written list: a list equal to an older shipped default stopped
+        counting as a default (``client_config_policy.policy_is_default``)
+        and ``exempt_paths`` shrank to what the appended entries name. A copy
+        ``effective_policy`` returned already holds the list that applies and
+        is dumped as it is.
+        """
+        written = self._written_denied_paths
+        if self._effective or written is None:
+            return value
+        return list(written)
+
 
 def sandbox_mode_from_yaml(value: Any) -> Any:
     """The sandbox mode a YAML scalar stands for.
@@ -1847,8 +1871,15 @@ class ContentDbStalenessOverride(RedactedSection):
 
     @property
     def expires_at(self) -> datetime:
-        """00:00 UTC on ``expiration``, the first instant the entry no longer applies."""
-        day = date.fromisoformat(self.expiration)
+        """00:00 UTC on ``expiration``, the first instant the entry no longer applies.
+
+        Read with the validator's own parser (``expiration_date_problem``'s
+        ``strptime`` with ``%Y-%m-%d``), which admits an unpadded month or day.
+        ``date.fromisoformat`` does not, so an entry that validated with
+        ``2026-1-5`` raised here and was dropped at scan time, a stricter
+        ``fail`` entry included.
+        """
+        day = datetime.strptime(self.expiration, "%Y-%m-%d").date()
         return datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
 
     def is_expired(self, now: Optional[datetime] = None) -> bool:
@@ -2979,17 +3010,18 @@ def _same_suppression(existing: Any, suppression: AshSuppression) -> bool:
     ) == suppression.model_dump(mode="json", exclude_none=True)
 
 
-class _KeepsEnvReferences(NoRecursiveAliasLoader):
+class _KeepsEnvReferences(_NoAliasSafeLoader):
     """SafeLoader, with an ``!ENV`` scalar kept as its own text.
 
     For loads whose result only locates where to edit the file as text (the
     suppression writer): the reference is left in the file as written, so this
     parse must not read the environment, where ``_AshConfigLoader`` resolves
-    the reference to its value. A recursive alias is refused while the
-    document is composed (utils/yaml_aliases.py): the save's write-check walks
-    the loaded document, and a document that contains itself recursed to
-    Python's limit there, a raw RecursionError in place of the save's own
-    left-unchanged refusal.
+    the reference to its value. Every alias is refused while the document is
+    composed, as ``load_config_yaml`` refuses it for every other reader of a
+    config: the save edited a file with an alias the scan then could not
+    load, and the save's write-check walks the loaded document, so an alias
+    that fans out (or one that contains itself) cost that walk the document's
+    expansion rather than its size.
     """
 
 
@@ -3023,6 +3055,37 @@ _EMPTY_SUPPRESSIONS_LINE = re.compile(
     r"(?P<comment>#[^" + _ALL_LINE_BREAKS + r"]*)?"
     r"(?P<end>\r?\n?|[" + "".join(_OTHER_YAML_BREAKS) + r"])\Z"
 )
+
+
+#: A top-level ``global_settings: {}`` (as a flow mapping) or a spelled null,
+#: with an optional trailing comment: the block holds nothing yet, and the
+#: suppressions key is inserted under it once the value is dropped
+#: (_blocked_empty_global_settings).
+_EMPTY_GLOBAL_SETTINGS_LINE = re.compile(
+    r"^global_settings:[ \t]*(?:\{[ \t]*\}|~|null|Null|NULL)[ \t]*"
+    r"(?P<comment>#[^" + _ALL_LINE_BREAKS + r"]*)?"
+    r"(?P<end>\r?\n?|[" + "".join(_OTHER_YAML_BREAKS) + r"])\Z"
+)
+
+
+def _blocked_empty_global_settings(lines: list) -> None:
+    """Rewrite a top-level ``global_settings: {}`` (or spelled-null) line to
+    take block children.
+
+    In place, as ``_blocked_empty_suppressions`` does for the list: the ``{}``,
+    ``~`` or ``null`` goes, a trailing comment and the line's own ending stay,
+    and the ``suppressions:`` key is then inserted under it as the block's
+    first child. Before this the line read as an inline mapping, which sent the
+    save to the whole rewrite, dropping every comment the file held for a block
+    that holds nothing.
+    """
+    for idx, line in enumerate(lines):
+        found = _EMPTY_GLOBAL_SETTINGS_LINE.match(line)
+        if found is not None:
+            comment = found.group("comment")
+            kept = f" {comment}" if comment else ""
+            lines[idx] = f"global_settings:{kept}{found.group('end')}"
+            return
 
 
 def _suppressions_key_line(lines: list) -> tuple:
@@ -3546,6 +3609,18 @@ def _write_checked(
             config_path,
         )
     target = config_path.resolve()
+    # The file the save writes stays in the directory the config path names:
+    # a symlinked config is written through to its target (so the link stays a
+    # link), but only to a target inside that directory, as resolved. A link
+    # placed in a repository that pointed outside it (dangling or not) made the
+    # save create or edit a file wherever the link led, with no confinement.
+    inside = config_path.parent.resolve()
+    if target.parent != inside and inside not in target.parents:
+        raise _left_unchanged(
+            "the config is a link to a file outside its own directory, which the "
+            "suppression save does not write through",
+            config_path,
+        )
     try:
         earlier_status: Optional[os.stat_result] = target.stat()
     except FileNotFoundError:
@@ -3897,7 +3972,10 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     # Case B: a block-style global_settings exists but has no suppressions key ->
     # insert the key plus the item at the end of that block. This is the common
     # first-suppression case, and the one the old full-rewrite fallback silently
-    # stripped every comment from.
+    # stripped every comment from. A `global_settings: {}` or a spelled null
+    # holds nothing either; its line drops the value first, so the key goes
+    # under it as a block child instead of through the whole rewrite.
+    _blocked_empty_global_settings(lines)
     gs_insert_idx, gs_child_indent = _find_global_settings_insert_point(lines)
     if gs_insert_idx is not None:
         block = [f"{gs_child_indent}suppressions:\n"]
@@ -4119,8 +4197,11 @@ def _find_global_settings_insert_point(lines: list) -> tuple:
     """End-of-block index and child indent for a block-style global_settings.
 
     Returns ``(insert_index, child_indent)`` for a top-level ``global_settings:``
-    that has block children, or ``(None, None)`` if it is absent, inline
-    (``global_settings: {...}``), or has no children to anchor indentation on.
+    that has block children, or ``(None, None)`` if it is absent or inline
+    (``global_settings: {...}``). A block with no children to anchor indentation
+    on (only comments or blank lines under the key, or nothing) gets two spaces,
+    the indent ``_config_dump_with_entry`` writes: the whole rewrite that such
+    a file used to take dropped every comment it held.
     """
     in_global = False
     block_end = None
@@ -4152,8 +4233,10 @@ def _find_global_settings_insert_point(lines: list) -> tuple:
         if child_indent is None:
             child_indent = line[:indent_len]
         block_end = idx + 1
-    if not in_global or child_indent is None:
+    if not in_global:
         return (None, None)
+    if child_indent is None:
+        child_indent = "  "
     return (block_end, child_indent)
 
 

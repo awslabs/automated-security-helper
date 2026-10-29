@@ -637,17 +637,22 @@ class TestOneReferencePerValueAtItsStart:
         assert config.project_name == value
 
     def test_a_second_reference_after_a_default_reads_as_the_default(self, monkeypatch):
-        """``${A:x}${B}``: the reference runs to the last ``}``, so the default
-        is ``x}${B``. Set, A replaces the whole value; unset, the default is the
-        value. The documented arms, pinned so a change to them is a decision."""
+        """``${A:x}${B}``: the reference ends at the first ``}``, so the default
+        is ``x`` and the text after it is kept as written, as it is after a
+        ``${A}`` with no default. Set, A's value takes the reference's place;
+        unset, the default does. The reference used to run to the LAST ``}``,
+        which dropped the trailing text when A was set and made the default the
+        garbled ``x}${B`` when it was not; that arm was pinned here as the
+        documented one, and this is the decision to change it."""
         monkeypatch.setenv("ASH_TEST_FIRST", "first")
         monkeypatch.delenv("ASH_TEST_UNSET", raising=False)
         assert (
-            resolve_env_references("${ASH_TEST_FIRST:x}${ASH_TEST_SECOND}") == "first"
+            resolve_env_references("${ASH_TEST_FIRST:x}${ASH_TEST_SECOND}")
+            == "first${ASH_TEST_SECOND}"
         )
         assert (
             resolve_env_references("${ASH_TEST_UNSET:x}${ASH_TEST_SECOND}")
-            == "x}${ASH_TEST_SECOND"
+            == "x${ASH_TEST_SECOND}"
         )
 
 
