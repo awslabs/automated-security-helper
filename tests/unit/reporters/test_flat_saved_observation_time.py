@@ -8,6 +8,8 @@ import json
 from datetime import datetime, timezone
 from io import StringIO
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
     CsvReporter,
@@ -17,6 +19,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_rep
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from tests.snapshot.support.fixture_model import pin_clock
+
+pytestmark = pytest.mark.unit
 
 
 def test_separate_saved_scan_loads_keep_per_finding_times(

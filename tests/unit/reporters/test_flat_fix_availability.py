@@ -8,6 +8,8 @@ import json
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
     CsvReporter,
@@ -19,6 +21,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_npm_fixture_fix_availability_reaches_flat_json_and_csv(

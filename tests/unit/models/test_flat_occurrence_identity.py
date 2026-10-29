@@ -75,6 +75,7 @@ def _run_ids(*payloads):
         {"region": {"startLine": 10, "endLine": 12, "startColumn": 2}},
     ],
 )
+@pytest.mark.unit
 def test_distinct_physical_occurrences_have_distinct_ids(change):
     first = _payload()
     second = copy.deepcopy(first)
@@ -107,6 +108,7 @@ def test_distinct_physical_occurrences_have_distinct_ids(change):
         },
     ],
 )
+@pytest.mark.unit
 def test_coordinates_outside_the_key_tell_results_apart_only_within_a_run(change):
     first = _payload()
     second = copy.deepcopy(first)
@@ -126,6 +128,7 @@ def test_coordinates_outside_the_key_tell_results_apart_only_within_a_run(change
         ("workspace_project", "backend", "frontend"),
     ],
 )
+@pytest.mark.unit
 def test_package_and_workspace_identity_distinguish_occurrences(
     property_name, first_value, second_value
 ):
@@ -135,6 +138,7 @@ def test_package_and_workspace_identity_distinguish_occurrences(
     assert _id(first) != _id(second)
 
 
+@pytest.mark.unit
 def test_package_version_is_not_part_of_the_identity():
     first, second = _payload(), _payload()
     first["properties"] = {"package_name": "pkg", "package_version": "1.0.0"}
@@ -154,6 +158,7 @@ def test_package_version_is_not_part_of_the_identity():
     ],
 )
 @pytest.mark.parametrize("physical", [True, False])
+@pytest.mark.unit
 def test_logical_locations_are_outside_the_key(logical, physical):
     first, second = _payload(), _payload()
     if not physical:
@@ -165,6 +170,7 @@ def test_logical_locations_are_outside_the_key(logical, physical):
     assert len(set(_run_ids(first, second))) == 2
 
 
+@pytest.mark.unit
 def test_only_the_first_location_is_part_of_the_key():
     single = _payload()
     first = _payload()
@@ -184,6 +190,7 @@ def test_only_the_first_location_is_part_of_the_key():
     assert _id(reversed_locations) != _id(first)
 
 
+@pytest.mark.unit
 def test_presentation_and_runtime_metadata_do_not_change_identity_or_source():
     # Fingerprints are part of the key (they replace the lines), so both results
     # carry them; everything else the second one adds is outside it.
@@ -225,6 +232,7 @@ def test_presentation_and_runtime_metadata_do_not_change_identity_or_source():
     )
 
 
+@pytest.mark.unit
 def test_id_seed_uses_masked_description_and_excludes_raw_secrets(monkeypatch):
     payload = _payload()
     payload["ruleId"] = "B105"
@@ -259,12 +267,14 @@ def test_id_seed_uses_masked_description_and_excludes_raw_secrets(monkeypatch):
     assert re.fullmatch(r"bandit-B105-[0-9a-f]{12}", flat.id)
 
 
+@pytest.mark.unit
 def test_a_lone_finding_is_not_re_keyed_by_its_message():
     first, second = _payload(), _payload()
     second["message"]["text"] = "different evidence"
     assert _id(first) == _id(second)
 
 
+@pytest.mark.unit
 def test_message_changes_at_a_shared_key_tell_the_results_apart():
     first, second = _payload(), _payload()
     second["message"]["text"] = "different evidence"
@@ -277,6 +287,7 @@ def test_message_changes_at_a_shared_key_tell_the_results_apart():
     assert _run_ids(first, reworded)[1] != pair[1]
 
 
+@pytest.mark.unit
 def test_exact_duplicates_at_a_shared_key_get_an_id_each():
     ids = _run_ids(_payload(), _payload(), _payload())
     assert len(set(ids)) == 3
@@ -284,6 +295,7 @@ def test_exact_duplicates_at_a_shared_key_get_an_id_each():
 
 
 @pytest.mark.parametrize("source_id", ["native-id", "native-id ", 0, False])
+@pytest.mark.unit
 def test_explicit_additional_report_ids_keep_the_existing_prefix(source_id):
     assert (
         FlatVulnerability.from_additional_report({"id": source_id}, "scanner").id
@@ -291,6 +303,7 @@ def test_explicit_additional_report_ids_keep_the_existing_prefix(source_id):
     )
 
 
+@pytest.mark.unit
 def test_missing_additional_report_ids_use_the_finding_identity():
     first = {
         "id": None,
@@ -318,6 +331,7 @@ def test_missing_additional_report_ids_use_the_finding_identity():
     assert json.loads(flat.raw_data) == first
 
 
+@pytest.mark.integration
 def test_ids_are_stable_across_hash_seed_processes_and_dictionary_order():
     code = """
 import json, sys
@@ -359,6 +373,7 @@ print(json.dumps([
     "field, first_advisory, second_advisory",
     [("cve_id", "CVE-2025-10001", "CVE-2025-10002"), ("cwe_id", "CWE-79", "CWE-89")],
 )
+@pytest.mark.unit
 def test_missing_additional_ids_tell_advisories_apart_only_within_a_run(
     field, first_advisory, second_advisory
 ):
@@ -402,6 +417,7 @@ def test_missing_additional_ids_tell_advisories_apart_only_within_a_run(
         {"startLine": 10, "endLine": None},
     ],
 )
+@pytest.mark.unit
 def test_context_line_fallback_distinguishes_occurrences(region):
     payloads = []
     for line in (10, 20):
@@ -413,6 +429,7 @@ def test_context_line_fallback_distinguishes_occurrences(region):
     assert _id(payloads[0]) != _id(payloads[1])
 
 
+@pytest.mark.unit
 def test_complete_region_lines_ignore_context_coordinates_and_presentation():
     payloads = []
     for line in (10, 20):
@@ -429,6 +446,7 @@ def test_complete_region_lines_ignore_context_coordinates_and_presentation():
     assert _id(payloads[0]) == _id(payloads[1])
 
 
+@pytest.mark.unit
 def test_context_fallback_has_the_identity_of_the_same_reported_region_lines():
     first, second = _payload(), _payload()
     first["locations"][0]["physicalLocation"]["region"] = {
@@ -445,6 +463,7 @@ def test_context_fallback_has_the_identity_of_the_same_reported_region_lines():
 
 @pytest.mark.parametrize("field", ["line_start", "line_end"])
 @pytest.mark.parametrize("line", [10, "10", 10.0])
+@pytest.mark.unit
 def test_additional_line_representations_normalize_and_a_new_line_changes_the_id(
     field, line
 ):
@@ -464,6 +483,7 @@ def test_additional_line_representations_normalize_and_a_new_line_changes_the_id
         (1, [1, "1", 1.0, True]),
     ],
 )
+@pytest.mark.unit
 def test_all_accepted_additional_line_aliases_contribute_to_identity(
     normalized, aliases
 ):
@@ -480,6 +500,7 @@ def test_all_accepted_additional_line_aliases_contribute_to_identity(
 
 @pytest.mark.parametrize("value", [1.5, "1.5", "not-a-line", {}, []])
 @pytest.mark.parametrize("source_id", [None, "explicit"])
+@pytest.mark.unit
 def test_invalid_additional_line_values_still_fail_validation(value, source_id):
     with pytest.raises(ValidationError):
         FlatVulnerability.from_additional_report(
@@ -501,6 +522,7 @@ def test_invalid_additional_line_values_still_fail_validation(value, source_id):
         ("fullyQualifiedName", ["module.one", "module.two"]),
     ],
 )
+@pytest.mark.unit
 def test_address_is_outside_the_key_but_kept_in_the_source(field, values):
     payloads = [
         {
@@ -525,6 +547,7 @@ def test_address_is_outside_the_key_but_kept_in_the_source(field, values):
         )
 
 
+@pytest.mark.unit
 def test_additional_default_and_validated_string_aliases_have_equal_identity():
     flat = FlatVulnerability.from_additional_report({}, "scanner")
     explicit = FlatVulnerability.from_additional_report(
@@ -569,6 +592,7 @@ def test_additional_default_and_validated_string_aliases_have_equal_identity():
         },
     ],
 )
+@pytest.mark.unit
 def test_rule_references_are_outside_the_key(change):
     first = _payload()
     second = {**first, **change}
@@ -585,6 +609,7 @@ def test_rule_references_are_outside_the_key(change):
         [{"logicalLocations": [{"name": "function"}]}],
     ],
 )
+@pytest.mark.unit
 def test_analysis_target_is_outside_the_key_without_a_physical_artifact(locations):
     first = {
         "ruleId": "RULE",
@@ -597,6 +622,7 @@ def test_analysis_target_is_outside_the_key_without_a_physical_artifact(location
     assert len(set(_run_ids(first, second))) == 2
 
 
+@pytest.mark.unit
 def test_ordinary_file_identity_is_stable_and_ignores_analysis_target():
     payload = {
         "ruleId": "RULE",
@@ -623,6 +649,7 @@ def test_ordinary_file_identity_is_stable_and_ignores_analysis_target():
 
 
 @pytest.mark.parametrize("artifact", [{"uriBaseId": "BASE"}, {"index": 0}])
+@pytest.mark.unit
 def test_analysis_target_is_outside_the_key_whatever_the_artifact_names(artifact):
     payload = {
         "ruleId": "RULE",
@@ -644,12 +671,14 @@ def test_analysis_target_is_outside_the_key_whatever_the_artifact_names(artifact
         ("cwe_id", False),
     ],
 )
+@pytest.mark.unit
 def test_only_the_rule_and_file_of_an_additional_entry_key_its_identity(field, in_key):
     one = FlatVulnerability.from_additional_report({field: "one"}, "scanner")
     two = FlatVulnerability.from_additional_report({field: "two"}, "scanner")
     assert (one.id != two.id) is in_key
 
 
+@pytest.mark.unit
 def test_explicit_additional_id_keeps_raw_scanner_prefix_and_trimming():
     assert (
         FlatVulnerability.from_additional_report({"id": " native "}, " scanner ").id

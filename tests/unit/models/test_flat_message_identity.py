@@ -19,6 +19,8 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models import flat_vulnerability
 from automated_security_helper.utils import finding_identity, occurrence_context
 
+pytestmark = pytest.mark.unit
+
 
 def _flats(
     messages,

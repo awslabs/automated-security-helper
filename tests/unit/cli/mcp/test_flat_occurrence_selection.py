@@ -18,6 +18,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_rep
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
+pytestmark = pytest.mark.unit
+
 
 def test_flat_report_ids_select_formerly_colliding_saved_findings(
     tmp_path, monkeypatch, test_plugin_context

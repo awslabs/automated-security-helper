@@ -14,6 +14,8 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 from automated_security_helper.models import flat_vulnerability
 from automated_security_helper.schemas.sarif_schema_model import Result
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "provenance, invocation, expected",

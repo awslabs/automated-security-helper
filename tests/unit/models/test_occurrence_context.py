@@ -17,6 +17,8 @@ from automated_security_helper.utils.occurrence_context import (
     persisted_context,
 )
 
+pytestmark = pytest.mark.unit
+
 CONTEXT = "ash_occurrence_context"
 MARKER = "ash_occurrence_context_version"
 
