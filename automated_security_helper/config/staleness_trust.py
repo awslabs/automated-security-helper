@@ -29,9 +29,13 @@ base's, and an overrides entry equal to one of the trusted base's entries. A
 value that only makes the gate stricter is kept too: ``content_db_staleness:
 fail``, and any entry with ``policy: fail``. Every other entry, a ``policy: warn``
 the operator did not set, is dropped, and the policy and the dropped entries' databases are
-named in one warning. Nothing is added: an entry the operator's file has and the
-repository's config does not is not copied in, as the policy the repository's
-config keeps is at least as strict. ``content_db_staleness_offline_image_default``
+named in one warning. One kind of entry is added: the operator's ``policy: fail``
+entries for databases the repository's config has no entry for, since those
+narrow a scan-wide ``warn`` the config may have repeated, and without them the
+repository's config would hold those databases to a laxer policy than the
+operator's. A ``policy: warn`` entry of the operator's is not copied in: the
+policy the repository's config keeps is at least as strict for that database.
+``content_db_staleness_offline_image_default``
 is kept when it is false, or when the trusted base's is true; a true where the
 operator's is false is set back to false and named in the same warning.
 
@@ -136,7 +140,22 @@ def confine_content_db_staleness(
         ignored.append(
             f"{STALENESS_OVERRIDES_CONFIG_FIELD} entries for {', '.join(dropped)}"
         )
-        config.content_db_staleness_overrides = kept
+    # The operator's per-database ``policy: fail`` entries narrow the scan-wide
+    # policy for the databases they name. A config that repeats the operator's
+    # ``content_db_staleness: warn`` (kept above as equal) but leaves those
+    # entries out would hold those databases to warn, laxer than the operator's
+    # setting for them, so each one the config has no entry for is carried over.
+    # An entry the config has for the same database is the config's own: a
+    # ``fail`` is already as strict, and a dropped ``warn`` makes way for the
+    # operator's entry here.
+    kept_databases = {entry.database for entry in kept}
+    carried = [
+        entry
+        for entry in trusted_config.content_db_staleness_overrides
+        if entry.policy == STALENESS_FAIL and entry.database not in kept_databases
+    ]
+    if dropped or carried:
+        config.content_db_staleness_overrides = [*kept, *carried]
 
     # true holds trivy-db to warn in an image built with OFFLINE=YES, so it relaxes
     # the gate as warn does; false only makes it stricter.
