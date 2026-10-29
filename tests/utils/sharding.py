@@ -3,9 +3,10 @@
 
 """Run one shard of the suite: ignore the test modules another shard owns.
 
-CI splits the unit-test job into shards (``ASH_TEST_SHARD=3of8``) because the whole suite
-does not finish inside one job. The split is made here, in ``pytest_ignore_collect``,
-rather than by handing pytest a list of files:
+CI splits the integration-test jobs into shards (``ASH_TEST_SHARD=3of8``) because the
+tests that start real tools do not finish inside one job; the unit tier is not sharded.
+The split is made here, in ``pytest_ignore_collect``, rather than by handing pytest a
+list of files:
 
 * A file named on the command line skips pytest's ignore machinery, so ``norecursedirs``,
   ``--ignore``, ``collect_ignore`` and the ``python_files`` match would stop applying to
@@ -23,6 +24,15 @@ filtered; everything else is left to pytest.
 
 An empty shard makes pytest exit 5 (no tests collected), so a count larger than the suite
 fails the job instead of passing it. A malformed ``ASH_TEST_SHARD`` is a usage error.
+
+One case is admitted: a shard run with a ``-m`` expression. A shard owns modules, not
+tiers, so with ``-m integration`` a shard whose modules hold no integration test collects
+nothing, and exit 5 there would read as a failure of a leg that has nothing to run. The
+tier's other shards carry the rest. An empty shard of a run with no ``-m`` expression
+still fails. ``admit_empty_shard`` turns ``NO_TESTS_COLLECTED`` into ``OK`` only when this
+run has a shard configured AND a ``-m`` expression, and prints one line naming both. It is registered from ``configure`` as a plugin object, and not as a
+module-level ``pytest_sessionfinish`` imported by tests/conftest.py, because that conftest
+already defines its own ``pytest_sessionfinish``. The owner rule is unchanged.
 
 The setting belongs to the run it was given to. ``configure`` reads ASH_TEST_SHARD once,
 at ``pytest_configure``, and removes it from ``os.environ``: a variable left there would
@@ -135,6 +145,57 @@ def configure(config: pytest.Config) -> None:
         raise pytest.UsageError(f"{ENV_VAR}: {error}") from None
     config.stash[_SHARD_KEY] = shard
     config.stash[_TEXT_KEY] = text
+    # A stand-in config without a plugin manager (the unit tests of this module use one)
+    # registers nothing.
+    plugins = getattr(config, "pluginmanager", None)
+    if shard is not None and plugins is not None:
+        if not plugins.has_plugin(_EMPTY_SHARD_PLUGIN):
+            plugins.register(_AdmitAnEmptyShard(), _EMPTY_SHARD_PLUGIN)
+
+
+def admit_empty_shard(session: Any, exitstatus: Any) -> bool:
+    """Turn "no tests collected" into success for a shard run with a ``-m`` expression.
+
+    True when it changed the exit status. It acts only when all three hold: the run has a
+    shard configured, it was given a ``-m`` expression, and pytest is about to exit with
+    ``NO_TESTS_COLLECTED``. Why: a shard owns modules, not tiers, so with ``-m integration``
+    a shard can hold none of the tier's tests, and exit 5 would fail a leg that has nothing
+    to run while the tier's other shards carry the rest. A run with no ``-m`` expression
+    keeps exit 5, which is what tells a shard count larger than the suite from a pass.
+    """
+    config = session.config
+    text = config.stash.get(_TEXT_KEY, "")
+    expression = config.getoption("markexpr", default="")
+    if not text or not expression:
+        return False
+    if exitstatus != pytest.ExitCode.NO_TESTS_COLLECTED:
+        return False
+    session.exitstatus = pytest.ExitCode.OK
+    line = (
+        f"shard {text} holds no test selected by -m {expression!r}; admitted, the "
+        "other shards of the run carry the rest"
+    )
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(line)
+    else:
+        print(line)
+    return True
+
+
+class _AdmitAnEmptyShard:
+    """The plugin object ``configure`` registers for a run that has a shard.
+
+    A class because tests/conftest.py already defines the module-level
+    ``pytest_sessionfinish`` that a hook imported by name would have to share.
+    """
+
+    def pytest_sessionfinish(self, session: Any, exitstatus: Any) -> None:
+        admit_empty_shard(session, exitstatus)
+
+
+#: The name the plugin object is registered under, once per config.
+_EMPTY_SHARD_PLUGIN = "ash-shard-empty-admitted"
 
 
 def pytest_configure(config: pytest.Config) -> None:
