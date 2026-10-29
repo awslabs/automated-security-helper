@@ -193,10 +193,25 @@ def record_reports_written(
     ``written`` holds ``(file name, format)`` pairs, the format being the name
     ``--output-formats`` selects the reporter by (``reporter_format_name``). An
     empty ``written`` records that the run wrote no report file.
+
+    A record an earlier report phase of the same run left in ``results`` is kept
+    and extended, not replaced: ``ash merge`` runs a second phase over the same
+    results for an off-host reporter, and the first phase's entries (the
+    ``ash.sarif`` the exit code is read from among them) are still this run's.
     """
     if results is None:
         return
-    formats = {name: format_name or None for name, format_name in written}
+    earlier = _reports_written(results)
+    formats: Dict[str, Optional[str]] = {}
+    if earlier is not None and isinstance(earlier.get("formats"), dict):
+        formats.update(
+            {
+                name: (format_name if isinstance(format_name, str) else None)
+                for name, format_name in earlier["formats"].items()
+                if isinstance(name, str)
+            }
+        )
+    formats.update({name: format_name or None for name, format_name in written})
     checkpoints = [
         checkpoint
         for checkpoint in getattr(results, "validation_checkpoints", None) or []
@@ -358,14 +373,31 @@ def read_refusal_outcome(
 
     None when there is no record, when it is another run's or carries no run ID,
     and when it cannot be read as one. The caller checks ``not_a_regular_file``
-    first.
+    first; the open here repeats that check on the file it actually opened, so a
+    link or a FIFO put at the name in between is neither followed nor waited on.
     """
     path = Path(output_dir) / INNER_RUN_OUTCOME_FILE
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
     try:
-        with open(path, encoding="utf-8") as handle:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        with open(fd, encoding="utf-8") as handle:
+            fd = -1
             text = handle.read(_MAX_OUTCOME_BYTES + 1)
     except (OSError, ValueError):
         return None
+    finally:
+        if fd != -1:
+            os.close(fd)
     if len(text) > _MAX_OUTCOME_BYTES:
         return None
     try:
