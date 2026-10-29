@@ -494,6 +494,29 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 raise OSError(f"{real.as_posix()} changed while it was being read")
             return json.load(handle)
 
+    @staticmethod
+    def _check_baseline_shape(document: Any) -> None:
+        """Refuse a baseline that parses as JSON but is not a baseline.
+
+        ``SecretsCollection.load_from_baseline`` reads ``document["results"]``
+        as a mapping of filename to a list of entries and raises KeyError or
+        TypeError on anything else, which would fail every scan with the
+        baseline in use. The message names the shape, never the content: a
+        baseline's entries can hold a secret.
+
+        Raises:
+            ValueError: the document is not an object, or its ``results`` is
+                not a mapping of lists.
+        """
+        if not isinstance(document, dict):
+            raise ValueError("the baseline is not a JSON object")
+        results = document.get("results")
+        if not isinstance(results, dict):
+            raise ValueError("the baseline's 'results' is not a JSON object")
+        for entries in results.values():
+            if not isinstance(entries, list):
+                raise ValueError("a 'results' entry of the baseline is not a list")
+
     def _process_config_options(self):
         # Check detect-secrets baseline path. The second element of each pair
         # says whether the candidate came from the option: the baseline the
@@ -711,6 +734,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # (_read_baseline); the scan uses this same parsed copy and
                 # never reopens the file.
                 baseline_data = self._read_baseline(self._baseline_real)
+                self._check_baseline_shape(baseline_data)
                 self._baseline_document = baseline_data
 
                 # Only apply baseline settings if scan_settings was not explicitly
@@ -743,10 +767,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         f"{len(self.config.options.scan_settings.plugins_used)} plugins, "
                         f"{len(self.config.options.scan_settings.filters_used)} filters"
                     )
-            except (json.JSONDecodeError, OSError) as e:
+            except (OSError, TypeError, ValueError) as e:
+                # ValueError covers json.JSONDecodeError, UnicodeDecodeError,
+                # pydantic's ValidationError from a wrong-shaped plugin or
+                # filter entry, and _check_baseline_shape; TypeError a plugin
+                # or filter entry that is not a mapping. Each used to escape
+                # the constructor, or leave a document behind that failed
+                # every scan. The scan runs with no baseline, as it does for
+                # a missing file.
+                self._baseline_document = None
                 ASH_LOGGER.warning(
                     text_without_values(
-                        f"Failed to read baseline file settings: {e}. "
+                        f"Failed to read baseline file settings: {error_text(e)}. "
                         f"Falling back to default settings.",
                         values,
                     )
