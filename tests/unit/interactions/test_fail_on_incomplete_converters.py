@@ -510,6 +510,92 @@ class TestAnUnavailableConverterWithNothingToConvert:
             "`== 0` would read False as 'nothing to convert'"
         )
 
+    def test_a_row_that_converted_paths_is_not_exempted_by_a_zero_count(self):
+        """ "Never ran" is the gate's inference, not the writer's promise.
+
+        The phase asks a converter's dependency check more than once, so a converter
+        whose first answer was False can still run, and ``ash merge`` reads rows from
+        any producer. A row with converted paths describes a converter that ran; a
+        count of 0 beside it answers a question that was not asked, so the row keeps
+        the strict answer it had before the count existed.
+        """
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                dependencies_satisfied=False,
+                candidate_inputs=0,
+                converted_paths=["converted/one.py"],
+            )
+        )
+
+        assert [row[0] for row in incomplete_converters(results)] == ["jupyter"]
+
+    @pytest.mark.parametrize(
+        "sign",
+        [
+            pytest.param(
+                {"failed_inputs": [SimpleNamespace(kind="input", accepted=True)]},
+                id="an-accepted-failed-input",
+            ),
+            pytest.param(
+                {"refused_inputs": [SimpleNamespace(limit=None)]},
+                id="a-refusal-without-a-limit",
+            ),
+        ],
+    )
+    def test_a_row_with_another_sign_of_a_run_is_not_exempted_either(self, sign):
+        """The two records that do not list a row by themselves (an accepted input
+        loss, a refusal that names no limit) still show the converter ran."""
+        row = SimpleNamespace(
+            excluded=False,
+            failure=None,
+            dependencies_satisfied=False,
+            candidate_inputs=0,
+            converted_paths=[],
+            failed_inputs=[],
+            refused_inputs=[],
+            **sign,
+        )
+
+        assert [row[0] for row in incomplete_converters(_results(jupyter=row))] == [
+            "jupyter"
+        ]
+
+
+class TestAnUnavailableConverterIsListedWithItsOwnReason:
+    """The row carries ``dependency_unavailable_reason`` (the convert phase writes it
+    on every row whose dependencies are unsatisfied); the gate used to print a fixed
+    line in its place, so the console named the loss and not its cause."""
+
+    def test_the_rows_own_reason_is_listed(self):
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                dependencies_satisfied=False,
+                candidate_inputs=2,
+                converted_paths=[],
+                dependency_unavailable_reason=(
+                    "nbconvert could not be installed through uv"
+                ),
+            )
+        )
+
+        assert incomplete_converters(results) == [
+            IncompleteConverter(
+                "jupyter", "nbconvert could not be installed through uv"
+            )
+        ]
+
+    def test_a_row_without_a_reason_keeps_the_fixed_line(self):
+        """Control: a row written before the field existed, or assembled without it."""
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                dependencies_satisfied=False, candidate_inputs=2, converted_paths=[]
+            )
+        )
+
+        assert incomplete_converters(results) == [
+            IncompleteConverter("jupyter", "dependencies unavailable, so it never ran")
+        ]
+
 
 class TestTheConverterArmHasItsOwnExitMessage:
     """The converter arm used to print "Exiting due to exception during ASH scan".

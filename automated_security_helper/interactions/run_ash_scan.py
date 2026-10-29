@@ -1032,6 +1032,11 @@ def incomplete_converters(
        those refuse one input or member that is not to be read at all, and the
        scan reports them without failing on them.
     4. ``dependencies_satisfied`` is False -- its external tool was not available.
+       Read as "it never ran" is an inference of this function, not a promise of
+       the writer, so the one exemption (``candidate_inputs`` an explicit 0) is
+       taken only for a row that shows no sign of a run: no converted paths, no
+       failed-input records of any kind and no refused inputs. The reason listed
+       is the row's own ``dependency_unavailable_reason`` when it carries one.
 
     ``excluded`` is checked first and wins over all of them. It is the converter-side
     counterpart of a SKIPPED scanner: work the run was never meant to do, which is
@@ -1120,12 +1125,37 @@ def incomplete_converters(
             # missing information. ``is 0`` rather than ``== 0`` to keep False out:
             # ``bool`` is an ``int`` subclass and ``False == 0``, so a row carrying a
             # boolean would otherwise silence the gate.
+            #
+            # And the count exempts only a row that shows no sign of a run. "Never
+            # ran" is this function's inference from ``dependencies_satisfied``, not
+            # a promise of the writer: ConvertPhase asks the dependency check more
+            # than once, so a converter whose first answer was False can still run,
+            # and a shard row can come from any producer. A row with converted
+            # paths, with failed-input records of any kind (an accepted one too), or
+            # with refused inputs describes a converter that ran, and for such a row
+            # a count of 0 answers a question that was not asked; it keeps the
+            # strict answer every row had before the field existed.
             candidates = getattr(row, "candidate_inputs", None)
+            ran = bool(
+                (getattr(row, "converted_paths", None) or [])
+                or (getattr(row, "failed_inputs", None) or [])
+                or (getattr(row, "refused_inputs", None) or [])
+            )
             if candidates is not None and not isinstance(candidates, bool):
-                if candidates == 0:
+                if candidates == 0 and not ran:
                     continue
+            # The row's own reason when it carries one (the dependency check's
+            # words, which the phase redacts and writes with the home directory
+            # as ~), shown as a failure's text is; the fixed line otherwise, for a
+            # row written before the field existed or assembled without it.
+            reason = getattr(row, "dependency_unavailable_reason", None)
             listed.append(
-                IncompleteConverter(name, "dependencies unavailable, so it never ran")
+                IncompleteConverter(
+                    name,
+                    shown_on_one_line(str(reason))
+                    if isinstance(reason, str) and reason
+                    else "dependencies unavailable, so it never ran",
+                )
             )
     return listed
 
