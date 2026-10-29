@@ -654,11 +654,13 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             )
             self._plugin_log(rejected_detail, level=logging.INFO)
 
-        # No usable zizmor on PATH: the uv route, which starts with the version
-        # probe the construction deferred (step 2 of the docstring).
-        self.resolve_deferred_tool_version()
+        # No usable zizmor on PATH: the uv route (step 2 of the docstring). A
+        # scanner already recorded MISSING (uv refused at construction, an
+        # earlier check) is not probed again: the probe starts uv and its
+        # answer could not change the recorded reason.
         if self.dependency_unavailable_reason:
             return False
+        self.resolve_deferred_tool_version()
 
         if self._resolve_through_uv():
             return True

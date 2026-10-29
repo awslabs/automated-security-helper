@@ -1293,6 +1293,32 @@ def test_without_a_binary_on_path_the_deferred_probe_runs_for_the_uv_route(
     assert scanner._deferred_tool_version_probe is None
 
 
+def test_a_scanner_already_missing_does_not_start_the_uv_probe(repo, monkeypatch):
+    """A scanner whose dependency check already recorded MISSING keeps that
+    answer without a uv call: probed first, the deferred version probe started uv
+    for a tool the check was about to refuse anyway."""
+    monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
+
+    def must_not_run(self, *_):
+        raise AssertionError("the uv probe ran for a scanner already MISSING")
+
+    monkeypatch.setattr(ZizmorScanner, "_get_uv_tool_version", must_not_run)
+    scanner = _scanner(repo)
+    assert scanner._deferred_tool_version_probe is not None
+    scanner.dependency_unavailable_reason = "zizmor is not available: uv refused"
+
+    def must_not_resolve():
+        raise AssertionError("the uv route ran for a scanner already MISSING")
+
+    object.__setattr__(scanner, "_resolve_through_uv", must_not_resolve)
+
+    assert scanner.validate_plugin_dependencies() is False
+
+    assert scanner.dependency_unavailable_reason == (
+        "zizmor is not available: uv refused"
+    )
+
+
 @pytest.mark.parametrize("output", ["zizmor 1.28.0\n", "zizmor 2.0.0\n", "garbage\n"])
 def test_an_unsatisfying_binary_offline_is_missing_with_a_reason(
     repo, monkeypatch, output
