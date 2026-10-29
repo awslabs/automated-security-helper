@@ -999,12 +999,15 @@ def _verify_scanner_union(
     missing_from_owner = sorted(
         name
         for name, position in owner_by_scanner.items()
-        if name in seen
-        and not any(
+        if not any(
             _normalized(scanner) == name
             for scanner in shards[position][1].scanner_results
         )
     )
+    # Whether or not another shard recorded the name. An owned scanner that no
+    # shard recorded at all is the worse case: there is no skip marker to adopt,
+    # so the scanner drops out of the merged report and out of the completeness
+    # gate, and nothing says it was ever assigned.
     if missing_from_owner:
         details = ", ".join(
             f"{_shown(name)} (owned by shard "
@@ -1013,9 +1016,11 @@ def _verify_scanner_union(
         )
         raise ShardCoverageError(
             f"The shard that owned these scanners recorded no result for them: "
-            f"{details}. Another shard's skip marker is the only trace left, and "
+            f"{details}. Where another shard's skip marker is the only trace left, "
             f"adopting it would report a scanner that never ran as deliberately "
-            f"skipped. Check whether that shard's scan phase completed."
+            f"skipped; where no shard recorded the scanner, the merged report would "
+            f"leave it out altogether. Check whether that shard's scan phase "
+            f"completed."
         )
 
     return owner_by_scanner
@@ -1301,8 +1306,9 @@ def _verify_shard_contributions(
 
     Also catches the case a status check structurally cannot: an owned scanner
     with no entry at all, where there is no status to inspect.
-    :func:`_verify_scanner_union` catches that only when some *other* shard left a
-    skip marker under the same name, which is the usual but not the only shape.
+    :func:`_verify_scanner_union` refuses that shape first, whether or not some
+    other shard left a skip marker under the same name; the arm here is the
+    second line for a caller that reaches this check without it.
 
     A shard that owns nothing is not an offender. A shard count above the scanner
     count leaves surplus shards with an empty assignment, which
@@ -2003,10 +2009,17 @@ def apply_aggregated_suppressions(
     the call is what ``ash scan`` does, so skipping it is what keeps the verdicts
     equal in the configurations no fixture here exercises.
 
-    Under the flag the merge path applies nothing: ``apply_suppressions_to_sarif``
-    is skipped, and the output-directory exclusion is not applied here in either
-    case -- each shard already dropped its own output-directory results, as the
-    comment at the call site says.
+    Under the flag ``apply_suppressions_to_sarif`` is skipped, and the
+    suppressions ASH applied on the shards are lifted
+    (:func:`lift_ash_suppressions`). The shards ran without the flag, so their
+    results arrive carrying the config and inline suppressions each shard's own
+    pass attached, and the metrics count a result with any suppression as
+    suppressed. Left in place, the flag changed nothing on a sharded scan while
+    its help text promised every finding regardless of suppression status; a
+    scan run with the flag attaches none of them, so lifting them is what makes
+    the two commands answer alike. The output-directory exclusion is not applied here in
+    either case -- each shard already dropped its own output-directory results,
+    as the comment at the call site says.
 
     Args:
         merged: The merged results, with metrics already populated from the union.
@@ -2038,13 +2051,59 @@ def apply_aggregated_suppressions(
                 used_suppressions=getattr(merged, "used_suppressions", None),
                 exclude_output_dir=False,
             )
+        else:
+            lift_ash_suppressions(merged.sarif)
 
     # Recomputed unconditionally, not only when suppressions ran. Under
-    # ``--ignore-suppressions`` the counts change only when a result in the output
-    # directory was removed; making this conditional would put the "did the counts
+    # ``--ignore-suppressions`` the counts change when a suppression the shards
+    # applied was lifted; making this conditional would put the "did the counts
     # get refreshed" question on the same branch as "did suppressions run", and the
     # exit code depends on the first.
     return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
+#: The justification prefixes ``apply_suppressions_to_sarif`` writes for the
+#: suppressions ASH itself applies from the operator's configuration and from
+#: inline comments. A client-supplied entry is written "(ASH, client-supplied
+#: config)" and marked ``clientSupplied``, and a scanner's own suppression carries
+#: whatever the scanner wrote; neither starts with one of these.
+_ASH_APPLIED_JUSTIFICATION_PREFIXES = ("(ASH) ", "(ASH inline) ")
+
+
+def _is_ash_applied_suppression(suppression: Any) -> bool:
+    """Whether ``apply_suppressions_to_sarif`` attached *suppression* from ASH's own rules."""
+    properties = getattr(suppression, "properties", None)
+    if getattr(properties, "clientSupplied", None) is True:
+        return False
+    justification = getattr(suppression, "justification", None) or ""
+    return justification.startswith(_ASH_APPLIED_JUSTIFICATION_PREFIXES)
+
+
+def lift_ash_suppressions(sarif_report: Any) -> int:
+    """Remove the suppressions ASH applied from every result of *sarif_report*.
+
+    What ``--ignore-suppressions`` means on a merge. ``ash scan`` run with the
+    flag attaches no config or inline suppression, so every such finding counts as
+    actionable; the shards of a sharded scan ran without it and attached theirs,
+    so the merge removes them again to answer the same question. Only ASH's own
+    are removed: a suppression a scanner wrote into its SARIF stays, as it stays
+    on a scan run with the flag, and so does one a client-supplied configuration
+    applied, which a scan run with the flag applies too. A result left with no
+    suppression carries ``None``, the shape of a result never suppressed.
+
+    Returns the number of suppressions removed.
+    """
+    removed = 0
+    for run in getattr(sarif_report, "runs", None) or []:
+        for result in getattr(run, "results", None) or []:
+            if not result.suppressions:
+                continue
+            kept = [
+                s for s in result.suppressions if not _is_ash_applied_suppression(s)
+            ]
+            removed += len(result.suppressions) - len(kept)
+            result.suppressions = kept or None
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -3053,15 +3112,34 @@ def merge_command(
     )
     for notice in notices:
         logger.warning(notice)
-    # The off-host reporters run only when no format is requested (below), so
-    # only then is an operator section that sets options but no enabled named.
-    if not parsed_formats:
-        for reporter_class in reporter_plugins:
-            if reporter_class in off_host_reporters:
-                continue
-            warn_off_host_section_without_enabled(
-                reporter_class, _section(operator_config, reporter_class)
-            )
+    # Which requested formats an off-host reporter produces. A reporter is
+    # selected by its configured name, and the ExportFormat members name the
+    # off-host reporters too (aws-security-hub, s3, and the rest), so a
+    # --output-formats value can ask for one. The two report phases below split
+    # the request between them: the local reporters get the formats they
+    # produce, the off-host reporters get theirs, and a phase whose share is
+    # empty does not run, as naming only s3 to a scan runs only the s3 reporter.
+    requested_formats = set(parsed_formats)
+    off_host_format_names = {
+        plugin_config_key(reporter_class)
+        for reporter_class in reporter_plugins
+        if getattr(reporter_class, "sends_off_host", False) is True
+    }
+    requested_off_host = [f for f in parsed_formats if f in off_host_format_names]
+    local_formats = [f for f in parsed_formats if f not in off_host_format_names]
+    # An operator section that sets options but no enabled is named when the
+    # reporter would otherwise run: with no format requested, or with its own.
+    for reporter_class in reporter_plugins:
+        if reporter_class in off_host_reporters:
+            continue
+        if (
+            parsed_formats
+            and plugin_config_key(reporter_class) not in requested_formats
+        ):
+            continue
+        warn_off_host_section_without_enabled(
+            reporter_class, _section(operator_config, reporter_class)
+        )
 
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
@@ -3080,20 +3158,29 @@ def merge_command(
         asharp_model=merged,
     )
     try:
-        merged = report_phase.execute(
-            report_dir=output_dir_path.joinpath("reports"),
-            cli_output_formats=parsed_formats or None,
-            aggregated_results=merged,
-            python_based_plugins_only=False,
-        )
+        # The local phase runs with the formats the local reporters produce; a
+        # request that names only off-host formats runs no local reporter, and
+        # tells the operator about no format a reporter of the other phase
+        # produces.
+        if not parsed_formats or local_formats:
+            merged = report_phase.execute(
+                report_dir=output_dir_path.joinpath("reports"),
+                cli_output_formats=local_formats or None,
+                aggregated_results=merged,
+                python_based_plugins_only=False,
+            )
         # The off-host reporters run with the operator's configuration, so their
-        # destinations are the operator's too. No --output-formats value names one,
-        # so, as in a scan, they run only when no format is requested. With
+        # destinations are the operator's too. As in a scan, they run when no
+        # format is requested or when --output-formats names one of them. With
         # neither --config nor --config-overrides there is no operator config and
         # every one is refused (select_merge_reporters), so the list is empty
         # then; the None check states that to the type checker. Overrides alone
         # are enough to enable and aim one.
-        if off_host_reporters and not parsed_formats and operator_config is not None:
+        if (
+            off_host_reporters
+            and (not parsed_formats or requested_off_host)
+            and operator_config is not None
+        ):
             off_host_context = PluginContext(
                 source_dir=Path.cwd(),
                 output_dir=output_dir_path,
@@ -3108,7 +3195,7 @@ def merge_command(
                 asharp_model=merged,
             ).execute(
                 report_dir=output_dir_path.joinpath("reports"),
-                cli_output_formats=None,
+                cli_output_formats=requested_off_host or None,
                 aggregated_results=merged,
                 python_based_plugins_only=False,
             )
