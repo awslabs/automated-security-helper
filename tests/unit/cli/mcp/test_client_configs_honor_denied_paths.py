@@ -905,7 +905,13 @@ def test_an_upload_without_the_section_keeps_the_servers_reporter_options(
 def test_a_delivered_tree_cannot_turn_on_a_reporter_the_server_turned_off(
     _server,
 ) -> None:
-    """Left out, the section would return the reporter to its default, which is on."""
+    """The server's ``enabled: false`` holds when the delivered tree leaves the section out.
+
+    Every off-host reporter is off by default (``REPORTER_ENABLED_DEFAULTS``), so
+    the operator's setting and the default agree here; what this pins is that a
+    delivered tree with no reporters section does not change the server's
+    answer, read as the scan reads it.
+    """
     operator = _server["tmp"] / "operator" / "ash.yaml"
     operator.write_text(
         "project_name: operator\nreporters:\n  s3:\n    enabled: false\n",
