@@ -73,6 +73,25 @@ def test_a_registry_entry_is_left_as_written(tmp_path):
     assert anchored["scanners"]["semgrep"]["options"]["config"] == "p/ci"
 
 
+def test_a_root_pointer_operation_has_its_document_anchored(tmp_path):
+    """A ``replace`` at the root pointer (the empty string) replaces the whole
+    document; the loader accepts it, so the tool paths in its value are
+    anchored as a file's own are."""
+    ops = [
+        {
+            "op": "replace",
+            "path": "",
+            "value": {"scanners": {"bandit": {"options": {"config_file": "b.yaml"}}}},
+        }
+    ]
+
+    anchored = anchor_patch_operations(ops, tmp_path)
+
+    assert anchored[0]["value"]["scanners"]["bandit"]["options"][
+        "config_file"
+    ] == _anchored(tmp_path, "b.yaml")
+
+
 def test_a_test_operation_keeps_its_value_while_a_replace_is_anchored(tmp_path):
     ops = [
         {

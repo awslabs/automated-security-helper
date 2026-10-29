@@ -403,7 +403,10 @@ def anchor_patch_operations(ops: Any, base_dir: Union[str, Path]) -> Any:
         pointer = op.get("path") if isinstance(op, dict) else None
         if (
             not isinstance(pointer, str)
-            or not pointer.startswith("/")
+            # The root pointer is the empty string: an operation there replaces
+            # the whole document, and the loader accepts it, so its value is
+            # anchored as a whole document is.
+            or (pointer and not pointer.startswith("/"))
             or "value" not in op
             # A ``test`` operation compares its value with what the document
             # holds and sets nothing: anchored, a test of a relative path a base
@@ -412,7 +415,11 @@ def anchor_patch_operations(ops: Any, base_dir: Union[str, Path]) -> Any:
         ):
             anchored_ops.append(op)
             continue
-        segments = [_unescape(segment) for segment in pointer[1:].split("/")]
+        segments = (
+            []
+            if not pointer
+            else [_unescape(segment) for segment in pointer[1:].split("/")]
+        )
         anchored_ops.append(dict(op, value=_anchored_at(segments, op["value"], base)))
     return anchored_ops
 
