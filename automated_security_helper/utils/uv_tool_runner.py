@@ -132,6 +132,21 @@ def is_checking_only() -> bool:
     return _CHECKING_ONLY.get()
 
 
+def _offline_for(offline: Optional[bool]) -> bool:
+    """The offline mode a uv call runs under: the caller's, else ASH's own.
+
+    A scanner's own ``options.offline: true`` puts that scanner offline while
+    the rest of the run stays online (``ScannerPluginBase._scanner_offline``);
+    its uv calls pass that as ``offline``. None follows ``ASH_OFFLINE``, which
+    was the only mode uv saw before the parameter existed.
+    """
+    if offline is not None:
+        return bool(offline)
+    from automated_security_helper.core.constants import is_offline_mode
+
+    return is_offline_mode()
+
+
 @dataclass
 class UVToolRetryConfig:
     """Configuration for UV tool operation retry logic."""
@@ -691,7 +706,9 @@ def shown_uv_output(
     return shown
 
 
-def checked_requirement(spec: str, naming: str = "a tool requirement") -> str:
+def checked_requirement(
+    spec: str, naming: str = "a tool requirement", *, package: Optional[str] = None
+) -> str:
     """``spec`` if it names a package from an index; UVToolRunnerError otherwise.
 
     Every requirement uv installs or runs here is assembled from a package name, the
@@ -700,12 +717,19 @@ def checked_requirement(spec: str, naming: str = "a tool requirement") -> str:
     the check at the point of use, so a plugin that builds its constraint some
     other way still cannot hand uv a path, a URL or an environment marker.
 
+    ``package`` is the name the caller assembled ``spec`` around, when it knows
+    it. The parsed requirement must then still name that package: a constraint
+    glued onto the name without an operator ("bandit" + "2") parses as a valid
+    requirement for another package, ``bandit2``, and the specifier check alone
+    lets it through to the index.
+
     ``naming`` is the caller's fixed, value-free words for WHICH requirement
     was refused ("the tool spec", "--with dependency 2", "the --from spec for
     bandit"): a refusal that names nothing leaves the operator with three
     candidate entries and no way to tell which to fix.
     """
     from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
 
     from automated_security_helper.utils.pre_installed_tool import (
         validate_version_constraint,
@@ -715,6 +739,10 @@ def checked_requirement(spec: str, naming: str = "a tool requirement") -> str:
         requirement = Requirement(spec)
         if requirement.url or requirement.marker:
             raise ValueError("a direct reference or marker")
+        if package is not None and canonicalize_name(
+            requirement.name
+        ) != canonicalize_name(package):
+            raise ValueError("a requirement for another package")
         validate_version_constraint(str(requirement.specifier))
     except (InvalidRequirement, ValueError):
         # The message carries no part of the spec: a plugin-built constraint
@@ -1250,6 +1278,15 @@ class UVToolRunner:
 
         except subprocess.CalledProcessError as e:
             raise UVToolRunnerError(f"Failed to list UV tools: {e}")
+        except (subprocess.SubprocessError, OSError) as e:
+            # A listing that timed out or whose spawn failed is this method's
+            # failure like a non-zero exit, not an exception for its callers:
+            # is_tool_installed answers False on UVToolRunnerError, and the
+            # callers of install_tool_with_version and
+            # get_tool_installation_info expect a value, not a raise.
+            raise UVToolRunnerError(
+                f"Failed to list UV tools: {type(e).__name__}: {e}"
+            ) from e
 
     def is_tool_installed(self, tool_name: str) -> bool:
         """Check if a specific tool is installed via UV."""
@@ -1267,6 +1304,7 @@ class UVToolRunner:
         refresh: bool = False,
         values: Optional[Iterable[str]] = None,
         python_request: Optional[str] = None,
+        offline: Optional[bool] = None,
     ) -> Optional[str]:
         """Get version of a UV tool.
 
@@ -1346,11 +1384,11 @@ class UVToolRunner:
         # keyed by (executable, offline) under the tool::spec key, so a uv
         # resolved or assigned after the probe is asked itself instead of
         # answered from the other uv's memory, while invalidation by tool
-        # name still drops every environment's answer at once.
-        from automated_security_helper.core.constants import is_offline_mode
-
+        # name still drops every environment's answer at once. ``offline`` is
+        # the caller's mode when given (a scanner's own options.offline), else
+        # ASH's; see run_tool.
         executable = self.uv_executable
-        offline = bool(is_offline_mode() or is_checking_only())
+        offline = bool(_offline_for(offline) or is_checking_only())
         environment_key = (executable, offline)
 
         # A hit copies the remembered answer under the lock and redacts it
@@ -1510,11 +1548,22 @@ class UVToolRunner:
         progress_callback: Optional[Callable] = None,
         values: Optional[Iterable[str]] = None,
         python_request: Optional[str] = None,
+        reinstall: bool = False,
+        offline: Optional[bool] = None,
     ) -> bool:
         """Install a UV tool with optional version constraint, extras, and retry logic.
 
         Args:
             tool_name: Name of the tool to install
+            reinstall: Install even when uv already lists the tool, with
+                ``uv tool install --reinstall``, so the environment is rebuilt
+                against this call's spec, extras and ``--with`` entries. The
+                default answers True without running anything for a tool uv
+                lists; the mixin's "installed but not functional, proceeding
+                with reinstallation" path used to call this and get exactly
+                that: a True and no install.
+            offline: Whether this install runs offline (nothing is installed
+                then). None follows ASH's own mode; see ``run_tool``.
             version_constraint: Optional version constraint (e.g., ">=1.7.0,<2.0.0")
             values: The caller's environment-read values, for redacting uv's
                 stderr before the debug log. The raised texts never need them:
@@ -1555,8 +1604,9 @@ class UVToolRunner:
         if not self.is_uv_available():
             return False
 
-        # Check if tool is already installed - skip installation if it exists
-        if self.is_tool_installed(tool_name):
+        # Check if tool is already installed - skip installation if it exists,
+        # unless the caller asked for a reinstall of a listed tool.
+        if not reinstall and self.is_tool_installed(tool_name):
             # Tool already exists, no need to reinstall
             return True
 
@@ -1612,10 +1662,9 @@ class UVToolRunner:
                     f"Failed to remove broken symlink for {tool_name}: {e}"
                 )
 
-        # Check for offline mode
-        from automated_security_helper.core.constants import is_offline_mode
-
-        if is_offline_mode():
+        # Check for offline mode: the caller's own when given, else ASH's.
+        offline_mode = _offline_for(offline)
+        if offline_mode:
             # In offline mode, skip installation attempts and rely on pre-installed tools
             return False
         if is_checking_only():
@@ -1631,7 +1680,7 @@ class UVToolRunner:
         )
         tool_spec = install_inputs.spec
         try:
-            checked_requirement(tool_spec, "the tool spec")
+            checked_requirement(tool_spec, "the tool spec", package=tool_name)
             for position, dep in enumerate(with_dependencies or [], start=1):
                 checked_requirement(dep, f"--with dependency {position}")
         except UVToolRunnerError as error:
@@ -1648,6 +1697,9 @@ class UVToolRunner:
         offline = os.environ.get("UV_OFFLINE") == "1"
         if offline:
             cmd.append("--offline")
+
+        if reinstall:
+            cmd.append("--reinstall")
 
         if python_request:
             cmd.extend(["--python", python_request])
@@ -1976,11 +2028,19 @@ class UVToolRunner:
         quiet: bool = False,
         values: Iterable[str] = (),
         python_request: Optional[str] = None,
+        offline: Optional[bool] = None,
     ) -> subprocess.CompletedProcess:
         """Run a UV tool with specified arguments and output handling support.
 
         Args:
-            tool_name: Name of the tool to run
+            tool_name: Name of the tool to run: the executable uv starts.
+            package_name: The package that provides ``tool_name``, when its name
+                differs (``jupyter-nbconvert`` comes from ``nbconvert``). It is
+                the base of the ``--from`` spec the extras and the constraint are
+                built on; without them it is passed as the ``--from`` spec
+                itself. A plugin that names its package only on the install
+                used to run ``uv tool run <tool_name>``, which resolves a
+                package named after the executable.
             args: Arguments to pass to the tool
             cwd: Working directory for the command
             capture_output: Whether to capture stdout/stderr
@@ -2005,6 +2065,11 @@ class UVToolRunner:
                 timeout line is redacted of).
             python_request: Optional interpreter request passed as
                 ``uv tool run --python``; None leaves the choice to uv.
+            offline: Whether this run is offline. None, the default, follows
+                ASH's own mode (``ASH_OFFLINE``). A scanner whose
+                ``options.offline: true`` runs offline while ASH is online passes
+                True, so its uv run resolves from the cache alone, as its own
+                mode says; the module-wide mode used to be the only one uv saw.
 
         Returns:
             CompletedProcess result with enhanced output handling
@@ -2031,9 +2096,7 @@ class UVToolRunner:
         # Set up environment for offline mode if needed. If the caller
         # passed an explicit env, start from it; otherwise start from
         # os.environ when we need to set offline flags.
-        from automated_security_helper.core.constants import is_offline_mode
-
-        if is_offline_mode() or is_checking_only():
+        if _offline_for(offline) or is_checking_only():
             env = dict(env) if env is not None else snapshot_environ()
             env["UV_OFFLINE"] = "1"
             command.append("--offline")
@@ -2042,17 +2105,19 @@ class UVToolRunner:
             command.extend(["--python", python_request])
 
         # Build command with --from parameter if extras or version constraint specified
+        base_name = package_name or tool_name
         if package_extras or version_constraint:
             # Build the --from specification
             if package_extras:
                 extras_str = ",".join(package_extras)
-                base_spec = f"{tool_name}[{extras_str}]"
+                base_spec = f"{base_name}[{extras_str}]"
             else:
-                base_spec = tool_name
+                base_spec = base_name
 
             from_spec = checked_requirement(
                 f"{base_spec}{version_constraint}" if version_constraint else base_spec,
                 f"the --from spec for {tool_name}",
+                package=base_name,
             )
 
             command.extend(
@@ -2062,7 +2127,7 @@ class UVToolRunner:
                 ]
             )
 
-        if package_name:
+        elif package_name:
             command.extend(
                 [
                     "--from",
@@ -3028,6 +3093,7 @@ def get_uv_tool_command(
     tool_name: str,
     *,
     fallback_binary: Optional[str] = None,
+    from_spec: Optional[str] = None,
 ) -> Optional[List[str]]:
     """Resolve the command list to invoke ``tool_name``.
 
@@ -3039,9 +3105,17 @@ def get_uv_tool_command(
        return ``[<fallback_path>]``.
     3. Else return ``None`` (caller marks deps unsatisfied).
 
+    ``from_spec`` is the ``--from`` requirement the scan itself runs under
+    (``UVToolMixin._uv_from_spec``): ``uv tool run --from 'bandit[sarif]' bandit``
+    resolves a different environment than the bare ``uv tool run bandit``, so a
+    probe without it answers for an environment the scan never uses. With it the
+    probe runs ``uv tool run --from <from_spec> <tool_name> --version``.
+
     Memoized per process so the version probe runs only once per
-    ``(tool_name, fallback_binary)`` pair in each environment (PATH and
-    ASH_BIN_PATH). Thread-safe: a single shared lock guards reads, writes, and
+    ``(tool_name, fallback_binary, from_spec)`` triple in each environment (PATH,
+    ASH_BIN_PATH, and whether ASH is offline: an offline probe resolves from uv's
+    cache alone, so its miss is not an online probe's answer, nor the reverse).
+    Thread-safe: a single shared lock guards reads, writes, and
     the underlying probe so concurrent threads racing on the same cache key see
     exactly one probe and a consistent result.
 
@@ -3050,11 +3124,15 @@ def get_uv_tool_command(
     is gone the answer is None and an error names the file; the probe is not run
     again in the same environment.
 
-    A None is remembered only when the probe ran and neither it nor the direct
-    lookup found the tool. Probing again on every call would start the tool once
-    per caller, the concurrent first runs ``_uv_tool_version_cache`` explains, and
-    cost the probe's time again. With no uv found nothing was probed, so a None
-    is looked up again on the next call and a tool installed in between is found.
+    A None is remembered only when the probe ran to an exit and neither it nor
+    the direct lookup found the tool. Probing again on every call would start
+    the tool once per caller, the concurrent first runs ``_uv_tool_version_cache``
+    explains, and cost the probe's time again. With no uv found nothing was
+    probed, so a None is looked up again on the next call and a tool installed
+    in between is found. A probe that did not run to an exit, one that timed out
+    or whose spawn failed or was refused by the sandbox scope, is not uv's answer
+    about the tool: its None is answered for that call and looked up again on the
+    next, as a missing uv's is.
 
     The uv branch names ``uv`` bare while the probe ran ``find_uv_or_none``'s copy,
     which prefers the uv installed with ASH over PATH's. A spawn of the bare name
@@ -3062,9 +3140,20 @@ def get_uv_tool_command(
     spawns this command: the scanners test it for None. A caller that starts it must run the uv the probe ran
     (``find_uv_or_none()``), not the name.
     """
+    # Offline, probe offline, for the reason given in
+    # UVToolRunner.get_tool_version: an online probe here resolved and
+    # downloaded the tool from PyPI under ASH_OFFLINE, and the 5s timeout
+    # could leave a half-written uv cache behind. Read once, with the key: the
+    # offline answer and the online one are different questions.
+    from automated_security_helper.core.constants import is_offline_mode
+
+    offline = is_offline_mode()
     binary = fallback_binary or tool_name
     lookup = _lookup_key(binary)
-    cache_key = f"{tool_name}::{binary}::{lookup[1:]!r}"
+    cache_key = (
+        f"{tool_name}::{binary}::{from_spec or ''}::offline={int(offline)}"
+        f"::{lookup[1:]!r}"
+    )
 
     # Fast-path: cache hit under the coarse lock.
     with _uv_tool_runner_cache_lock:
@@ -3096,20 +3185,21 @@ def get_uv_tool_command(
         uv_path = find_uv_or_none()
         command: Optional[List[str]] = None
         started: Optional[str] = None
+        # Whether the probe ran to an exit. A probe that timed out, or whose
+        # spawn failed or was refused, answered nothing about the tool, and its
+        # None is not remembered (see above).
+        probe_exited = False
         if uv_path is not None:
-            # Offline, probe offline, for the reason given in
-            # UVToolRunner.get_tool_version: an online probe here resolved and
-            # downloaded the tool from PyPI under ASH_OFFLINE, and the 5s timeout
-            # could leave a half-written uv cache behind.
-            from automated_security_helper.core.constants import is_offline_mode
-
-            probe_command = [uv_path, "tool", "run", tool_name, "--version"]
+            probe_command = [uv_path, "tool", "run"]
             probe_env: Optional[Dict[str, str]] = None
             # Offline in check-only mode too, which must not download.
-            if is_offline_mode() or is_checking_only():
-                probe_command.insert(3, "--offline")
+            if offline or is_checking_only():
+                probe_command.append("--offline")
                 probe_env = snapshot_environ()
                 probe_env["UV_OFFLINE"] = "1"
+            if from_spec:
+                probe_command.extend(["--from", from_spec])
+            probe_command.extend([tool_name, "--version"])
             try:
                 probe = spawn_run(  # nosec B603 — fixed list of trusted strings
                     probe_command,
@@ -3119,6 +3209,7 @@ def get_uv_tool_command(
                     env=probe_env if probe_env is not None else snapshot_environ(),
                     timeout=_UV_VERSION_PROBE_TIMEOUT,
                 )
+                probe_exited = True
                 if probe.returncode == 0:
                     command = ["uv", "tool", "run", tool_name]
                     started = uv_path
@@ -3138,10 +3229,11 @@ def get_uv_tool_command(
             with _uv_tool_runner_cache_lock:
                 if _lookup_generation != generation:
                     return command
-                # A None is remembered only after a probe ran: probing again on each
-                # call is what the memo is for (see above). With no uv to probe, the
-                # lookups behind a None are searched again on the next call.
-                if command is not None or uv_path is not None:
+                # A None is remembered only after a probe ran to an exit: probing
+                # again on each call is what the memo is for (see above). With no
+                # uv to probe, or a probe that never exited, the lookups behind a
+                # None are searched again on the next call.
+                if command is not None or probe_exited:
                     _uv_command_cache[cache_key] = command
                 else:
                     _uv_command_cache.pop(cache_key, None)

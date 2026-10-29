@@ -1,0 +1,204 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The uv runner's probes answer the question the scan asks, and remember only
+uv's own answers.
+
+Each test here pins one fix in ``utils/uv_tool_runner.py``:
+
+* ``get_uv_tool_command`` keys its memo by the offline mode and the ``--from``
+  spec, probes that spec, and does not remember a probe that never exited.
+* ``checked_requirement`` refuses a constraint glued onto the package name
+  (``bandit`` + ``2`` names ``bandit2``) when told which package was meant.
+* ``list_available_tools`` turns a listing that timed out or could not spawn
+  into the runner's own error, so ``is_tool_installed`` answers False.
+* ``install_tool_with_version`` reinstalls a listed tool when asked to.
+* ``run_tool`` and the probes honor a caller's own offline mode, and build the
+  ``--from`` spec on the package that provides the tool.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess  # nosec B404
+from unittest.mock import MagicMock
+
+import pytest
+
+from automated_security_helper.utils import uv_tool_runner
+from automated_security_helper.utils.uv_tool_runner import (
+    UVToolRunner,
+    UVToolRunnerError,
+    _reset_uv_tool_runner_caches,
+    checked_requirement,
+    get_uv_tool_command,
+)
+
+pytestmark = pytest.mark.unit
+
+UV_PATH = os.path.abspath("/opt/uv/bin/uv")
+
+
+@pytest.fixture(autouse=True)
+def _fresh(monkeypatch):
+    _reset_uv_tool_runner_caches()
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.delenv("UV_OFFLINE", raising=False)
+    yield
+    _reset_uv_tool_runner_caches()
+
+
+@pytest.fixture
+def spawn(monkeypatch):
+    """The process boundary, replaced; the probe's uv and no direct binary."""
+    mock = MagicMock()
+    mock.return_value = subprocess.CompletedProcess([], 1, "", "")
+    monkeypatch.setattr(uv_tool_runner, "spawn_run", mock)
+    monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: UV_PATH)
+    monkeypatch.setattr(uv_tool_runner, "find_executable", lambda name: None)
+    return mock
+
+
+@pytest.fixture
+def runner():
+    r = UVToolRunner(uv_executable=UV_PATH)
+    r._uv_available_cache = True
+    return r
+
+
+class TestGetUvToolCommandMemo:
+    def test_an_offline_miss_is_not_served_to_an_online_lookup(
+        self, spawn, monkeypatch
+    ):
+        monkeypatch.setenv("ASH_OFFLINE", "1")
+        assert get_uv_tool_command("bandit") is None
+        monkeypatch.delenv("ASH_OFFLINE")
+        assert get_uv_tool_command("bandit") is None
+        assert spawn.call_count == 2, spawn.call_args_list
+        assert "--offline" in spawn.call_args_list[0].args[0]
+        assert "--offline" not in spawn.call_args_list[1].args[0]
+
+    def test_a_probe_that_timed_out_is_not_remembered_as_absence(self, spawn):
+        spawn.side_effect = subprocess.TimeoutExpired(["uv"], 5)
+        assert get_uv_tool_command("bandit") is None
+        assert get_uv_tool_command("bandit") is None
+        assert spawn.call_count == 2
+
+    def test_a_probe_that_exited_non_zero_is_remembered(self, spawn):
+        """The control: uv's own answer about the tool is still memoized."""
+        assert get_uv_tool_command("bandit") is None
+        assert get_uv_tool_command("bandit") is None
+        assert spawn.call_count == 1
+
+    def test_the_probe_runs_the_from_spec_the_scan_runs(self, spawn):
+        spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.9", "")
+        command = get_uv_tool_command("bandit", from_spec="bandit[sarif]>=1.7")
+        assert command == ["uv", "tool", "run", "bandit"]
+        argv = spawn.call_args.args[0]
+        assert argv[-4:] == ["--from", "bandit[sarif]>=1.7", "bandit", "--version"]
+
+    def test_the_bare_probe_and_the_from_spec_probe_are_remembered_apart(self, spawn):
+        assert get_uv_tool_command("bandit") is None
+        assert get_uv_tool_command("bandit", from_spec="bandit[sarif]") is None
+        assert spawn.call_count == 2
+
+
+class TestCheckedRequirementNamesThePackage:
+    def test_a_glued_constraint_that_renames_the_package_is_refused(self):
+        with pytest.raises(UVToolRunnerError):
+            checked_requirement("bandit2", "the tool spec", package="bandit")
+
+    def test_the_same_package_in_another_spelling_passes(self):
+        assert (
+            checked_requirement("Detect_Secrets>=1", package="detect-secrets")
+            == "Detect_Secrets>=1"
+        )
+
+    def test_run_tool_refuses_a_constraint_glued_onto_the_name(self, spawn, runner):
+        with pytest.raises(UVToolRunnerError):
+            runner.run_tool("bandit", version_constraint="2")
+        assert spawn.call_count == 0
+
+
+class TestListingFailuresAreTheRunnersOwn:
+    def test_a_listing_that_timed_out_reads_as_not_installed(self, spawn, runner):
+        spawn.side_effect = subprocess.TimeoutExpired(["uv", "tool", "list"], 30)
+        assert runner.is_tool_installed("bandit") is False
+
+    def test_a_listing_whose_spawn_failed_reads_as_not_installed(self, spawn, runner):
+        spawn.side_effect = OSError(11, "try again")
+        assert runner.is_tool_installed("bandit") is False
+
+
+class TestReinstall:
+    def test_reinstall_runs_uv_tool_install_for_a_listed_tool(
+        self, spawn, runner, monkeypatch
+    ):
+        monkeypatch.setattr(runner, "is_tool_installed", lambda name: True)
+        spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
+        assert (
+            runner.install_tool_with_version("bandit", timeout=10, reinstall=True)
+            is True
+        )
+        argv = spawn.call_args.args[0]
+        assert argv[:3] == [UV_PATH, "tool", "install"], argv
+        assert "--reinstall" in argv
+        assert argv[-1] == "bandit"
+
+    def test_without_reinstall_a_listed_tool_is_left_as_it_is(
+        self, spawn, runner, monkeypatch
+    ):
+        """The control: the default still answers True and installs nothing."""
+        monkeypatch.setattr(runner, "is_tool_installed", lambda name: True)
+        assert runner.install_tool_with_version("bandit") is True
+        assert spawn.call_count == 0
+
+
+class TestTheCallersOfflineMode:
+    def test_run_tool_honors_the_callers_offline_mode(self, spawn, runner):
+        spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
+        runner.run_tool("bandit", offline=True)
+        call = spawn.call_args
+        assert "--offline" in call.args[0]
+        assert call.kwargs["env"]["UV_OFFLINE"] == "1"
+
+    def test_run_tool_without_a_mode_follows_ash(self, spawn, runner):
+        """The control: with no caller mode and ASH online, nothing is offline."""
+        spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
+        runner.run_tool("bandit")
+        call = spawn.call_args
+        assert "--offline" not in call.args[0]
+        assert "UV_OFFLINE" not in call.kwargs["env"]
+
+    def test_the_version_probe_honors_the_callers_offline_mode(self, spawn, runner):
+        spawn.return_value = subprocess.CompletedProcess([], 0, "1.0\n", "")
+        runner.get_tool_version("bandit", offline=True)
+        assert "--offline" in spawn.call_args.args[0]
+
+    def test_an_install_asked_to_run_offline_installs_nothing(
+        self, spawn, runner, monkeypatch
+    ):
+        monkeypatch.setattr(runner, "is_tool_installed", lambda name: False)
+        assert runner.install_tool_with_version("bandit", offline=True) is False
+        assert spawn.call_count == 0
+
+
+class TestTheFromSpecIsBuiltOnThePackage:
+    def test_extras_ride_the_package_name_not_the_executable(self, spawn, runner):
+        spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
+        runner.run_tool(
+            "jupyter-nbconvert", package_name="nbconvert", package_extras=["webpdf"]
+        )
+        argv = spawn.call_args.args[0]
+        assert argv.count("--from") == 1, argv
+        position = argv.index("--from")
+        assert argv[position + 1] == "nbconvert[webpdf]"
+        assert argv[position + 2] == "jupyter-nbconvert"
+
+    def test_a_bare_package_name_is_still_the_from_spec(self, spawn, runner):
+        """The control: the pre-existing shape, a package name alone."""
+        spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
+        runner.run_tool("jupyter-nbconvert", package_name="nbconvert")
+        argv = spawn.call_args.args[0]
+        position = argv.index("--from")
+        assert argv[position + 1 : position + 3] == ["nbconvert", "jupyter-nbconvert"]
