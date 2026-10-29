@@ -563,7 +563,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if self.dependency_unavailable_reason:
             return False
         if not self._validate_uv_tool_availability():
-            if get_uv_tool_command(_COMMAND) is not None:
+            resolved = get_uv_tool_command(
+                _COMMAND, from_spec=self._uv_probe_from_spec()
+            )
+            if resolved is not None:
                 self.use_uv_tool = False
                 self.dependencies_satisfied = True
                 return True
@@ -584,7 +587,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 "consolidated resolver",
                 level=logging.WARNING,
             )
-        resolved = get_uv_tool_command(_COMMAND)
+        resolved = get_uv_tool_command(_COMMAND, from_spec=self._uv_probe_from_spec())
         if resolved is None:
             return False
         # As the uv-absent branch above: a dependency declared satisfied on a

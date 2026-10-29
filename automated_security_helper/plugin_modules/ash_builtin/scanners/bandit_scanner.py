@@ -625,7 +625,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             # (_take_resolved_command). Any non-None answer used to turn uv off
             # and mark the dependency satisfied with no check of the sarif and
             # toml extras or of tool_version.
-            command = get_uv_tool_command(self.command)
+            command = get_uv_tool_command(
+                self.command, from_spec=self._uv_probe_from_spec()
+            )
             if command is not None:
                 return self._take_resolved_command(command)
             self._plugin_log(
@@ -674,7 +676,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # answer was tested for None and the route left as it was, so a binary on
         # PATH marked the dependency satisfied while use_uv_tool stayed True and
         # the scan went back through the uv route that had just failed.
-        command = get_uv_tool_command(self.command)
+        command = get_uv_tool_command(
+            self.command, from_spec=self._uv_probe_from_spec()
+        )
         if command is None:
             return False
         return self._take_resolved_command(command)

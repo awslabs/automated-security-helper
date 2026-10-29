@@ -505,7 +505,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         self.resolve_deferred_tool_version()
         if not self._validate_uv_tool_availability():
             # UV missing — defer to consolidated resolver for direct binary.
-            if get_uv_tool_command(self.command) is not None:
+            resolved = get_uv_tool_command(
+                self.command, from_spec=self._uv_probe_from_spec()
+            )
+            if resolved is not None:
                 self.use_uv_tool = False
                 self.dependencies_satisfied = True
                 return True
@@ -539,7 +542,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
 
         # Final fallback: consolidated UV-or-direct-binary resolver.
-        return get_uv_tool_command(self.command) is not None
+        resolved = get_uv_tool_command(
+            self.command, from_spec=self._uv_probe_from_spec()
+        )
+        return resolved is not None
 
     def _process_config_options(self):
         # Checkov config path

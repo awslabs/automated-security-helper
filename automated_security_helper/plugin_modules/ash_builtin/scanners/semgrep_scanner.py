@@ -207,7 +207,9 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         (offline, it fails again), so only a semgrep binary on PATH satisfies the
         dependency, and the check reports MISSING otherwise.
         """
-        command = get_uv_tool_command(self.command)
+        command = get_uv_tool_command(
+            self.command, from_spec=self._uv_probe_from_spec()
+        )
         if command is None:
             return False
         uses_uv = _is_uv_form(command)

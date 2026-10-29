@@ -231,6 +231,46 @@ class UVToolMixin:
         base = f"{package}[{','.join(extras)}]" if extras else package
         return f"{base}{constraint}" if constraint else base
 
+    def _uv_probe_from_spec(self) -> Optional[str]:
+        """:meth:`_uv_from_spec` as the dependency check hands it to the probe.
+
+        ``get_uv_tool_command`` runs ``uv tool run --from <spec> <tool> --version``
+        with the spec as given, while ``run_tool`` passes the scan's own ``--from``
+        only through ``checked_requirement`` (a package name, optional extras and
+        a PEP 440 specifier; never a path, a URL or a marker). The same check
+        here, with the package named so a constraint glued onto the name cannot
+        rename it: a spec the run would refuse is refused before the probe,
+        logged in this plugin's fixed words with nothing of the spec in the
+        line, and the probe runs bare, as ``get_tool_version`` answers None for
+        the same refusal.
+        """
+        spec = self._uv_from_spec()
+        if spec is None:
+            return None
+        from automated_security_helper.utils.uv_tool_runner import (
+            UVToolRunnerError,
+            checked_requirement,
+        )
+
+        try:
+            return checked_requirement(
+                spec,
+                f"the --from spec for {self.command}",
+                package=self.uv_tool_package_name or self.command,
+            )
+        except UVToolRunnerError as error:
+            # The refusal's text carries no part of the spec, and the tool is
+            # named from this plugin's own field, so the line is value-free as
+            # built; the redaction of the plugin's values is the second guard
+            # the install-command setup keeps on the same kind of line, read
+            # guarded as every record line reads it (_values_to_redact).
+            message = f"{self.command}: {error}"
+            values = self._guarded_values()
+            if values:
+                message = text_without_values(message, values)
+            self._plugin_log(message, level=logging.WARNING)
+            return None
+
     def _uv_stderr_log_identity(
         self, results_dir: Optional[Path]
     ) -> Optional[Tuple[int, int, int, int]]:

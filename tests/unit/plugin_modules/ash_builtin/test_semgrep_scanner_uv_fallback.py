@@ -76,7 +76,9 @@ def test_the_install_fallback_runs_a_semgrep_binary_on_path(
     scanner = _scanner(test_plugin_context, monkeypatch)
     _install_fails(monkeypatch)
     monkeypatch.setattr(
-        semgrep_module, "get_uv_tool_command", lambda name: list(DIRECT_FORM)
+        semgrep_module,
+        "get_uv_tool_command",
+        lambda name, **kwargs: list(DIRECT_FORM),
     )
 
     assert scanner._validate_tool_dependencies() is True
@@ -103,7 +105,9 @@ def test_the_install_fallback_does_not_accept_the_uv_form(
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     _install_fails(monkeypatch)
-    monkeypatch.setattr(semgrep_module, "get_uv_tool_command", lambda name: list(found))
+    monkeypatch.setattr(
+        semgrep_module, "get_uv_tool_command", lambda name, **kwargs: list(found)
+    )
 
     assert scanner._validate_tool_dependencies() is False
     assert scanner.dependencies_satisfied is not True
@@ -126,7 +130,9 @@ def test_the_uv_unavailable_fallback_runs_the_tool_as_the_resolver_found_it(
     monkeypatch.setattr(
         SemgrepScanner, "_validate_uv_tool_availability", lambda self: False
     )
-    monkeypatch.setattr(semgrep_module, "get_uv_tool_command", lambda name: list(found))
+    monkeypatch.setattr(
+        semgrep_module, "get_uv_tool_command", lambda name, **kwargs: list(found)
+    )
 
     assert scanner._validate_tool_dependencies() is True
     assert scanner.dependencies_satisfied is True
@@ -137,6 +143,8 @@ def test_no_route_at_all_is_still_a_failed_check(test_plugin_context, monkeypatc
     """The control: a None answer leaves the dependency unsatisfied, as before."""
     scanner = _scanner(test_plugin_context, monkeypatch)
     _install_fails(monkeypatch)
-    monkeypatch.setattr(semgrep_module, "get_uv_tool_command", lambda name: None)
+    monkeypatch.setattr(
+        semgrep_module, "get_uv_tool_command", lambda name, **kwargs: None
+    )
 
     assert scanner._validate_tool_dependencies() is False

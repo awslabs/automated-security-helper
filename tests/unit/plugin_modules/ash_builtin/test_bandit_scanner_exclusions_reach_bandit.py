@@ -459,7 +459,9 @@ def test_a_path_binary_that_falls_short_is_refused_when_uv_is_absent(
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: [binary])
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
+    )
     monkeypatch.setattr(
         pre_installed_tool,
         "verify_pre_installed_tool",
@@ -481,7 +483,9 @@ def test_a_verified_path_binary_runs_directly_when_uv_is_absent(tmp_path, monkey
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: [binary])
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
+    )
     monkeypatch.setattr(
         pre_installed_tool,
         "verify_pre_installed_tool",
@@ -508,7 +512,9 @@ def test_after_a_failed_install_a_path_binary_runs_directly(tmp_path, monkeypatc
     monkeypatch.setattr(
         BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: [binary])
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: [binary]
+    )
 
     assert scanner.validate_plugin_dependencies() is True
     assert scanner.use_uv_tool is False, "the binary on PATH is what runs now"
@@ -530,7 +536,7 @@ def test_a_uv_answer_keeps_the_uv_route(tmp_path, monkeypatch):
     monkeypatch.setattr(
         bandit_scanner,
         "get_uv_tool_command",
-        lambda command: ["uv", "tool", "run", "bandit"],
+        lambda command, **kwargs: ["uv", "tool", "run", "bandit"],
     )
 
     assert scanner.validate_plugin_dependencies() is True

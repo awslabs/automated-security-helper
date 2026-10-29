@@ -707,7 +707,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             self._plugin_log("Successfully installed zizmor via UV tool")
             self.dependencies_satisfied = True
             return True
-        if get_uv_tool_command(self.command or "zizmor") is not None:
+        resolved = get_uv_tool_command(
+            self.command or "zizmor", from_spec=self._uv_probe_from_spec()
+        )
+        if resolved is not None:
             self.dependencies_satisfied = True
             return True
         return False
