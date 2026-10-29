@@ -244,7 +244,7 @@ CI never passes `pytest --snapshot-update`, and `tests/snapshot/conftest.py` ref
 `CI=1` does not trigger the refusal). `tests/snapshot/test_snapshot_policy.py` fails if
 any workflow, action, script or pytest configuration passes `pytest --snapshot-update`
 or `pytest --snapshot-warn-unused`, with one exception: the "Run PyTest" step of
-`.github/actions/run-unit-tests/action.yml` passes `--snapshot-warn-unused` once. CI's
+`.github/actions/run-unit-tests/action.yml` passes `pytest --snapshot-warn-unused` once. CI's
 tier runs and shards each see only part of the suite, so the snapshots of the other
 tiers' and shards' tests are unused by construction. A local whole-suite run keeps
 syrupy's failing default, so an orphaned snapshot is caught by a whole-suite run (and
@@ -254,9 +254,9 @@ surfaces as a warning line in the tier runs). A missing snapshot fails.
 
 A snapshot that no test asserts any more fails a whole-suite run. That is syrupy's
 default, and a local `pytest` keeps it. CI's tier runs and integration shards pass
-`--snapshot-warn-unused`, because each sees only part of the suite, so there an unused
+`pytest --snapshot-warn-unused`, because each sees only part of the suite, so there an unused
 snapshot is reported as a warning in the run's snapshot summary and does not fail the
-leg. The `--orphans` check below still fails CI for a snapshot file whose test module
+leg. The `check-snapshot-trailers.py --orphans` check below still fails CI for a snapshot file whose test module
 is gone. syrupy reports an unused snapshot in a
 test module that still exists. If you delete or rename a test module, syrupy never opens
 its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in

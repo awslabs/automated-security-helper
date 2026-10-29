@@ -72,13 +72,13 @@ module-level `integration` and a function-level `unit` count as two), makes coll
 refuse the whole session with a usage error that lists the first offenders, so nothing
 runs until each one has exactly one. The check is in `tests/conftest.py` and is pinned
 by `tests/unit/test_every_test_carries_one_tier_marker.py`. Other markers (`slow`,
-`skipif`, `usefixtures` and so on) are separate and stay as they are. `--strict-markers`
+`skipif`, `usefixtures` and so on) are separate and stay as they are. `pytest --strict-markers`
 is on, so a marker has to be registered in `pytest.ini` or in a `conftest.py` before a
 test can use it.
 
 CI selects its jobs by tier: `-m unit` runs unsharded for each operating system and
 Python version, `-m integration` runs sharded, and `-m e2e` runs unsharded. Locally,
-integration and e2e tests are skipped unless `--run-integration` is given:
+integration and e2e tests are skipped unless `pytest --run-integration` is given:
 
 ```bash
 uv run pytest -m unit
