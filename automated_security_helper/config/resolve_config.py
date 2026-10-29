@@ -2598,6 +2598,10 @@ def resolve_config(
         # predicate keys the client-supplied wording of the confine steps
         # above (confinement_membership).
         untrusted=client_supplied,
+        # The other scanned roots count as scanned here as they do for the
+        # sandbox and settle steps above: a module location inside one of
+        # their trees is refused as one inside the scan root's trees is.
+        also_scanned=[Path(extra) for extra in also_scanned],
         # Only a file whose walk stopped has a source of its own here: the
         # closing sentence of a decided membership is the one this step has
         # always given.
@@ -5571,6 +5575,7 @@ def confine_to_trusted_base(
     in_tree: Sequence[Path],
     source: Optional[UntrustedSource] = None,
     in_tree_documents: Sequence[Any] = (),
+    also_scanned: Sequence[Path | str] = (),
 ) -> None:
     """Replace what a config that is not the operator's may not choose, in place.
 
@@ -5607,6 +5612,10 @@ def confine_to_trusted_base(
         in_tree_documents: Those files' documents as they were parsed, so the
             reporter step's warning quotes a section as they spelled it where the
             merge kept another spelling (the operator's, in workspace mode).
+        also_scanned: Other roots whose trees count as scanned for the plugin
+            module step (``resolve_config``'s ``also_scanned``): a module
+            location inside one of their trees is refused as one inside
+            ``scanned_root``'s trees is. ``ash merge`` passes none today.
     """
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
@@ -5675,6 +5684,7 @@ def confine_to_trusted_base(
         given_root_membership=False,
         undecided_membership=memberships.undecided,
         source=source,
+        also_scanned=[Path(extra) for extra in also_scanned],
     )
     confine_reporter_destinations(
         config,
