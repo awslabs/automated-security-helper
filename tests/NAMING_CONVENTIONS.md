@@ -62,6 +62,9 @@ Mark a mixed file per test or per class. A class decorator covers every method o
 class, so do not also mark its methods, and a parametrized test takes one marker:
 
 ```python
+import pytest
+
+
 @pytest.mark.integration
 def test_scan_runs_the_real_tool(tmp_path): ...
 
@@ -95,6 +98,7 @@ CI selects its jobs by tier: `-m unit` runs unsharded for each operating system 
 Python version, `-m integration` runs sharded, and `-m e2e` runs unsharded. Locally,
 integration and e2e tests are skipped unless `pytest --run-integration` is given:
 
+<!-- doctest: illustrative reason="selects this repository's own test tiers, which the docs runner's sample project does not have" -->
 ```bash
 uv run pytest -m unit
 uv run pytest --run-integration -m "integration or e2e"
