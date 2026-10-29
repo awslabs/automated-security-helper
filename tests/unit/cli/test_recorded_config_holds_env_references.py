@@ -595,7 +595,7 @@ def test_ash_config_get_shows_the_reference(tmp_path, probe_env):
     assert "${ASH_PROBE_CANARY}" in result.output
 
 
-def test_ash_config_update_keeps_the_reference(tmp_path, probe_env):
+def test_ash_config_update_refuses_a_file_with_references(tmp_path, probe_env):
     """``ash config update`` writes the whole resolved config back, which would
     replace each reference with its value, so a file with environment references
     is refused with exit 1 and left as written (cli/config.py, _rewrite_refusal);
