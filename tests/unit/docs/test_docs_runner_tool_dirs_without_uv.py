@@ -21,6 +21,13 @@ asked, and the uv route stays as a further source. These tests prove the environ
 route alone: ``shutil.which`` answers None for everything, so neither uv route exists,
 and a child-process start would be a failure of the test.
 
+The invoking environment is the process's, with what the test session changed put
+back from the record tests/conftest.py exports. The session also removes uv's
+directory variables, so a developer or runner that set UV_TOOL_BIN_DIR or XDG_BIN_HOME
+would otherwise get HOME/.local/bin from both routes. Those two names are therefore
+restored from the record as well, and a name the record lacks is removed from the
+copy, since the session removed it: a value the process holds now is not trusted.
+
 The runner is loaded by path, as every test of it is, because tests/integration/docs
 is not a package. Nothing here runs a docs command or any program.
 """
@@ -29,6 +36,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -100,6 +108,20 @@ def _found() -> list[Path]:
     return [directory.resolve() for directory in runner.ash_tool_dirs()]
 
 
+def _record_developer_env(monkeypatch, real_home: Path, **recorded: str) -> None:
+    """Replace the fixture's record with one that also holds ``recorded``.
+
+    The process keeps none of these variables: the session removed them, and the
+    fixture has already deleted them from the environment. A variable the developer
+    set reaches the runner only through this record.
+    """
+    env = {"HOME": str(real_home), **recorded}
+    monkeypatch.setenv(
+        "ASH_TEST_DEVELOPER_HOME",
+        json.dumps({"env": env, "home": str(real_home)}),
+    )
+
+
 def test_the_default_directories_are_found_with_no_uv(without_uv):
     real_home, ash_bin, local_bin = without_uv
     assert runner._uv_executable() is None
@@ -111,7 +133,7 @@ def test_uv_tool_bin_dir_replaces_the_local_bin_default(
 ):
     real_home, ash_bin, local_bin = without_uv
     uv_tool = _planted_tool(tmp_path / "uv-tool-bin", "ash-docs-uv-tool")
-    monkeypatch.setenv("UV_TOOL_BIN_DIR", str(uv_tool.parent))
+    _record_developer_env(monkeypatch, real_home, UV_TOOL_BIN_DIR=str(uv_tool.parent))
     found = _found()
     assert found == [ash_bin.resolve(), uv_tool.parent.resolve()]
     assert local_bin.resolve() not in found
@@ -122,11 +144,16 @@ def test_xdg_bin_home_replaces_the_local_bin_default_when_uv_tool_bin_dir_is_uns
 ):
     real_home, ash_bin, local_bin = without_uv
     xdg_tool = _planted_tool(tmp_path / "xdg-bin", "ash-docs-xdg-tool")
-    monkeypatch.setenv("XDG_BIN_HOME", str(xdg_tool.parent))
+    _record_developer_env(monkeypatch, real_home, XDG_BIN_HOME=str(xdg_tool.parent))
     assert _found() == [ash_bin.resolve(), xdg_tool.parent.resolve()]
     # UV_TOOL_BIN_DIR comes first when both are set, as uv itself reads them.
     uv_tool = _planted_tool(tmp_path / "uv-tool-bin", "ash-docs-uv-tool")
-    monkeypatch.setenv("UV_TOOL_BIN_DIR", str(uv_tool.parent))
+    _record_developer_env(
+        monkeypatch,
+        real_home,
+        XDG_BIN_HOME=str(xdg_tool.parent),
+        UV_TOOL_BIN_DIR=str(uv_tool.parent),
+    )
     assert _found() == [ash_bin.resolve(), uv_tool.parent.resolve()]
 
 
@@ -134,11 +161,62 @@ def test_a_named_directory_that_does_not_exist_is_left_out(
     without_uv, tmp_path, monkeypatch
 ):
     real_home, ash_bin, local_bin = without_uv
-    monkeypatch.setenv("UV_TOOL_BIN_DIR", str(tmp_path / "never-made"))
+    never_made = tmp_path / "never-made"
+    _record_developer_env(monkeypatch, real_home, UV_TOOL_BIN_DIR=str(never_made))
     assert _found() == [ash_bin.resolve()]
 
 
 def test_the_same_directory_named_twice_is_listed_once(without_uv, monkeypatch):
     real_home, ash_bin, local_bin = without_uv
-    monkeypatch.setenv("UV_TOOL_BIN_DIR", str(ash_bin))
+    _record_developer_env(monkeypatch, real_home, UV_TOOL_BIN_DIR=str(ash_bin))
     assert _found() == [ash_bin.resolve()]
+
+
+def test_a_recorded_uv_tool_bin_dir_is_used_though_the_session_removed_it(
+    without_uv, tmp_path, monkeypatch
+):
+    real_home, ash_bin, local_bin = without_uv
+    recorded = _planted_tool(tmp_path / "recorded-uv-tool-bin", "ash-docs-uv-tool")
+    _record_developer_env(monkeypatch, real_home, UV_TOOL_BIN_DIR=str(recorded.parent))
+    assert "UV_TOOL_BIN_DIR" not in os.environ
+    found = _found()
+    assert found == [ash_bin.resolve(), recorded.parent.resolve()]
+    assert local_bin.resolve() not in found
+
+
+def test_a_recorded_xdg_bin_home_is_used_though_the_session_removed_it(
+    without_uv, tmp_path, monkeypatch
+):
+    real_home, ash_bin, local_bin = without_uv
+    recorded = _planted_tool(tmp_path / "recorded-xdg-bin", "ash-docs-xdg-tool")
+    _record_developer_env(monkeypatch, real_home, XDG_BIN_HOME=str(recorded.parent))
+    assert "XDG_BIN_HOME" not in os.environ
+    found = _found()
+    assert found == [ash_bin.resolve(), recorded.parent.resolve()]
+    assert local_bin.resolve() not in found
+
+
+def test_the_invoking_environment_carries_the_recorded_uv_directory_variables(
+    without_uv, monkeypatch
+):
+    real_home, ash_bin, local_bin = without_uv
+    _record_developer_env(
+        monkeypatch,
+        real_home,
+        UV_TOOL_BIN_DIR="/recorded/uv-tool-bin",
+        XDG_BIN_HOME="/recorded/xdg-bin",
+    )
+    env = runner.invoking_user_environment()
+    assert env["UV_TOOL_BIN_DIR"] == "/recorded/uv-tool-bin"
+    assert env["XDG_BIN_HOME"] == "/recorded/xdg-bin"
+    # The home variables are restored as before.
+    assert env["HOME"] == str(real_home)
+
+    # A name the record lacks was unset for the developer and removed by the
+    # session, so a value the process holds now is not trusted.
+    _record_developer_env(monkeypatch, real_home)
+    monkeypatch.setenv("UV_TOOL_BIN_DIR", "/stray/uv-tool-bin")
+    monkeypatch.setenv("XDG_BIN_HOME", "/stray/xdg-bin")
+    env = runner.invoking_user_environment()
+    assert "UV_TOOL_BIN_DIR" not in env
+    assert "XDG_BIN_HOME" not in env

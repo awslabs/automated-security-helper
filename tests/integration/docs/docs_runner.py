@@ -173,27 +173,36 @@ SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
 
 
 #: The variables tests/conftest.py moves into a private directory for the whole pytest
-#: run, and records (those that were set) as JSON in ASH_TEST_DEVELOPER_HOME.
+#: run, or removes for it, and records (those that were set) as JSON in
+#: ASH_TEST_DEVELOPER_HOME. The record also holds the other uv directory variables;
+#: only the two that name uv's tool bin directory are restored here, because those
+#: are the ones _uv_tool_bin_dir and the ``uv tool dir --bin`` child read.
 _MOVED_BY_THE_TEST_SESSION = (
     "HOME",
     "USERPROFILE",
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_STATE_HOME",
+    "UV_TOOL_BIN_DIR",
+    "XDG_BIN_HOME",
 )
 
 
 def invoking_user_environment() -> dict[str, str]:
-    """This process's environment, with the home variables the test session moved put back.
+    """This process's environment, with the variables the test session moved put back.
 
     tests/conftest.py points HOME, USERPROFILE and three XDG directories at a private
     directory before collection, so Path.home() here is that directory, which holds
-    no tool. ``ash dependencies install`` ran as the invoking user, outside the test
-    session, and put its tools under that user's home. The values the session replaced
+    no tool. It also removes uv's directory variables for the whole session. ``ash
+    dependencies install`` ran as the invoking user, outside the test session, and put
+    its tools under that user's home, or under the directory the user's
+    UV_TOOL_BIN_DIR or XDG_BIN_HOME names. The values the session replaced or removed
     are the ``env`` part of the JSON in ASH_TEST_DEVELOPER_HOME (read by
     developer_environment_record), and a variable that was unset is absent from it.
-    Without the record (this module run outside that conftest) nothing was moved and
-    the environment is returned as it is.
+    A variable absent from the record is removed from the copy, which is also what
+    the session did, so a value the process holds now is not trusted. Without the
+    record (this module run outside that conftest) nothing was moved and the
+    environment is returned as it is.
     """
     env = dict(os.environ)
     recorded = developer_environment_record()
