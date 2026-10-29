@@ -141,6 +141,67 @@ def _usable_cvss_score(cvss: Any) -> float | None:
     return float(score)
 
 
+# One comparator of an npm advisory range: an operator and a version.
+_RANGE_COMPARATOR = re.compile(
+    r"^(<=|>=|<|>|=)?v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?)$"
+)
+
+
+def _version_in_range(version: Any, vulnerable_range: Any) -> bool | None:
+    """Whether ``version`` is inside npm's ``vulnerable_range``, or None.
+
+    npm audit lists every installed copy of a package under each of its
+    advisories, so a copy at a fixed version carried the advisory of another
+    copy, and one GHSA split into several ranges (minimist's ``<0.2.4`` and
+    ``>=1.0.0 <1.2.6``) was reported once per range on every copy. The range
+    grammar read here is the one advisories use: alternatives joined by
+    ``||``, each a run of comparators (``<``, ``<=``, ``>``, ``>=``, ``=`` or a
+    bare version) that all have to hold, and ``*`` for everything.
+
+    None, which the caller reads as "keep the result", whenever the answer is
+    not certain: no version, a version or comparator that does not parse
+    (``^``, ``~``, ``x`` ranges, hyphen ranges), or a prerelease version, whose
+    place in a range npm's semver decides by rules not reproduced here.
+    """
+    from packaging.version import InvalidVersion, Version
+
+    if not isinstance(version, str) or not isinstance(vulnerable_range, str):
+        return None
+    try:
+        installed = Version(version.strip().lstrip("v"))
+    except InvalidVersion:
+        return None
+    if installed.is_prerelease or installed.local is not None:
+        return None
+    text = vulnerable_range.strip()
+    if text in ("", "*"):
+        return True
+    outcome = False
+    for alternative in text.split("||"):
+        holds = True
+        for comparator in alternative.split():
+            match = _RANGE_COMPARATOR.match(comparator)
+            if match is None:
+                return None
+            operator, bound_text = match.group(1) or "=", match.group(2)
+            try:
+                bound = Version(bound_text)
+            except InvalidVersion:
+                return None
+            if operator == "<":
+                holds = holds and installed < bound
+            elif operator == "<=":
+                holds = holds and installed <= bound
+            elif operator == ">":
+                holds = holds and installed > bound
+            elif operator == ">=":
+                holds = holds and installed >= bound
+            else:
+                holds = holds and installed == bound
+        outcome = outcome or holds
+    return outcome
+
+
 def _grade_properties(severity: str) -> Dict[str, str]:
     """The ``issue_severity`` a result declares from its advisory's severity word,
     for an advisory with no usable CVSS score; empty for a word not in the table,
@@ -1451,6 +1512,21 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         pkg_location, identity = self._node_place(
                             pkg_name, node_path, lock_rel, lock_index
                         )
+                        # A copy whose installed version the lockfile gives,
+                        # and which this advisory's own range excludes, is
+                        # not affected by it: npm lists every installed copy
+                        # under each advisory of the package, so a fixed copy
+                        # carried another copy's advisory and a GHSA split
+                        # into several ranges was reported once per range on
+                        # every copy. An uncertain answer keeps the result.
+                        if (
+                            via.get("range")
+                            and _version_in_range(
+                                identity.get(PACKAGE_VERSION_KEY), via_range
+                            )
+                            is False
+                        ):
+                            continue
                         result = Result(
                             ruleId=vuln_id,
                             level=via_level,
@@ -2167,6 +2243,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     all_results.setdefault("advisories", {}).update(
                                         audit_results["advisories"]
                                     )
+                                # yarn's records, so results.json keeps every
+                                # yarn lockfile's advisories: with no branch
+                                # for this key, every yarn lockfile after the
+                                # first was dropped from the merged file (the
+                                # SARIF, converted per lockfile, had them).
+                                yarn_records = audit_results.get(_YARN_ADVISORIES_KEY)
+                                if isinstance(yarn_records, list):
+                                    all_results.setdefault(
+                                        _YARN_ADVISORIES_KEY, []
+                                    ).extend(yarn_records)
                                 # Update metadata. A v1 report can carry the
                                 # key with a null value, so the value's type
                                 # decides on both sides: only a dict merges,
