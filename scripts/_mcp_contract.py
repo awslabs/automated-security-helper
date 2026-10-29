@@ -2041,7 +2041,11 @@ class Evaluator:
         alias, a reference passed on, a method of that name or a spread
         argument), so that the calls found are all the calls there are. A
         call that leaves the parameter out gives the parameter's default.
-        Each argument is read in its call's module scope, as a construction's are.
+        Each argument is read in the scope of the function the call sits in, the
+        module's for a call at module level (:meth:`_call_scope`), so a name the
+        calling function binds is read as that function's and never as a module
+        name it shadows. A call inside a lambda, a comprehension or a class body
+        leaves the parameter unread.
         """
         if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
             return None
@@ -2095,17 +2099,55 @@ class Evaluator:
             ):
                 return None
             passed = next((k.value for k in call.keywords if k.arg == name), None)
-            where = call_module
             if passed is None and name in positional:
                 index = positional.index(name)
                 if index < len(call.args):
                     passed = call.args[index]
             if passed is None:
-                passed, where = default, module
-            if passed is None:
+                if default is None:
+                    return None
+                # A default is bound where the function is defined.
+                parts.append(self.evaluate(default, _Scope(module=module)))
+                continue
+            scope = self._call_scope(call_module, call)
+            if scope is None:
                 return None
-            parts.append(self.evaluate(passed, _Scope(module=where)))
+            parts.append(self.evaluate(passed, scope))
         return union(*parts) if parts else None
+
+    def _call_scope(self, module: _Module, call: ast.Call) -> Optional[_Scope]:
+        """The scope an argument of ``call`` is read in, or None.
+
+        The module's for a call at module level. For a call inside a function,
+        that function's, with each function around it as a parent, so a name the
+        function binds (a parameter, an assignment, a loop target) is read as the
+        function's own and not as the module name it shadows; a parameter, whose
+        value this scope does not carry, is unread. A class body between a method
+        and the module is passed over, since its names are not in scope inside the
+        method. None for a call inside a lambda, a comprehension or a class body
+        itself, where a name can be bound by something this reader does not follow.
+        """
+        parents = self._parent_map(module)
+        funcs: list[ast.AST] = []
+        node = parents.get(id(call))
+        while node is not None:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                funcs.append(node)
+            elif isinstance(node, ast.ClassDef):
+                if not funcs:
+                    return None
+            elif isinstance(node, _OPAQUE_SCOPES):
+                return None
+            node = parents.get(id(node))
+        scope = _Scope(module=module)
+        for func in reversed(funcs):
+            scope = _Scope(
+                module=module,
+                func=func,
+                parent=scope,
+                locals=self._locals_for(func, module),
+            )
+        return scope
 
     def _reraises(
         self,
