@@ -2086,6 +2086,91 @@ class TestCandidateInputCount:
             "_notebooks_in_scan_set, or the two selections can drift"
         )
 
+    def test_a_notebook_under_an_operator_ignore_path_is_not_counted(self, converter):
+        """convert() skips it, so a missing nbconvert costs no coverage for it.
+
+        A tree whose only notebooks are ignored used to fail the completeness gate
+        on an unavailable nbconvert over files the converter would not have touched.
+        """
+        write_notebook(converter.context.source_dir / "keep", "keep.ipynb")
+        write_notebook(converter.context.source_dir / "vendor", "vendored.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="third-party code")
+        ]
+
+        assert converter.candidate_input_count() == 1
+
+        converter.context.config.global_settings.ignore_paths.append(
+            IgnorePathWithReason(path="keep/*", reason="generated")
+        )
+
+        assert converter.candidate_input_count() == 0
+
+    def test_a_client_supplied_ignore_path_does_not_lower_the_count(self, converter):
+        """The control: convert() converts a notebook under a client's entry."""
+        write_notebook(converter.context.source_dir / "client", "c.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="client/*", reason="client", client_supplied=True)
+        ]
+
+        assert converter.candidate_input_count() == 1
+
+    def test_ignore_suppressions_counts_a_notebook_under_an_ignore_path(
+        self, converter
+    ):
+        """With --ignore-suppressions convert() skips nothing, so nothing is left out."""
+        write_notebook(converter.context.source_dir / "vendor", "v.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator")
+        ]
+        converter.context.ignore_suppressions = True
+
+        assert converter.candidate_input_count() == 1
+
+
+class TestScanSetNamesAreReadAsGiven:
+    """A scan-set name is a file's name; stripping it names another file.
+
+    The selection used to strip whitespace from every name, which ``scan_set`` and
+    the archive converter stopped doing: a name ending in whitespace is a file that
+    exists only with it, and without it the converter opened a notebook that does
+    not exist and recorded the failure. Such a name is not a notebook's at all,
+    since its suffix is not ``.ipynb``.
+    """
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Windows drops a trailing space from a name"
+    )
+    def test_a_name_ending_in_whitespace_is_not_a_notebook(
+        self, converter, monkeypatch
+    ):
+        source = converter.context.source_dir
+        source.mkdir(parents=True, exist_ok=True)
+        spaced = source / "nb.ipynb "
+        spaced.write_text(json.dumps(_NOTEBOOK), encoding="utf-8")
+        assert spaced.exists() and not (source / "nb.ipynb").exists()
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(spaced)])
+
+        assert converter._notebooks_in_scan_set() == []
+        assert converter.candidate_input_count() == 0
+        assert converter.convert() == []
+        assert converter.failed_inputs == []
+        assert converter.refused_inputs == []
+
+    def test_a_notebook_whose_name_holds_a_space_converts(self, converter, monkeypatch):
+        """The control: whitespace inside a name was never the problem."""
+        notebook = write_notebook(converter.context.source_dir, "my nb.ipynb")
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
+        use_stand_in_nbconvert(monkeypatch, converter)
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+
+        assert converter._notebooks_in_scan_set() == [str(notebook)]
+        results = converter.convert()
+
+        assert len(results) == 1 and len(run.calls) == 1
+        assert converter.failed_inputs == []
+
 
 class TestOutputNames:
     """Every notebook that converts keeps an output of its own.

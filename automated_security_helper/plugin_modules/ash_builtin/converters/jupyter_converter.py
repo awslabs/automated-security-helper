@@ -27,7 +27,10 @@ from typing import (
 
 from pydantic import Field, PrivateAttr
 
-from automated_security_helper.models.core import ignore_paths_that_skip_scanning
+from automated_security_helper.models.core import (
+    IgnorePathWithReason,
+    ignore_paths_that_skip_scanning,
+)
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
     ConverterPluginConfigBase,
@@ -730,6 +733,10 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         avoid here: the count decides whether a missing nbconvert costs coverage, so a
         copy that drifted from the real selection would make the completeness gate fire
         on files this converter would not have touched, or stay silent on ones it would.
+
+        Paths as the scan set gives them: stripping them would turn a file whose
+        name ends in whitespace into one that does not exist, and such a name is
+        not a notebook's, since its suffix is not ``.ipynb``.
         """
         ipynb_files = scan_set(
             source=self.context.source_dir,
@@ -737,7 +744,31 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             honor_ignore_files=honors_ignore_files(self.context.config),
             run_id=getattr(self.context, "run_id", None),
         )
-        return [f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")]
+        return [f for f in ipynb_files if f.endswith(".ipynb")]
+
+    def _ignore_paths_skipping_conversion(self) -> List[IgnorePathWithReason]:
+        """The ignore paths that keep a notebook from being converted.
+
+        An expired entry no longer applies (active_ignore_paths); of the rest,
+        only the entries the operator supplied skip conversion, and
+        --ignore-suppressions lifts them all (ignore_paths_that_skip_scanning).
+        One reading for convert() and candidate_input_count, so the count says
+        what the conversion would have done.
+        """
+        return ignore_paths_that_skip_scanning(
+            active_ignore_paths(self.context.config.global_settings.ignore_paths),
+            ignore_suppressions=self.context.ignore_suppressions,
+        )
+
+    def _ignored_by(
+        self, ipynb_file: str, ignore_paths: List[IgnorePathWithReason]
+    ) -> Optional[IgnorePathWithReason]:
+        """The first of ``ignore_paths`` naming the notebook, or None."""
+        rel_path = Path(ipynb_file).relative_to(self.context.source_dir).as_posix()
+        for ignore_path in ignore_paths:
+            if ignore_path_matches(rel_path, ignore_path.path):
+                return ignore_path
+        return None
 
     def candidate_input_count(self) -> int | None:
         """How many notebooks this converter would convert, tool or no tool.
@@ -758,12 +789,17 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         """
         try:
             # Less the notebooks convert() would refuse, judged by the same check it
-            # opens them with, so a symlinked notebook is not counted as lost coverage.
+            # opens them with, so a symlinked notebook is not counted as lost
+            # coverage, and less those it would skip for an ignore path, read as
+            # convert() reads them, so a tree whose only notebooks are ignored does
+            # not fail the gate over files the converter would not have touched.
+            ignore_paths = self._ignore_paths_skipping_conversion()
             return len(
                 [
                     notebook
                     for notebook in self._notebooks_in_scan_set()
                     if refusal_reason(notebook, self.context.source_dir) is None
+                    and self._ignored_by(notebook, ignore_paths) is None
                 ]
             )
         except Exception as exc:  # pragma: no cover - defensive
@@ -1111,13 +1147,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             return results
 
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        # An expired entry no longer applies (active_ignore_paths); of the rest,
-        # only the entries the operator supplied skip conversion, and
-        # --ignore-suppressions lifts them all (ignore_paths_that_skip_scanning).
-        ignore_paths = ignore_paths_that_skip_scanning(
-            active_ignore_paths(self.context.config.global_settings.ignore_paths),
-            ignore_suppressions=self.context.ignore_suppressions,
-        )
+        # The same reading candidate_input_count takes, so the count says what
+        # this loop does.
+        ignore_paths = self._ignore_paths_skipping_conversion()
         # The output names this run has used, each with its notebook, so two
         # notebooks whose paths fold to one name get two outputs (_output_base).
         taken: Dict[str, str] = {}
@@ -1130,18 +1162,12 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     ASH_LOGGER.debug(f"Skipping directory: {ipynb_file}")
                     skip_item = True
                 else:
-                    for ignore_path in ignore_paths:
-                        rel_path = (
-                            Path(ipynb_file)
-                            .relative_to(self.context.source_dir)
-                            .as_posix()
+                    ignored_by = self._ignored_by(ipynb_file, ignore_paths)
+                    if ignored_by is not None:
+                        ASH_LOGGER.debug(
+                            f"Skipping conversion of ignored path: {ipynb_file} due to global ignore_path '{ignored_by.path}' with reason '{ignored_by.reason}'"
                         )
-                        if ignore_path_matches(rel_path, ignore_path.path):
-                            ASH_LOGGER.debug(
-                                f"Skipping conversion of ignored path: {ipynb_file} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"
-                            )
-                            skip_item = True
-                            break
+                        skip_item = True
                 if skip_item:
                     continue
 
