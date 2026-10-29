@@ -146,10 +146,24 @@ TRIVY_UPDATE_OPT_OUTS: Mapping[str, Tuple[Tuple[str, ...], Tuple[str, str]]] = {
     "Java database": (("TRIVY_SKIP_JAVA_DB_UPDATE",), ("db", "java-skip-update")),
 }
 
+#: grype's own opt-out of its database update: ``GRYPE_DB_AUTO_UPDATE`` and its
+#: config key ``db.auto-update``, read in that order as viper reads them. Set to
+#: false, grype itself downloads nothing at scan time; ASH's update replaced that
+#: download, so the setting applies to ASH's update too, as trivy's does above.
+GRYPE_UPDATE_OPT_OUT: Tuple[Tuple[str, ...], Tuple[str, str]] = (
+    ("GRYPE_DB_AUTO_UPDATE",),
+    ("db", "auto-update"),
+)
+
 #: The strings Go's ``strconv.ParseBool`` reads as true, which is how trivy reads a
 #: boolean from the environment or a config string. Anything else, ``yes`` included,
 #: is false.
 _GO_TRUE = frozenset({"1", "t", "T", "TRUE", "true", "True"})
+
+#: The strings Go's ``strconv.ParseBool`` reads as false. grype's auto-update is on
+#: unless its setting reads as one of these; a string that is neither true nor false
+#: is an error grype reports itself, and no opt-out.
+_GO_FALSE = frozenset({"0", "f", "F", "FALSE", "false", "False"})
 
 _prepared_lock = threading.Lock()
 _prepared: Set[Tuple[str, str, bool, bool, str, str]] = set()
@@ -269,11 +283,34 @@ def trivy_update_opt_outs(
     return found
 
 
-def _env_opt_out(env: Mapping[str, str], names: Tuple[str, ...]) -> Optional[str]:
+def grype_update_opt_outs(
+    env: Mapping[str, str], config_file: Optional[Union[str, Path]]
+) -> Dict[str, str]:
+    """Whether the operator's settings turn grype's database update off, and how.
+
+    Keyed as ``trivy_update_opt_outs`` is (``database`` only; grype has one
+    database), naming the setting. Read as viper reads it for grype:
+    ``GRYPE_DB_AUTO_UPDATE`` when set to a non-empty value, else ``db.auto-update``
+    in ``config_file``, the operator's grype config the update is given. The
+    setting opts out when it reads as false (``_GO_FALSE``); grype's default is on.
+    """
+    names, key = GRYPE_UPDATE_OPT_OUT
+    setting = _env_opt_out(env, names, opt_out=_GO_FALSE)
+    if setting is None and not any(env.get(name) for name in names):
+        config = _composed_yaml(Path(config_file)) if config_file is not None else None
+        setting = _config_opt_out(config, key, config_file, opt_out=_GO_FALSE)
+    return {"database": setting} if setting is not None else {}
+
+
+def _env_opt_out(
+    env: Mapping[str, str],
+    names: Tuple[str, ...],
+    opt_out: frozenset = _GO_TRUE,
+) -> Optional[str]:
     for name in names:
         value = env.get(name)
         if value:
-            return f"{name}={value}" if value in _GO_TRUE else None
+            return f"{name}={value}" if value in opt_out else None
     return None
 
 
@@ -295,12 +332,16 @@ def _config_opt_out(
     root: Optional[yaml.Node],
     key: Tuple[str, str],
     config_file: Optional[Union[str, Path]],
+    opt_out: frozenset = _GO_TRUE,
 ) -> Optional[str]:
-    """``key`` (``db``, ``skip-update``) in the composed config, as trivy reads it.
+    """``key`` (``db``, ``skip-update``) in the composed config, as the tool reads it.
 
-    Nested or dotted (``db.skip-update``), and case-insensitively, as trivy's config
-    library matches keys. True for a plain integer other than 0 and for a string
-    ``strconv.ParseBool`` accepts, quoted or not.
+    Nested or dotted (``db.skip-update``), and case-insensitively, as both tools'
+    config library matches keys. The value is an opt-out when it reads as one of
+    ``opt_out``: true for trivy's skip settings, false for grype's auto-update. A
+    plain integer reads as true unless it is 0; a string reads as what
+    ``strconv.ParseBool`` makes of it, quoted or not, and a string it rejects is
+    neither, so it is no opt-out.
     """
     value = _mapping_get(_mapping_get(root, key[0]), key[1])
     if value is None:
@@ -309,10 +350,10 @@ def _config_opt_out(
         return None
     text = value.value
     if value.style is None and re.fullmatch(r"[-+]?[0-9]+", text):
-        enabled = int(text) != 0
+        reads_as = "1" if int(text) != 0 else "0"
     else:
-        enabled = text in _GO_TRUE
-    return f"{'.'.join(key)}: {text} in {config_file}" if enabled else None
+        reads_as = text
+    return f"{'.'.join(key)}: {text} in {config_file}" if reads_as in opt_out else None
 
 
 def _mapping_get(node: Optional[yaml.Node], key: str) -> Optional[yaml.Node]:
@@ -328,12 +369,21 @@ def _mapping_get(node: Optional[yaml.Node], key: str) -> Optional[yaml.Node]:
 def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     """Where the refresh lock for ``cache_dir`` lives.
 
-    In the cache directory when it, or the directory it will be created in, is
-    writable; otherwise in the temporary directory, named for the cache, so the
-    callers on this host still take turns.
+    In the cache directory when it, or the nearest directory above it that exists
+    (the one it will be created under), is writable; otherwise in the temporary
+    directory, named for the cache, so the callers on this host still take turns.
+
+    The nearest existing ancestor rather than the parent alone: a first refresh of
+    a cache whose parent does not exist yet either (``~/.cache/grype/db`` on a host
+    with no ``~/.cache/grype``) would otherwise read the missing parent as not
+    writable and take the temporary-directory lock, and a caller arriving once the
+    refresh had created the cache would take the lock inside it, so the two ran at
+    once.
     """
     cache = Path(cache_dir)
-    probe = cache if cache.exists() else cache.parent
+    probe = cache
+    while not probe.exists() and probe.parent != probe:
+        probe = probe.parent
     if os.access(probe, os.W_OK):
         return cache / f".ash-{tool}-update.lock"
     digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
@@ -373,25 +423,26 @@ def prepare_content_db(
             (``scan_id_for``). None refreshes on every call (the tool itself
             returns at once when current).
         executable: The tool to run; found on PATH when not given.
-        config_file: trivy only: the config file to pass instead of an empty one.
-            Only a file the caller has established is the operator's and outside
-            the scanned tree (``TrivyScannerBase._operator_path``); never one the
+        config_file: The operator's config file to pass instead of an empty one
+            (``--config`` for trivy, ``-c`` for grype), so a database mirror or
+            CA it names applies to the update as it does to the scan. Only a
+            file the caller has established is the operator's and outside the
+            scanned tree (``TrivyScannerBase._operator_path``); never one the
             scanned repository could have written.
         values: The caller's env-read values: a failed update's stderr excerpt
             is redacted with them BEFORE it is cut, so the cut cannot split a
             value and leave a fragment the downstream whole-spelling
             redaction misses.
 
-    A trivy update the operator's settings turn off is not run, with a warning; see
-    "The operator's opt-out" above.
+    An update the operator's settings turn off (trivy's skip settings, grype's
+    ``GRYPE_DB_AUTO_UPDATE=false``) is not run, with a warning; see "The operator's
+    opt-out" above.
 
     Raises:
         ScannerError: The tool is missing, failed, or timed out.
     """
     if tool not in TOOLS:
         raise ValueError(f"no content database refresh for {tool!r}")
-    if config_file is not None and tool != "trivy":
-        raise ValueError(f"no config file for the {tool} refresh")
     if offline:
         return
     cache = Path(os.path.abspath(Path(cache_dir).expanduser()))
@@ -417,19 +468,18 @@ def prepare_content_db(
             *(["Java database"] if java else []),
             *(["checks bundle"] if checks else []),
         ]
-    skipped = {
-        what: setting
-        for what, setting in (
-            trivy_update_opt_outs(env, operator_config) if tool == "trivy" else {}
-        ).items()
-        if what in wanted
-    }
+    opt_outs = (
+        trivy_update_opt_outs(env, operator_config)
+        if tool == "trivy"
+        else grype_update_opt_outs(env, operator_config)
+    )
+    skipped = {what: setting for what, setting in opt_outs.items() if what in wanted}
     for what, setting in skipped.items():
         ASH_LOGGER.warning(
-            f"ASH did not update trivy's {what} in {cache.as_posix()} before the "
-            f"scan: the operator's {setting} turns trivy's own update off, and ASH "
-            "honors it. trivy reads what is already in the cache; the scan-time "
-            "staleness check still holds trivy's vulnerability database to its bound."
+            f"ASH did not update {tool}'s {what} in {cache.as_posix()} before the "
+            f"scan: the operator's {setting} turns {tool}'s own update off, and ASH "
+            f"honors it. {tool} reads what is already in the cache; the scan-time "
+            f"staleness check still holds {tool}'s vulnerability database to its bound."
         )
     if any(what not in skipped for what in wanted):
         program = executable or find_executable(tool)
@@ -506,8 +556,28 @@ def _commands(
     if checks:
         empty = workdir / "empty-target"
         empty.mkdir()
+        # The report of this scan of nothing goes to a file in the work directory,
+        # removed with it, in the default format: pinned on the command line, where
+        # it beats the operator's TRIVY_OUTPUT or TRIVY_FORMAT and the `output:` or
+        # `format:` of the trivy.yaml this command runs with. Left to those, the
+        # fetch wrote an empty report over the operator's own report file, or
+        # failed on a format that needs a template.
+        report = workdir / "checks-bundle-report"
         commands.append(
-            ([program, "config", *common, empty.as_posix()], env, "checks bundle")
+            (
+                [
+                    program,
+                    "config",
+                    *common,
+                    "--format",
+                    "table",
+                    "--output",
+                    report.as_posix(),
+                    empty.as_posix(),
+                ],
+                env,
+                "checks bundle",
+            )
         )
     return commands
 

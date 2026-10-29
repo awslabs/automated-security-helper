@@ -181,6 +181,14 @@ class ContentDbAgeRecord:
     #: The tool reports that the database does not exist (see "Failure modes" in the
     #: module docstring). Omitted from ``to_dict`` when False, like ``policy_source``.
     absent: bool = False
+    #: What the scan that made this record decided about ``stale``, when the record
+    #: was read back from a results file (``from_dict``); None for a record this
+    #: process measured. A read-back record keeps the scan's decision: recomputed from
+    #: ``built`` and ``measured_at`` as the file carries them, truncated to the second,
+    #: and from the reading ASH's bound rather than the recorded one, the answer could
+    #: differ at the edge, and an error-level notification then read back as not
+    #: enforced and left the exit-code gate.
+    recorded_stale: Optional[bool] = None
 
     @property
     def age(self) -> Optional[timedelta]:
@@ -190,12 +198,17 @@ class ContentDbAgeRecord:
 
     @property
     def stale(self) -> bool:
-        """Past the bound, or of unknown age; see "Failure modes" in the module docstring."""
+        """Past the bound, or of unknown age; see "Failure modes" in the module docstring.
+
+        Measured against the bound this record carries (``max_age``), which is the
+        bound the scan held the database to: a record read back from an older results
+        file keeps its own answer when this ASH declares another bound.
+        """
+        if self.recorded_stale is not None:
+            return self.recorded_stale
         if self.built is None:
             return True
-        return is_stale(
-            _registry_entry(self.name, self.max_age), self.built, self.measured_at
-        )
+        return is_stale(_recorded_bound(self), self.built, self.measured_at)
 
     @property
     def enforced(self) -> bool:
@@ -308,23 +321,27 @@ class ContentDbAgeRecord:
             timestamp_label=str(data.get("timestamp_label") or "built"),
             policy_source=data.get("policy_source") or None,
             absent=data.get("absent") is True,
+            # The scan's own decision, kept as it was written; a file from before
+            # the field was written (no boolean) is measured from its timestamps.
+            recorded_stale=(
+                data["stale"] if isinstance(data.get("stale"), bool) else None
+            ),
         )
 
 
-def _registry_entry(name: str, max_age: timedelta) -> ContentDatabase:
-    """The registry entry, or a stand-in carrying the recorded bound.
+def _recorded_bound(record: "ContentDbAgeRecord") -> ContentDatabase:
+    """A registry stand-in carrying the bound the record was measured against.
 
-    A record read back from an older results file may name a database this ASH no longer
-    declares; its own recorded bound still decides whether it was stale.
+    ``is_stale`` reads only the entry's ``max_age``. The record's own bound, not the
+    registry's for a database of that name: a record read back from a results file
+    written under another bound (an older ASH, or one this ASH no longer declares)
+    is judged by the bound its scan held the database to.
     """
-    for entry in CONTENT_DATABASES:
-        if entry.name == name:
-            return entry
     return ContentDatabase(
-        name=name,
+        name=record.name,
         scanner="",
         cache_path="",
-        max_age=max_age,
+        max_age=record.max_age,
         bound_source="",
         bound_is_tool_default=False,
         age_source="",
@@ -333,7 +350,15 @@ def _registry_entry(name: str, max_age: timedelta) -> ContentDatabase:
 
 
 def _iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # isoformat rather than strftime: on glibc ``%Y`` writes a year under 1000 without
+    # zero padding ("1-01-01" for Go's zero time), which ``parse_timestamp`` cannot
+    # read back, so such a record vanished from every read-back of the results.
+    return (
+        value.astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def format_age(age: Optional[timedelta]) -> str:
@@ -773,20 +798,29 @@ def assess_scanner(
 
     Never raises. A failure to ask the scanner which databases it used is itself recorded as
     an unmeasurable record for each database declared for it, so a defect here cannot quietly
-    turn the check off.
+    turn the check off. A failure to build the probe context, once the scanner has said which
+    databases it read, is recorded for those databases only: a scan that read none (an online
+    semgrep or opengrep, trivy without its vulnerability scanner) is not graded against the
+    databases it did not read. Such a record is unmeasurable, not ``absent``: nothing was
+    learned about whether the database exists, so the policy still decides what it does.
     """
     scanner_name = str(
         getattr(getattr(scanner_plugin, "config", None), "name", "") or ""
     )
+    failure = ""
     try:
         entries = list(scanner_plugin.content_databases_in_use())
-        ctx = scanner_plugin.content_database_probe_context()
     except Exception as exc:  # noqa: BLE001
         entries = [e for e in CONTENT_DATABASES if scanner_name in e.readers]
-        ctx = None
         failure = f"{type(exc).__name__}: {exc}"
     if not entries:
         return []
+    ctx = None
+    if not failure:
+        try:
+            ctx = scanner_plugin.content_database_probe_context()
+        except Exception as exc:  # noqa: BLE001
+            failure = f"{type(exc).__name__}: {exc}"
 
     now = now or datetime.now(timezone.utc)
     records: List[ContentDbAgeRecord] = []
@@ -807,6 +841,9 @@ def assess_scanner(
             )
             record.error = f"the scanner could not describe its database: {failure}"
             record.built = None
+            # Unmeasured, not absent: the empty context's probe found no cache
+            # to look in, which says nothing about the database the scan read.
+            record.absent = False
         else:
             record = measure(entry, ctx, entry_policy, now, scanner_name)
         record.policy_source = policy_source
@@ -933,9 +970,12 @@ def scanners_in_error_for_a_stale_database(results: Any) -> set[str]:
     for any other reason is not in this set and is still reported as incomplete.
 
     A scanner qualifies when every per-target report of it in ERROR names a rejected
-    database, at least one does, and the results carry an enforced stale record for
-    it. A results file written before the marker existed has no such report, so its
-    ERROR rows keep the stricter reading.
+    database and nothing else, at least one does, and the results carry an enforced
+    stale record for it. A report whose ERROR also carries a tool ASH could not stop
+    (``could_not_stop``) or an error beyond the one per rejected database (a timeout,
+    a target no rule was evaluated against) is a second coverage gap, so that scanner
+    stays in the incomplete rows. A results file written before the marker existed
+    has no such report, so its ERROR rows keep the stricter reading.
     """
     from automated_security_helper.core.enums import ScannerStatus
 
@@ -954,11 +994,25 @@ def scanners_in_error_for_a_stale_database(results: Any) -> set[str]:
             and getattr(report.get("status"), "value", report.get("status"))
             == ScannerStatus.ERROR.value
         ]
-        if in_error and all(
-            report.get("rejected_content_databases") for report in in_error
-        ):
+        if in_error and all(_error_only_for_a_stale_database(r) for r in in_error):
             found.add(name)
     return found
+
+
+def _error_only_for_a_stale_database(report: Mapping[str, Any]) -> bool:
+    """Whether the per-target ``report``'s ERROR is its rejected databases alone.
+
+    The executor adds one error per rejected database when it records the ERROR; a
+    timeout, an unevaluated target or a stop that failed adds a line of its own, or
+    sets ``could_not_stop``.
+    """
+    rejected = report.get("rejected_content_databases")
+    if not rejected:
+        return False
+    if report.get("could_not_stop"):
+        return False
+    errors = report.get("errors")
+    return not isinstance(errors, (list, tuple)) or len(errors) <= len(rejected)
 
 
 def probe_env(extra: Optional[Mapping[str, str]]) -> Dict[str, str]:
