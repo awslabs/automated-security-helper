@@ -667,7 +667,7 @@ class TestATierRunThatRanNothingInARealPytest:
                 encoding="utf-8",
             )
 
-    def _run(self, root: Path, *, under_ci: bool):
+    def _run(self, root: Path, *, under_ci: bool, extra: tuple[str, ...] = ()):
         env = _clean_env(PYTHONPATH=str(REPO_ROOT))
         if under_ci:
             env[sharding.FLOOR_ENV_VAR] = "1"
@@ -689,6 +689,7 @@ class TestATierRunThatRanNothingInARealPytest:
                 "no:randomly",
                 "-m",
                 "unit",
+                *extra,
             ],
             cwd=root,
             env=env,
@@ -713,6 +714,46 @@ class TestATierRunThatRanNothingInARealPytest:
         assert "tier run executed no test: 2 collected, 1 skipped, 0 executed" in (
             done.stdout
         ), done.stdout
+
+    def test_the_floor_fires_under_xdist_where_the_controller_collects_nothing(
+        self, tmp_path
+    ):
+        """As CI runs it, ``-n 2``: the controller learns the counts from the workers.
+
+        It relies on two xdist internals the unit cases only mock: the controller
+        receives each worker's reports through ``pytest_runtest_logreport``, and sets
+        ``session.testscollected`` itself.
+        """
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=True, extra=("-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert self.LINE in done.stdout, done.stdout
+
+    def test_a_passing_leg_assertion_does_not_hide_an_all_skipped_leg_under_xdist(
+        self, tmp_path
+    ):
+        """The mark travels on the report, which is all the controller receives."""
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, leg_assertion=True)
+        done = self._run(tmp_path, under_ci=True, extra=("-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "tier run executed no test: 2 collected, 1 skipped, 0 executed" in (
+            done.stdout
+        ), done.stdout
+
+    def test_the_same_leg_with_a_real_passing_test_stays_green_under_xdist(
+        self, tmp_path
+    ):
+        """The control for the two cases above: a worker's pass is counted."""
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, leg_assertion=True, real_test=True)
+        done = self._run(tmp_path, under_ci=True, extra=("-n", "2"))
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "executed no test" not in done.stdout, done.stdout
 
     def test_the_same_leg_with_a_real_passing_test_stays_green(self, tmp_path):
         """The control for the case above: one executed test is enough."""
