@@ -937,3 +937,27 @@ def test_the_batch_records_the_exit_code_of_a_child_that_died(tmp_path, monkeypa
 
     assert [r.get("returncode") for r in batch.failed_child_responses] == [139]
     assert batch.could_not_stop_response is None
+
+
+@pytest.mark.unit
+def test_a_relative_work_root_still_hands_the_child_paths_it_can_find(
+    tmp_path, monkeypatch
+):
+    """The child runs with the work directory as its cwd and takes the request and
+    response paths on its argv, so they must be absolute. At the base a relative
+    ``outdir`` produced relative argv paths, resolved by the child against its own cwd,
+    and the request was never found."""
+    monkeypatch.chdir(tmp_path)
+    templates = _templates(tmp_path, 1)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    calls: List[List[str]] = []
+    _patch_spawn(monkeypatch, _fake_child(answers, calls))
+
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], Path("relative-out"), values=()
+    ):
+        assert _call(templates[0], Path("relative-out")) is None
+
+    request_path, response_path = Path(calls[0][-2]), Path(calls[0][-1])
+    assert request_path.is_absolute(), request_path
+    assert response_path.is_absolute(), response_path

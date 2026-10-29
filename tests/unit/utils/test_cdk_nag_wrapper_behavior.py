@@ -2966,3 +2966,20 @@ def test_a_json_declaration_is_found_by_its_quoted_key(cdk_doubles, tmp_path, ou
     )
     region = _only_finding(response).locations[0].physicalLocation.root.region
     assert region.startLine == declaration, (region, lines)
+
+
+def test_a_colon_in_the_template_name_is_folded_out_of_the_synth_directory_name(
+    cdk_doubles, tmp_path, outdir
+):
+    """A name that keeps a colon is drive-qualified on Windows (``C:--other--t--yaml``),
+    and ``joinpath`` then discards the output directory when the drives differ. The
+    sanitizer folds the colon with the separators; pinned here with a colon that a
+    POSIX filename may carry, since the drive-letter shape cannot exist on this host."""
+    template = tmp_path / "drive:like.yaml"
+    template.write_text(TEMPLATE_YAML, encoding="utf-8")
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert ":" not in Path(response.outdir).name, response.outdir
+    assert Path(response.outdir).parent == outdir

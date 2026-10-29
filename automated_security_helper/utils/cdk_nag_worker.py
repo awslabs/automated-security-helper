@@ -509,7 +509,11 @@ def _run_child(
         run_command_with_output_handling,
     )
 
-    work_dir = work_root.joinpath(_WORK_DIR_NAME, uuid.uuid4().hex)
+    # Absolute, because the request and response paths go to the child on its argv
+    # and the child is started with this directory as its cwd: a relative work_root
+    # (an ``outdir`` given relative to the parent's cwd) made argv paths the child
+    # resolved against work_dir instead, and it never found its request.
+    work_dir = Path(work_root).absolute().joinpath(_WORK_DIR_NAME, uuid.uuid4().hex)
     # A directory of this child's own, every time, retries included: one already
     # at the name is not reused, so no request or response file is ever left
     # from an earlier child.

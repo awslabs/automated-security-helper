@@ -1102,8 +1102,12 @@ def run_cdk_nag_against_cfn_template(
             template_digest = hashlib.sha256(
                 Path(template_path).absolute().as_posix().encode("utf-8")
             ).hexdigest()[:12]
+            # The colon is folded with the separators. A template outside the working
+            # directory keeps its drive letter on Windows (``C:/other/t.yaml``), and a
+            # name that still starts ``C:`` is drive-qualified to ``joinpath``, which then
+            # discards the output directory when the drives differ.
             clean_template_filename = (
-                re.sub(r"(\/|\\|\.)+", "--", clean_template_filename.lstrip("/"))
+                re.sub(r"(\/|\\|\.|:)+", "--", clean_template_filename.lstrip("/"))
                 + "--"
                 + template_digest
             )
