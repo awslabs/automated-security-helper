@@ -1453,6 +1453,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # PASSED: a tree that was never scanned read as clean. The text
                 # raised is the logged line, which carries no environment value.
                 self._record_timeout(response, scan_timeout)
+                # A stop that failed (timed_out with no exit code, or the
+                # runner's could_not_stop key) is recorded as the base class's
+                # _run_subprocess records it, so the executor and run_ash_scan
+                # fail the run: the worker may still be running and can write
+                # its raw findings into the results directory after cleanup.
+                # Without this record the run read as a plain timeout.
+                self._record_could_not_stop(response)
                 raise ScannerError(
                     f"{timed_out_text}, so the worker was killed and produced no "
                     "results file. Raise scanners.detect-secrets.options.scan_timeout "
