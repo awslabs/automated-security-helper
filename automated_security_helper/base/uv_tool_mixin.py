@@ -184,15 +184,16 @@ def _uv_unavailable(runner: Any) -> str:
 class UVToolMixin:
     """UV tool management methods extracted from PluginBase."""
 
-    # A private attribute of PluginBase: why the last _try_uv_tool_execution
-    # could not run the tool through uv, or None.
+    # Private attributes of PluginBase, typed here for the methods below. An
+    # underscore-named annotation is never a pydantic field, so these two are
+    # plain annotations: why the last _try_uv_tool_execution could not run the
+    # tool through uv, or None; and the version probe deferred at construction
+    # (a PrivateAttr defaulting to None on PluginBase), which
+    # resolve_deferred_tool_version clears once the probe has answered.
     _uv_run_failure: Optional[str]
+    _deferred_tool_version_probe: Optional[tuple[str, Optional[str]]]
 
     if TYPE_CHECKING:
-        # PluginBase declares it, as a PrivateAttr defaulting to None, which
-        # resolve_deferred_tool_version sets again once the probe has run.
-        _deferred_tool_version_probe: Optional[tuple[str, Optional[str]]]
-
         # ScannerPluginBase and ConverterPluginBase declare it, defaulting to
         # None. Typed here only: a real class-level annotation would be read by
         # pydantic as a required field of every plugin model that mixes this in.

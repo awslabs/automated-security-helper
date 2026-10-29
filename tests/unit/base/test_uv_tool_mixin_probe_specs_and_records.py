@@ -17,7 +17,9 @@ Each test pins one fix in ``base/uv_tool_mixin.py``:
 * an installed-but-broken tool is reinstalled, and the plugin's own offline mode
   reaches uv;
 * the import-failure arm of the uv run names the component that failed to
-  import, and still answers when the runner's own import is what raised.
+  import, and still answers when the runner's own import is what raised;
+* the mixin's private-attribute annotations are plain annotations, and the one
+  public name it types stays out of every plugin model's fields.
 """
 
 from __future__ import annotations
@@ -397,6 +399,23 @@ class TestTheImportFailureArmNamesTheComponent:
         assert plugin._uv_run_failure.startswith(self.RUNNER_WORDING), (
             plugin._uv_run_failure
         )
+
+
+class TestTheMixinsAnnotations:
+    def test_the_private_attributes_are_annotated_at_runtime(self):
+        """An underscore-named annotation is no pydantic field, so neither needs
+        the TYPE_CHECKING fence; the deferred probe's used to sit behind it."""
+        annotations = UVToolMixin.__annotations__
+        assert "_uv_run_failure" in annotations
+        assert "_deferred_tool_version_probe" in annotations
+
+    def test_the_public_name_is_no_field_of_a_plugin_model(self):
+        """The control: the fenced annotation stays out of the model fields."""
+        from automated_security_helper.base.plugin_base import PluginBase
+
+        assert "dependency_unavailable_reason" not in UVToolMixin.__annotations__
+        assert "dependency_unavailable_reason" not in PluginBase.model_fields
+        assert "_deferred_tool_version_probe" not in PluginBase.model_fields
 
 
 class TestThePluginsOwnOfflineMode:
