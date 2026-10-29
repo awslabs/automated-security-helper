@@ -41,7 +41,7 @@ module "ash_image" {
   source = "../../../ash-image-pipeline"
 
   name_prefix         = "ash-mcp-fargate"
-  ash_version         = "v3.7.0"
+  ash_version         = "v3.7.1"
   target_architecture = "x86_64"
   rebuild_schedule    = "rate(1 day)"
 

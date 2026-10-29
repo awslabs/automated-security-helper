@@ -282,7 +282,7 @@ So the install is what this repository documents for CI:
 
 <!-- doctest: illustrative reason="installs from the network" -->
 ```console
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
 ```
 
 If ASH is ever published to PyPI under a name the project controls, installing by
