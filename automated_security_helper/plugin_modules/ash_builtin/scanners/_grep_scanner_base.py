@@ -259,6 +259,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             self._configure_offline_mode()
         else:
             self._configure_online_mode()
+        # The rule's own id rather than a path-derived prefix, online and offline
+        # alike: the bundled ASH rules above are passed by path in both modes, and
+        # passing this only offline gave the same rule two ids depending on the
+        # mode the scan ran in.
+        self.args.extra_args.append(ToolExtraArg(key="--no-rewrite-rule-ids", value=""))
 
         # A .semgrepignore in the scanned tree is the repository's own choice of
         # what to leave out, and both tools honor one on their own: semgrep from
@@ -346,12 +351,45 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 warnings.append(message)
                 self._plugin_log(message, level=logging.WARNING)
 
+    def _local_rules_configured(self) -> Optional[str]:
+        """The operator's ``options.config`` as an absolute path, when it names a
+        rule file or directory on this host; None for a registry name or a URL.
+
+        Offline, a local rule file needs no network, so it is what the scan runs
+        with, as it is online. Absolute because the tool runs in the source
+        directory while the path was written relative to ASH's working directory.
+        """
+        configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
+        if not configured or not isinstance(configured, str):
+            return None
+        if "://" in configured:
+            return None
+        candidate = Path(os.path.abspath(configured))
+        if candidate.is_file() or candidate.is_dir():
+            return candidate.as_posix()
+        return None
+
     def _configure_offline_mode(self) -> None:
-        """Set --metrics off (when supported), validate cache dir, append cache --config."""
+        """Set --metrics off (when supported), then the rules: the operator's local
+        rule file or directory when ``options.config`` names one, else the
+        validated cache directory as ``--config``."""
         if self.emit_metrics_flag():
             self.args.extra_args.append(
                 ToolExtraArg(key="--metrics", value=self.metrics_value_offline())
             )
+
+        local_rules = self._local_rules_configured()
+        if local_rules is not None:
+            # The operator's own rules, as online. The registry cache is not
+            # needed for them and not read: online passes the configured rules
+            # alone, and an offline scan of the same configuration should run
+            # the same rules.
+            ASH_LOGGER.info(
+                f"{self.cache_dir_name()} offline mode: using the configured local "
+                f"rules from {local_rules}"
+            )
+            self.args.extra_args.append(ToolExtraArg(key="--config", value=local_rules))
+            return
 
         from automated_security_helper.utils.offline_mode_validator import (
             OfflineModeValidator,
@@ -408,10 +446,13 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         ASH_LOGGER.info(
             f"{scanner_label} offline mode: using cached rules from {cache_dir}"
         )
-        self.args.extra_args.append(ToolExtraArg(key="--config", value=cache_dir))
-        # Use the rule's own id rather than path-derived prefix — keeps
-        # rule IDs stable between online and offline runs.
-        self.args.extra_args.append(ToolExtraArg(key="--no-rewrite-rule-ids", value=""))
+        # Absolute: the directory was validated against ASH's working directory,
+        # and the tool runs in the source directory, so a relative value would
+        # name a different directory there (one inside the scanned tree, when
+        # the name exists in both).
+        self.args.extra_args.append(
+            ToolExtraArg(key="--config", value=os.path.abspath(cache_dir))
+        )
 
     def _configure_online_mode(self) -> None:
         opts = self.config.options  # type: ignore[union-attr]
