@@ -1375,6 +1375,27 @@ def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
 
 
 @pytest.mark.unit
+def test_the_password_never_stays_in_the_plugins_record_lines(
+    repo, monkeypatch, on_path
+):
+    """The run's stdout becomes the plugin's record lines, which are persisted
+    with the results when a later scan of this scanner fails. The lines must hold
+    the redacted payload, as actionlint.json does, not the raw stdout with the
+    hard-coded password a credentials finding quotes."""
+    stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
+    assert "hunter2" in stdout
+    scanner = _scanner(repo)
+    _through_the_base_class(monkeypatch, [{"returncode": 1, "stdout": stdout}])
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    assert len(report.runs[0].results) == len(EXPECTED_DEFAULT)
+    record = "\n".join(scanner.output)
+    assert "hunter2" not in record
+    assert '"kind": "credentials"' in record
+
+
+@pytest.mark.unit
 def test_a_credentials_finding_is_a_secret_finding_for_masking():
     """The finding reports a password on that line, so ASH's masking has to treat
     it as a secret finding: another scanner's snippet of the same line is then

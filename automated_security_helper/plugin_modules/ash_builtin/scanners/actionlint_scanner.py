@@ -1209,6 +1209,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 *workflows,
             ]
             effective_timeout = self._effective_scan_timeout()
+            # The run's stdout is appended to self.output as record lines, and
+            # those are persisted with the results when a scan fails. Remembered
+            # so the lines can be replaced with the redacted payload below.
+            output_before = len(self.output)
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=results_dir,
@@ -1245,8 +1249,13 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     f"actionlint output is not JSON ({exc}); raw output kept at "
                     f"{raw_output.as_posix()}"
                 ) from exc
+            redacted = redact_credentials(payload)
             with open_for_write(raw_output) as handle:
-                handle.write(json.dumps(redact_credentials(payload), indent=2))
+                handle.write(json.dumps(redacted, indent=2))
+            # The record lines hold the raw stdout, a credentials finding's
+            # password included; the redacted payload takes their place so a
+            # later failure of this scanner does not persist the password.
+            self.output[output_before:] = [json.dumps(redacted)]
 
             sarif_dict = build_sarif(payload, self.exit_code)
             self.tool_version = sarif_dict["runs"][0]["tool"]["driver"]["version"]
