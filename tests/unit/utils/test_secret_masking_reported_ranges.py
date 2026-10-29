@@ -129,6 +129,26 @@ class TestAKeyBlocksRangeOnLaterMaskings:
         )
         assert (_context(model, 1), _context(model, 2)) == once
 
+    def test_a_producers_own_end_line_does_not_bound_a_key_with_no_end_in_sight(
+        self,
+    ):
+        """A producer that reports a key as lines 11-12 says nothing about where the
+        block ends; with no END line in any snippet every later line is masked,
+        as it was before the END line was kept on the finding. Only an END line
+        an earlier masking wrote (the line then reads as masked) bounds it."""
+        key = _key_finding()
+        key["locations"][0]["physicalLocation"]["region"]["endLine"] = 12
+        model = _results(
+            key,
+            _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES[:3]),
+            _neighbor("keys.py", 40, 40, [FAR_LINE]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == BEFORE_PEM + (MASKED_LINE + "\n") * 3
+        assert _context(model, 2) == MASKED_LINE + "\n"
+
     def test_the_findings_browser_masks_the_body_of_a_begin_line_finding(self):
         """A rule that is not a private-key rule is known to start a block only
         from the BEGIN line, which the first masking replaced."""

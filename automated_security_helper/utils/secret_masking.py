@@ -651,6 +651,15 @@ def _block_end(known: Dict[str, Dict[int, str]], uri: str, start: int) -> Option
     return max(ends) if ends else None
 
 
+def _line_is_masked(known: Dict[str, Dict[int, str]], uri: str, line: int) -> bool:
+    """Whether some snippet shows ``line`` of ``uri`` as a line an earlier masking wrote."""
+    return any(
+        (lines.get(line) or "").strip() == MASKED_LINE
+        for candidate, lines in known.items()
+        if _same_file(candidate, uri)
+    )
+
+
 def _starts_a_block(known: Dict[str, Dict[int, str]], uri: str, line: int) -> bool:
     return any(
         _PEM_BEGIN in (lines.get(line) or "")
@@ -941,10 +950,17 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                     if block_end is not None:
                         end = block_end
                         index.block_ends.append((region, block_end))
-                    elif not (isinstance(end, int) and end > start):
-                        # No END line in any snippet: an earlier masking may
-                        # have replaced it with MASKED_LINE and kept the block's
-                        # extent in the finding's own endLine, which stands.
+                    elif not (
+                        isinstance(end, int)
+                        and end > start
+                        and _line_is_masked(known, uri, end)
+                    ):
+                        # No END line in any snippet. The finding's own endLine
+                        # stands only when an earlier masking wrote it: that
+                        # masking replaced the END line with MASKED_LINE, which
+                        # is what the line at endLine then reads. A producer's
+                        # own endLine says nothing about where the key ends, and
+                        # every later line is masked, as before.
                         end = _TO_END_OF_FILE
                 elif resource_only and not (isinstance(end, int) and end > start):
                     # cdk-nag writes endLine == startLine for the resource's
