@@ -182,7 +182,13 @@ def test_bandit_scanner_scan_nonexistent_path(test_bandit_scanner):
 
 
 def test_bandit_scanner_additional_formats(test_plugin_context):
-    """Test BanditScanner with additional output formats."""
+    """additional_formats adds no ``--format`` to the extra arguments.
+
+    bandit takes one ``--format`` (argparse ``store``, last one wins). A second
+    one after the base class's ``--format sarif`` made bandit write that format
+    into bandit.sarif, and the scan failed reading it as SARIF. The one format in
+    argv stays the base class's SARIF.
+    """
     scanner = BanditScanner(
         context=test_plugin_context,
         config=BanditScannerConfig(
@@ -193,10 +199,7 @@ def test_bandit_scanner_additional_formats(test_plugin_context):
     )
     scanner._process_config_options()
 
-    # Check that additional format arguments were added
     format_args = [arg.key for arg in scanner.args.extra_args]
-    format_values = [arg.value for arg in scanner.args.extra_args]
-
-    # Check that the --format argument is present with the additional formats
-    assert "--format" in format_args
-    assert "sarif" in format_values or "html" in format_values
+    assert "--format" not in format_args
+    assert scanner.args.format_arg == "--format"
+    assert scanner.args.format_arg_value == "sarif"

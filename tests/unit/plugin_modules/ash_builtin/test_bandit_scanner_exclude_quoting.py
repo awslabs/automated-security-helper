@@ -7,6 +7,7 @@ import pytest
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+    BANDIT_DEFAULT_EXCLUDES,
     BanditScanner,
     BanditScannerConfig,
     BanditScannerConfigOptions,
@@ -75,14 +76,15 @@ def test_process_config_options_exclude_argument_value_is_well_formed(
     ]
     assert exclude_tokens, "Expected at least one --exclude= token"
 
-    # Each KNOWN_IGNORE_PATHS item and each user excluded_paths entry
-    # contributes its bandit_excluded_path_globs, anchored at the source
-    # directory. (They were "{item}/**", "**/{item}/**" and "**/{path}/**",
-    # which never skipped a file entry's file and matched the target's own
-    # path.)
+    # Each KNOWN_IGNORE_PATHS item, each of bandit's own default excludes (which
+    # an explicit --exclude replaces, so ASH passes them too) and each user
+    # excluded_paths entry contributes its bandit_excluded_path_globs, anchored
+    # at the source directory. (They were "{item}/**", "**/{item}/**" and
+    # "**/{path}/**", which never skipped a file entry's file and matched the
+    # target's own path.)
     anchor = Path(test_plugin_context.source_dir).as_posix()
     expected_entries: list[str] = []
-    for item in KNOWN_IGNORE_PATHS:
+    for item in (*KNOWN_IGNORE_PATHS, *BANDIT_DEFAULT_EXCLUDES):
         expected_entries.extend(bandit_excluded_path_globs(anchor, item))
     for p in user_paths:
         expected_entries.extend(bandit_excluded_path_globs(anchor, p))

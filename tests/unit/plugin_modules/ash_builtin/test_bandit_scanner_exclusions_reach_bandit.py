@@ -1,0 +1,466 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""bandit's ``--exclude`` reaches bandit whole, and only what it names is skipped.
+
+Each test here pins one way the exclusions, or the scan, used to fail:
+
+* A line break in one ``excluded_paths`` entry, one global ignore path or the
+  target's own path made the base class drop the WHOLE ``--exclude`` argument
+  (its flag-key check refuses a key holding one, with a warning), so bandit ran
+  with no exclusion at all, the links that leave the tree included. Such an entry
+  now excludes nothing, with a warning, and such a target refuses the scan.
+* A link leaving the tree was passed as its literal path, which bandit also reads
+  as a plain substring: ``.venv/bin/python`` is a substring of
+  ``.venv/bin/python3``, so every tree with a symlinked virtualenv was refused.
+  The entry is now a glob that matches that one path (``pytho[n]``).
+* ``additional_formats`` appended a second ``--format``; bandit's is
+  single-valued, so it wrote that format into bandit.sarif and the scan failed.
+* ASH's explicit ``--exclude`` replaced bandit's own default excludes (``.tox``,
+  ``.eggs``, ``*.egg`` and the rest), which were then scanned.
+* The ``--exclude`` length was measured with a strict ``str.encode``, which raised
+  on a path holding a byte that is not UTF-8.
+* The operator's ``.bandit`` ``exclude`` was ignored, because bandit reads it only
+  while ``--exclude`` is still its default and ASH always passes one.
+* A file bandit skipped (a syntax error) kept its metrics entry and was counted
+  as scanned, so a target whose every file failed to parse passed with nothing.
+* A bandit found on PATH with no uv was run with no check of its extras or
+  version, and after a failed uv install a binary on PATH never ran at all.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import logging
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.plugin_modules.ash_builtin.scanners import bandit_scanner
+from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+    BANDIT_DEFAULT_EXCLUDES,
+    BanditScanner,
+    BanditScannerConfig,
+    BanditScannerConfigOptions,
+    bandit_exclude_globs,
+    bandit_excluded_path_globs,
+)
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils import pre_installed_tool
+
+PluginContext.model_rebuild()
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_tool_probes"),
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="bandit exclude entries are POSIX paths here"
+    ),
+]
+
+
+def _ignore(*paths: str) -> list[IgnorePathWithReason]:
+    return [IgnorePathWithReason(path=path, reason="ignored") for path in paths]
+
+
+def _tree(base: Path, files: list[str], name: str = "source") -> Path:
+    source = base / name
+    for rel in files:
+        (source / rel).parent.mkdir(parents=True, exist_ok=True)
+        (source / rel).write_text("x = 1\n", encoding="utf-8")
+    source.mkdir(exist_ok=True)
+    return source
+
+
+def _scanner(source: Path, base: Path, options=None) -> BanditScanner:
+    output = base / "ash-output"
+    output.mkdir(exist_ok=True)
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(),
+    )
+    return BanditScanner(
+        context=context,
+        config=BanditScannerConfig(options=options or BanditScannerConfigOptions()),
+    )
+
+
+def _entries(argv: list[str]) -> list[str]:
+    tokens = [arg for arg in argv if arg.startswith("--exclude=")]
+    assert len(tokens) == 1, argv
+    return tokens[0][len("--exclude=") :].split(",")
+
+
+# ---------------------------------------------------------------------------
+# A line break never reaches the --exclude argument
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("entry", ["vendor\nx", "ven\rdor", "a\n"])
+def test_an_excluded_paths_entry_with_a_line_break_has_no_bandit_form(entry):
+    """At the base the entry's globs carried the line break into the argument."""
+    assert bandit_excluded_path_globs("/scan", entry) == []
+
+
+@pytest.mark.parametrize("pattern", ["vendor\n/**", "src/*.p\ny", "app\r.py"])
+def test_a_global_ignore_path_with_a_line_break_is_not_passed(pattern):
+    assert bandit_exclude_globs("/scan", pattern) == []
+
+
+def test_an_anchor_with_a_line_break_gets_no_entries():
+    assert bandit_excluded_path_globs("/sc\nan", "vendor") == []
+    assert bandit_exclude_globs("/sc\nan", "vendor/**") == []
+
+
+def test_a_line_break_entry_leaves_the_other_exclusions_in_place(tmp_path, caplog):
+    """The argument keeps every other entry; the base class never sees a key it
+    would drop, and the operator is told the entry excludes nothing."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(excluded_paths=_ignore("ven\ndor"))
+    )
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", _ignore("gen\nerated/**"))
+
+    entries = _entries(argv)
+    assert entries, argv
+    assert not any("\n" in entry or "\r" in entry for entry in entries), entries
+    for entry in bandit_excluded_path_globs(source.as_posix(), ".venv/"):
+        assert entry in entries
+    assert any("line break" in record.message for record in caplog.records), [
+        record.message for record in caplog.records
+    ]
+
+
+def test_a_target_whose_path_holds_a_line_break_refuses_the_scan(tmp_path):
+    """Every entry is anchored at the target, so each would carry its line break
+    and the base class would drop the whole argument: bandit is not run."""
+    source = _tree(tmp_path, ["app.py"], name="sou\nrce")
+    scanner = _scanner(source, tmp_path)
+
+    with pytest.raises(ScannerError, match="line break"):
+        scanner._execute_scan(source, "source", [])
+
+
+# ---------------------------------------------------------------------------
+# Links leaving the tree: one entry, one file
+# ---------------------------------------------------------------------------
+
+
+def test_a_symlinked_virtualenv_does_not_refuse_the_scan(tmp_path):
+    """``.venv/bin/python`` and ``.venv/bin/python3`` both leave the tree; the
+    first's path is a substring of the second's, which refused the whole scan."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "python3.12").write_text("", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py"])
+    bin_dir = source / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    os.symlink(outside / "python3.12", bin_dir / "python")
+    os.symlink(outside / "python3.12", bin_dir / "python3")
+    scanner = _scanner(source, tmp_path)
+
+    entries = scanner._link_excludes(source)
+
+    root = source.as_posix()
+    python = f"{root}/.venv/bin/python"
+    python3 = f"{root}/.venv/bin/python3"
+    assert len(entries) == 2, entries
+    for path in (python, python3):
+        own = [entry for entry in entries if fnmatch.fnmatchcase(path, entry)]
+        assert len(own) == 1, (path, entries)
+        other = python3 if path == python else python
+        assert not fnmatch.fnmatchcase(other, own[0]), (own[0], other)
+        # bandit also reads an entry as a plain substring of a walked path.
+        assert own[0] not in other
+        assert own[0] not in python
+        assert own[0] not in python3
+
+
+def test_a_link_entry_with_glob_characters_is_escaped(tmp_path):
+    """A link named with ``*`` used to be refused outright; its entry is now the
+    escaped glob, which bandit matches as the literal name."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "target.py").write_text("x = 1\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py"])
+    os.symlink(outside / "target.py", source / "li*nk.py")
+    scanner = _scanner(source, tmp_path)
+
+    entries = scanner._link_excludes(source)
+
+    link = f"{source.as_posix()}/li*nk.py"
+    assert len(entries) == 1
+    assert fnmatch.fnmatchcase(link, entries[0])
+    assert not fnmatch.fnmatchcase(f"{source.as_posix()}/lixnk.py", entries[0])
+
+
+def test_a_link_whose_path_holds_a_comma_is_still_refused(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "target.py").write_text("x = 1\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py"])
+    os.symlink(outside / "target.py", source / "a,b.py")
+    scanner = _scanner(source, tmp_path)
+
+    with pytest.raises(ScannerError, match="cannot leave out that file alone"):
+        scanner._link_excludes(source)
+
+
+def test_a_link_name_with_a_non_utf8_byte_does_not_fail_the_scan(tmp_path):
+    """The argument's length is measured as exec passes the bytes; a strict
+    encode raised UnicodeEncodeError on the surrogate such a name decodes to."""
+    name = os.fsdecode(b"li\xffnk.py")
+    if os.fsencode(name) != b"li\xffnk.py":
+        pytest.skip("the file system does not keep a non-UTF-8 name")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "target.py").write_text("x = 1\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py"])
+    os.symlink(outside / "target.py", source / name)
+    scanner = _scanner(source, tmp_path)
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert any(name in entry for entry in _entries(argv)), argv
+
+
+# ---------------------------------------------------------------------------
+# What else the argument carries
+# ---------------------------------------------------------------------------
+
+
+def test_bandits_own_default_excludes_are_passed(tmp_path):
+    """bandit replaces its defaults with any --exclude it is given."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    entries = _entries(argv)
+    assert ".tox" in BANDIT_DEFAULT_EXCLUDES and "*.egg" in BANDIT_DEFAULT_EXCLUDES
+    for item in BANDIT_DEFAULT_EXCLUDES:
+        for entry in bandit_excluded_path_globs(source.as_posix(), item):
+            assert entry in entries, (item, entry)
+
+
+def test_the_operators_bandit_ini_exclude_reaches_bandit(tmp_path):
+    """bandit reads the ini's ``exclude`` only while ``--exclude`` is its default,
+    and ASH always passes one, so the setting was silently ignored."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = tests,legacy/\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+    assert any(arg.key == "--ini" for arg in scanner.args.extra_args), (
+        "the configured .bandit must be passed with --ini for this test to mean "
+        "anything"
+    )
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    entries = _entries(argv)
+    assert "tests" in entries, entries
+    assert "legacy/" in entries, entries
+
+
+def test_no_ini_adds_no_raw_entries(tmp_path):
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert all(entry.startswith(source.as_posix()) for entry in _entries(argv))
+
+
+def test_additional_formats_leave_one_sarif_format_in_argv(tmp_path):
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(additional_formats=["html"])
+    )
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert argv.count("--format") == 1
+    assert argv[argv.index("--format") + 1] == "sarif"
+    assert "html" not in argv
+
+
+# ---------------------------------------------------------------------------
+# Files bandit skipped are not scanned files
+# ---------------------------------------------------------------------------
+
+
+def _report(root: Path, scanned: list[str], skipped: list[str]) -> SarifReport:
+    metrics = {"_totals": {"loc": 0}}
+    for rel in scanned + skipped:
+        metrics[f"{root.as_posix()}/{rel}"] = {"loc": 0}
+    notifications = [
+        {
+            "message": {"text": "syntax error while parsing AST from file"},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": (root / rel).as_uri()}
+                    }
+                }
+            ],
+        }
+        for rel in skipped
+    ]
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "Bandit"}},
+                    "results": [],
+                    "properties": {"metrics": metrics},
+                    "invocations": [
+                        {
+                            "executionSuccessful": True,
+                            "toolConfigurationNotifications": notifications,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def test_a_file_bandit_could_not_parse_is_not_counted_as_scanned(tmp_path):
+    source = _tree(tmp_path, ["a.py", "b.py"])
+    scanner = _scanner(source, tmp_path)
+
+    scanner._record_scanned_files(_report(source, ["b.py"], ["a.py"]), [], source)
+
+    assert scanner.targets_attempted == 1
+
+
+def test_a_target_whose_every_file_failed_to_parse_is_not_passed(tmp_path):
+    source = _tree(tmp_path, ["a.py"])
+    scanner = _scanner(source, tmp_path)
+
+    with pytest.raises(ScannerError, match="scanned no file"):
+        scanner._record_scanned_files(_report(source, [], ["a.py"]), [], source)
+
+
+def test_a_parsed_file_is_still_counted(tmp_path):
+    source = _tree(tmp_path, ["a.py"])
+    scanner = _scanner(source, tmp_path)
+
+    scanner._record_scanned_files(_report(source, ["a.py"], []), [], source)
+
+    assert scanner.targets_attempted == 1
+
+
+# ---------------------------------------------------------------------------
+# A bandit on PATH is verified before it runs, and then it does run
+# ---------------------------------------------------------------------------
+
+
+def _checked(status: str, executable: str, detail: str):
+    """What ``verify_pre_installed_tool`` answers: the scanner reads status and detail."""
+    return SimpleNamespace(
+        status=status,
+        executable=executable,
+        requirement="bandit[sarif,toml]>=1.7.0,<2.0.0",
+        detail=detail,
+    )
+
+
+def test_a_path_binary_that_falls_short_is_refused_when_uv_is_absent(
+    tmp_path, monkeypatch
+):
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    binary = str(tmp_path / "bandit")
+    monkeypatch.setattr(
+        BanditScanner, "_validate_uv_tool_availability", lambda self: False
+    )
+    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: [binary])
+    monkeypatch.setattr(
+        pre_installed_tool,
+        "verify_pre_installed_tool",
+        lambda *args, **kwargs: _checked(
+            "unsatisfied", binary, "the sarif extra is not installed"
+        ),
+    )
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert scanner.dependency_unavailable_reason is not None
+    assert "cannot be used" in scanner.dependency_unavailable_reason
+
+
+def test_a_verified_path_binary_runs_directly_when_uv_is_absent(tmp_path, monkeypatch):
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    binary = str(tmp_path / "bandit")
+    monkeypatch.setattr(
+        BanditScanner, "_validate_uv_tool_availability", lambda self: False
+    )
+    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: [binary])
+    monkeypatch.setattr(
+        pre_installed_tool,
+        "verify_pre_installed_tool",
+        lambda *args, **kwargs: _checked("satisfied", binary, "1.9.4 with the extras"),
+    )
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.use_uv_tool is False
+    assert scanner.dependencies_satisfied is True
+
+
+def test_after_a_failed_install_a_path_binary_runs_directly(tmp_path, monkeypatch):
+    """The final fallback marked the dependency satisfied and left the uv route
+    on, so the scan went back through the install that had just failed."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    binary = str(tmp_path / "bandit")
+    monkeypatch.setattr(
+        BanditScanner, "_validate_uv_tool_availability", lambda self: True
+    )
+    monkeypatch.setattr(
+        BanditScanner, "_get_tool_installation_info", lambda self: {"available": False}
+    )
+    monkeypatch.setattr(
+        BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
+    )
+    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: [binary])
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.use_uv_tool is False, "the binary on PATH is what runs now"
+    assert scanner.dependencies_satisfied is True
+
+
+def test_a_uv_answer_keeps_the_uv_route(tmp_path, monkeypatch):
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    monkeypatch.setattr(
+        BanditScanner, "_validate_uv_tool_availability", lambda self: True
+    )
+    monkeypatch.setattr(
+        BanditScanner, "_get_tool_installation_info", lambda self: {"available": False}
+    )
+    monkeypatch.setattr(
+        BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
+    )
+    monkeypatch.setattr(
+        bandit_scanner,
+        "get_uv_tool_command",
+        lambda command: ["uv", "tool", "run", "bandit"],
+    )
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.use_uv_tool is True

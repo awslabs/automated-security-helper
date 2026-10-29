@@ -504,15 +504,24 @@ def test_confidence_level_is_passed_through(plugin_context, confidence):
     assert extra_arg_values(scanner, "--severity-level") == ["all"]
 
 
-def test_additional_formats_each_add_a_format_flag(plugin_context):
-    scanner = BanditScanner(
-        context=plugin_context,
-        config=BanditScannerConfig(
-            options=BanditScannerConfigOptions(additional_formats=["json", "html"])
-        ),
-    )
+def test_additional_formats_add_no_second_format_flag(plugin_context, caplog):
+    """bandit's --format is single-valued (argparse store): a second one after the
+    base class's ``--format sarif`` won, bandit wrote that format into
+    bandit.sarif, and the SARIF read failed the scan. The option is logged as not
+    produced and adds nothing to argv."""
+    with caplog.at_level(logging.WARNING):
+        scanner = BanditScanner(
+            context=plugin_context,
+            config=BanditScannerConfig(
+                options=BanditScannerConfigOptions(additional_formats=["json", "html"])
+            ),
+        )
 
-    assert extra_arg_values(scanner, "--format") == ["json", "html"]
+    assert extra_arg_values(scanner, "--format") == []
+    assert any(
+        "additional_formats" in record.message and "not produced" in record.message
+        for record in caplog.records
+    ), [record.message for record in caplog.records]
 
 
 def test_no_additional_formats_adds_no_format_flag(scanner):
