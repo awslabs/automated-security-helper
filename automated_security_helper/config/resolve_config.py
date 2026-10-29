@@ -1980,6 +1980,17 @@ def resolve_config(
     # are the operator's choice the same way a selected chain's are. The
     # no-config branch rebinds it.
     view_chain: Sequence[Path] = chain
+    # How many extends trees the view chain holds. _resolve_config lays the
+    # operator's overlay chain AFTER the selected config's (one root each), so
+    # a chain longer than the overlay's own holds two; with the fallback taken
+    # the overlay's chain is the whole chain, one root. Read as one tree, a
+    # two-root chain failed to rebuild and the operator views took nothing,
+    # the overlay's own writes included. The no-config branch rebinds it.
+    view_roots = (
+        2
+        if overlay is not None and overlay.chain and len(chain) > len(overlay.chain)
+        else 1
+    )
 
     def refuse_owned_junk(
         selected_in_tree: Sequence[Path], default_in_tree_files: Sequence[Path]
@@ -1997,7 +2008,9 @@ def resolve_config(
         Separate from the floor's computation (trusted_base_config), whose
         answer stays where it is; the answers here are discarded."""
         if chain:
-            _owned_sandbox_mode(chain, selected_in_tree, reads, environment_paths)
+            _owned_sandbox_mode(
+                chain, selected_in_tree, reads, environment_paths, roots=view_roots
+            )
         default_chain_files, _named, default_environment_paths = default_views()
         if default_chain_files:
             _owned_sandbox_mode(
@@ -2235,6 +2248,7 @@ def resolve_config(
         # file when that variable names one, which can be inside the tree too.
         default_chain, ash_config_named, _ = default_views()
         view_chain = list(default_chain)
+        view_roots = 1
         judged = confined_files(default_chain, trees, ash_config_named)
         in_tree = default_in_tree = list(judged.members)
         undecided_files = list(judged.undecided)
@@ -2620,7 +2634,7 @@ def resolve_config(
     # and onto the recorded view below by _with_reporter_overrides, each on a
     # copy, so an override is applied once per use.
     chain_reporters = _with_operator_chain_reporters(
-        trusted, view_chain, in_tree, reads, environment_paths
+        trusted, view_chain, in_tree, reads, environment_paths, roots=view_roots
     )
     confine_reporter_destinations(
         config,
@@ -2782,6 +2796,7 @@ def resolve_config(
         reads,
         environment_paths,
         environment_values=config_environment_values(config),
+        roots=view_roots,
     )
     if files_view is not None:
         scanner_views.append(files_view)
@@ -3052,34 +3067,95 @@ def _folded_onto_trusted(
     return rewritten
 
 
+def _extends_count(document: Any) -> Optional[int]:
+    """How many ``extends`` bases *document*, a chain file's own document, names:
+    0 for no key or a non-mapping document, 1 for one reference, the list's
+    length for a list, and None for a value of another shape, which the
+    resolution would have refused."""
+    from automated_security_helper.config.config_sources import EXTENDS_KEY
+
+    if not isinstance(document, dict):
+        return 0
+    refs = document.get(EXTENDS_KEY)
+    if refs is None:
+        return 0
+    if isinstance(refs, str):
+        return 1
+    if isinstance(refs, list):
+        return len(refs)
+    return None
+
+
+#: A node of a rebuilt ``extends`` tree: the file's index into the chain, and
+#: its bases' nodes.
+_ExtendsNode = Tuple[int, List[Any]]
+
+
+def _extends_forest(
+    chain: Sequence[Path], reads: Dict[Path, Any]
+) -> Tuple[List[_ExtendsNode], Optional[Path]]:
+    """The ``extends`` trees *chain* rebuilds, and the file at which the rebuild
+    failed, or None when it did not.
+
+    *chain* is post-order: each file after the subtrees of its bases, one
+    subtree per ``extends`` entry, in the entry's order. So a stack rebuilds the
+    trees: each file takes as its bases the last N subtrees, N being its own
+    ``extends`` count (*reads*, its own document; :func:`_extends_count`). The
+    stack that is left holds one node per tree, in chain order. The rebuild
+    fails at a file *reads* does not hold, or whose count is of an unreadable
+    shape or exceeds the subtrees before it; the nodes rebuilt so far are
+    returned with that file, for a caller that reports it.
+    """
+    stack: List[_ExtendsNode] = []
+    for index, file in enumerate(chain):
+        key = Path(file).resolve()
+        if key not in reads:
+            return stack, Path(file)
+        count = _extends_count(reads[key])
+        if count is None or count > len(stack):
+            return stack, Path(file)
+        bases = stack[len(stack) - count :] if count else []
+        del stack[len(stack) - count :]
+        stack.append((index, bases))
+    return stack, None
+
+
 def _operator_chain_occurrences(
     chain: Sequence[Path],
     repository_files: Sequence[Path],
     reads: Dict[Path, Any],
     environment_paths: Collection[Path],
     warn: bool = True,
+    roots: int = 1,
 ) -> List[Path]:
     """The occurrences of *chain* the operator reached, in chain order.
 
     *chain* is post-order: each file after the subtrees of its bases, one
     subtree per ``extends`` entry, in the entry's order. So a stack rebuilds the
-    tree: each file takes as its bases the last N subtrees, N being its own
-    ``extends`` count (*reads*, its own document). From the root down, a file
-    is the operator's when it is not a repository file (*repository_files*,
-    by resolved path or name) and no file above it on its branch is one.
+    tree (:func:`_extends_forest`): each file takes as its bases the last N
+    subtrees, N being its own ``extends`` count (*reads*, its own document).
+    From each root down, a file is the operator's when it is not a repository
+    file (*repository_files*, by resolved path or name) and no file above it
+    on its branch is one.
 
-    Answers [] -- nothing is the operator's -- when the tree does not rebuild:
-    a file *reads* does not hold, or counts that do not add up to one root.
-    The warning that says so names the file; one an ``extends`` entry chose
-    with a value read from the environment (*environment_paths*, by the path
-    or its resolved form) is named ``<value>`` instead, since the drift the
-    warning exists for is likeliest exactly on such a file, and its real
+    *roots* is how many trees *chain* holds, which the caller knows from how
+    it built the chain: one for a selected config's chain or an ASH_CONFIG
+    chain, two when the operator's overlay chain was appended after a selected
+    chain (``_resolve_config`` lays the overlay's files after the selected
+    config's; the overlay layers over the selected config, so its files are
+    the operator's by the same rule, walked from their own root). A chain read
+    as one tree when it held two did not rebuild, and took NOTHING as the
+    operator's, the overlay's own writes included.
+
+    Answers [] -- nothing is the operator's -- when the trees do not rebuild:
+    a file *reads* does not hold, or counts that do not add up to *roots*
+    trees. The warning that says so names the file; one an ``extends`` entry
+    chose with a value read from the environment (*environment_paths*, by the
+    path or its resolved form) is named ``<value>`` instead, since the drift
+    the warning exists for is likeliest exactly on such a file, and its real
     path is the environment's value.
     """
-    from automated_security_helper.config.config_sources import (
-        EXTENDS_KEY,
-        describe_config_path,
-    )
+    from automated_security_helper.config.config_sources import describe_config_path
     from automated_security_helper.config.environment_record import (
         ENVIRONMENT_VALUE_SHOWN,
     )
@@ -3087,18 +3163,6 @@ def _operator_chain_occurrences(
     repository = {Path(file) for file in repository_files} | {
         Path(file).resolve() for file in repository_files
     }
-
-    def base_count(document: Any) -> Optional[int]:
-        if not isinstance(document, dict):
-            return 0
-        refs = document.get(EXTENDS_KEY)
-        if refs is None:
-            return 0
-        if isinstance(refs, str):
-            return 1
-        if isinstance(refs, list):
-            return len(refs)
-        return None
 
     def not_rebuilt(file: Path) -> List[Path]:
         # By construction the chain rebuilds: *reads* holds each file's one
@@ -3130,24 +3194,15 @@ def _operator_chain_occurrences(
         )
         return []
 
-    # Each node: (index into chain, its bases' nodes).
-    stack: List[Tuple[int, List[Any]]] = []
-    for index, file in enumerate(chain):
-        key = Path(file).resolve()
-        if key not in reads:
-            return not_rebuilt(Path(file))
-        count = base_count(reads[key])
-        if count is None or count > len(stack):
-            return not_rebuilt(Path(file))
-        bases = stack[len(stack) - count :] if count else []
-        del stack[len(stack) - count :]
-        stack.append((index, bases))
-    if len(stack) != 1:
+    forest, failed_at = _extends_forest(chain, reads)
+    if failed_at is not None:
+        return not_rebuilt(failed_at)
+    if len(forest) != roots:
         return not_rebuilt(Path(chain[-1])) if chain else []
 
     owned: Set[int] = set()
 
-    def walk(node: Tuple[int, List[Any]], above_is_repository: bool) -> None:
+    def walk(node: _ExtendsNode, above_is_repository: bool) -> None:
         index, bases = node
         file = Path(chain[index])
         is_repository = (
@@ -3158,7 +3213,8 @@ def _operator_chain_occurrences(
         for base in bases:
             walk(base, is_repository)
 
-    walk(stack[0], False)
+    for tree in forest:
+        walk(tree, False)
     return [Path(chain[index]) for index in sorted(owned)]
 
 
@@ -3360,8 +3416,15 @@ def _owned_sandbox_mode(
     repository_files: Sequence[Path],
     reads: Dict[Path, Any],
     environment_paths: Collection[Path],
+    roots: int = 1,
 ) -> Optional[str]:
     """The sandbox mode the operator's own files of *chain* set, or None.
+
+    *roots* is the number of ``extends`` trees *chain* holds
+    (``_operator_chain_occurrences``): two when the operator's overlay chain
+    follows a selected chain. Each tree's root patches the running answer, so
+    the overlay's root, laid after the selected config's, patches what the
+    selected tree set, as the layering merges its document over it.
 
     Each owned occurrence contributes its EFFECTIVE write, read from the
     file's own document (*reads*), in chain order: the ``sandbox.mode`` key
@@ -3411,9 +3474,17 @@ def _owned_sandbox_mode(
     from automated_security_helper.config.config_sources import PATCH_KEY
 
     mode: Optional[str] = None
-    root = Path(chain[-1]).resolve() if chain else None
+    # The roots: the chain's last occurrence for one tree (the chain is
+    # post-order), and each tree's last occurrence when the chain holds more
+    # (the overlay's root after the selected config's). The forest is read
+    # only for more than one root; with one, the last occurrence is it.
+    tree_roots: Set[Path] = {Path(chain[-1]).resolve()} if chain else set()
+    if roots > 1:
+        forest, failed_at = _extends_forest(chain, reads)
+        if failed_at is None and len(forest) == roots:
+            tree_roots = {Path(chain[index]).resolve() for index, _ in forest}
     for file in _operator_chain_occurrences(
-        chain, repository_files, reads, environment_paths, warn=False
+        chain, repository_files, reads, environment_paths, warn=False, roots=roots
     ):
         document = reads.get(Path(file).resolve())
         if not isinstance(document, dict):
@@ -3421,11 +3492,11 @@ def _owned_sandbox_mode(
         # A BASE's effective write starts from nothing and is folded into
         # the walk's answer only when the base's own document ends up
         # carrying a mode: a base whose patch unsets its own write
-        # contributes nothing, never a clearing of a sibling's. The ROOT
-        # (the chain's last occurrence; the chain is post-order) patches the
-        # merged chain, so its walk starts from the running answer and its
-        # result is the answer, clears included.
-        at_root = root is not None and Path(file).resolve() == root
+        # contributes nothing, never a clearing of a sibling's. A ROOT
+        # (a tree's last occurrence) patches the merged chain, so its walk
+        # starts from the running answer and its result is the answer,
+        # clears included.
+        at_root = Path(file).resolve() in tree_roots
         file_mode: Optional[str] = mode if at_root else None
         sandbox = document.get("sandbox")
         if sandbox is not None and not isinstance(sandbox, dict):
@@ -3624,6 +3695,7 @@ def _with_operator_chain_reporters(
     repository_files: Sequence[Path],
     reads: Dict[Path, Any],
     environment_paths: Collection[Path],
+    roots: int = 1,
 ) -> AshConfig:
     """*trusted* with the ``reporters`` sections the operator's own chain files
     wrote merged over it, for the off-host reporter view.
@@ -3646,7 +3718,9 @@ def _with_operator_chain_reporters(
     file after its bases (``ResolvedConfigDocument.chain``), so the ``extends``
     tree is rebuilt from it and each file's own count of ``extends`` entries
     (``_operator_chain_occurrences``). A file reached on two branches is judged
-    per branch.
+    per branch. *roots* is the number of trees the chain holds: two when the
+    operator's overlay chain follows a selected chain, whose files are then
+    walked from their own root instead of failing the rebuild.
 
     An owned file's own ``patch`` operations that target ``/reporters`` are
     the operator's writes too, so they count toward this view
@@ -3711,7 +3785,7 @@ def _with_operator_chain_reporters(
 
     merged: Dict[str, Any] = {}
     for file in _operator_chain_occurrences(
-        chain, repository_files, reads, environment_paths
+        chain, repository_files, reads, environment_paths, roots=roots
     ):
         own = reads.get(Path(file).resolve())
         reporters = own.get("reporters") if isinstance(own, dict) else None
@@ -3871,13 +3945,14 @@ def _with_operator_chain_scanners(
     reads: Dict[Path, Any],
     environment_paths: Collection[Path],
     environment_values: Sequence[str] = (),
+    roots: int = 1,
 ) -> Optional["_ScannerFileView"]:
     """The ``scanners`` sections the operator's own chain files wrote, merged
     over *view*'s, or None when those files wrote none.
 
     The scanner half of :func:`_with_operator_chain_reporters`: the same files
-    (the ones the operator reached, from each file's own document in *reads*),
-    merged in chain order. A section a file spells another way is folded onto
+    (the ones the operator reached, from each file's own document in *reads*,
+    under the same *roots*), merged in chain order. A section a file spells another way is folded onto
     the view's own spelling first (``section_fold_key``), so it lands on the
     section the scanner reads instead of beside it. What is not taken: an
     owned file's ``patch`` operations. The view then holds less than the
@@ -3900,7 +3975,7 @@ def _with_operator_chain_scanners(
     # warn=False: the reporters pass over the same chain already named a tree
     # that does not rebuild.
     for file in _operator_chain_occurrences(
-        chain, repository_files, reads, environment_paths, warn=False
+        chain, repository_files, reads, environment_paths, warn=False, roots=roots
     ):
         own = reads.get(Path(file).resolve())
         scanners = own.get("scanners") if isinstance(own, dict) else None
