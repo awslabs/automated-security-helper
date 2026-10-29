@@ -1983,6 +1983,90 @@ def _annotation_reaches_a_section(
     return any(_annotation_reaches_a_section(arg, seen) for arg in get_args(annotation))
 
 
+def _downcast_outside_sections(annotation: Any, value: Any) -> Any:
+    """*value*, a container at a field whose *annotation* reaches a section,
+    with the EnvResolvedScalars at every slot that reaches NO section downcast
+    to plain str, and every section-typed slot's value handed on as given.
+
+    The section-reaching route of the section base's validator hands the
+    value on whole so each section in the shape receives its markers (only its
+    own validator knows every key its fields accept). A slot BESIDE a section
+    that admits a string without converting it -- ``Any``, ``object``, a
+    ``str`` -- then kept the marker class too: the walk refuses nothing there,
+    and pydantic validates an Any slot by passing the object through, so the
+    validated model carried the str subclass into a config dump (SafeDumper
+    has no representer for one) and into whatever printed the slot by type.
+    This walk follows the annotation's shape beside the sections:
+
+    - a section-typed slot (a RedactedSection, through Annotated and RootModel
+      wrappers) keeps its value as given;
+    - a slot whose shape reaches no section is downcast whole
+      (:func:`without_env_scalars`), as the non-section route downcasts;
+    - a list, tuple, set or dict shape is walked per slot: a list's or set's
+      item type, a tuple's per-position types or its one repeated type, a
+      dict's key and value types;
+    - a union of several non-None arms keeps the value as given: which arm
+      describes a dict (``Union[Section, Dict[str, str]]``) is the arm's
+      validation to decide, and downcasting under the wrong arm would strip
+      the markers a section needs. ``Optional[X]`` is read as X.
+
+    A value whose Python shape does not match the annotation's (a dict at a
+    list slot) is kept as given; the field's own validation refuses it. The
+    walk recurses per nesting level of the ANNOTATION, which is finite and
+    written by the field's owner, so the config value's depth does not bound it.
+    """
+    annotation = _root_annotation(annotation)
+    if isinstance(annotation, type) and issubclass(annotation, RedactedSection):
+        return value
+    if not _annotation_reaches_a_section(annotation):
+        return without_env_scalars(value)
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin in (Union, types.UnionType):
+        arms = [arm for arm in args if arm is not type(None)]
+        if value is None or len(arms) != 1:
+            return value
+        return _downcast_outside_sections(arms[0], value)
+    if not isinstance(origin, type) or not args:
+        return value
+    if issubclass(origin, collections.abc.Mapping):
+        if not isinstance(value, dict) or len(args) != 2:
+            return value
+        key_type, value_type = args
+        return {
+            _downcast_outside_sections(key_type, key): _downcast_outside_sections(
+                value_type, item
+            )
+            for key, item in value.items()
+        }
+    if issubclass(origin, tuple):
+        if not isinstance(value, (list, tuple)):
+            return value
+        if len(args) == 2 and args[1] is Ellipsis:
+            slots = [args[0]] * len(value)
+        elif len(args) == len(value):
+            slots = list(args)
+        else:
+            return value
+        walked = [
+            _downcast_outside_sections(slot, item) for slot, item in zip(slots, value)
+        ]
+        return tuple(walked) if isinstance(value, tuple) else walked
+    if issubclass(origin, (collections.abc.Set, collections.abc.Sequence)):
+        if not isinstance(value, (list, tuple, set, frozenset)) or len(args) != 1:
+            return value
+        walked = [_downcast_outside_sections(args[0], item) for item in value]
+        if isinstance(value, (set, frozenset)):
+            try:
+                return type(value)(walked)
+            except TypeError:
+                # An unhashable item (a dict a section will take) cannot sit in
+                # a set; the field's own validation says so.
+                return value
+        return tuple(walked) if isinstance(value, tuple) else walked
+    return value
+
+
 class RedactedSection(BaseModel):
     """A model a configuration holds: its repr and str redact the values the
     configuration read from the environment.
@@ -2063,10 +2147,14 @@ class RedactedSection(BaseModel):
         boolean, a number) is refused by name, saying it holds a container
         where the type is expected, so the field's own validation never sees
         a copy with the text downcast.
-        Values under a field that reaches another section are handed on as
-        given, after a walk that treats the section-typed slots as opaque:
-        that section's own validator sees its markers, and a typed slot
-        beside a section in the same shape still refuses.
+        Values under a field that reaches another section are handed on with
+        the section-typed slots' values as given, after a walk that treats
+        those slots as opaque: that section's own validator sees its markers,
+        and a typed slot beside a section in the same shape still refuses. A
+        slot beside a section that admits a string as it is (``Any``, a
+        ``str``) is downcast to plain str (:func:`_downcast_outside_sections`),
+        as a field that reaches no section is: handed on whole, the marker
+        class survived validation there and reached config dumps.
         """
         field_name = info.field_name
         if field_name is None:
@@ -2100,10 +2188,13 @@ class RedactedSection(BaseModel):
             if _annotation_reaches_a_section(annotation):
                 # The sections in the shape must receive their markers (only
                 # their own validators know every key their fields accept),
-                # so the value is handed on undowncast. A slot BESIDE a
-                # section (the int of Tuple[Section, int]) still converts
-                # text, so the walk runs first with section-typed slots
-                # opaque.
+                # so the section-typed slots' values are handed on
+                # undowncast. A slot BESIDE a section (the int of
+                # Tuple[Section, int]) still converts text, so the walk runs
+                # first with section-typed slots opaque; a slot beside one
+                # that admits the text as it is (the Any of Tuple[Section,
+                # Any]) is then downcast, so the marker class reaches no
+                # validated model.
                 _refuse_typed_env_reference(
                     annotation,
                     value,
@@ -2113,7 +2204,7 @@ class RedactedSection(BaseModel):
                     metadata=cls.model_fields[field_name].metadata,
                     sections_opaque=True,
                 )
-                return value
+                return _downcast_outside_sections(annotation, value)
             _refuse_typed_env_reference(
                 annotation,
                 value,
