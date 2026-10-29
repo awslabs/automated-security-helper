@@ -876,11 +876,14 @@ def _refuse_ssh_key_id(ssh_key_id: Optional[str]) -> None:
     server process can reach, which is the opposite of what naming a key asks
     for, so the clone is refused before git runs.
 
+    An empty string is unset, as ``ref=""`` is on the tool side: a client that
+    sends the field with no value names no key.
+
     Raises:
-        ValueError: for every non-None ``ssh_key_id``.
+        ValueError: for every non-blank ``ssh_key_id``.
     """
 
-    if ssh_key_id is not None:
+    if ssh_key_id:
         raise ValueError(
             f"ssh_key_id {ssh_key_id!r} is not registered: this server registers no "
             f"ssh keys, so set_source_git cannot authenticate with one. Clone a "
