@@ -7,7 +7,11 @@ Three properties, each with a negative control so a check that has stopped seein
 anything cannot pass by default:
 
 * nothing CI runs passes syrupy's update or warn-unused flags (either would turn a
-  failing snapshot into a rewritten or ignored one);
+  failing snapshot into a rewritten or ignored one), with one exception: the single
+  ``--snapshot-warn-unused`` in the "Run PyTest" step of
+  ``.github/actions/run-unit-tests/action.yml``. A tier run or a shard sees only part of
+  the suite, so the other tiers' and shards' snapshots are unused by construction, and
+  syrupy would fail a leg whose tests all passed;
 * every snapshot file maps to a test module that exists, which syrupy cannot check for a
   module that was deleted or renamed;
 * .github/scripts/check-snapshot-trailers.py rejects a golden change whose commit has no
@@ -26,6 +30,7 @@ from pathlib import Path, PurePosixPath
 from types import ModuleType
 
 import pytest
+import yaml
 
 from tests.utils.helpers import iter_repo_files
 
@@ -60,6 +65,39 @@ _COMMENT = re.compile(r"(?:^|\s)#.*$", re.MULTILINE)
 
 def banned_flags(text: str) -> list[str]:
     return _BANNED.findall(_COMMENT.sub("", text))
+
+
+# The one place CI may pass --snapshot-warn-unused: the composite action that runs a tier
+# (or a shard of one), in its "Run PyTest" step, once.
+_WARN_UNUSED = "--snapshot-warn-unused"
+_ADMITTED_FILE = ".github/actions/run-unit-tests/action.yml"
+_ADMITTED_STEP = "Run PyTest"
+
+
+def _step_run(text: str, name: str) -> str:
+    steps = yaml.safe_load(text)["runs"]["steps"]
+    runs = [str(step.get("run", "")) for step in steps if step.get("name") == name]
+    assert len(runs) == 1, f"expected one step named {name!r}, found {len(runs)}"
+    return runs[0]
+
+
+def banned_flags_in_ci_file(rel_path: str, text: str) -> list[str]:
+    """The banned flags in a CI file, less the one the policy admits.
+
+    Only ``_ADMITTED_FILE`` is looked at for the exception, and in it one
+    ``--snapshot-warn-unused`` is dropped from the findings, and only when the
+    ``_ADMITTED_STEP`` step's ``run`` holds one. A second occurrence anywhere in the
+    file (in that step or another), any ``--snapshot-update`` and the same text under
+    another path stay findings. A file without exactly one step of that name raises, so
+    renaming the step reads red.
+    """
+    found = banned_flags(text)
+    if rel_path != _ADMITTED_FILE:
+        return found
+    in_step = banned_flags(_step_run(text, _ADMITTED_STEP))
+    if _WARN_UNUSED in in_step and _WARN_UNUSED in found:
+        found.remove(_WARN_UNUSED)
+    return found
 
 
 # Everything CI executes or configures pytest from. .github/ is scanned whole (workflows,
@@ -110,13 +148,52 @@ def test_no_ci_file_passes_snapshot_update_or_warn_unused() -> None:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        found = banned_flags(text)
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        found = banned_flags_in_ci_file(relative, text)
         if found:
-            offenders[path.relative_to(REPO_ROOT).as_posix()] = found
+            offenders[relative] = found
     assert offenders == {}, (
-        "CI must never update or ignore snapshots; a failing snapshot is fixed locally "
-        f"and committed with a Snapshot-Update trailer. Found: {offenders}"
+        "CI must never update or ignore snapshots, except for the one warn-unused flag "
+        f"of the {_ADMITTED_STEP!r} step in {_ADMITTED_FILE}; a failing snapshot is "
+        f"fixed locally and committed with a Snapshot-Update trailer. Found: {offenders}"
     )
+
+
+@pytest.mark.unit
+def test_the_one_admitted_flag_is_admitted_in_one_step_of_one_file_only() -> None:
+    real = (REPO_ROOT / _ADMITTED_FILE).read_text(encoding="utf-8")
+    # The scanner sees the real flag, and the exception takes exactly that one away.
+    assert banned_flags(real) == [_WARN_UNUSED]
+    assert banned_flags_in_ci_file(_ADMITTED_FILE, real) == []
+
+    # An update flag in the admitted step is not admitted.
+    array_end = f"{_WARN_UNUSED})"
+    assert real.count(array_end) == 1
+    planted = real.replace(array_end, f"{_WARN_UNUSED} --snapshot-update)")
+    assert banned_flags_in_ci_file(_ADMITTED_FILE, planted) == ["--snapshot-update"]
+
+    # A second warn-unused in the admitted step stays a finding.
+    planted = real.replace(array_end, f"{_WARN_UNUSED} {_WARN_UNUSED})")
+    assert banned_flags_in_ci_file(_ADMITTED_FILE, planted) == [_WARN_UNUSED]
+
+    # A warn-unused in another step of the same file stays a finding.
+    planted = real + (
+        "\n    - name: Another step\n      shell: bash\n"
+        f"      run: uv run pytest {_WARN_UNUSED}\n"
+    )
+    assert yaml.safe_load(planted)["runs"]["steps"][-1]["name"] == "Another step"
+    assert banned_flags_in_ci_file(_ADMITTED_FILE, planted) == [_WARN_UNUSED]
+
+    # The same text under another path is not admitted.
+    assert banned_flags_in_ci_file(".github/workflows/x.yml", real) == [_WARN_UNUSED]
+    assert banned_flags_in_ci_file("scripts/run-tests.sh", real) == [_WARN_UNUSED]
+
+    # With the step renamed, the exception has nothing to attach to.
+    step_line = f"    - name: {_ADMITTED_STEP}\n"
+    assert real.count(step_line) == 1
+    renamed = real.replace(step_line, "    - name: Run the tests\n")
+    with pytest.raises(AssertionError, match="expected one step named"):
+        banned_flags_in_ci_file(_ADMITTED_FILE, renamed)
 
 
 # ---------------------------------------------------------------------------

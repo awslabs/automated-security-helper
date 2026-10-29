@@ -243,7 +243,12 @@ CI never passes `pytest --snapshot-update`, and `tests/snapshot/conftest.py` ref
 `CI` or `GITHUB_ACTIONS` environment variable equals `true` (exactly that string, so
 `CI=1` does not trigger the refusal). `tests/snapshot/test_snapshot_policy.py` fails if
 any workflow, action, script or pytest configuration passes `pytest --snapshot-update`
-or `pytest --snapshot-warn-unused`. A missing snapshot fails.
+or `pytest --snapshot-warn-unused`, with one exception: the "Run PyTest" step of
+`.github/actions/run-unit-tests/action.yml` passes `--snapshot-warn-unused` once. CI's
+tier runs and shards each see only part of the suite, so the snapshots of the other
+tiers' and shards' tests are unused by construction. A local whole-suite run keeps
+syrupy's failing default, so an orphaned snapshot is caught by a whole-suite run or by
+the tier that owns it. A missing snapshot fails.
 
 ### Orphaned snapshots
 
