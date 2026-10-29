@@ -88,7 +88,7 @@ def _excluded(*paths: str) -> list:
         pytest.param(["build/out.py", "dist/out.js"], id="build-dist"),
         pytest.param(["static/app.min.js"], id="min-js"),
         pytest.param(["pkg/handler_test.go"], id="go-test"),
-        pytest.param(["/abs/repo/tests/test_app.py"], id="absolute"),
+        pytest.param(["{target}/tests/test_app.py"], id="absolute-under-target"),
     ],
 )
 def test_files_the_tools_default_ignore_list_left_out_grade_skipped(
@@ -96,14 +96,100 @@ def test_files_the_tools_default_ignore_list_left_out_grade_skipped(
 ):
     """A target whose files all sit on the tools' own default ignore list is
     SKIPPED, as the tools graded it before ASH re-passed that list as --exclude.
+    An absolute path is read below the target, so ``<target>/tests/x.py`` is on
+    the list the way ``tests/x.py`` is.
 
     Fails at the base with ScannerError ("its --exclude patterns left out all N
     files it found"): every ``cli_exclude_flags_match`` entry outside the global
     ignore names counted as the operator's.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
+    target = (tmp_path / "src").as_posix()
+    paths = [path.format(target=target) for path in paths]
 
     assert _grade(scanner, tmp_path, _excluded(*paths)) == 0
+
+
+@pytest.mark.parametrize(
+    "checkout",
+    [
+        pytest.param(("opt", "atlassian", "pipelines", "agent", "build"), id="build"),
+        pytest.param(("home", "ci", "tests", "repo"), id="tests"),
+        pytest.param(("srv", "vendor", "repo"), id="vendor"),
+    ],
+)
+def test_directories_above_the_target_never_count_as_default_ignores(
+    test_plugin_context, monkeypatch, tmp_path, checkout
+):
+    """A checkout under a directory named ``build``, ``tests`` or ``vendor`` (the
+    Bitbucket Pipelines and Travis clone roots, say) does not make every excluded
+    file one the tools' defaults left out: only the components below the target
+    are read against the list, so an operator pattern that left out every file is
+    still refused.
+
+    Fails at the base: every component of the absolute path was matched, so
+    ``/opt/atlassian/pipelines/agent/build/repo/app.py`` read as a default ignore
+    and the scan was graded SKIPPED.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
+    target = tmp_path.joinpath(*checkout, "repo")
+    target.mkdir(parents=True)
+    paths_file_dir = tmp_path / "grading"
+    paths_file_dir.mkdir()
+    reported = (target / "app.py").as_posix()
+
+    paths_file = paths_file_dir / "paths.json"
+    paths_file.write_text(
+        json.dumps({"paths": {"scanned": [], "skipped": _excluded(reported)}}),
+        encoding="utf-8",
+    )
+    scanner.targets_attempted = None
+    with pytest.raises(ScannerError, match="--exclude patterns left out all 1 files"):
+        scanner._post_process_sarif(
+            _SARIF, [f"--json-output={paths_file.as_posix()}"], target
+        )
+
+
+def test_an_ignore_name_above_the_target_does_not_count(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The global ignore names are matched below the target too: a target under a
+    directory that carries one of those names is not thereby all ASH's exclusion."""
+    scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
+    scanner._ignore_exclude_names = ["generated"]
+    target = tmp_path / "generated" / "repo"
+    target.mkdir(parents=True)
+    paths_file = tmp_path / "paths.json"
+    paths_file.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "scanned": [],
+                    "skipped": _excluded((target / "app.py").as_posix()),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    scanner.targets_attempted = None
+    with pytest.raises(ScannerError, match="--exclude patterns left out"):
+        scanner._post_process_sarif(
+            _SARIF, [f"--json-output={paths_file.as_posix()}"], target
+        )
+
+
+def test_an_absolute_path_outside_the_target_keeps_only_its_file_name(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """A reported path under neither the target nor its project root is matched
+    on its file name alone: a directory pattern cannot match it, a file glob can."""
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    target = tmp_path / "src"
+    target.mkdir()
+
+    assert _grade(scanner, tmp_path, _excluded("/elsewhere/static/app.min.js")) == 0
+    with pytest.raises(ScannerError, match="--exclude patterns left out"):
+        _grade(scanner, tmp_path, _excluded("/elsewhere/tests/test_app.py"))
 
 
 def test_files_in_an_ash_output_directory_grade_skipped(

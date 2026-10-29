@@ -38,6 +38,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
@@ -122,6 +123,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # Which target the current command is for: the converted target drops the
     # converted-file exclude and reads git-ignored files (_resolve_scan_arguments).
     _scan_target_type: str = PrivateAttr(default="source")
+    # The offline rule cache the command reads as --config, absolute, or None when
+    # the offline scan reads no cache (patterns mode, the operator's local rules,
+    # no cache found, or an online scan). content_databases_in_use and the
+    # staleness probe read it, so a scan that read other rules is not graded on
+    # the cache's age.
+    _cache_dir_in_use: Optional[str] = PrivateAttr(default=None)
 
     # ---------------------------------------------------------------
     # Hooks subclasses override
@@ -214,19 +221,24 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         return self._validate_tool_dependencies()
 
     def content_databases_in_use(self) -> list:
-        """The offline ruleset, and only in offline mode.
+        """The offline ruleset, and only when the offline scan read the cache.
 
         Online, the rules come from the registry at scan time and no local copy is read,
-        so there is nothing whose age could make the result stale.
+        so there is nothing whose age could make the result stale. Offline, patterns
+        mode and the operator's local rules read no cache either (``_cache_dir_in_use``
+        stays None), and neither does a scan that found no cache.
         """
-        if not self._scanner_offline():
+        if not self._scanner_offline() or self._cache_dir_in_use is None:
             return []
         return super().content_databases_in_use()
 
     def content_database_probe_context(self):
-        """The rules cache directory the offline scan passed as ``--config``."""
+        """The rules cache directory the offline scan passed as ``--config``, absolute."""
         context = super().content_database_probe_context()
-        context.cache_dir = os.environ.get(self.cache_dir_env_var(), "") or None
+        cache_dir = self._cache_dir_in_use or os.environ.get(
+            self.cache_dir_env_var(), ""
+        )
+        context.cache_dir = os.path.abspath(cache_dir) if cache_dir else None
         return context
 
     # ---------------------------------------------------------------
@@ -239,6 +251,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # Drop any --metrics already pushed into extra_args (some scanners
         # re-call this and we want a clean state).
         self.args.extra_args = [a for a in self.args.extra_args if a.key != "--metrics"]
+        self._cache_dir_in_use = None
 
         # Bundled ASH stargrep rules — picked up by both scanners.
         ash_stargrep_rules = [
@@ -360,21 +373,51 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 self._plugin_log(message, level=logging.WARNING)
 
     def _local_rules_configured(self) -> Optional[str]:
-        """The operator's ``options.config`` as an absolute path, when it names a
-        rule file or directory on this host; None for a registry name or a URL.
+        """The ``options.config`` rule file or directory ASH may hand the tool, as
+        the resolved absolute path, or None.
 
-        Offline, a local rule file needs no network, so it is what the scan runs
-        with, as it is online. Absolute because the tool runs in the source
-        directory while the path was written relative to ASH's working directory.
+        None for a registry name or a URL (``_is_registry_name``), for a value that
+        names nothing on this host, and for a path ASH may not pass: the one rule
+        every tool path option follows (``config/path_trust.honored_path``), under
+        which a relative value is taken from the source directory, the tool's
+        working directory, and a file inside the scanned tree or one an MCP client
+        delivered is refused with a warning, so the scanned repository cannot choose
+        the rules it is scanned with. One resolver for both modes: online and
+        offline hand the tool the same file for the same configuration.
         """
         configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
         if not configured or not isinstance(configured, str):
             return None
         if "://" in configured or _is_registry_name(configured):
             return None
-        candidate = Path(os.path.abspath(configured))
+        source_dir = getattr(self.context, "source_dir", None)
+        if source_dir is None:
+            return None
+        candidate = honored_path(
+            configured,
+            source_dir=source_dir,
+            key=self._config_option_key(),
+            config=getattr(self.context, "config", None),
+        )
+        if candidate is None:
+            return None
         if candidate.is_file() or candidate.is_dir():
             return candidate.as_posix()
+        return None
+
+    def _config_option_key(self) -> str:
+        """The dotted key of ``options.config`` in the ASH config, as the path-trust
+        warning names it (``scanners.semgrep.options.config``)."""
+        name = getattr(self.config, "name", None) or "grep"
+        return f"scanners.{name}.options.config"
+
+    def _configured_registry_entry(self) -> Optional[str]:
+        """``options.config`` when it names a registry entry or a URL, else None."""
+        configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
+        if not configured or not isinstance(configured, str):
+            return None
+        if "://" in configured or _is_registry_name(configured):
+            return configured
         return None
 
     def _configure_offline_mode(self) -> None:
@@ -468,17 +511,33 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # and the tool runs in the source directory, so a relative value would
         # name a different directory there (one inside the scanned tree, when
         # the name exists in both).
+        self._cache_dir_in_use = os.path.abspath(cache_dir)
         self.args.extra_args.append(
-            ToolExtraArg(key="--config", value=os.path.abspath(cache_dir))
+            ToolExtraArg(key="--config", value=self._cache_dir_in_use)
         )
 
     def _configure_online_mode(self) -> None:
         opts = self.config.options  # type: ignore[union-attr]
-        # Honour scanner-configured ruleset (defaults to default_rulesets()[0]).
+        # The configured rules: a registry entry or URL as written; a local rule
+        # file or directory through the same resolver offline uses
+        # (_local_rules_configured), so the two modes hand the tool one file and a
+        # path the scanned repository chose is refused in both. A configured value
+        # that names nothing ASH may pass falls back to the default rulesets, and
+        # the refusal, when there was one, has already been logged.
         configured = getattr(opts, "config", None)
-        if configured:
-            self.args.extra_args.append(ToolExtraArg(key="--config", value=configured))
+        registry = self._configured_registry_entry()
+        local_rules = self._local_rules_configured() if configured else None
+        if registry is not None:
+            self.args.extra_args.append(ToolExtraArg(key="--config", value=registry))
+        elif local_rules is not None:
+            self.args.extra_args.append(ToolExtraArg(key="--config", value=local_rules))
         else:
+            if configured:
+                self._plugin_log(
+                    f"{self._config_option_key()} names no rule file or directory "
+                    "ASH may pass to the tool; using the default rulesets.",
+                    level=logging.WARNING,
+                )
             for rs in self.default_rulesets():
                 self.args.extra_args.append(ToolExtraArg(key="--config", value=rs))
 
@@ -700,14 +759,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         if not relatives:
             return []
         target_abs = Path(os.path.abspath(target))
-        anchor = next(
-            (
-                candidate
-                for candidate in (target_abs, *target_abs.parents)
-                if candidate.joinpath(".git").exists()
-            ),
-            target_abs,
-        )
+        anchor = _pattern_anchor(target_abs)
         return [
             "/"
             + escape_for_pattern(
@@ -718,7 +770,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             for relative in relatives
         ]
 
-    def _left_out_by_ash(self, path: str) -> bool:
+    def _left_out_by_ash(self, path: str, target: Path) -> bool:
         """Whether ``path``, which the tool excluded, matches one of the exclusions
         ASH itself adds to every command rather than one the operator configured.
 
@@ -727,10 +779,14 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         (``_ignore_exclude_names``), the ASH output directories inside the target
         (``_output_dir_excluded``), and the tools' own default ignore list, which
         ASH re-passes as ``--exclude`` because ``--x-ignore-semgrepignore-files``
-        drops it (``SEMGREP_DEFAULT_IGNORES``). Matched on path components, as the
-        tools match a directory pattern, and on the file name for a file glob.
+        drops it (``SEMGREP_DEFAULT_IGNORES``). Matched on the path's components
+        below the target (or below the project root the tools anchor their patterns
+        at), as the tools match a directory pattern, and on the file name for a
+        file glob. The directories above the target never count: a checkout under
+        ``/opt/atlassian/pipelines/agent/build`` or ``/home/travis/build`` would
+        otherwise read every excluded file as one the tools' defaults left out.
         """
-        parts = Path(path).parts
+        parts = _parts_below(path, target)
         if set(self._ignore_exclude_names).intersection(parts):
             return True
         for relative in self._output_dir_excluded:
@@ -796,7 +852,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 not_ignored = [
                     entry
                     for entry in excluded
-                    if not self._left_out_by_ash(str(entry.get("path", "")))
+                    if not self._left_out_by_ash(str(entry.get("path", "")), target)
                 ]
                 if not_ignored:
                     raise ScannerError(
@@ -855,12 +911,47 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
 #: directory in the working directory that happens to carry such a name is not read
 #: as the operator's local rules; a local path is spelled so it cannot be confused
 #: with a registry entry (``./p/ci``, an absolute path, a ``.yaml`` or ``.yml`` file).
-_REGISTRY_PREFIXES = ("p/", "r/")
+_REGISTRY_PREFIXES = ("p/", "r/", "s/")
 
 
 def _is_registry_name(configured: str) -> bool:
-    """Whether ``configured`` is a registry entry name (``auto``, ``p/...``, ``r/...``)."""
+    """Whether ``configured`` is a registry entry name (``auto``, ``p/...``, ``r/...``,
+    ``s/...``)."""
     return configured == "auto" or configured.startswith(_REGISTRY_PREFIXES)
+
+
+def _pattern_anchor(target_abs: Path) -> Path:
+    """The project root the tools anchor their patterns at: the nearest directory
+    at or above ``target_abs`` holding ``.git``, else the target itself."""
+    return next(
+        (
+            candidate
+            for candidate in (target_abs, *target_abs.parents)
+            if candidate.joinpath(".git").exists()
+        ),
+        target_abs,
+    )
+
+
+def _parts_below(path: str, target: Path) -> tuple[str, ...]:
+    """The components of a path the tool reported, below the target or the project
+    root; the directories above them never count.
+
+    The tools report a path as given or relative to their project root, so a
+    relative path is taken as it is. An absolute one is made relative to the target,
+    else to the project root (``_pattern_anchor``); one under neither keeps only its
+    file name, so no directory above the scan can match a directory pattern.
+    """
+    reported = Path(path)
+    if not reported.is_absolute():
+        return reported.parts
+    target_abs = Path(os.path.abspath(target))
+    for root in (target_abs, _pattern_anchor(target_abs)):
+        try:
+            return reported.relative_to(root).parts
+        except ValueError:
+            continue
+    return (reported.name,)
 
 
 #: The flag the scanned-paths JSON is written with (semgrep and opengrep alike).

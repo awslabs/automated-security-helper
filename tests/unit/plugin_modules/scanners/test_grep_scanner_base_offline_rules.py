@@ -9,7 +9,11 @@
   by the cached registry rules without a word.
 - The cache directory and a local config reach the tool as absolute paths. The
   directory is validated against ASH's working directory and the tool runs in the
-  source directory, so a relative value named a different directory there.
+  source directory, so a relative value named a different directory there. A local
+  config is taken from the source directory, as every tool path option is
+  (``config/path_trust``); the path-trust judgment itself is covered in
+  ``test_grep_scanner_base_registry_names.py`` and
+  ``test_grep_scanner_base_rules_path_trust.py``.
 - ``--no-rewrite-rule-ids`` is passed online as well as offline, so ASH's bundled
   rules keep one id whatever mode the scan ran in.
 
@@ -145,20 +149,30 @@ def test_a_relative_local_config_reaches_the_tool_as_an_absolute_path(
     tmp_path,
     monkeypatch,
 ):
-    """The path is resolved against ASH's working directory, where the operator
-    wrote it, not the source directory the tool runs in."""
-    (tmp_path / "my-rules.yaml").write_text(RULE, encoding="utf-8")
+    """A relative path is taken from the source directory, as every tool path
+    option is (``path_trust.resolved_path``), and reaches the tool absolute. A
+    directory beside the scanned one is outside the tree, so the value is passed.
+    ASH's working directory plays no part: it is moved elsewhere here."""
+    source_dir = Path(test_plugin_context.source_dir)
+    rules_dir = source_dir.parent / "rules-beside-the-tree"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "my-rules.yaml").write_text(RULE, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(cache_env, raising=False)
 
     scanner = scanner_cls(
         context=test_plugin_context,
-        config=config_cls(options=options_cls(offline=True, config="my-rules.yaml")),
+        config=config_cls(
+            options=options_cls(
+                offline=True, config="../rules-beside-the-tree/my-rules.yaml"
+            )
+        ),
     )
 
     configs = [Path(value) for value in _configs(scanner)]
-    assert Path(os.getcwd()) / "my-rules.yaml" in configs, configs
+    assert Path(os.path.realpath(rules_dir / "my-rules.yaml")) in configs, configs
     assert all(path.is_absolute() for path in configs), configs
+    assert not any(str(tmp_path) in str(path) for path in configs), configs
 
 
 @pytest.mark.parametrize(
