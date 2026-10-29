@@ -215,7 +215,11 @@ def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Pat
     for parent in candidates:
         reason = _changeable_by_others(parent)
         if reason is None:
-            private.append(parent)
+            # The resolved path: _changeable_by_others checked every directory on
+            # it, and the directory is made and written there, so a symbolic link
+            # in the path as given (TMPDIR, or the output directory) is not walked
+            # again afterwards by a path the check never saw.
+            private.append(Path(os.path.realpath(parent)))
         else:
             passed_over.append(f"{parent.as_posix()}: {reason}")
     for parent in private:
