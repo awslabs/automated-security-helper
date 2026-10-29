@@ -635,6 +635,11 @@ class TestATierRunThatRanNothingInARealPytest:
         "tier run executed no test: 1 collected, 1 skipped, 0 executed; "
         "a leg that runs nothing is not green"
     )
+    COUNTED_LINE = (
+        "tier run executed no test: 2 collected, 1 skipped, 1 leg assertion not "
+        "counted, 0 executed; a leg that runs nothing is not green"
+    )
+    ANNOTATION_START = "::error title=tier run executed no test::"
 
     def _plant(
         self, root: Path, *, leg_assertion: bool = False, real_test: bool = False
@@ -715,14 +720,49 @@ class TestATierRunThatRanNothingInARealPytest:
         assert done.returncode == 1, done.stdout + done.stderr
         assert self.LINE in done.stdout, done.stdout
 
+    def test_a_failing_floor_prints_an_error_annotation_at_the_start_of_a_line(
+        self, tmp_path
+    ):
+        """GitHub reads a workflow command only at the start of a line.
+
+        ``-vv`` against the helper's ``-q`` is the verbose output CI runs with (the
+        repository's addopts has ``--verbose``), where the reporter ends a test's line.
+        """
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=True, extra=("-vv",))
+        assert done.returncode == 1, done.stdout + done.stderr
+        starts = [
+            line
+            for line in done.stdout.splitlines()
+            if line.startswith(self.ANNOTATION_START)
+        ]
+        assert starts == [self.ANNOTATION_START + self.LINE], done.stdout
+
+    def test_the_error_annotation_is_printed_under_xdist_too(self, tmp_path):
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, leg_assertion=True)
+        done = self._run(tmp_path, under_ci=True, extra=("-vv", "-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        starts = [
+            line
+            for line in done.stdout.splitlines()
+            if line.startswith(self.ANNOTATION_START)
+        ]
+        assert starts == [self.ANNOTATION_START + self.COUNTED_LINE], done.stdout
+
+    def test_a_leg_that_executed_a_test_prints_no_annotation(self, tmp_path):
+        self._plant(tmp_path, leg_assertion=True, real_test=True)
+        done = self._run(tmp_path, under_ci=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "::error" not in done.stdout, done.stdout
+
     def test_a_passing_leg_assertion_does_not_hide_an_all_skipped_leg(self, tmp_path):
         """The e2e tools test passes on every leg that has its tools; it must not count."""
         self._plant(tmp_path, leg_assertion=True)
         done = self._run(tmp_path, under_ci=True)
         assert done.returncode == 1, done.stdout + done.stderr
-        assert "tier run executed no test: 2 collected, 1 skipped, 0 executed" in (
-            done.stdout
-        ), done.stdout
+        assert self.COUNTED_LINE in done.stdout, done.stdout
 
     def test_the_floor_fires_under_xdist_where_the_controller_collects_nothing(
         self, tmp_path
@@ -749,9 +789,7 @@ class TestATierRunThatRanNothingInARealPytest:
         self._plant(tmp_path, leg_assertion=True)
         done = self._run(tmp_path, under_ci=True, extra=("-n", "2"))
         assert done.returncode == 1, done.stdout + done.stderr
-        assert "tier run executed no test: 2 collected, 1 skipped, 0 executed" in (
-            done.stdout
-        ), done.stdout
+        assert self.COUNTED_LINE in done.stdout, done.stdout
 
     def test_the_same_leg_with_a_real_passing_test_stays_green_under_xdist(
         self, tmp_path
@@ -982,6 +1020,7 @@ class TestSkipifLegsAndWarnModeInARealPytest:
             + "tier run executed no test: 1 collected, 1 skipped, 0 executed; "
             "a leg that runs nothing is not green"
         ) in done.stdout, done.stdout
+        assert "::error" not in done.stdout, "a warning is not an error annotation"
 
     def test_the_value_1_on_the_same_tree_exits_1(self, tmp_path):
         """The control for warn mode: only the value differs."""
@@ -989,6 +1028,7 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         done = self._run(tmp_path, floor="1", gate_open=True)
         assert done.returncode == 1, done.stdout + done.stderr
         assert sharding.WARN_PREFIX not in done.stdout, done.stdout
+        assert "::error title=tier run executed no test::" in done.stdout, done.stdout
 
     def test_any_other_value_leaves_the_floor_off(self, tmp_path):
         self._plant(tmp_path, absent_tool=1)
@@ -1140,6 +1180,7 @@ class TestATierRunThatExecutedNoTestFails:
         "tier run executed no test: 3 collected, 3 skipped, 0 executed; "
         "a leg that runs nothing is not green"
     )
+    ANNOTATION = "::error title=tier run executed no test::" + LINE
 
     @staticmethod
     def _session(
@@ -1173,7 +1214,49 @@ class TestATierRunThatExecutedNoTestFails:
         session = self._session(written)
         assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
-        assert written == [self.LINE]
+        assert written == [self.LINE, self.ANNOTATION]
+
+    def test_the_failure_line_counts_leg_assertions_apart_and_says_so(self):
+        written: list[str] = []
+        session = self._session(written, collected=3)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 2, None, 1)
+        line = (
+            "tier run executed no test: 3 collected, 2 skipped, 1 leg assertion not "
+            "counted, 0 executed; a leg that runs nothing is not green"
+        )
+        assert written == [line, f"::error title={sharding.FAILURE_TITLE}::{line}"]
+
+    def test_the_clause_says_leg_assertions_for_more_than_one(self):
+        written: list[str] = []
+        session = self._session(written, collected=3)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 1, None, 2)
+        assert "1 skipped, 2 leg assertions not counted, 0 executed" in written[0]
+
+    def test_the_clause_is_left_out_when_there_is_no_leg_assertion(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3, None, 0)
+        assert written[0] == self.LINE and "leg assertion" not in written[0]
+
+    def test_the_annotation_carries_the_same_text_as_the_line(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        prefix = f"::error title={sharding.FAILURE_TITLE}::"
+        assert sharding.FAILURE_TITLE == "tier run executed no test"
+        assert written[1] == prefix + written[0]
+
+    def test_a_run_that_is_not_failed_prints_no_annotation(self):
+        """Warn mode, an admitted skipif leg and a run that executed a test."""
+        for kwargs, args in (
+            ({"warn": True}, (0, 3)),
+            ({}, (0, 3, {"not supported on this runner": 3})),
+            ({}, (1, 2)),
+        ):
+            written: list[str] = []
+            session = self._session(written, **kwargs)
+            assert not sharding.fail_a_tier_run_that_executed_no_test(session, *args)
+            assert not any(line.startswith("::") for line in written), written
 
     def test_a_run_that_executed_a_test_is_left_alone(self):
         written: list[str] = []
@@ -1370,10 +1453,31 @@ class TestATierRunThatExecutedNoTestFails:
         marked = {sharding.LEG_ASSERTION_MARKER: 1}
         plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
         plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
-        plugin.pytest_runtest_logreport(self._report("call", "passed", keywords=marked))
+        for when in ("setup", "call", "teardown"):
+            plugin.pytest_runtest_logreport(
+                self._report(when, "passed", keywords=marked)
+            )
+        assert plugin.leg_assertions == 1, "one test has one setup report"
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
-        assert "2 skipped, 0 executed" in written[0], written
+        assert "2 skipped, 1 leg assertion not counted, 0 executed" in written[0], (
+            written
+        )
+
+    def test_leg_assertions_are_counted_by_setup_report_and_never_as_skips(self):
+        """One test passes setup and skips in the body; another skips in setup."""
+        plugin = sharding._TierRunOutcome()
+        marked = {sharding.LEG_ASSERTION_MARKER: 1}
+        plugin.pytest_runtest_logreport(
+            self._report("setup", "passed", keywords=marked)
+        )
+        plugin.pytest_runtest_logreport(
+            self._report("call", "skipped", keywords=marked)
+        )
+        plugin.pytest_runtest_logreport(
+            self._report("setup", "skipped", keywords=marked)
+        )
+        assert (plugin.executed, plugin.skipped, plugin.leg_assertions) == (0, 0, 2)
 
     def test_a_controller_counts_the_reports_xdist_forwards_once(self):
         """The workers' own counts are not summed too: that would count each test twice."""
@@ -1386,7 +1490,7 @@ class TestATierRunThatExecutedNoTestFails:
         plugin.pytest_testnodedown(node, None)
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
-        assert written == [self.LINE]
+        assert written == [self.LINE, self.ANNOTATION]
 
     @staticmethod
     def _skip(
@@ -1541,7 +1645,7 @@ class TestATierRunThatExecutedNoTestFails:
         )
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
-        assert written == [self.LINE]
+        assert written == [self.LINE, self.ANNOTATION]
 
     def test_a_skip_in_the_call_phase_among_skipif_skips_keeps_the_failure(self):
         """A missing tool found by the test body is not a declared condition."""
@@ -1553,7 +1657,7 @@ class TestATierRunThatExecutedNoTestFails:
         plugin.pytest_runtest_logreport(self._skip("bandit is absent", when="call"))
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
-        assert written == [self.LINE]
+        assert written == [self.LINE, self.ANNOTATION]
 
     def test_a_leg_that_only_gate_skipped_keeps_the_failure(self):
         written: list[str] = []
@@ -1568,7 +1672,7 @@ class TestATierRunThatExecutedNoTestFails:
             )
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
-        assert written == [self.LINE]
+        assert written == [self.LINE, self.ANNOTATION]
 
     def test_a_leg_with_no_skip_at_all_is_not_admitted(self):
         """Selected items that were all leg assertions: nothing was skipped, nothing ran."""

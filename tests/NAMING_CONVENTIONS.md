@@ -86,6 +86,25 @@ executed-test count, so a leg whose only passing test is a leg assertion still f
 executed-test floor in `tests/utils/sharding.py`. Do not reclassify a leg assertion by
 what it does.
 
+The executed-test floor fails a CI tier leg that selected tests and executed none of
+them. The environment variable `ASH_TEST_TIER_FLOOR` is its only trigger: the
+`run-unit-tests` action sets it to `1` on the unit and integration legs, and to `warn`
+on the e2e legs for now. In warn mode the floor prints its line with a warning prefix and
+leaves the exit status alone, and the e2e legs change to `1` once a hosted run shows each
+of them executing a real test with its scanners installed. A shard alone does not turn
+the floor on, so `ASH_TEST_SHARD=3of4 uv run pytest -m integration` on a developer
+machine is not failed for tests that a missing `pytest --run-integration` skipped. A
+leg whose every skip comes from a `skipif` marker whose condition held is admitted, with
+a line that names the reasons and their counts. A skip from the `pytest --run-integration`
+or `pytest --run-slow` gate, from a `pytest.skip` in a test or a fixture, or from an
+unconditional `skip` mark still fails the leg, so a missing tool should be a `skipif`
+only when the test is meant not to apply there. The failure line counts leg assertions
+apart from the skips, for example
+`2 collected, 1 skipped, 1 leg assertion not counted, 0 executed`, and a failing floor
+prints a `::error` annotation with the same text. The published JUnit report lists no
+failed test for such a run, because pytest has no public hook for a plugin to add one:
+the step log and the annotation are the record.
+
 There is no directory default. A test with no tier marker, or with more than one (a
 module-level `integration` and a function-level `unit` count as two), makes collection
 refuse the whole session with a usage error that lists the first offenders, so nothing

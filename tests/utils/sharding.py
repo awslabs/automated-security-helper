@@ -105,6 +105,23 @@ time is not.
 same line is printed with a warning prefix and the exit status is left alone. The e2e
 legs run in warn mode until a hosted run shows every one of them executing a real test
 with its scanners installed. Any other value is ignored.
+
+The failure line counts the leg assertions apart from the skips, so its numbers add up
+(``2 collected, 1 skipped, 1 leg assertion not counted, 0 executed``); the clause is
+left out when there are none. A failing floor under ``1`` also prints a GitHub error
+annotation line, ``::error title=tier run executed no test::<the line>``, which puts the
+reason on the workflow run's page and not only at the end of the step log.
+
+Where a failed floor is recorded: the step log line and that annotation, and nowhere in
+the JUnit XML. The file for such a run lists no failed testcase, so the "PyTest - ..."
+check run that action-junit-report publishes can read green while the job exits 1. No
+test report is added, because pytest's junitxml plugin has no public hook for a plugin to
+add a testcase: ``LogXML.add_global_property`` (and the ``record_testsuite_property``
+fixture over it) writes a ``<property>`` of the testsuite and no testcase, and feeding a
+synthetic failed ``TestReport`` through ``pytest_runtest_logreport`` at session end would
+also reach the terminal summary and every other reporter, and depends on junitxml's own
+``pytest_sessionfinish`` running after ours. A reader of the check run follows the
+annotation.
 """
 
 from __future__ import annotations
@@ -188,6 +205,8 @@ WORKERINPUT_KEY = "ash_test_shard"
 FLOOR_ENV_VAR = "ASH_TEST_TIER_FLOOR"
 #: The value of the opt-in that reports a floor failure and leaves the exit status alone.
 FLOOR_WARN_VALUE = "warn"
+#: The title of the GitHub error annotation a failing floor prints after its line.
+FAILURE_TITLE = "tier run executed no test"
 #: What the floor line starts with in warn mode, so a reader knows it did not fail the run.
 WARN_PREFIX = "warning (ASH_TEST_TIER_FLOOR=warn, exit status unchanged): "
 #: Whether this run opted in to the floor, in either mode.
@@ -364,6 +383,7 @@ def fail_a_tier_run_that_executed_no_test(
     executed: int,
     skipped: int,
     skipif_reasons: Optional[Mapping[str, int]] = None,
+    leg_assertions: int = 0,
 ) -> bool:
     """Fail a CI tier run that selected tests and executed none of them.
 
@@ -383,9 +403,12 @@ def fail_a_tier_run_that_executed_no_test(
     returns False. A gate skip, a ``pytest.skip`` or a ``skip`` mark among the skips
     keeps the failure.
 
-    The status becomes ``TESTS_FAILED`` and one line says what the run did. In warn mode
-    (``ASH_TEST_TIER_FLOOR=warn``) the same line is printed with :data:`WARN_PREFIX` and
-    the status is left alone, so this returns False. It does nothing in an xdist worker,
+    The status becomes ``TESTS_FAILED`` and one line says what the run did, counting the
+    ``leg_assertions`` (tests marked ``leg_assertion``, which are in neither count)
+    apart so that the numbers add up. The line is followed by a GitHub error annotation
+    carrying the same text. In warn mode (``ASH_TEST_TIER_FLOOR=warn``) the same line is
+    printed with :data:`WARN_PREFIX`, without the annotation, and the status is left
+    alone, so this returns False. It does nothing in an xdist worker,
     whose share of the tests may be all skips while the run executed hundreds; the
     controller counts every worker's reports and decides.
     """
@@ -423,8 +446,12 @@ def fail_a_tier_run_that_executed_no_test(
             f"condition that held: {skipped} skipped ({listed})",
         )
         return False
+    counted = ""
+    if leg_assertions > 0:
+        plural = "" if leg_assertions == 1 else "s"
+        counted = f", {leg_assertions} leg assertion{plural} not counted"
     line = (
-        f"tier run executed no test: {selected} collected, {skipped} skipped, "
+        f"tier run executed no test: {selected} collected, {skipped} skipped{counted}, "
         "0 executed; a leg that runs nothing is not green"
     )
     if config.stash.get(_FLOOR_WARN_KEY, False):
@@ -432,6 +459,7 @@ def fail_a_tier_run_that_executed_no_test(
         return False
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
     _write_line(config, line)
+    _write_line(config, f"::error title={FAILURE_TITLE}::{line}")
     return True
 
 
@@ -455,8 +483,8 @@ class _TierRunOutcome:
     ``configure`` registers it for a run with a shard or under CI. A class because tests/conftest.py already defines the module-level
     ``pytest_sessionfinish`` that a hook imported by name would have to share, and
     because it holds the counts of the run: the items it deselected, the tests it
-    executed and skipped, and how many of the skips came from a ``skipif`` marker, by
-    reason.
+    executed and skipped, how many of the skips came from a ``skipif`` marker (by
+    reason), and the leg assertions, which are in neither count.
     """
 
     def __init__(self) -> None:
@@ -464,6 +492,7 @@ class _TierRunOutcome:
         self.executed = 0
         self.skipped = 0
         self.skipif_reasons: Dict[str, int] = {}
+        self.leg_assertions = 0
 
     def pytest_deselected(self, items: Sequence[Any]) -> None:
         self.deselected += len(items)
@@ -477,12 +506,16 @@ class _TierRunOutcome:
         without skipping, or when its setup failed (an error is a result). A skip
         in setup, or ``pytest.skip`` in the body, is skipped; an expected failure
         (``wasxfail``) ran its body and is executed. A leg assertion is neither: it
-        is left out of both counts, and it is recognized by its marker name in
+        is left out of both counts, though it is counted on its own so that the floor
+        line can say so. It is recognized by its marker name in
         ``report.keywords``, which reaches an xdist controller with the report. A
         setup skip that :func:`skipif_reason` reads as a ``skipif`` skip is also tallied
         by its reason.
         """
         if LEG_ASSERTION_MARKER in (getattr(report, "keywords", None) or {}):
+            # Every test has one setup report, so counting there counts each once.
+            if report.when == "setup":
+                self.leg_assertions += 1
             return
         if report.when == "setup":
             if report.failed:
@@ -513,7 +546,11 @@ class _TierRunOutcome:
             return
         admit_empty_shard(session, exitstatus, self.deselected)
         fail_a_tier_run_that_executed_no_test(
-            session, self.executed, self.skipped, self.skipif_reasons
+            session,
+            self.executed,
+            self.skipped,
+            self.skipif_reasons,
+            self.leg_assertions,
         )
 
 
