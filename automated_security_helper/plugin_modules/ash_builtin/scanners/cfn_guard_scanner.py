@@ -571,6 +571,16 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         except RulesBundleUnavailable as exc:
             self._record_unavailable(str(exc))
             return False
+        except OSError as exc:
+            # Path.exists() and Path.is_dir() raise PermissionError on a rules
+            # path under a directory this user cannot search (Python 3.10-3.12).
+            # Escaping here dropped the scanner with a traceback instead of
+            # reporting it MISSING with the reason.
+            self._record_unavailable(
+                "cfn-guard rules could not be checked: "
+                f"{type(exc).__name__}: {exc.strerror or exc}"
+            )
+            return False
         return True
 
     def nothing_to_scan_reason(self) -> Optional[str]:
