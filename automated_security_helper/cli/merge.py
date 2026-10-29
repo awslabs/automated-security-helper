@@ -2780,12 +2780,12 @@ def merge_command(
                 "Refuse the merge when a shard completed none of the scanners it "
                 "owned, and exit 1 when any scanner in the union is ERROR or "
                 "MISSING, or when every one is SKIPPED, such as when no selected "
-                "scanner had a file to scan. On by default: under "
+                "scanner had a file to scan. Under "
                 "--no-fail-on-incomplete-scanners, a shard whose scanners never ran "
                 "contributes no findings and the merged report reads as a "
-                "complete, clean scan. Defaults to the scan configuration's "
-                "value, then to true; pass --no-fail-on-incomplete-scanners to "
-                "merge a partial union anyway."
+                "complete, clean scan. Defaults to unset, which prefers the scan "
+                "configuration's value and then on; pass "
+                "--no-fail-on-incomplete-scanners to merge a partial union anyway."
             ),
         ),
     ] = None,
