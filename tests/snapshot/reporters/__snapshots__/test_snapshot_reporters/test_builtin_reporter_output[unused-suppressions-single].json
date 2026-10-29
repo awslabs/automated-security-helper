@@ -13,5 +13,11 @@
       "reason": "Stale suppression for a check that no longer exists",
       "expiration": "2099-12-31"
     }
-  ]
+  ],
+  "scanners_not_run": [
+    "cdk-nag",
+    "cfn-nag",
+    "npm-audit"
+  ],
+  "scope_caveat": "These scanners did not run on this scan: cdk-nag, cfn-nag, npm-audit. A suppression for a finding one of them would report could not be matched and may be listed as unused although it is in force; keep such entries until a scan with the scanner enabled evaluates them."
 }

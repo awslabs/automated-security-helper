@@ -109,6 +109,28 @@ def test_the_workspace_markdown_states_its_scope(tmp_path):
     assert "% of suppressions are unused" not in markdown
 
 
+def test_the_workspace_report_carries_no_scanner_caveat(tmp_path):
+    """The workspace report covers no suppression, so a project's scanner that
+    did not run (recorded in the unified results) is not a caveat here; each
+    project's own report carries it for that project's scan."""
+    from automated_security_helper.core.enums import ScannerStatus
+    from automated_security_helper.models.asharp_model import ScannerTargetStatusInfo
+
+    context = _context(tmp_path)
+    model = _workspace_model(tmp_path)
+    model.scanner_results = {
+        "npm-audit": ScannerTargetStatusInfo(
+            status=ScannerStatus.MISSING, dependencies_satisfied=False
+        )
+    }
+
+    report = json.loads(UnusedSuppressionsReporter(context=context).report(model))
+
+    assert report["scope"] == "workspace"
+    assert "scanners_not_run" not in report
+    assert "scope_caveat" not in report
+
+
 def test_a_single_directory_report_still_reads_the_configured_list(tmp_path):
     """The control: outside workspace mode the context's list is the report's."""
     context = _context(tmp_path)

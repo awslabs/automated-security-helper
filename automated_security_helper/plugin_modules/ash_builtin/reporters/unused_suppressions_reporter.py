@@ -254,8 +254,10 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # could not be matched and reads as unused here although it is in
         # force. The report names those scanners so the "remove it" reading
         # is qualified; a suppression carries no scanner name, so it cannot
-        # say which entries are affected.
-        scanners_not_run = self._scanners_not_run(model)
+        # say which entries are affected. Not in workspace mode: this report
+        # then covers no suppression (the list above is empty), and each
+        # project's own report carries the caveat for that project's scan.
+        scanners_not_run = [] if workspace else self._scanners_not_run(model)
         if scanners_not_run and not suppressions_ignored:
             report_data["scanners_not_run"] = scanners_not_run
             report_data["scope_caveat"] = (

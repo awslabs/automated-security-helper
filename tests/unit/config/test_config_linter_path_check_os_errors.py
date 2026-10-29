@@ -14,9 +14,14 @@ ended in a traceback, where the validator's own check of the same path is
 guarded. The linter now catches both and reports nothing for that path: it
 matches nothing, and the model's own refusal of a bad path is still printed.
 
-On Python 3.13 and later ``Path.is_dir`` swallows both errors itself, so the
-two cases below are green at the base there and red at the base on 3.12 and
-older; the fix holds on every version.
+``Path.is_dir`` has caught ``ValueError`` on every supported Python, so the
+embedded-NUL case is green at the base everywhere (a control for the
+ENAMETOOLONG case, and the pin that the catch in the linter does not hide a
+path the helpers refuse). The ENAMETOOLONG case is red at the base on Python
+3.12 and older, where ``Path.is_dir`` lets that ``OSError`` through, and green
+at the base on 3.13 and later, where ``is_dir`` is ``os.path.isdir`` and
+swallows it; the fix holds on every version. Measured on Python 3.12.15 at the
+base: name-past-name-max red, embedded-nul green.
 """
 
 import pytest
