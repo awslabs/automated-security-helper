@@ -229,4 +229,7 @@ def test_many_ignored_files_keep_the_value_inside_one_argument(tmp_path):
 
     (token,) = [a for a in argv if str(a).startswith("--exclude=")]
     assert len(token.encode()) < 128 * 1024
-    assert f"{source.as_posix()}/link_out.py" in _entries(argv)
+    # The link's entry is a glob that matches its path alone (bandit also reads
+    # an entry as a plain substring, so the literal path is not what is passed).
+    link = f"{source.as_posix()}/link_out.py"
+    assert any(fnmatch.fnmatchcase(link, entry) for entry in _entries(argv)), argv

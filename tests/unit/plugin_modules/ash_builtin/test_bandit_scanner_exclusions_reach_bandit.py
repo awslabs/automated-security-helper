@@ -231,7 +231,8 @@ def test_a_link_name_with_a_non_utf8_byte_does_not_fail_the_scan(tmp_path):
 
     argv, _, _ = scanner._execute_scan(source, "source", [])
 
-    assert any(name in entry for entry in _entries(argv)), argv
+    link = f"{source.as_posix()}/{name}"
+    assert any(fnmatch.fnmatchcase(link, entry) for entry in _entries(argv)), argv
 
 
 # ---------------------------------------------------------------------------

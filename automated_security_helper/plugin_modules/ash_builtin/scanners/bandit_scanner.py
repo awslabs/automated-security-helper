@@ -1096,6 +1096,16 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         results_file = target_results_dir.joinpath("bandit.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
 
+        if _holds_a_line_break(Path(target).as_posix()):
+            # Every entry is anchored at the target, and the builders refuse an
+            # anchor that holds a line break, so bandit would get no exclusion
+            # at all for such a target: not the default excludes, not the
+            # output directory inside the tree, not the links that leave it.
+            raise ScannerError(
+                f"Not running bandit on {Path(target).as_posix()!r}: its path "
+                "holds a line break, which no --exclude entry anchored at it can "
+                "carry, so bandit would run with no exclusion at all."
+            )
         files, links = walked_files(target)
         required, best_effort = self._scan_excludes(target, global_ignore_paths or [])
         entries = required + self._link_excludes(target, files=files, links=links)

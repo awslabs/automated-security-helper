@@ -130,7 +130,8 @@ def test_without_a_usable_file_only_the_empty_ini_is_passed(
         (warning,) = [
             r.getMessage() for r in caplog.records if str(missing) in r.getMessage()
         ]
-        assert "is ignored" in warning and "empty config file" in warning, warning
+        assert "does not exist or is not a file" in warning, warning
+        assert "empty ini file" in warning, warning
 
 
 def test_a_directory_is_not_passed_as_a_config_file(
@@ -149,7 +150,7 @@ def test_a_directory_is_not_passed_as_a_config_file(
     (warning,) = [
         r.getMessage() for r in caplog.records if str(directory) in r.getMessage()
     ]
-    assert "is not a file" in warning and "is ignored" in warning, warning
+    assert "is not a file" in warning and "empty ini file" in warning, warning
 
 
 def test_a_path_still_relative_at_the_scanner_is_joined_to_the_source_directory(

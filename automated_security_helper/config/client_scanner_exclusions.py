@@ -250,6 +250,11 @@ def _reduced(name: str) -> str:
     return reduced_plugin_name(name)
 
 
+def _has_a_drive(path: str) -> bool:
+    """Whether ``path`` starts with a Windows drive letter (``C:/``)."""
+    return len(path) >= 2 and path[1] == ":" and path[0].isalpha()
+
+
 def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
     """Whether bandit, given ``excluded_paths`` entry ``pattern``, skips the file at ``absolute``.
 
@@ -269,11 +274,16 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
     below = relative.replace("\\", "/")
     while below.startswith("./"):
         below = below[2:]
-    below = below.lstrip("/")
+    if not below or below.startswith("/") or _has_a_drive(below):
+        # An absolute "relative" path is the SARIF step's sign that it could
+        # not place the finding under the source directory: no root is known.
+        return False
     path = absolute.replace("\\", "/")
-    if not below or not path.endswith("/" + below):
+    if not path.endswith("/" + below):
         return False
     root = path[: -(len(below) + 1)]
+    if not root:
+        return False
     return any(
         fnmatch.fnmatchcase(path, entry) or entry in path
         for entry in bandit_excluded_path_globs(root, pattern)
@@ -590,6 +600,7 @@ def strip_client_scanner_exclusions(
             moved: List[ClientScannerExclusion] = []
             expired: List[str] = []
             unread: List[str] = []
+            replaced = 0
             for entry in value:
                 pattern, reason, expiration = _entry_fields(entry)
                 if pattern is None:
@@ -599,7 +610,10 @@ def strip_client_scanner_exclusions(
                     # The operator's own entry, with its reason and expiration,
                     # not the client's copy of the path: a client could otherwise
                     # revive an exclusion the operator let expire.
-                    kept.append(_spelled_like(entry, operator_entries[pattern]))
+                    spelled = _spelled_like(entry, operator_entries[pattern])
+                    if spelled != entry:
+                        replaced += 1
+                    kept.append(spelled)
                     continue
                 if _entry_expired(expiration):
                     # The scanner would not apply it (active_ignore_paths), so
@@ -618,8 +632,11 @@ def strip_client_scanner_exclusions(
                         reason=reason or "set by a config an MCP client delivered",
                     )
                 )
-            if not moved and not expired and not unread:
+            if not moved and not expired and not unread and not replaced:
                 continue
+            # Written back whenever an entry changed, a client's copy of an
+            # operator entry replaced by the operator's own included: left
+            # unwritten, the client's reason and expiration stayed in the option.
             _set(options, spec.option, kept)
             recorded.extend(moved)
             if moved:
