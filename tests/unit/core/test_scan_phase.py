@@ -9,6 +9,8 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 
+pytestmark = pytest.mark.unit
+
 # Rebuild model to handle forward references
 AshAggregatedResults.model_rebuild()
 

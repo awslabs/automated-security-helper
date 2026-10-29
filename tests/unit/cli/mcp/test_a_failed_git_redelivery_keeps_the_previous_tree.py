@@ -45,6 +45,8 @@ from automated_security_helper.cli.mcp.sessions import reset_default_registry_fo
 from automated_security_helper.cli.mcp_server import _resolve_omitted_source_dir
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 
+pytestmark = pytest.mark.unit
+
 HOST = "git.example.invalid"
 URL = f"https://{HOST}/team/repo.git"
 GIT = "/opt/git/bin/git"

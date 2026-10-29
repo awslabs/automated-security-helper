@@ -27,6 +27,8 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils
 
+pytestmark = pytest.mark.unit
+
 
 class _WindowsOs:
     """The os module, reporting Windows."""

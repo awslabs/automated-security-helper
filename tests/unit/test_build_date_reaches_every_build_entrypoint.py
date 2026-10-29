@@ -127,6 +127,7 @@ def _date_values(argv: List[str]) -> List[str]:
     return [p.partition("=")[2] for p in pairs if p.startswith(f"{BUILD_DATE_ARG}=")]
 
 
+@pytest.mark.unit
 class TestTheDockerfile:
     @pytest.fixture
     def stage(self) -> List[str]:
@@ -250,6 +251,7 @@ def stand_in_runner(tmp_path, monkeypatch) -> Path:
     return runner
 
 
+@pytest.mark.integration
 class TestThePythonEntrypoint:
     """``_build_image``, behind ``ash build-image`` and ``ash scan --mode container``."""
 
@@ -413,6 +415,7 @@ tail -n +2 "$DATE_TIMES" > "$DATE_TIMES.rest" && mv "$DATE_TIMES.rest" "$DATE_TI
 """
 
 
+@pytest.mark.integration
 class TestTheBashEntrypoint:
     """``./ash``, which is what the ``bash`` scan legs and bash users run."""
 
@@ -520,6 +523,7 @@ class TestTheBashEntrypoint:
         ]
 
 
+@pytest.mark.unit
 class TestThePowerShellEntrypoint:
     """``Invoke-ASH`` in utils/ash_helpers.ps1, asserted as text, where there is no pwsh.
 
@@ -541,6 +545,7 @@ class TestThePowerShellEntrypoint:
         assert '"BUILD_DATE=' not in body
 
 
+@pytest.mark.unit
 class TestTheTerraformImagePipeline:
     """The CodeBuild buildspec of deploy/terraform/modules/ash-image-pipeline."""
 
@@ -577,6 +582,7 @@ def pwsh(in_ci: bool) -> str:
     return PWSH
 
 
+@pytest.mark.unit
 class TestEveryPowerShellCellTakesTheCiCheckFromOnePlace:
     """A pwsh cell fails in CI and skips elsewhere when pwsh is missing. The check
     for CI is the ``in_ci`` fixture in tests/unit/conftest.py; a copy of it in a
@@ -604,6 +610,7 @@ class TestEveryPowerShellCellTakesTheCiCheckFromOnePlace:
         assert "def in_ci" in (here / "conftest.py").read_text(encoding="utf-8")
 
 
+@pytest.mark.integration
 class TestThePowerShellEntrypointRuns:
     """``Invoke-ASH`` under pwsh, against a recording runner: what it passes, online
     and with ``-Offline``. The text test above cannot tell a value that is passed
@@ -675,6 +682,7 @@ def _terraform_build_block() -> str:
     return block.replace("$${", "${").replace("%%{", "%{")
 
 
+@pytest.mark.integration
 class TestTheTerraformImagePipelineRuns:
     """The buildspec's build command run in ``sh``, as CodeBuild runs it, with a
     recording ``docker`` and a stand-in ``date`` first on PATH. The text test above
@@ -756,6 +764,7 @@ CDK_SETTER = (
 CDK_BUILD_ARG = '--build-arg "BUILD_DATE_EPOCH=${ASH_BUILD_DATE_EPOCH}"'
 
 
+@pytest.mark.unit
 class TestTheCdkImageBuild:
     """deploy/cdk/lib/ash-image-build.ts, and the templates synthesized from it.
 

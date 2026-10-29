@@ -107,6 +107,7 @@ def _scan_in_another_process(root: Path, session_id: str):
             raise
 
 
+@pytest.mark.integration
 def test_ending_a_session_defers_while_a_scan_in_another_server_runs(root) -> None:
     sandbox = _sandbox(root, "elsewhere")
 
@@ -120,6 +121,7 @@ def test_ending_a_session_defers_while_a_scan_in_another_server_runs(root) -> No
     assert deferred
 
 
+@pytest.mark.integration
 def test_the_ttl_sweep_removes_the_deferred_session_once_that_scan_is_gone(
     root,
 ) -> None:
@@ -139,6 +141,7 @@ def test_the_ttl_sweep_removes_the_deferred_session_once_that_scan_is_gone(
     assert "elsewhere" not in sessions._ended_while_scanning
 
 
+@pytest.mark.unit
 def test_ending_a_session_drops_the_entry_a_dead_scan_left(root) -> None:
     sandbox = _sandbox(root, "orphaned")
     holder = root / sessions.SCAN_PRESENCE_DIR / "orphaned"
@@ -170,6 +173,7 @@ def ash_log():
         ASH_LOGGER.setLevel(previous)
 
 
+@pytest.mark.unit
 def test_a_presence_guard_that_cannot_be_taken_clears_the_memory_and_warns(
     root, monkeypatch, ash_log
 ) -> None:
@@ -214,6 +218,7 @@ def test_a_presence_guard_that_cannot_be_taken_clears_the_memory_and_warns(
         source_delivery._drop_session_source_dir("unreadable")
 
 
+@pytest.mark.unit
 def test_forgetting_a_session_drops_its_delivered_source_record(
     root, monkeypatch, ash_log
 ) -> None:
@@ -294,6 +299,7 @@ def _refuse_the_presence_guard(
     return attempts
 
 
+@pytest.mark.unit
 def test_a_refused_sweep_opens_no_entry_for_two_stale_trees(
     root, monkeypatch, registry_calls
 ) -> None:
@@ -312,6 +318,7 @@ def test_a_refused_sweep_opens_no_entry_for_two_stale_trees(
     assert all((s / "source" / "app.py").is_file() for s in sandboxes)
 
 
+@pytest.mark.unit
 def test_a_refused_sweep_does_not_add_and_remove_an_entry(
     root, monkeypatch, registry_calls
 ) -> None:
@@ -325,6 +332,7 @@ def test_a_refused_sweep_does_not_add_and_remove_an_entry(
     assert registry_calls == [], registry_calls
 
 
+@pytest.mark.unit
 def test_a_sweep_with_nothing_stale_never_takes_the_guard(root, monkeypatch) -> None:
     """The guard is tried only when a workspace is stale: a root with nothing to
     remove gets no registry directory and no lock file from the sweep."""
@@ -346,6 +354,7 @@ def _guard_warnings(ash_log) -> List[str]:
     ]
 
 
+@pytest.mark.unit
 def test_a_permanently_refused_guard_keeps_the_tree_and_the_process_warns_once(
     root, monkeypatch, ash_log
 ) -> None:
@@ -388,6 +397,7 @@ def _meet_the_refusal_at(site: str) -> None:
 
 
 @pytest.mark.parametrize("order", list(itertools.permutations(_SITES)))
+@pytest.mark.unit
 def test_one_latch_serves_end_session_the_scan_and_the_sweep(
     order, root, monkeypatch, ash_log
 ) -> None:
@@ -405,6 +415,7 @@ def test_one_latch_serves_end_session_the_scan_and_the_sweep(
     assert _FIRST_SEEN[order[0]] in warned[0], (order, warned[0])
 
 
+@pytest.mark.unit
 def test_ending_many_sessions_at_shutdown_warns_once(
     root, monkeypatch, ash_log
 ) -> None:
@@ -420,6 +431,7 @@ def test_ending_many_sessions_at_shutdown_warns_once(
     assert len(_guard_warnings(ash_log)) == 1, _guard_warnings(ash_log)
 
 
+@pytest.mark.unit
 def test_a_failure_to_open_the_guard_is_not_reported_as_a_lock_refusal(
     root, monkeypatch, ash_log
 ) -> None:
@@ -445,6 +457,7 @@ def test_a_failure_to_open_the_guard_is_not_reported_as_a_lock_refusal(
         assert "may clear" in swept[0], swept[0]
 
 
+@pytest.mark.unit
 def test_a_refusal_after_a_taken_guard_is_reported_again(
     root, monkeypatch, ash_log
 ) -> None:
@@ -491,6 +504,7 @@ def test_a_refusal_after_a_taken_guard_is_reported_again(
         (None, False),
     ],
 )
+@pytest.mark.unit
 def test_only_the_lock_errnos_class_a_failure_as_a_lock_refusal(
     number, is_lock_refusal
 ) -> None:
@@ -499,6 +513,7 @@ def test_only_the_lock_errnos_class_a_failure_as_a_lock_refusal(
     assert sessions._is_lock_refusal(error) is is_lock_refusal
 
 
+@pytest.mark.unit
 def test_an_error_with_no_errno_is_described_by_its_type() -> None:
     assert sessions._describe_os_error(OSError("no errno")) == "OSError: no errno"
     assert (
@@ -507,6 +522,7 @@ def test_an_error_with_no_errno_is_described_by_its_type() -> None:
     )
 
 
+@pytest.mark.unit
 def test_an_error_that_names_a_file_is_described_with_it() -> None:
     error = OSError(errno.ESTALE, "FAKE stale file handle", "FAKE-registry-dir")
 
@@ -515,6 +531,7 @@ def test_an_error_that_names_a_file_is_described_with_it() -> None:
     )
 
 
+@pytest.mark.unit
 def test_an_error_that_names_two_files_is_described_with_both() -> None:
     error = OSError(
         errno.EXDEV, "FAKE cross-device link", "FAKE-source", None, "FAKE-target"
@@ -525,6 +542,7 @@ def test_an_error_that_names_two_files_is_described_with_both() -> None:
     )
 
 
+@pytest.mark.unit
 def test_ending_the_default_session_does_not_open_the_scan_presence_registry(
     root,
 ) -> None:
@@ -539,6 +557,7 @@ def test_ending_the_default_session_does_not_open_the_scan_presence_registry(
     assert not (root / sessions.SCAN_PRESENCE_DIR).exists()
 
 
+@pytest.mark.unit
 def test_a_guard_that_cannot_be_taken_does_not_strand_the_default_workspace(
     root, monkeypatch
 ) -> None:
@@ -553,12 +572,14 @@ def test_a_guard_that_cannot_be_taken_does_not_strand_the_default_workspace(
     assert not default.exists()
 
 
+@pytest.mark.unit
 def test_ending_an_unknown_session_creates_nothing_under_the_root(root) -> None:
     assert sessions.end_session("never-existed") is True
 
     assert sorted(p.name for p in root.iterdir()) == []
 
 
+@pytest.mark.unit
 def test_the_reset_helper_clears_a_latch_a_refusal_set(root) -> None:
     sessions._warn_guard_refused_once(root, PermissionError(errno.EACCES, "x"), "a")
     assert sessions._guard_refusal_warned is True
@@ -568,6 +589,7 @@ def test_the_reset_helper_clears_a_latch_a_refusal_set(root) -> None:
     assert sessions._guard_refusal_warned is False
 
 
+@pytest.mark.unit
 def test_the_conftest_reset_clears_a_latch_a_refusal_set(root, monkeypatch) -> None:
     """The autouse conftest fixture resets MCP session state through
     ``_drop_mcp_session_state``; called directly, so the cell proves the latch

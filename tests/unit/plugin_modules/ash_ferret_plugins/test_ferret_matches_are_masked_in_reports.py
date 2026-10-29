@@ -28,6 +28,8 @@ from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner 
 )
 from tests.utils.secret_bearing_scan import find_result, isolate_from_aws, sarif_results
 
+pytestmark = pytest.mark.unit
+
 FERRET_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_ferret_plugins"
 
 # A card-network test number, assembled here so this source holds no match.

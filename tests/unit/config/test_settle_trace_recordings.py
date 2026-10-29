@@ -86,6 +86,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 SESSION = "client-1"
 
 #: The host files the delivered tree links to; the texts and canaries are those of

@@ -37,6 +37,8 @@ from automated_security_helper.plugin_modules import (
     ash_trivy_plugins,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

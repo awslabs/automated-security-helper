@@ -34,6 +34,9 @@ from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def context(tmp_path: Path, monkeypatch) -> PluginContext:
     monkeypatch.delenv("ASH_OFFLINE", raising=False)

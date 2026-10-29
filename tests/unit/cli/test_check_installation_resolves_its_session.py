@@ -23,7 +23,11 @@ on. With the name missing the tool raises before the double is reached.
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from automated_security_helper.cli import mcp_server
+
+pytestmark = pytest.mark.unit
 
 _SERVER = "automated_security_helper.cli.mcp_server"
 

@@ -42,6 +42,8 @@ from automated_security_helper.utils.get_scan_set import (
     scan_set,
 )
 
+pytestmark = pytest.mark.unit
+
 WINDOWS_SEPARATORS = "\\/"
 POSIX_SEPARATORS = "/"
 

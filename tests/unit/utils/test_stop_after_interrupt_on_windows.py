@@ -101,6 +101,7 @@ def _timed_out():
     return subprocess.TimeoutExpired("runtime", INTERRUPT_WAIT_SLICE_SECONDS)
 
 
+@pytest.mark.unit
 def test_the_slices_add_up_to_the_grace():
     assert _SLICES * INTERRUPT_WAIT_SLICE_SECONDS == pytest.approx(
         INTERRUPT_GRACE_SECONDS
@@ -108,6 +109,7 @@ def test_the_slices_add_up_to_the_grace():
     assert INTERRUPT_WAIT_SLICE_SECONDS <= 0.5, "a second Ctrl-C should land quickly"
 
 
+@pytest.mark.unit
 class TestWithAConsole:
     """The runtime shares the console, so it has the Ctrl-C already."""
 
@@ -147,6 +149,7 @@ class TestWithAConsole:
         assert child.calls == [_SLICE, _SLICE, ("kill",), ("wait", None)]
 
 
+@pytest.mark.unit
 class TestWithoutAConsole:
     """No console, so the Ctrl-C did not reach the runtime: it is stopped.
 
@@ -175,6 +178,7 @@ class TestWithoutAConsole:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the POSIX wait")
+@pytest.mark.unit
 class TestOnPosixTheWaitIsOne:
     """POSIX reaps with one wait carrying the whole grace, never sliced waits.
 
@@ -197,6 +201,7 @@ class TestOnPosixTheWaitIsOne:
         assert child.calls == [("wait", INTERRUPT_GRACE_SECONDS)]
 
 
+@pytest.mark.unit
 class TestTheConsoleCheck:
     """Attached to a console exactly when GetConsoleProcessList does not fail.
 
@@ -273,6 +278,7 @@ class _OsWithoutWaitid:
         return getattr(os, attribute)
 
 
+@pytest.mark.integration
 def test_a_build_without_waitid_keeps_the_record_while_the_child_is_alive(
     monkeypatch,
 ):

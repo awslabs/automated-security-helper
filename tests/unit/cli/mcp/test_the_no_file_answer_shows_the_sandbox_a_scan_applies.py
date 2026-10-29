@@ -15,9 +15,13 @@ agreement with the scan rather than a copied expectation.
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.cli.mcp.sandbox import ASH_MCP_ALLOWED_ROOTS_ENV
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config.resolve_config import resolve_config
+
+pytestmark = pytest.mark.unit
 
 
 def _searched_tree(tmp_path: Path, monkeypatch) -> Path:

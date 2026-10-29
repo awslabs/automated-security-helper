@@ -39,6 +39,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerTargetStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The asymmetry the whole defect rests on.

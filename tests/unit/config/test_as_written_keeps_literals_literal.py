@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 TAGGED = "!ENV ${ASH_FC_TAG}"
 PLAIN = "${ASH_FC_LOOK}"

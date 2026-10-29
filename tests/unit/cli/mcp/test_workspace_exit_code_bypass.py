@@ -66,6 +66,8 @@ from automated_security_helper.core.exceptions import (
 )
 from automated_security_helper.models.workspace import WorkspaceExitCode
 
+pytestmark = pytest.mark.unit
+
 MODULE_UNDER_TEST = "automated_security_helper.cli.mcp.workspace"
 
 #: The two registered tools, by the name the module must export them under.

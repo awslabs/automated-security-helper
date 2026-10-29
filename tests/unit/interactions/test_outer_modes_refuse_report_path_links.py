@@ -32,9 +32,12 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.inner_run_outcome import mark_run_completed
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 RUN_ASH_SCAN = "automated_security_helper.interactions.run_ash_scan"
 

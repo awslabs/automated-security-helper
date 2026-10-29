@@ -46,6 +46,8 @@ from automated_security_helper.core.previous_results import (
     holds_restored_results,
 )
 
+pytestmark = pytest.mark.unit
+
 PREVIOUS = {
     "reports/ash.sarif": '{"previous": "sarif"}',
     "scanners/bandit/ASH.ScanResults.json": '{"status": "PASSED"}',

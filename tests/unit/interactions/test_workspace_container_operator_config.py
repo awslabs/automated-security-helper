@@ -38,6 +38,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
+pytestmark = pytest.mark.unit
+
 
 def _write(path: Path, document: Any) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)

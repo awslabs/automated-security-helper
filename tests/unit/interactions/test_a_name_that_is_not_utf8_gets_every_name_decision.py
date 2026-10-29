@@ -278,6 +278,7 @@ def _tree(tmp_path: Path, case: Case) -> Path:
 
 
 @pytest.mark.parametrize("label", sorted(CASES))
+@pytest.mark.integration
 def test_the_odd_name_gets_the_decision_the_plain_name_gets(tmp_path, label):
     case = CASES[label](tmp_path)
     source = _tree(tmp_path, case)
@@ -376,6 +377,7 @@ def _mark_converted(tmp_path: Path, directory: str, monkeypatch) -> int:
     [_drop_in_output_dir, _mark_converted],
     ids=["output-dir-drop", "converted-results-mark"],
 )
+@pytest.mark.unit
 def test_an_output_dir_named_so_gets_the_decision_a_plain_one_gets(
     tmp_path, monkeypatch, decide
 ):
@@ -386,6 +388,7 @@ def test_an_output_dir_named_so_gets_the_decision_a_plain_one_gets(
     assert odd == plain
 
 
+@pytest.mark.unit
 def test_a_listed_file_set_keeps_the_odd_file_as_it_keeps_the_plain_one(tmp_path):
     report = _report(names.ODD, CONTROL, KEEP)
 

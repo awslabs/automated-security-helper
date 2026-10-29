@@ -29,6 +29,8 @@ from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.config_trust import NOT_THE_OPERATORS
 
+pytestmark = pytest.mark.unit
+
 _SCANNERS = "automated_security_helper.plugin_modules.ash_builtin.scanners"
 
 #: Each scanner's module, class name and config-class prefix.

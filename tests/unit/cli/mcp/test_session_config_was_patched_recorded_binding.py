@@ -36,6 +36,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 )
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 PATCH = [{"op": "replace", "path": "/project_name", "value": "patched"}]
 
 

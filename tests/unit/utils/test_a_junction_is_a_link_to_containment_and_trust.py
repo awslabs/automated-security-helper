@@ -30,6 +30,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 #: IO_REPARSE_TAG_MOUNT_POINT, the reparse tag of a junction.
 MOUNT_POINT_TAG = 0xA0000003
 

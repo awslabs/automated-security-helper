@@ -27,6 +27,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.utils.install_containment import InstallSandbox, sandbox_env
 
+pytestmark = pytest.mark.unit
+
 BAD_YAML = "project_name: demo\nscanners: [bandit\n"
 
 

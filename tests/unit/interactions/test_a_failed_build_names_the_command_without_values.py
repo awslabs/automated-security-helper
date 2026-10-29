@@ -29,6 +29,7 @@ from automated_security_helper.utils import subprocess_utils
 PLANTED = "ash-planted-value-5f2e-0123456789"
 
 
+@pytest.mark.unit
 def test_the_failure_text_hides_a_carried_value_in_the_argv():
     error = CalledProcessError(
         2, ["docker", "build", "--build-arg", f"TOKEN={PLANTED}", "/ctx"]
@@ -39,12 +40,14 @@ def test_the_failure_text_hides_a_carried_value_in_the_argv():
     assert "docker" in text, text
 
 
+@pytest.mark.unit
 def test_the_failure_text_hides_a_carried_value_in_any_other_error():
     text = rac._shown_build_failure(RuntimeError(f"disk full at {PLANTED}"), (PLANTED,))
     assert PLANTED not in text, text
     assert "disk full" in text, text
 
 
+@pytest.mark.unit
 def test_the_failure_text_shows_an_override_value_as_its_key_with_no_carrier():
     """``shown_arguments`` alone, with nothing carried: a --config-overrides
     value in the failed command's argv prints as its key."""
@@ -56,6 +59,7 @@ def test_the_failure_text_shows_an_override_value_as_its_key_with_no_carrier():
     assert "reporters.token" in text, text
 
 
+@pytest.mark.unit
 def test_the_debug_command_text_hides_a_value_the_spawn_carries():
     """The ``--debug`` echo of the build command reads the spawn's carrier,
     which the build phase sets around its builds."""
@@ -101,6 +105,7 @@ def failing_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> List[List[
     return commands
 
 
+@pytest.mark.unit
 def test_a_failed_build_does_not_print_a_value_the_chain_reads(failing_build, capsys):
     """The planted control first: the value really is in the failed build's
     argv, through the operator's own --custom-build-arg text. The error
@@ -126,6 +131,7 @@ def test_a_failed_build_does_not_print_a_value_the_chain_reads(failing_build, ca
     assert PLANTED not in text, text
 
 
+@pytest.mark.unit
 def test_a_failed_build_alone_prints_no_raw_argv_quote(failing_build, capsys):
     """``--no-run`` builds too: the chain is readable, so its values are
     carried; a chain the run-phase check would refuse builds as before,
@@ -210,6 +216,7 @@ def _dump_section(stdout_text: str) -> str:
     return stdout_text[index:]
 
 
+@pytest.mark.integration
 def test_the_debug_dump_of_a_failed_build_hides_a_carried_value(echoing_build, capsys):
     """The build runtime quotes the carried --build-arg value back in its
     output; the --debug dump of that captured output hides it."""
@@ -234,6 +241,7 @@ def test_the_debug_dump_of_a_failed_build_hides_a_carried_value(echoing_build, c
     assert PLANTED not in dump, dump
 
 
+@pytest.mark.integration
 def test_the_debug_dump_keeps_the_operators_own_literal(echoing_build, capsys):
     """The over-masking control: a literal the operator typed is not a
     carried value, and the dump keeps it readable."""
@@ -255,6 +263,7 @@ def test_the_debug_dump_keeps_the_operators_own_literal(echoing_build, capsys):
     assert LITERAL in dump, dump
 
 
+@pytest.mark.integration
 def test_the_streamed_build_output_hides_a_carried_value(echoing_build, capsys):
     """The live stream, without --debug: the build runtime quotes the
     carried value back and its output streams to the console as it runs,
@@ -280,6 +289,7 @@ def test_the_streamed_build_output_hides_a_carried_value(echoing_build, capsys):
     assert PLANTED not in text, text
 
 
+@pytest.mark.integration
 def test_the_streamed_build_output_keeps_the_operators_own_literal(
     echoing_build, capsys
 ):
@@ -303,6 +313,7 @@ def test_the_streamed_build_output_keeps_the_operators_own_literal(
     assert LITERAL in text, text
 
 
+@pytest.mark.integration
 def test_a_build_that_succeeds_streams_no_carried_value(
     echoing_build_that_succeeds, capsys
 ):

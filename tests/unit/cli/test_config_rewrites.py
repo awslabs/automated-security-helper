@@ -27,6 +27,8 @@ from automated_security_helper.cli.config import (
 )
 from automated_security_helper.config.config_validator import ConfigValidator
 
+pytestmark = pytest.mark.unit
+
 INVALID_CONFIG_EXIT = 3
 
 STARTING_CONFIG = textwrap.dedent(

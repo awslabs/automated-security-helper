@@ -14,6 +14,8 @@ from automated_security_helper.core.unified_metrics import ScannerMetrics
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Refactor A: ScanResultsContainer.severity_counts as ScannerSeverityCount

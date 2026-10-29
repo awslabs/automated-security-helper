@@ -27,6 +27,8 @@ from automated_security_helper.utils.scan_output_dirs import (
 )
 from tests.unit.workspace.test_execution import _git
 
+pytestmark = pytest.mark.integration
+
 #: (where the search starts, the ceilings, the repository it finds), all relative
 #: to a repository at ``r``.
 CASES = [

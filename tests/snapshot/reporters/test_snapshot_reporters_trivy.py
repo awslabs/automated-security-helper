@@ -28,6 +28,8 @@ from tests.snapshot.support.reporter_catalog import (
     snapshot_extension,
 )
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TRIVY_DATA = REPO_ROOT / "tests" / "test_data" / "scanners" / "trivy"
 

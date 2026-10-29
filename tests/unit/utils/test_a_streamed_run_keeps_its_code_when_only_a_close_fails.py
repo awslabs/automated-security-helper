@@ -36,6 +36,8 @@ from automated_security_helper.utils.subprocess_utils import (
     run_command_stream_output,
 )
 
+pytestmark = pytest.mark.integration
+
 #: Marks the tool's child, so the stand-ins below touch no other process.
 _MARK = "ASH-STREAM-CLOSE-TOOL"
 

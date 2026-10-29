@@ -58,6 +58,7 @@ def _executor(tasks) -> ScannerExecutor:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process check")
+@pytest.mark.integration
 def test_the_parallel_pool_scanners_are_stopped_by_a_cancel(tmp_path, monkeypatch):
     """A pool thread sees the scan's cancel event only through the context copy."""
     from automated_security_helper.utils.subprocess_utils import run_command
@@ -93,6 +94,7 @@ def test_the_parallel_pool_scanners_are_stopped_by_a_cancel(tmp_path, monkeypatc
     assert pids and not alive, (pids, alive)
 
 
+@pytest.mark.unit
 def test_a_scanner_finishing_during_the_cancels_wait_is_recorded(tmp_path, monkeypatch):
     """The cancel drains the pool before the final sweep, so a scanner that
     finishes while the pool is drained is recorded like one that finished
@@ -209,6 +211,7 @@ def _a_cancel_with_a_finished_siblings_result_in_hand(tmp_path, monkeypatch):
     return executor, recorded, order, ThreadPoolExecutor
 
 
+@pytest.mark.unit
 def test_a_result_in_hand_is_recorded_before_the_drain(tmp_path, monkeypatch):
     """A result already in hand at the cancel is recorded BEFORE the pool is
     drained: the drain waits for every running scanner, and one that cannot
@@ -240,6 +243,7 @@ def test_a_result_in_hand_is_recorded_before_the_drain(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_an_interrupt_during_the_drain_keeps_the_results_in_hand(tmp_path, monkeypatch):
     """A KeyboardInterrupt while the drain waits (the operator interrupting a
     scanner that cannot see the cancel) must not lose the results already in
@@ -272,6 +276,7 @@ def test_an_interrupt_during_the_drain_keeps_the_results_in_hand(tmp_path, monke
     )
 
 
+@pytest.mark.unit
 def test_a_queued_scanner_is_not_started_after_the_cancel(tmp_path, monkeypatch):
     """Three scanners on two workers: s0 carries the cancel, s1 has finished,
     s2 is still queued. Once the cancel is in hand, the queued scanner must be
@@ -409,6 +414,7 @@ def test_a_queued_scanner_is_not_started_after_the_cancel(tmp_path, monkeypatch)
     )
 
 
+@pytest.mark.unit
 def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
     tmp_path, monkeypatch
 ):
@@ -479,6 +485,7 @@ def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
     assert not late, f"a queued scanner started after the scan was cancelled: {late}"
 
 
+@pytest.mark.unit
 def test_a_parallel_run_starts_no_scanner_once_the_cancel_event_is_set(
     tmp_path, monkeypatch
 ):
@@ -503,6 +510,7 @@ def test_a_parallel_run_starts_no_scanner_once_the_cancel_event_is_set(
     assert started == [], started
 
 
+@pytest.mark.unit
 def test_a_cancels_own_future_is_not_a_completed_scanner(tmp_path, monkeypatch):
     """In a cancelled run, SCAN_COMPLETE's completed_count counts scanners
     that completed -- returned or failed -- not the cancel's own future.
@@ -533,6 +541,7 @@ def test_a_cancels_own_future_is_not_a_completed_scanner(tmp_path, monkeypatch):
     assert completions[0]["total_count"] == 2, completions
 
 
+@pytest.mark.unit
 def test_a_recorded_failure_counts_as_a_completion_in_a_cancelled_run(
     tmp_path, monkeypatch
 ):
@@ -611,6 +620,7 @@ def test_a_recorded_failure_counts_as_a_completion_in_a_cancelled_run(
 
 
 @pytest.mark.parametrize("method", ["run_parallel", "run_sequential"])
+@pytest.mark.unit
 def test_a_new_run_on_the_same_executor_starts_its_scanners(
     tmp_path, monkeypatch, method
 ):
@@ -637,6 +647,7 @@ def test_a_new_run_on_the_same_executor_starts_its_scanners(
     assert sorted(started) == ["s0", "s1"], started
 
 
+@pytest.mark.unit
 def test_a_sequential_run_starts_no_scanner_after_the_cancel(tmp_path, monkeypatch):
     started = []
     event = threading.Event()
@@ -655,6 +666,7 @@ def test_a_sequential_run_starts_no_scanner_after_the_cancel(tmp_path, monkeypat
     assert started == ["s0"], started
 
 
+@pytest.mark.unit
 def test_the_scan_phases_own_scanner_runner_starts_none_after_a_cancel(tmp_path):
     """The scan phase's own check comes before anything is built.
 
@@ -686,6 +698,7 @@ def _with_its_tool(scanner_class):
 
 
 @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+@pytest.mark.unit
 def test_a_scanner_done_before_a_cancel_stays_in_the_phases_completions(
     tmp_path, parallel
 ):
@@ -790,6 +803,7 @@ def test_a_scanner_done_before_a_cancel_stays_in_the_phases_completions(
     "recorded", [True, False], ids=["after-a-completion", "before-any-record"]
 )
 @pytest.mark.parametrize("ending", ["cancel", "keyboard-interrupt"])
+@pytest.mark.unit
 def test_an_interrupted_run_sends_no_execution_complete(tmp_path, ending, recorded):
     """A cancelled run takes interrupted semantics, as Ctrl-C does.
 
@@ -859,6 +873,7 @@ def test_an_interrupted_run_sends_no_execution_complete(tmp_path, ending, record
 
 
 @pytest.mark.parametrize("raised", ["cancel", "error"])
+@pytest.mark.unit
 def test_a_scan_phase_start_handler_that_raises_ends_the_run_with_it(tmp_path, raised):
     """A SCAN_PHASE_START handler that raises ends the run with what it raised.
 
@@ -923,6 +938,7 @@ def test_a_scan_phase_start_handler_that_raises_ends_the_run_with_it(tmp_path, r
         assert ended.value is failure, repr(ended.value)
 
 
+@pytest.mark.unit
 def test_a_scan_phase_has_no_completions_before_its_run(tmp_path):
     """A new ScanPhase has an empty completion list before any run of its own.
 
@@ -947,6 +963,7 @@ def test_a_scan_phase_has_no_completions_before_its_run(tmp_path):
     assert phase._completed_scanners == []
 
 
+@pytest.mark.unit
 def test_the_engine_starts_no_phase_after_a_cancel(tmp_path):
     """A cancel during the convert phase: the scan and report phases never start."""
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
@@ -1002,6 +1019,7 @@ def test_the_engine_starts_no_phase_after_a_cancel(tmp_path):
 
 
 @pytest.mark.parametrize("cancelled", [True, False], ids=["cancelled", "control"])
+@pytest.mark.unit
 def test_a_cancel_after_the_last_scanner_starts_writes_no_results_file(
     tmp_path, monkeypatch, cancelled
 ):

@@ -46,6 +46,8 @@ from automated_security_helper.cli.mcp.sessions import (
     sweep_stale_workspaces,
 )
 
+pytestmark = pytest.mark.unit
+
 LONG_AGO_SECONDS = 10_000.0
 TTL_SECONDS = 600.0
 

@@ -30,6 +30,8 @@ import typer
 
 from tests.utils.secret_bearing_scan import isolate_from_aws
 
+pytestmark = pytest.mark.unit
+
 AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 
 # A color code, which a variable that forces a terminal puts around styled text.

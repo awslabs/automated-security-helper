@@ -37,6 +37,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

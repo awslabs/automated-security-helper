@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+
+pytestmark = pytest.mark.unit
 
 VARIABLE = "ASH_PLUGIN_LIST_NEEDLE"
 #: Bandit's default tool_version, printed whole only when the column is wide.

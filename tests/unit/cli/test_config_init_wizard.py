@@ -21,6 +21,8 @@ from tests.unit.config._plugin_module_helpers import (
     plant_site_and_environment,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def cli_runner():

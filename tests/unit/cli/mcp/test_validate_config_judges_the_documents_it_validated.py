@@ -39,6 +39,8 @@ from automated_security_helper.config.config_validator import (
     ConfigValidator,
 )
 
+pytestmark = pytest.mark.unit
+
 REMOTE = "client-1"
 PROBE_VAR = "ASH_ENV_PROBE"
 PROBE = "probe-value-7f3a"

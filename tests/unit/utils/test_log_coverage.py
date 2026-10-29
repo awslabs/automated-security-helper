@@ -4,6 +4,8 @@ import json
 import logging
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.utils.log import (
     addLoggingLevel,
     JsonFormatter,
@@ -11,6 +13,8 @@ from automated_security_helper.utils.log import (
     get_logger,
     ASH_LOGGER,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestAddLoggingLevel:

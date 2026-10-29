@@ -38,6 +38,8 @@ from automated_security_helper.cli.mcp.sessions import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 LONG_AGO_SECONDS = 10_000.0
 TTL_SECONDS = 600.0
 #: How recent "just renamed" has to be: far above the time a rename takes, far

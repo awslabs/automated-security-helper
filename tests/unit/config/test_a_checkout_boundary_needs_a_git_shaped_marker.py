@@ -95,6 +95,7 @@ def _a_stranger() -> int:
     return os.geteuid() + 1
 
 
+@pytest.mark.unit
 def test_an_empty_git_directory_does_not_move_the_boundary(tmp_path):
     """The widening shape: an empty .git above the scan root must not make the
     parent "the scanned tree". With it counted, everything beside the scan
@@ -108,6 +109,7 @@ def test_an_empty_git_directory_does_not_move_the_boundary(tmp_path):
     assert tmp_path not in scanned_trees(root), scanned_trees(root)
 
 
+@pytest.mark.unit
 def test_an_empty_git_directory_is_not_a_checkout(tmp_path):
     """The same bar for in_a_checkout, which judges where a config NAME sits."""
     (tmp_path / ".git").mkdir()
@@ -118,6 +120,7 @@ def test_an_empty_git_directory_is_not_a_checkout(tmp_path):
     assert in_a_checkout(inside) is False
 
 
+@pytest.mark.unit
 def test_a_real_checkout_still_bounds_the_tree(tmp_path):
     """Must not fire: a .git directory with HEAD is a checkout, and the
     outermost one still wins over a nested one."""
@@ -131,6 +134,7 @@ def test_a_real_checkout_still_bounds_the_tree(tmp_path):
     assert in_a_checkout(inside) is True
 
 
+@pytest.mark.unit
 def test_a_worktree_gitfile_still_bounds_the_tree(tmp_path):
     """Must not fire: a linked worktree's .git is a regular file, and it marks
     the checkout exactly as the directory form does."""
@@ -148,6 +152,7 @@ def _symlink_or_skip(link, target) -> None:
         pytest.skip(f"symlinks unavailable: {error}")
 
 
+@pytest.mark.unit
 def test_a_symlinked_head_still_marks_the_checkout(tmp_path):
     """Must not fire: git can keep HEAD as a symbolic link to the ref file,
     so the lookup asks only that the name exist -- dangling included. A test
@@ -181,6 +186,7 @@ def _chain_of_links(tmp_path, length, in_checkout):
     return links[0], links
 
 
+@pytest.mark.unit
 def test_a_chain_cut_at_the_link_bound_is_judged_in_a_checkout(tmp_path):
     """Must fire: the links that sit in a checkout lie beyond the bound the walk
     stops at, so the walk never saw them and cannot rule them out."""
@@ -193,6 +199,7 @@ def test_a_chain_cut_at_the_link_bound_is_judged_in_a_checkout(tmp_path):
     assert in_a_checkout(head) is True
 
 
+@pytest.mark.unit
 def test_a_chain_cut_at_an_unreadable_link_is_judged_in_a_checkout(
     tmp_path, monkeypatch
 ):
@@ -213,6 +220,7 @@ def test_a_chain_cut_at_an_unreadable_link_is_judged_in_a_checkout(
     assert in_a_checkout(head) is True
 
 
+@pytest.mark.unit
 def test_a_checkout_link_inside_the_bound_is_still_found(tmp_path):
     """Must not fire: the same length of chain, with its checkout links inside
     the bound, is decided and judged in a checkout by what the walk saw."""
@@ -222,6 +230,7 @@ def test_a_checkout_link_inside_the_bound_is_still_found(tmp_path):
     assert in_a_checkout(head) is True
 
 
+@pytest.mark.unit
 def test_a_short_chain_outside_every_checkout_is_not_in_one(tmp_path):
     """Must not fire: a walk that reached the end and saw no link in a checkout
     stays outside, so only an undecided walk is judged the other way."""
@@ -231,6 +240,7 @@ def test_a_short_chain_outside_every_checkout_is_not_in_one(tmp_path):
     assert in_a_checkout(head) is False
 
 
+@pytest.mark.unit
 def test_a_junction_git_still_marks_the_checkout(tmp_path):
     """Must not fire, Windows only: a junction named .git is placed content
     like a symlink and counts without HEAD, dangling included. Not run
@@ -254,6 +264,7 @@ def test_a_junction_git_still_marks_the_checkout(tmp_path):
     assert tmp_path in scanned_trees(root), scanned_trees(root)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_an_unsearchable_git_directory_still_bounds_the_tree(tmp_path, caplog):
     """A .git directory the scanning user cannot search gives the lookup no
@@ -292,6 +303,7 @@ _WRITABLE_BY_OTHERS = {
 }
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 @pytest.mark.parametrize("name", sorted(_WRITABLE_BY_OTHERS))
 def test_a_strangers_unsearchable_git_in_a_writable_directory_does_not_widen(
@@ -319,6 +331,7 @@ def test_a_strangers_unsearchable_git_in_a_writable_directory_does_not_widen(
         os.chmod(git_dir, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 @pytest.mark.parametrize("kind", ["directory-with-head", "gitfile", "symlink"])
 def test_a_strangers_readable_git_in_a_shared_drop_does_not_widen(
@@ -349,6 +362,7 @@ def test_a_strangers_readable_git_in_a_shared_drop_does_not_widen(
         os.chmod(shared, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_a_checkout_rooted_in_a_shared_shaped_directory_still_bounds(tmp_path, caplog):
     """Must not fire open: a real checkout whose root directory is itself
@@ -377,6 +391,7 @@ def test_a_checkout_rooted_in_a_shared_shaped_directory_still_bounds(tmp_path, c
         os.chmod(git_dir, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_roots_git_in_a_writable_directory_still_counts(tmp_path, monkeypatch):
     """Must not fire: root places system checkouts in shared places, and a
@@ -395,6 +410,7 @@ def test_roots_git_in_a_writable_directory_still_counts(tmp_path, monkeypatch):
         os.chmod(shared, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_the_directory_owners_git_still_counts(tmp_path, monkeypatch):
     """Must not fire: whose directory it is, their .git to place -- a shared
@@ -415,6 +431,7 @@ def test_the_directory_owners_git_still_counts(tmp_path, monkeypatch):
         os.chmod(shared, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_a_directory_reached_through_a_link_is_judged_as_itself(
     tmp_path, monkeypatch, caplog
@@ -443,6 +460,7 @@ def test_a_directory_reached_through_a_link_is_judged_as_itself(
         os.chmod(git_dir, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_the_warning_names_the_lookups_failure(tmp_path, monkeypatch, caplog):
     """The lookup can fail for more reasons than a mode: the warning names
@@ -475,6 +493,7 @@ def test_the_warning_names_the_lookups_failure(tmp_path, monkeypatch, caplog):
     )
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_the_warning_prints_once_per_scan(tmp_path, caplog):
     """One scan walks the same parents many times, so the warning prints
@@ -511,6 +530,7 @@ def test_the_warning_prints_once_per_scan(tmp_path, caplog):
         os.chmod(git_dir, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_your_own_git_under_anothers_shared_directory_still_counts(
     tmp_path, monkeypatch
@@ -535,6 +555,7 @@ def test_your_own_git_under_anothers_shared_directory_still_counts(
         os.chmod(shared, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_an_unattributable_git_in_a_writable_directory_does_not_widen(
     tmp_path, monkeypatch
@@ -566,6 +587,7 @@ def test_an_unattributable_git_in_a_writable_directory_does_not_widen(
         os.chmod(shared, 0o755)
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_an_unstattable_directory_keeps_the_shape_rule(tmp_path, monkeypatch):
     """A race-only branch, pinned by a stand-in: when the directory holding
@@ -591,6 +613,7 @@ def test_an_unstattable_directory_keeps_the_shape_rule(tmp_path, monkeypatch):
         monkeypatch.undo()
 
 
+@pytest.mark.unit
 def test_a_scan_run_starts_a_fresh_warning_window(monkeypatch):
     """run_ash_scan opens the per-run warning window before it builds its
     options, so a long-lived process's second scan logs its boundary
@@ -619,6 +642,7 @@ def test_a_scan_run_starts_a_fresh_warning_window(monkeypatch):
     assert calls == [True]
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_each_runs_log_scope_warns_for_its_own_boundary(tmp_path, caplog):
     """Two runs in one process, the hosting server's shape: each run's log
@@ -695,6 +719,7 @@ def _refused() -> OSError:
     return PermissionError(errno.EACCES, "Permission denied")
 
 
+@pytest.mark.unit
 @_POSIX_NAMES_NEEDED
 def test_the_bound_sweep_drops_only_other_runs_windows(_warned_window, _recorder):
     """Past the bound, the sweeping run keeps its own window and drops the
@@ -720,6 +745,7 @@ def test_the_bound_sweep_drops_only_other_runs_windows(_warned_window, _recorder
     assert _recorder.count(entry.as_posix(), a_run[1]) == 2, _recorder.lines
 
 
+@pytest.mark.unit
 @_POSIX_NAMES_NEEDED
 def test_the_bound_holds_and_a_runs_own_window_survives_it(_warned_window, _recorder):
     """The memo never grows past its bound, and the sweep keeps the sweeping
@@ -759,6 +785,7 @@ def test_the_bound_holds_and_a_runs_own_window_survives_it(_warned_window, _reco
     assert _recorder.count(first.as_posix(), run[1]) == 1, _recorder.lines
 
 
+@pytest.mark.unit
 @_POSIX_NAMES_NEEDED
 def test_forget_leaves_another_runs_window(_warned_window, _recorder):
     """One run's fresh window must not silence or reopen another's: run B
@@ -776,6 +803,7 @@ def test_forget_leaves_another_runs_window(_warned_window, _recorder):
     assert _recorder.count(entry.as_posix(), a_run[1]) == 1, _recorder.lines
 
 
+@pytest.mark.unit
 @_POSIX_NAMES_NEEDED
 def test_a_runs_window_opens_safely_beside_a_concurrent_warning(
     _warned_window, _recorder
@@ -846,6 +874,7 @@ def test_a_runs_window_opens_safely_beside_a_concurrent_warning(
     assert completed["forget"] > 0 and completed["warn"] > 0, completed
 
 
+@pytest.mark.integration
 @_POSIX_NAMES_NEEDED
 def test_the_warning_logger_runs_outside_the_memo_lock(tmp_path):
     """A design property, pinned: the logger call stays outside the memo
@@ -889,6 +918,7 @@ def test_the_warning_logger_runs_outside_the_memo_lock(tmp_path):
     )
 
 
+@pytest.mark.unit
 @_POSIX_MODES_NEEDED
 def test_the_warning_shows_a_hostile_name_on_one_line(tmp_path, caplog):
     """The warned name is the scanned side's to choose: a newline in it

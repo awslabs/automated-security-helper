@@ -26,6 +26,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_re
 )
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 BedrockSummaryReporter.model_rebuild()
 

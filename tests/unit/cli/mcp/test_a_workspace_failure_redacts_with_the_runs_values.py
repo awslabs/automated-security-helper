@@ -41,6 +41,7 @@ SECRET = "a-value-read-from-the-environment"
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_crashed_workspace_runs_entries_hide_a_project_config_value(
     tmp_path, monkeypatch
 ):
@@ -72,6 +73,7 @@ async def test_a_crashed_workspace_runs_entries_hide_a_project_config_value(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_timed_out_workspace_scan_prints_its_limit_in_the_token_form(
     tmp_path, monkeypatch
 ):
@@ -107,6 +109,7 @@ async def test_a_timed_out_workspace_scan_prints_its_limit_in_the_token_form(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_timed_out_workspace_scan_hides_a_limit_the_operator_chain_read(
     tmp_path, monkeypatch
 ):
@@ -161,6 +164,7 @@ async def test_a_timed_out_workspace_scan_hides_a_limit_the_operator_chain_read(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_value_that_is_not_the_limit_keeps_the_context_key(
     tmp_path, monkeypatch
 ):

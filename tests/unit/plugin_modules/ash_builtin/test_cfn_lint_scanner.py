@@ -50,6 +50,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 
+pytestmark = pytest.mark.unit
+
 
 def _ashs_own(config: Path, repo: Path) -> bool:
     """Whether ``config`` is the empty config ASH writes for this run's cfn-lint.

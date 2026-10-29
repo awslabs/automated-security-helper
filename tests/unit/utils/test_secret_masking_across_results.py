@@ -83,6 +83,7 @@ def _message(result):
     return result.message.root.text
 
 
+@pytest.mark.unit
 class TestMaskingByLocation:
     def test_a_line_a_secret_finding_reports_is_masked_in_every_result(self):
         model = _results(
@@ -235,6 +236,7 @@ def _reuse(text, uri="deploy.py", line=5):
 WORD_VALUE = "hun" + "ter"
 
 
+@pytest.mark.unit
 class TestEveryValueIsMaskedInFindingsThatOverlapIt:
     """A finding whose region or context covers a secret finding's line has the value masked.
 
@@ -353,6 +355,7 @@ class TestEveryValueIsMaskedInFindingsThatOverlapIt:
         assert model.secret_value_shapes == []
 
 
+@pytest.mark.unit
 class TestOnlyValuesThatLookLikeSecretsAreMaskedElsewhere:
     """A hard-coded password check quotes ordinary words as often as credentials.
 
@@ -524,6 +527,7 @@ RDS_LINES = [
 ]
 
 
+@pytest.mark.unit
 class TestInfrastructureCredentialRules:
     """checkov's and cfn-nag's rules about a credential written into IaC are secret rules.
 
@@ -647,6 +651,7 @@ class TestInfrastructureCredentialRules:
         assert KEY_ID_VALUE not in _region_text(model.sarif.runs[0].results[1])
 
 
+@pytest.mark.unit
 class TestValuesFromTheMatch:
     """A secret finding that quotes no value gives the one its own region matched.
 
@@ -728,6 +733,7 @@ class TestValuesFromTheMatch:
         assert _region_text(model.sarif.runs[0].results[0]) == MASKED_LINE
 
 
+@pytest.mark.unit
 class TestValuesAreMaskedInWhatFindingsReport:
     """Masking by value reaches the text a finding reports, not names and metadata.
 
@@ -795,6 +801,7 @@ class TestValuesAreMaskedInWhatFindingsReport:
         assert is_secret_finding(model.sarif.runs[0].results[1])
 
 
+@pytest.mark.unit
 class TestTokenBoundaries:
     """A value is masked as a whole token only."""
 
@@ -891,6 +898,7 @@ def _context_neighbor(uri="app.py"):
     )
 
 
+@pytest.mark.unit
 class TestEachRecognitionRule:
     """Each way of recognizing a secret finding, on an input only it recognizes."""
 
@@ -965,6 +973,7 @@ class TestEachRecognitionRule:
         )
 
 
+@pytest.mark.unit
 class TestEachMaskingStep:
     """Each step that keeps a value out of the output, on an input only it handles."""
 
@@ -1066,6 +1075,7 @@ class TestEachMaskingStep:
         assert properties.model_dump()["command"].startswith("login --token ")
 
 
+@pytest.mark.unit
 class TestLineSeparators:
     """Snippets are split into lines the way scanners count them.
 
@@ -1199,6 +1209,7 @@ class TestLineSeparators:
         assert VALUE not in _region_text(model.sarif.runs[0].results[1])
 
 
+@pytest.mark.unit
 class TestMaskingByValue:
     def test_a_value_a_message_quotes_is_masked_where_it_is_reused(self):
         model = _results(
@@ -1396,6 +1407,7 @@ print(f"{time.monotonic() - started:.3f}")
 QUOTED_VALUE = "ab'" + _derived("masking-unit-quoted", 10)
 
 
+@pytest.mark.unit
 class TestQuotesInsideTheValue:
     """The quoted value runs to the last quote of the message, not the first.
 
@@ -1456,6 +1468,7 @@ class TestQuotesInsideTheValue:
         assert VALUE not in _message(model.sarif.runs[0].results[0])
 
 
+@pytest.mark.integration
 class TestPathologicalInput:
     def test_a_line_of_backslashes_is_masked_in_bounded_time(self, tmp_path):
         """One line in a scanned file must not stall the scan or an MCP server.
@@ -1516,6 +1529,7 @@ def _neighbor(line, context_start, context_lines):
     )
 
 
+@pytest.mark.unit
 class TestOneFileUnderTwoNames:
     """A secret finding and a neighbor that name one file differently still match."""
 
@@ -1580,6 +1594,7 @@ class TestOneFileUnderTwoNames:
         )
 
 
+@pytest.mark.unit
 class TestSaveModel:
     def test_results_filled_in_after_the_model_was_built_are_masked_when_saved(
         self, tmp_path
@@ -1627,6 +1642,7 @@ class TestSaveModel:
         assert VALUE not in text
 
 
+@pytest.mark.unit
 class TestPrivateKeyBlocks:
     """A key reported on its BEGIN line is masked through its END line in every snippet."""
 
@@ -1706,6 +1722,7 @@ class TestPrivateKeyBlocks:
         assert self._context(model, 2) == "".join(PEM_LINES[1:3])
 
 
+@pytest.mark.unit
 class TestLargeRegions:
     def test_a_secret_region_of_millions_of_lines_takes_little_memory(self):
         """The reported lines are kept as ranges, not one entry per line.
@@ -1752,6 +1769,7 @@ class TestLargeRegions:
         )
 
 
+@pytest.mark.unit
 class TestMaskingAsAWhole:
     def test_results_without_secret_findings_are_unchanged(self):
         model = _results(
@@ -1810,6 +1828,7 @@ class TestMaskingAsAWhole:
         assert VALUE not in str(model.additional_reports)
 
 
+@pytest.mark.unit
 class TestReportersReceiveMaskedResults:
     """``ReportPhase`` masks the results before the first reporter is called."""
 
@@ -1887,6 +1906,7 @@ class TestReportersReceiveMaskedResults:
         assert VALUE not in (output_dir / "reports" / "ash.recording.json").read_text()
 
 
+@pytest.mark.unit
 class TestStoredResultsAreMaskedWhenRead:
     """A results file written without masking is masked by every way of reading it.
 
@@ -2021,6 +2041,7 @@ def _write_shards(tmp_path, shards):
     return dirs
 
 
+@pytest.mark.unit
 class TestMergedShards:
     """``ash merge`` masks the merged results against every shard's secret findings.
 
@@ -2157,6 +2178,7 @@ class TestMergedShards:
             assert VALUE not in text, relative
 
 
+@pytest.mark.unit
 class TestValuesAcrossResultSets:
     """What one masking learns is kept, so a later union of result sets can use it.
 

@@ -308,6 +308,7 @@ def _run_env(run_call: list[str]) -> dict[str, str]:
     return dict(pair.split("=", 1) for pair in pairs)
 
 
+@pytest.mark.integration
 def test_pwsh_runs_with_a_scratch_home_and_no_telemetry(tmp_path):
     # pwsh writes caches under HOME and the XDG directories, sends telemetry unless
     # opted out, and checks for updates; none of that belongs to a test.
@@ -330,6 +331,7 @@ def test_pwsh_runs_with_a_scratch_home_and_no_telemetry(tmp_path):
 # Choosing the runner.
 
 
+@pytest.mark.integration
 def test_oci_runner_selects_the_runner(tmp_path):
     result, calls = _invoke(
         tmp_path,
@@ -361,6 +363,7 @@ def _native_calls(tmp_path: Path, verb: str) -> list[str]:
     return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in runner is a POSIX script")
 def test_a_runner_named_by_path_is_the_one_that_runs(tmp_path):
     # Get-Command resolves the path, and its Name is just "myrunner": calling that ran
@@ -400,6 +403,7 @@ _LEGACY = "-LegacyQuoting"
 _BATCH = "-BatchFile 'C:\\tools\\runner.cmd'"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("value", "flags", "refusal"),
     [
@@ -452,6 +456,7 @@ def test_arguments_a_program_would_not_get_whole_are_refused(
     assert calls == []
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name != "nt", reason="Windows PowerShell 5.1 runs only on Windows"
 )
@@ -479,6 +484,7 @@ def test_windows_powershell_refuses_what_its_quoting_would_break(
     assert calls == []
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name != "nt", reason="Windows PowerShell 5.1 runs only on Windows"
 )
@@ -499,6 +505,7 @@ def test_windows_powershell_takes_the_default_output_directory(tmp_path):
     assert _run_call(result, calls)
 
 
+@pytest.mark.integration
 def test_every_join_path_names_one_child_path(tmp_path):
     # Windows PowerShell 5.1 has no -AdditionalChildPath, so a Join-Path with a third
     # path fails to bind there. Read with PowerShell's parser, so it runs on any host.
@@ -520,6 +527,7 @@ def test_every_join_path_names_one_child_path(tmp_path):
     assert report["wide"] == [], report
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "nt", reason="cmd.exe runs batch files only on Windows")
 def test_a_batch_file_runner_gets_no_value_cmd_exe_would_act_on(tmp_path):
     ran = tmp_path / "batch-runner-ran.log"
@@ -535,6 +543,7 @@ def test_a_batch_file_runner_gets_no_value_cmd_exe_would_act_on(tmp_path):
     assert not ran.exists(), "the batch file ran"
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in runner is a POSIX script")
 def test_values_stay_one_argument_under_legacy_native_argument_passing(tmp_path):
     # 'Legacy' wraps an argument holding a space in double quotes without escaping
@@ -587,6 +596,7 @@ def _startup_files(tmp_path: Path, monkeypatch, body: str) -> Path:
     return canary
 
 
+@pytest.mark.integration
 def test_no_startup_file_of_the_developers_shell_runs(tmp_path, monkeypatch):
     # pwsh can be a bash script (nix installs it as one), and a non-interactive bash
     # runs $BASH_ENV first. One that exports OCI_RUNNER undid the test's removal of
@@ -600,6 +610,7 @@ def test_no_startup_file_of_the_developers_shell_runs(tmp_path, monkeypatch):
     assert _run_call(result, calls)[0] in RUNNERS
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", ["OCI_RUNNER", "ASH_OCI_RUNNER", "OCI_RUNNER_WRAPPER"])
 def test_a_runner_variable_the_test_did_not_set_stops_the_script(tmp_path, name):
     # The guard behind the one above: whatever sets a runner variable between the
@@ -613,12 +624,14 @@ def test_a_runner_variable_the_test_did_not_set_stops_the_script(tmp_path, name)
     assert _calls(tmp_path) == []
 
 
+@pytest.mark.integration
 def test_pwsh_runs_with_a_home_of_the_tests_own(tmp_path):
     result, _ = _run_script(tmp_path, 'Write-Output "HOME=$HOME"\nexit 0\n')
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"HOME={tmp_path / 'pwsh-home'}" in result.stdout.splitlines(), result.stdout
 
 
+@pytest.mark.integration
 def test_oci_runner_wins_over_the_old_ash_oci_runner(tmp_path):
     result, calls = _invoke(
         tmp_path,
@@ -630,6 +643,7 @@ def test_oci_runner_wins_over_the_old_ash_oci_runner(tmp_path):
     assert _run_call(result, calls)[0] == "podman"
 
 
+@pytest.mark.integration
 def test_the_old_ash_oci_runner_still_works_and_says_it_is_deprecated(tmp_path):
     result, calls = _invoke(
         tmp_path,
@@ -641,6 +655,7 @@ def test_the_old_ash_oci_runner_still_works_and_says_it_is_deprecated(tmp_path):
     assert "ASH_OCI_RUNNER is deprecated" in result.stdout + result.stderr
 
 
+@pytest.mark.integration
 def test_an_explicit_empty_oci_runner_is_refused_and_ash_oci_runner_is_not_used(
     tmp_path,
 ):
@@ -660,6 +675,7 @@ def test_an_explicit_empty_oci_runner_is_refused_and_ash_oci_runner_is_not_used(
     assert calls == []
 
 
+@pytest.mark.integration
 def test_discovery_tries_finch_first_like_ash_and_the_cli(tmp_path):
     result, calls = _invoke(
         tmp_path, "Invoke-ASH -NoBuild -SourceDir src -OutputDir out"
@@ -668,6 +684,7 @@ def test_discovery_tries_finch_first_like_ash_and_the_cli(tmp_path):
     assert _run_call(result, calls)[0] == "finch"
 
 
+@pytest.mark.integration
 def test_no_runner_throws_to_the_caller(tmp_path):
     # `exit` inside a function would end the PowerShell session that dot-sourced it: a
     # caller's catch would never run and an interactive window would close, so
@@ -697,6 +714,7 @@ _NO_RUNNER_MESSAGE = (
 )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "launch",
     [
@@ -807,6 +825,7 @@ def _assert_only_the_failed_build_ran(failure: str, calls: list[list[str]]) -> N
         assert calls == [], calls
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("failure", sorted(_FAILURES))
 def test_a_refusal_ends_the_script_and_is_reported_once(tmp_path, failure):
     # The statement after Invoke-ASH must not run (a ThrowTerminatingError would let
@@ -829,6 +848,7 @@ def test_a_refusal_ends_the_script_and_is_reported_once(tmp_path, failure):
     _assert_only_the_failed_build_ran(failure, calls)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("failure", sorted(_FAILURES))
 def test_a_refusal_leaves_lastexitcode_set_for_a_script_that_continues(
     tmp_path, failure
@@ -874,6 +894,7 @@ def _statements(text: str) -> str:
     return " ".join(text.split())
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("preference", ["Stop", "Continue"])
 @pytest.mark.parametrize("failure", sorted(_FAILURES))
 def test_a_script_that_wraps_invoke_ash_as_the_help_shows_exits_with_its_code(
@@ -894,6 +915,7 @@ def test_a_script_that_wraps_invoke_ash_as_the_help_shows_exits_with_its_code(
     _assert_only_the_failed_build_ran(failure, calls)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("invocation", "text"),
     [
@@ -1254,6 +1276,7 @@ def _prepare(tmp_path: Path, needs: dict) -> None:
         _link_dir(tmp_path / link, tmp_path / target)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("site", sorted(_INVOKE_ASH_SITES))
 def test_every_invoke_ash_refusal_exits_with_its_code(tmp_path, site):
     invocation, needs, env, code, text = _INVOKE_ASH_SITES[site]
@@ -1379,6 +1402,7 @@ def _both_wrappers_in_both_locales(
     return measured
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
@@ -1396,6 +1420,7 @@ def test_the_wrappers_agree_on_an_image_name(tmp_path, name):
     assert measured == [code] * 4, measured
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
@@ -1455,6 +1480,7 @@ def _invoke_ash_refusal(tmp_path: Path, where: str, value: str):
     return _run_script(tmp_path, _wrapped(invocation), **{variable: value})
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("where", sorted(_SHOWN_IN))
 @pytest.mark.parametrize("character", sorted(_HIDDEN_CHARACTERS))
 def test_a_refused_value_is_shown_with_its_hidden_characters_escaped(
@@ -1533,6 +1559,7 @@ _BACKSLASH_LOOKALIKES = (
 )
 
 
+@pytest.mark.integration
 def test_the_shown_form_reads_back_to_the_value_one_to_one(tmp_path):
     """A literal backslash-x-1-B and a real ESC are shown differently.
 
@@ -1561,6 +1588,7 @@ def test_the_shown_form_reads_back_to_the_value_one_to_one(tmp_path):
     assert not any(chr(0x1B) in text or chr(0x202E) in text for text in shown), shown
 
 
+@pytest.mark.integration
 def test_a_refused_literal_escape_and_a_real_one_are_shown_apart(tmp_path):
     shown = []
     for name, value in (("literal", "img\\x1Bname"), ("real", f"img{chr(0x1B)}name")):
@@ -1584,6 +1612,7 @@ def _shown_value(output: str, before: str, after: str) -> str:
     return unwrapped[unwrapped.index(before) + len(before) : unwrapped.index(after)]
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
@@ -1674,6 +1703,7 @@ _WORKSPACE_AND_SANDBOX = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
@@ -1717,6 +1747,7 @@ def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, cell)
     assert calls == [], calls
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
@@ -1764,6 +1795,7 @@ def test_an_empty_ash_image_name_is_unset_in_both_wrappers(tmp_path):
     assert default in _run_call(result, calls), calls
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
@@ -1859,6 +1891,7 @@ _TARGET_AND_MODE_LOOKALIKES = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
@@ -1960,6 +1993,7 @@ _HIDDEN_CHARACTER_SITES = {
 _HIDDEN_CHARACTER_USAGE_ERRORS = {"source-dir", "output-dir", "output-dir-reason"}
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("site", sorted(_HIDDEN_CHARACTER_SITES))
 def test_every_refusal_that_shows_a_value_escapes_its_hidden_characters(tmp_path, site):
     invocation, template, needs, escapes = _HIDDEN_CHARACTER_SITES[site]
@@ -2098,6 +2132,7 @@ def _unshown_values(tmp_path: Path, source: Path) -> tuple[int, list[str]]:
     ]
 
 
+@pytest.mark.integration
 def test_every_value_a_message_interpolates_is_shown(tmp_path):
     """A value in a throw or a Write-* call goes through Format-AshShownValue.
 
@@ -2127,6 +2162,7 @@ function Show-Probe {
 """
 
 
+@pytest.mark.integration
 def test_the_allowed_extents_do_not_cover_a_bare_variable(tmp_path):
     """Control for the walk above: ``$($id[0])`` and ``$envConfigHeld`` are allowed by
     their extents, so ``$id`` shown raw, ``$id[1]`` outside Format-AshShownValue and a
@@ -2144,6 +2180,7 @@ def test_the_allowed_extents_do_not_cover_a_bare_variable(tmp_path):
     ], raw
 
 
+@pytest.mark.integration
 def test_the_verbose_lines_show_paths_with_their_escapes(tmp_path):
     """-Verbose prints the source and output directories and the run command.
 
@@ -2170,6 +2207,7 @@ def test_the_verbose_lines_show_paths_with_their_escapes(tmp_path):
     assert _unwrapped(output).count("\\" + "u202E") >= 3, output
 
 
+@pytest.mark.integration
 def test_tab_completion_offers_the_build_targets(tmp_path):
     # -BuildTarget is checked in the body, so a value outside the set exits 3 like
     # every refusal, not with PowerShell's binding error; the completer keeps the
@@ -2186,6 +2224,7 @@ def test_tab_completion_offers_the_build_targets(tmp_path):
     assert json.loads(result.stdout.strip().splitlines()[-1]) == ["ci", "non-root"]
 
 
+@pytest.mark.unit
 def test_the_help_gives_the_wrapped_form():
     help_text = HELPERS.read_text(encoding="utf-8").split("[CmdletBinding()]")[0]
     description = help_text.split(".DESCRIPTION")[1].split(".PARAMETER")[0]
@@ -2193,6 +2232,7 @@ def test_the_help_gives_the_wrapped_form():
     assert _unwrapped(form) in _unwrapped(description), description
 
 
+@pytest.mark.integration
 def test_oci_runner_wrapper_is_split_into_words(tmp_path):
     # OCI_RUNNER_WRAPPER prefixes the runner, and is split at whitespace as ./ash
     # splits it: "sudo -E" is a program and its option, not a program named "sudo -E".
@@ -2219,6 +2259,7 @@ _RECORDING_ID_STUB = (
 )
 
 
+@pytest.mark.integration
 def test_no_build_looks_up_no_ids(tmp_path):
     result, calls = _invoke(
         tmp_path,
@@ -2232,6 +2273,7 @@ def test_no_build_looks_up_no_ids(tmp_path):
     assert not (tmp_path / "id.log").exists()
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt", reason="the IDs are taken from id only off Windows"
 )
@@ -2251,6 +2293,7 @@ def test_without_id_the_build_warns_and_keeps_the_images_default_ids(tmp_path):
 # Flags whose defaults belong to ash.
 
 
+@pytest.mark.integration
 def test_no_progress_summary_or_findings_flag_is_forced(tmp_path):
     result, calls = _invoke(
         tmp_path, "Invoke-ASH -NoBuild -SourceDir src -OutputDir out"
@@ -2263,6 +2306,7 @@ def test_no_progress_summary_or_findings_flag_is_forced(tmp_path):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("switch", "expected"),
     [
@@ -2283,6 +2327,7 @@ def test_a_requested_flag_is_passed_through(tmp_path, switch, expected):
     assert _DEFAULTED_BY_ASH.intersection(inner) == {expected}, inner
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("switches", "expected", "ash_debug"),
     [
@@ -2305,6 +2350,7 @@ def test_verbose_and_debug_follow_their_value_not_their_presence(
     assert _run_env(run).get("ASH_DEBUG") == ash_debug, run
 
 
+@pytest.mark.integration
 def test_config_is_passed_as_config(tmp_path):
     result, calls = _invoke(
         tmp_path, "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -Config cfg.yaml"
@@ -2317,6 +2363,7 @@ def test_config_is_passed_as_config(tmp_path):
 # The directories, and the arguments' position.
 
 
+@pytest.mark.integration
 def test_source_and_output_dirs_reach_ash_as_environment_variables(tmp_path):
     # Positional --source-dir/--output-dir came before the caller's words, so a
     # subcommand ended up after options it may not take. scan reads ASH_SOURCE_DIR and
@@ -2332,6 +2379,7 @@ def test_source_and_output_dirs_reach_ash_as_environment_variables(tmp_path):
     assert env.get("ASH_OUTPUT_DIR") == "/out", run
 
 
+@pytest.mark.integration
 def test_output_format_sets_no_variable_ash_does_not_read(tmp_path):
     """-OutputFormat put ASH_OUTPUT_FORMAT into the container, and ASH reads no such
     variable: report formats are chosen with --output-formats. The parameter is
@@ -2346,6 +2394,7 @@ def test_output_format_sets_no_variable_ash_does_not_read(tmp_path):
     assert not any("ASH_OUTPUT_FORMAT" in arg for arg in run), run
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("invocation", "source", "expected"),
     [
@@ -2369,6 +2418,7 @@ def test_the_first_trailing_argument_is_the_source_directory_unless_given(
     assert _inner_ash_args(run) == expected, run
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "report_dir", [True, False], ids=["report-exists", "no-report"]
 )
@@ -2402,6 +2452,7 @@ def test_invoke_ash_report_takes_report_as_the_source_directory(tmp_path, report
 # the subcommand, and only to one that takes them.
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("invocation", "expected"),
     [
@@ -2451,6 +2502,7 @@ def test_the_wrappers_options_go_after_a_subcommand_that_takes_them(
     assert _inner_ash_args(_run_call(result, calls)) == expected
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("invocation", "expected"),
     [
@@ -2512,6 +2564,7 @@ def test_an_option_value_is_not_the_subcommand(tmp_path, invocation, expected):
     assert "does not take" not in result.stdout + result.stderr
 
 
+@pytest.mark.integration
 def test_an_option_a_subcommand_does_not_take_is_named_in_a_warning(tmp_path):
     result, calls = _invoke(
         tmp_path,
@@ -2521,6 +2574,7 @@ def test_an_option_a_subcommand_does_not_take_is_named_in_a_warning(tmp_path):
     assert "ash report does not take --offline" in result.stdout + result.stderr
 
 
+@pytest.mark.integration
 def test_quiet_and_no_color_are_dropped_without_a_warning(tmp_path):
     # As the help says: they have already quieted the build and kept the container off
     # a terminal, so a subcommand that does not take them loses nothing worth a warning.
@@ -2576,6 +2630,7 @@ def _link_dir(link: Path, target: Path) -> None:
         target.rmdir()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "linked",
     [".ash/ash_output", ".ash", ".ash/ash_output (dangling)", "src/out", "src/nested"],
@@ -2616,6 +2671,7 @@ def test_an_output_directory_reached_through_a_link_is_refused(tmp_path, linked)
     assert list(target.iterdir()) == [], list(target.iterdir())
 
 
+@pytest.mark.integration
 def test_a_link_inside_the_source_directory_is_refused_from_another_working_directory(
     tmp_path,
 ):
@@ -2639,6 +2695,7 @@ def test_a_link_inside_the_source_directory_is_refused_from_another_working_dire
     assert list(victim.iterdir()) == [], list(victim.iterdir())
 
 
+@pytest.mark.integration
 def test_a_link_is_found_when_the_output_directory_is_typed_in_another_case(tmp_path):
     # macOS and Windows volumes usually ignore case, so the same directory can be typed
     # in another case. Compared case-sensitively, the typed path was not "below the
@@ -2661,6 +2718,7 @@ def test_a_link_is_found_when_the_output_directory_is_typed_in_another_case(tmp_
     assert list(victim.iterdir()) == [], list(victim.iterdir())
 
 
+@pytest.mark.integration
 def test_an_output_directory_without_links_is_created(tmp_path):
     result, calls = _invoke(tmp_path, "Invoke-ASH -NoBuild -SourceDir src")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -2685,6 +2743,7 @@ def _uid_gid_args(build: list[str]) -> list[str]:
     ]
 
 
+@pytest.mark.integration
 def test_the_image_is_built_for_the_callers_uid_and_gid(tmp_path):
     # ./ash and `ash --mode container` build for the caller, so the container can write
     # a host-owned output directory. The image's own default is 500:100.
@@ -2699,6 +2758,7 @@ def test_the_image_is_built_for_the_callers_uid_and_gid(tmp_path):
         assert _uid_gid_args(build) == ["UID=4242", "GID=4343"], build
 
 
+@pytest.mark.integration
 def test_an_explicit_container_uid_and_gid_win(tmp_path):
     result, calls = _invoke(
         tmp_path,
@@ -2718,6 +2778,7 @@ _ROOT_ID_STUB = (
 _CI_VARIABLES = ("CI", "IsCI", "ISCI", "CODEBUILD_BUILD_ID")
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt",
     reason="Windows always builds ci, and its variable names ignore case (ISCI is IsCI)",
@@ -2752,6 +2813,7 @@ def test_the_ci_variables_do_not_choose_the_stage(tmp_path, variable):
     assert build[build.index("--target") + 1] == "non-root", build
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt", reason="the IDs are taken from id only off Windows"
 )
@@ -2772,6 +2834,7 @@ def test_a_root_caller_is_refused_the_non_root_stage(tmp_path):
     assert "Pass -BuildTarget ci" in message, message
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt", reason="the IDs are taken from id only off Windows"
 )
@@ -2788,6 +2851,7 @@ def test_a_root_caller_builds_ci_with_its_own_ids(tmp_path):
     assert "Running as root" not in result.stdout + result.stderr
 
 
+@pytest.mark.integration
 def test_an_explicit_container_uid_of_0_is_passed_to_the_ci_stage(tmp_path):
     # An explicit choice is the caller's, and the ci stage takes it; the non-root
     # stage refuses 0 whether it came from id or from the caller.
@@ -2801,6 +2865,7 @@ def test_an_explicit_container_uid_of_0_is_passed_to_the_ci_stage(tmp_path):
     assert _uid_gid_args(_build_call(result, calls)) == ["UID=0", "GID=0"]
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="id(1) and os.getuid are POSIX")
 @pytest.mark.skipif(
     os.name != "nt" and os.getuid() == 0,
@@ -2854,6 +2919,7 @@ def _github_pwsh_contents(run: str) -> str:
     )
 
 
+@pytest.mark.integration
 def test_the_ci_powershell_step_names_only_declared_parameters(tmp_path):
     # An undeclared name such as -ConfigFile is not an error in PowerShell: it binds to
     # the arguments forwarded to ash. So the step's parameter names are checked against
@@ -2885,6 +2951,7 @@ def test_the_ci_powershell_step_names_only_declared_parameters(tmp_path):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("config_file", ["default", "community"])
 def test_the_ci_powershell_step_reaches_the_container_as_written(tmp_path, config_file):
     # The step dot-sources ./utils/ash_helpers.ps1 and scans $PWD, so it runs here in a
@@ -2919,6 +2986,7 @@ def test_the_ci_powershell_step_reaches_the_container_as_written(tmp_path, confi
         assert "--config" not in inner, inner
 
 
+@pytest.mark.integration
 def test_every_invoke_ash_call_in_the_ci_step_is_wrapped_as_the_help_shows(tmp_path):
     # Left uncaught, a refusal ends the step with PowerShell's 1, not ASH's 3.
     step = tmp_path / "step.ps1"
@@ -2951,6 +3019,7 @@ def test_every_invoke_ash_call_in_the_ci_step_is_wrapped_as_the_help_shows(tmp_p
     assert [_statements(catch) for catch in report["catches"]] == [expected] * 2, report
 
 
+@pytest.mark.integration
 def test_a_refusal_in_the_ci_step_fails_it_with_3(tmp_path):
     # The step is started the way GitHub's runner starts it, from its `shell:` value.
     # With the stock `shell: pwsh` that is `pwsh -command ". '<file>'"`, and pwsh then
@@ -2985,6 +3054,7 @@ def test_a_refusal_in_the_ci_step_fails_it_with_3(tmp_path):
 # does, and forwards every other argument to ash in the container.
 
 
+@pytest.mark.integration
 def test_a_word_that_merely_contains_dash_c_is_not_no_color(tmp_path):
     # The words were matched as case-insensitive substrings, so --cleanup, --config,
     # --container-uid or a -ConfigFile typo each counted as -c and turned color off.
@@ -2998,6 +3068,7 @@ def test_a_word_that_merely_contains_dash_c_is_not_no_color(tmp_path):
     assert "--no-color" not in inner, inner
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("word", "build_flag", "ash_flag"),
     [
@@ -3024,6 +3095,7 @@ def test_wrapper_flags_are_handled_like_ash(tmp_path, word, build_flag, ash_flag
         assert word not in inner, inner
 
 
+@pytest.mark.integration
 def test_wrapper_flags_are_matched_case_sensitively(tmp_path):
     # ./ash compares exactly; -Q and --FORCE are not its flags and go to ash as given.
     result, calls = _invoke(
@@ -3036,6 +3108,7 @@ def test_wrapper_flags_are_matched_case_sensitively(tmp_path):
     assert "--no-cache" not in build and "-q" not in build, build
 
 
+@pytest.mark.integration
 def test_other_words_are_forwarded_in_order(tmp_path):
     result, calls = _invoke(
         tmp_path,
@@ -3052,6 +3125,7 @@ def test_other_words_are_forwarded_in_order(tmp_path):
     ], inner
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("ash_args", "expected"),
     [
@@ -3078,6 +3152,7 @@ def test_quoted_values_in_ash_args_are_kept_whole(tmp_path, ash_args, expected):
     assert _inner_ash_args(_run_call(result, calls)) == [*SANDBOX_OFF, *expected]
 
 
+@pytest.mark.integration
 def test_arguments_after_the_parameters_are_forwarded_whole(tmp_path):
     result, calls = _invoke(
         tmp_path,
@@ -3088,6 +3163,7 @@ def test_arguments_after_the_parameters_are_forwarded_whole(tmp_path):
     assert inner == [*SANDBOX_OFF, "--quiet", "--config-overrides", "a=x  y"], inner
 
 
+@pytest.mark.integration
 def test_a_command_in_ash_args_is_refused_not_run(tmp_path):
     # The words are passed as arguments, not pasted into a string for
     # Invoke-Expression, which would run anything after a ; or a |.
@@ -3143,6 +3219,7 @@ def _help_ash_args_example() -> str:
     return match.group(1)
 
 
+@pytest.mark.integration
 def test_the_helps_own_ash_args_example_passes_its_comma_list_whole(tmp_path):
     example = _help_ash_args_example()
     result, calls = _invoke(
@@ -3156,6 +3233,7 @@ def test_the_helps_own_ash_args_example_passes_its_comma_list_whole(tmp_path):
     ], example
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("ash_args", "expected"),
     [
@@ -3174,6 +3252,7 @@ def test_adjacent_pieces_in_ash_args_are_one_argument(tmp_path, ash_args, expect
     assert _inner_ash_args(_run_call(result, calls)) == [*SANDBOX_OFF, *expected]
 
 
+@pytest.mark.integration
 def test_a_comma_list_after_the_parameters_stays_one_argument(tmp_path):
     # PowerShell reads `sarif,html` there as a two-element array before Invoke-ASH
     # sees it.
@@ -3189,6 +3268,7 @@ def test_a_comma_list_after_the_parameters_stays_one_argument(tmp_path):
     ]
 
 
+@pytest.mark.integration
 def test_a_quoted_dash_c_after_the_parameters_is_no_color(tmp_path):
     # Bare, -c is an ambiguous prefix of -Config, -ContainerUID and -ContainerGID, so
     # PowerShell refuses it; quoted, it is an argument.
@@ -3199,6 +3279,7 @@ def test_a_quoted_dash_c_after_the_parameters_is_no_color(tmp_path):
     assert _inner_ash_args(_run_call(result, calls)) == [*SANDBOX_OFF, "--no-color"]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "quote", _UNICODE_SINGLE_QUOTES, ids=lambda q: f"U+{ord(q):04X}"
 )
@@ -3219,6 +3300,7 @@ def test_a_typographic_quote_in_a_value_never_runs_code(tmp_path, quote, channel
     assert value in _inner_ash_args(_run_call(result, calls))
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "quote", _UNICODE_SINGLE_QUOTES, ids=lambda q: f"U+{ord(q):04X}"
 )
@@ -3240,6 +3322,7 @@ def test_a_typographic_quote_in_ash_args_never_runs_code(tmp_path, quote):
     ]
 
 
+@pytest.mark.integration
 def test_a_typographic_apostrophe_in_a_value_arrives_intact(tmp_path):
     name = "O’Neil"
     config = _ps_double_quoted(name + ".yaml")
@@ -3263,6 +3346,7 @@ def test_a_typographic_apostrophe_in_a_value_arrives_intact(tmp_path):
     ]
 
 
+@pytest.mark.integration
 def test_an_unquoted_typographic_apostrophe_in_ash_args_is_refused_with_a_hint(
     tmp_path,
 ):
@@ -3283,6 +3367,7 @@ def test_an_unquoted_typographic_apostrophe_in_ash_args_is_refused_with_a_hint(
     assert calls == []
 
 
+@pytest.mark.integration
 def test_a_refused_variable_is_named_with_its_dollar_sign(tmp_path):
     result, calls = _run_script(
         tmp_path,
@@ -3317,6 +3402,7 @@ _EXPANDABLE_ASH_ARGS = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("element", sorted(_EXPANDABLE_ASH_ARGS))
 def test_an_ash_args_element_powershell_would_expand_is_refused(tmp_path, element):
     """Refused with 3, as a bare $variable is, and named with its escapes."""
@@ -3354,6 +3440,7 @@ _TYPED_ASH_ARGS = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("element", sorted(_TYPED_ASH_ARGS))
 def test_a_single_quoted_dollar_sign_reaches_ash_as_typed(tmp_path, element):
     ash_args, expected = _TYPED_ASH_ARGS[element]
@@ -3366,6 +3453,7 @@ def test_a_single_quoted_dollar_sign_reaches_ash_as_typed(tmp_path, element):
     assert _inner_ash_args(_run_call(result, calls)) == [*SANDBOX_OFF, *expected]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "where", ["SourceDir", "OutputDir", "AshImageName", "ASH_IMAGE_NAME"]
 )

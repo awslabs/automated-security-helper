@@ -6,6 +6,8 @@ from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     analyze_sarif_file,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def sample_sarif_file():

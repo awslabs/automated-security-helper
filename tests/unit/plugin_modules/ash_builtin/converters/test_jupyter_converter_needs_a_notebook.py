@@ -39,9 +39,12 @@ import pytest
 
 from tests.utils.helpers import importing_this_checkout
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the stand-in uv is a POSIX shell script"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="the stand-in uv is a POSIX shell script"
+    ),
+]
 
 STUB_UV = textwrap.dedent(
     """\

@@ -42,6 +42,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.execution_engine import ScanExecutionEngine
 
+pytestmark = pytest.mark.unit
+
 
 def _engine(enabled, excluded, tmp_path, **kwargs):
     context = MagicMock()

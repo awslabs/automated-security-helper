@@ -24,8 +24,12 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
+
+pytestmark = pytest.mark.unit
 
 
 def _config() -> AshConfig:

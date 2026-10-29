@@ -56,9 +56,12 @@ LINKS_LEAVING_THE_TREE = (
     LINK_WITH_A_BACKTICK,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 # Run in the child, with ASH imported from this checkout (see importing_this_checkout).
 # Only `jupyter nbconvert` is replaced; every other subprocess.run call goes to the

@@ -15,9 +15,13 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
+import pytest
+
 from automated_security_helper.interactions import run_ash_scan
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
+
+pytestmark = pytest.mark.unit
 
 _STOP = [("watched", "ASH could not stop watched-tool (pid 4242)")]
 _INCOMPLETE = [("bandit", "MISSING")]

@@ -52,10 +52,13 @@ from tests.unit.deploy.buildspec_extraction import (
     posix_shell,
 )
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="executes POSIX buildspec commands destined for a Linux build container",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="executes POSIX buildspec commands destined for a Linux build container",
+    ),
+]
 
 PIPELINE_TEMPLATE = CDK_TEMPLATE_DIR / "AshDistributedPipeline.template.json"
 EXECUTOR = REPO_ROOT / "deploy" / "terraform" / "modules" / "codepipeline-executor"

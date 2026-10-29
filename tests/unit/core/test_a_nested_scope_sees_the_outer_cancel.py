@@ -40,6 +40,8 @@ from automated_security_helper.core.cancellation import (
     raise_if_cancelled,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_an_outer_cancel_is_seen_through_an_inner_scope():
     outer = CancelEvent()

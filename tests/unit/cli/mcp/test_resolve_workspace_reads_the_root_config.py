@@ -23,6 +23,8 @@ from automated_security_helper.cli.mcp.sandbox import (
     ASH_MCP_TRANSPORT_ENV,
 )
 
+pytestmark = pytest.mark.unit
+
 GOOD = "global_settings:\n  severity_threshold: MEDIUM\n"
 
 

@@ -43,7 +43,11 @@ this property is not masked by the module-scope ``model_rebuild()`` prologues in
 the rest of the suite, because it does not depend on when the rebuild ran.
 """
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 # One CycloneDX component. The trigger is not an alias in the *input* -- an input
 # with "bom-ref" and one without both fail once the flag is True -- it is that the

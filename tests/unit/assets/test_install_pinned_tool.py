@@ -114,6 +114,7 @@ def _dockerfile_instructions() -> str:
     )
 
 
+@pytest.mark.unit
 class TestTheDockerfileAndTheTableAgree:
     """The ARG lines and TOOL_VERSIONS are the same fact written twice."""
 
@@ -182,6 +183,7 @@ class TestTheDockerfileAndTheTableAgree:
         assert "get-pip.py" not in _dockerfile_instructions()
 
 
+@pytest.mark.unit
 class TestOpengrepReachesTheImageThroughThePin:
     """The exempted tool still has to be provisioned, and provisioned verified."""
 
@@ -206,6 +208,7 @@ class TestOpengrepReachesTheImageThroughThePin:
         )
 
 
+@pytest.mark.unit
 class TestArchResolution:
     @pytest.mark.parametrize(
         "machine,expected",
@@ -228,6 +231,7 @@ class TestArchResolution:
         assert "s390x" in str(raised.value)
 
 
+@pytest.mark.unit
 class TestTheExactlyOneMemberRule:
     def test_a_member_in_a_subdirectory_is_still_found(self, tmp_path):
         """A vendor moving the binary out of the archive root must keep working."""
@@ -275,6 +279,7 @@ class TestTheExactlyOneMemberRule:
         assert target.read_text() == "binary"
 
 
+@pytest.mark.unit
 class TestTheHttpsGuard:
     def test_a_non_https_asset_url_is_refused(self, tmp_path, monkeypatch):
         """The table is reviewed, so this guards a bad edit to it rather than a
@@ -294,6 +299,7 @@ class TestTheHttpsGuard:
         assert "non-https" in str(raised.value)
 
 
+@pytest.mark.unit
 class TestTheDigestCheckCanFail:
     """A pinned digest that cannot reject anything is decoration.
 
@@ -399,6 +405,7 @@ class TestTheDigestCheckCanFail:
         )
 
 
+@pytest.mark.unit
 class TestABareExecutableAsset:
     """opengrep publishes the executable itself; there is no archive to open."""
 
@@ -452,6 +459,7 @@ class TestABareExecutableAsset:
         assert not bin_dir.exists() or list(bin_dir.iterdir()) == []
 
 
+@pytest.mark.unit
 class TestTheExecutableDigestIsChecked:
     """The extracted executable is checked against its own pin, not only the archive.
 
@@ -562,6 +570,7 @@ class TestTheExecutableDigestIsChecked:
         assert os.access(installed, os.X_OK)
 
 
+@pytest.mark.unit
 class TestLoadPinsLeavesSysModulesAlone:
     """The regression these tests could not see in themselves.
 
@@ -641,6 +650,7 @@ class TestLoadPinsLeavesSysModulesAlone:
                     sys.modules[name] = module
 
 
+@pytest.mark.integration
 class TestTheScriptRunsWithNothingInstalled:
     """The container build invokes this before the ASH wheel exists.
 
@@ -783,6 +793,7 @@ _TRIVY_NOTICE_URL = next(
 )
 
 
+@pytest.mark.unit
 class TestLicenseFilesTravelWithTheBinary:
     def test_archive_license_lands_beside_the_binary(self, tmp_path, monkeypatch):
         archive = _tarball({"syft": b"#!/bin/sh\n", "LICENSE": b"syft license\n"})
@@ -954,6 +965,7 @@ class TestLicenseFilesTravelWithTheBinary:
 
 
 class TestLicensesOnly:
+    @pytest.mark.unit
     def test_opengrep_gets_its_files_and_a_source_section(self, tmp_path, monkeypatch):
         entry = THIRD_PARTY_LICENSES["opengrep"]
         payloads = {f.url: f"{f.name} text\n".encode() for f in entry.files}
@@ -980,6 +992,7 @@ class TestLicensesOnly:
         for command in entry.source_checkout:
             assert command in source
 
+    @pytest.mark.unit
     def test_a_tool_whose_files_are_in_its_archive_is_refused(self, tmp_path):
         """--licenses-only has no archive; it must not invent a second download."""
         with pytest.raises(SystemExit) as raised:
@@ -989,6 +1002,7 @@ class TestLicensesOnly:
         assert "release archive" in str(raised.value)
         assert not (tmp_path / "tp" / "syft").exists()
 
+    @pytest.mark.integration
     def test_the_mode_works_under_a_bare_interpreter(self):
         result = subprocess.run(  # nosec B603 - fixed interpreter and script path
             [sys.executable, "-I", "-S", str(SCRIPT), "--verify-third-party", "--help"],
@@ -1015,6 +1029,7 @@ class TestLicensesOnly:
         ("0.12.23.1", "0.12.23", False),
     ],
 )
+@pytest.mark.unit
 def test_the_version_match_is_a_whole_version(output, version, expected):
     assert installer.reports_version(output, version) is expected
 
@@ -1023,6 +1038,7 @@ def test_the_version_match_is_a_whole_version(output, version, expected):
     os.name == "nt",
     reason="runs only in the Linux image build; the fixtures are POSIX executables",
 )
+@pytest.mark.unit
 class TestVerifyThirdParty:
     """The last step of the image build. Each negative case is one mutation of a
     tree on which the positive case passes, so a failure is about that mutation."""
@@ -1040,6 +1056,14 @@ class TestVerifyThirdParty:
         )
         monkeypatch.setenv("ASH_CFN_GUARD_RULES_DIR", str(rules))
         self.rules = rules
+        # verify_third_party asks uv for its tool directory whenever any entry has a
+        # version probe, and resolves uv on the process PATH, where the unit tool
+        # guard's stand-in is first. The stand-in records `uv tool dir` as a tool
+        # start, so every test here failed at teardown. The only probe in the table
+        # (the rules bundle) reads its manifest from ASH_CFN_GUARD_RULES_DIR and
+        # names no `{uv_tool_dir}`, so the answer is not used; a probe that did
+        # need it would fail loudly as "uv did not answer".
+        monkeypatch.setattr(installer, "_uv_tool_dir", lambda: None)
 
     @staticmethod
     def _tree(tmp_path: Path):
@@ -1170,7 +1194,10 @@ class TestVerifyThirdParty:
         )
         (third_party / "index.json").unlink()
         (Path(path) / "uv").write_text('#!/bin/sh\necho "uv 0.1.0"\n')
-        self._fails(pins, third_party, searched, "does not report 0.12.23", site_dirs)
+        # The message names the pinned release, so read it from the pin instead of
+        # spelling it: the literal went stale when the uv pin moved.
+        pinned = THIRD_PARTY_LICENSES["uv"].version.lstrip("v")
+        self._fails(pins, third_party, searched, f"does not report {pinned}", site_dirs)
 
     def test_every_release_copy_is_checked_not_only_the_first(self, tmp_path):
         """grype is in both /usr/local/bin and /.ash/bin in the image."""
@@ -1216,6 +1243,7 @@ class TestVerifyThirdParty:
         assert list(home.iterdir()) == []
 
 
+@pytest.mark.unit
 class TestTheGuardsTheReviewFoundUntested:
     """Each of these guards survived a mutation probe before it had a test."""
 
@@ -1294,6 +1322,7 @@ class TestTheGuardsTheReviewFoundUntested:
         assert not (tmp_path / "bin" / "syft").exists()
 
 
+@pytest.mark.unit
 class TestARulesBundleCarriesItsLicenses:
     """`install-pinned-tool aws-guard-rules-registry --rules-bundle` in the image.
 
@@ -1464,6 +1493,7 @@ def _semgrep():
     return entry, entry.version.lstrip("v"), {f.name: f.url for f in entry.files}
 
 
+@pytest.mark.unit
 class TestPythonToolLicenses:
     @pytest.fixture
     def tool_dir(self, tmp_path, monkeypatch):
@@ -1640,6 +1670,7 @@ class TestPythonToolLicenses:
         assert "found 0" in str(raised.value)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on PATH")
 @pytest.mark.runs_real_tools(
     reason="what the real uv prints for `tool dir` under FORCE_COLOR is the question"
@@ -1654,6 +1685,7 @@ def test_uv_tool_dir_is_a_plain_path_even_when_color_is_forced(monkeypatch):
 
 
 class TestUvToolPins:
+    @pytest.mark.unit
     def test_every_python_tool_is_pinned_to_its_entry(self, tmp_path):
         argv = installer.uv_tool_pins(_pins_dir(tmp_path))
         expected = []
@@ -1670,6 +1702,7 @@ class TestUvToolPins:
             a.split(".")[1] for a in argv if a.startswith("scanners.")
         }
 
+    @pytest.mark.unit
     def test_ash_reads_them_as_exact_version_constraints(self, tmp_path):
         """The overrides go through ASH's own parser in the image; check the value
         that reaches each scanner is an exact pin, not a range or a string with a
@@ -1687,6 +1720,7 @@ class TestUvToolPins:
                 f"=={version}"
             )
 
+    @pytest.mark.integration
     def test_the_mode_prints_them_under_a_bare_interpreter(self, tmp_path):
         """The Dockerfile word-splits this output into `ash dependencies install`."""
         pins = _pins_dir(tmp_path)
@@ -1746,23 +1780,28 @@ class TestAssertRootOnly:
         problems = installer.root_only_problems([path], trusted or (owner,))
         return self._local(problems, tmp_path)
 
+    @pytest.mark.unit
     def test_a_root_only_tree_passes(self, tmp_path):
         assert self._problems(self._tree(tmp_path, 0o755), tmp_path) == []
 
+    @pytest.mark.unit
     def test_a_world_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
         """In a directory anyone can write, the rules directory could be renamed."""
         target = self._tree(tmp_path, 0o777)
         problems = self._problems(target, tmp_path)
         assert any(str(target.parent) in p and "write" in p for p in problems)
 
+    @pytest.mark.unit
     def test_a_sticky_world_writable_parent_passes(self, tmp_path):
         assert self._problems(self._tree(tmp_path, 0o1777), tmp_path) == []
 
+    @pytest.mark.unit
     def test_a_writable_file_inside_fails(self, tmp_path):
         target = self._tree(tmp_path, 0o755)
         (target / "bundle" / "a.guard").chmod(0o666)
         assert any("a.guard" in p for p in self._problems(target, tmp_path))
 
+    @pytest.mark.unit
     def test_a_group_writable_file_inside_fails(self, tmp_path):
         """Group write counts as much as world write: the group need not be root's."""
         target = self._tree(tmp_path, 0o755)
@@ -1770,12 +1809,14 @@ class TestAssertRootOnly:
         problems = self._problems(target, tmp_path)
         assert any("a.guard" in p and "write" in p for p in problems), problems
 
+    @pytest.mark.unit
     def test_a_group_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
         target = self._tree(tmp_path, 0o775)
         problems = self._problems(target, tmp_path)
         assert any(str(target.parent) in p and "write" in p for p in problems)
 
     @pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="no symlinks")
+    @pytest.mark.unit
     def test_a_symlink_inside_is_judged_as_the_link_not_its_target(self, tmp_path):
         """lstat, not stat. The link points at the bundle's own root-only rule
         file, so following it would find nothing wrong; the link itself is a name
@@ -1801,18 +1842,21 @@ class TestAssertRootOnly:
             p.startswith(f"{target / 'bundle' / 'a.guard'}:") for p in problems
         )
 
+    @pytest.mark.unit
     def test_a_sticky_directory_inside_still_fails(self, tmp_path):
         """Inside the target, sticky is no excuse: the content itself must be root's."""
         target = self._tree(tmp_path, 0o755)
         (target / "bundle").chmod(0o1777)
         assert any("bundle" in p for p in self._problems(target, tmp_path))
 
+    @pytest.mark.unit
     def test_an_owner_that_is_not_trusted_fails(self, tmp_path):
         target = self._tree(tmp_path, 0o755)
         owner = os.stat(tmp_path).st_uid
         problems = self._problems(target, tmp_path, trusted=(owner + 1,))
         assert any(f"owned by uid {owner}" in p for p in problems)
 
+    @pytest.mark.integration
     def test_the_mode_exits_nonzero_and_names_the_path(self, tmp_path):
         target = self._tree(tmp_path, 0o777)
         result = subprocess.run(  # nosec B603 - fixed interpreter and script path

@@ -44,6 +44,8 @@ from automated_security_helper.utils.rich_log_handler import (
     RichLogPanel,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # A terminating __rich__ calls Table.add_row exactly max_lines times per render:
 # once per buffered record and once per pad row, and those two counts sum to

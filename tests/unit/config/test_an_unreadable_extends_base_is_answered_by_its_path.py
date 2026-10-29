@@ -25,6 +25,8 @@ from automated_security_helper.cli.mcp_tools import config_load_category
 from automated_security_helper.config.resolve_config import load_config_file_for_run
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 _PRE_313 = sys.version_info < (3, 13)
 #: A base name read from the environment: it must appear on no refusal surface.
 HIDDEN_BASE = "envbase-hidden-7731"

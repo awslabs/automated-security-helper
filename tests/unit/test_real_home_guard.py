@@ -19,6 +19,8 @@ import pytest
 from automated_security_helper.utils.download_utils import write_receipt
 from tests.utils import real_home_guard
 
+pytestmark = pytest.mark.unit
+
 
 def _finish_session(conftest, session, exitstatus):
     """Drive the root conftest's pytest_sessionfinish as pluggy drives an

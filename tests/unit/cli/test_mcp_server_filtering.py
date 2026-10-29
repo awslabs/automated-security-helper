@@ -9,7 +9,11 @@ This module tests the scanner and severity filtering functionality
 in the MCP server's get_scan_results tool.
 """
 
+import pytest
+
 from automated_security_helper.cli.mcp_server import _apply_content_filters
+
+pytestmark = pytest.mark.unit
 
 
 def test_scanner_filtering():

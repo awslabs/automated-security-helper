@@ -31,6 +31,8 @@ from tests.utils.refusing_proxy import (
     scrub_cloud_credentials,
 )
 
+pytestmark = pytest.mark.integration
+
 VERIFICATION_FILTER = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
 )

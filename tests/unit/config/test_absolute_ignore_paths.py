@@ -30,6 +30,8 @@ from automated_security_helper.config.config_validator import (
 )
 from automated_security_helper.utils.path_matching import _path_pattern_matches
 
+pytestmark = pytest.mark.unit
+
 ABSOLUTE = "is absolute"
 
 

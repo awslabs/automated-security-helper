@@ -19,6 +19,8 @@ from automated_security_helper.config.environment_record import (
     referenced_name,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     ("written", "name"),

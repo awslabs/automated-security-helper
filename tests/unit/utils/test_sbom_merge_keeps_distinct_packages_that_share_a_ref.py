@@ -41,6 +41,8 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sbom_merge import merge_cyclonedx_reports
 
+pytestmark = pytest.mark.unit
+
 REQUESTS = "pkg:pypi/requests@2.19.1"
 URLLIB3 = "pkg:pypi/urllib3@2.0.0"
 FLASK = "pkg:pypi/flask@3.0.0"

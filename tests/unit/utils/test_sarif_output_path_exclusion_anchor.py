@@ -48,6 +48,8 @@ from automated_security_helper.schemas.sarif_schema_model import Run, SarifRepor
 from automated_security_helper.utils import sarif_utils
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+pytestmark = pytest.mark.unit
+
 
 def _sarif(*uris: str) -> SarifReport:
     """One finding per URI, each with a location a scanner would emit."""

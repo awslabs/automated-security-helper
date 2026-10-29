@@ -29,6 +29,8 @@ from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()
 

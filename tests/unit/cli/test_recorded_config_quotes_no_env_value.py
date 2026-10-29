@@ -33,6 +33,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from tests.utils.tool_guard import install_tool_guard, reset_tool_lookup_caches
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 SECRET = "${ASH_PROBE_VALUE}"
 WITH_DEFAULT = "${ASH_PROBE_VALUE:fallback}"

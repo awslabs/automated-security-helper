@@ -29,6 +29,8 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 

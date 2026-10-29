@@ -13,6 +13,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 
 class TestParseConfigValue:
     """Tests for _parse_config_value."""

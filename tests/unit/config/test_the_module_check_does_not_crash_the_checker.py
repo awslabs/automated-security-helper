@@ -15,6 +15,10 @@ check and must keep answering about the file.
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_the_module_checks_own_resolution_failure_does_not_crash_the_check(
     tmp_path, monkeypatch

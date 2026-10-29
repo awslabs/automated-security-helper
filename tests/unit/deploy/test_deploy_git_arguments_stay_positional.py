@@ -377,6 +377,7 @@ def _git_segments(command: str) -> list[list[str]]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_every_image_build_fetch_was_found():
     # One Terraform image pipeline; AgentCore, Fargate, the gate and the pipeline
     # each build once in CDK, and AshImagePipeline builds both architectures.
@@ -402,6 +403,7 @@ def test_every_image_build_fetch_was_found():
 
 
 @pytest.mark.parametrize("target", SHELL_GIT_TARGETS)
+@pytest.mark.unit
 def test_git_options_end_before_every_variable_argument(target):
     """Every git call in the fetch has `--` before its first `$VARIABLE` argument."""
     checked = 0
@@ -419,6 +421,7 @@ def test_git_options_end_before_every_variable_argument(target):
 
 @pytest.mark.parametrize("target", sorted(FETCH_COMMANDS))
 @pytest.mark.parametrize("which", ["tag", "branch", "commit"])
+@pytest.mark.integration
 def test_control_the_fetch_checks_out_the_ref_it_names(
     target, which, upstream, tmp_path
 ):
@@ -434,6 +437,7 @@ def test_control_the_fetch_checks_out_the_ref_it_names(
 
 @pytest.mark.parametrize("target", sorted(FETCH_COMMANDS))
 @pytest.mark.parametrize("value", ["upload-pack", "force"])
+@pytest.mark.integration
 def test_a_ref_starting_with_a_dash_never_reaches_git_as_an_option(
     target, value, upstream, upload_pack_probe, tmp_path
 ):
@@ -456,6 +460,7 @@ def test_a_ref_starting_with_a_dash_never_reaches_git_as_an_option(
     )
 
 
+@pytest.mark.integration
 def test_a_repository_url_starting_with_a_dash_is_the_terraform_remote_url(
     upload_pack_probe, tmp_path
 ):
@@ -484,6 +489,7 @@ def test_a_repository_url_starting_with_a_dash_is_the_terraform_remote_url(
 @pytest.mark.parametrize(
     "target", sorted(t for t in FETCH_COMMANDS if t.startswith("cdk:"))
 )
+@pytest.mark.integration
 def test_a_repository_url_starting_with_a_dash_is_the_cdk_fetch_repository(
     target, upload_pack_probe, tmp_path
 ):
@@ -539,6 +545,7 @@ class _Recorder:
 
 @pytest.mark.parametrize("field", ["source", "destination"])
 @pytest.mark.parametrize("value", NOT_COMMIT_IDS)
+@pytest.mark.unit
 def test_the_terraform_gate_refuses_an_event_commit_that_is_not_a_commit_id(
     field, value, monkeypatch, tmp_path
 ):
@@ -559,6 +566,7 @@ def test_the_terraform_gate_refuses_an_event_commit_that_is_not_a_commit_id(
     assert recorder.calls == [], f"git ran with an event commit of {value!r}"
 
 
+@pytest.mark.unit
 def test_the_terraform_gate_accepts_full_commit_ids():
     gate = _load_terraform_gate()
     parsed = gate.parse_event(_event())
@@ -571,6 +579,7 @@ def test_the_terraform_gate_accepts_full_commit_ids():
     assert parsed["source_commit"] == "c" * 64
 
 
+@pytest.mark.unit
 def test_the_terraform_gate_clone_ends_options_before_the_repository(
     monkeypatch, tmp_path
 ):
@@ -613,6 +622,7 @@ def _cdk_gate_sources() -> dict[str, str]:
 CDK_GATE_SOURCES = _cdk_gate_sources()
 
 
+@pytest.mark.unit
 def test_every_cdk_gate_handler_was_found():
     assert sorted(name.split(":")[0] for name in CDK_GATE_SOURCES) == [
         "AshCodeCommitGate",
@@ -667,6 +677,7 @@ def _load_cdk_gate(
 @pytest.mark.parametrize("name", sorted(CDK_GATE_SOURCES))
 @pytest.mark.parametrize("field", ["source", "destination"])
 @pytest.mark.parametrize("value", NOT_COMMIT_IDS)
+@pytest.mark.unit
 def test_the_cdk_gate_refuses_an_event_commit_that_is_not_a_commit_id(
     name, field, value, monkeypatch, tmp_path
 ):
@@ -680,6 +691,7 @@ def test_the_cdk_gate_refuses_an_event_commit_that_is_not_a_commit_id(
 
 
 @pytest.mark.parametrize("name", sorted(CDK_GATE_SOURCES))
+@pytest.mark.unit
 def test_the_cdk_gate_clone_ends_options_before_the_repository(
     name, monkeypatch, tmp_path
 ):

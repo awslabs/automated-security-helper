@@ -22,6 +22,8 @@ import pytest
 from automated_security_helper.utils import git_command, subprocess_utils
 from automated_security_helper.utils.scan_output_dirs import git_index_below
 
+pytestmark = pytest.mark.unit
+
 # Built with chr() so the source file stays ASCII.
 CAFE = f"caf{chr(0xE9)}.py"
 

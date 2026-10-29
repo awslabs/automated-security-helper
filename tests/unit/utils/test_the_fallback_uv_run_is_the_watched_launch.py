@@ -14,11 +14,15 @@ from __future__ import annotations
 import sys
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.utils.subprocess_utils import StartWatch
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def test_the_fallback_spawn_is_the_watched_launch(tmp_path, monkeypatch):

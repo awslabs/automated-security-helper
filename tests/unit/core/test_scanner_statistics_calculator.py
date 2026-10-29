@@ -2,6 +2,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.config.ash_config import AshConfigGlobalSettingsSection
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -23,6 +25,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
     SarifReport,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestScannerStatisticsCalculator:

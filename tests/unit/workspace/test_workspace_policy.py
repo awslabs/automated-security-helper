@@ -47,6 +47,8 @@ from automated_security_helper.workspace.policy import (
     resolve_workspace_policy,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

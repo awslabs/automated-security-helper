@@ -32,6 +32,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfig,
 )
 
+pytestmark = pytest.mark.integration
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

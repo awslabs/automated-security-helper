@@ -21,6 +21,8 @@ import pytest
 
 from automated_security_helper.utils import process_env
 
+pytestmark = pytest.mark.unit
+
 DISPLAY = {
     "COLUMNS": "20",
     "LINES": "5",

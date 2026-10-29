@@ -9,6 +9,8 @@ from pathlib import Path
 
 from automated_security_helper.models.core import IgnorePathWithReason
 
+pytestmark = pytest.mark.unit
+
 
 class TestGlobalIgnorePathsFiltering:
     """Tests for the global_ignore_paths filtering logic in detect_secrets_scanner."""

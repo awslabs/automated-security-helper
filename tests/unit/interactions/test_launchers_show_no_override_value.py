@@ -81,6 +81,7 @@ def _assert_shown_by_key(shown: str, planted: str) -> None:
     assert "global_settings.severity_threshold=<value>" in shown, shown
 
 
+@pytest.mark.unit
 def test_nix_mode_shows_its_command_without_override_values(
     monkeypatch, capfd, logged, planted
 ):
@@ -114,6 +115,7 @@ def test_nix_mode_shows_its_command_without_override_values(
     assert f"project_name={planted}" in ran[0]
 
 
+@pytest.mark.unit
 def test_container_mode_shows_its_command_without_override_values(
     monkeypatch, capfd, planted
 ):
@@ -135,6 +137,7 @@ def test_container_mode_shows_its_command_without_override_values(
     assert f"project_name={planted}" in ran[0]
 
 
+@pytest.mark.integration
 def test_run_cmd_direct_shows_its_command_without_override_values(
     capfd, logged, planted, true_program
 ):
@@ -169,6 +172,7 @@ def test_run_cmd_direct_shows_its_command_without_override_values(
         ),
     ],
 )
+@pytest.mark.integration
 def test_a_subprocess_helper_logs_its_command_without_override_values(
     logged, planted, true_program, run
 ):

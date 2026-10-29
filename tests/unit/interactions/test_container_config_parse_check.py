@@ -17,6 +17,10 @@ from importlib.machinery import ModuleSpec
 from types import ModuleType, SimpleNamespace
 from typing import NamedTuple
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_the_container_parse_check_accepts_a_toml_config(tmp_path):
     from automated_security_helper.interactions.run_ash_scan import (

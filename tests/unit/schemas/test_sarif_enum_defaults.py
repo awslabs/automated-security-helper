@@ -30,6 +30,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _models():
     """Every pydantic model declared in the SARIF schema module."""

@@ -15,6 +15,7 @@ import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli import dependencies as dependencies_module
@@ -23,6 +24,8 @@ from automated_security_helper.cli.dependencies import (
     dependencies_app,
     run_command,
 )
+
+pytestmark = pytest.mark.unit
 
 runner = CliRunner()
 

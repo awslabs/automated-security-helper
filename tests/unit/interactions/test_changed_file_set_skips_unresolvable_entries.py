@@ -20,6 +20,10 @@ and the remaining entries still scope the report.
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_an_unresolvable_diff_entry_is_skipped_not_raised(tmp_path):
     from automated_security_helper.interactions.run_ash_scan import (

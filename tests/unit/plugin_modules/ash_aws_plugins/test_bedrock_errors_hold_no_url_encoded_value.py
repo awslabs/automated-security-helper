@@ -77,6 +77,7 @@ OK = {
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_value_s_url_encoded_forms_are_redacted(value, printed):
     text = f"Read timeout on endpoint URL: https://host.invalid/{printed}/converse"
     # The control: the text holds the encoded form, not the value itself.
@@ -102,6 +103,7 @@ ARN = "arn:aws:bedrock:us-east-1:envcanary:inference-profile/vendor.q7x9-model:0
         pytest.param("Command stderr: GET /v1/models/{} returned 404", id="stderr"),
     ],
 )
+@pytest.mark.unit
 def test_an_arn_s_path_segment_form_is_redacted(template):
     """In an SDK's request URL, and in a tool's stderr line that quotes one."""
     printed = urllib.parse.quote(ARN, safe="")
@@ -113,6 +115,7 @@ def test_an_arn_s_path_segment_form_is_redacted(template):
     assert printed not in text_without_values(text, [ARN])
 
 
+@pytest.mark.unit
 def test_a_value_without_reserved_characters_adds_no_form():
     """A value a URL prints as it is gains no form, and its plain form is still
     redacted."""
@@ -248,6 +251,7 @@ def _canary_reporter(tmp_path, monkeypatch, chain, valid):
 
 
 @pytest.mark.parametrize("mode", ["close", "hang"])
+@pytest.mark.integration
 def test_the_real_client_s_error_prints_the_encoded_value(local_runtime, mode):
     """The control for the cells below: botocore's own text holds the
     percent-encoded id, and not the id as written."""
@@ -271,6 +275,7 @@ def test_the_real_client_s_error_prints_the_encoded_value(local_runtime, mode):
 
 
 @pytest.mark.parametrize("mode", ["close", "hang"])
+@pytest.mark.integration
 def test_the_exhaustion_text_holds_no_form_of_the_value(
     tmp_path, monkeypatch, local_runtime, mode
 ):
@@ -288,6 +293,7 @@ def test_the_exhaustion_text_holds_no_form_of_the_value(
 
 
 @pytest.mark.parametrize("mode", ["close", "hang"])
+@pytest.mark.integration
 def test_an_unwalked_section_text_holds_no_form_of_the_value(
     tmp_path, monkeypatch, local_runtime, mode
 ):
@@ -302,6 +308,7 @@ def test_an_unwalked_section_text_holds_no_form_of_the_value(
 
 
 @pytest.mark.parametrize("mode", ["close", "hang"])
+@pytest.mark.integration
 def test_the_logged_lines_hold_no_form_of_the_value(
     tmp_path, monkeypatch, local_runtime, mode
 ):
@@ -333,6 +340,7 @@ def test_the_logged_lines_hold_no_form_of_the_value(
     assert ENCODED not in text, text
 
 
+@pytest.mark.unit
 def test_a_resumed_exhaustion_after_a_timeout_holds_no_form_of_the_value(
     tmp_path, monkeypatch
 ):

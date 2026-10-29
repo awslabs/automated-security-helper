@@ -42,6 +42,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
 )
 from automated_security_helper.utils.log import ASHLogger
 
+pytestmark = pytest.mark.unit
+
 _MODULE = "automated_security_helper.core.resource_management.scan_management"
 
 

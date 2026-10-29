@@ -31,6 +31,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.unit.cli.test_merge import build_shards, write_shards
 
+pytestmark = pytest.mark.unit
+
 VARIABLE = "ASH_ZQDBGMOD"
 LINE = "failure traceback"
 CRASH = 'raise RuntimeError("cannot initialise " + __name__ + " from " + __file__)\n'

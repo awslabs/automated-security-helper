@@ -35,6 +35,8 @@ import pytest
 from tests.utils.helpers import checkout_env
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
+pytestmark = pytest.mark.e2e
+
 needs_a_pty = pytest.mark.skipif(
     sys.platform == "win32" or not hasattr(os, "openpty"),
     reason="needs a pseudo-terminal",

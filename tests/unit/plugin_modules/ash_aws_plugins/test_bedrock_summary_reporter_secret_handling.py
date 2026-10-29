@@ -183,6 +183,7 @@ def _detect_secrets_count(model):
     )
 
 
+@pytest.mark.integration
 class TestNoSecretValueLeavesTheReporter:
     """Results a real scan saved, reported with every option that adds content."""
 
@@ -242,6 +243,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
     @pytest.mark.parametrize(
         "add_section_headers", [True, False], ids=["structured", "simple"]
     )
+    @pytest.mark.integration
     def test_detect_secrets_findings_are_counted_and_not_sent(
         self, scan_output, runtime, tmp_path, add_section_headers, exclude
     ):
@@ -264,6 +266,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
         assert DETECTOR_MESSAGE_START not in sent
         assert f"Secret findings: {count}" in sent
 
+    @pytest.mark.integration
     def test_findings_of_other_scanners_are_still_sent(
         self, scan_output, runtime, tmp_path
     ):
@@ -274,6 +277,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
 
         assert BANDIT_MESSAGE in runtime.sent()
 
+    @pytest.mark.unit
     def test_finding_from_another_secrets_scanner_is_counted_and_not_sent(
         self, runtime, tmp_path
     ):
@@ -299,6 +303,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
     @pytest.mark.parametrize(
         "tool_type_tag", ["tool_type::SECRETS", "tool_type::ScannerToolType.SECRETS"]
     )
+    @pytest.mark.unit
     def test_finding_tagged_with_the_secrets_tool_type_is_counted_and_not_sent(
         self, runtime, tmp_path, tool_type_tag
     ):
@@ -315,6 +320,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
         assert marker not in sent
         assert "Secret findings: 1" in sent
 
+    @pytest.mark.unit
     def test_finding_whose_scanner_type_is_unknown_is_sent_without_its_snippet(
         self, runtime, tmp_path
     ):
@@ -369,6 +375,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
         assert BANDIT_SNIPPET.strip() in sent
 
 
+@pytest.mark.integration
 class TestLocalSummaryFollowsIncludeCodeSnippets:
     """``include_code_snippets`` decides whether the local summary holds code at all.
 
@@ -410,6 +417,7 @@ class TestLocalSummaryFollowsIncludeCodeSnippets:
         assert RUN_LINE.strip() in self._summary(tmp_path)
 
 
+@pytest.mark.unit
 class TestSastSecretFindingsAreCountedNotSent:
     """A semgrep or opengrep secret finding is a secret finding to Bedrock too.
 
@@ -444,6 +452,7 @@ class TestSastSecretFindingsAreCountedNotSent:
         assert BANDIT_MESSAGE in sent
 
 
+@pytest.mark.integration
 class TestHardCodedPasswordFindingsAreSentMasked:
     """Bandit's B105-B107 are sent, with the value their message quotes masked.
 

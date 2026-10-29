@@ -39,6 +39,8 @@ import pytest
 
 from tests.utils.helpers import importing_this_checkout
 
+pytestmark = pytest.mark.integration
+
 DRIVER = """
 import importlib, json, sys, tempfile
 from pathlib import Path

@@ -60,6 +60,7 @@ NOTES_V380 = REPO_ROOT / ".github" / "release-notes" / "v3.8.0.md"
 CZ_BIN = Path(sys.executable).parent / ("cz.exe" if os.name == "nt" else "cz")
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.skipif(
         os.name == "nt",
         reason="bash on Windows runners is the WSL stub; the step under test runs on ubuntu-latest",

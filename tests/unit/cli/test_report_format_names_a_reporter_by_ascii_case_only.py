@@ -20,6 +20,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 #: A non-ASCII letter whose Unicode lowercase is ASCII ``k``, written as an escape.
 LOWERS_TO_K = "\N{KELVIN SIGN}"
 

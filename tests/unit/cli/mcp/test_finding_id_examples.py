@@ -30,6 +30,8 @@ from automated_security_helper.utils.finding_identity import (
     finding_id,
 )
 
+pytestmark = pytest.mark.unit
+
 PACKAGE = Path(__file__).resolve().parents[4] / "automated_security_helper"
 MODULES = [
     PACKAGE / "cli" / "mcp_server.py",

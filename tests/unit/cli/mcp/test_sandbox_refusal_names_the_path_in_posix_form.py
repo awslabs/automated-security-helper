@@ -23,7 +23,11 @@ from __future__ import annotations
 
 from pathlib import Path, PureWindowsPath
 
+import pytest
+
 from automated_security_helper.cli.mcp import sandbox
+
+pytestmark = pytest.mark.unit
 
 REMEDY = "Grant the directory."
 

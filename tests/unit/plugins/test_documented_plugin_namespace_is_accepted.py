@@ -43,6 +43,8 @@ from automated_security_helper.plugins.loader import (
     _is_allowed_module_path,
 )
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_CONFIG = REPO_ROOT / "examples" / "ash_plugins_example" / ".ash" / ".ash.yaml"
 

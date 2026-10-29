@@ -65,6 +65,8 @@ from automated_security_helper.core.resource_management.scan_tracking import (
     get_scan_results_with_error_handling,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The closed set of statuses ``core/enums.ScannerStatus`` defines, mapped to the
 #: ``MCScannerStatus`` value each one must produce. Written out here rather than
 #: imported so a change to the mapping has to be made in two places on purpose.

@@ -26,9 +26,12 @@ from automated_security_helper.interactions.run_ash_scan import (
     _refuse_symlinked_output_dir,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating a symlink needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating a symlink needs privileges on Windows"
+    ),
+]
 
 
 def _write(path: Path, text: str) -> Path:

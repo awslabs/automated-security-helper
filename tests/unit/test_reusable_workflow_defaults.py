@@ -85,6 +85,7 @@ def _resolve_step() -> dict:
     return steps[0]
 
 
+@pytest.mark.unit
 def test_ash_version_and_repo_default_to_the_workflows_own_commit():
     inputs = _inputs()
 
@@ -107,6 +108,7 @@ def test_ash_version_and_repo_default_to_the_workflows_own_commit():
     assert env["CHECKED_ASH_REPO"] == "${{ steps.inputs.outputs.ash_repo }}"
 
 
+@pytest.mark.unit
 def test_no_step_reads_the_raw_inputs():
     """Every step installs the ASH the resolution step chose, or none at all.
 
@@ -181,6 +183,7 @@ pytestmark_posix = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @pytestmark_posix
 class TestTheResolutionStep:
     def test_unset_inputs_install_the_workflows_own_commit(self, tmp_path):
@@ -465,6 +468,7 @@ class TestTheResolutionStep:
         assert urllib.parse.unquote(in_url) == ref
 
 
+@pytest.mark.unit
 def test_the_cfn_nag_assets_url_takes_the_pinned_commit():
     """The cfn-nag Gemfile URL names the commit the pin step resolved.
 
@@ -490,6 +494,7 @@ def test_the_cfn_nag_assets_url_takes_the_pinned_commit():
     assert not readers, f"these steps put the raw ref in a URL: {readers}"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("name", ["ash-version", "ash-repo"])
 def test_the_inputs_say_a_copy_outside_ash_must_set_both(name):
     """A copy kept in another repository resolves job.workflow_* to that repository."""
@@ -497,6 +502,7 @@ def test_the_inputs_say_a_copy_outside_ash_must_set_both(name):
     assert "copy of this file kept outside ASH's repository" in description, description
 
 
+@pytest.mark.unit
 def test_every_install_input_defaults_to_true():
     inputs = _inputs()
     installs = {

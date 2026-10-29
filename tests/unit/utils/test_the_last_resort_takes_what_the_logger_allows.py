@@ -18,8 +18,12 @@ own, process-wide, at the first hosted scan.
 import logging
 import threading
 
+import pytest
+
 from automated_security_helper.utils import log as ash_log
 from automated_security_helper.utils.log import ASH_LOGGER, get_logger
+
+pytestmark = pytest.mark.unit
 
 
 class _Recording(logging.Handler):

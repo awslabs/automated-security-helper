@@ -24,6 +24,8 @@ import pytest
 from automated_security_helper.config import config_sources
 from automated_security_helper.config.config_sources import resolve_config_document
 
+pytestmark = pytest.mark.unit
+
 
 def _config(tmp_path: Path) -> Path:
     path = tmp_path / "ash.yaml"

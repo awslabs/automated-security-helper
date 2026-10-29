@@ -245,6 +245,7 @@ def _measure(cell: str, lay: Dict[str, Path], name: Path) -> str:
     return outcome
 
 
+@pytest.mark.integration
 def test_control_one_operator_link_then_the_tree_link_is_marked(tmp_path):
     lay = _layout(tmp_path)
     outcome = _measure("control-1-link", lay, _chain(tmp_path, lay, 1))
@@ -252,6 +253,7 @@ def test_control_one_operator_link_then_the_tree_link_is_marked(tmp_path):
     assert outcome == "MARKED"
 
 
+@pytest.mark.integration
 def test_control_naming_the_tree_link_directly_is_refused(tmp_path):
     lay = _layout(tmp_path)
     outcome = _measure("control-direct-tree-link", lay, lay["tree_link"])
@@ -259,6 +261,7 @@ def test_control_naming_the_tree_link_directly_is_refused(tmp_path):
     assert outcome == "REFUSED"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("n", [2, 20, 38, 39, 40, 41])
 def test_variant_a_operator_links_then_one_tree_link_fails_closed(tmp_path, n):
     lay = _layout(tmp_path)
@@ -267,6 +270,7 @@ def test_variant_a_operator_links_then_one_tree_link_fails_closed(tmp_path, n):
     assert outcome in FAIL_CLOSED, outcome
 
 
+@pytest.mark.integration
 def test_variant_b_sim_one_link_unreadable_by_readlink_fails_closed(
     tmp_path, monkeypatch
 ):
@@ -286,6 +290,7 @@ def test_variant_b_sim_one_link_unreadable_by_readlink_fails_closed(
     assert outcome in FAIL_CLOSED, outcome
 
 
+@pytest.mark.integration
 def test_variant_b_real_link_20_in_a_mode_000_directory_fails_closed(tmp_path):
     lay = _layout(tmp_path)
     name = _chain(tmp_path, lay, 40, hidden_dir_at=20)
@@ -299,6 +304,7 @@ def test_variant_b_real_link_20_in_a_mode_000_directory_fails_closed(tmp_path):
         hidden.chmod(0o755)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(
     os.name != "posix" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="needs a directory the process cannot search",
@@ -317,6 +323,7 @@ def test_a_component_the_walk_cannot_examine_ends_it_undecided(tmp_path, request
     assert decided is False, (links, decided)
 
 
+@pytest.mark.unit
 def test_a_provably_absent_component_keeps_the_walk_decided(tmp_path):
     """The must-not twin: a component that provably is not a link, because it
     does not exist under a searchable directory, keeps the walk decided."""

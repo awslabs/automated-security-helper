@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.field_mapping import (
     merge_field_paths,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_merge_field_paths():

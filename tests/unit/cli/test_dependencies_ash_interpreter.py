@@ -41,6 +41,8 @@ from tests.snapshot.dependencies.test_snapshot_dependencies_install import (
 )
 from tests.snapshot.support.cli import LINUX_AMD64, run_cli, simulated_host
 
+pytestmark = pytest.mark.unit
+
 EXE = ".exe" if sys.platform == "win32" else ""
 REAL_FIND_EXECUTABLE = subprocess_utils.find_executable
 

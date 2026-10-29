@@ -26,6 +26,8 @@ from automated_security_helper.plugins import ash_plugin_manager, decorators
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 MASK = "<value>"
 
 

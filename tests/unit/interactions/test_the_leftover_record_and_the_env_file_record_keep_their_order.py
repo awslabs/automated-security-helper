@@ -35,6 +35,8 @@ from automated_security_helper.interactions.run_ash_container import (
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+pytestmark = pytest.mark.unit
+
 _CANARY = "ops-canary-qq41"
 
 

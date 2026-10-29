@@ -29,6 +29,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 from automated_security_helper.cli.mcp.sessions import MCPSessionRegistry
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 _SESSION_IDS = ("gone", "stays", "never-seen")
 
 

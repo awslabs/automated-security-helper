@@ -79,6 +79,7 @@ def _text(captured: Any) -> str:
     return captured or ""
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("runner", RUNNERS)
 def test_input_is_written_to_the_childs_stdin(runner):
     result = runner(
@@ -88,12 +89,14 @@ def test_input_is_written_to_the_childs_stdin(runner):
     assert result.stdout == "hello\n", result
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("runner", RUNNERS)
 def test_input_with_stdin_given_is_a_value_error(runner):
     with pytest.raises(ValueError, match="stdin and input arguments may not both"):
         runner(ECHOES_STDIN, input="x", stdin=subprocess.DEVNULL, timeout=_BOUND)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 @pytest.mark.parametrize("runner", RUNNERS)
 def test_capture_output_with_a_stream_given_as_none_is_allowed(runner, stream):
@@ -106,6 +109,7 @@ def test_capture_output_with_a_stream_given_as_none_is_allowed(runner, stream):
     assert result.stderr == "err\n", result
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 @pytest.mark.parametrize("runner", RUNNERS)
 def test_control_capture_output_with_a_stream_given_is_a_value_error(runner, stream):
@@ -129,6 +133,7 @@ def _watched_communicate() -> Iterator[Any]:
         yield seen
 
 
+@pytest.mark.integration
 def test_the_sandboxed_runner_raises_the_timeout_expired_communicate_raised():
     """As subprocess.run does, with the output read before and after the stop."""
     with (
@@ -142,6 +147,7 @@ def test_the_sandboxed_runner_raises_the_timeout_expired_communicate_raised():
     assert "partial" in _text(info.value.output), info.value.output
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("runner", RUNNERS)
 def test_control_a_timeout_names_the_command_and_the_timeout_asked_for(runner):
     with pytest.raises(subprocess.TimeoutExpired) as info:

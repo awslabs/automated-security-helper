@@ -98,6 +98,7 @@ def _version_memo_keys():
         return set(uv_tool_runner._uv_tool_version_cache)
 
 
+@pytest.mark.unit
 def test_a_cancelled_install_drops_the_memo():
     runner = UVToolRunner(uv_executable="uv")
     runner._uv_available_cache = True
@@ -119,6 +120,7 @@ def test_a_cancelled_install_drops_the_memo():
     assert "bandit::" not in _version_memo_keys()
 
 
+@pytest.mark.integration
 def test_a_cancelled_install_through_a_real_cancel_scope_drops_the_memo(tmp_path):
     uv = _fake_uv(
         tmp_path, "uvc", version="1.2.3", install='touch "$MARK"; exec sleep 30'
@@ -168,11 +170,13 @@ def _timed_out_install(tmp_path, monkeypatch):
     return runner
 
 
+@pytest.mark.integration
 def test_a_timed_out_install_lets_the_version_be_asked_again(tmp_path, monkeypatch):
     runner = _timed_out_install(tmp_path, monkeypatch)
     assert runner.get_tool_version("bandit") == "1.2.3"
 
 
+@pytest.mark.integration
 def test_a_timed_out_install_lets_the_command_be_found(tmp_path, monkeypatch):
     """The lookup memos drop with the version memo: a completed install
     clears them (the mixin's success arm), and a timed-out one that may
@@ -186,6 +190,7 @@ def test_a_timed_out_install_lets_the_command_be_found(tmp_path, monkeypatch):
     ]
 
 
+@pytest.mark.integration
 def test_a_probe_racing_the_install_is_dropped_after_the_stop(tmp_path, monkeypatch):
     """The order pin: a version probe that runs WHILE the install runs
     memoizes the pre-install answer again, so the drop has to come after
@@ -215,6 +220,7 @@ def test_a_probe_racing_the_install_is_dropped_after_the_stop(tmp_path, monkeypa
     assert runner.get_tool_version("bandit") == "1.2.3"
 
 
+@pytest.mark.unit
 def test_uvs_own_refusal_keeps_the_memo():
     """The must-not-flag control: a CalledProcessError is uv's own answer
     that it did not install, so the pre-install memo still describes the

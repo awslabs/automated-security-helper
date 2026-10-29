@@ -29,6 +29,8 @@ import pytest
 
 from tests.utils.tasks import drain
 
+pytestmark = pytest.mark.unit
+
 MARKDOWN = "ash.unused-suppressions.md"
 
 #: The previous scan's reports, in bytes, so the restore is checked byte for byte:

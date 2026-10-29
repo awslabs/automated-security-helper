@@ -93,6 +93,8 @@ from tests.unit.cli.merge_shard_support import (  # noqa: F401
     write_shards,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The logger the merge's disclosures are written to.
 ASH_LOGGER_NAME = "ash"
 

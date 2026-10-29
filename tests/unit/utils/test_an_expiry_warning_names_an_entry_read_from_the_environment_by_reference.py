@@ -39,6 +39,8 @@ from automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppres
     handle_suppression_expiration_check,
 )
 
+pytestmark = pytest.mark.unit
+
 FORMS = {
     "plain": "${{{}}}",
     "tagged": "!ENV ${{{}}}",

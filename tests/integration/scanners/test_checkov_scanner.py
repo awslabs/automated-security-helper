@@ -9,6 +9,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
 )
 from automated_security_helper.models.core import IgnorePathWithReason
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def test_checkov_scanner(test_plugin_context):

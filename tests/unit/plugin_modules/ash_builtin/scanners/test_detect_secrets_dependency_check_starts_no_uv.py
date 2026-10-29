@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_the_dependency_check_asks_uv_for_nothing(monkeypatch, test_plugin_context):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (

@@ -46,6 +46,8 @@ from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.inner_run_outcome import mark_run_completed
 
+pytestmark = pytest.mark.unit
+
 
 # Every way a shard selection can be unusable, paired with a fragment of the
 # message that names the specific problem. Kept as literals rather than derived

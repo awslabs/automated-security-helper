@@ -30,6 +30,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters import (
     archive_converter,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _tar_of(*members: Tuple[str, str]) -> bytes:
     """An uncompressed tar of ``(name, text)`` members, in order."""

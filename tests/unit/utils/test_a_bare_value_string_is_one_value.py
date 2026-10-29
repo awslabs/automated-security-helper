@@ -24,6 +24,8 @@ import pytest
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 #: Long enough, and holding a "-", that redaction replaces it anywhere: the
 #: cells measure how the value is taken, not the band a short value falls in.
 CANARY = "ENVCANARY-bare-9q7x"

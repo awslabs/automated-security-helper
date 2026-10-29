@@ -28,6 +28,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     CdkNagScannerConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 _MOD = "automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner"
 
 TEMPLATE = """Resources:

@@ -26,6 +26,8 @@ from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

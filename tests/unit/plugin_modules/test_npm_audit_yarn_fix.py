@@ -25,6 +25,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 def _yarn_1_clean(command):
     """yarn 1 answering `--version`, then a clean `yarn audit --json`."""
     if "--version" in command:

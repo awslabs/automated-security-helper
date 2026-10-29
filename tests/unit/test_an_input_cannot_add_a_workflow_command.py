@@ -193,12 +193,14 @@ def _run_first_scan_step(tmp_path: Path, **with_values: Any) -> ga.StepRun:
 
 
 class TestTheScanWorkflowChecksEveryStringInputFirst:
+    @pytest.mark.unit
     def test_the_workflow_has_string_inputs_to_check(self):
         # Guards the parametrization below against reading no inputs at all.
         assert {"ash-version", "ash-repo", "config", "output-dir"} <= set(
             _string_inputs()
         )
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("value", COMMAND_TEXT)
     @pytest.mark.parametrize("name", _string_inputs())
     def test_the_first_step_refuses_the_input_without_printing_it(
@@ -207,6 +209,7 @@ class TestTheScanWorkflowChecksEveryStringInputFirst:
         run = _run_first_scan_step(tmp_path, **{name: value})
         assert_refused_without_printing(run, name)
 
+    @pytest.mark.integration
     def test_the_defaults_pass_the_first_step_and_print_no_command(self, tmp_path):
         workflow, job = _scan_workflow()
         first = (job.get("steps") or [])[0]
@@ -215,6 +218,7 @@ class TestTheScanWorkflowChecksEveryStringInputFirst:
         )
         assert_clean(_run_first_scan_step(tmp_path))
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "name,value",
         [
@@ -262,6 +266,7 @@ def _context_from_check(outputs: dict[str, str], **with_values: Any) -> dict[str
     return context
 
 
+@pytest.mark.integration
 class TestOneTrailingLineFeedIsDropped:
     """A YAML block scalar (`ash-args: |`) always ends in a line feed, and nothing can
     follow it, so one is dropped before the check. Anything more is refused."""
@@ -383,6 +388,7 @@ def _raw_input_references() -> set[tuple[str, str]]:
 
 
 class TestTheCheckedValueIsTheValueUsed:
+    @pytest.mark.unit
     def test_only_the_check_and_the_listed_env_read_a_string_input(self):
         check_index = (_scan_workflow()[1].get("steps") or []).index(
             _input_check_step()
@@ -399,6 +405,7 @@ class TestTheCheckedValueIsTheValueUsed:
             f"{sorted(RAW_REFERENCES_KEPT - outside)}"
         )
 
+    @pytest.mark.unit
     def test_no_later_step_reads_the_check_inputs_environment(self):
         _, job = _scan_workflow()
         steps = job.get("steps") or []
@@ -412,6 +419,7 @@ class TestTheCheckedValueIsTheValueUsed:
         ]
         assert reading == [], reading
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "step_name,variable,output",
         [
@@ -433,6 +441,7 @@ class TestTheCheckedValueIsTheValueUsed:
         used = (step.get("env") or {}).get(variable)
         assert used == expected, sorted(step.get("env") or {})
 
+    @pytest.mark.unit
     def test_the_report_job_reads_the_scan_jobs_checked_outputs(self):
         workflow, job = _scan_workflow()
         outputs = job.get("outputs") or {}
@@ -445,6 +454,7 @@ class TestTheCheckedValueIsTheValueUsed:
         assert "needs.ash.outputs.output-dir" in report
         assert "needs.ash.outputs.repository-owner" in report
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "step_name,variable,name,value,used",
         [
@@ -469,6 +479,7 @@ class TestTheCheckedValueIsTheValueUsed:
         assert ga.render_env(step.get("env"), context)[variable] == used
 
 
+@pytest.mark.unit
 class TestNothingReadsAnUncheckedValueAfterARefusal:
     """Steps that run after a failure must not reach a value nobody checked: before the
     pin step succeeds, ASH_UVX_SOURCE and ASH_ASSETS_URL hold ash-repo and ash-version
@@ -546,6 +557,7 @@ def _wrongly_answered(
     ]
 
 
+@pytest.mark.integration
 class TestTheCheckGivesTheSameAnswerInEveryLocale:
     """In the C locale [[:cntrl:]] is C0 and DEL only; in a UTF-8 locale it is also
     C1 and U+2028 and U+2029. The checks read bytes, so the locale cannot change
@@ -671,6 +683,7 @@ class TestTheCheckGivesTheSameAnswerInEveryLocale:
         assert len({repr(a) for a in answers.values()}) == 1, answers
 
 
+@pytest.mark.integration
 class TestConfigRefIsNotReadAsAnOption:
     """git fetch reads `--upload-pack=<command>` after the remote name as an option,
     and runs that command for a local or ssh remote."""
@@ -814,12 +827,14 @@ CHECKED_ACTION_INPUTS = [
 
 
 class TestCompositeActionsCheckTheirInputsFirst:
+    @pytest.mark.unit
     def test_every_input_but_the_secret_is_listed(self):
         for action in ("prepull-base-image", "run-scan-test"):
             declared = set(_action(action).get("inputs") or {})
             listed = {i for a, i in CHECKED_ACTION_INPUTS if a == action}
             assert declared - listed <= {"snyk-token"}, (action, declared - listed)
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("value", COMMAND_TEXT)
     @pytest.mark.parametrize("action,name", CHECKED_ACTION_INPUTS)
     def test_the_first_step_refuses_the_input_without_printing_it(
@@ -828,6 +843,7 @@ class TestCompositeActionsCheckTheirInputsFirst:
         run = _run_action_step(tmp_path, action, _first_step(action), **{name: value})
         assert_refused_without_printing(run, name)
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "action,values",
         [
@@ -850,6 +866,7 @@ class TestCompositeActionsCheckTheirInputsFirst:
         assert_clean(_run_action_step(tmp_path, action, _first_step(action), **values))
 
 
+@pytest.mark.integration
 class TestARefusalDoesNotPrintTheValueItRefuses:
     @pytest.mark.parametrize("value", COMMAND_TEXT)
     def test_tool_download_cache_mode(self, tmp_path, value):
@@ -878,6 +895,7 @@ DIGEST = "sha256:" + "0" * 64
 BASE = "public.ecr.aws/docker/library/python:3.12-slim-bookworm"
 
 
+@pytest.mark.integration
 class TestBaseImageArgsAreCheckedBeforeTheyArePrinted:
     @pytest.mark.parametrize(
         "base,pin",
@@ -919,6 +937,7 @@ class TestBaseImageArgsAreCheckedBeforeTheyArePrinted:
 # --------------------------------------------------------------------- pull request title
 
 
+@pytest.mark.integration
 class TestThePullRequestTitleIsCheckedBeforeItIsPrinted:
     def _title_step(self) -> tuple[ga.Workflow, dict[str, Any], dict[str, Any]]:
         workflow = ga.load_workflow(TITLE_WORKFLOW)

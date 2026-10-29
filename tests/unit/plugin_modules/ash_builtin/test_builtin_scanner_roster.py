@@ -15,6 +15,8 @@ from automated_security_helper.config.ash_config import ScannerConfigSegment
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin import scanners
 
+pytestmark = pytest.mark.unit
+
 NEW_BUILTINS = {
     "actionlint": ("ActionlintScanner", "actionlint"),
     "cfn-guard": ("CfnGuardScanner", "cfn_guard"),

@@ -30,6 +30,8 @@ from automated_security_helper.cli.main import app
 from tests.utils.env_assertions import environ_value
 from tests.utils.process_guard import refuse_process_starts
 
+pytestmark = pytest.mark.unit
+
 #: The published value of ``ASH_EXIT_USAGE_ERROR``. Pinned here, once, because it is
 #: a contract callers branch on; ``test_the_code_is_published`` ties it to the name.
 USAGE_ERROR_EXIT = 5

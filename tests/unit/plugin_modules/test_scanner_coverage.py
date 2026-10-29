@@ -8,6 +8,9 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture(autouse=True)
 def _no_tool_starts(tmp_path_factory, monkeypatch):
     """No test here may start a tool: they exercise ASH's code, not the host's tools.

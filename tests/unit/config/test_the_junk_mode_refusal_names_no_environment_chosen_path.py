@@ -97,6 +97,7 @@ def _env_chosen_chain(tmp_path, monkeypatch, base_document):
 
 
 @pytest.mark.parametrize("route", ["ash_config", "config_file"])
+@pytest.mark.unit
 def test_control_an_environment_chosen_base_is_read_and_recorded(
     tmp_path, monkeypatch, route
 ):
@@ -117,6 +118,7 @@ def test_control_an_environment_chosen_base_is_read_and_recorded(
 
 @pytest.mark.parametrize("route", ["ash_config", "config_file"])
 @pytest.mark.parametrize("arm", ["key", "patch"])
+@pytest.mark.unit
 def test_the_refusal_never_prints_an_environment_chosen_path(
     tmp_path, monkeypatch, route, arm
 ):
@@ -194,6 +196,7 @@ def _cli(tmp_path, src, extra_env):
     return done, done.stdout + done.stderr + logs
 
 
+@pytest.mark.integration
 def test_cli_output_never_prints_an_environment_chosen_path(tmp_path, monkeypatch):
     """The refusal's full surface: a scan refused on the environment-chosen
     base's junk mode writes neither stdout, stderr nor ash.log a path the
@@ -212,6 +215,7 @@ def test_cli_output_never_prints_an_environment_chosen_path(tmp_path, monkeypatc
     _absent(text, _PATH_CANARY)
 
 
+@pytest.mark.integration
 def test_control_cli_output_never_prints_an_environment_read_mode_value(
     tmp_path, monkeypatch
 ):

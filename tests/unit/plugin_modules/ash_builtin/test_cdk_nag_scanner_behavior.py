@@ -49,6 +49,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils import cdk_nag_wrapper as wrapper_module
 from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
 
+pytestmark = pytest.mark.unit
+
 CFN_TEMPLATE = """Resources:
   MyDataBucket:
     Type: AWS::S3::Bucket

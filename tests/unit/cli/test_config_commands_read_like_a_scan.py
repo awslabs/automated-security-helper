@@ -27,6 +27,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.config import config_app
 from tests.unit.config.test_config_file_reads import _returns_promptly
 
+pytestmark = pytest.mark.unit
+
 needs_fifo = pytest.mark.skipif(
     not hasattr(os, "mkfifo"), reason="FIFOs are a POSIX file type"
 )

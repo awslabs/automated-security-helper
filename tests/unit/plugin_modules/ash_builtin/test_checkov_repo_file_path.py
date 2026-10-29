@@ -35,7 +35,10 @@ from automated_security_helper.utils.sandbox.policy import (
 
 PluginContext.model_rebuild()
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX paths")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(os.name == "nt", reason="POSIX paths"),
+]
 
 
 @pytest.mark.parametrize(

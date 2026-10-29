@@ -35,6 +35,8 @@ from utils.test_a_failure_while_waiting_on_a_started_child_keeps_its_code import
     _waiting_fails_once_the_stderr_was_read,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.skipif(os.name != "posix", reason="EPERM on a stop is POSIX's case")
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)

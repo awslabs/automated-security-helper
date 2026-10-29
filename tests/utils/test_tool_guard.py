@@ -45,6 +45,7 @@ def _host_tool(directory: Path, name: str) -> Path:
     return tool
 
 
+@pytest.mark.unit
 def test_a_lookup_cached_before_the_guard_resolves_to_the_guard(
     monkeypatch, tmp_path_factory
 ):
@@ -64,6 +65,7 @@ def test_a_lookup_cached_before_the_guard_resolves_to_the_guard(
     assert Path(uv_tool_runner.find_executable("grype")).parent == guard.directory
 
 
+@pytest.mark.unit
 def test_the_uv_installed_with_ash_does_not_bypass_the_guard(
     monkeypatch, tmp_path_factory
 ):
@@ -87,6 +89,7 @@ def test_the_uv_installed_with_ash_does_not_bypass_the_guard(
     assert found is not None and Path(found).parent == guard.directory, found
 
 
+@pytest.mark.unit
 def test_on_windows_a_guarded_name_beats_a_later_exe(monkeypatch, tmp_path_factory):
     """Windows tries <name>.exe over the whole PATH before <name>.bat.
 
@@ -107,6 +110,7 @@ def test_on_windows_a_guarded_name_beats_a_later_exe(monkeypatch, tmp_path_facto
     assert found is not None and Path(found).parent == guard.directory, found
 
 
+@pytest.mark.unit
 def test_the_windows_stand_in_passes_no_arguments_through_cmd(
     monkeypatch, tmp_path_factory
 ):
@@ -121,6 +125,7 @@ def test_the_windows_stand_in_passes_no_arguments_through_cmd(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs the POSIX stand-in")
+@pytest.mark.integration
 def test_a_log_path_with_an_apostrophe_still_records(monkeypatch, tmp_path_factory):
     """The log path was single-quoted into sh: an apostrophe gave rc 2 and no record.
     Both logs are written: the starts' and the version probes'."""
@@ -134,6 +139,7 @@ def test_a_log_path_with_an_apostrophe_still_records(monkeypatch, tmp_path_facto
     assert guard.probes == ["semgrep --version"], guard.probes
 
 
+@pytest.mark.unit
 def test_the_package_managers_and_converters_are_guarded():
     """npm-audit runs yarn and pnpm audits, cfn-nag installs with gem, and the
     Jupyter converter asks ``jupyter nbconvert --version``."""
@@ -142,6 +148,7 @@ def test_the_package_managers_and_converters_are_guarded():
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs a POSIX script")
+@pytest.mark.integration
 def test_a_start_by_absolute_path_is_recorded(monkeypatch, tmp_path_factory):
     """A tool started by its full path, or under a name not on the list, never meets
     a stand-in; the guard records every process start while it is installed."""
@@ -160,6 +167,7 @@ def _popen_event(argv, env=None, cwd=None):
     tool_guard._audit("subprocess.Popen", (None, list(argv), cwd, env))
 
 
+@pytest.mark.integration
 def test_a_python_child_of_the_test_is_recorded(monkeypatch, tmp_path_factory):
     """This interpreter started by a test can run anything: ``-m uv`` runs the real
     uv, and a ``-c`` child starts a tool by its own path, unaudited. Only ASH's two
@@ -176,6 +184,7 @@ def test_a_python_child_of_the_test_is_recorded(monkeypatch, tmp_path_factory):
     ), started
 
 
+@pytest.mark.unit
 def test_the_detect_secrets_and_cdk_nag_workers_may_start(
     monkeypatch, tmp_path_factory
 ):
@@ -211,6 +220,7 @@ def test_the_detect_secrets_and_cdk_nag_workers_may_start(
     assert guard.started == [], guard.started
 
 
+@pytest.mark.unit
 def test_a_flag_other_than_the_safe_path_flag_does_not_make_a_worker(
     monkeypatch, tmp_path_factory
 ):
@@ -233,6 +243,7 @@ def test_a_flag_other_than_the_safe_path_flag_does_not_make_a_worker(
     assert len(guard.started) == 1, guard.started
 
 
+@pytest.mark.unit
 def test_a_tool_inside_the_landlock_wrapper_is_judged_by_itself(
     monkeypatch, tmp_path_factory
 ):
@@ -279,6 +290,7 @@ def _probe(stand_in: Path, *args: str) -> subprocess.CompletedProcess:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs the POSIX stand-in")
 @pytest.mark.parametrize("name", ["grype", "opengrep", "syft", "trivy", "uv"])
+@pytest.mark.integration
 def test_a_version_probe_reads_the_pinned_version(monkeypatch, tmp_path_factory, name):
     """The locator probes ``[<path>, "--version"]`` before it runs a tool, and a
     stand-in that printed nothing read as a tool that is not there."""
@@ -303,6 +315,7 @@ def test_a_version_probe_reads_the_pinned_version(monkeypatch, tmp_path_factory,
     # snyk has none.
     [("ferret-scan", ">=2.4.5,<2.6.0"), ("node", ">=18.0.0"), ("snyk", None)],
 )
+@pytest.mark.integration
 def test_a_version_probe_of_an_unpinned_tool_is_in_its_range(
     monkeypatch, tmp_path_factory, name, constraint
 ):
@@ -321,6 +334,7 @@ def test_a_version_probe_of_an_unpinned_tool_is_in_its_range(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs the POSIX stand-in")
+@pytest.mark.integration
 def test_a_second_probe_of_the_same_path_is_a_start(monkeypatch, tmp_path_factory):
     """The locator probes each binary once per process, so a second probe is a bug."""
     guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
@@ -336,6 +350,7 @@ def test_a_second_probe_of_the_same_path_is_a_start(monkeypatch, tmp_path_factor
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs the POSIX stand-in")
+@pytest.mark.integration
 def test_a_version_call_with_more_arguments_is_a_start(monkeypatch, tmp_path_factory):
     guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
 
@@ -347,6 +362,7 @@ def test_a_version_call_with_more_arguments_is_a_start(monkeypatch, tmp_path_fac
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX PATH lookup")
+@pytest.mark.integration
 def test_a_version_call_by_bare_name_is_a_start(monkeypatch, tmp_path_factory):
     """The locator probes the absolute path it resolved; a bare name is a start."""
     guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
@@ -359,6 +375,7 @@ def test_a_version_call_by_bare_name_is_a_start(monkeypatch, tmp_path_factory):
     ], guard.started
 
 
+@pytest.mark.unit
 def test_a_probe_through_the_landlock_wrapper_is_a_probe(monkeypatch, tmp_path_factory):
     """The locator's probe runs sandboxed, so it can arrive inside the wrapper."""
     from automated_security_helper.utils.sandbox.backends import LANDLOCK_EXEC
@@ -389,6 +406,7 @@ def test_a_probe_through_the_landlock_wrapper_is_a_probe(monkeypatch, tmp_path_f
     assert guard.started == [guard._as_logged("grype", more)], guard.started
 
 
+@pytest.mark.unit
 def test_the_windows_stand_in_answers_a_probe_without_reading_arguments(
     monkeypatch, tmp_path_factory
 ):
@@ -405,6 +423,7 @@ def test_the_windows_stand_in_answers_a_probe_without_reading_arguments(
     assert f"grype {TOOL_VERSIONS['grype'].removeprefix('v')}" in text, text
 
 
+@pytest.mark.unit
 def test_a_fork_is_recorded(monkeypatch, tmp_path_factory):
     """What a forked child starts is audited in the child, so the test never sees it."""
     from tests.utils import tool_guard
@@ -419,6 +438,7 @@ def test_a_fork_is_recorded(monkeypatch, tmp_path_factory):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs the POSIX stand-in")
+@pytest.mark.integration
 def test_a_start_through_a_stand_in_that_records_nothing_is_recorded(
     monkeypatch, tmp_path_factory
 ):
@@ -439,6 +459,7 @@ def test_a_start_through_a_stand_in_that_records_nothing_is_recorded(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX PATH lookup")
+@pytest.mark.unit
 def test_a_bare_name_is_looked_up_on_the_childs_path(monkeypatch, tmp_path_factory):
     """A child given a PATH without the stand-ins runs the host's tool by name."""
     host = tmp_path_factory.mktemp("host-bin")
@@ -458,6 +479,7 @@ def test_a_bare_name_is_looked_up_on_the_childs_path(monkeypatch, tmp_path_facto
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="looks up the C library's system")
+@pytest.mark.unit
 def test_a_process_function_looked_up_through_ctypes_is_recorded(
     monkeypatch, tmp_path_factory
 ):
@@ -474,6 +496,7 @@ def test_a_process_function_looked_up_through_ctypes_is_recorded(
     )
 
 
+@pytest.mark.unit
 def test_a_multiprocessing_spawn_is_recorded(monkeypatch, tmp_path_factory):
     """multiprocessing's spawn and forkserver start methods start this interpreter
     through _posixsubprocess, which raises no audit event."""
@@ -498,6 +521,7 @@ def test_a_multiprocessing_spawn_is_recorded(monkeypatch, tmp_path_factory):
     ), guard.started
 
 
+@pytest.mark.unit
 def test_popens_own_fork_exec_is_not_recorded_a_second_time(
     monkeypatch, tmp_path_factory
 ):
@@ -563,6 +587,7 @@ def _developer_environment(developer_home):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
+@pytest.mark.unit
 def test_a_direct_fork_exec_repeating_a_recorded_start_is_held(
     monkeypatch, tmp_path_factory, developer_home
 ):
@@ -599,6 +624,7 @@ def test_a_direct_fork_exec_repeating_a_recorded_start_is_held(
     reason="Popen itself runs through the wrapped attribute here; the "
     "by-attribute branch is pinned by the cell above",
 )
+@pytest.mark.integration
 def test_a_direct_fork_exec_after_a_real_popen_of_the_same_argv_is_held(
     monkeypatch, tmp_path_factory, tmp_path, developer_home
 ):
@@ -624,6 +650,7 @@ def test_a_direct_fork_exec_after_a_real_popen_of_the_same_argv_is_held(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
+@pytest.mark.unit
 def test_a_direct_fork_exec_with_no_record_before_it_is_held(
     monkeypatch, tmp_path_factory, developer_home
 ):
@@ -688,6 +715,7 @@ def _in_a_thread(target):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
+@pytest.mark.unit
 def test_a_held_direct_calls_own_record_arms_no_skip(
     monkeypatch, tmp_path_factory, developer_home
 ):
@@ -709,6 +737,7 @@ def test_a_held_direct_calls_own_record_arms_no_skip(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
+@pytest.mark.unit
 def test_a_deduplicated_popen_repeat_still_skips_its_own_fork_exec(
     monkeypatch, tmp_path_factory
 ):
@@ -734,6 +763,7 @@ def test_a_deduplicated_popen_repeat_still_skips_its_own_fork_exec(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
+@pytest.mark.unit
 def test_two_threads_interleaved_popens_each_record_once(monkeypatch, tmp_path_factory):
     """A records, B records, A's own fork_exec, B's own fork_exec - the order
     a thread pool produces (the scanner executor runs scanners on one). With a
@@ -787,6 +817,7 @@ def test_two_threads_interleaved_popens_each_record_once(monkeypatch, tmp_path_f
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
+@pytest.mark.unit
 def test_another_threads_direct_call_does_not_spend_a_popens_arm(
     monkeypatch, tmp_path_factory, developer_home
 ):
@@ -887,6 +918,7 @@ def _popen_route_set_up(monkeypatch, tmp_path_factory):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
 @pytest.mark.parametrize("route", ["raises", "posix_spawn"])
+@pytest.mark.unit
 def test_a_popen_with_no_own_fork_exec_leaves_no_arm_for_the_next_call(
     monkeypatch, tmp_path_factory, developer_home, route
 ):
@@ -905,6 +937,7 @@ def test_a_popen_with_no_own_fork_exec_leaves_no_arm_for_the_next_call(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
+@pytest.mark.unit
 def test_a_popen_whose_own_fork_exec_ran_then_a_direct_call_is_held(
     monkeypatch, tmp_path_factory, developer_home
 ):
@@ -921,6 +954,7 @@ def test_a_popen_whose_own_fork_exec_ran_then_a_direct_call_is_held(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
 @pytest.mark.parametrize("route", ["raises", "posix_spawn"])
+@pytest.mark.unit
 def test_a_later_thread_with_a_reused_ident_finds_no_arm(
     monkeypatch, tmp_path_factory, developer_home, route
 ):
@@ -951,6 +985,7 @@ def test_a_later_thread_with_a_reused_ident_finds_no_arm(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fork_exec")
+@pytest.mark.unit
 def test_another_live_thread_finds_no_arm_either(
     monkeypatch, tmp_path_factory, developer_home
 ):
@@ -991,6 +1026,7 @@ def _in_a_thread_with_ident(target):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs the POSIX stand-in")
+@pytest.mark.integration
 def test_a_stand_in_asked_to_run_is_a_tool_start_and_its_answered_probe_is_not(
     monkeypatch, tmp_path_factory
 ):
@@ -1007,6 +1043,7 @@ def test_a_stand_in_asked_to_run_is_a_tool_start_and_its_answered_probe_is_not(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs POSIX scripts")
+@pytest.mark.integration
 def test_a_guarded_tool_by_its_path_is_a_tool_start_unless_the_test_owns_it(
     monkeypatch, tmp_path_factory
 ):
@@ -1030,6 +1067,7 @@ def test_a_guarded_tool_by_its_path_is_a_tool_start_unless_the_test_owns_it(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX PATH lookup and links")
+@pytest.mark.unit
 def test_a_tool_is_known_by_the_file_it_resolves_to(monkeypatch, tmp_path_factory):
     """By the name a bare one resolves to on the child's PATH, and by the name of
     the file a link points at: a link of the test's own named ``uv`` to ``true`` is
@@ -1056,6 +1094,7 @@ def test_a_tool_is_known_by_the_file_it_resolves_to(monkeypatch, tmp_path_factor
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths")
+@pytest.mark.unit
 def test_a_relative_program_is_found_from_the_childs_directory(
     monkeypatch, tmp_path_factory
 ):
@@ -1085,6 +1124,7 @@ def test_a_relative_program_is_found_from_the_childs_directory(
         ["-m", "nbconvert"],
     ],
 )
+@pytest.mark.unit
 def test_a_python_running_a_tools_module_is_a_tool_start(
     monkeypatch, tmp_path_factory, args
 ):
@@ -1106,6 +1146,7 @@ def test_a_python_running_a_tools_module_is_a_tool_start(
         ["-X", "-m", "-c", "pass"],
     ],
 )
+@pytest.mark.unit
 def test_a_python_running_anything_else_is_no_tool_start(
     monkeypatch, tmp_path_factory, args
 ):
@@ -1119,6 +1160,7 @@ def test_a_python_running_anything_else_is_no_tool_start(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX links and PATH lookup")
+@pytest.mark.integration
 def test_only_the_real_git_is_let_through(monkeypatch, tmp_path_factory):
     """By the file git resolves to: a link named git to another program, or another
     git first on a child's PATH, is a start like any other."""
@@ -1136,6 +1178,7 @@ def test_only_the_real_git_is_let_through(monkeypatch, tmp_path_factory):
     ], guard.started
 
 
+@pytest.mark.unit
 def test_a_fork_or_a_library_lookup_is_no_tool_start(monkeypatch, tmp_path_factory):
     """What either starts is not seen, so neither names a tool."""
     from tests.utils import tool_guard
@@ -1183,6 +1226,7 @@ def _probe_answers() -> list:
     ]
 
 
+@pytest.mark.integration
 def test_the_child_probe_stubs_answer_as_stub_tool_probes_does(monkeypatch, tmp_path):
     """In a child started with ``-I``, as the MCP session tests start theirs, and with
     an empty PATH, so a probe that was not stubbed fails rather than finds a uv."""
@@ -1228,6 +1272,7 @@ def test_the_child_probe_stubs_answer_as_stub_tool_probes_does(monkeypatch, tmp_
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_real_tools_opt_out_needs_a_listed_module_and_a_reason():
     from tests.utils.tool_guard import real_tools_opt_out_refusal
 
@@ -1241,6 +1286,7 @@ def test_the_real_tools_opt_out_needs_a_listed_module_and_a_reason():
         assert missing is not None and "reason" in missing, missing
 
 
+@pytest.mark.unit
 def test_every_file_left_in_a_home_is_listed(tmp_path):
     from tests.utils.tool_guard import files_left_in
 
@@ -1252,6 +1298,7 @@ def test_every_file_left_in_a_home_is_listed(tmp_path):
     assert files_left_in(tmp_path) == [".config/tool/settings.yml", ".lock"]
 
 
+@pytest.mark.unit
 def test_ashs_own_state_is_not_a_tools_file(tmp_path):
     """Install receipts, the MCP session configs and the container records are ASH's,
     written into the test's HOME on purpose; a name that only begins like one of them
@@ -1290,6 +1337,7 @@ def test_ashs_own_state_is_not_a_tools_file(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no _posixsubprocess on Windows")
+@pytest.mark.unit
 def test_a_direct_fork_exec_is_recorded(monkeypatch, tmp_path_factory):
     """fork_exec raises no audit event. subprocess calls the one it bound when it was
     imported, and raises its own; a test calling fork_exec started a tool unseen."""
@@ -1315,6 +1363,7 @@ def test_a_direct_fork_exec_is_recorded(monkeypatch, tmp_path_factory):
     )
 
 
+@pytest.mark.unit
 def test_a_process_a_running_forkserver_forks_is_recorded(
     monkeypatch, tmp_path_factory
 ):
@@ -1346,6 +1395,7 @@ def test_a_process_a_running_forkserver_forks_is_recorded(
 @pytest.mark.parametrize(
     "name", ["syscall", "clone", "clone3", "_Fork", "wordexp", "pidfd_spawn"]
 )
+@pytest.mark.unit
 def test_each_c_route_to_a_new_process_is_recorded_when_looked_up(
     monkeypatch, tmp_path_factory, name
 ):
@@ -1393,6 +1443,7 @@ def test_each_c_route_to_a_new_process_is_recorded_when_looked_up(
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_tool_started_through_env_is_a_tool_start(
     monkeypatch, tmp_path_factory, launch
 ):
@@ -1411,6 +1462,7 @@ def test_a_tool_started_through_env_is_a_tool_start(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX PATH lookup")
+@pytest.mark.unit
 def test_env_running_anything_else_is_no_tool_start(monkeypatch, tmp_path_factory):
     guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
 
@@ -1428,6 +1480,7 @@ def test_env_running_anything_else_is_no_tool_start(monkeypatch, tmp_path_factor
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX links")
 @pytest.mark.parametrize("linked_as", ["semgrep-host", "semgrep"])
+@pytest.mark.integration
 def test_a_host_tool_in_the_stand_in_directory_is_no_probe(
     monkeypatch, tmp_path_factory, linked_as
 ):
@@ -1529,6 +1582,7 @@ GIT_RUNNING_A_PROGRAM = [
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX git and paths")
 @pytest.mark.parametrize("args,env,config,allowed", GIT_RUNNING_A_PROGRAM)
+@pytest.mark.unit
 def test_a_git_told_to_run_a_program_is_not_only_git(
     tmp_path, args, env, config, allowed
 ):
@@ -1549,6 +1603,7 @@ def test_a_git_told_to_run_a_program_is_not_only_git(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX git and paths")
+@pytest.mark.unit
 def test_a_repository_with_a_hook_or_a_config_naming_a_program(tmp_path):
     from tests.utils.tool_guard import why_git_may_run_a_program
 
@@ -1606,6 +1661,7 @@ def test_a_repository_with_a_hook_or_a_config_naming_a_program(tmp_path):
         pytest.param(["rev-parse", "--show-toplevel"], id="plain"),
     ],
 )
+@pytest.mark.unit
 def test_the_git_ash_starts_is_only_git(tmp_path, args):
     """ASH's own git commands, in a repository whose config sets an fsmonitor: its
     ls-files turns that off on the command line, which git reads in its place."""
@@ -1629,6 +1685,7 @@ def test_the_git_ash_starts_is_only_git(tmp_path, args):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX git and paths")
+@pytest.mark.unit
 def test_the_git_directory_read_is_the_one_git_uses(tmp_path):
     """--git-dir wins over GIT_DIR, and GIT_COMMON_DIR names where the shared config
     is, as git takes them. Read the other way, the guard judged a config git does not
@@ -1680,6 +1737,7 @@ def test_the_git_directory_read_is_the_one_git_uses(tmp_path):
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_config_is_read_as_git_reads_it(tmp_path, args, config):
     """A -c setting stands in only for the same key, subsection case included; a
     value continued by a backslash is the whole value, and a backslash inside a
@@ -1696,6 +1754,7 @@ def test_a_config_is_read_as_git_reads_it(tmp_path, args, config):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX git and paths")
+@pytest.mark.unit
 def test_a_byte_order_mark_hides_no_setting(tmp_path):
     """git skips a byte order mark at the start of a config file; read as text, it
     took the first section header with it."""
@@ -1715,6 +1774,7 @@ def test_a_byte_order_mark_hides_no_setting(tmp_path):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX git and paths")
 @pytest.mark.parametrize("named_by", ["a-git-file", "commondir"])
+@pytest.mark.unit
 def test_a_cr_in_a_directory_git_is_pointed_at_is_part_of_its_name(tmp_path, named_by):
     """git reads a ``.git`` file and ``commondir`` as bytes, so a CR in the path
     either one holds is part of the name (git 2.50.1 resolves both that way). Read
@@ -1756,6 +1816,7 @@ def test_a_cr_in_a_directory_git_is_pointed_at_is_part_of_its_name(tmp_path, nam
         pytest.param("commondir", b"\r\n", id="commondir-crlf"),
     ],
 )
+@pytest.mark.integration
 def test_a_path_git_is_pointed_at_keeps_its_trailing_spaces(tmp_path, named_by, ending):
     """git drops only the CRs and LFs that end a .git file or a commondir, and takes
     the path after ``gitdir: `` as written, so a directory whose name ends in a space
@@ -1840,6 +1901,7 @@ _GIT_CONFIG_CASES = [
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX git and paths")
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 @pytest.mark.parametrize("config", _GIT_CONFIG_CASES, ids=repr)
+@pytest.mark.integration
 def test_the_config_reader_reads_what_git_reads(tmp_path, config):
     """The guard's reading of a config file is git's: ``git config --file --list``,
     which reads the file and runs nothing, lists the same settings."""
@@ -1871,6 +1933,7 @@ def test_the_config_reader_reads_what_git_reads(tmp_path, config):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX git and paths")
 @pytest.mark.parametrize("name", ["EDITOR", "VISUAL", "SSH_ASKPASS"])
+@pytest.mark.unit
 def test_the_editors_and_askpass_git_falls_back_to_count(tmp_path, name):
     """git commit and git config --edit run EDITOR or VISUAL when no git setting names
     an editor."""
@@ -1899,6 +1962,7 @@ def test_the_editors_and_askpass_git_falls_back_to_count(tmp_path, name):
         ),
     ],
 )
+@pytest.mark.unit
 def test_env_short_options_cluster(monkeypatch, tmp_path_factory, launch):
     """getopt clusters env's short options; read option by option, ``-iS`` and
     ``-iu`` were not options, and the tool was judged as env."""
@@ -1916,6 +1980,7 @@ def test_env_short_options_cluster(monkeypatch, tmp_path_factory, launch):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX links")
 @pytest.mark.parametrize("how", ["link", "copy"])
+@pytest.mark.integration
 def test_a_probe_line_does_not_answer_for_a_tool_put_in_the_stand_ins_place(
     monkeypatch, tmp_path_factory, how
 ):
@@ -1972,6 +2037,7 @@ def _start_event(event: str, env: dict) -> tuple:
 @pytest.mark.parametrize(
     "event", ["os.posix_spawn", "os.exec", "os.spawn", "os.system"]
 )
+@pytest.mark.unit
 def test_a_start_that_skips_popen_is_held_to_the_home_rule(
     monkeypatch, tmp_path_factory, developer_home, event
 ):
@@ -2000,6 +2066,7 @@ def test_a_start_that_skips_popen_is_held_to_the_home_rule(
         pytest.param("ctypes.dlsym/handle", (0, "posix_spawn"), id="ctypes-handle"),
     ],
 )
+@pytest.mark.unit
 def test_a_child_of_this_interpreter_is_held_to_the_home_rule(
     monkeypatch, tmp_path_factory, developer_home, event, args
 ):
@@ -2020,6 +2087,7 @@ def test_a_child_of_this_interpreter_is_held_to_the_home_rule(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX starts")
+@pytest.mark.unit
 def test_a_posix_spawn_given_the_developers_home_does_not_start(
     monkeypatch, tmp_path_factory, developer_home
 ):
@@ -2035,6 +2103,7 @@ def test_a_posix_spawn_given_the_developers_home_does_not_start(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX starts")
 @pytest.mark.parametrize("route", ["spawnv_passfds", "fork_exec", "fork_exec-env"])
+@pytest.mark.unit
 def test_the_starts_without_an_audit_event_are_held_to_the_home_rule(
     monkeypatch, tmp_path_factory, developer_home, route
 ):

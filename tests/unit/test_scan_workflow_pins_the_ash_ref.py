@@ -217,6 +217,7 @@ def _source_ref(value: str) -> str:
 
 
 class TestTheAshRefIsResolvedOnce:
+    @pytest.mark.unit
     def test_the_pin_follows_only_the_input_check(self):
         # The input check (test_an_input_cannot_add_a_workflow_command.py) runs
         # first, so nothing prints an input before it is checked. It runs no tool and
@@ -252,6 +253,7 @@ class TestTheAshRefIsResolvedOnce:
         for word in ("git ls-remote", "git fetch", "uv ", "uvx ", "curl "):
             assert word not in script, f"the resolve step runs {word.strip()!r}"
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "ash_version,expected",
         [
@@ -273,6 +275,7 @@ class TestTheAshRefIsResolvedOnce:
             "/automated_security_helper/assets"
         ), env
 
+    @pytest.mark.integration
     def test_later_steps_use_the_pinned_commit_after_the_branch_moved(self, tmp_path):
         repo = AshRepository(tmp_path / "ash")
         context = _context("refs/heads/main")
@@ -311,6 +314,7 @@ class TestTheAshRefIsResolvedOnce:
             f"{wrong}"
         )
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("ash_version", ["main", "main\n"], ids=["plain", "block"])
     def test_a_one_line_block_scalar_pins_like_the_plain_value(
         self, tmp_path, ash_version
@@ -335,6 +339,7 @@ class TestTheAshRefIsResolvedOnce:
         assert run.proc.returncode == 0, run.describe()
         assert _source_ref(ga.read_github_env(sandbox)["ASH_UVX_SOURCE"]) == repo.second
 
+    @pytest.mark.integration
     def test_a_full_commit_id_is_used_without_contacting_the_repository(self, tmp_path):
         repo = AshRepository(tmp_path / "ash")
         commit = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
@@ -345,6 +350,7 @@ class TestTheAshRefIsResolvedOnce:
         assert _source_ref(ga.read_github_env(sandbox)["ASH_UVX_SOURCE"]) == commit
 
 
+@pytest.mark.integration
 class TestARefThatDoesNotNameOneCommitIsRefused:
     @pytest.mark.parametrize(
         "ash_version",
@@ -407,6 +413,7 @@ class TestARefThatDoesNotNameOneCommitIsRefused:
         assert ga.read_github_env(sandbox) == {}
 
 
+@pytest.mark.integration
 class TestARefusalPrintsOneErrorLineAndNotTheValue:
     """The runner starts a new line at a line feed or a carriage return, and reads a
     line that starts with `::` as a workflow command. Both refusals printed the value

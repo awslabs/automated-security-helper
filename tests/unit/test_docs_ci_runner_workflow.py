@@ -62,6 +62,8 @@ from pathlib import Path, PurePosixPath
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-docs-ci-runners.yml"
 WORKFLOW_REL = ".github/workflows/ash-docs-ci-runners.yml"
@@ -1755,12 +1757,18 @@ def _pytest_ini_addopts() -> list[str]:
 #:   daemon, the pull recording and the images the session builds.
 #: * ``--dist worksteal``: left out. With ``-n 0`` no worker starts, so there is no work
 #:   to distribute.
+#: * ``--strict-markers``: left out. It turns an unregistered marker into a collection
+#:   error. The collection hook in tests/conftest.py that refuses a test without exactly
+#:   one tier marker is not an addopts option and still applies to these runs, and the
+#:   modules they run are fixed in the checkout, so a marker typo in them fails the
+#:   integration tier's run of the same files, which keeps the repository's addopts.
 ADDOPTS_IN_CI = (
     (("--verbose",), ()),
     (("--junit-xml=test-results/pytest.junit.xml",), ("--junit-xml=",)),
     (("--durations=10",), ("--durations=0", "--durations-min=0")),
     (("-n", "auto"), ("-n", "0")),
     (("--dist", "worksteal"), ()),
+    (("--strict-markers",), ()),
 )
 
 
@@ -2170,7 +2178,13 @@ def test_the_run_settings_that_keep_legs_independent_and_tokens_out():
     assert job["strategy"].get("fail-fast") is False
     assert workflow.get("concurrency") == {
         "group": "${{ github.workflow }}-${{ github.ref }}-${{ inputs.legs || 'all' }}",
-        "cancel-in-progress": True,
+        # A newer run supersedes an older one on the same ref and leg, except on main
+        # and tags, where a run is never cancelled. The expression is the one every
+        # workflow shares; test_workflows_cancel_superseded_runs_outside_main.py pins
+        # it across the directory.
+        "cancel-in-progress": (
+            "${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}"
+        ),
     }
     assert "github.token" not in text and "GITHUB_TOKEN" not in text
     cached = [

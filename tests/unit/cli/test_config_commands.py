@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 import yaml
 from unittest.mock import patch
 from typer.testing import CliRunner
@@ -12,6 +13,7 @@ from automated_security_helper.cli.config import (
 )
 from automated_security_helper.config.config_writer import IndentableYamlDumper
 
+pytestmark = pytest.mark.unit
 
 runner = CliRunner()
 

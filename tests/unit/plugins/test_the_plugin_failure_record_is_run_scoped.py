@@ -36,6 +36,8 @@ from tests.utils.stand_in_uv import (
     stand_in_env,
 )
 
+pytestmark = pytest.mark.integration
+
 DEPENDENCY = "runscopedep_for_record"
 BROKEN_PACKAGE = "runscope_ash_plugins"
 INVENTORY_GHOST = "runscope_ghost_ash_plugins"

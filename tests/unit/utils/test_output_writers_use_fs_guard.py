@@ -26,6 +26,8 @@ from typing import Dict, List, Tuple
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 PACKAGE = Path(__file__).resolve().parents[3] / "automated_security_helper"
 
 #: open() modes that create or change a file.

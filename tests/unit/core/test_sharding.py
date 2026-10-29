@@ -23,6 +23,8 @@ from automated_security_helper.core.sharding import (
     verify_shard_coverage,
 )
 
+pytestmark = pytest.mark.unit
+
 # A deliberately unsorted list. Passing an already-sorted list would let a
 # partition that depends on input order pass by accident.
 SCANNERS = [

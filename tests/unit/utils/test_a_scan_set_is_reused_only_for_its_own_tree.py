@@ -36,6 +36,8 @@ import pytest
 
 from automated_security_helper.utils import get_scan_set as gss
 
+pytestmark = pytest.mark.unit
+
 RUN = "0123456789abcdef" * 2
 
 

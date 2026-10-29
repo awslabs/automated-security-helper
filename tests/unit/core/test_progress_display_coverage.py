@@ -24,6 +24,8 @@ from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def autospec_live(monkeypatch):

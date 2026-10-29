@@ -6,6 +6,7 @@
 import textwrap
 from unittest.mock import patch
 
+import pytest
 
 from automated_security_helper.config.config_linter import (
     ConfigLinter,
@@ -13,6 +14,8 @@ from automated_security_helper.config.config_linter import (
     LintSeverity,
 )
 from automated_security_helper.config.config_validator import ConfigValidator
+
+pytestmark = pytest.mark.unit
 
 
 class TestLinterUsesValidatorForRequiredFieldCheck:

@@ -18,11 +18,15 @@ import pkgutil
 from pathlib import Path
 from typing import List
 
+import pytest
+
 import automated_security_helper.plugin_modules as plugin_modules
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
+
+pytestmark = pytest.mark.unit
 
 PluginContext.model_rebuild()
 

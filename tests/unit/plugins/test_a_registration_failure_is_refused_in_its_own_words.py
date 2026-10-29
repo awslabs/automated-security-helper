@@ -27,6 +27,8 @@ from automated_security_helper.plugins.loader import (
     refuse_failed_plugin_imports,
 )
 
+pytestmark = pytest.mark.unit
+
 EVENT = "registration-probe-event"
 
 

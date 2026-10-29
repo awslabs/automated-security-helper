@@ -29,6 +29,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.enums import PackageManager
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def plugin_context(tmp_path):

@@ -45,7 +45,7 @@ SCANNERS = {
     "trivy": (TrivyScanner, TrivyScannerConfig, TrivyScannerConfigOptions),
 }
 
-pytestmark = pytest.mark.parametrize("name", sorted(SCANNERS))
+pytestmark = [pytest.mark.unit, pytest.mark.parametrize("name", sorted(SCANNERS))]
 
 
 def _key(name: str) -> str:

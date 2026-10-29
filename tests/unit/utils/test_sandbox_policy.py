@@ -115,6 +115,7 @@ def _resolved(paths):
     return {Path(os.path.realpath(p)) for p in paths}
 
 
+@pytest.mark.unit
 class TestUvDirectoriesAreScreened:
     """uv's directories named in ASH's environment get the breadth rule too.
 
@@ -171,6 +172,7 @@ class TestUvDirectoriesAreScreened:
         assert not any(variable in str(said) for said in warnings), warnings
 
 
+@pytest.mark.unit
 class TestNetwork:
     def test_off_unless_declared(self, layout):
         assert _policy(layout).network is False
@@ -198,6 +200,7 @@ class TestNetwork:
         )
 
 
+@pytest.mark.unit
 class TestPaths:
     def test_only_the_results_directory_is_writable(self, layout):
         policy = _policy(layout)
@@ -249,6 +252,7 @@ class TestPaths:
         assert Path(os.path.realpath(extra)) in _resolved(policy.read_only)
 
 
+@pytest.mark.unit
 class TestExecutable:
     def test_tool_paths_are_executable_and_the_scan_data_is_not(self, layout):
         policy = _policy(layout)
@@ -319,6 +323,7 @@ class TestExecutable:
             assert Path(os.path.realpath(path)) not in executable, path
 
 
+@pytest.mark.unit
 class TestEnvironment:
     def test_credentials_are_dropped_and_declared_prefixes_kept(self, layout):
         policy = _policy(layout, SandboxRequirements(env_prefixes=("GRYPE_",)))
@@ -363,6 +368,7 @@ class TestEnvironment:
         assert online.filter_env({"HTTPS_PROXY": "p"})["HTTPS_PROXY"] == "p"
 
 
+@pytest.mark.unit
 class TestBwrapCommandLine:
     def test_mount_order_and_namespaces(self, layout):
         backend = BwrapBackend()
@@ -402,6 +408,7 @@ class TestBwrapCommandLine:
             BwrapBackend().plan(["/usr/bin/true"], {}, _policy(layout))
 
 
+@pytest.mark.unit
 class TestSocketFilterWrapper:
     """bwrap and firejail start the scanner through the seccomp socket filter.
 
@@ -435,6 +442,7 @@ class TestSocketFilterWrapper:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+@pytest.mark.unit
 class TestHostCachesAreNotWrittenInPlace:
     """A host cache is writable only where the write is thrown away.
 
@@ -609,6 +617,7 @@ def _every_declared_requirement():
     return found
 
 
+@pytest.mark.unit
 class TestIpcEndpointVariables:
     """None of IPC_ENDPOINT_VARIABLES reaches a scanner, on any backend.
 
@@ -666,6 +675,7 @@ def _plugin(requirements=SandboxRequirements(), name="grype"):
     )
 
 
+@pytest.mark.unit
 class TestScope:
     def test_mode_off_gives_no_scope(self, tmp_path):
         assert (
@@ -808,6 +818,7 @@ class TestScope:
         assert started == []
 
 
+@pytest.mark.unit
 class TestPolicyEdges:
     """Symlinked results directories, tool prefixes under home, and the env filter."""
 
@@ -901,6 +912,7 @@ class TestPolicyEdges:
             _ACTIVE.reset(scope_reset)
 
 
+@pytest.mark.unit
 class TestSymlinkedOutputDirectory:
     """The scanned repository cannot choose where the output directory really is.
 
@@ -996,6 +1008,7 @@ class TestSymlinkedOutputDirectory:
 _BUILTIN = "automated_security_helper.plugin_modules.ash_builtin"
 
 
+@pytest.mark.unit
 class TestProbeScope:
     def test_off_mode_leaves_probes_alone(self, tmp_path):
         from automated_security_helper.utils.sandbox.scope import (
@@ -1079,6 +1092,7 @@ class TestProbeScope:
     reason="no backend runs on Windows: firejail is Linux-only and its plan reads "
     "os.getuid()",
 )
+@pytest.mark.unit
 class TestFirejailHidesBothHomes:
     """firejail hides the passwd entry's home; HOME's directory needs its own blacklist.
 
@@ -1159,6 +1173,7 @@ class TestFirejailHidesBothHomes:
         assert "--private" in argv
 
 
+@pytest.mark.unit
 class TestTheBackendsHideADirectoryAHomeLinksTo:
     """~/.local -> /persist/me/.local: the backends hide the target like a home.
 
@@ -1623,6 +1638,7 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         assert policy_module._broader_than_a_tool(persist, homes)
 
 
+@pytest.mark.unit
 class TestHomeElsewhereThanThePasswdEntry:
     """HOME and the passwd entry's home can be two directories; deny reading both.
 
@@ -1741,6 +1757,7 @@ def _reopened_after_deny(profile, home, paths):
     ]
 
 
+@pytest.mark.unit
 class TestPolicyPathsUnderThePasswdHome:
     """The breadth filters measure a path against both homes, not only HOME's.
 
@@ -1834,6 +1851,7 @@ class TestPolicyPathsUnderThePasswdHome:
         assert Path(os.path.realpath(pw / "automated_security_helper")) in exposed
 
 
+@pytest.mark.unit
 class TestAshsInterpreterThroughAHome:
     """ASH's interpreter paths are mounted unfiltered, so a home among them is refused.
 
@@ -1957,6 +1975,7 @@ class TestAshsInterpreterThroughAHome:
         assert "outside the home directory" in message
 
 
+@pytest.mark.unit
 class TestAshBinPathUnderAHome:
     """ASH_BIN_PATH is mounted for every scanner, so it gets the same breadth rule."""
 
@@ -1981,6 +2000,7 @@ class TestAshBinPathUnderAHome:
         assert Path(os.path.realpath(layout.home)) not in exposed
 
 
+@pytest.mark.unit
 class TestNoBinDirectoryToMount:
     """A relative ASH_BIN_PATH, or none at all, leaves no bin directory to mount.
 
@@ -2081,6 +2101,7 @@ class TestNoBinDirectoryToMount:
             _policy(layout)
 
 
+@pytest.mark.unit
 class TestCommonInterpreterLayoutsStayAllowed:
     """The refusal above does not refuse the usual places a Python lives in a home.
 
@@ -2162,6 +2183,7 @@ class TestCommonInterpreterLayoutsStayAllowed:
 @pytest.mark.parametrize(
     "pw_dir", [None, "/", "", "relative/home", "HOME", "link to HOME"], ids=repr
 )
+@pytest.mark.unit
 def test_no_second_home(tmp_path, pw_dir):
     """A passwd home that is not a second directory to measure against or deny."""
     home = tmp_path / "home"
@@ -2173,6 +2195,7 @@ def test_no_second_home(tmp_path, pw_dir):
     assert policy_module._distinct_home(home, value) is None
 
 
+@pytest.mark.unit
 def test_a_home_of_root_is_not_a_home(tmp_path, monkeypatch):
     """A HOME of "/", as in some containers, names no home: every path is inside it."""
     monkeypatch.setenv("HOME", "/")
@@ -2183,6 +2206,7 @@ def test_a_home_of_root_is_not_a_home(tmp_path, monkeypatch):
     assert policy_module._homes() == [Path(os.path.realpath(other))]
 
 
+@pytest.mark.unit
 def test_a_second_home(tmp_path):
     home = tmp_path / "home"
     other = tmp_path / "other"
@@ -2192,6 +2216,7 @@ def test_a_second_home(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+@pytest.mark.unit
 class TestBwrapAndLandlockGrantNothingInThePasswdHome:
     """With HOME elsewhere, no bwrap or Landlock grant opens the passwd entry's home.
 
@@ -2274,6 +2299,7 @@ class TestBwrapAndLandlockGrantNothingInThePasswdHome:
         assert opening == [], opening
 
 
+@pytest.mark.unit
 class TestSandboxExecLeavesTheRealCacheUnwritten:
     """filter_env drops XDG_CACHE_HOME, so tools fall back to $HOME/.cache.
 
@@ -2303,6 +2329,7 @@ class TestBackendProbesKeepHome:
     real home.
     """
 
+    @pytest.mark.integration
     def test_a_probe_child_resolves_the_operators_home(self, tmp_path, monkeypatch):
         home = tmp_path / "operator-home"
         home.mkdir()
@@ -2314,6 +2341,7 @@ class TestBackendProbesKeepHome:
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == str(home)
 
+    @pytest.mark.unit
     def test_the_landlock_probe_passes_home(self, tmp_path, monkeypatch):
         home = tmp_path / "operator-home"
         monkeypatch.setenv("HOME", str(home))
@@ -2329,6 +2357,7 @@ class TestBackendProbesKeepHome:
         assert all(env is not None and env.get("HOME") == str(home) for env in envs)
 
 
+@pytest.mark.unit
 class TestWritableWinsOverReadOnly:
     """A read-only bind inside the writable results directory must not cover it.
 
@@ -2358,6 +2387,7 @@ class TestWritableWinsOverReadOnly:
         assert argv[argv.index("--chdir") + 1] == _as_argv(work)
 
 
+@pytest.mark.unit
 def test_every_import_path_directory_is_readable(layout, monkeypatch, tmp_path):
     """An editable install's .pth adds sys.path entries outside site-packages.
 
@@ -2378,6 +2408,7 @@ def test_every_import_path_directory_is_readable(layout, monkeypatch, tmp_path):
             assert Path(os.path.realpath(entry)) in exposed, entry
 
 
+@pytest.mark.unit
 def test_an_import_path_entry_elsewhere_in_home_is_not_mounted(layout, monkeypatch):
     """PYTHONPATH=~/anything must not make that directory readable to scanners."""
     stray = layout.home / "notes"
@@ -2387,6 +2418,7 @@ def test_an_import_path_entry_elsewhere_in_home_is_not_mounted(layout, monkeypat
     assert Path(os.path.realpath(stray)) not in exposed
 
 
+@pytest.mark.unit
 class TestPluginDeclarations:
     """Third-party and community plugin scanners get exactly what they declare.
 
@@ -2473,6 +2505,7 @@ class TestPluginDeclarations:
         assert policy.network is False
 
 
+@pytest.mark.unit
 def test_a_uv_tool_interpreter_installed_elsewhere_is_readable(
     layout, tmp_path, monkeypatch
 ):
@@ -2495,6 +2528,7 @@ def test_a_uv_tool_interpreter_installed_elsewhere_is_readable(
     assert Path(os.path.realpath(pythons.parent)) in exposed
 
 
+@pytest.mark.unit
 class TestNothingBroaderThanATool:
     """Paths taken from the environment never mount $HOME or anything above it."""
 
@@ -2542,6 +2576,7 @@ def _indexed(lines, prefix):
     return [(i, line) for i, line in enumerate(lines) if line.startswith(prefix)]
 
 
+@pytest.mark.unit
 class TestSandboxExecProfile:
     """The macOS profile names the Mach services and the exec paths it allows.
 
@@ -2846,6 +2881,7 @@ class TestSandboxExecProfile:
             assert where > max(i for i, _ in _indexed(lines, "(allow file-"))
 
 
+@pytest.mark.unit
 class TestSystemTrustRoots:
     """semgrep-core reads root certificates from a file instead of the keychain."""
 
@@ -2956,6 +2992,7 @@ def _scanner_requirements():
     return found
 
 
+@pytest.mark.unit
 def test_the_guards_see_every_shipped_scanner_plugin():
     found = set(_scanner_requirements())
     assert {
@@ -2978,6 +3015,7 @@ def _content_db_scanners():
     return {"grype": GrypeScanner, "trivy": TrivyRepoScanner}
 
 
+@pytest.mark.unit
 class TestMacosScannerDeclarations:
     """What each shipped scanner is granted for macOS, and how narrowly."""
 
@@ -3040,6 +3078,7 @@ class TestMacosScannerDeclarations:
                 assert parts[-1:] != ("Library",), (name, path)
 
 
+@pytest.mark.unit
 class TestSandboxExecEnv:
     def test_the_declared_values_win_over_the_scanner_environment(self, layout):
         requirements = SandboxRequirements(
@@ -3064,6 +3103,7 @@ class TestSandboxExecEnv:
         assert "JSII_X" not in plan.env
 
 
+@pytest.mark.unit
 class TestUnpackDir:
     """A self-unpacking tool gets a private directory it may write and run from."""
 
@@ -3117,6 +3157,7 @@ class TestUnpackDir:
             plan.run_cleanup()
 
 
+@pytest.mark.unit
 class TestUvToolLock:
     """uv tool run opens its tools-directory lock read-write; nothing else there."""
 
@@ -3156,6 +3197,7 @@ class TestUvToolLock:
         assert _policy(layout).uv_tool_locks == ()
 
 
+@pytest.mark.unit
 class TestScriptInterpreter:
     """A script's interpreter prefix is readable, as cfn_nag_scan's Ruby must be."""
 
@@ -3199,6 +3241,7 @@ class TestScriptInterpreter:
         )
 
 
+@pytest.mark.unit
 class TestSandboxExecWorkingDirectory:
     """A spawn without a cwd of its own starts in the private TMPDIR, not in ASH's."""
 
@@ -3222,6 +3265,7 @@ class TestSandboxExecWorkingDirectory:
             plan.run_cleanup()
 
 
+@pytest.mark.unit
 class TestAToolGivenAStagedCopy:
     """A tool handed a staged copy of its input reads that copy, not the scan's tree.
 
@@ -3396,6 +3440,7 @@ def _uv_plugin(pin="1.8"):
     )
 
 
+@pytest.mark.unit
 def test_the_scope_factory_carries_a_uv_plugins_run_inputs(tmp_path, monkeypatch):
     """The scope's plugin inputs come from the FACTORY reading the plugin, so
     every record made under the scope hides a spec that holds an env-read
@@ -3415,6 +3460,7 @@ def test_the_scope_factory_carries_a_uv_plugins_run_inputs(tmp_path, monkeypatch
     assert scope.plugin_inputs == ()
 
 
+@pytest.mark.unit
 def test_the_scope_factory_carries_the_plugins_public_command(tmp_path, monkeypatch):
     """The scope's record tool name is the plugin's COMMAND, read by the
     factory -- the same public anchor the report lines and the install
@@ -3443,6 +3489,7 @@ def test_the_scope_factory_carries_the_plugins_public_command(tmp_path, monkeypa
     assert "bandit-cmd -r src" in shown, shown
 
 
+@pytest.mark.unit
 def test_the_record_context_hides_a_short_pin_with_the_sandbox_off():
     """Under the default sandbox mode "off" no scope exists, so the process
     runner's own records fell back to the plain value layer and a short pin
@@ -3464,6 +3511,7 @@ def test_the_record_context_hides_a_short_pin_with_the_sandbox_off():
     assert scope_module.scope_shown_text(line) == line
 
 
+@pytest.mark.unit
 def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
     """_try_uv_tool_execution wraps run_tool in the record-only context, so
     every record the runner makes while the child runs -- with the sandbox
@@ -3521,6 +3569,7 @@ def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
     assert scope_module.scope_shown_text("stub-tool==1.8") == "stub-tool==1.8"
 
 
+@pytest.mark.unit
 def test_the_sandbox_debug_line_hides_a_spec_that_pins_an_env_read_value(
     tmp_path, monkeypatch, caplog
 ):
@@ -3557,6 +3606,7 @@ def test_the_sandbox_debug_line_hides_a_spec_that_pins_an_env_read_value(
     assert any("sarif-tools" in line for line in lines), lines
 
 
+@pytest.mark.unit
 def test_the_runners_own_records_hide_a_pinning_spec_inside_a_uv_scope(
     tmp_path, monkeypatch
 ):
@@ -3582,6 +3632,7 @@ def test_the_runners_own_records_hide_a_pinning_spec_inside_a_uv_scope(
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a POSIX special file")
+@pytest.mark.unit
 def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, caplog):
     """The could-not-remove warning names the entry, the root and the OS
     error, and any of them can hold an env-read value (a tool names files
@@ -3667,6 +3718,7 @@ _SWEEP_VALUE = "tool-qz4b9secret"
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a POSIX special file")
+@pytest.mark.unit
 def test_a_bare_string_values_answer_is_hidden_whole_from_the_sweep_note(
     tmp_path, monkeypatch, caplog
 ):
@@ -3682,6 +3734,7 @@ def test_a_bare_string_values_answer_is_hidden_whole_from_the_sweep_note(
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a POSIX special file")
+@pytest.mark.unit
 def test_a_raising_values_hook_makes_the_sweep_note_value_free(
     tmp_path, monkeypatch, caplog
 ):
@@ -3698,6 +3751,7 @@ def test_a_raising_values_hook_makes_the_sweep_note_value_free(
     assert not any("fifo-" in note or str(results) in note for note in notes), notes
 
 
+@pytest.mark.unit
 def test_a_cleanup_failure_record_hides_the_scopes_env_values(
     tmp_path, monkeypatch, caplog
 ):
@@ -3736,6 +3790,7 @@ def test_a_cleanup_failure_record_hides_the_scopes_env_values(
     assert not any(value in line for line in lines), lines
 
 
+@pytest.mark.unit
 def test_scope_records_keep_the_plugins_public_command_visible(tmp_path):
     """scope_shown_text passed the scope's scanner_name as the public tool
     name while every report line passes the plugin's command: a plugin whose
@@ -3791,6 +3846,7 @@ def _scope_with(tmp_path, **overrides):
     return scope_module.SandboxScope(**fields)
 
 
+@pytest.mark.unit
 def test_the_scopes_and_the_records_hidden_sets_are_unioned(tmp_path):
     """A scope that carries its own inputs made the record context invisible:
     the dispatch-time values and inputs of the run the record is FROM were
@@ -3824,6 +3880,7 @@ def test_the_scopes_and_the_records_hidden_sets_are_unioned(tmp_path):
     assert "1.77rc9" not in shown, shown
 
 
+@pytest.mark.unit
 def test_a_records_command_outranks_the_scopes_config_name(tmp_path):
     """The record context carries the plugin's public command; a scope built
     before construction carries only the config name. Preferring the config
@@ -3848,6 +3905,7 @@ def test_a_records_command_outranks_the_scopes_config_name(tmp_path):
     assert "1.77rc9" not in shown, shown
 
 
+@pytest.mark.unit
 def test_a_raising_redaction_returns_a_value_free_note(monkeypatch):
     """scope_shown_text never raises: its callers record from inside except
     blocks, where a raise becomes the frame's own failure. The note carries
@@ -3865,6 +3923,7 @@ def test_a_raising_redaction_returns_a_value_free_note(monkeypatch):
     assert "EDGESECRET-9912" not in shown
 
 
+@pytest.mark.unit
 def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypatch):
     """fs_guard's sweep records a removal failure from inside its except
     block. A raise from the redaction there stopped the os.fwalk sweep
@@ -3902,6 +3961,7 @@ def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypat
     )
 
 
+@pytest.mark.unit
 def test_a_raising_redaction_does_not_skip_the_remaining_cleanup(monkeypatch):
     """A sandbox plan's cleanup records a failed step from inside its except
     block. A raise from the redaction there skipped every remaining step,

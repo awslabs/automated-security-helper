@@ -11,11 +11,15 @@ sentence here, loudly, instead of silently double-punctuating or running
 the halves together.
 """
 
+import pytest
+
 from automated_security_helper.config.sandbox_grants import (
     _MIXED_HEAD_CLOSING,
     joined_membership,
     membership_clause,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_the_mixed_head_ends_with_the_shared_closing():

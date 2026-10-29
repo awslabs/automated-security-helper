@@ -7,9 +7,13 @@ import inspect
 import json
 import re
 
+import pytest
+
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.cli.mcp_server import _build_ash_exit_codes
 import automated_security_helper.interactions.run_ash_scan as run_ash_scan_module
+
+pytestmark = pytest.mark.unit
 
 #: The resource's codes with a scan's meaning; ``commands`` holds the per-command
 #: entries.

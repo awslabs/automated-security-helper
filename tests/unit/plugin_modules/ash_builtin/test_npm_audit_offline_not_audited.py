@@ -32,6 +32,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 )
 from tests.utils.refusing_proxy import scrub_cloud_credentials
 
+pytestmark = pytest.mark.unit
+
 #: What `npm audit --json --offline` printed for a lockfile with known advisories.
 OFFLINE_NPM_AUDIT_OUTPUT = json.dumps(
     {

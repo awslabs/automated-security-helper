@@ -548,16 +548,24 @@ global_settings:
         GHSA-45c3-73f7-pv4m (CVE-2026-114605): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
-    # === Time-boxed: filelock GHSA-v4x8-3wr5-3wq8, no patched version on Python 3.10 (expires 2026-11-20) ===
+    # === Time-boxed: filelock, thirteen advisories with no patched version on Python 3.10 (expires 2026-11-20) ===
     # filelock is affected through 4.2.0 and fixed in 4.2.1, but 4.1.1 and later
     # require Python 3.11 and this project supports 3.10, so uv.lock carries a
     # filelock 4.0.x entry for Python 3.10 that no upgrade can patch. The 3.11 and
-    # later entry is on 4.2.4 and is not affected. The advisory concerns
-    # ReadWriteLock, which ASH does not use: nothing in the repository imports
-    # filelock directly, and it arrives only as a dependency of virtualenv and
-    # python-discovery. pyproject.toml holds that entry on 4.0.x with a uv constraint
-    # because 4.1.0 is affected by three more advisories (all Medium).
-    # Revisit when filelock backports the fix to a release that supports Python
+    # later entry is on 4.2.4 and is not affected. Nothing in the repository imports
+    # filelock directly; it arrives only as a dependency of virtualenv and
+    # python-discovery in the dev group. pyproject.toml holds the 3.10 entry on 4.0.x
+    # with a uv constraint because 4.1.0 is affected by three more advisories.
+    # GHSA-v4x8-3wr5-3wq8 (High, ReadWriteLock) was the first entry. On 2026-10-28
+    # the same maintainers published nine Medium and three Low advisories against
+    # the same range (every one of them: affected through 4.2.0, fixed in 4.2.1,
+    # 4.2.1 requires Python 3.11), and grype's database of 2026-10-29 reports all
+    # twelve against the 4.0.12 entry. They cover SoftFileLock, StrictSoftFileLock,
+    # SoftReadWriteLock, ReadWriteLock, UnixFileLock and WindowsFileLock, none of
+    # which ASH calls. One entry per id, so a thirteenth advisory reports again
+    # instead of being swallowed; all thirteen share one expiry so the whole set is
+    # re-reviewed on one date.
+    # Revisit when filelock backports the fixes to a release that supports Python
     # 3.10, or when this project drops 3.10.
     - rule_id: "GHSA-v4x8-3wr5-3wq8-filelock"
       path: "uv.lock"
@@ -571,6 +579,162 @@ global_settings:
         import filelock itself. The 3.11 and later entry is on the patched 4.2.4.
         Revisit when a 3.10-compatible fix ships or Python 3.10 support ends; see
         the block comment above.
+    - rule_id: "GHSA-fj95-fr6c-h845-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-fj95-fr6c-h845 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftReadWriteLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-69hj-f68j-2879-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-69hj-f68j-2879 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        UnixFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-cwqr-hh33-gh44-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-cwqr-hh33-gh44 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        ReadWriteLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-9c4x-gm8v-wgc4-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-9c4x-gm8v-wgc4 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected APIs are
+        StrictSoftFileLock and SoftReadWriteLock; ASH does not call them and does
+        not import filelock itself. The 3.11 and later entry is on the patched
+        4.2.4. Revisit when a 3.10-compatible fix ships or Python 3.10 support ends;
+        see the block comment above.
+    - rule_id: "GHSA-rfpc-qcw5-3pc4-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-rfpc-qcw5-3pc4 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-fq56-3cx3-fjxp-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-fq56-3cx3-fjxp (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-6627-m3xw-93mp-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-6627-m3xw-93mp (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        StrictSoftFileLock; ASH does not call it and does not import filelock
+        itself. The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-8mx5-7m5m-r77g-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-8mx5-7m5m-r77g (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        WindowsFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-m462-7rxw-wvpg-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-m462-7rxw-wvpg (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        StrictSoftFileLock; ASH does not call it and does not import filelock
+        itself. The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-9j6q-wvj5-jgjg-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-9j6q-wvj5-jgjg (Low): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-567q-5qvw-pf92-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-567q-5qvw-pf92 (Low): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftFileLock on Windows; ASH does not call it and does not import filelock
+        itself. The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-9vhv-jxww-xfm5-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expiration: "2026-11-20"
+      reason: >-
+        GHSA-9vhv-jxww-xfm5 (Low): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        ReadWriteLock on Windows; ASH does not call it and does not import filelock
+        itself. The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
     # === detect-secrets: broad patterns by path ===
     #
     # This header used to claim detect-secrets had "no inline nosec support".

@@ -35,6 +35,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 RESULTS = "ash_aggregated_results.json"
 
 

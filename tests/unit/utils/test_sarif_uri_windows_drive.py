@@ -93,6 +93,8 @@ from automated_security_helper.utils.sarif_utils import (
     _sanitize_uri,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestAWindowsDriveUriReducesToAUsablePath:
     """The reduction itself, asserted as text so every platform runs it."""

@@ -36,6 +36,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_result(
     rule_id: str = "RULE001",

@@ -15,6 +15,8 @@ import pytest
 from automated_security_helper.cli.mcp import profile_registry
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def clean_state():

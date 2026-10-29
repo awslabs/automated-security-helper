@@ -11,6 +11,10 @@ it. This reads the page text only and imports nothing from the product.
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TRUST_MODEL = REPO_ROOT / "docs" / "content" / "concepts" / "trust-model.md"
 

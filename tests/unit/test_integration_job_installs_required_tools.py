@@ -26,6 +26,8 @@ from typing import Any
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
 CONFIGS_TEST = (

@@ -37,6 +37,8 @@ from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter impo
     _outcome,
 )
 
+pytestmark = pytest.mark.unit
+
 # THRESHOLD_QUALIFYING_LEVELS, ALL_SARIF_LEVELS and _outcome used to be defined
 # here as a second copy. They now live in the helper module both threshold test
 # files import from, next to the test that ties the table to the ladder.

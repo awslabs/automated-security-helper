@@ -33,11 +33,15 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
+import pytest
+
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
     Component,
     CycloneDXReport,
 )
 from automated_security_helper.utils.sbom_merge import merge_cyclonedx_reports
+
+pytestmark = pytest.mark.unit
 
 REQUESTS = "pkg:pypi/requests@2.19.1"
 URLLIB3 = "pkg:pypi/urllib3@2.0.0"

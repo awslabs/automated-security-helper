@@ -5,6 +5,10 @@ PR#274 Bug #33: debug_echo returns None, passes tuple to logger.
 
 from unittest.mock import patch
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestDebugEchoReturnValue:
     """debug_echo should return the message string, not None."""

@@ -54,6 +54,8 @@ from tests.unit.interactions.test_container_image_revision import (
     _clone_step,
 )
 
+pytestmark = pytest.mark.integration
+
 STAND_IN_GIT = """#!/bin/sh
 printf '%s\\n' "$*" >> "$STUB_GIT_LOG"
 exit "${STUB_GIT_RC:-0}"

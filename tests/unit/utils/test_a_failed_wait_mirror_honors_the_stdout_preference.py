@@ -34,6 +34,8 @@ from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import StartWatch
 
+pytestmark = pytest.mark.integration
+
 STDOUT_BODY = "tool output before the failure"
 STDERR_BODY = "diag before the failure"
 WAIT_FAILURE = "the wait on the child failed"

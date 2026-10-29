@@ -23,6 +23,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 CANARY_DIR = "ENVCANARY-5e2b"
 
 

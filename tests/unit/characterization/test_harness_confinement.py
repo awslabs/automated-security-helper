@@ -51,6 +51,8 @@ import urllib3
 from tests.unit.characterization import _harness
 from tests.unit.characterization._harness import Exit, Hang, LaunchViolation
 
+pytestmark = pytest.mark.unit
+
 NONEXISTENT = "/nonexistent-char-probe/x"
 
 # By the build, not the platform: CPython leaves os.waitid out on some systems

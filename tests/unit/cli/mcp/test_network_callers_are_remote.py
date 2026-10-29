@@ -43,6 +43,8 @@ from tests.utils.mcp_transport_harness import (
     stdio_tool_calls,
 )
 
+pytestmark = pytest.mark.unit
+
 #: A session id some other client holds. Its sandbox exists on disk.
 OTHER_SESSION = "other-client-session-1"
 

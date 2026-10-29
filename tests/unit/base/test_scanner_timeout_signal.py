@@ -88,6 +88,7 @@ def uv_available():
         yield
 
 
+@pytest.mark.unit
 def test_checkov_through_uv_reports_the_timeout(checkov, uv_available):
     """The #628 case: a uv-run scanner killed at scan_timeout says so."""
     scanner, source = checkov
@@ -107,6 +108,7 @@ def test_checkov_through_uv_reports_the_timeout(checkov, uv_available):
     assert "No such file or directory" not in message, message
 
 
+@pytest.mark.unit
 def test_checkov_without_uv_reports_the_timeout(checkov):
     """The direct path, held to the same message so the two cannot drift."""
     scanner, source = checkov
@@ -122,6 +124,7 @@ def test_checkov_without_uv_reports_the_timeout(checkov):
     assert "timed out after '5' s" in str(excinfo.value)
 
 
+@pytest.mark.unit
 def test_the_timeout_is_recorded_on_the_scanner(checkov, uv_available):
     """Scanners that override scan() never reach the template's timeout check.
 
@@ -137,6 +140,7 @@ def test_the_timeout_is_recorded_on_the_scanner(checkov, uv_available):
     assert any("timed out after '5' s" in line for line in scanner.errors)
 
 
+@pytest.mark.unit
 def test_partial_stderr_of_a_killed_tool_is_kept(checkov, uv_available):
     """What the tool printed before it was killed is the best clue to why."""
     scanner, source = checkov
@@ -149,6 +153,7 @@ def test_partial_stderr_of_a_killed_tool_is_kept(checkov, uv_available):
     assert "still parsing" in log.read_text()
 
 
+@pytest.mark.unit
 class TestRunToolCarriesTheFlag:
     def test_with_a_results_dir(self, tmp_path):
         runner = UVToolRunner()
@@ -180,6 +185,7 @@ class TestRunToolCarriesTheFlag:
         assert getattr(result, "timed_out", False) is True
 
 
+@pytest.mark.integration
 def test_run_command_marks_a_timeout():
     """run_command keeps its -1 return code, which callers and tests pin, and
     gains the same marker so nothing has to infer a timeout from the code."""
@@ -192,6 +198,7 @@ def test_run_command_marks_a_timeout():
     assert isinstance(result, subprocess.CompletedProcess)
 
 
+@pytest.mark.integration
 def test_a_completed_command_carries_no_marker():
     result = run_command([sys.executable, "-c", "pass"], timeout=30)
 

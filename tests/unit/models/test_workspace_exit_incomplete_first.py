@@ -13,12 +13,16 @@ npm-audit, a missing tool) or a project had not run at all.
 3 (a project's invalid configuration) stays above both.
 """
 
+import pytest
+
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceExitCode,
     WorkspaceProjectResult,
     workspace_exit_code,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _completed(

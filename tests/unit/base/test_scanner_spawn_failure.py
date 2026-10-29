@@ -65,6 +65,7 @@ _EFAULT = OSError(errno.EFAULT, "Bad address", "/usr/local/bin/uv")
 
 
 class TestSpawnFailureReturnCode:
+    @pytest.mark.unit
     def test_is_127_with_the_cause_in_stderr(self, tmp_path):
         with patch(_PLAIN_RUNNER, side_effect=_EFAULT):
             response = run_command_with_output_handling(
@@ -82,6 +83,7 @@ class TestSpawnFailureReturnCode:
         log = tmp_path / "SemgrepScanner.stderr.log"
         assert "Bad address" in log.read_text()
 
+    @pytest.mark.unit
     def test_a_real_missing_executable(self, tmp_path):
         """No mock: the OS itself refuses to start a path that does not exist."""
         missing = str(tmp_path / "no-such-tool")
@@ -92,6 +94,7 @@ class TestSpawnFailureReturnCode:
         assert response["returncode"] == 127
         assert response["spawn_failed"] is True
 
+    @pytest.mark.unit
     def test_run_command(self):
         with patch(_PLAIN_RUNNER, side_effect=_EFAULT):
             result = run_command(["uv", "--version"])
@@ -100,6 +103,7 @@ class TestSpawnFailureReturnCode:
         assert result.returncode == 127
         assert "Bad address" in result.stderr
 
+    @pytest.mark.unit
     def test_run_command_with_check_still_raises(self):
         with (
             patch(_PLAIN_RUNNER, side_effect=_EFAULT),
@@ -108,10 +112,12 @@ class TestSpawnFailureReturnCode:
             run_command(["uv", "--version"], check=True)
         assert excinfo.value.errno == errno.EFAULT
 
+    @pytest.mark.unit
     def test_run_command_stream_output(self):
         with patch(_SUBPROCESS_POPEN, side_effect=_EFAULT):
             assert run_command_stream_output(["uv", "--version"]) == 127
 
+    @pytest.mark.integration
     def test_a_command_that_ran_and_exited_127_is_not_a_spawn_failure(self):
         result = run_command(
             [sys.executable, "-c", "raise SystemExit(127)"],
@@ -121,6 +127,7 @@ class TestSpawnFailureReturnCode:
         assert result.returncode == 127
         assert not isinstance(result, SpawnFailedProcess)
 
+    @pytest.mark.integration
     def test_an_oserror_writing_logs_is_not_a_spawn_failure(self, tmp_path):
         """Only the spawn is guarded: the tool ran, so this is no spawn failure.
 
@@ -152,6 +159,7 @@ class TestASpawnFailureIsNotRetried:
         ],
         ids=["EFAULT", "ETXTBSY", "ENOENT"],
     )
+    @pytest.mark.unit
     def test_run_command_with_output_handling(self, exc):
         with patch(_PLAIN_RUNNER, side_effect=exc) as run:
             response = run_command_with_output_handling(["uv"])
@@ -160,6 +168,7 @@ class TestASpawnFailureIsNotRetried:
         assert response["returncode"] == 127
         assert response["spawn_failed"] is True
 
+    @pytest.mark.unit
     def test_run_command(self):
         with patch(_PLAIN_RUNNER, side_effect=_EFAULT) as run:
             result = run_command(["uv", "--version"])
@@ -167,6 +176,7 @@ class TestASpawnFailureIsNotRetried:
         assert run.call_count == 1
         assert result.returncode == 127
 
+    @pytest.mark.unit
     def test_run_command_stream_output(self):
         with patch(_SUBPROCESS_POPEN, side_effect=_EFAULT) as popen:
             assert run_command_stream_output(["uv", "--version"]) == 127
@@ -174,6 +184,7 @@ class TestASpawnFailureIsNotRetried:
         assert popen.call_count == 1
 
 
+@pytest.mark.unit
 def test_uv_tool_runner_carries_the_flag(tmp_path):
     with (
         patch.object(UVToolRunner, "uv_availability", return_value=(True, None)),
@@ -198,6 +209,7 @@ def semgrep(tmp_path):
     return scanner, source
 
 
+@pytest.mark.unit
 def test_semgrep_through_uv_is_not_accepted(semgrep):
     """The reported case: accepted codes include 1, and a uv that cannot exec
     must still fail the scan, naming the cause rather than the missing SARIF."""
@@ -224,6 +236,7 @@ def test_semgrep_through_uv_is_not_accepted(semgrep):
     assert "exit code 127: not an accepted exit code" in message, message
 
 
+@pytest.mark.unit
 def test_127_is_never_accepted_even_when_listed(semgrep):
     scanner, _source = semgrep
     scanner.exit_code = 127
@@ -283,6 +296,7 @@ def _run(context, scanner):
 
 
 class TestExecutorReportsError:
+    @pytest.mark.unit
     def test_even_when_scan_returned_normally(self, tmp_path):
         context = _context(tmp_path)
         scanner = _LenientScanner(config=_Config(), context=context)
@@ -295,6 +309,7 @@ class TestExecutorReportsError:
         first = container.raw_results["errors"][0]
         assert "lenient could not start its tool on source" in first, first
 
+    @pytest.mark.integration
     def test_a_spawn_failure_is_not_charged_to_the_next_target(self, tmp_path):
         context = _context(tmp_path)
         scanner = _LenientScanner(config=_Config(), context=context)
@@ -450,6 +465,7 @@ def _assert_the_flag_is_kept(response: dict, flag: str) -> None:
 
 @pytest.mark.parametrize("path", ["direct", "uv"])
 @pytest.mark.parametrize("flag", FLAGS)
+@pytest.mark.unit
 def test_handling_that_raises_keeps_the_responses_flag(
     tmp_path, monkeypatch, flag, path
 ):
@@ -490,6 +506,7 @@ AFTER_THE_UV_LAUNCH = {
 
 @pytest.mark.parametrize("flag", FLAGS)
 @pytest.mark.parametrize("call", sorted(AFTER_THE_UV_LAUNCH))
+@pytest.mark.unit
 def test_handling_that_raises_after_a_uv_launch_runs_nothing_again(
     tmp_path, monkeypatch, call, flag
 ):
@@ -532,6 +549,7 @@ def _uv_scanner_whose_run_returns(tmp_path, monkeypatch, result) -> _Handled:
     return scanner
 
 
+@pytest.mark.unit
 def test_a_uv_response_whose_handling_raised_keeps_its_stderr(tmp_path, monkeypatch):
     """Handling the uv run's response raised. The response kept is the one already
     assembled, the tool's stderr included."""
@@ -565,6 +583,7 @@ class _StdoutRaises:
         raise AttributeError(name)
 
 
+@pytest.mark.unit
 def test_a_uv_response_that_could_not_be_built_keeps_the_runs_stderr(
     tmp_path, monkeypatch
 ):
@@ -598,6 +617,7 @@ class _TimedOutStdoutRaises:
         raise AttributeError(name)
 
 
+@pytest.mark.unit
 def test_a_timed_out_response_that_could_not_be_built_keeps_its_timeout(
     tmp_path, monkeypatch
 ):
@@ -638,6 +658,7 @@ class _TimedOutReturncodeRaises:
         raise AttributeError(name)
 
 
+@pytest.mark.unit
 def test_a_timed_out_response_whose_code_is_unreadable_is_no_spawn_failure(
     tmp_path, monkeypatch
 ):
@@ -708,6 +729,7 @@ class _StoppedTimeoutWhoseStderrQuotesTheMarker:
         raise AttributeError(name)
 
 
+@pytest.mark.unit
 def test_a_could_not_stop_timeout_whose_error_is_unreadable_gets_no_124(
     tmp_path, monkeypatch
 ):
@@ -731,6 +753,7 @@ def test_a_could_not_stop_timeout_whose_error_is_unreadable_gets_no_124(
     assert scanner.scan_spawn_failure is None, scanner.scan_spawn_failure
 
 
+@pytest.mark.unit
 def test_tool_text_quoting_the_marker_does_not_drop_the_124(tmp_path, monkeypatch):
     """The converse. A stopped timeout keeps its own 124 even when the tool
     itself printed the marker's words to stderr: tool text is data, and only
@@ -755,6 +778,7 @@ class _Unprintable:
         raise RuntimeError("str() of the error failed")
 
 
+@pytest.mark.unit
 def test_a_post_run_error_whose_reason_cannot_be_read_stays_inside(
     tmp_path, monkeypatch
 ):
@@ -787,6 +811,7 @@ def test_a_post_run_error_whose_reason_cannot_be_read_stays_inside(
 
 
 @pytest.mark.parametrize("flag", [f for f in FLAGS if f != "none"])
+@pytest.mark.unit
 def test_run_tool_keeps_a_flagged_responses_flag_and_stderr(
     tmp_path, monkeypatch, flag
 ):
@@ -841,6 +866,7 @@ def _uv_scanner_with_a_real_child(tmp_path, monkeypatch):
     return scanner
 
 
+@pytest.mark.integration
 def test_a_uv_runner_that_raises_after_its_child_started_runs_nothing_again(
     tmp_path, monkeypatch
 ):
@@ -910,6 +936,7 @@ def _waiting_fails_once_the_stderr_was_read():
     return patch.object(subprocess.Popen, "communicate", communicate)
 
 
+@pytest.mark.integration
 def test_a_uv_launch_that_raised_during_a_failed_wait_keeps_the_stderr_read(
     tmp_path, monkeypatch
 ):
@@ -961,6 +988,7 @@ def _fake_uv_that_writes_both_streams(tmp_path) -> str:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the stand-in uv is a shell script")
+@pytest.mark.integration
 def test_a_uv_runner_that_raised_after_its_run_returned_keeps_that_runs_output(
     tmp_path, monkeypatch
 ):
@@ -1015,6 +1043,7 @@ def test_a_uv_runner_that_raised_after_its_run_returned_keeps_that_runs_output(
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_uv_launch_that_never_started_runs_nothing_in_its_place(
     tmp_path, monkeypatch, never_started, reason
 ):
@@ -1059,6 +1088,7 @@ def test_a_uv_launch_that_never_started_runs_nothing_in_its_place(
     assert reason in (response.get("error") or ""), response
 
 
+@pytest.mark.integration
 def test_a_uv_launch_that_never_started_is_not_read_from_a_probe_before_it(
     tmp_path, monkeypatch
 ):
@@ -1104,6 +1134,7 @@ def test_a_uv_launch_that_never_started_is_not_read_from_a_probe_before_it(
     assert "the tool's launch never started" in (response.get("error") or ""), response
 
 
+@pytest.mark.integration
 def test_a_probes_start_before_the_launch_does_not_grade_the_launch(
     tmp_path, monkeypatch
 ):
@@ -1167,6 +1198,7 @@ def test_a_probes_start_before_the_launch_does_not_grade_the_launch(
     assert "a pre-launch step broke" in (response.get("error") or ""), response
 
 
+@pytest.mark.unit
 def test_a_raising_values_hook_keeps_the_runners_verdict(tmp_path, monkeypatch):
     """The redaction values are the config's and the plugin's hook together,
     never the hook alone: a hook that raises adds nothing. Read directly in a
@@ -1215,6 +1247,7 @@ class _RefusesAttributes(Exception):
         raise AttributeError(f"{type(self).__name__} is frozen")
 
 
+@pytest.mark.unit
 def test_a_uv_launch_error_that_refuses_attributes_is_the_reason_given(
     tmp_path, monkeypatch
 ):
@@ -1261,6 +1294,7 @@ def _fake_uv(tmp_path) -> str:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the stand-in uv is a shell script")
+@pytest.mark.integration
 def test_a_uv_run_that_timed_out_writing_its_logs_runs_nothing_again(
     tmp_path, monkeypatch
 ):
@@ -1376,6 +1410,7 @@ class _SpawnFailsRedacted(ScannerPluginBase):
         return response
 
 
+@pytest.mark.unit
 def test_a_spawn_failure_headline_is_static_and_its_stderr_shows_once_redacted(
     tmp_path,
 ):
@@ -1418,6 +1453,7 @@ class _FlaggedResponseScanner(_SpawnFailsRedacted):
         ("signaled", "did not finish"),
     ],
 )
+@pytest.mark.unit
 def test_a_flagged_responses_raise_redacts_the_response_error(
     tmp_path, monkeypatch, flag, headline
 ):

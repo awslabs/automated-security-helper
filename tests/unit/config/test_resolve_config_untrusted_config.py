@@ -23,6 +23,8 @@ from automated_security_helper.utils.sandbox.policy import (
     build_scanner_policy,
 )
 
+pytestmark = pytest.mark.unit
+
 GRANTS_AND_OFF = (
     "project_name: uploaded\n"
     "sandbox:\n"

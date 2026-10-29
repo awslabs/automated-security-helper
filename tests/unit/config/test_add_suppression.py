@@ -18,6 +18,8 @@ from automated_security_helper.config.resolve_config import load_config_file
 from automated_security_helper.models.core import AshSuppression
 from tests.snapshot.support.cli import CONFIG_HOSTS, run_cli, simulated_host
 
+pytestmark = pytest.mark.unit
+
 
 def _future_date() -> str:
     return (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")

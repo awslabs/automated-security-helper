@@ -31,6 +31,8 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.workspace.aggregation import WorkspaceAggregator
 from automated_security_helper.workspace.plan import WorkspacePlan
 
+pytestmark = pytest.mark.unit
+
 REPORT_ID = re.compile(r"^ASH-(?P<stamp>\d{14})-(?P<token>[0-9a-f]{12})$")
 
 

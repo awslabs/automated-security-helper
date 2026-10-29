@@ -30,6 +30,8 @@ from tests.utils.mcp_transport_harness import (
     StreamableHttpClient,
 )
 
+pytestmark = pytest.mark.unit
+
 DAY = 24 * 3600
 
 

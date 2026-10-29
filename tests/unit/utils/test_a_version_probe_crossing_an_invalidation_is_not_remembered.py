@@ -30,6 +30,8 @@ from automated_security_helper.utils.uv_tool_runner import (
     invalidate_tool_version_cache,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolated_caches(monkeypatch):

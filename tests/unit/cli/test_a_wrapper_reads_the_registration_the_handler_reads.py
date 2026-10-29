@@ -27,6 +27,8 @@ from automated_security_helper.core.cancellation import (
     shutdown_scopes_registered,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def no_registrations(monkeypatch):

@@ -47,6 +47,8 @@ from tests.unit.interactions import (
 from tests.utils.helpers import checkout_env
 from tests.utils.isolated_tool_env import network_containment
 
+pytestmark = pytest.mark.integration
+
 #: Variables that point git at a repository whatever its working directory is.
 #: Left out of the child's environment unless a cell sets one.
 _GIT_LOCATION = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")

@@ -25,7 +25,11 @@ from __future__ import annotations
 import ast
 import inspect
 
+import pytest
+
 from automated_security_helper.interactions import run_ash_scan
+
+pytestmark = pytest.mark.unit
 
 
 def _body_of(function_name: str) -> list[ast.stmt]:

@@ -12,6 +12,8 @@ import importlib
 import sys
 from unittest.mock import patch
 
+import pytest
+
 import automated_security_helper.plugins as plugins_module
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
@@ -22,6 +24,8 @@ from tests.conftest import (
     _UV_TOOL_RUNNER_MODULE,
     _ProcessWideToolState,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_every_name_the_restore_looks_up_exists():

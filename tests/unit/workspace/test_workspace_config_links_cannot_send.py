@@ -30,6 +30,8 @@ from typing import Any, Optional
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 #: Turns the S3 upload on, to the repository's bucket.
 _PAYLOAD = "reporters:\n  s3:\n    enabled: true\n    options:\n      bucket_name: repo-bucket\n"
 

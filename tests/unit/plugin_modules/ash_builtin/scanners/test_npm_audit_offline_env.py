@@ -38,6 +38,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 from tests.utils.env_assertions import differing_names
 from tests.utils.npm_audit_reports import PNPM_CLEAN
 
+pytestmark = pytest.mark.unit
+
 
 def _scanner(context, *, offline: bool):
     scanner = NpmAuditScanner(

@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e"
 SCAN = ["scan", "--no-progress"]
 SECRET = "${ASH_PROBE_VALUE}"

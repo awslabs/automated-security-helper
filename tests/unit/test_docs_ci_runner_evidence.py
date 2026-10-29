@@ -99,6 +99,7 @@ def _aggregated(threshold: str | None = None) -> dict:
     return data
 
 
+@pytest.mark.unit
 def test_findings_are_counted_by_file_at_the_scan_s_threshold():
     by_file = _api("reports", "findings_by_file")
     assert by_file(_aggregated()) == {"app.py": 2, "changed.py": 1}, (
@@ -107,6 +108,7 @@ def test_findings_are_counted_by_file_at_the_scan_s_threshold():
     assert by_file(_aggregated("LOW")) == {"app.py": 3, "changed.py": 1}
 
 
+@pytest.mark.unit
 def test_findings_that_differ_from_the_expected_are_named(tmp_path):
     problems = _api("reports", "findings_problems")(
         [("ash_aggregated_results.json", _aggregated())],
@@ -124,6 +126,7 @@ def test_findings_that_differ_from_the_expected_are_named(tmp_path):
     assert _api("reports", "findings_problems")(two, {"app.py": 2, "changed.py": 1})
 
 
+@pytest.mark.unit
 def test_aggregated_results_are_found_in_a_tree_and_inside_a_zip(tmp_path):
     find = _api("reports", "aggregated_results_in")
     assert find(tmp_path) == []
@@ -143,6 +146,7 @@ def test_aggregated_results_are_found_in_a_tree_and_inside_a_zip(tmp_path):
     assert len(find(tmp_path / "zipped")) == 1
 
 
+@pytest.mark.unit
 @POSIX_ONLY
 def test_copies_of_reports_leave_symbolic_links_behind(tmp_path):
     source = tmp_path / "source"
@@ -236,6 +240,7 @@ def _called_workflows() -> dict:
     }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "text,expected",
     [
@@ -253,11 +258,13 @@ def test_a_job_that_gates_on_findings_fails_and_the_others_pass(text, expected):
     assert results == expected
 
 
+@pytest.mark.unit
 def test_load_workflow_keeps_the_on_key():
     document = _api("reports", "load_workflow")(STEPS_JOB)
     assert "on" in document and True not in document
 
 
+@pytest.mark.unit
 def test_the_artifacts_a_workflow_uploads_are_named_per_matrix_run():
     load = _api("reports", "load_workflow")
     names = _api("reports", "uploaded_artifact_names")
@@ -268,6 +275,7 @@ def test_the_artifacts_a_workflow_uploads_are_named_per_matrix_run():
     assert names([load(STEPS_JOB), load(scan)]) == ["ash_output"]
 
 
+@pytest.mark.unit
 def test_an_artifact_the_run_did_not_keep_is_reported(tmp_path):
     check = _api("reports", "artifact_problems")
     store = tmp_path / "artifacts" / "1"
@@ -292,6 +300,7 @@ def _act(job: str, msg: str, time: str, **fields) -> str:
     )
 
 
+@pytest.mark.unit
 def test_a_step_s_start_is_read_from_act_s_log():
     start = _api("verdict", "act_step_start")
     log = "\n".join(
@@ -309,6 +318,7 @@ def test_a_step_s_start_is_read_from_act_s_log():
     assert start(log, job="merge", step="Upload") is None
 
 
+@pytest.mark.unit
 def test_every_phase_of_a_codebuild_log_is_read():
     phases = _api("verdict", "codebuild_phase_states")
     log = (
@@ -320,6 +330,7 @@ def test_every_phase_of_a_codebuild_log_is_read():
     assert phases(log) == {"INSTALL": "FAILED", "UPLOAD_ARTIFACTS": "SUCCEEDED"}
 
 
+@pytest.mark.unit
 def test_an_upload_of_the_scan_s_own_sarif_passes_and_another_fails(tmp_path):
     check = _api("verdict", "stub_sarif_problems")
     sarif = tmp_path / "ash.ghas.sarif"
@@ -355,6 +366,7 @@ def _stub(name: str) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("name", sorted(STUBS))
 def test_each_stub_is_a_composite_action_that_calls_nothing_else(name):
     action = _stub(name)
@@ -416,6 +428,7 @@ def _records(directory: Path, prefix: str) -> list[dict]:
     ]
 
 
+@pytest.mark.integration
 @POSIX_ONLY
 def test_the_sarif_stub_records_the_file_it_was_given(tmp_path):
     workspace = tmp_path / "workspace"
@@ -435,6 +448,7 @@ def test_the_sarif_stub_records_the_file_it_was_given(tmp_path):
     assert record["sha256"] == hashlib.sha256(sarif.read_bytes()).hexdigest()
 
 
+@pytest.mark.integration
 @POSIX_ONLY
 @pytest.mark.parametrize(
     "content,path",
@@ -453,6 +467,7 @@ def test_the_sarif_stub_fails_where_the_real_upload_fails(tmp_path, content, pat
     assert _records(tmp_path / "records", "upload-sarif") == []
 
 
+@pytest.mark.integration
 @POSIX_ONLY
 def test_a_stub_run_outside_the_runner_tests_fails(tmp_path):
     workspace = tmp_path / "workspace"
@@ -462,6 +477,7 @@ def test_a_stub_run_outside_the_runner_tests_fails(tmp_path):
     assert code != 0
 
 
+@pytest.mark.integration
 @POSIX_ONLY
 def test_the_comment_stub_needs_its_message_file(tmp_path):
     code, _ = _run_stub(
@@ -497,6 +513,7 @@ def _junit(path: Path, failures: int, passed: int) -> None:
     path.write_text(f"<testsuites><testsuite>{cases}</testsuite></testsuites>", "utf-8")
 
 
+@pytest.mark.integration
 @POSIX_ONLY
 def test_the_check_run_stub_counts_the_tests_it_would_publish(tmp_path):
     _junit(tmp_path / "workspace" / ".ash" / "reports" / "ash.junit.xml", 2, 1)
@@ -511,6 +528,7 @@ def test_the_check_run_stub_counts_the_tests_it_would_publish(tmp_path):
     assert (record["tests"], record["failures"]) == (3, 2)
 
 
+@pytest.mark.integration
 @POSIX_ONLY
 @pytest.mark.parametrize(
     "inputs",
@@ -531,6 +549,7 @@ def test_the_check_run_stub_fails_where_the_real_action_fails(tmp_path, inputs):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_junit_check_compares_the_run_with_the_leg_s_census(tmp_path):
     problems = _api("check_junit", "census_problems")
     junit = tmp_path / "junit.xml"
@@ -556,6 +575,7 @@ RELEASE = (
 )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "runner,text,expected",
     [
@@ -586,6 +606,7 @@ def test_the_install_mechanism_is_read_from_the_block(runner, text, expected):
     assert _api("pipelines", "install_mechanism")(runner, text) == expected
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "kind,save_as,extends,expected",
     [
@@ -616,6 +637,7 @@ def test_each_block_is_saved_where_its_runner_reads_it(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_every_launch_gets_a_new_empty_home(tmp_path):
     fresh_home = _api("env", "fresh_home")
     first = fresh_home(tmp_path, "lint")

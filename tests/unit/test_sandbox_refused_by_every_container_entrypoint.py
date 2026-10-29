@@ -310,6 +310,7 @@ def _assert_sandbox_off(run_argv: List[str], is_a_scan: bool) -> None:
         assert "--sandbox" not in words, words
 
 
+@pytest.mark.integration
 class TestTheBashEntrypoint:
     pytestmark = _REQUIRES_BASH
 
@@ -987,6 +988,7 @@ _NIGHTLY = "project_name=Nightly scan report"
 _WEEKLY = "project_name=Weekly report summary"
 
 
+@pytest.mark.integration
 class TestThePowerShellEntrypoint:
     @pytest.mark.parametrize("words", _REFUSED, ids=" ".join)
     def test_refused_before_the_image_is_built(self, pwsh, tmp_path, words):
@@ -2042,6 +2044,7 @@ def _name_walk_refuses_a_directory_it_cannot_search(text: str) -> bool:
     )
 
 
+@pytest.mark.unit
 class TestThePowerShellConfigCarryAsText:
     """The ps1 carry of a config is pinned in the text, so no pwsh is needed."""
 
@@ -2282,6 +2285,7 @@ class TestThePowerShellConfigCarryAsText:
         assert not _name_is_resolved_as_written(mutant)
 
 
+@pytest.mark.unit
 class TestTheWrappersListsAreTheClis:
     """The wrappers' lists of commands and root options, checked against ash itself.
 
@@ -2346,6 +2350,7 @@ class TestTheWrappersListsAreTheClis:
         assert "sandbox" in {param.name for param in root.params}
 
 
+@pytest.mark.unit
 class TestThePowerShellRefusalAsText:
     """What the behavior tests above need pwsh to see, checked where pwsh is absent."""
 

@@ -18,6 +18,8 @@ from automated_security_helper.config.config_linter import (
 from automated_security_helper.config.config_validator import ConfigValidator
 from automated_security_helper.models.core import AshSuppression
 
+pytestmark = pytest.mark.unit
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)

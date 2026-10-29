@@ -17,6 +17,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 DEFAULT_PROJECT_NAME = AshConfig().project_name
 
 

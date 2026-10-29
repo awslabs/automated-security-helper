@@ -23,6 +23,8 @@ from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.config.resolve_config import resolve_config
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 SCANNERS = ["bandit", "grype", "syft"]
 
 

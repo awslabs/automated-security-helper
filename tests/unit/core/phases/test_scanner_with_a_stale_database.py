@@ -147,6 +147,7 @@ def _days_ago(days: int) -> datetime:
     return datetime.now(timezone.utc) - timedelta(days=days)
 
 
+@pytest.mark.unit
 def test_on_a_windows_host_the_grype_stand_in_is_a_launcher_on_a_readable_path(
     tmp_path, monkeypatch
 ):
@@ -181,6 +182,7 @@ def test_on_a_windows_host_the_grype_stand_in_is_a_launcher_on_a_readable_path(
     )
 
 
+@pytest.mark.integration
 def test_a_clean_result_from_a_stale_database_under_fail_is_an_error(
     layout, monkeypatch
 ):
@@ -196,6 +198,7 @@ def test_a_clean_result_from_a_stale_database_under_fail_is_an_error(
     assert any("stale" in str(error) for error in row.errors), row.errors
 
 
+@pytest.mark.integration
 def test_under_warn_the_operator_accepted_the_database(layout, monkeypatch):
     tmp_path, bin_dir, cache = layout
     _status_tool(bin_dir, _days_ago(40), cache)
@@ -205,6 +208,7 @@ def test_under_warn_the_operator_accepted_the_database(layout, monkeypatch):
     assert row.status == ScannerStatus.PASSED, row.status.value
 
 
+@pytest.mark.integration
 def test_findings_from_a_stale_database_are_failed(layout, monkeypatch):
     tmp_path, bin_dir, cache = layout
     _status_tool(bin_dir, _days_ago(40), cache)
@@ -214,6 +218,7 @@ def test_findings_from_a_stale_database_are_failed(layout, monkeypatch):
     assert row.status == ScannerStatus.FAILED, row.status.value
 
 
+@pytest.mark.integration
 def test_a_current_database_is_graded_on_findings(layout, monkeypatch):
     """Control: a database built an hour ago leaves the clean result PASSED."""
     tmp_path, bin_dir, cache = layout
@@ -299,6 +304,7 @@ def _as_read_back(results: AshAggregatedResults) -> AshAggregatedResults:
 
 
 @pytest.mark.parametrize("read_back", [False, True], ids=["in-memory", "from-disk"])
+@pytest.mark.integration
 def test_a_stale_database_error_is_reported_once(stale_error, read_back):
     from automated_security_helper.interactions.run_ash_scan import (
         scan_incompleteness,
@@ -322,6 +328,7 @@ def test_a_stale_database_error_is_reported_once(stale_error, read_back):
     assert len(payload["stale_content_databases"]) == 1, payload
 
 
+@pytest.mark.integration
 def test_the_console_gives_the_stale_database_advice_alone(stale_error, monkeypatch):
     import rich
     from rich.console import Console
@@ -352,6 +359,7 @@ def test_the_console_gives_the_stale_database_advice_alone(stale_error, monkeypa
     assert "no scanner ran" not in out, out
 
 
+@pytest.mark.integration
 def test_the_exit_code_comes_from_the_stale_arm(stale_error, tmp_path, caplog):
     import logging
 
@@ -371,6 +379,7 @@ def test_the_exit_code_comes_from_the_stale_arm(stale_error, tmp_path, caplog):
     assert "ran no scanners" not in logged, logged
 
 
+@pytest.mark.integration
 def test_the_workspace_layer_counts_it_as_having_run(stale_error):
     """What ``_scan_one_project`` writes into the outcome, through ``_coverage_fields``."""
     from automated_security_helper.workspace.execution import _coverage_fields
@@ -400,6 +409,7 @@ def _one_shard(results: AshAggregatedResults) -> AshAggregatedResults:
     return shard
 
 
+@pytest.mark.integration
 def test_merge_takes_the_shard_and_exits_one_on_staleness(stale_error, tmp_path):
     """As it did when the scanner was PASSED: merge, then exit 1 on staleness."""
     from automated_security_helper.cli.merge import merge_shard_results
@@ -429,6 +439,7 @@ def _drop_the_marker(results: AshAggregatedResults) -> AshAggregatedResults:
     return copy
 
 
+@pytest.mark.integration
 def test_a_scanner_in_error_for_another_reason_keeps_its_row(stale_error):
     """Control: only the stale-database ERROR is folded into the stale arm."""
     from automated_security_helper.interactions.run_ash_scan import (
@@ -444,6 +455,7 @@ def test_a_scanner_in_error_for_another_reason_keeps_its_row(stale_error):
     assert facts.no_scanner_ran is True
 
 
+@pytest.mark.integration
 def test_merge_refuses_a_shard_in_error_for_another_reason(stale_error):
     from automated_security_helper.cli.merge import merge_shard_results
     from automated_security_helper.core.exceptions import ShardCoverageError
@@ -485,6 +497,7 @@ def _with_the_database_record_not_enforced(results: AshAggregatedResults):
     return copy
 
 
+@pytest.mark.integration
 def test_every_error_target_must_name_a_rejected_database(stale_error):
     """Two targets, one an ERROR for another reason: the scanner keeps its row."""
     from automated_security_helper.interactions.run_ash_scan import (
@@ -503,6 +516,7 @@ def test_every_error_target_must_name_a_rejected_database(stale_error):
     assert facts.no_scanner_ran is True
 
 
+@pytest.mark.integration
 def test_merge_refuses_a_shard_whose_other_target_errored(stale_error):
     from automated_security_helper.cli.merge import merge_shard_results
     from automated_security_helper.core.exceptions import ShardCoverageError
@@ -519,6 +533,7 @@ def test_merge_refuses_a_shard_whose_other_target_errored(stale_error):
         )
 
 
+@pytest.mark.integration
 def test_the_marker_counts_only_with_an_enforced_record(stale_error):
     """A marker without a stale record the policy enforces does not fold the row."""
     from automated_security_helper.interactions.run_ash_scan import (
@@ -540,6 +555,7 @@ def test_the_marker_counts_only_with_an_enforced_record(stale_error):
     assert facts.no_scanner_ran is True
 
 
+@pytest.mark.integration
 def test_merge_refuses_a_shard_whose_marker_has_no_enforced_record(stale_error):
     from automated_security_helper.cli.merge import merge_shard_results
     from automated_security_helper.core.exceptions import ShardCoverageError
@@ -556,6 +572,7 @@ def test_merge_refuses_a_shard_whose_marker_has_no_enforced_record(stale_error):
         )
 
 
+@pytest.mark.integration
 def test_a_workspace_project_reports_the_stale_database_as_a_single_scan_does(
     stale_error,
 ):

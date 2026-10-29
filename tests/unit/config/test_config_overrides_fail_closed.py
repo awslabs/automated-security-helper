@@ -28,6 +28,8 @@ from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
+pytestmark = pytest.mark.unit
+
 
 class TestMalformedOverridesRefused:
     """An override string that is not 'key.path=value' is refused."""

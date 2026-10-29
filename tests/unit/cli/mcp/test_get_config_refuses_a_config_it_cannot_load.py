@@ -34,6 +34,8 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 BAD_YAML = "project_name: [unclosed\nglobal_settings: {\n"
 BAD_JSON = '{"project_name": "x",\n'

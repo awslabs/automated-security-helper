@@ -43,6 +43,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_re
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 BedrockSummaryReporterConfig.model_rebuild()
 BedrockSummaryReporter.model_rebuild()

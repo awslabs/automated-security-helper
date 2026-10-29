@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def test_an_environment_only_refused_entry_renders_the_unset_remedy():
     """Drives the real judge, ``refuse_plugin_modules_a_scan_refuses``, with a

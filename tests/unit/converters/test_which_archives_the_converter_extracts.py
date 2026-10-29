@@ -27,6 +27,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters import (
     archive_converter,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _zip_bytes() -> bytes:
     buffer = io.BytesIO()

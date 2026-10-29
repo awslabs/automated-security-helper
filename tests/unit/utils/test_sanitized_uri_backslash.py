@@ -43,6 +43,8 @@ from automated_security_helper.workspace.aggregation import (
     to_workspace_uri,
 )
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 posix_only = pytest.mark.skipif(

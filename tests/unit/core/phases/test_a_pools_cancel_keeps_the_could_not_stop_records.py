@@ -25,6 +25,8 @@ from automated_security_helper.core.cancellation import ScanCancelled, cancel_sc
 from automated_security_helper.core.phases import scanner_executor as module
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 
+pytestmark = pytest.mark.unit
+
 WAIT_BOUND_SECONDS = 5.0
 
 #: Past the kernel's pid space, so the record can never name a real process.

@@ -30,9 +30,12 @@ import pytest
 from automated_security_helper.interactions import container_leftovers
 from automated_security_helper.utils.log import ASH_LOGGER
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the runtime stub is a POSIX shell script"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="the runtime stub is a POSIX shell script"
+    ),
+]
 
 
 class _Stop(Exception):

@@ -33,6 +33,8 @@ from automated_security_helper.utils.get_scan_set import (
     git_repository_root,
 )
 
+pytestmark = pytest.mark.integration
+
 # Built with chr() so the source file stays ASCII.
 NAIVE = f"na{chr(0xEF)}ve.py"
 

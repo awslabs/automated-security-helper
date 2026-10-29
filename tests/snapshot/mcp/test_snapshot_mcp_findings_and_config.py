@@ -29,6 +29,8 @@ from tests.snapshot.mcp.mcp_snapshot_support import (
     write_results,
 )
 
+pytestmark = pytest.mark.unit
+
 
 async def _call(tool: str, *args, **kwargs) -> Dict[str, Any]:
     """Call a tool; a Context, if the tool takes one, is passed positionally.

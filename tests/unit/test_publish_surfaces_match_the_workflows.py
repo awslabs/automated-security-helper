@@ -60,11 +60,13 @@ def surfaces() -> ModuleType:
     return module
 
 
+@pytest.mark.integration
 def test_the_self_test_passes():
     proc = _run("--self-test")
     assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-2000:]
 
 
+@pytest.mark.integration
 def test_every_upload_and_cache_matches_an_allowlist_entry():
     proc = _run()
     assert proc.returncode == 0, (
@@ -75,6 +77,7 @@ def test_every_upload_and_cache_matches_an_allowlist_entry():
     assert "OK: all" in proc.stdout, proc.stdout[-2000:]
 
 
+@pytest.mark.unit
 def test_a_missing_entry_is_reported(surfaces):
     found = surfaces.scan_tree(surfaces.GITHUB_DIR)
     assert any(site.surface.file == SCAN_WORKFLOW for site in found), (

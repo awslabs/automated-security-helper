@@ -79,6 +79,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COUNTER_PATH = (
     REPO_ROOT / ".github" / "actions" / "run-scan-test" / "count_scanner_errors.py"

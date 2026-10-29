@@ -105,6 +105,7 @@ def _installed_tools(tmp_path, steps: list[dict[str, Any]]) -> list[tuple[int, s
     return tools
 
 
+@pytest.mark.integration
 def test_bandit_is_installed_before_the_suite_runs(tmp_path):
     _, job = _job()
     steps = job.get("steps") or []
@@ -120,6 +121,7 @@ def test_bandit_is_installed_before_the_suite_runs(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_the_suite_step_sees_the_uv_tool_directory():
     _, job = _job()
     steps = job.get("steps") or []
@@ -136,6 +138,7 @@ def test_the_suite_step_sees_the_uv_tool_directory():
     assert "GITHUB_PATH" not in script
 
 
+@pytest.mark.integration
 def test_the_suite_requires_every_tool_the_job_preinstalls(tmp_path):
     _, job = _job()
     steps = job.get("steps") or []
@@ -149,6 +152,7 @@ def test_the_suite_requires_every_tool_the_job_preinstalls(tmp_path):
     )
 
 
+@pytest.mark.unit
 class TestTheScannerInstallingBanditFailsTheRun:
     """Drive bandit's real install path on a machine where bandit is not installed."""
 
@@ -208,6 +212,7 @@ class TestTheScannerInstallingBanditFailsTheRun:
         assert [n for n in self.installs if n.startswith("bandit")], self.installs
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("available", "expected"),
     [(False, ["bandit"]), (True, [])],

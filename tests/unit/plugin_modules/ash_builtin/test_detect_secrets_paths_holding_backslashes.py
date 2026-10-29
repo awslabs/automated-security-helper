@@ -73,7 +73,7 @@ LAYOUTS = {
 # is_uv_available and get_tool_version alone left the dependency check's own probe,
 # ``uv tool run detect-secrets --version``, which started the tool in every test here;
 # no_tool_probes (tests/unit/conftest.py) answers that one too.
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_tool_probes")]
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:

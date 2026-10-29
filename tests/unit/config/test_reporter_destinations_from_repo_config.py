@@ -106,6 +106,7 @@ def _options(config, key: str) -> dict:
 
 
 @pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+@pytest.mark.unit
 def test_an_in_tree_config_does_not_choose_a_reporters_destination(
     tmp_path, ash_log, reporter
 ):
@@ -126,6 +127,7 @@ def test_an_in_tree_config_does_not_choose_a_reporters_destination(
 
 
 @pytest.mark.parametrize("name", ["archive_resolved_findings", "findings_scope"])
+@pytest.mark.unit
 def test_security_hubs_import_scope_and_archiving_are_the_operators(
     tmp_path, ash_log, name
 ):
@@ -168,6 +170,7 @@ _BEDROCK_CONTENT = {
 
 
 @pytest.mark.parametrize("name", sorted(_BEDROCK_CONTENT))
+@pytest.mark.unit
 def test_a_repository_config_does_not_choose_what_bedrock_is_sent(
     tmp_path, ash_log, name
 ):
@@ -189,6 +192,7 @@ def test_a_repository_config_does_not_choose_what_bedrock_is_sent(
     "section",
     ["bedrock-summary-reporter", "BedrockSummary", "bedrock_summary_reporter"],
 )
+@pytest.mark.unit
 def test_a_hyphenated_spelling_of_a_bedrock_option_is_ignored_too(
     tmp_path, ash_log, name, section
 ):
@@ -209,6 +213,7 @@ def test_a_hyphenated_spelling_of_a_bedrock_option_is_ignored_too(
 
 
 @pytest.mark.parametrize("name", sorted(_BEDROCK_CONTENT))
+@pytest.mark.unit
 def test_a_repository_config_repeating_the_operators_bedrock_content_applies(
     tmp_path, ash_log, name
 ):
@@ -235,6 +240,7 @@ _RETRY_CASES = [(r, n) for r in _RETRYING for n in _RETRY_OPTIONS]
 @pytest.mark.parametrize(
     "reporter,name", _RETRY_CASES, ids=[f"{r}.{n}" for r, n in _RETRY_CASES]
 )
+@pytest.mark.unit
 def test_a_repository_config_does_not_tune_a_reporters_retries(
     tmp_path, ash_log, reporter, name
 ):
@@ -259,6 +265,7 @@ _TABLE_CASES = [
 @pytest.mark.parametrize(
     "reporter,name", _TABLE_CASES, ids=[f"{r}.{n}" for r, n in _TABLE_CASES]
 )
+@pytest.mark.unit
 def test_a_repository_config_repeating_the_operators_value_applies(
     tmp_path, ash_log, reporter, name
 ):
@@ -300,6 +307,7 @@ def test_a_repository_config_repeating_the_operators_value_applies(
 @pytest.mark.parametrize(
     "spelling", ["BedrockSummary", "bedrocksummaryreporter", "Bedrock_Summary_Reporter"]
 )
+@pytest.mark.unit
 def test_another_spelling_of_the_reporters_section_is_covered(
     tmp_path, ash_log, spelling
 ):
@@ -318,6 +326,7 @@ def test_another_spelling_of_the_reporters_section_is_covered(
     assert any("aws_region" in message for message in _warnings(ash_log))
 
 
+@pytest.mark.unit
 def test_other_reporter_options_in_the_tree_still_apply(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
@@ -342,6 +351,7 @@ def test_other_reporter_options_in_the_tree_still_apply(tmp_path, ash_log):
     assert config.reporters.markdown.options.compact is True
 
 
+@pytest.mark.unit
 def test_no_warning_when_the_tree_sets_no_destination(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
@@ -353,6 +363,7 @@ def test_no_warning_when_the_tree_sets_no_destination(tmp_path, ash_log):
     assert not any("reporters." in message for message in _warnings(ash_log))
 
 
+@pytest.mark.unit
 def test_an_operator_config_outside_the_tree_is_honored(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
@@ -370,6 +381,7 @@ def test_an_operator_config_outside_the_tree_is_honored(tmp_path, ash_log):
     assert not _warnings(ash_log)
 
 
+@pytest.mark.unit
 def test_an_operator_default_config_replaced_by_the_tree_supplies_the_value(
     tmp_path, ash_log
 ):
@@ -391,6 +403,7 @@ def test_an_operator_default_config_replaced_by_the_tree_supplies_the_value(
     assert _options(config, "s3")["bucket_name"] == "operator-bucket"
 
 
+@pytest.mark.unit
 def test_config_overrides_are_honored(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
@@ -424,6 +437,7 @@ def _operator_off(tmp_path: Path, reporter: str) -> Path:
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_an_in_tree_config_does_not_turn_on_a_reporter_the_operator_turned_off(
     tmp_path, ash_log, reporter
 ):
@@ -445,6 +459,7 @@ def test_an_in_tree_config_does_not_turn_on_a_reporter_the_operator_turned_off(
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_an_in_tree_config_that_leaves_the_reporter_out_keeps_it_off(
     tmp_path, ash_log, reporter
 ):
@@ -473,6 +488,7 @@ def _ops_config(where: Path) -> Path:
     )
 
 
+@pytest.mark.unit
 def test_an_ash_config_in_another_checkout_neither_turns_on_nor_points_a_reporter(
     tmp_path, ash_log, monkeypatch
 ):
@@ -501,6 +517,7 @@ def test_an_ash_config_in_another_checkout_neither_turns_on_nor_points_a_reporte
     assert named[0].endswith(KEEP_A_SETTING), named[0]
 
 
+@pytest.mark.unit
 def test_control_the_same_ash_config_outside_every_checkout_is_the_operators(
     tmp_path, ash_log, monkeypatch
 ):
@@ -515,6 +532,7 @@ def test_control_the_same_ash_config_outside_every_checkout_is_the_operators(
     assert not [m for m in _warnings(ash_log) if "reporters.s3." in m]
 
 
+@pytest.mark.unit
 def test_the_operators_ash_config_turning_one_off_holds_too(
     tmp_path, ash_log, monkeypatch
 ):
@@ -531,6 +549,7 @@ def test_the_operators_ash_config_turning_one_off_holds_too(
 
 @pytest.mark.parametrize("operator", ["defaults", "operator-on"])
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_an_in_tree_config_cannot_turn_one_off(tmp_path, ash_log, reporter, operator):
     """Whether it runs is the operator's in both directions, so the tree's
     ``enabled: false`` is ignored with a warning, as its ``true`` is. Each of
@@ -557,6 +576,7 @@ def test_an_in_tree_config_cannot_turn_one_off(tmp_path, ash_log, reporter, oper
 
 
 @pytest.mark.parametrize("value", [0, "no", "false"])
+@pytest.mark.unit
 def test_a_tree_enabled_read_as_false_is_confined_too(tmp_path, ash_log, value):
     """Not only ``false`` itself: any value the reporter reads as off is the tree's
     choice too, and is ignored with a warning where the operator has it on."""
@@ -574,6 +594,7 @@ def test_a_tree_enabled_read_as_false_is_confined_too(tmp_path, ash_log, value):
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_a_tree_repeating_the_operators_off_is_not_warned(tmp_path, ash_log, reporter):
     """``enabled: false`` where the operator has the reporter off changes nothing."""
     source = tmp_path / "repo"
@@ -592,6 +613,7 @@ def test_a_tree_repeating_the_operators_off_is_not_warned(tmp_path, ash_log, rep
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_an_override_turns_one_off(tmp_path, ash_log, reporter):
     """``--config-overrides`` are the operator's, in both directions."""
     source = tmp_path / "repo"
@@ -611,6 +633,7 @@ def test_an_override_turns_one_off(tmp_path, ash_log, reporter):
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_enabled_true_where_the_operator_has_it_on_changes_nothing(
     tmp_path, ash_log, reporter
 ):
@@ -634,6 +657,7 @@ def test_enabled_true_where_the_operator_has_it_on_changes_nothing(
     [None, {"options": {"file_format": "yaml"}}],
     ids=["absent", "no-enabled"],
 )
+@pytest.mark.unit
 def test_a_reporter_off_by_its_default_gets_no_section_added(section):
     """Nothing is written for a reporter the config already leaves off."""
     from automated_security_helper.config.ash_config import AshConfig
@@ -651,6 +675,7 @@ def test_a_reporter_off_by_its_default_gets_no_section_added(section):
 
 
 @pytest.mark.parametrize("trusted_value", ["no", 0, "false"])
+@pytest.mark.unit
 def test_an_operator_off_written_another_way_still_counts(tmp_path, trusted_value):
     """The operator's value is read as the reporter's model reads it."""
     source = tmp_path / "repo"
@@ -679,6 +704,7 @@ def defaults_off(monkeypatch):
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_off_by_default_an_in_tree_config_cannot_enable_it(
     tmp_path, ash_log, defaults_off, reporter
 ):
@@ -694,6 +720,7 @@ def test_off_by_default_an_in_tree_config_cannot_enable_it(
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_off_by_default_a_delivered_config_cannot_enable_it(
     tmp_path, ash_log, defaults_off, reporter
 ):
@@ -757,12 +784,14 @@ def _narrow_client_rules():
     )
 
 
+@pytest.mark.unit
 def test_every_off_host_reporter_has_an_options_only_section():
     assert set(_OPTIONS_ONLY) == set(REPORTER_ENABLED_DEFAULTS)
 
 
 @pytest.mark.parametrize("route", ["tree", "delivered"])
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+@pytest.mark.unit
 def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_off(
     tmp_path, ash_log, reporter, route
 ):
@@ -839,6 +868,7 @@ print(json.dumps({
 """
 
 
+@pytest.mark.integration
 def test_off_by_their_models_default_the_loaded_reporters_stay_off(tmp_path):
     """Once the plugin package is loaded, its models' own defaults decide."""
     names = sorted(REPORTER_ENABLED_DEFAULTS)
@@ -866,6 +896,7 @@ def test_off_by_their_models_default_the_loaded_reporters_stay_off(tmp_path):
     assert enabled == dict.fromkeys(names, False), enabled
 
 
+@pytest.mark.unit
 def test_the_example_values_cover_the_table():
     """An option added to the table gets a value above without another edit."""
     assert {r: set(v) for r, v in REPO_VALUES.items()} == {
@@ -873,6 +904,7 @@ def test_the_example_values_cover_the_table():
     }
 
 
+@pytest.mark.unit
 def test_every_operator_only_reporter_setting_is_a_default_denied_path():
     """Under the MCP server a delivered file that sets one is refused."""
     from automated_security_helper.config.ash_config import RuntimeOverridesConfig
@@ -892,6 +924,7 @@ def test_every_operator_only_reporter_setting_is_a_default_denied_path():
     assert not uncovered
 
 
+@pytest.mark.unit
 def test_an_override_turns_one_on(tmp_path, ash_log):
     source = tmp_path / "repo"
     project = _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": False}})
@@ -907,6 +940,7 @@ def test_an_override_turns_one_on(tmp_path, ash_log):
     assert not any("enabled" in message for message in _warnings(ash_log))
 
 
+@pytest.mark.unit
 def test_a_base_the_tree_extends_sets_no_destination_either(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
@@ -921,6 +955,7 @@ def test_a_base_the_tree_extends_sets_no_destination_either(tmp_path, ash_log):
     assert any("bucket_name" in message for message in _warnings(ash_log))
 
 
+@pytest.mark.unit
 def test_a_config_inside_the_checkout_but_outside_the_source_dir(tmp_path, ash_log):
     """CLI scan of a directory in a checkout: the tree is the whole checkout."""
     checkout = tmp_path / "checkout"
@@ -939,6 +974,7 @@ def test_a_config_inside_the_checkout_but_outside_the_source_dir(tmp_path, ash_l
     )
 
 
+@pytest.mark.unit
 def test_an_uploaded_config_is_covered(tmp_path, ash_log):
     upload = _write_config(
         tmp_path / "upload" / "ash.yaml",
@@ -1073,6 +1109,7 @@ def reporter_fields(tmp_path_factory):
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
+@pytest.mark.integration
 def test_every_destination_like_option_of_a_built_in_reporter_is_listed(
     reporter_fields,
 ):
@@ -1110,6 +1147,7 @@ def test_every_destination_like_option_of_a_built_in_reporter_is_listed(
     )
 
 
+@pytest.mark.integration
 def test_each_built_in_reporter_declares_the_options_listed_for_it(reporter_fields):
     """The table covers a reporter before its plugin package is imported, and the
     declaration after; the two must not drift apart."""
@@ -1133,6 +1171,7 @@ def test_each_built_in_reporter_declares_the_options_listed_for_it(reporter_fiel
     assert set(REPORTER_DESTINATION_OPTIONS) <= set(declared)
 
 
+@pytest.mark.integration
 def test_every_retry_option_of_an_off_host_reporter_is_listed(reporter_fields):
     """A reporter that gains retry options has to list them as the operator's."""
     unlisted = [
@@ -1152,6 +1191,7 @@ def test_every_retry_option_of_an_off_host_reporter_is_listed(reporter_fields):
     } == set(_RETRYING)
 
 
+@pytest.mark.integration
 def test_each_off_host_reporters_enabled_default_is_listed(reporter_fields):
     """A reporter's ``enabled`` is confined against its own default, which the
     table gives before its plugin package is imported."""
@@ -1165,6 +1205,7 @@ def test_each_off_host_reporters_enabled_default_is_listed(reporter_fields):
         assert set(reporter_fields[reporter]["enabled_defaults"]) == {default}, reporter
 
 
+@pytest.mark.integration
 def test_no_listed_option_has_an_alias(reporter_fields):
     """reporter_trust matches the options by field name, as written in the config."""
     from automated_security_helper.config.reporter_trust import (
@@ -1211,6 +1252,7 @@ _OPEN_OFF_HOST_OPTIONS: Dict[Tuple[str, str], str] = {
 }
 
 
+@pytest.mark.integration
 def test_every_option_of_an_off_host_reporter_is_classified(reporter_fields):
     """A new option fails here until it is made the operator's or listed as open."""
     unclassified = [
@@ -1231,6 +1273,7 @@ def test_every_option_of_an_off_host_reporter_is_classified(reporter_fields):
     assert not stale
 
 
+@pytest.mark.unit
 def test_every_off_host_reporter_is_denied_to_a_client_as_a_whole_section():
     """So a client can neither turn one on nor configure it, and an option added
     later is denied before anyone lists it. A client's ``enabled: false`` is still
@@ -1251,6 +1294,7 @@ def test_every_off_host_reporter_is_denied_to_a_client_as_a_whole_section():
     assert not any(_names(e, "/reporters/sarif/enabled") for e in shipped)
 
 
+@pytest.mark.integration
 def test_every_section_level_field_is_reviewed(reporter_fields):
     unreviewed = {
         reporter: sorted(set(fields["section"]) - _REVIEWED_SECTION_FIELDS)
@@ -1260,6 +1304,7 @@ def test_every_section_level_field_is_reviewed(reporter_fields):
     assert not unreviewed
 
 
+@pytest.mark.integration
 def test_every_reporter_refuses_a_path_in_its_extension(reporter_fields):
     accepting = sorted(
         reporter
@@ -1269,6 +1314,7 @@ def test_every_reporter_refuses_a_path_in_its_extension(reporter_fields):
     assert not accepting
 
 
+@pytest.mark.integration
 def test_the_field_walker_sees_unions_nested_models_and_aliases(tmp_path):
     """The dump above walks what a future options model might use."""
     probe = _DUMP_REPORTER_FIELDS.split("out = {}")[0] + (

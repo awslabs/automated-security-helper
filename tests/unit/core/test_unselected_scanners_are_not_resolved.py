@@ -25,6 +25,8 @@ import pytest
 
 from automated_security_helper.core.enums import ExecutionStrategy
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def probes(monkeypatch, tmp_path):

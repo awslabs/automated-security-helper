@@ -39,6 +39,8 @@ from tests.unit.base.test_scanner_plugin_coverage import (
     _scanner,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Long enough that redaction replaces it anywhere, so these cells measure the
 #: sink, not the band a short value falls in.
 SETTINGS_CANARY = "/nonexistent/ENVCANARY-77aa/settings.yaml"

@@ -34,6 +34,8 @@ from tests.utils.stand_in_uv import (
 )
 from tests.utils.tool_guard import CHILD_TRIVY_PROBE_STUBS
 
+pytestmark = pytest.mark.integration
+
 BROKEN = "zq8broken_ash_plugins"
 DEPENDENCY = "zq8dep_pkg"
 GOOD = "zq8good_ash_plugins"

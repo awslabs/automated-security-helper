@@ -75,6 +75,7 @@ def _plant(state: Path, pid: int, host: Any) -> Path:
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+@pytest.mark.unit
 def test_linux_names_the_boot_and_the_pid_namespace():
     key = container_leftovers.host_key()
 
@@ -85,6 +86,7 @@ def test_linux_names_the_boot_and_the_pid_namespace():
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+@pytest.mark.integration
 def test_a_record_from_another_pid_namespace_is_left_alone(state, tmp_path, dead_pid):
     stub = _stub(tmp_path)
     boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
@@ -96,6 +98,7 @@ def test_a_record_from_another_pid_namespace_is_left_alone(state, tmp_path, dead
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+@pytest.mark.integration
 def test_an_unreadable_boot_id_gives_no_key_and_the_sweep_skips(
     state, tmp_path, dead_pid, monkeypatch
 ):
@@ -110,6 +113,7 @@ def test_an_unreadable_boot_id_gives_no_key_and_the_sweep_skips(
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+@pytest.mark.integration
 def test_a_record_written_with_no_key_matches_no_host_even_one_with_no_key(
     state, tmp_path, dead_pid, monkeypatch
 ):
@@ -125,12 +129,14 @@ def test_a_record_written_with_no_key_matches_no_host_even_one_with_no_key(
     assert path.exists()
 
 
+@pytest.mark.unit
 def test_a_platform_with_no_identity_has_no_key(monkeypatch):
     monkeypatch.setattr(sys, "platform", "freebsd14")
 
     assert container_leftovers.host_key() is None
 
 
+@pytest.mark.unit
 def test_macos_names_its_boot_session(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(container_leftovers, "_macos_scope", lambda: "darwin:SESSION")
@@ -138,6 +144,7 @@ def test_macos_names_its_boot_session(monkeypatch):
     assert container_leftovers.host_key() == "darwin:SESSION"
 
 
+@pytest.mark.unit
 def test_a_macos_boot_session_that_cannot_be_read_gives_no_key(monkeypatch):
     import ctypes
 

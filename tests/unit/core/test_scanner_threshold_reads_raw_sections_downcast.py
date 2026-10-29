@@ -18,11 +18,15 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.utils.redacted_model import env_resolved_scalar
+
+pytestmark = pytest.mark.unit
 
 VARIABLE = "ASH_F35_SEV"
 

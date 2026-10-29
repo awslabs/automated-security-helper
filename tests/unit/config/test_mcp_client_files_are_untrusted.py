@@ -23,6 +23,8 @@ from automated_security_helper.config.path_trust import (
 from automated_security_helper.config.plugin_module_trust import refusal_reason
 from automated_security_helper.config.resolve_config import resolve_config
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):

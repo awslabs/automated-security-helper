@@ -14,7 +14,11 @@ refused and drops what a more verbose one asked for.
 
 import logging
 
+import pytest
+
 from automated_security_helper.utils import log as ash_log
+
+pytestmark = pytest.mark.unit
 
 
 class _Recording(logging.Handler):

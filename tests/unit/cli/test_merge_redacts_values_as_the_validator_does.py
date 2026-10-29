@@ -12,8 +12,12 @@ stores a value in once it is stripped.
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.cli import merge
 from automated_security_helper.config.config_validator import redact_values
+
+pytestmark = pytest.mark.unit
 
 
 def test_overlapping_values_leave_no_part_behind():

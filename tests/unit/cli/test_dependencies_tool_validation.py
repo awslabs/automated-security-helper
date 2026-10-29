@@ -30,6 +30,8 @@ from automated_security_helper.cli.dependencies import (
 )
 from automated_security_helper.utils import uv_tool_runner
 
+pytestmark = pytest.mark.unit
+
 runner = CliRunner()
 
 

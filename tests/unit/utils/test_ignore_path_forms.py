@@ -62,6 +62,8 @@ from automated_security_helper.utils.suppression_matcher import (
     ignore_path_matches,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 #: What the warning about a path that names a directory says.

@@ -26,6 +26,8 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 SNYK_CODE = "snyk-code"

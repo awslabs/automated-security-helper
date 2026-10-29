@@ -32,6 +32,8 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils
 
+pytestmark = pytest.mark.unit
+
 #: One PATH both cells pin, so the planted key and the reader's lookup key
 #: are equal; without this the keys differ and the reader is vacuously green.
 _PINNED_PATH = "/usr/bin:/bin"

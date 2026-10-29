@@ -33,6 +33,8 @@ from automated_security_helper.utils.scan_output_dirs import (
 from tests.unit.test_committed_output_refused_at_entry_points import _repo
 from tests.unit.workspace.test_execution import _git
 
+pytestmark = pytest.mark.integration
+
 
 @contextlib.contextmanager
 def _platform(name: str):

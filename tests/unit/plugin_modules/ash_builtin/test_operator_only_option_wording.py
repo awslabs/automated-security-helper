@@ -40,6 +40,8 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins import (
 )
 from automated_security_helper.utils import config_trust
 
+pytestmark = pytest.mark.unit
+
 #: The narrower rule, as a config's place.
 NARROWER = re.compile(r"config files? outside the (scanned )?tree")
 

@@ -115,12 +115,14 @@ def scanner(plugin_context):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_scanner_metadata_is_wired(scanner):
     assert scanner.command == "detect-secrets"
     assert scanner.tool_type == ScannerToolType.SECRETS
     assert scanner.tool_version, "the installed detect-secrets version must be recorded"
 
 
+@pytest.mark.unit
 def test_dependencies_are_always_satisfied_because_the_import_succeeded(scanner):
     """detect-secrets is used in-process, so the import is the only requirement."""
     assert scanner.validate_plugin_dependencies() is True
@@ -129,6 +131,7 @@ def test_dependencies_are_always_satisfied_because_the_import_succeeded(scanner)
 _COMMIT = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 
 
+@pytest.mark.unit
 def test_missing_library_log_line_prints_a_bracketed_path_as_is(
     plugin_context, monkeypatch, tmp_path
 ):
@@ -198,6 +201,7 @@ def test_missing_library_log_line_prints_a_bracketed_path_as_is(
     ],
     ids=["git-install-pins-its-commit", "editable-names-its-directory", "no-record"],
 )
+@pytest.mark.unit
 def test_missing_library_reason_names_installs_that_resolve_to_ash(
     plugin_context, monkeypatch, tmp_path, direct_url, reinstall
 ):
@@ -247,6 +251,7 @@ def test_missing_library_reason_names_installs_that_resolve_to_ash(
     assert shlex.split(commands[1]) == [*uv_pip, "detect-secrets"], reason
 
 
+@pytest.mark.unit
 def test_default_config_enables_every_detect_secrets_plugin(scanner):
     """With no baseline, all detect-secrets plugins are configured."""
     plugins = scanner.config.options.scan_settings.plugins_used
@@ -259,6 +264,7 @@ def test_default_config_enables_every_detect_secrets_plugin(scanner):
     assert "Base64HighEntropyString" in names
 
 
+@pytest.mark.unit
 def test_execute_scan_stub_raises_not_implemented(scanner):
     with pytest.raises(NotImplementedError, match="overrides scan"):
         scanner._execute_scan(
@@ -276,6 +282,7 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 @pytest.mark.parametrize(
     "baseline_name", [".secrets.baseline", ".ash/.secrets.baseline"]
 )
+@pytest.mark.unit
 def test_baseline_is_discovered_in_the_source_directory(
     plugin_context, tmp_path, monkeypatch, baseline_name
 ):
@@ -297,6 +304,7 @@ def test_baseline_is_discovered_in_the_source_directory(
     assert scanner._baseline_file_path() == baseline.resolve()
 
 
+@pytest.mark.unit
 def test_a_baseline_in_the_working_directory_is_not_the_scans(
     plugin_context, tmp_path, monkeypatch
 ):
@@ -315,6 +323,7 @@ def test_a_baseline_in_the_working_directory_is_not_the_scans(
     assert scanner.config.options.baseline_file is None
 
 
+@pytest.mark.unit
 def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
     plugin_context, tmp_path, monkeypatch
 ):
@@ -349,6 +358,7 @@ def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
     ]
 
 
+@pytest.mark.unit
 def test_explicitly_configured_baseline_wins_over_the_defaults(
     plugin_context, tmp_path, monkeypatch
 ):
@@ -370,6 +380,7 @@ def test_explicitly_configured_baseline_wins_over_the_defaults(
     assert Path(scanner.config.options.baseline_file) == chosen
 
 
+@pytest.mark.unit
 def test_a_found_configured_baseline_leaves_the_option_as_written(
     plugin_context, tmp_path, monkeypatch
 ):
@@ -397,6 +408,7 @@ def test_a_found_configured_baseline_leaves_the_option_as_written(
     ]
 
 
+@pytest.mark.unit
 def test_no_baseline_anywhere_leaves_baseline_file_unset(
     plugin_context, tmp_path, monkeypatch
 ):
@@ -414,6 +426,7 @@ def test_no_baseline_anywhere_leaves_baseline_file_unset(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
     plugin_context, tmp_path, monkeypatch
 ):
@@ -445,6 +458,7 @@ def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
     assert filter_paths == [EXCLUDE_FILTER_PATH]
 
 
+@pytest.mark.unit
 def test_explicit_scan_settings_are_not_overwritten_by_the_baseline(
     plugin_context, tmp_path, monkeypatch
 ):
@@ -475,6 +489,7 @@ def test_explicit_scan_settings_are_not_overwritten_by_the_baseline(
     )
 
 
+@pytest.mark.unit
 def test_baseline_without_plugins_or_filters_falls_back_to_all_plugins(
     plugin_context, tmp_path, monkeypatch
 ):
@@ -491,6 +506,7 @@ def test_baseline_without_plugins_or_filters_falls_back_to_all_plugins(
     assert len(scanner.config.options.scan_settings.plugins_used) > 10
 
 
+@pytest.mark.unit
 def test_unreadable_baseline_warns_and_falls_back_to_defaults(
     plugin_context, tmp_path, monkeypatch, caplog
 ):
@@ -513,6 +529,7 @@ def test_unreadable_baseline_warns_and_falls_back_to_defaults(
     assert len(scanner.config.options.scan_settings.plugins_used) > 10
 
 
+@pytest.mark.unit
 def test_missing_configured_baseline_warns_and_falls_back(
     plugin_context, tmp_path, monkeypatch, caplog
 ):
@@ -552,6 +569,7 @@ def test_missing_configured_baseline_warns_and_falls_back(
         ("refused", "_configured_baseline_refused", "_configured_baseline_missing"),
     ],
 )
+@pytest.mark.unit
 def test_processing_options_again_forgets_an_earlier_baseline_decision(
     tmp_path, monkeypatch, first_pass, flag, other_flag
 ):
@@ -563,6 +581,13 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
     monkeypatch.chdir(tmp_path)
     source = tmp_path / "repo"
     (source / ".ash").mkdir(parents=True)
+    # The repository writes a config of its own. Without one no operator view
+    # is recorded, and operator_wrote_value then reads every value as the
+    # operator's (config/operator_only_options.py), so a derived work product
+    # named by the configured value would not be refused.
+    (source / ".ash" / ".ash.yaml").write_text(
+        "project_name: repository\n", encoding="utf-8"
+    )
     output = tmp_path / "out"
     work = output / ASH_WORK_DIR_NAME
     work.mkdir(parents=True)
@@ -634,6 +659,7 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_exclude_patterns_are_compiled_from_a_pattern_list():
     patterns = DetectSecretsScanner._get_baseline_exclude_patterns(
         {
@@ -649,6 +675,7 @@ def test_exclude_patterns_are_compiled_from_a_pattern_list():
     assert not patterns[0].search("src/app.py")
 
 
+@pytest.mark.unit
 def test_a_single_string_pattern_is_accepted():
     """detect-secrets baselines allow `pattern` to be a bare string."""
     patterns = DetectSecretsScanner._get_baseline_exclude_patterns(
@@ -659,6 +686,7 @@ def test_a_single_string_pattern_is_accepted():
     assert patterns[0].search("docs/index.md")
 
 
+@pytest.mark.unit
 def test_filters_other_than_should_exclude_file_are_ignored():
     """Only the file-exclusion filter contributes patterns."""
     patterns = DetectSecretsScanner._get_baseline_exclude_patterns(
@@ -676,10 +704,12 @@ def test_filters_other_than_should_exclude_file_are_ignored():
     assert patterns == []
 
 
+@pytest.mark.unit
 def test_no_filters_used_yields_no_patterns():
     assert DetectSecretsScanner._get_baseline_exclude_patterns({}) == []
 
 
+@pytest.mark.unit
 def test_an_invalid_exclude_pattern_is_warned_about_and_skipped(caplog):
     """One bad regex must not discard the valid patterns beside it."""
     with caplog.at_level(logging.WARNING):
@@ -696,6 +726,7 @@ def test_an_invalid_exclude_pattern_is_warned_about_and_skipped(caplog):
     assert any("Invalid exclude pattern" in r.message for r in caplog.records)
 
 
+@pytest.mark.unit
 def test_file_exclusions_filter_the_matching_paths():
     files = ["src/app.py", "tests/test_app.py", "docs/index.md"]
 
@@ -704,6 +735,7 @@ def test_file_exclusions_filter_the_matching_paths():
     assert kept == ["src/app.py", "docs/index.md"]
 
 
+@pytest.mark.unit
 def test_no_exclude_patterns_returns_the_list_unchanged():
     files = ["src/app.py", "tests/test_app.py"]
 
@@ -715,6 +747,7 @@ def test_no_exclude_patterns_returns_the_list_unchanged():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_fork_start_method_is_requested_on_linux(monkeypatch):
     """detect-secrets uses multiprocessing.Pool; spawn recurses without a guard."""
     calls = []
@@ -730,6 +763,7 @@ def test_fork_start_method_is_requested_on_linux(monkeypatch):
     assert calls == [("fork", True)]
 
 
+@pytest.mark.unit
 def test_an_already_set_start_method_is_tolerated(monkeypatch):
     """A RuntimeError from set_start_method means it is already configured."""
     monkeypatch.setattr(detect_secrets_scanner.sys, "platform", "linux")
@@ -742,6 +776,7 @@ def test_an_already_set_start_method_is_tolerated(monkeypatch):
     DetectSecretsScanner._ensure_fork_multiprocessing()
 
 
+@pytest.mark.unit
 def test_non_linux_platforms_are_left_alone(monkeypatch):
     calls = []
     monkeypatch.setattr(detect_secrets_scanner.sys, "platform", "darwin")
@@ -761,6 +796,7 @@ def test_non_linux_platforms_are_left_alone(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_empty_target_returns_an_empty_report(scanner):
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
@@ -768,6 +804,7 @@ def test_empty_target_returns_an_empty_report(scanner):
     assert any("empty or doesn't exist" in err for err in scanner.errors)
 
 
+@pytest.mark.unit
 def test_pre_scan_failure_returns_false(scanner):
     source_with_planted_key(scanner.context.work_dir)
 
@@ -779,6 +816,7 @@ def test_pre_scan_failure_returns_false(scanner):
     assert result is False
 
 
+@pytest.mark.unit
 def test_unsatisfied_dependencies_return_false(scanner):
     """The independent post-_pre_scan dependency guard."""
     source_with_planted_key(scanner.context.work_dir)
@@ -792,6 +830,7 @@ def test_unsatisfied_dependencies_return_false(scanner):
     assert result is False
 
 
+@pytest.mark.unit
 def test_a_target_of_only_lockfiles_has_nothing_to_scan(scanner):
     """Lockfiles are excluded by name, so a lockfile-only tree is empty."""
     (scanner.context.work_dir / "package-lock.json").write_text(
@@ -809,6 +848,7 @@ def test_a_target_of_only_lockfiles_has_nothing_to_scan(scanner):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_planted_credential_becomes_a_sarif_result(scanner):
     """A real detect-secrets scan turns a planted key into a SARIF finding.
 
@@ -848,6 +888,7 @@ def test_a_planted_credential_becomes_a_sarif_result(scanner):
     assert "tool_name::detect-secrets" in tags
 
 
+@pytest.mark.integration
 def test_the_planted_secret_value_is_not_echoed_into_the_finding(scanner):
     """The finding names the secret's type and location, not its value.
 
@@ -867,6 +908,7 @@ def test_the_planted_secret_value_is_not_echoed_into_the_finding(scanner):
     )
 
 
+@pytest.mark.integration
 def test_a_clean_target_produces_no_findings_and_exit_code_zero(scanner):
     """A file with no secrets yields an empty run and resets the exit code."""
     (scanner.context.work_dir / "plain.py").write_text(
@@ -882,6 +924,7 @@ def test_a_clean_target_produces_no_findings_and_exit_code_zero(scanner):
     )
 
 
+@pytest.mark.integration
 def test_findings_are_written_to_the_results_file(scanner):
     planted = source_with_planted_key(scanner.context.work_dir)
 
@@ -897,6 +940,7 @@ def test_findings_are_written_to_the_results_file(scanner):
     assert planted.name in json.dumps(written)
 
 
+@pytest.mark.integration
 def test_report_invocation_describes_the_ash_run(scanner):
     source_with_planted_key(scanner.context.work_dir)
 
@@ -909,6 +953,7 @@ def test_report_invocation_describes_the_ash_run(scanner):
     assert report.runs[0].tool.driver.organization == "Yelp"
 
 
+@pytest.mark.integration
 def test_baseline_results_are_loaded_for_a_source_scan(scanner, tmp_path):
     """A source scan seeds the collection from the baseline before scanning.
 
@@ -930,6 +975,7 @@ def test_baseline_results_are_loaded_for_a_source_scan(scanner, tmp_path):
     assert planted.name in report.runs[0].results[0].message.root.text
 
 
+@pytest.mark.integration
 def test_excluded_files_are_never_handed_to_detect_secrets(scanner, monkeypatch):
     """The exclude patterns are applied to the scan set, not only to findings.
 
@@ -979,6 +1025,7 @@ def test_excluded_files_are_never_handed_to_detect_secrets(scanner, monkeypatch)
     )
 
 
+@pytest.mark.integration
 def test_baseline_exclude_patterns_remove_files_before_scanning(scanner, caplog):
     """A planted key inside an excluded file is not reported.
 
@@ -1001,6 +1048,7 @@ def test_baseline_exclude_patterns_remove_files_before_scanning(scanner, caplog)
     )
 
 
+@pytest.mark.integration
 def test_a_non_matching_exclude_pattern_leaves_the_finding_in_place(scanner):
     """Control for the exclusion test: the filter must be what silenced it."""
     source_with_planted_key(scanner.context.work_dir, name="skipme_settings.py")
@@ -1015,6 +1063,7 @@ def test_a_non_matching_exclude_pattern_leaves_the_finding_in_place(scanner):
     assert [r.ruleId for r in report.runs[0].results] == ["SECRET-AWS-ACCESS-KEY"]
 
 
+@pytest.mark.integration
 def test_global_ignore_paths_exclude_files_from_the_scan(scanner):
     """A globally ignored path is dropped from the scan set."""
     source_with_planted_key(scanner.context.work_dir, name="generated_settings.py")
@@ -1032,6 +1081,7 @@ def test_global_ignore_paths_exclude_files_from_the_scan(scanner):
     )
 
 
+@pytest.mark.integration
 def test_a_global_ignore_path_ending_in_a_slash_drops_the_directory(scanner):
     """``**/generated/`` names a directory, so the key planted in it is not read."""
     directory = Path(scanner.context.work_dir) / "generated"
@@ -1051,6 +1101,7 @@ def test_a_global_ignore_path_ending_in_a_slash_drops_the_directory(scanner):
     )
 
 
+@pytest.mark.integration
 def test_an_ignore_path_for_dot_directories_still_scans_a_dotfile(scanner):
     """``**/.*/`` names what is inside dot-directories, not the dotfiles: a key
     planted in ``.env`` is still found, while one in ``.cache/`` is not read."""
@@ -1075,6 +1126,7 @@ def test_an_ignore_path_for_dot_directories_still_scans_a_dotfile(scanner):
     assert [Path(uri).name for uri in locations] == [".env"], locations
 
 
+@pytest.mark.integration
 def test_a_non_matching_global_ignore_leaves_the_finding_in_place(scanner):
     """Control for the global-ignore test above."""
     source_with_planted_key(scanner.context.work_dir, name="generated_settings.py")
@@ -1090,6 +1142,7 @@ def test_a_non_matching_global_ignore_leaves_the_finding_in_place(scanner):
     assert [r.ruleId for r in report.runs[0].results] == ["SECRET-AWS-ACCESS-KEY"]
 
 
+@pytest.mark.integration
 def test_multiple_secrets_across_files_all_report(scanner, monkeypatch):
     """Every file with a finding contributes to the results list.
 
@@ -1120,6 +1173,7 @@ def test_multiple_secrets_across_files_all_report(scanner, monkeypatch):
     assert "second.py" in reported_files
 
 
+@pytest.mark.integration
 def test_an_unexpected_failure_is_wrapped_in_scanner_error(scanner, monkeypatch):
     """Errors inside the scan body surface as ScannerError."""
     source_with_planted_key(scanner.context.work_dir)
@@ -1139,6 +1193,7 @@ def test_an_unexpected_failure_is_wrapped_in_scanner_error(scanner, monkeypatch)
     assert "transient settings failed" in str(excinfo.value)
 
 
+@pytest.mark.unit
 def test_the_baseline_read_is_the_file_that_was_checked(tmp_path, monkeypatch):
     """_read_baseline parses only the file the containment check judged: one whose
     device and inode differ when it is opened is refused."""
@@ -1159,6 +1214,7 @@ def test_the_baseline_read_is_the_file_that_was_checked(tmp_path, monkeypatch):
         DetectSecretsScanner._read_baseline(baseline)
 
 
+@pytest.mark.unit
 def test_a_baseline_that_is_not_a_regular_file_is_refused_without_blocking(tmp_path):
     """A FIFO named .secrets.baseline (an extracted archive can hold one) would
     block an open() forever; it is refused before ASH opens it."""

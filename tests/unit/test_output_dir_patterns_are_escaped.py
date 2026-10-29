@@ -129,6 +129,7 @@ def _checkov_excludes(value: str, path: str) -> bool:
     return matched or value in path
 
 
+@pytest.mark.unit
 def test_the_models_reproduce_the_measured_over_matches():
     """The defects as measured, so a model that cannot see them fails here."""
     assert _doublestar_excludes("./out[1]/**", "./out1/requirements.txt")
@@ -155,6 +156,7 @@ def _tree(tmp_path: Path, output: str, look_alike: str, source_name: str = "repo
     return source, source / output
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "output, look_alike",
     [("out[1]", "out1"), ("out{a,b}", "outa"), ("out[!x]", "out!")],
@@ -222,6 +224,7 @@ def _grep_scanner(kind, context):
     return OpengrepScanner(context=context, config=OpengrepScannerConfig())
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("kind", ["semgrep", "opengrep"])
 def test_semgrep_and_opengrep_exclude_exactly_an_output_dir_named_with_glob_syntax(
     tmp_path, kind
@@ -242,6 +245,7 @@ def test_semgrep_and_opengrep_exclude_exactly_an_output_dir_named_with_glob_synt
     assert not excluded("src"), excludes
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", ["semgrep", "opengrep"])
 def test_the_scanned_directorys_own_name_is_escaped_in_the_anchor(tmp_path, kind):
     """In a git repository the pattern is anchored at its root, so the scanned
@@ -279,6 +283,7 @@ def _ferret_excludes_for(source, output_dir, monkeypatch):
     return ",".join(named._values(seen["argv"], "--exclude")).split(",")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("source_name", ["repo", "repo[2]"])
 def test_ferret_scan_excludes_exactly_an_output_dir_named_with_glob_syntax(
     tmp_path, monkeypatch, source_name
@@ -299,6 +304,7 @@ def test_ferret_scan_excludes_exactly_an_output_dir_named_with_glob_syntax(
     assert not excluded("src"), values
 
 
+@pytest.mark.unit
 def test_ferret_scan_is_not_told_about_a_path_with_a_comma(
     tmp_path, monkeypatch, capture
 ):
@@ -327,6 +333,7 @@ def _checkov_skip_paths(source, output_dir):
     return named._values(argv, "--skip-path")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "output, look_alike",
     [
@@ -356,6 +363,7 @@ def test_checkov_skips_exactly_an_output_dir_named_with_regex_syntax(
     assert not any(_checkov_excludes(v, f"{root}/src/main.tf") for v in values)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("output", ["out(1)", "out]("])
 def test_checkov_is_not_told_about_a_path_its_module_finder_cannot_take(
     tmp_path, capture, output
@@ -378,6 +386,7 @@ def test_checkov_is_not_told_about_a_path_its_module_finder_cannot_take(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_glob_spelling_of_each_metacharacter_is_pinned():
     """As measured on doublestar v4.10.2 (grype, syft), semgrep 1.180.0, opengrep
     1.30.2 and ferret-scan 2.4.5 and 2.5.2: a character class works for each glob
@@ -400,6 +409,7 @@ def test_the_glob_spelling_of_each_metacharacter_is_pinned():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "name, look_alike",
     [
@@ -426,6 +436,7 @@ def test_an_escaped_glob_matches_only_its_own_name(name, look_alike):
     assert not _gitignore_excludes(gitignore, f"{look_alike}/x")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "name, look_alike",
     [("out[1]", "out1"), ("out*x", "outAx"), ("out?y", "outBy"), ("out[!x]n", "out!n")],
@@ -449,6 +460,7 @@ def test_an_escaped_fnmatch_pattern_matches_only_its_own_name(name, look_alike):
     assert escape_for_pattern("out{a,b}", PatternSyntax.FNMATCH) == "out{a,b}"
 
 
+@pytest.mark.unit
 def test_the_regex_spelling_is_re_escape():
     from automated_security_helper.utils.scan_output_dirs import (
         PatternSyntax,
@@ -517,6 +529,7 @@ def _warnings(capture) -> list[str]:
     return [r.getMessage() for r in capture.records if r.levelname == "WARNING"]
 
 
+@pytest.mark.unit
 def test_a_finding_in_an_output_dir_with_a_comma_is_dropped_from_ferret_scans_results(
     tmp_path, monkeypatch, capture
 ):
@@ -564,6 +577,7 @@ def test_a_finding_in_an_output_dir_with_a_comma_is_dropped_from_ferret_scans_re
     ), warned
 
 
+@pytest.mark.unit
 def test_a_finding_in_an_output_dir_with_a_parenthesis_is_dropped_from_checkovs_results(
     tmp_path, monkeypatch, capture
 ):
@@ -617,6 +631,7 @@ def test_a_finding_in_an_output_dir_with_a_parenthesis_is_dropped_from_checkovs_
     ), warned
 
 
+@pytest.mark.unit
 def test_a_percent_encoded_uri_is_read_decoded_unless_it_names_a_file_as_written(
     tmp_path,
 ):

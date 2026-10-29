@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from tests.unit.plugin_modules.ash_builtin.test_detect_secrets_operator_settings import (
@@ -25,6 +27,8 @@ from tests.unit.plugin_modules.ash_builtin.test_detect_secrets_operator_settings
     VERIFICATION_FILTER,
 )
 from tests.utils.refusing_proxy import scrub_cloud_credentials
+
+pytestmark = pytest.mark.unit
 
 
 def _scanner(tmp_path: Path, **options):

@@ -27,6 +27,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 )
 from tests.utils.delivered_trees import clone, write
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-1"
 
 #: Text of a policy file that must not reach the client.

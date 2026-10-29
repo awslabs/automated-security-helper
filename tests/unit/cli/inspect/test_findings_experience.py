@@ -14,6 +14,8 @@ from automated_security_helper.cli.inspect.inspect_findings_app import (
     SuppressDialog,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def finding(rule="R1", severity="high", scanner="bandit", suppressed=False):
     return {

@@ -18,6 +18,8 @@ import pytest
 from automated_security_helper.config import default_config
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 UNPARSED = "project_name: [unclosed\n"
 
 

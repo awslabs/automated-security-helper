@@ -239,6 +239,7 @@ def _one_line(output: str) -> str:
     return " ".join(output.split())
 
 
+@pytest.mark.integration
 class TestAnExplicitSandboxIsRefused:
     """``--sandbox <mode>`` with ``--mode container`` is a usage error, exit 5.
 
@@ -306,6 +307,7 @@ class TestAnExplicitSandboxIsRefused:
         assert returncode == 5, output
 
 
+@pytest.mark.integration
 class TestTheDroppedSandboxIsReported:
     def test_a_config_file_in_the_source_directory(self, tmp_path, stand_in, project):
         (project / ".ash").mkdir()
@@ -583,6 +585,7 @@ class TestTheDroppedSandboxIsReported:
         assert "Traceback" not in output, output
 
 
+@pytest.mark.integration
 class TestNothingToReport:
     def test_an_unconfined_repository_config_and_no_flag(
         self, tmp_path, stand_in, project
@@ -740,6 +743,7 @@ class TestNothingToReport:
         assert REFUSAL not in _one_line(output), output
 
 
+@pytest.mark.integration
 class TestSchemaDependentInvalidsAreTheImagesToJudge:
     """With ``--no-build`` the host judges only what holds for every ASH
     revision: that each config parses and that its ``extends`` chain stays
@@ -943,6 +947,7 @@ def _operator_config(tmp_path: Path, mode: str) -> Path:
     return operator
 
 
+@pytest.mark.unit
 class TestTheFloorWithoutTheConfig:
     """``_sandbox_mode_without_the_config``, the fallback when the host cannot resolve.
 
@@ -1315,6 +1320,7 @@ class TestChangedFilesOnlyIsRefused:
     ``--sandbox`` refusal: the operator asked for something this mode does not do.
     """
 
+    @pytest.mark.integration
     def test_refused_before_the_runner_is_called(self, tmp_path, stand_in, project):
         returncode, output = _refused(
             tmp_path, stand_in, "--source-dir", str(project), "--changed-files-only"
@@ -1324,6 +1330,7 @@ class TestChangedFilesOnlyIsRefused:
         assert CHANGED_FILES_REFUSAL in _one_line(output), output
         assert "--mode local" in _one_line(output), output
 
+    @pytest.mark.integration
     def test_refused_before_a_build(self, tmp_path, stand_in, project):
         returncode, output = _refused(
             tmp_path,
@@ -1338,6 +1345,7 @@ class TestChangedFilesOnlyIsRefused:
         assert returncode == 5, output
         assert CHANGED_FILES_REFUSAL in _one_line(output), output
 
+    @pytest.mark.integration
     def test_refused_when_asked_for_through_its_environment_variable(
         self, tmp_path, stand_in, project
     ):
@@ -1354,6 +1362,7 @@ class TestChangedFilesOnlyIsRefused:
         assert "ASH_CHANGED_FILES_ONLY" in _one_line(output), output
 
     @pytest.mark.parametrize("mode", ["local", "precommit", "nix", None])
+    @pytest.mark.unit
     def test_another_mode_is_left_alone(self, mode):
         from automated_security_helper.cli.scan import (
             _refuse_changed_files_only_in_container_mode,
@@ -1366,6 +1375,7 @@ class TestChangedFilesOnlyIsRefused:
             is None
         )
 
+    @pytest.mark.integration
     def test_a_local_scan_takes_it(self, tmp_path, stand_in, project):
         """Outside a git repository a local scan falls back to a full scan and runs.
 
@@ -1423,6 +1433,7 @@ class TestChangedFilesOnlyIsRefused:
         assert (tmp_path / "out" / "ash_aggregated_results.json").is_file()
 
 
+@pytest.mark.unit
 class TestTheRefusalIsForContainerModeOnly:
     """``_refuse_sandbox_in_container_mode`` refuses nothing outside container mode.
 
@@ -1475,6 +1486,7 @@ _SPACED_SPELLINGS = [
 
 
 @pytest.mark.parametrize("spelling", _OVERRIDE_SPELLINGS)
+@pytest.mark.unit
 def test_the_fallbacks_override_selection_matches_resolve_config(
     tmp_path, monkeypatch, spelling
 ):
@@ -1506,6 +1518,7 @@ def test_the_fallbacks_override_selection_matches_resolve_config(
     assert bool(_sandbox_overrides([spelling])) == replayed_by_resolve_config
 
 
+@pytest.mark.unit
 def test_a_respelled_sandbox_segment_is_refused_and_not_selected(tmp_path, monkeypatch):
     """A first segment respelling the configuration's own `sandbox` field is
     refused with both keys (it would otherwise land as a top-level extra the
@@ -1532,6 +1545,7 @@ def test_a_respelled_sandbox_segment_is_refused_and_not_selected(tmp_path, monke
     assert _sandbox_overrides([spelling]) == []
 
 
+@pytest.mark.unit
 def test_an_explicit_empty_config_is_a_selection_not_a_fall_through(
     tmp_path, monkeypatch
 ):
@@ -1571,6 +1585,7 @@ def test_an_explicit_empty_config_is_a_selection_not_a_fall_through(
 
 
 @pytest.mark.parametrize("spelling", _SPACED_SPELLINGS)
+@pytest.mark.unit
 def test_a_spaced_sandbox_override_is_refused_and_not_selected(
     tmp_path, monkeypatch, spelling
 ):
@@ -1593,6 +1608,7 @@ def test_a_spaced_sandbox_override_is_refused_and_not_selected(
     assert _sandbox_overrides([spelling]) == []
 
 
+@pytest.mark.unit
 def test_the_probe_resolves_through_the_function_the_orchestrator_resolves_with(
     tmp_path, monkeypatch
 ):
@@ -1657,6 +1673,7 @@ def test_the_probe_resolves_through_the_function_the_orchestrator_resolves_with(
     assert seen == [expected], seen
 
 
+@pytest.mark.unit
 def test_the_probe_hands_resolution_a_list_of_its_own_for_the_overrides(
     tmp_path, monkeypatch
 ):
@@ -1698,6 +1715,7 @@ def test_the_probe_hands_resolution_a_list_of_its_own_for_the_overrides(
     assert handed[2] is not opts.config_overrides
 
 
+@pytest.mark.unit
 def test_a_scan_that_leaves_the_overrides_at_none_still_reports_its_files_sandbox_mode(
     tmp_path, monkeypatch
 ):
@@ -1738,6 +1756,7 @@ class _Collect(logging.Handler):
         self.messages.append(record.getMessage())
 
 
+@pytest.mark.unit
 class TestTheProbeSilencesOnlyItsOwnThread:
     """The probe keeps its resolution's messages off the console, and nothing else.
 

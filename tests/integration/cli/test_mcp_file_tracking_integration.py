@@ -31,6 +31,8 @@ from automated_security_helper.core.resource_management.scan_tracking import (
     check_scan_completion,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def test_directory():

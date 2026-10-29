@@ -29,7 +29,11 @@ import pathlib
 import re
 from typing import Iterator, Tuple
 
+import pytest
+
 from tests.utils.helpers import iter_repo_files
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 ROOTS = (REPO_ROOT / "deploy", REPO_ROOT / "tests" / "unit" / "deploy")

@@ -33,6 +33,8 @@ from tests.unit.cli.test_merge import as_loaded, build_shards
 from tests.unit.test_scanners_completed_gate import _run as run_gate
 from tests.unit.workspace.test_execution import _make_workspace, _sarif, _settings
 
+pytestmark = pytest.mark.unit
+
 MODULE = "automated_security_helper.plugin_modules.ash_builtin.reporters"
 ERROR = "ImportError: No module named 'zz_missing_dependency'"
 OTHER_ERROR = "ImportError: cannot import name 'zz_gone' from 'zz_missing_dependency'"

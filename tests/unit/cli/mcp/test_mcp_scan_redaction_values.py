@@ -28,6 +28,8 @@ from automated_security_helper.cli.mcp_tools import (
     _profile_environment_values,
 )
 
+pytestmark = pytest.mark.unit
+
 SECRET = "value-the-log-must-not-hold"
 
 

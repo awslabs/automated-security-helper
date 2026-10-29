@@ -1,6 +1,5 @@
 """Extended tests for subprocess_utils.py to increase coverage."""
 
-import os
 import subprocess  # nosec B404 — test exercises subprocess_utils module
 from unittest.mock import patch, MagicMock
 
@@ -23,6 +22,8 @@ from automated_security_helper.utils.subprocess_utils import (
     UNRECORDED_RUN_RETURNCODE,
 )
 from tests.utils.fake_tool_paths import fake_tool_path
+
+pytestmark = pytest.mark.unit
 
 
 @patch("shutil.which")

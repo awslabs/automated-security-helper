@@ -186,6 +186,7 @@ def _invoke_cli(args: List[str]) -> Any:
 
 
 class TestTheImageIsBuiltFromAshsOwnDockerfile:
+    @pytest.mark.unit
     def test_a_pinned_revision_builds_the_packaged_dockerfile_in_a_project(
         self, commands, packaged, monkeypatch, tmp_path
     ):
@@ -200,6 +201,7 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
             f"the build context {build[-1]} is the scanned project"
         )
 
+    @pytest.mark.unit
     def test_a_pinned_revision_builds_the_packaged_dockerfile_elsewhere(
         self, commands, packaged, monkeypatch, tmp_path
     ):
@@ -217,6 +219,7 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
         "layout",
         ["dockerfile-only-in-cwd", "project-in-cwd", "project-root-above-cwd"],
     )
+    @pytest.mark.unit
     def test_a_local_revision_builds_the_ash_source_tree(
         self, layout, commands, monkeypatch, tmp_path
     ):
@@ -239,6 +242,7 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
         assert Path(build[-1]).resolve() == ASH_SOURCE_ROOT
         assert not _within(build[-1], project)
 
+    @pytest.mark.unit
     def test_a_local_revision_inside_the_ash_checkout_builds_it(
         self, commands, monkeypatch
     ):
@@ -272,6 +276,7 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
             pytest.param(["build-image", "--no-run"], id="build-image"),
         ],
     )
+    @pytest.mark.unit
     def test_the_cli_builds_ash_not_the_project_it_is_started_in(
         self, cli_args, commands, monkeypatch, tmp_path
     ):
@@ -287,6 +292,7 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
         )
         assert not _within(build[-1], project)
 
+    @pytest.mark.integration
     def test_a_local_revision_outside_a_source_tree_never_builds_the_cwd(
         self, tmp_path
     ):
@@ -390,6 +396,7 @@ def _assemble(source_dir: Path, output_dir: Path, **overrides: Any) -> List[str]
     return _assemble_run_command(**kwargs)
 
 
+@pytest.mark.unit
 class TestTheSourceIsMountedReadOnly:
     @pytest.mark.parametrize(
         "output_relative",
@@ -501,6 +508,7 @@ class TestTheSourceIsMountedReadOnly:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestTheBuildTargetIsTheOneRequested:
     @pytest.fixture(autouse=True)
     def _cwd(self, monkeypatch, tmp_path, packaged):

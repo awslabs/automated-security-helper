@@ -216,6 +216,7 @@ def _run(tmp_path, plan, **overrides):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestPerProjectScoping:
     def test_one_orchestrator_per_project(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
@@ -319,6 +320,7 @@ class TestPerProjectScoping:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestPerProjectThresholds:
     def test_a_project_below_its_own_threshold_passes(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
@@ -595,6 +597,7 @@ def _scanner(status, *, excluded=False, satisfied=True):
     }
 
 
+@pytest.mark.unit
 class TestScannerCompleteness:
     """A project whose scanners did not all run must not report clean.
 
@@ -958,6 +961,7 @@ def _written(tmp_path) -> Dict[str, Any]:
     )
 
 
+@pytest.mark.unit
 class TestScannerReasonsInTheWorkspace:
     """The workspace says why a scanner did not run, as a single scan does.
 
@@ -1263,6 +1267,7 @@ class TestScannerReasonsInTheWorkspace:
 PROJECT_TIMEOUT = 3.0
 
 
+@pytest.mark.unit
 class TestConverterCompleteness:
     """A project whose converter lost coverage is incomplete, as ``ash --source-dir P`` is.
 
@@ -1355,6 +1360,7 @@ class TestConverterCompleteness:
         assert coverage_has_gap(coverage)
 
 
+@pytest.mark.unit
 class TestFailureHandling:
     def test_a_failing_project_does_not_stop_the_others(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"), ("fine", "MEDIUM"))
@@ -1722,6 +1728,7 @@ class TestFailureHandling:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestConcurrencyBound:
     def test_max_parallel_projects_is_honoured(self, tmp_path):
         """Counts concurrent occupancy rather than timing it.
@@ -1853,6 +1860,7 @@ def git_available() -> bool:
 
 
 class TestChangedFilesGate:
+    @pytest.mark.integration
     def test_a_project_with_no_changes_is_skipped_and_recorded(
         self, tmp_path, git_available
     ):
@@ -1866,6 +1874,7 @@ class TestChangedFilesGate:
         assert entry.skip_reason is SkippedProjectReason.NO_CHANGES
         assert entry.skip_detail
 
+    @pytest.mark.integration
     def test_a_no_changes_skip_is_in_the_payload_not_just_the_log(
         self, tmp_path, git_available
     ):
@@ -1879,6 +1888,7 @@ class TestChangedFilesGate:
             ("unchanged", "no-changes")
         ]
 
+    @pytest.mark.integration
     def test_a_no_changes_skip_does_not_fail_the_workspace(
         self, tmp_path, git_available
     ):
@@ -1892,6 +1902,7 @@ class TestChangedFilesGate:
         outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
+    @pytest.mark.integration
     def test_a_workspace_where_every_project_is_unchanged_exits_zero(
         self, tmp_path, git_available
     ):
@@ -1922,6 +1933,7 @@ class TestChangedFilesGate:
         ]
         assert FakeOrchestrator.built == []
 
+    @pytest.mark.integration
     def test_a_changed_project_is_scanned(self, tmp_path, git_available):
         if not git_available:
             pytest.skip("git is not available on PATH")
@@ -1931,6 +1943,7 @@ class TestChangedFilesGate:
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
         assert [o.key for o in FakeOrchestrator.built] == ["changed"]
 
+    @pytest.mark.integration
     def test_the_changed_set_is_handed_to_the_projects_engine(
         self, tmp_path, git_available
     ):
@@ -1953,6 +1966,7 @@ class TestChangedFilesGate:
         }
         assert kwargs["metadata"]["changed_files_only"] is True
 
+    @pytest.mark.integration
     def test_without_the_flag_no_changed_set_is_handed_over(
         self, tmp_path, git_available
     ):
@@ -1968,6 +1982,7 @@ class TestChangedFilesGate:
         # Written on every run, False on a full scan (see run_ash_scan).
         assert kwargs["metadata"]["changed_files_only"] is False
 
+    @pytest.mark.integration
     def test_each_project_is_evaluated_against_its_own_repository(
         self, tmp_path, git_available
     ):
@@ -1984,6 +1999,7 @@ class TestChangedFilesGate:
         assert statuses["changed"] is ProjectRunStatus.COMPLETED
         assert statuses["still"] is ProjectRunStatus.SKIPPED
 
+    @pytest.mark.integration
     def test_precommit_alone_does_not_scope_the_scan_to_a_diff(
         self, tmp_path, git_available
     ):
@@ -2004,6 +2020,7 @@ class TestChangedFilesGate:
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
         assert [o.key for o in FakeOrchestrator.built] == ["unchanged"]
 
+    @pytest.mark.unit
     def test_a_non_repository_under_precommit_is_not_an_error(self, tmp_path):
         """Inverted with the gate change above.
 
@@ -2017,12 +2034,14 @@ class TestChangedFilesGate:
         outcome = _run(tmp_path, plan, precommit=True)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    @pytest.mark.unit
     def test_the_gate_is_off_without_changed_files_only(self, tmp_path):
         """A plain workspace scan must not care whether a project is a repository."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    @pytest.mark.integration
     def test_changed_files_only_applies_the_gate(self, tmp_path, git_available):
         if not git_available:
             pytest.skip("git is not available on PATH")
@@ -2031,12 +2050,14 @@ class TestChangedFilesGate:
         outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         assert outcome.payload.projects[0].status is ProjectRunStatus.SKIPPED
 
+    @pytest.mark.integration
     def test_a_non_repository_under_changed_files_only_scans_fully(self, tmp_path):
         """--changed-files-only already documents a full-scan fallback; keep it."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan, changed_files_only=True)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    @pytest.mark.integration
     def test_allow_missing_projects_does_not_change_the_non_repository_fallback(
         self, tmp_path
     ):
@@ -2053,6 +2074,7 @@ class TestChangedFilesGate:
         )
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    @pytest.mark.integration
     def test_an_option_like_base_ref_is_refused_before_any_project_runs(
         self, tmp_path, git_available
     ):
@@ -2072,6 +2094,7 @@ class TestChangedFilesGate:
         assert FakeOrchestrator.built == []
         assert not (tmp_path / "out").exists()
 
+    @pytest.mark.integration
     def test_a_missing_base_ref_scans_in_full_whatever_files_the_project_holds(
         self, tmp_path, git_available
     ):
@@ -2099,6 +2122,7 @@ class TestChangedFilesGate:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestWorkspaceOutput:
     def test_the_unified_results_file_is_written(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
@@ -2259,6 +2283,7 @@ class TestWorkspaceOutput:
         assert Path(outcome.payload.workspace_root) == root
 
 
+@pytest.mark.unit
 class TestFolderNamedSrc:
     """A workspace containing a project literally named ``src``.
 
@@ -2305,6 +2330,7 @@ class TestFolderNamedSrc:
         assert len(roots) == 2
 
 
+@pytest.mark.unit
 class TestSettingsDefaults:
     def test_the_settings_object_is_immutable(self, tmp_path):
         """The same settings are read from several threads; mutation is a data race."""
@@ -2326,6 +2352,7 @@ class TestSettingsDefaults:
         assert self._phases_of(settings) == ["convert", "scan", "report"]
 
 
+@pytest.mark.unit
 class TestOptionalOrchestratorFactory:
     def test_the_real_orchestrator_is_the_default(self):
         """Injected only for tests; production must not have to pass one."""
@@ -2335,6 +2362,7 @@ class TestOptionalOrchestratorFactory:
         assert signature.parameters["orchestrator_factory"].default is None
 
 
+@pytest.mark.unit
 class TestProjectThreadsKeepTheWorkspaceScope:
     def test_each_project_is_built_with_the_workspace_root_registered(self, tmp_path):
         """Project threads start with a copy of the run's context, which holds it."""

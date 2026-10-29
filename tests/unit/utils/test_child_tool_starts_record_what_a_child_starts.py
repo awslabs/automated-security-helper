@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.utils.child_tool_starts import POSIX_ONLY, SHADOWED_EXIT, ChildToolStarts
 from tests.utils.helpers import checkout_env
 
@@ -56,6 +58,7 @@ def _run_child(
     )
 
 
+@pytest.mark.integration
 def test_a_child_that_starts_nothing_leaves_no_record(tmp_path):
     started = ChildToolStarts(tmp_path)
 
@@ -65,6 +68,7 @@ def test_a_child_that_starts_nothing_leaves_no_record(tmp_path):
     assert started.starts() == []
 
 
+@pytest.mark.integration
 def test_a_start_of_a_tool_by_its_path_is_recorded(tmp_path):
     """The uv installed with ASH is asked for by path before PATH is searched, so no
     stand-in sees it, and a uv that resolves nothing leaves its directories empty."""
@@ -84,6 +88,7 @@ def test_a_start_of_a_tool_by_its_path_is_recorded(tmp_path):
     assert "--version" in recorded[0], recorded
 
 
+@pytest.mark.integration
 def test_a_start_of_a_tool_found_on_path_is_recorded_twice(tmp_path):
     """The audit hook and the stand-in each log it: either alone would show it."""
     started = ChildToolStarts(tmp_path)
@@ -100,6 +105,7 @@ def test_a_start_of_a_tool_found_on_path_is_recorded_twice(tmp_path):
     assert "detect-secrets --version" in recorded, recorded
 
 
+@pytest.mark.integration
 def test_a_start_through_a_shell_command_line_is_recorded(tmp_path):
     started = ChildToolStarts(tmp_path)
 
@@ -110,6 +116,7 @@ def test_a_start_through_a_shell_command_line_is_recorded(tmp_path):
     assert [line for line in recorded if line.startswith("os.system uvx ")], recorded
 
 
+@pytest.mark.integration
 def test_a_tool_named_by_path_inside_a_shell_line_is_recorded(tmp_path):
     """A shell -c argv names the tool only inside its command string: no PATH
     lookup reaches a recording stand-in, so the audit hook's reading of the
@@ -131,6 +138,7 @@ def test_a_tool_named_by_path_inside_a_shell_line_is_recorded(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_a_module_run_by_an_interpreter_is_recorded(tmp_path):
     """-m names the tool after the interpreter's own word, so the first-word
     read sees only the interpreter; the module name, written with the
@@ -152,6 +160,7 @@ def test_a_module_run_by_an_interpreter_is_recorded(tmp_path):
     ], recorded
 
 
+@pytest.mark.integration
 def test_a_direct_posix_spawn_start_is_recorded_once(tmp_path):
     """A posix_spawn with no subprocess.Popen before it is a start of its own:
     dropping subprocess's second report of one start must not drop this one."""
@@ -173,6 +182,7 @@ def test_a_direct_posix_spawn_start_is_recorded_once(tmp_path):
     assert recorded[0].startswith("os.posix_spawn uv "), recorded
 
 
+@pytest.mark.integration
 def test_a_cwd_popen_then_a_direct_spawn_of_the_same_tool_records_two(tmp_path):
     """A Popen given a cwd takes the fork_exec path and reports no posix_spawn
     echo, so it must arm no echo drop: a direct posix_spawn of the same tool
@@ -196,6 +206,7 @@ def test_a_cwd_popen_then_a_direct_spawn_of_the_same_tool_records_two(tmp_path):
     assert len(recorded) == 2, recorded
 
 
+@pytest.mark.integration
 def test_a_module_run_with_a_valued_x_option_is_recorded(tmp_path):
     """-X takes a value, so the module walk must step over the value to reach
     -m: the option's value is not where the options end."""
@@ -216,6 +227,7 @@ def test_a_module_run_with_a_valued_x_option_is_recorded(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_a_module_named_inside_the_m_cluster_is_recorded(tmp_path):
     """-muv runs uv exactly as -m uv does: the module can end the cluster with
     no space before its name."""
@@ -236,6 +248,7 @@ def test_a_module_named_inside_the_m_cluster_is_recorded(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_a_tool_inside_a_login_shell_command_line_is_recorded(tmp_path):
     """bash -lc puts -c at the end of a cluster: the command operand follows
     wherever the shell's options put -c, not only at argv[1]."""
@@ -256,6 +269,7 @@ def test_a_tool_inside_a_login_shell_command_line_is_recorded(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_a_tool_inside_a_ksh_command_line_is_recorded(tmp_path):
     """ksh's -c runs a command line the same way sh's does, and the shell set
     of record (the conftest's) includes it: a stand-in named ksh keeps the
@@ -278,6 +292,7 @@ def test_a_tool_inside_a_ksh_command_line_is_recorded(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_a_start_of_something_else_is_not_recorded(tmp_path):
     """The record names the probed tools, not every start: a child that starts
     only a shell leaves it empty."""
@@ -293,6 +308,7 @@ def test_a_start_of_something_else_is_not_recorded(tmp_path):
     assert started.starts() == []
 
 
+@pytest.mark.integration
 def test_a_directory_ahead_of_the_stand_ins_ends_the_child_with_a_record(tmp_path):
     """A uv found before the stand-in would start for real where the cell looks
     for it, and log nothing. The child ends before its own code runs instead,
@@ -311,6 +327,7 @@ def test_a_directory_ahead_of_the_stand_ins_ends_the_child_with_a_record(tmp_pat
     assert recorded[0].startswith("stand-in for uv is shadowed"), recorded
 
 
+@pytest.mark.unit
 def test_the_directories_the_child_is_given_are_the_ones_the_record_reads(tmp_path):
     started = ChildToolStarts(tmp_path)
 
@@ -322,6 +339,7 @@ def test_the_directories_the_child_is_given_are_the_ones_the_record_reads(tmp_pa
     assert set(started.uv_directories) == {started.uv_cache, started.uv_tools}
 
 
+@pytest.mark.unit
 def test_child_env_passes_pythonpath_through_unchanged(tmp_path):
     """child_env only adds (PATH's front, the uv directories): a variable it
     does not own, PYTHONPATH here, reaches the child exactly as given."""
@@ -332,6 +350,7 @@ def test_child_env_passes_pythonpath_through_unchanged(tmp_path):
     assert env["PYTHONPATH"] == "/x"
 
 
+@pytest.mark.integration
 def test_an_entry_a_uv_left_in_its_directories_is_recorded(tmp_path):
     """The second record: a start no audit hook saw, shown by what it left."""
     started = ChildToolStarts(tmp_path)

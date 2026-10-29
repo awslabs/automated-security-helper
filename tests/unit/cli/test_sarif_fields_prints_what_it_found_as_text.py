@@ -19,9 +19,12 @@ from __future__ import annotations
 import json
 import re
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+
+pytestmark = pytest.mark.unit
 
 #: A closing tag with no opener, and a whole style tag around a word.
 TEXT = "x[/x] [bold]y[/bold]"

@@ -40,6 +40,8 @@ import pytest
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 TRACEBACK = "failure traceback"
 RAISES = "raise RuntimeError('module body refuses')\n"
 RAISES_FROM_FILE = (

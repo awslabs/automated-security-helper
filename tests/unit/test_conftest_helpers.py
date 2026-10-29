@@ -71,6 +71,7 @@ def environment_check():
     )
 
 
+@pytest.mark.unit
 def test_temp_env_vars_restores_the_environment_it_found(
     environment_check, temp_env_vars
 ):
@@ -81,6 +82,7 @@ def test_temp_env_vars_restores_the_environment_it_found(
     assert "PATH" in environ_names()
 
 
+@pytest.mark.unit
 def test_a_variable_set_twice_returns_to_its_first_value(
     environment_check, temp_env_vars
 ):
@@ -89,6 +91,7 @@ def test_a_variable_set_twice_returns_to_its_first_value(
     assert os.environ[OVERWRITTEN] == "second"
 
 
+@pytest.mark.unit
 def test_values_are_set_as_strings(environment_check, temp_env_vars):
     temp_env_vars(**{ADDED: 3})
     assert os.environ[ADDED] == "3"
@@ -155,6 +158,7 @@ def _options_read_by_name_in_tests() -> set[str]:
     return found
 
 
+@pytest.mark.integration
 def test_every_option_the_conftest_adds_is_read(request):
     """An option that nothing reads accepts the flag and silently does nothing.
 
@@ -186,6 +190,7 @@ def test_every_option_the_conftest_adds_is_read(request):
     )
 
 
+@pytest.mark.unit
 def test_no_marker_promises_scheduling_that_nothing_implements(request):
     """No marker such as ``serial`` ("Tests that should not run in parallel") is registered.
 
@@ -200,6 +205,7 @@ def test_no_marker_promises_scheduling_that_nothing_implements(request):
     )
 
 
+@pytest.mark.unit
 class TestInstallReceiptsStayOutOfTheDeveloperHome:
     """``write_receipt`` keys a directory by the install destination's path.
 
@@ -292,6 +298,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
             return f"refused: {exc}"
         return "started"
 
+    @pytest.mark.unit
     def test_an_installer_child_with_the_developer_home_is_refused(
         self, home_guard_violations, developer_env
     ):
@@ -301,6 +308,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         assert len(home_guard_violations) == 1, home_guard_violations
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     def test_ash_dependencies_install_with_the_developer_home_is_refused(
         self, home_guard_violations, developer_env
     ):
@@ -310,9 +318,11 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         assert outcome.startswith("refused"), outcome
         home_guard_violations.clear()
 
+    @pytest.mark.integration
     def test_an_installer_child_inheriting_the_tests_home_starts(self):
         assert self._start(self.installer()) == "started"
 
+    @pytest.mark.integration
     def test_a_child_given_no_home_gets_the_tests(self):
         """With HOME unset, Path.home() falls back to the password database, the developer's.
 
@@ -323,6 +333,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         outcome = self._start(self.installer(), env=env)
         assert outcome == "started"
 
+    @pytest.mark.unit
     def test_a_test_whose_home_is_the_developers_has_none_to_give(
         self, home_guard_violations, developer_home, monkeypatch
     ):
@@ -340,6 +351,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         assert "HOME unset" in outcome, outcome
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     def test_a_refusal_the_code_swallows_is_still_recorded(
         self, home_guard_violations, developer_env
     ):
@@ -353,11 +365,13 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         assert len(home_guard_violations) == 1
         home_guard_violations.clear()
 
+    @pytest.mark.integration
     def test_the_same_child_with_its_own_home_starts(self, tmp_path):
         env = {**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
         outcome = self._start(self.installer(), env=env)
         assert outcome == "started"
 
+    @pytest.mark.integration
     def test_a_child_that_installs_nothing_is_not_checked(self):
         assert self._start([sys.executable, "-c", "print('ok')"]) == "started"
 
@@ -365,6 +379,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
     def _without_a_home() -> "dict[str, str]":
         return {k: v for k, v in os.environ.items() if k not in ("HOME", "USERPROFILE")}
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("program", ["python", "ash"])
     def test_a_python_or_ash_child_given_the_developer_home_is_refused(
         self, home_guard_violations, developer_home, program
@@ -385,6 +400,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         assert "HOME" in outcome, outcome
         home_guard_violations.clear()
 
+    @pytest.mark.integration
     def test_a_python_child_given_no_home_gets_the_tests(self, tmp_path):
         """ASH's own Landlock probe starts ``python -I`` with ``env={"PATH": ...}``.
 
@@ -399,6 +415,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         home = os.environ["USERPROFILE" if os.name == "nt" else "HOME"]
         assert seen.read_text() == home
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("given", ["as a keyword", "by position", "as bytes"])
     def test_the_tests_home_reaches_the_child_however_env_is_given(
         self, tmp_path, given
@@ -425,12 +442,14 @@ class TestToolInstallingChildrenGetTheirOwnHome:
             seen.read_text() == os.environ["USERPROFILE" if os.name == "nt" else "HOME"]
         )
 
+    @pytest.mark.integration
     def test_an_ash_child_given_no_home_starts(self):
         ash = TestInstallersAreRefusedADestinationInTheDeveloperHome._ash()
         env = checkout_env(self._without_a_home())
         outcome = self._start([ash, "--version"], env=env)
         assert outcome == "started"
 
+    @pytest.mark.integration
     def test_a_home_less_child_writing_a_receipt_writes_it_in_the_tests_home(
         self, tmp_path, developer_home
     ):
@@ -467,6 +486,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
             for root in guarded
         ), receipt
 
+    @pytest.mark.unit
     def test_ash_run_as_a_module_with_the_developer_home_is_refused(
         self, home_guard_violations, developer_env
     ):
@@ -502,6 +522,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
             pytest.skip(f"no {name} beside {sys.executable}")
         return str(path)
 
+    @pytest.mark.unit
     def test_a_pinned_installer_aimed_at_the_developer_home_is_refused(
         self, home_guard_violations, developer_home
     ):
@@ -512,6 +533,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert len(home_guard_violations) == 1, home_guard_violations
         home_guard_violations.clear()
 
+    @pytest.mark.integration
     def test_a_pinned_installer_aimed_at_a_temporary_directory_starts(self, tmp_path):
         assert self._start(self._pinned_installer(tmp_path / "bin")) == "started"
 
@@ -524,6 +546,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
             pytest.skip(f"no {path.name} beside {sys.executable}")
         return str(path)
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("name", ["ashv3", "automated-security-helper"])
     def test_each_of_ashs_console_scripts_is_an_installer(
         self, home_guard_violations, developer_home, name
@@ -537,6 +560,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert "--bin-path" in outcome, outcome
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("name", ["ashv3", "automated-security-helper"])
     def test_each_of_ashs_console_scripts_needs_a_home_of_its_own(
         self, home_guard_violations, developer_home, name
@@ -549,6 +573,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert "HOME in the developer home" in outcome, outcome
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     def test_ash_bin_path_in_the_developer_home_is_refused(
         self, home_guard_violations, developer_home
     ):
@@ -558,6 +583,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert "ASH_BIN_PATH" in outcome, outcome
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "spelling",
         [
@@ -584,6 +610,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert destination in outcome and "--bin-path" in outcome, outcome
         home_guard_violations.clear()
 
+    @pytest.mark.integration
     def test_the_last_bin_path_is_the_one_that_counts(self, tmp_path, developer_home):
         argv = [self._ash(), "dependencies", "install"]
         argv += ["--bin-path", str(developer_home / ".ash" / "bin")]
@@ -591,6 +618,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         outcome = self._start(argv, env=checkout_env())
         assert outcome == "started"
 
+    @pytest.mark.unit
     def test_a_pinned_installer_with_interpreter_options_is_refused(
         self, home_guard_violations, developer_home
     ):
@@ -601,6 +629,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert outcome.startswith("refused"), outcome
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     def test_a_home_inside_the_developer_home_is_refused(
         self, home_guard_violations, developer_home
     ):
@@ -613,6 +642,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert outcome.startswith("refused"), outcome
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "variable",
         [
@@ -636,6 +666,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert variable in outcome, outcome
         home_guard_violations.clear()
 
+    @pytest.mark.integration
     def test_a_relative_destination_is_resolved_against_the_childs_cwd(
         self, home_guard_violations, developer_home, tmp_path
     ):
@@ -646,6 +677,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
             "started"
         )
 
+    @pytest.mark.unit
     def test_a_case_variant_of_the_developer_home_is_refused(
         self, home_guard_violations, developer_home
     ):
@@ -669,6 +701,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
             pytest.skip(f"cannot make a symbolic link here: {exc}")
         return link
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "route",
         [
@@ -734,6 +767,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         monkeypatch.setenv("ASH_TEST_DEVELOPER_HOME", record)
         return home
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "route", ["a destination", "ASH_BIN_PATH", "--bin-path", "XDG_DATA_HOME"]
     )
@@ -759,6 +793,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert outcome.startswith("refused"), outcome
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "temp_root",
         ["PYTEST_DEBUG_TEMPROOT", "ASH_TEST_SESSION_TMPDIR", "TMPDIR before the run"],
@@ -778,6 +813,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         assert outcome.startswith("refused"), outcome
         home_guard_violations.clear()
 
+    @pytest.mark.integration
     def test_an_explicit_bin_path_elsewhere_comes_first(self, tmp_path, developer_home):
         """``--bin-path`` wins over ASH_BIN_PATH in ``ash dependencies install``."""
         env = {**os.environ, "ASH_BIN_PATH": str(developer_home / ".ash" / "bin")}
@@ -822,6 +858,7 @@ class TestBotocoreRequestsStayOnThisMachine:
     ``@pytest.mark.allow_aws_network``.
     """
 
+    @pytest.mark.unit
     def test_a_request_to_aws_is_refused_before_it_is_sent(
         self, aws_network_violations
     ):
@@ -831,6 +868,7 @@ class TestBotocoreRequestsStayOnThisMachine:
         assert len(aws_network_violations) == 1, aws_network_violations
         aws_network_violations.clear()
 
+    @pytest.mark.unit
     def test_a_refusal_the_code_swallows_is_still_recorded(
         self, aws_network_violations
     ):
@@ -843,6 +881,7 @@ class TestBotocoreRequestsStayOnThisMachine:
         assert len(aws_network_violations) == 1, aws_network_violations
         aws_network_violations.clear()
 
+    @pytest.mark.unit
     def test_a_stubbed_client_is_not_refused(self, aws_network_violations):
         from botocore.stub import Stubber
 
@@ -855,6 +894,7 @@ class TestBotocoreRequestsStayOnThisMachine:
             assert client.get_caller_identity()["Account"] == "123456789012"
         assert aws_network_violations == []
 
+    @pytest.mark.integration
     def test_a_loopback_endpoint_is_not_refused(self, aws_network_violations):
         """Nothing listens on port 9 here, so botocore's own send fails to connect
         (to the endpoint, or to a proxy the environment names)."""
@@ -865,6 +905,7 @@ class TestBotocoreRequestsStayOnThisMachine:
             client.get_caller_identity()
         assert aws_network_violations == []
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "url, loopback",
         [
@@ -884,10 +925,12 @@ class TestBotocoreRequestsStayOnThisMachine:
         conftest = _root_conftest(request.config)
         assert conftest._is_loopback_url(url) is loopback
 
+    @pytest.mark.unit
     def test_the_send_stage_is_guarded_in_an_ordinary_test(self):
         """Control for the opt-in below: the patch is there without the marker."""
         assert botocore.endpoint.Endpoint._send is not _ORIGINAL_SEND
 
+    @pytest.mark.unit
     @pytest.mark.allow_aws_network
     def test_a_test_that_opts_in_sends_as_botocore_does(self):
         assert botocore.endpoint.Endpoint._send is _ORIGINAL_SEND
@@ -916,28 +959,33 @@ class TestTheGuardReadsThroughWrappers:
             assert word in outcome, outcome
         home_guard_violations.clear()
 
+    @pytest.mark.unit
     def test_env_setting_ash_bin_path(self, home_guard_violations, into_home):
         argv = ["env", f"ASH_BIN_PATH={into_home}", "ash", "dependencies", "install"]
         outcome = self._start([*argv, "--help"])
         self._refused(home_guard_violations, outcome, "ASH_BIN_PATH", into_home)
 
+    @pytest.mark.unit
     def test_env_setting_home(self, home_guard_violations, developer_home):
         installer = TestToolInstallingChildrenGetTheirOwnHome.installer()
         argv = ["env", f"HOME={developer_home}", f"USERPROFILE={developer_home}"]
         outcome = self._start([*argv, *installer])
         self._refused(home_guard_violations, outcome, "HOME")
 
+    @pytest.mark.unit
     def test_env_unsetting_home(self, home_guard_violations):
         installer = TestToolInstallingChildrenGetTheirOwnHome.installer()
         argv = ["env", "-u", "HOME", "--unset=USERPROFILE", *installer]
         self._refused(home_guard_violations, self._start(argv), "HOME unset")
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="no env command on Windows")
     def test_env_with_an_empty_environment_and_its_own_home_starts(self, tmp_path):
         installer = TestToolInstallingChildrenGetTheirOwnHome.installer()
         argv = ["env", "-i", f"HOME={tmp_path}", f"USERPROFILE={tmp_path}", *installer]
         assert self._start(argv) == "started"
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("flags", ["-c", "-ec"])
     def test_a_shell_command_string(self, home_guard_violations, into_home, flags):
         """Read through: the refusal names the destination it found inside the string."""
@@ -947,11 +995,13 @@ class TestTheGuardReadsThroughWrappers:
             home_guard_violations, outcome, into_home, "its destination argument"
         )
 
+    @pytest.mark.unit
     def test_a_shell_command_string_running_ash(self, home_guard_violations, into_home):
         command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
         outcome = self._start(["sh", "-c", shlex.join(command)])
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("option", ["--rcfile", "--init-file"])
     def test_a_bash_option_that_takes_a_value(
         self, home_guard_violations, into_home, option
@@ -961,12 +1011,14 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(["bash", option, os.devnull, "-c", shlex.join(command)])
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
+    @pytest.mark.unit
     def test_env_with_an_empty_environment(self, home_guard_violations):
         """``env -i`` drops HOME with the rest: the child falls back to the passwd home."""
         installer = TestToolInstallingChildrenGetTheirOwnHome.installer()
         argv = ["env", "-i", f"PATH={os.environ.get('PATH', '')}", *installer]
         self._refused(home_guard_violations, self._start(argv), "HOME unset")
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "unset", [["--unset", "HOME"], ["--unset=HOME"], ["-uHOME"]], ids=" ".join
     )
@@ -975,6 +1027,7 @@ class TestTheGuardReadsThroughWrappers:
         argv = ["env", *unset, "--unset=USERPROFILE", *installer]
         self._refused(home_guard_violations, self._start(argv), "HOME unset")
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "spelling",
         [
@@ -994,12 +1047,14 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(argv, cwd=str(tmp_path))
         self._refused(home_guard_violations, outcome, "its destination argument")
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("form", ["-S", "--split-string"])
     def test_env_splitting_a_string(self, home_guard_violations, into_home, form):
         line = f"ASH_BIN_PATH={into_home} ash dependencies install --help"
         argv = ["env", "-S", line] if form == "-S" else ["env", f"{form}={line}"]
         self._refused(home_guard_violations, self._start(argv), "ASH_BIN_PATH")
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "prefix",
         [
@@ -1025,6 +1080,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start([*argv, "dependencies", "install", "--help"])
         self._refused(home_guard_violations, outcome, "ASH_BIN_PATH", into_home)
 
+    @pytest.mark.unit
     def test_a_prefix_before_env_unsetting_home(self, home_guard_violations):
         installer = TestToolInstallingChildrenGetTheirOwnHome.installer()
         argv = ["stdbuf", "-oL", "env", "-u", "HOME", "--unset=USERPROFILE"]
@@ -1032,6 +1088,7 @@ class TestTheGuardReadsThroughWrappers:
             home_guard_violations, self._start([*argv, *installer]), "HOME unset"
         )
 
+    @pytest.mark.unit
     def test_exec_in_a_shell_command_line(self, home_guard_violations, into_home):
         line = (
             f"exec env ASH_BIN_PATH={shlex.quote(into_home)} ash dependencies install"
@@ -1039,11 +1096,13 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(["sh", "-c", f"{line} --help"])
         self._refused(home_guard_violations, outcome, "ASH_BIN_PATH", into_home)
 
+    @pytest.mark.unit
     def test_a_shell_behind_a_prefix(self, home_guard_violations, into_home):
         command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
         outcome = self._start(["nice", "sh", "-c", shlex.join(command)])
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
+    @pytest.mark.unit
     def test_the_program_given_as_executable(self, home_guard_violations, into_home):
         """``Popen(["x", ...], executable=ash)`` runs ash whatever argv[0] says."""
         ash = TestInstallersAreRefusedADestinationInTheDeveloperHome._ash()
@@ -1051,6 +1110,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(argv, executable=ash)
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     def test_a_command_after_pushd_in_a_shell(
         self, home_guard_violations, developer_home, tmp_path
@@ -1060,6 +1120,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(["bash", "-c", command], cwd=str(tmp_path))
         self._refused(home_guard_violations, outcome, "its destination argument")
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "bin_path",
@@ -1082,6 +1143,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(["bash", "-c", line])
         self._refused(home_guard_violations, outcome, "cannot read")
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     def test_a_tilde_is_the_childs_own_home(self, tmp_path):
         """``~/...`` is readable: it is the child's HOME, here a temporary one."""
@@ -1090,6 +1152,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(["sh", "-c", line], env=env)
         assert outcome == "started"
 
+    @pytest.mark.unit
     def test_a_shell_option_the_guard_does_not_know(
         self, home_guard_violations, into_home
     ):
@@ -1097,6 +1160,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(["bash", "--new-option", "-c", shlex.join(command)])
         self._refused(home_guard_violations, outcome, "cannot read")
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     def test_an_export_before_the_command_in_a_shell(
         self, home_guard_violations, into_home
@@ -1106,6 +1170,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(command, shell=True)
         self._refused(home_guard_violations, outcome, "ASH_BIN_PATH", into_home)
 
+    @pytest.mark.unit
     def test_a_shell_running_its_operands_with_the_developers_home(
         self, home_guard_violations, developer_home
     ):
@@ -1116,6 +1181,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(["sh", "-c", 'exec "$@"', "sh", *installer], env=env)
         self._refused(home_guard_violations, outcome, "HOME")
 
+    @pytest.mark.unit
     @pytest.mark.skipif(
         os.name == "nt", reason="Windows joins a shell=True list into one command line"
     )
@@ -1130,6 +1196,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(['exec "$@"', "sh", *installer], shell=True, env=env)
         self._refused(home_guard_violations, outcome, "HOME")
 
+    @pytest.mark.unit
     def test_a_shell_running_ash_from_its_operands(
         self, home_guard_violations, into_home
     ):
@@ -1137,11 +1204,13 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start([*argv, "--bin-path", into_home, "--help"])
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
+    @pytest.mark.unit
     def test_python_with_c_in_a_cluster(self, home_guard_violations, into_home):
         argv = _pinned_installer(into_home)
         argv[1] = "-uc"
         self._refused(home_guard_violations, self._start(argv), into_home)
 
+    @pytest.mark.unit
     def test_an_installer_call_of_another_shape_is_refused(
         self, home_guard_violations, tmp_path
     ):
@@ -1149,6 +1218,7 @@ class TestTheGuardReadsThroughWrappers:
         argv = [*_pinned_installer(tmp_path / "bin"), "extra"]
         self._refused(home_guard_violations, self._start(argv), "5 arguments")
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="cmd expands %VAR%, not $VAR")
     def test_a_shell_variable_for_the_bin_path(self, home_guard_violations, into_home):
         command = 'ash dependencies install --bin-path "$DEST" --help'
@@ -1156,6 +1226,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(command, shell=True, env=env)
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="cmd has no NAME=VALUE prefix")
     def test_a_shell_assignment_before_the_command(
         self, home_guard_violations, into_home
@@ -1166,6 +1237,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(command, shell=True)
         self._refused(home_guard_violations, outcome, "ASH_BIN_PATH", into_home)
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     def test_a_command_after_cd_in_a_shell(
         self, home_guard_violations, developer_home, tmp_path
@@ -1176,6 +1248,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(command, shell=True, cwd=str(tmp_path))
         self._refused(home_guard_violations, outcome, "bin")
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line, words",
@@ -1211,6 +1284,7 @@ class TestTheGuardReadsThroughWrappers:
         line = line.replace("DEV", shlex.quote(str(developer_home)))
         self._refused(home_guard_violations, self._start(line, shell=True), *words)
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line",
@@ -1263,6 +1337,7 @@ class TestTheGuardReadsThroughWrappers:
         line = line.replace("SCRIPT", shlex.quote(str(script)))
         assert self._start(line, shell=True) == "started"
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line",
@@ -1287,6 +1362,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(line, shell=True)
         self._refused(home_guard_violations, outcome, "cannot read")
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line, words",
@@ -1435,6 +1511,7 @@ class TestTheGuardReadsThroughWrappers:
         line = line.replace("DEV", shlex.quote(str(developer_home)))
         self._refused(home_guard_violations, self._start(line, shell=True), *words)
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell")
     @pytest.mark.parametrize(
         "argv",
@@ -1450,6 +1527,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(argv, stdin=subprocess.DEVNULL)
         self._refused(home_guard_violations, outcome, "cannot read")
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "sourced, line, words",
@@ -1493,6 +1571,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(line, shell=True, cwd=tmp_path)
         self._refused(home_guard_violations, outcome, *words)
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "sourced",
@@ -1508,6 +1587,7 @@ class TestTheGuardReadsThroughWrappers:
         line = f". {shlex.quote(str(script))}; python -c pass"
         assert self._start(line, shell=True) == "started"
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     def test_a_file_sourced_nine_deep_is_not_read(
         self, home_guard_violations, tmp_path
@@ -1523,6 +1603,7 @@ class TestTheGuardReadsThroughWrappers:
             home_guard_violations, self._start(line, shell=True), "cannot read"
         )
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     def test_how_deep_bounds_what_is_read_not_how_much(self, tmp_path):
         """A file holding six evals, sourced twice, is read all through: each read is
@@ -1534,6 +1615,7 @@ class TestTheGuardReadsThroughWrappers:
             "started"
         )
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line, words",
@@ -1549,6 +1631,7 @@ class TestTheGuardReadsThroughWrappers:
         line = line.replace("DEV", shlex.quote(str(developer_home)))
         self._refused(home_guard_violations, self._start(line, shell=True), *words)
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line",
@@ -1564,6 +1647,7 @@ class TestTheGuardReadsThroughWrappers:
     def test_a_declaration_of_another_name_starts(self, line):
         assert self._start(line, shell=True) == "started"
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line, words",
@@ -1615,6 +1699,7 @@ class TestTheGuardReadsThroughWrappers:
         evaluate (of -v, -R or an arithmetic comparison) could run a substitution."""
         self._refused(home_guard_violations, self._start(line, shell=True), *words)
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line",
@@ -1652,6 +1737,7 @@ class TestTheGuardReadsThroughWrappers:
         "uvx --from SOURCE ash dependencies install --help"
     )
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     def test_a_nested_sh_c_is_read_with_its_operands(self, tmp_path):
         """The script's $0 and "$@" are the operands after it, so the command it runs
@@ -1659,6 +1745,7 @@ class TestTheGuardReadsThroughWrappers:
         line = self._PREFLIGHT.replace("MARKER", shlex.quote(str(tmp_path / "ran")))
         assert self._start(line, shell=True) == "started"
 
+    @pytest.mark.unit
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line, words",
@@ -1732,6 +1819,7 @@ class TestTheGuardReadsThroughWrappers:
         line = line.replace("DEV", shlex.quote(str(developer_home)))
         self._refused(home_guard_violations, self._start(line, shell=True), *words)
 
+    @pytest.mark.integration
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell command line")
     @pytest.mark.parametrize(
         "line",
@@ -1759,6 +1847,7 @@ class TestTheGuardReadsThroughWrappers:
             pytest.skip(f"no {runner[0]} on PATH")
         return [program, *runner[1:]]
 
+    @pytest.mark.unit
     @_RUNNERS
     def test_python_behind_a_runner_the_guard_does_not_unwrap(
         self, home_guard_violations, developer_home, runner
@@ -1770,6 +1859,7 @@ class TestTheGuardReadsThroughWrappers:
         outcome = self._start(argv, env=env)
         self._refused(home_guard_violations, outcome, "HOME in the developer home")
 
+    @pytest.mark.integration
     @_RUNNERS
     def test_python_behind_a_runner_given_no_home_gets_the_tests(
         self, tmp_path, runner
@@ -1783,6 +1873,7 @@ class TestTheGuardReadsThroughWrappers:
         assert seen.read_text() == os.environ["HOME"]
 
 
+@pytest.mark.unit
 class TestTheHomeRuleCanBeAskedFromOutsideTheConftest:
     """tests/utils/home_rule.py: the rule, for a start that never reaches Popen.
 
@@ -1925,6 +2016,7 @@ class TestTheRunHeaderNamesToolsItWillNotUse:
         monkeypatch.delenv("ASH_BIN_PATH", raising=False)
         return lambda: conftest.pytest_report_header(request.config)
 
+    @pytest.mark.unit
     def test_installed_tools_are_named_with_the_way_to_use_them(self, header, tmp_path):
         """PATH, not ASH_BIN_PATH: tests install to ASH_BIN_PATH by default.
 
@@ -1943,11 +2035,13 @@ class TestTheRunHeaderNamesToolsItWillNotUse:
             assert f'PATH="{bin_dir}:$PATH"' in text, text
         assert "ASH_BIN_PATH=" not in text, text
 
+    @pytest.mark.unit
     def test_nothing_is_said_without_installed_tools(self, header, tmp_path):
         assert header() is None
         (tmp_path / ".ash" / "bin").mkdir(parents=True)
         assert header() is None
 
+    @pytest.mark.unit
     def test_nothing_is_said_when_the_directory_is_on_path(
         self, header, tmp_path, monkeypatch
     ):
@@ -1957,6 +2051,7 @@ class TestTheRunHeaderNamesToolsItWillNotUse:
         monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
         assert header() is None
 
+    @pytest.mark.unit
     def test_an_ash_bin_path_in_the_home_is_named_with_what_it_does(
         self, header, tmp_path, monkeypatch
     ):
@@ -1969,6 +2064,7 @@ class TestTheRunHeaderNamesToolsItWillNotUse:
         assert "refused" in text, text
         assert str(bin_dir) in text.split("refused", 1)[1], text
 
+    @pytest.mark.integration
     def test_an_ash_bin_path_in_a_temp_dir_inside_the_home_is_not_called_refused(
         self, header, tmp_path, monkeypatch
     ):
@@ -1985,6 +2081,7 @@ class TestTheRunHeaderNamesToolsItWillNotUse:
         argv = installer._pinned_installer(temp / "ash-bin")
         assert installer._start(argv) == "started"
 
+    @pytest.mark.unit
     def test_an_ash_bin_path_through_a_link_out_of_the_home_is_still_named(
         self, header, tmp_path, monkeypatch
     ):
@@ -2000,6 +2097,7 @@ class TestTheRunHeaderNamesToolsItWillNotUse:
         assert text is not None
         assert f"ASH_BIN_PATH={bin_dir} is in your home" in text, text
 
+    @pytest.mark.unit
     def test_nothing_is_said_when_ash_bin_path_is_set_elsewhere(
         self, header, tmp_path, tmp_path_factory, monkeypatch
     ):
@@ -2011,6 +2109,7 @@ class TestTheRunHeaderNamesToolsItWillNotUse:
         assert header() is None
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "windows, advice",
     [
@@ -2042,6 +2141,7 @@ def test_the_tool_skip_reason_points_at_path(windows, advice):
     assert default == ash_tool_not_found_reason("trivy", windows=os.name == "nt")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "windows, advice",
     [
@@ -2065,6 +2165,7 @@ def test_the_header_gives_path_in_each_of_the_platforms_shells(
         assert form in text, text
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "started_by",
     [
@@ -2130,6 +2231,7 @@ def test_a_nested_run_takes_a_home_beside_its_parents_and_puts_everything_back(
     assert {name: os.environ.get(name) for name in watched} == before
 
 
+@pytest.mark.unit
 def test_an_xdist_worker_marks_itself_and_keeps_the_runs_home(
     request, monkeypatch, tmp_path
 ):
@@ -2155,6 +2257,7 @@ def test_an_xdist_worker_marks_itself_and_keeps_the_runs_home(
     assert (environ_value("HOME"), environ_value("USERPROFILE")) == home_before
 
 
+@pytest.mark.unit
 class TestTheDevelopersUvCache:
     """``_developer_uv_cache`` names the cache uv would use for the developer.
 

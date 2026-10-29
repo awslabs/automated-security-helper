@@ -50,6 +50,8 @@ import pytest
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.exceptions import ScannerError
 
+pytestmark = pytest.mark.unit
+
 #: What a tool writes for a clean scan: SARIF with one run and no results. A log with
 #: no run records no scan, and the template reports it as nothing to grade.
 ONE_RUN_SARIF = '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "fake"}}, "results": []}]}'

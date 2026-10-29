@@ -69,6 +69,7 @@ REFUSED = [
 ]
 
 
+@pytest.mark.unit
 def test_every_generated_buildspec_was_found():
     assert [p.name for p in BUILDSPECS] == [
         "buildspec-merge.yml",
@@ -128,6 +129,7 @@ def _run_install(
 
 @pytest.mark.parametrize("path", BUILDSPECS, ids=lambda p: p.name)
 @pytest.mark.parametrize("ref", ACCEPTED)
+@pytest.mark.integration
 def test_control_an_accepted_ref_reaches_pip_unchanged(path, ref, tmp_path):
     run, calls = _run_install(path, ref, tmp_path)
     assert run.returncode == 0, run.stderr
@@ -136,6 +138,7 @@ def test_control_an_accepted_ref_reaches_pip_unchanged(path, ref, tmp_path):
 
 @pytest.mark.parametrize("path", BUILDSPECS, ids=lambda p: p.name)
 @pytest.mark.parametrize("ref", REFUSED)
+@pytest.mark.integration
 def test_a_refused_ref_stops_the_install_before_pip(path, ref, tmp_path):
     run, calls = _run_install(path, ref, tmp_path)
     assert calls == [], f"{path.name}: pip ran with ASH_VERSION={ref!r}: {calls}"
@@ -144,6 +147,7 @@ def test_a_refused_ref_stops_the_install_before_pip(path, ref, tmp_path):
 
 
 @pytest.mark.parametrize("path", BUILDSPECS, ids=lambda p: p.name)
+@pytest.mark.integration
 def test_an_upload_pack_ref_never_reaches_pip(path, tmp_path):
     marker = tmp_path / "upload-pack-ran"
     script = tmp_path / "upload-pack.sh"

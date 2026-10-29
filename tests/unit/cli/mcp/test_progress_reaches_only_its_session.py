@@ -27,6 +27,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 NEVER_ISSUED = "00000000-0000-0000-0000-000000000000"
 
 

@@ -29,9 +29,10 @@ from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox.backends import LandlockBackend
 from automated_security_helper.utils.sandbox.policy import build_scanner_policy
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="no backend runs on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows"),
+]
 
 #: A name no real PATH holds, so only the files these tests create answer to it.
 TOOL = "ash-landlock-sample-tool"

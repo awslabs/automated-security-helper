@@ -28,6 +28,8 @@ from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.plugins.loader import load_additional_plugin_modules
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 STANDIN = "standin_ash_plugins"
 INSTALLED = "automated_security_helper.plugin_modules.ash_trivy_plugins"
 

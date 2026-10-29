@@ -21,6 +21,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScannerConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 _TIMEOUT = {"timed_out": True, "returncode": 124}

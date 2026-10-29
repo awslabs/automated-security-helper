@@ -126,6 +126,7 @@ def _issuer_requests(proxy: RecordingProxy) -> list:
     return [line for line in proxy.external_requests() if ISSUER in line]
 
 
+@pytest.mark.integration
 def test_an_operator_baseline_in_another_checkout_verifies(recorder, tmp_path):
     shared = tmp_path / "shared-baselines"
     (shared / ".git").mkdir(parents=True)  # a checkout of its own
@@ -140,6 +141,7 @@ def test_an_operator_baseline_in_another_checkout_verifies(recorder, tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_a_baseline_in_the_scanned_tree_s_own_checkout_does_not_verify(
     recorder, tmp_path
 ):
@@ -156,6 +158,7 @@ def test_a_baseline_in_the_scanned_tree_s_own_checkout_does_not_verify(
     assert int(row.get("finding_count") or 0) >= 1, "detection went off with it"
 
 
+@pytest.mark.integration
 def test_control_an_operator_baseline_outside_any_checkout_verifies(recorder, tmp_path):
     baseline = _verifying_baseline(tmp_path / "plain" / "verifying.baseline")
     source = _project(tmp_path / "repo")
@@ -165,6 +168,7 @@ def test_control_an_operator_baseline_outside_any_checkout_verifies(recorder, tm
     assert _issuer_requests(recorder), recorder.requests
 
 
+@pytest.mark.unit
 def test_the_reason_names_the_scanned_checkout(tmp_path):
     from automated_security_helper.config.path_trust import scanned_checkout_reason
 

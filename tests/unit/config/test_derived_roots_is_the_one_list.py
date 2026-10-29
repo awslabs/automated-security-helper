@@ -12,12 +12,16 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.path_trust import (
     derived_roots,
     refused_derived_product,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_the_list_holds_the_output_work_and_workspace_output_directories(tmp_path):

@@ -49,6 +49,7 @@ def _names(directory):
 
 
 @pytest.mark.parametrize("system", ["Windows", "windows", "Linux", "Darwin", ""])
+@pytest.mark.unit
 def test_the_host_is_windows_when_the_tool_guard_says_so(monkeypatch, system):
     with monkeypatch.context() as host:
         host.setattr(platform, "system", lambda: system)
@@ -64,6 +65,7 @@ def test_the_host_is_windows_when_the_tool_guard_says_so(monkeypatch, system):
     [("Windows", ["grype.bat", "grype.py"]), ("Linux", ["grype"])],
     ids=["windows", "posix"],
 )
+@pytest.mark.unit
 def test_the_form_follows_the_host_unless_it_is_told(
     tmp_path, monkeypatch, system, expected
 ):
@@ -77,12 +79,14 @@ def test_the_form_follows_the_host_unless_it_is_told(
 # ------------------------------------------------------------------ the launcher
 
 
+@pytest.mark.unit
 def test_the_launcher_starts_the_script_with_the_interpreter_and_passes_its_arguments():
     text = launcher_text("C:\\Python\\python.exe", "C:\\work\\grype.py")
 
     assert text == '@"C:\\Python\\python.exe" "C:\\work\\grype.py" %*\r\n'
 
 
+@pytest.mark.unit
 def test_a_percent_sign_in_either_path_is_doubled_and_the_arguments_are_not():
     text = launcher_text("C:\\100%\\python.exe", "C:\\50%done\\grype.py")
 
@@ -92,6 +96,7 @@ def test_a_percent_sign_in_either_path_is_doubled_and_the_arguments_are_not():
 # ------------------------------------------------------------------ the POSIX form
 
 
+@pytest.mark.unit
 def test_on_posix_the_stand_in_is_the_script_with_this_interpreter_in_its_shebang(
     tmp_path,
 ):
@@ -104,12 +109,14 @@ def test_on_posix_the_stand_in_is_the_script_with_this_interpreter_in_its_sheban
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows files have no execute bit")
+@pytest.mark.unit
 def test_on_posix_the_stand_in_can_be_executed(tmp_path):
     write_stand_in(tmp_path, "grype", SOURCE, windows=False)
 
     assert (tmp_path / "grype").stat().st_mode & stat.S_IXUSR
 
 
+@pytest.mark.unit
 def test_on_posix_the_interpreter_is_the_one_asked_for(tmp_path):
     write_stand_in(tmp_path, "grype", SOURCE, windows=False, python="/opt/py/python")
 
@@ -120,6 +127,7 @@ def test_on_posix_the_interpreter_is_the_one_asked_for(tmp_path):
 # ---------------------------------------------------------------- the Windows form
 
 
+@pytest.mark.unit
 def test_on_windows_the_stand_in_is_a_script_and_a_bat_launcher_for_it(tmp_path):
     made = write_stand_in(tmp_path, "grype", SOURCE, windows=True)
 
@@ -133,6 +141,7 @@ def test_on_windows_the_stand_in_is_a_script_and_a_bat_launcher_for_it(tmp_path)
     )
 
 
+@pytest.mark.unit
 def test_a_percent_sign_in_a_path_survives_cmd_reading_the_launcher(tmp_path):
     bin_dir = tmp_path / "100%"
     bin_dir.mkdir()
@@ -150,6 +159,7 @@ def test_a_percent_sign_in_a_path_survives_cmd_reading_the_launcher(tmp_path):
     not on_windows(),
     reason="only cmd.exe reads a .bat launcher; the Windows leg runs this test",
 )
+@pytest.mark.integration
 def test_on_windows_the_launcher_hands_its_arguments_to_the_script_and_returns_its_exit_code(
     tmp_path,
 ):
@@ -186,6 +196,7 @@ def test_on_windows_the_launcher_hands_its_arguments_to_the_script_and_returns_i
     ["café", "日本"],
     ids=["a-letter-an-oem-page-holds", "a-letter-no-western-page-holds"],
 )
+@pytest.mark.unit
 def test_a_directory_with_a_non_ascii_name_is_refused_on_every_host(
     tmp_path, directory
 ):
@@ -204,6 +215,7 @@ def test_a_directory_with_a_non_ascii_name_is_refused_on_every_host(
     assert list(bin_dir.iterdir()) == [], "no half-made stand-in is left behind"
 
 
+@pytest.mark.unit
 def test_an_interpreter_path_with_a_non_ascii_name_is_refused_on_every_host(tmp_path):
     interpreter = "C:\\Pythön\\python.exe"
 
@@ -214,6 +226,7 @@ def test_an_interpreter_path_with_a_non_ascii_name_is_refused_on_every_host(tmp_
     assert list(tmp_path.iterdir()) == [], "no half-made stand-in is left behind"
 
 
+@pytest.mark.unit
 def test_the_posix_form_is_written_to_a_directory_with_a_non_ascii_name(tmp_path):
     """Control: a shebang file is read as UTF-8, so only the Windows form is limited."""
     bin_dir = tmp_path / "café"
@@ -227,10 +240,12 @@ def test_the_posix_form_is_written_to_a_directory_with_a_non_ascii_name(tmp_path
 # ----------------------------------------------------------------- the search path
 
 
+@pytest.mark.unit
 def test_on_windows_the_search_path_is_the_stand_ins_directory_alone(tmp_path):
     assert search_path(tmp_path, windows=True) == str(tmp_path)
 
 
+@pytest.mark.unit
 def test_off_windows_the_system_directories_follow_it_joined_with_the_host_separator(
     tmp_path, monkeypatch
 ):
@@ -246,6 +261,7 @@ def test_off_windows_the_system_directories_follow_it_joined_with_the_host_separ
     [("Windows", []), ("Linux", ["/usr/bin", "/bin"])],
     ids=["windows", "posix"],
 )
+@pytest.mark.unit
 def test_the_search_path_follows_the_host_unless_it_is_told(
     tmp_path, monkeypatch, system, system_directories
 ):
@@ -260,6 +276,7 @@ def test_the_search_path_follows_the_host_unless_it_is_told(
 # --------------------------------------------------------------- the status tool
 
 
+@pytest.mark.unit
 def test_the_status_tool_is_a_grype_stand_in_unless_named_otherwise(tmp_path):
     made = status_tool(tmp_path, {"valid": True}, 0, windows=False)
     other = status_tool(tmp_path, {"valid": True}, 0, name="trivy", windows=False)
@@ -268,6 +285,7 @@ def test_the_status_tool_is_a_grype_stand_in_unless_named_otherwise(tmp_path):
     assert other.program.name == "trivy"
 
 
+@pytest.mark.unit
 def test_the_status_tool_prints_its_status_and_exits_with_its_code(tmp_path):
     made = status_tool(tmp_path, {"valid": False}, 3, windows=True)
 

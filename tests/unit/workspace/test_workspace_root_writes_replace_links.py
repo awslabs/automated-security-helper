@@ -30,9 +30,12 @@ from tests.unit.workspace.test_workspace_reporting import (
     _run,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 def _outside(tmp_path: Path, name: str) -> Path:

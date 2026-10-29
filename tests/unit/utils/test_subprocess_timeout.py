@@ -54,6 +54,7 @@ def _sleep_command(seconds: int = _SLEEP_SECONDS):
     return [sys.executable, "-c", f"import time; time.sleep({seconds})"]
 
 
+@pytest.mark.integration
 class TestTimeoutIsEnforced:
     def test_a_hanging_command_returns_instead_of_blocking(self, tmp_path):
         """The reported failure mode, reduced to its smallest form."""
@@ -109,6 +110,7 @@ class TestTimeoutIsEnforced:
         assert failed.get("timed_out") is not True
 
 
+@pytest.mark.integration
 class TestNormalExecutionIsUnaffected:
     def test_fast_command_succeeds_within_a_timeout(self, tmp_path):
         response = run_command_with_output_handling(
@@ -157,6 +159,7 @@ def runner_with_uv(monkeypatch):
     return runner
 
 
+@pytest.mark.unit
 class TestTheUvToolPathIsAlsoBounded:
     """The path bandit, checkov and semgrep actually take.
 
@@ -309,6 +312,7 @@ class TestPartialOutputKeepsTheCallersEncoding:
     output came back with replacement characters, in the returned stdout and
     in the stream log, while the same tool finishing read correctly."""
 
+    @pytest.mark.integration
     def test_a_timed_out_runs_partial_stdout_decodes_with_the_callers_encoding(
         self, tmp_path
     ):
@@ -328,6 +332,7 @@ class TestPartialOutputKeepsTheCallersEncoding:
         reason="only the POSIX communicate attaches partial bytes to "
         "TimeoutExpired; the thread-reader one raises with no output",
     )
+    @pytest.mark.integration
     def test_a_failed_waits_late_read_decodes_as_the_childs_streams_would(self):
         """The reap path: a wait that fails on a still-running text-mode child
         reads what sits in the pipes, and the late communicate's TimeoutExpired
@@ -354,6 +359,7 @@ class TestPartialOutputKeepsTheCallersEncoding:
 
         assert stdout == "café", repr(stdout)
 
+    @pytest.mark.unit
     def test_partial_bytes_with_no_named_encoding_decode_as_the_locale_would(self):
         """With no encoding named, a finished run's text-mode streams decode
         with the locale encoding, so the partial bytes a timed-out wait
@@ -374,6 +380,7 @@ class TestPartialOutputKeepsTheCallersEncoding:
         assert subprocess_utils._late_decoded("already text", None) == "already text"
 
 
+@pytest.mark.unit
 def test_detect_secrets_inherits_the_shared_scan_timeout():
     """detect-secrets must not carry its own copy of the option.
 
@@ -396,6 +403,7 @@ def test_detect_secrets_inherits_the_shared_scan_timeout():
     )
 
 
+@pytest.mark.unit
 def test_scanners_that_override_scan_still_pass_the_timeout():
     """A field that appears in a schema and does nothing is worse than absent.
 
@@ -438,6 +446,7 @@ def test_scanners_that_override_scan_still_pass_the_timeout():
     )
 
 
+@pytest.mark.unit
 def test_scanner_options_expose_a_scan_timeout_default():
     """Every scanner gets the knob, not just the one that grew its own.
 

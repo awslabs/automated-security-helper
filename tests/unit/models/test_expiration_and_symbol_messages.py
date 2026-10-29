@@ -28,6 +28,8 @@ from automated_security_helper.config.ash_config import (
 from automated_security_helper.config.config_validator import ConfigValidator
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 
+pytestmark = pytest.mark.unit
+
 ENTRY = {"path": "vendor/**", "reason": "r"}
 SUPPRESSION = {"path": "app.py", "rule_id": "B101", "reason": "r"}
 

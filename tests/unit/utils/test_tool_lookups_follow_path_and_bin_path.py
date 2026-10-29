@@ -31,7 +31,10 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX execute bits")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(os.name == "nt", reason="POSIX execute bits"),
+]
 
 #: A name no directory searched outside this test's own holds.
 TOOL = "ash-lookup-probe-tool"

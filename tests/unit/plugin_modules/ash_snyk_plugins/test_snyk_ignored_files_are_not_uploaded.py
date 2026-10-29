@@ -34,6 +34,8 @@ from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner
     SnykCodeScannerConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 SARIF = json.dumps(
     {
         "version": "2.1.0",

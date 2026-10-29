@@ -22,6 +22,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 )
 from tests.utils.delivered_trees import symlink, write
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-1"
 
 DENIED = "project_name: linked\nfail_on_findings: false\n"

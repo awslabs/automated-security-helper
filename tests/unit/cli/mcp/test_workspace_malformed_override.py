@@ -25,6 +25,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import apply_config_overrides
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 MALFORMED = ["project_name", "=renamed", "  =renamed"]
 
 

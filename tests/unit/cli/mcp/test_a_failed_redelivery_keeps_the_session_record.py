@@ -60,6 +60,8 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_set_source_zip_finalize,
 )
 
+pytestmark = pytest.mark.unit
+
 HOST = "git.example.invalid"
 URL = f"https://{HOST}/team/repo.git"
 GIT = "/opt/git/bin/git"

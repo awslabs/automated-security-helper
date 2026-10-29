@@ -28,6 +28,8 @@ from automated_security_helper.cli import mcp_server
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.models.workspace import WorkspaceExitCode
 
+pytestmark = pytest.mark.unit
+
 #: The usage-error code the CLI exits with for the same selection.
 USAGE = int(WorkspaceExitCode.USAGE_ERROR)
 

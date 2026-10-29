@@ -43,6 +43,8 @@ from automated_security_helper.utils.output_dir_links import (
     linked_output_component,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

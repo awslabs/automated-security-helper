@@ -20,6 +20,8 @@ import requests
 
 from automated_security_helper.cli import main as cli_main
 
+pytestmark = pytest.mark.unit
+
 GUIDE = "# GenAI guide\n\nUse ash_aggregated_results.json, not the HTML report.\n"
 
 

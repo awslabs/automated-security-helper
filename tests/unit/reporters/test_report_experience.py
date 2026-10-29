@@ -37,6 +37,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.cli.inspect.inspect_findings_app import extract_findings
 
+pytestmark = pytest.mark.unit
+
 
 def model_with_finding():
     model = AshAggregatedResults(ash_config=get_default_config())

@@ -53,6 +53,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     _missing_cdk_distributions,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _canonical(name):
     """Fold ``-`` and ``_`` the way ``importlib.metadata`` does.

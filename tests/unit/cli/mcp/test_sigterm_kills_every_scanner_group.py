@@ -34,9 +34,12 @@ from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import run_command
 from tests.utils.processes import process_running
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the SIGTERM watcher is POSIX only"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="the SIGTERM watcher is POSIX only"
+    ),
+]
 
 #: Ignores SIGTERM, records its pid and waits: only SIGKILL ends it. The pid file
 #: is created empty and written ``argv[2]`` seconds later, as a busy host can

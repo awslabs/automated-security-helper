@@ -27,6 +27,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPLACED = "replkept_ash_plugins"
 REPLACED_TWO = "replkept_two_ash_plugins"
 FIRST = "replfirst_ash_plugins"

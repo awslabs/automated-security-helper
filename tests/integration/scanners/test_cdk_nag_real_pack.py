@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.schemas.sarif_schema_model import SarifReport

@@ -30,6 +30,8 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 DEFAULT_PROJECT_NAME = AshConfig().project_name
 
 

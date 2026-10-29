@@ -20,6 +20,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e"
 SARIF_REPORTER = (
     "automated_security_helper.plugin_modules.ash_builtin.reporters."

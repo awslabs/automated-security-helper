@@ -19,6 +19,8 @@ import pytest
 
 from automated_security_helper.config.resolve_config import resolve_config
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

@@ -25,6 +25,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 WORDS = "is not a plugin module ASH imports"
 
 OUTSIDE = "outside_module"

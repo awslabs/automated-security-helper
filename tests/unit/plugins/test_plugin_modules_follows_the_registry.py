@@ -39,6 +39,8 @@ import textwrap
 from typing import List
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.plugins.plugin_manager import (
     AshPluginLibrary,
     AshPluginManager,
@@ -65,6 +67,7 @@ def _names(classes) -> List[str]:
     return [cls.__name__ for cls in classes]
 
 
+@pytest.mark.unit
 def test_a_reporter_registered_after_the_first_resolution_is_resolved():
     manager = _manager()
     first = _names(manager.plugin_modules("reporter"))
@@ -78,6 +81,7 @@ def test_a_reporter_registered_after_the_first_resolution_is_resolved():
     assert second == ["CsvReporter", "SecurityHubReporter"]
 
 
+@pytest.mark.unit
 def test_a_disabled_registration_drops_out_of_the_next_resolution():
     manager = _manager()
     manager.register_plugin_module(
@@ -90,6 +94,7 @@ def test_a_disabled_registration_drops_out_of_the_next_resolution():
     assert _names(manager.plugin_modules("reporter")) == ["CsvReporter"]
 
 
+@pytest.mark.unit
 def test_a_removed_registration_drops_out_and_a_second_removal_finds_nothing():
     """``remove_plugin_module_registration`` is ``register_plugin_module``'s
     inverse, the route a test takes to put the registry back: the first removal
@@ -112,6 +117,7 @@ def test_a_removed_registration_drops_out_and_a_second_removal_finds_nothing():
     )
 
 
+@pytest.mark.unit
 def test_an_unchanged_registry_is_answered_from_the_memo():
     """The memo saves the import work while nothing new is registered."""
     import importlib
@@ -132,6 +138,7 @@ def test_an_unchanged_registry_is_answered_from_the_memo():
     assert again == first
 
 
+@pytest.mark.unit
 def test_each_kind_follows_its_own_registrations():
     """A new reporter does not cost the scanner resolution its memo."""
     import importlib
@@ -181,6 +188,7 @@ DRIVER = textwrap.dedent(
 )
 
 
+@pytest.mark.integration
 def test_a_module_loaded_after_resolving_is_found_by_the_process_wide_manager():
     """The `ash report` case: resolve, then a config's ash_plugin_modules load."""
     completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter

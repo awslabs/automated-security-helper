@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.utils.sarif_utils import (
     get_finding_id,
     _sanitize_uri,
@@ -7,6 +9,8 @@ from automated_security_helper.utils.sarif_utils import (
 from automated_security_helper.utils.suppression_matcher import (
     file_path_matches as path_matches_pattern,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_get_finding_id():

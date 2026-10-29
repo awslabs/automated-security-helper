@@ -25,6 +25,8 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_ash_config(monkeypatch):

@@ -62,6 +62,7 @@ def _no_scan(monkeypatch) -> None:
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", MARKUP_NAMES)
 def test_the_cli_prints_a_committed_name_verbatim_and_exits_3(
     tmp_path, monkeypatch, capsys, name
@@ -88,6 +89,7 @@ def test_the_cli_prints_a_committed_name_verbatim_and_exits_3(
     assert _snapshot(output) == before
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", MARKUP_NAMES)
 def test_the_local_run_prints_the_orchestrators_refusal_verbatim(
     tmp_path, monkeypatch, capsys, name
@@ -118,6 +120,7 @@ def _workspace_options(tmp_path: Path) -> ScanOptions:
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("error", "label"),
     [
@@ -156,6 +159,7 @@ def _commit_reports(tmp_path, monkeypatch, count: int):
     return source, output, names
 
 
+@pytest.mark.integration
 def test_the_message_names_ten_committed_files_and_counts_the_rest(
     tmp_path, monkeypatch
 ):
@@ -171,6 +175,7 @@ def test_the_message_names_ten_committed_files_and_counts_the_rest(
     assert ", ".join(sorted(names)[:10]) + " and 2 more." in message, message
 
 
+@pytest.mark.integration
 def test_the_message_names_every_file_up_to_ten(tmp_path, monkeypatch):
     source, output, names = _commit_reports(tmp_path, monkeypatch, 10)
 
@@ -183,6 +188,7 @@ def test_the_message_names_every_file_up_to_ten(tmp_path, monkeypatch):
     assert "more" not in message, message
 
 
+@pytest.mark.integration
 def test_one_committed_file_is_counted_as_one_file(tmp_path, monkeypatch):
     source, output, names = _commit_reports(tmp_path, monkeypatch, 1)
 

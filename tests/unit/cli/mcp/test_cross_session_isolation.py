@@ -57,6 +57,8 @@ from automated_security_helper.cli.mcp.source_delivery import (
     resolve_workspace_root,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def workspace_root(tmp_path, monkeypatch) -> Path:

@@ -23,6 +23,8 @@ import pytest
 
 from automated_security_helper.utils import terminal_text
 
+pytestmark = pytest.mark.unit
+
 #: The characters that interact: backslashes, the letters and digits of an
 #: escape's text in both cases, the command forms' characters, the layout
 #: characters, a C0 and a C1 control, a separator and a zero-width space.

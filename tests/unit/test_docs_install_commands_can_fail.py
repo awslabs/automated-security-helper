@@ -398,6 +398,7 @@ DEFECTS = [
 ]
 
 
+@pytest.mark.unit
 def test_install_commands_pass_every_valid_form(trees):
     counts: dict[str, int] = {}
     assert _check(trees, CLEAN, counts=counts) == []
@@ -406,6 +407,7 @@ def test_install_commands_pass_every_valid_form(trees):
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "case,text,expected,line", DEFECTS, ids=[c[0] for c in DEFECTS]
 )
@@ -413,6 +415,7 @@ def test_install_check_can_fail(trees, case, text, expected, line):
     _assert_reports(_check(trees, text), expected, line)
 
 
+@pytest.mark.unit
 def test_a_template_is_checked_with_its_placeholders(trees):
     """A template renders {{VERSION}} to the release; a misspelled placeholder is a bad ref."""
     good = (
@@ -429,6 +432,7 @@ def test_a_template_is_checked_with_its_placeholders(trees):
     )
 
 
+@pytest.mark.unit
 def test_a_floating_tag_passes_only_where_the_page_says_it_moves(trees):
     pin = _pin("v3")
     _assert_reports(_check(trees, pin), "names v3")
@@ -440,12 +444,14 @@ def test_a_floating_tag_passes_only_where_the_page_says_it_moves(trees):
     )
 
 
+@pytest.mark.unit
 def test_the_check_reports_checking_nothing(trees):
     _assert_reports(
         _check(trees, "# No install commands\n\nJust prose.\n"), "nothing was checked"
     )
 
 
+@pytest.mark.integration
 def test_the_real_docs_have_install_commands_for_every_rule():
     """Each rule examines real commands on the live corpus, so none passes vacuously."""
     gate = _load("_ash_docs_gate_for_install", GATE_PATH)

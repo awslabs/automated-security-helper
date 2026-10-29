@@ -178,6 +178,7 @@ def _refusals_without_a_code(lines: List[str]) -> List[str]:
     ]
 
 
+@pytest.mark.unit
 def test_the_commands_name_operator_values_instead_of_splicing_them():
     """The build and run commands are argument arrays handed to the runner whole.
 
@@ -193,6 +194,7 @@ def test_the_commands_name_operator_values_instead_of_splicing_them():
     assert _hand_off(code) == _HAND_OFF
 
 
+@pytest.mark.unit
 def test_the_check_sees_a_spliced_value():
     """Control for the checker: lines that read a value as code, and the array form."""
     parsed_again = [
@@ -223,6 +225,7 @@ def test_the_check_sees_a_spliced_value():
     assert unchecked != _HAND_OFF
 
 
+@pytest.mark.unit
 def test_no_refusal_writes_with_write_error():
     """Under ``$ErrorActionPreference = 'Stop'`` a Write-Error is itself a terminating
     error, raised before the refusal sets ``$LASTEXITCODE``. A refusal sets the code
@@ -239,6 +242,7 @@ def test_no_refusal_writes_with_write_error():
     assert _refusals_without_a_code(code) == []
 
 
+@pytest.mark.unit
 def test_the_check_sees_a_refusal_that_throws_before_the_code():
     """Control for the checker: a throw with no code set in its block is found, and
     the shapes the wrapper uses are not."""
@@ -404,6 +408,7 @@ def _invoke(
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("arguments", "extra_env"),
     [
@@ -427,6 +432,7 @@ def test_a_refusal_exits_3_under_error_action_stop(
     assert not (tmp_path / "docker-args.txt").exists()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -448,6 +454,7 @@ def test_an_output_directory_over_the_source_is_refused(
     assert "above it" in " ".join(result.stderr.split())
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt",
     reason="the recording runner is a POSIX shell script; Windows gets a .cmd stub",
@@ -503,6 +510,7 @@ _POSIX_ONLY = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_a_source_named_through_a_link_still_finds_its_checkout(
     pwsh, recording_docker, checkout, tmp_path
@@ -526,6 +534,7 @@ def test_a_source_named_through_a_link_still_finds_its_checkout(
     assert SCANNED_CHAIN_FLAG in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_in_the_source_linked_out_of_the_tree_is_refused(
     pwsh, recording_docker, checkout, tmp_path
@@ -548,6 +557,7 @@ def test_an_ash_config_file_in_the_source_linked_out_of_the_tree_is_refused(
     assert "link" in result.stderr
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_in_the_source_linked_inside_it_is_read_through_src(
     pwsh, recording_docker, checkout, tmp_path
@@ -573,6 +583,7 @@ def test_an_ash_config_file_in_the_source_linked_inside_it_is_read_through_src(
     assert sorted(_mount_destinations(args)) == ["/out", "/src"]
 
 
+@pytest.mark.integration
 def test_an_output_directory_inside_the_source_runs(pwsh, recording_docker, tmp_path):
     """Control: the default .ash/ash_output is inside the source."""
     (tmp_path / "src").mkdir()
@@ -592,6 +603,7 @@ def elsewhere(tmp_path) -> Path:
     return path
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "where",
     [
@@ -639,6 +651,7 @@ def test_a_linked_output_directory_is_refused(
     assert str(link) in " ".join(result.stderr.split())
 
 
+@pytest.mark.integration
 def test_a_link_on_the_way_is_seen_under_the_real_name_of_the_source(
     pwsh, recording_docker, elsewhere, tmp_path
 ):
@@ -657,6 +670,7 @@ def test_a_link_on_the_way_is_seen_under_the_real_name_of_the_source(
     assert list(elsewhere.iterdir()) == []
 
 
+@pytest.mark.integration
 def test_a_linked_output_directory_is_refused_without_a_run_too(
     pwsh, recording_docker, elsewhere, tmp_path
 ):
@@ -675,6 +689,7 @@ def test_a_linked_output_directory_is_refused_without_a_run_too(
     assert list(elsewhere.iterdir()) == []
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("where", ["a-real-directory", "a-source-named-through-a-link"])
 def test_a_real_output_directory_runs(where, pwsh, recording_docker, tmp_path):
     """Control: a real directory inside the source, also when the source is named
@@ -705,6 +720,7 @@ def test_a_real_output_directory_runs(where, pwsh, recording_docker, tmp_path):
     assert output.is_dir() and not output.is_symlink()
 
 
+@pytest.mark.integration
 def test_a_link_below_the_working_directory_on_the_way_to_the_output_is_refused(
     pwsh, recording_docker, tmp_path
 ):
@@ -727,6 +743,7 @@ def test_a_link_below_the_working_directory_on_the_way_to_the_output_is_refused(
     assert not (tmp_path / "work" / "src" / ".ash").exists()
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt",
     reason="the recording runner is a POSIX shell script; Windows gets a .cmd stub",
@@ -750,6 +767,7 @@ def test_a_source_path_is_passed_as_a_value_and_not_run(
     assert f"type=bind,source={source},destination=/src,readonly" in args
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "flag",
     ["--workspace /src/ash.code-workspace", "--workspace=/src/ash.code-workspace"],
@@ -792,6 +810,7 @@ def _self_recording_runner(directory: Path, log: Path) -> Path:
     return runner
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
 )
@@ -865,6 +884,7 @@ def _mount_at(args: List[str], destination: str) -> str:
     return values[0]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_outside_the_checkout_is_mounted_read_only(
     pwsh, recording_docker, checkout, tmp_path
@@ -883,6 +903,7 @@ def test_an_ash_config_file_outside_the_checkout_is_mounted_read_only(
     assert SCANNED_FILE_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_elsewhere_in_the_checkout_is_marked_as_the_repositorys(
     pwsh, recording_docker, checkout, tmp_path
@@ -905,6 +926,7 @@ def test_an_ash_config_file_elsewhere_in_the_checkout_is_marked_as_the_repositor
     assert ELSEWHERE_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.parametrize("layout", LINKS_IN_THE_SCANNED_CHECKOUT)
 def test_an_ash_config_file_reached_through_a_link_in_the_scanned_checkout_is_marked(
@@ -925,6 +947,7 @@ def test_an_ash_config_file_reached_through_a_link_in_the_scanned_checkout_is_ma
     assert ELSEWHERE_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_reached_through_a_link_in_the_scanned_directory_is_marked(
     pwsh, recording_docker, tmp_path
@@ -947,6 +970,7 @@ def test_an_ash_config_file_reached_through_a_link_in_the_scanned_directory_is_m
     assert SCANNED_CHAIN_FLAG in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_link_chain_outside_every_checkout_is_not_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -962,6 +986,7 @@ def test_an_ash_config_link_chain_outside_every_checkout_is_not_marked(
     assert ELSEWHERE_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_reached_through_a_link_out_of_the_checkout_is_refused(
     pwsh, recording_docker, checkout, tmp_path
@@ -983,6 +1008,7 @@ def test_an_ash_config_file_reached_through_a_link_out_of_the_checkout_is_refuse
     assert _recorded(tmp_path) == []
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_inside_the_source_is_read_through_src_with_no_mount(
     pwsh, recording_docker, checkout, tmp_path
@@ -1103,6 +1129,7 @@ def _plant_an_explicit_config(shape: str, checkout: Path, tmp_path: Path) -> str
     return str(config_through_links(shape, checkout, tmp_path))
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.parametrize("shape", _EXPLICIT_CONFIG_SHAPES)
 def test_an_explicit_config_reaches_the_scan_as_written(
@@ -1130,6 +1157,7 @@ def test_an_explicit_config_reaches_the_scan_as_written(
         assert option not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_in_another_checkout_is_marked_as_such(
     pwsh, recording_docker, checkout, tmp_path
@@ -1152,6 +1180,7 @@ def test_an_ash_config_file_in_another_checkout_is_marked_as_such(
     ] == []
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_in_another_checkout_is_marked_beside_an_explicit_config(
     pwsh, recording_docker, checkout, tmp_path
@@ -1176,6 +1205,7 @@ def test_an_ash_config_file_in_another_checkout_is_marked_beside_an_explicit_con
     assert _values_of(args, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.parametrize("layout", LINKS_IN_ANOTHER_CHECKOUT)
 def test_an_ash_config_file_reached_through_a_link_in_another_checkout_is_marked(
@@ -1189,6 +1219,7 @@ def test_an_ash_config_file_reached_through_a_link_in_another_checkout_is_marked
     assert SCANNED_FILE_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.parametrize(
     "shape",
@@ -1218,6 +1249,7 @@ def test_each_shape_of_git_entry_that_counts_marks_the_ash_config_file(
     assert _values_of(args, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_beside_an_empty_git_directory_is_not_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -1234,6 +1266,7 @@ def test_an_ash_config_file_beside_an_empty_git_directory_is_not_marked(
     assert _values_of(args, "--config") == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_beside_a_fifo_named_git_is_not_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -1251,6 +1284,7 @@ def test_an_ash_config_file_beside_a_fifo_named_git_is_not_marked(
     assert _values_of(args, "--config") == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_outside_every_checkout_is_not_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -1266,6 +1300,7 @@ def test_an_ash_config_file_outside_every_checkout_is_not_marked(
     assert SCANNED_CHAIN_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_in_the_scanned_checkout_is_not_marked_as_another(
     pwsh, recording_docker, checkout, tmp_path
@@ -1286,6 +1321,7 @@ def test_an_ash_config_file_in_the_scanned_checkout_is_not_marked_as_another(
     assert ELSEWHERE_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_a_checkout_in_a_directory_others_can_write_counts_for_its_owner(
     pwsh, recording_docker, checkout, tmp_path
@@ -1304,6 +1340,7 @@ def test_a_checkout_in_a_directory_others_can_write_counts_for_its_owner(
     assert _values_of(args, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_the_outermost_checkout_is_the_scanned_tree_when_checkouts_nest(
     pwsh, recording_docker, tmp_path
@@ -1326,6 +1363,7 @@ def test_the_outermost_checkout_is_the_scanned_tree_when_checkouts_nest(
     assert ELSEWHERE_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_deep_below_the_checkout_root_is_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -1340,6 +1378,7 @@ def test_an_ash_config_file_deep_below_the_checkout_root_is_marked(
     assert _values_of(args, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.parametrize("given", ["ops/ash.yaml", "operator/../ops/ash.yaml"])
 def test_a_relative_ash_config_name_is_judged_from_the_working_directory(
@@ -1354,6 +1393,7 @@ def test_a_relative_ash_config_name_is_judged_from_the_working_directory(
     assert SCANNED_FILE_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_name_that_climbs_out_of_the_checkout_to_a_file_in_none_is_not_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -1377,6 +1417,7 @@ def test_an_ash_config_name_that_climbs_out_of_the_checkout_to_a_file_in_none_is
     assert SCANNED_CHAIN_FLAG not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_an_ash_config_file_beside_a_git_directory_without_head_is_not_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -1393,6 +1434,7 @@ def test_an_ash_config_file_beside_a_git_directory_without_head_is_not_marked(
     assert _values_of(args, "--config") == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_a_checkout_reached_through_a_link_of_the_operators_own_is_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -1410,6 +1452,7 @@ def test_a_checkout_reached_through_a_link_of_the_operators_own_is_marked(
     assert _values_of(args, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_a_name_outside_every_checkout_that_resolves_into_one_is_marked(
     pwsh, recording_docker, checkout, tmp_path
@@ -1428,6 +1471,7 @@ def test_a_name_outside_every_checkout_that_resolves_into_one_is_marked(
     assert _values_of(args, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_a_dotdot_after_a_link_in_another_checkout_is_judged_from_the_link(
     pwsh, recording_docker, checkout, tmp_path
@@ -1450,6 +1494,7 @@ def test_a_dotdot_after_a_link_in_another_checkout_is_judged_from_the_link(
     assert _values_of(args, ELSEWHERE_FLAG) == ["/ash-env-config/x.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.skipif(
     not hasattr(os, "geteuid") or os.geteuid() != 0,
@@ -1480,6 +1525,7 @@ def test_a_checkout_another_user_left_in_a_directory_others_can_write_does_not_c
     assert _values_of(args, "--config") == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.skipif(
     not hasattr(os, "geteuid") or os.geteuid() != 0,
@@ -1548,6 +1594,7 @@ def _link_ls_and_id_into(bin_dir: Path) -> None:
         (bin_dir / name).symlink_to(found)
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.parametrize(
     "others_can_write", [False, True], ids=["private-directory", "writable-directory"]
@@ -1584,6 +1631,7 @@ def test_a_runtime_that_gives_no_permissions_asks_ls_and_id(
     ]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_a_runtime_that_gives_no_permissions_and_has_no_ls_refuses(
     pwsh, recording_docker, checkout, tmp_path
@@ -1658,6 +1706,7 @@ def _stub_ls_and_id(
     ident.chmod(0o755)
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 @pytest.mark.parametrize(
     ("entry_owner", "marked"),
@@ -1698,6 +1747,7 @@ def test_a_git_entry_in_a_directory_others_can_write_counts_by_who_left_it(
     assert _values_of(args, "--config") == ["/ash-env-config/ash.yaml"]
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_ci_variables_do_not_choose_the_stage(
     pwsh, recording_docker, tmp_path, monkeypatch
@@ -1716,6 +1766,7 @@ def test_ci_variables_do_not_choose_the_stage(
     assert "automated-security-helper:ci" not in args
 
 
+@pytest.mark.integration
 @_POSIX_ONLY
 def test_the_scanner_lists_reach_the_scan(pwsh, recording_docker, tmp_path):
     (tmp_path / "src").mkdir()
@@ -1742,6 +1793,7 @@ def test_the_scanner_lists_reach_the_scan(pwsh, recording_docker, tmp_path):
     ]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("arguments", "extra_env"),
     [

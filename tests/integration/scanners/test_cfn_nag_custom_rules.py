@@ -104,6 +104,7 @@ def _rule_ids(proc: subprocess.CompletedProcess) -> set:
     }
 
 
+@pytest.mark.integration
 def test_the_fixture_declares_an_access_policy():
     """The fixture is the test. If AccessPolicies is gone, nothing below runs a rule."""
     assert FIXTURE.is_file(), FIXTURE

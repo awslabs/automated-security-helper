@@ -28,6 +28,8 @@ import yaml
 
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 
+pytestmark = pytest.mark.unit
+
 RULE_DIR = ASH_ASSETS_DIR.joinpath("appsec_cfn_rules")
 FIXTURE_DIR = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "cfn_nag"
 

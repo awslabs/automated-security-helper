@@ -36,6 +36,8 @@ from tests.snapshot.support.reporter_catalog import (
     snapshot_extension,
 )
 
+pytestmark = pytest.mark.integration
+
 REGION = "us-east-1"
 
 

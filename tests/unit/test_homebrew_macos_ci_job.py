@@ -85,6 +85,7 @@ def _logical_lines(path: Path) -> List[str]:
     return path.read_text(encoding="utf-8").replace("\\\n", " ").splitlines()
 
 
+@pytest.mark.unit
 class TestTheJob:
     def test_it_runs_on_a_pinned_macos_image(self):
         runs_on = _job()["runs-on"]
@@ -150,6 +151,7 @@ class TestTheJob:
         assert JOB in _workflow()["jobs"]["required-checks"]["needs"]
 
 
+@pytest.mark.unit
 class TestTheInstallPath:
     def test_the_action_runs_homebrew_sh_on_an_archive_of_the_commit(self):
         steps = yaml.safe_load(ACTION.read_text(encoding="utf-8"))["runs"]["steps"]
@@ -232,6 +234,7 @@ _REQUIRES_BASH = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @_REQUIRES_BASH
 class TestTheFixtureScanScript:
     @staticmethod
@@ -420,6 +423,7 @@ def _scan_results(statuses: Dict[str, str]) -> str:
     )
 
 
+@pytest.mark.integration
 @_REQUIRES_BASH
 class TestHomebrewShUnderStandIns:
     """homebrew.sh end to end, offline, in about a second a run.

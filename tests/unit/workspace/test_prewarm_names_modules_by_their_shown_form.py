@@ -28,6 +28,8 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
 
+pytestmark = pytest.mark.unit
+
 
 def test_the_refusal_masks_an_env_read_entry(tmp_path):
     (tmp_path / "api").mkdir()

@@ -22,6 +22,8 @@ import pytest
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # PR#274 Bug #94 -- base/reporter_plugin.py:45-51 -- configure() writes self._config

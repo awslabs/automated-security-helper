@@ -47,7 +47,7 @@ from tests.utils.gitleaks_fixture import fabricated_tokens
 from tests.utils.helpers import importing_this_checkout
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.e2e,
     pytest.mark.skipif(
         sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
     ),

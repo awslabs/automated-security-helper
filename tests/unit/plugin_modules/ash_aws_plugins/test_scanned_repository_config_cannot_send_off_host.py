@@ -49,6 +49,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_repor
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.secret_bearing_scan import isolate_from_aws
 
+pytestmark = pytest.mark.integration
+
 AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 
 OPERATOR_REGION = "us-west-2"

@@ -147,6 +147,7 @@ def _walk_spy():
     )
 
 
+@pytest.mark.integration
 def test_merge_keeps_a_committed_file_without_a_walk_or_a_write(
     tmp_path, monkeypatch, isolated_git
 ):
@@ -163,6 +164,7 @@ def test_merge_keeps_a_committed_file_without_a_walk_or_a_write(
     assert [name for name in LISTS if (output / name).exists()] == []
 
 
+@pytest.mark.unit
 def test_merge_outside_git_walks_nothing_and_writes_nothing(
     tmp_path, monkeypatch, isolated_git
 ):
@@ -186,6 +188,7 @@ def _merged_uris(merged) -> list[str]:
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("in_git", [False, True], ids=["outside-git", "in-git"])
 def test_merge_keeps_a_committed_file_every_shard_kept(
     tmp_path, monkeypatch, isolated_git, in_git
@@ -218,6 +221,7 @@ def test_merge_keeps_a_committed_file_every_shard_kept(
     assert walk.call_count == 0
 
 
+@pytest.mark.unit
 def test_merge_applies_the_merged_configs_suppressions(
     tmp_path, monkeypatch, isolated_git
 ):
@@ -252,6 +256,7 @@ def test_merge_applies_the_merged_configs_suppressions(
     assert suppressed == {"a.py": False, COMMITTED: True}
 
 
+@pytest.mark.integration
 def test_merge_leaves_a_committed_scan_set_pair_as_it_was(
     tmp_path, monkeypatch, isolated_git
 ):
@@ -278,6 +283,7 @@ def test_merge_leaves_a_committed_scan_set_pair_as_it_was(
     assert not (output / "ash-scan-set-run.json").exists()
 
 
+@pytest.mark.integration
 def test_a_run_reads_its_own_list_and_asks_git_nothing(
     tmp_path, monkeypatch, isolated_git
 ):
@@ -308,6 +314,7 @@ def test_a_run_reads_its_own_list_and_asks_git_nothing(
     assert committed == {(root / COMMITTED).resolve()}
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("run_id", [None, "b" * 32], ids=["no-run-id", "other-run"])
 def test_without_this_runs_list_git_is_asked_and_nothing_is_walked(
     tmp_path, monkeypatch, isolated_git, run_id

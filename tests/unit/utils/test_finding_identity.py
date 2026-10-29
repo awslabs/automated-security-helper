@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.schemas.sarif_schema_model import Message, Result
 from automated_security_helper.utils.finding_identity import (
     canonical,
@@ -24,6 +26,8 @@ from automated_security_helper.utils.finding_identity import (
     relative_path,
     result_fingerprints,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _identity(**overrides):

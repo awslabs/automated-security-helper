@@ -1309,7 +1309,7 @@ class TestFerretScanScannerVersionSupport:
             assert any("skip_version_check=true" in call for call in log_calls)
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestFerretPluginValidation:
     """Run the pre-push validation script as a test to catch regressions."""
 

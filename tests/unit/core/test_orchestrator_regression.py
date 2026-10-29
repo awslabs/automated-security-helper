@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 class TestOrchestratorCleanupNoneWorkDir:
     """Cleanup must not crash when work_dir is None."""

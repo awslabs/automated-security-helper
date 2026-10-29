@@ -36,6 +36,8 @@ from automated_security_helper.config.config_writer import (
 from automated_security_helper.config.resolve_config import load_config_file_for_run
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 VARIABLE = "ASH_UNDECLARED_REFERENCE_CANARY"
 REFERENCE = "${" + VARIABLE + "}"
 CANARY = "ash-canary-4b2e-7713905"

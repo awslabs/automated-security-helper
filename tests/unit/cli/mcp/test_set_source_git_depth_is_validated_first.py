@@ -21,6 +21,8 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.sessions import reset_default_registry_for_tests
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 
+pytestmark = pytest.mark.unit
+
 URL = "https://git.example.invalid/team/repo.git"
 SESSION = "depth-session"
 REFUSED = [0, -1, True, False, 1.5, "2", None, 2**31, 10**12]

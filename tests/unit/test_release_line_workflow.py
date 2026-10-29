@@ -252,6 +252,7 @@ def _requires_bash(cls):
     return cls
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheThreeXLineCapsAMajor:
     def test_a_bang_commit_ships_as_a_minor_and_is_named(self, fixture: Fixture):
@@ -305,6 +306,7 @@ class TestTheThreeXLineCapsAMajor:
         assert bump.outputs.get("new_version") == "3.7.1", bump.describe()
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheCapIsBounded:
     def test_auto_lets_the_same_history_go_major(self, fixture: Fixture):
@@ -339,6 +341,7 @@ class TestTheCapIsBounded:
         assert "::error::Unknown release-line" in line.proc.stdout, line.describe()
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheBumpStepBackstop:
     def test_it_fails_when_three_x_is_selected_and_the_bump_lands_on_four(
@@ -360,6 +363,7 @@ class TestTheBumpStepBackstop:
         assert "bumped" not in bump.outputs, "the step went on to report a bump"
 
 
+@pytest.mark.unit
 class TestTheReleaseLineSetting:
     def test_the_line_is_committed_as_three_x(self):
         doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
@@ -373,6 +377,7 @@ class TestTheReleaseLineSetting:
         assert not (trigger["workflow_dispatch"] or {}).get("inputs")
 
 
+@pytest.mark.unit
 class TestTheChangelogTemplate:
     """The v3.8.0 notes render under v3.8.0, and only there."""
 
@@ -485,6 +490,7 @@ def _missing_after_release(fx: Fixture, before: list[str]) -> list[str]:
     return [ln for ln in before if ln not in entry]
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheUnreleasedSectionSurvivesTheBump:
     """commitizen replaces `## Unreleased` wholesale; the fold step must save it."""
@@ -528,6 +534,7 @@ class TestTheUnreleasedSectionSurvivesTheBump:
         )
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheFoldStepEdges:
     @staticmethod

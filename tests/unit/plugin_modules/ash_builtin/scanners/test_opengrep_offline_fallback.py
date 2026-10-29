@@ -27,6 +27,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
 from automated_security_helper.core.exceptions import ScannerError
 from tests.utils.tool_guard import stub_tool_probes
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_tool_probe(monkeypatch):

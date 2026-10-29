@@ -207,6 +207,7 @@ def _flag(args: List[str], flag: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", UNUSUAL_NAMES)
 def test_a_config_outside_the_source_is_mounted_read_only_by_its_real_path(
     name, fake_runner, tmp_path
@@ -240,6 +241,7 @@ def test_a_config_outside_the_source_is_mounted_read_only_by_its_real_path(
     assert mounts[inner].get("readonly") is True
 
 
+@pytest.mark.integration
 def test_a_config_inside_the_source_is_read_through_src(fake_runner, tmp_path):
     source = tmp_path / "project"
     (source / ".ash").mkdir(parents=True)
@@ -258,6 +260,7 @@ def test_a_config_inside_the_source_is_read_through_src(fake_runner, tmp_path):
     assert set(_mounts(run)) == {"/src", "/out"}
 
 
+@pytest.mark.integration
 def test_a_missing_config_is_refused_before_any_build(fake_runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()
@@ -274,6 +277,7 @@ def test_a_missing_config_is_refused_before_any_build(fake_runner, tmp_path):
     assert "--config (or ASH_CONFIG) has to name an existing file" in output_text
 
 
+@pytest.mark.integration
 def test_a_trailing_config_with_no_value_is_refused(fake_runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()
@@ -285,6 +289,7 @@ def test_a_trailing_config_with_no_value_is_refused(fake_runner, tmp_path):
     assert "Config file not found:" in output_text
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     getattr(os, "geteuid", lambda: -1)() == 0,
     reason="root reads an unreadable file anyway",
@@ -308,6 +313,7 @@ def test_an_unreadable_config_is_refused(fake_runner, tmp_path):
     assert "ASH does not hand the container runner a file it cannot read" in output_text
 
 
+@pytest.mark.integration
 def test_a_config_linked_out_of_the_scanned_tree_is_refused(fake_runner, tmp_path):
     checkout = tmp_path / "repo"
     (checkout / ".git").mkdir(parents=True)
@@ -333,6 +339,7 @@ def test_a_config_linked_out_of_the_scanned_tree_is_refused(fake_runner, tmp_pat
     )
 
 
+@pytest.mark.integration
 def test_a_config_through_an_outside_link_loop_is_refused(fake_runner, tmp_path):
     """Two links pointing at each other, outside every checkout: the name
     resolves to no file, so it is refused before any runner call, never
@@ -399,6 +406,7 @@ def _use_readlink(fake_runner, script: str) -> Dict[str, str]:
     return {"REAL_READLINK": real}
 
 
+@pytest.mark.integration
 def test_a_config_through_a_link_the_walk_cannot_read_is_refused(fake_runner, tmp_path):
     """The walk reads the link a second time and cannot: the name cannot be
     decided, so it is refused with the walk's own text before any runner
@@ -432,6 +440,7 @@ def test_a_config_through_a_link_the_walk_cannot_read_is_refused(fake_runner, tm
     assert "Config file" not in output_text, output_text
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("layout", ["directory-link", "file-link"])
 def test_a_config_through_an_outside_link_is_carried_where_readlink_has_no_f(
     layout, fake_runner, tmp_path
@@ -471,6 +480,7 @@ def test_a_config_through_an_outside_link_is_carried_where_readlink_has_no_f(
     assert mounts[inner].get("readonly") is True
 
 
+@pytest.mark.integration
 def test_an_outside_parent_dir_link_does_not_hide_an_in_tree_link(
     fake_runner, tmp_path
 ):
@@ -525,6 +535,7 @@ _EXTENDS_SPELLING_TABLE = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("name", "text"),
     [pytest.param(name, text, id=id_) for id_, name, text in _EXTENDS_SPELLING_TABLE],
@@ -537,6 +548,7 @@ def test_the_spelling_is_an_extends_entry_to_ash(name, text, tmp_path):
     assert "extends" in read_config_file(config)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("name", "text"),
     [pytest.param(name, text, id=id_) for id_, name, text in _EXTENDS_SPELLING_TABLE],
@@ -761,6 +773,7 @@ def _layout(layout: str, tmp_path: Path) -> Tuple[Path, Path, Path]:
     return source, output, config
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("layout", _CONFIG_LAYOUTS)
 def test_the_bash_wrapper_and_the_launcher_agree_on_config(
     layout, fake_runner, tmp_path, monkeypatch
@@ -815,6 +828,7 @@ def _as_the_command_line_passes_it(decision: Dict[str, object]) -> Dict[str, obj
     }
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "layout",
     [
@@ -875,6 +889,7 @@ def test_the_bash_wrapper_and_the_launcher_agree_on_ash_config(
         assert python["refused"] is True
 
 
+@pytest.mark.unit
 def test_the_root_command_and_the_scan_command_read_the_same_config_variable():
     """The command line reaches the scan through the root command or ``scan``,
     and both declare ``--config`` from one function, so the variable is the
@@ -923,6 +938,7 @@ def _working_directory_layout(kind: str, tmp_path: Path):
     return repo / "lnk" / "sub", repo, output, Path("../cfg.yaml")
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "kind",
     [
@@ -950,6 +966,7 @@ def test_the_wrapper_and_the_launcher_agree_through_a_checkout_alias(
     assert bash == python
 
 
+@pytest.mark.integration
 def test_the_launcher_judges_a_relative_config_from_the_directory_the_shell_names(
     tmp_path, monkeypatch
 ):
@@ -970,6 +987,7 @@ def test_the_launcher_judges_a_relative_config_from_the_directory_the_shell_name
     assert python["refused"] is True, python
 
 
+@pytest.mark.integration
 def test_the_launcher_reads_a_relative_config_from_the_physical_directory_without_pwd(
     tmp_path, monkeypatch
 ):
@@ -987,6 +1005,7 @@ def test_the_launcher_reads_a_relative_config_from_the_physical_directory_withou
     assert python["refused"] is False, python
 
 
+@pytest.mark.integration
 def test_the_bash_wrapper_judges_a_relative_config_from_the_directory_the_shell_names(
     fake_runner, tmp_path, monkeypatch
 ):
@@ -1010,6 +1029,7 @@ def test_the_bash_wrapper_judges_a_relative_config_from_the_directory_the_shell_
     assert "is inside the scanned tree but is a link" in output_text, output_text
 
 
+@pytest.mark.integration
 def test_the_bash_wrapper_reads_a_relative_config_from_the_physical_directory_without_pwd(
     fake_runner, tmp_path, monkeypatch
 ):
@@ -1027,6 +1047,7 @@ def test_the_bash_wrapper_reads_a_relative_config_from_the_physical_directory_wi
     assert bash["refused"] is False, bash
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("pwd_names_the_directory", [True, False])
 def test_a_relative_config_reached_through_an_operators_link_to_a_tree_link_is_marked(
     pwd_names_the_directory, fake_runner, tmp_path, monkeypatch
@@ -1069,6 +1090,7 @@ def test_a_relative_config_reached_through_an_operators_link_to_a_tree_link_is_m
     assert bash == python
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("pwd_names_the_directory", [True, False])
 def test_a_relative_config_below_a_link_in_another_checkout_is_marked_from_where_the_shell_stands(
     pwd_names_the_directory, fake_runner, tmp_path, monkeypatch
@@ -1111,6 +1133,7 @@ def test_a_relative_config_below_a_link_in_another_checkout_is_marked_from_where
     assert bash == python
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("given_as", ["config", "environment"])
 def test_a_config_named_through_a_tree_link_and_back_out_is_refused_by_both(
     given_as, fake_runner, tmp_path, monkeypatch
@@ -1152,6 +1175,7 @@ def test_a_config_named_through_a_tree_link_and_back_out_is_refused_by_both(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_scan_option_reads_ash_config_from_the_environment():
     """The precondition of the next cell: on the command line the variable is
     the ``--config`` option's value, so the file is the scan's config and an
@@ -1167,6 +1191,7 @@ def test_the_scan_option_reads_ash_config_from_the_environment():
     assert option.envvar == "ASH_CONFIG"
 
 
+@pytest.mark.integration
 def test_ash_config_is_the_scans_config_even_when_the_source_holds_one(
     fake_runner, tmp_path
 ):
@@ -1194,6 +1219,7 @@ def test_ash_config_is_the_scans_config_even_when_the_source_holds_one(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_ash_config_outside_the_source_is_mounted_under_its_own_root(
     fake_runner, tmp_path
 ):
@@ -1223,6 +1249,7 @@ def test_ash_config_outside_the_source_is_mounted_under_its_own_root(
     assert "WARNING: ASH_CONFIG" not in output_text
 
 
+@pytest.mark.integration
 def test_ash_config_inside_the_source_is_read_through_src(fake_runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()
@@ -1244,6 +1271,7 @@ def test_ash_config_inside_the_source_is_read_through_src(fake_runner, tmp_path)
     assert set(_mounts(run)) == {"/src", "/out"}
 
 
+@pytest.mark.integration
 def test_ash_config_from_the_scanned_checkout_is_marked(fake_runner, tmp_path):
     checkout = tmp_path / "repo"
     (checkout / ".git").mkdir(parents=True)
@@ -1269,6 +1297,7 @@ def test_ash_config_from_the_scanned_checkout_is_marked(fake_runner, tmp_path):
     assert "--config-from-scanned-repository" in inner
 
 
+@pytest.mark.integration
 def test_a_missing_ash_config_is_refused_before_any_build(fake_runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()
@@ -1285,6 +1314,7 @@ def test_a_missing_ash_config_is_refused_before_any_build(fake_runner, tmp_path)
     assert "Config file not found:" in output_text
 
 
+@pytest.mark.integration
 def test_an_ash_config_that_extends_is_refused_when_mounted_alone(
     fake_runner, tmp_path
 ):
@@ -1305,6 +1335,7 @@ def test_an_ash_config_that_extends_is_refused_when_mounted_alone(
     assert "extends" in output_text
 
 
+@pytest.mark.integration
 def test_both_config_and_ash_config_are_carried_together(fake_runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()
@@ -1340,6 +1371,7 @@ def test_both_config_and_ash_config_are_carried_together(fake_runner, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_the_last_config_wins_and_is_the_one_rewritten(fake_runner, tmp_path):
     """Two --config words reach the scan as given, except the last one, which the
     inner CLI reads, is rewritten to its container path and mounted."""
@@ -1376,6 +1408,7 @@ def test_the_last_config_wins_and_is_the_one_rewritten(fake_runner, tmp_path):
     assert "/ash-config/first.yaml" not in _mounts(run)
 
 
+@pytest.mark.integration
 def test_a_config_value_in_the_same_word_is_rewritten(fake_runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()
@@ -1401,6 +1434,7 @@ def test_a_config_value_in_the_same_word_is_rewritten(fake_runner, tmp_path):
     assert "/ash-config/strict.yaml" in _mounts(run)
 
 
+@pytest.mark.integration
 def test_another_options_value_is_not_read_as_a_config(fake_runner, tmp_path):
     """A word after a value-taking option is that option's value: --config-overrides
     takes the next word, so a path there is not resolved or mounted."""
@@ -1432,6 +1466,7 @@ def test_another_options_value_is_not_read_as_a_config(fake_runner, tmp_path):
     assert "/ash-config/strict.yaml" in _mounts(run)
 
 
+@pytest.mark.integration
 def test_another_subcommand_keeps_its_config_words_as_written(fake_runner, tmp_path):
     """The provenance options are the scan command's; another subcommand's words
     pass through unchanged, with no mount made for them."""
@@ -1463,6 +1498,7 @@ def test_another_subcommand_keeps_its_config_words_as_written(fake_runner, tmp_p
     assert "--config-from-scanned-repository" not in inner
 
 
+@pytest.mark.integration
 def test_another_subcommand_still_names_a_dropped_ash_config(fake_runner, tmp_path):
     """For a run the config handling does not cover, ASH_CONFIG is still named in
     a warning rather than dropped silently, as before."""
@@ -1485,6 +1521,7 @@ def test_another_subcommand_still_names_a_dropped_ash_config(fake_runner, tmp_pa
     assert _flag(_inner_args(run), "--ash-config-from-host") is None
 
 
+@pytest.mark.integration
 def test_an_explicit_scan_subcommand_gets_the_same_handling(fake_runner, tmp_path):
     source = tmp_path / "project"
     source.mkdir()
@@ -1517,6 +1554,7 @@ def test_an_explicit_scan_subcommand_gets_the_same_handling(fake_runner, tmp_pat
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_ash_config_with_no_config_is_also_named_as_the_scans_config(
     fake_runner, tmp_path
 ):
@@ -1542,6 +1580,7 @@ def test_ash_config_with_no_config_is_also_named_as_the_scans_config(
     assert "--config-from-scanned-repository" not in inner
 
 
+@pytest.mark.integration
 def test_an_explicit_config_is_the_only_config_word_beside_ash_config(
     fake_runner, tmp_path
 ):
@@ -1569,6 +1608,7 @@ def test_an_explicit_config_is_the_only_config_word_beside_ash_config(
     assert _flag(inner, "--ash-config-from-host") == "/ash-env-config/base.yaml"
 
 
+@pytest.mark.integration
 def test_a_dotdot_after_a_tree_link_is_the_trees_name_and_is_refused(
     fake_runner, tmp_path
 ):
@@ -1606,6 +1646,7 @@ def test_a_dotdot_after_a_tree_link_is_the_trees_name_and_is_refused(
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("layout", NAMES_STEERED_BY_THE_SCANNED_CHECKOUT)
 def test_a_name_the_scanned_checkout_steers_out_of_it_is_refused(
     layout, fake_runner, tmp_path
@@ -1633,6 +1674,7 @@ def test_a_name_the_scanned_checkout_steers_out_of_it_is_refused(
     )
 
 
+@pytest.mark.integration
 def test_a_file_link_chain_through_a_tree_link_is_mounted_and_marked(
     fake_runner, tmp_path
 ):
@@ -1665,6 +1707,7 @@ def test_a_file_link_chain_through_a_tree_link_is_mounted_and_marked(
     assert "--config-from-scanned-repository" in inner
 
 
+@pytest.mark.integration
 def test_a_directory_alias_onto_a_tree_directory_link_is_mounted_and_marked(
     fake_runner, tmp_path
 ):
@@ -1715,6 +1758,7 @@ def _config_by_option_or_environment(via: str, name: str):
     return [], {"ASH_CONFIG": name}
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("via", ["option", "environment"])
 def test_a_dotdot_after_a_tree_link_reached_by_another_spelling_is_refused(
     fake_runner, tmp_path, via
@@ -1785,6 +1829,7 @@ def _run_with_a_checkout_that_is_a_link(fake_runner, tmp_path, via):
     return config, rc, output_text, calls
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("via", ["option", "environment"])
 def test_a_checkout_that_is_itself_a_link_is_not_refused_as_a_link_in_the_tree(
     fake_runner, tmp_path, via
@@ -1807,6 +1852,7 @@ def test_a_checkout_that_is_itself_a_link_is_not_refused_as_a_link_in_the_tree(
     ), _mounts(run)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("via", ["option", "environment"])
 def test_a_checkout_that_is_itself_a_link_does_not_mark_a_file_beside_it_as_the_repositorys(
     fake_runner, tmp_path, via
@@ -1823,6 +1869,7 @@ def test_a_checkout_that_is_itself_a_link_does_not_mark_a_file_beside_it_as_the_
     assert marked == [], marked
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("via", ["option", "environment"])
 def test_a_file_in_the_checkout_is_the_repositorys_when_the_source_is_reached_through_an_alias(
     fake_runner, tmp_path, via
@@ -1868,6 +1915,7 @@ def test_a_file_in_the_checkout_is_the_repositorys_when_the_source_is_reached_th
     assert any("from-scanned-repository" in word for word in _inner_args(run))
 
 
+@pytest.mark.integration
 def test_an_inline_config_value_with_spaces_leaves_no_stray_words(
     fake_runner, tmp_path
 ):
@@ -1897,6 +1945,7 @@ def test_an_inline_config_value_with_spaces_leaves_no_stray_words(
     assert [word for word in inner if "space" in word] == []
 
 
+@pytest.mark.integration
 def test_the_wrappers_c_is_its_no_color_option_not_a_config_carry(
     fake_runner, tmp_path
 ):
@@ -1988,6 +2037,7 @@ def _run_with_config(fake_runner, tmp_path: Path, config: Path, env=None):
     )
 
 
+@pytest.mark.integration
 def test_a_git_directory_the_user_owns_needs_no_ls(fake_runner, tmp_path):
     """The shell's own ownership test settles it: this suite's PATH has no ``ls``."""
     mark_git_checkout(tmp_path / "ops")
@@ -2002,6 +2052,7 @@ def test_a_git_directory_the_user_owns_needs_no_ls(fake_runner, tmp_path):
     assert _flag(inner, ELSEWHERE_FLAG) == "/ash-config/ash.yaml"
 
 
+@pytest.mark.integration
 def test_a_checkout_above_an_entry_that_cannot_be_judged_still_counts(
     fake_runner, tmp_path
 ):
@@ -2024,6 +2075,7 @@ def test_a_checkout_above_an_entry_that_cannot_be_judged_still_counts(
     assert _flag(inner, ELSEWHERE_FLAG) == "/ash-config/ash.yaml"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("holder", "entry", "marked"),
     [
@@ -2099,6 +2151,7 @@ def test_a_git_entry_that_is_a_link_counts_by_who_left_it(
     assert _flag(inner, "--config") == "/ash-config/ash.yaml"
 
 
+@pytest.mark.integration
 def test_a_git_entry_that_is_a_link_the_scanning_user_left_counts(
     fake_runner, tmp_path
 ):
@@ -2119,6 +2172,7 @@ def test_a_git_entry_that_is_a_link_the_scanning_user_left_counts(
     assert ELSEWHERE_FLAG in _inner_args(_only_run(calls))
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "stub",
     [
@@ -2151,6 +2205,7 @@ def test_a_judgment_that_cannot_be_made_refuses_and_starts_nothing(
     assert "without the mark a local scan's judgment would give it" in output_text
 
 
+@pytest.mark.integration
 def test_the_refusal_for_a_git_entry_it_cannot_judge_names_the_entry(
     fake_runner, tmp_path
 ):
@@ -2197,6 +2252,7 @@ def _ps1_config_arms(text: str) -> str:
     return text[start:end]
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_passes_an_explicit_config_as_given():
     arms = _ps1_config_arms(_ps1_text())
 
@@ -2210,6 +2266,7 @@ def test_the_powershell_wrapper_passes_an_explicit_config_as_given():
 #: (TestThePowerShellConfigCarryAsText), on whitespace-collapsed text.
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_keeps_the_ash_config_carry_only_for_a_scan():
     text = _ps1_text()
 
@@ -2225,6 +2282,7 @@ def test_the_powershell_wrapper_keeps_the_ash_config_carry_only_for_a_scan():
     assert "passes it only for a scan" in text
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_no_longer_tells_the_operator_to_use_source_relative_paths():
     text = _ps1_text()
 
@@ -2232,6 +2290,7 @@ def test_the_powershell_wrapper_no_longer_tells_the_operator_to_use_source_relat
     assert "passes a config into the container only with -Config" not in text
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_walks_the_links_of_a_name_once():
     """One walk of the name's links serves the scanned tree's mark and the
     other-checkout mark, so a walk that cannot reach the end has one failure shape.
@@ -2259,6 +2318,7 @@ def test_the_powershell_wrapper_walks_the_links_of_a_name_once():
     )
 
 
+@pytest.mark.unit
 def test_the_bash_wrapper_walks_the_links_of_a_name_once():
     """The same for ./ash: collect_link_parents is called once for a mounted file, and
     the scanned tree's mark reads its parents, as in_another_checkout does. Read as
@@ -2281,6 +2341,7 @@ def test_the_bash_wrapper_walks_the_links_of_a_name_once():
     assert "LINK_PARENTS=()" not in judged
 
 
+@pytest.mark.unit
 def test_the_bash_wrapper_marks_the_same_two_flags_for_a_marked_ash_config_file():
     """The flags the PowerShell wrapper appends are the ones ./ash passes."""
     bash = ASH_SCRIPT.read_text(encoding="utf-8")
@@ -2298,6 +2359,7 @@ def _flat(text: str) -> str:
     return " ".join(text.split())
 
 
+@pytest.mark.unit
 def test_the_bash_wrapper_marks_another_checkout_by_the_container_path_only():
     """One mark for the --config file and one for the ASH_CONFIG file, each the
     option and the path inside the container, as the launcher sends it. No value
@@ -2320,6 +2382,7 @@ def test_the_bash_wrapper_marks_another_checkout_by_the_container_path_only():
     assert "--config-file-from-another-checkout=" not in bash
 
 
+@pytest.mark.unit
 def test_the_bash_wrapper_judges_another_checkout_only_for_a_file_it_mounts_unmarked():
     """The judgment sits in the mount arm of carry_config_file, after the scanned
     tree's mark, and runs only when that mark was not given."""
@@ -2342,6 +2405,7 @@ def test_the_bash_wrapper_judges_another_checkout_only_for_a_file_it_mounts_unma
     assert len(calls) == 1, calls
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_marks_another_checkout_by_the_container_path_only():
     text = _flat(_ps1_text())
 
@@ -2365,6 +2429,7 @@ def test_the_powershell_wrapper_marks_another_checkout_by_the_container_path_onl
     assert scanned < text.index(group) < own_config
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_judges_another_checkout_after_the_mount_and_unmarked():
     text = _flat(_ps1_text())
 
@@ -2380,6 +2445,7 @@ def test_the_powershell_wrapper_judges_another_checkout_after_the_mount_and_unma
     )
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_refuses_when_it_cannot_judge_another_checkout():
     """An undecided judgment is a refusal with the code of any other, in the
     launcher's words, and not an unmarked file."""
@@ -2393,6 +2459,7 @@ def test_the_powershell_wrapper_refuses_when_it_cannot_judge_another_checkout():
     assert "without the mark a local scan's judgment would give it" in after, after
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_trusts_a_git_entry_by_user_id():
     """The launcher and ``./ash`` compare the numeric id of the user who left a
     ``.git`` entry with root, the directory's owner and the user running the scan. A

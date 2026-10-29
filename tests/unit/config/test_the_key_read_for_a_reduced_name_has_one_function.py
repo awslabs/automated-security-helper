@@ -16,6 +16,8 @@ import pytest
 
 from automated_security_helper.config.ash_config import AshConfig, plugin_section_key
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 SNYK_CODE = "snyk-code"

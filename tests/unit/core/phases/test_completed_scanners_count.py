@@ -11,10 +11,13 @@ from __future__ import annotations
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
+import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

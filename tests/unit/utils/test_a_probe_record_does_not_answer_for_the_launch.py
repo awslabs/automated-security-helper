@@ -16,11 +16,15 @@ from __future__ import annotations
 import subprocess  # nosec B404 -- the cells spawn this Python with a known exit
 import sys
 
+import pytest
+
 from automated_security_helper.utils.subprocess_utils import (
     StartWatch,
     spawn_run,
     watched_launch,
 )
+
+pytestmark = pytest.mark.integration
 
 _EXITS_7 = [sys.executable, "-c", "import sys; sys.exit(7)"]
 

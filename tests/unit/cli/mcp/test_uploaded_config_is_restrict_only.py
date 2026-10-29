@@ -45,6 +45,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 from automated_security_helper.cli.mcp.sandbox import session_sandbox
 from automated_security_helper.config.ash_config import AshConfig
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-1"
 
 GRANTS_AND_OFF = (

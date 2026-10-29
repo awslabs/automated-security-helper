@@ -27,6 +27,8 @@ import automated_security_helper.plugin_modules as plugin_modules
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 
+pytestmark = pytest.mark.unit
+
 #: The options whose descriptions state who sets them, by scanner.
 STATED: Dict[str, Tuple[str, ...]] = {
     "bandit": ("config_file",),

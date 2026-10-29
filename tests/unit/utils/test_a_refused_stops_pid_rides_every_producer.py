@@ -58,6 +58,7 @@ def _refused_child_pid(children) -> int:
     return children[0].pid
 
 
+@pytest.mark.integration
 @_POSIX
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_a_failed_wait_response_carries_the_refused_stops_pid(tmp_path, kind):
@@ -72,6 +73,7 @@ def test_a_failed_wait_response_carries_the_refused_stops_pid(tmp_path, kind):
     assert response.get("could_not_stop_pid") == pid, (pid, response)
 
 
+@pytest.mark.integration
 @_POSIX
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_a_timeout_response_carries_the_refused_stops_pid(tmp_path, kind):
@@ -86,6 +88,7 @@ def test_a_timeout_response_carries_the_refused_stops_pid(tmp_path, kind):
     assert response.get("could_not_stop_pid") == pid, (pid, response)
 
 
+@pytest.mark.integration
 @_POSIX
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_run_commands_timeout_result_carries_the_pid(kind):
@@ -98,6 +101,7 @@ def test_run_commands_timeout_result_carries_the_pid(kind):
     assert result.could_not_stop_pid == pid, (pid, result)
 
 
+@pytest.mark.integration
 @_POSIX
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_run_commands_failed_wait_result_carries_the_pid(kind):
@@ -110,6 +114,7 @@ def test_run_commands_failed_wait_result_carries_the_pid(kind):
     assert result.could_not_stop_pid == pid, (pid, result)
 
 
+@pytest.mark.integration
 @_POSIX
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_spawn_run_failure_and_the_start_watch_carry_the_pid(kind):
@@ -172,6 +177,7 @@ def _agrees(text, flagged: bool):
     return (COULD_NOT_STOP_MARKER in str(text or "")) == flagged
 
 
+@pytest.mark.unit
 def test_text_and_flag_agree_when_the_child_exits_between_reads():
     """The failure-after-the-start builders read the stop's outcome once: a
     child that exits right after the read cannot leave a reason saying it may
@@ -194,6 +200,7 @@ def test_text_and_flag_agree_when_the_child_exits_between_reads():
     )
 
 
+@pytest.mark.integration
 @_POSIX
 @pytest.mark.parametrize("kind", _POPEN_STOPPED[:1])
 def test_the_stop_outcome_is_read_once_per_failure(tmp_path, monkeypatch, kind):
@@ -276,6 +283,7 @@ def _spawn_run_failure(started):
     return spawn_run_failure_after_the_start(["tool"], raised)
 
 
+@pytest.mark.unit
 def test_the_start_watch_builder_reads_the_stop_outcome_once(counted_reads):
     """One ``not_stopped()`` read, and one poll, per StartWatch failure."""
     started = _scripted_record([None, 0])
@@ -285,6 +293,7 @@ def test_the_start_watch_builder_reads_the_stop_outcome_once(counted_reads):
     assert response is not None and response.get("could_not_stop") is True, response
 
 
+@pytest.mark.unit
 def test_the_spawn_run_builder_reads_the_stop_outcome_once(counted_reads):
     """One ``not_stopped()`` read, and one poll, per spawn_run failure."""
     started = _scripted_record([None, 0])
@@ -294,6 +303,7 @@ def test_the_spawn_run_builder_reads_the_stop_outcome_once(counted_reads):
     assert after is not None and after.could_not_stop is True, after
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "build", [_start_watch_failure, _spawn_run_failure], ids=["watch", "spawn_run"]
 )
@@ -315,6 +325,7 @@ def test_alive_at_the_read_then_exiting_stays_could_not_stop_in_both(build):
     assert started.process.poll() == 0
 
 
+@pytest.mark.integration
 @_POSIX
 def test_a_cancel_whose_stop_fails_keeps_the_record_saying_so():
     """A cancel ends the scan, so no per-scanner response exists for it; the
@@ -373,6 +384,7 @@ _CONVERSION_ERRORS = pytest.mark.parametrize(
 )
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_the_uv_runner_copies_the_pid_through_both_conversions(
     uv_runner, tmp_path, error
@@ -394,6 +406,7 @@ def test_the_uv_runner_copies_the_pid_through_both_conversions(
     assert getattr(result, "could_not_stop_pid", None) == 4242, result
 
 
+@pytest.mark.unit
 @_CONVERSION_ERRORS
 def test_the_uv_runner_drops_a_bool_pid(uv_runner, tmp_path, error):
     """The control: True is not a pid, and no number is invented from it."""

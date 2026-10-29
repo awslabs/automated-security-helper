@@ -132,6 +132,7 @@ def git_calls(repo, tmp_path, monkeypatch):
     subprocess_utils.clear_find_executable_cache()
 
 
+@pytest.mark.integration
 class TestPlainGitReadsTheseValuesAsOptions:
     """The controls: without ASH's check, these values change what git does."""
 
@@ -161,6 +162,7 @@ class TestPlainGitReadsTheseValuesAsOptions:
         assert result.stdout == ""
 
 
+@pytest.mark.integration
 class TestAnOptionLikeBaseRef:
     @pytest.mark.parametrize("template", OPTION_LIKE)
     def test_is_refused_before_any_git_process_starts(
@@ -178,6 +180,7 @@ class TestAnOptionLikeBaseRef:
         assert list(watched.iterdir()) == []
 
 
+@pytest.mark.integration
 class TestRefsThatStillWork:
     @pytest.mark.parametrize(
         "form", ["branch", "tag", "full commit id", "ancestry step"]
@@ -212,6 +215,7 @@ def _plant_a_file_named_after_the_range(repo, state: str) -> Path:
     return planted
 
 
+@pytest.mark.integration
 class TestAMissingBaseRefIsNeverReadAsAPath:
     STATES = ["untracked", "tracked and edited"]
 
@@ -297,6 +301,7 @@ ACCEPTED = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("base_ref", list(REFUSED.values()), ids=list(REFUSED))
 def test_validate_base_ref_refuses(base_ref):
     from automated_security_helper.utils.get_scan_set import (
@@ -313,6 +318,7 @@ def test_validate_base_ref_refuses(base_ref):
     assert isinstance(refused.value, ValueError)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("base_ref", list(ACCEPTED.values()), ids=list(ACCEPTED))
 def test_validate_base_ref_accepts(base_ref):
     from automated_security_helper.utils.get_scan_set import validate_base_ref
@@ -360,6 +366,7 @@ REF_NAMES = [
 ]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", REF_NAMES)
 def test_the_ref_name_rule_agrees_with_git_check_ref_format(name):
     """ASH's copy of the rule gives git's answer, measured against git itself."""
@@ -377,6 +384,7 @@ def test_the_ref_name_rule_agrees_with_git_check_ref_format(name):
     assert ash_accepts == git_accepts
 
 
+@pytest.mark.integration
 def test_run_ash_scan_refuses_before_any_git_call_or_output(
     repo, git_calls, tmp_path, monkeypatch
 ):

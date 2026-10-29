@@ -21,6 +21,8 @@ from __future__ import annotations
 import sys
 from typing import List
 
+import pytest
+
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
 )
@@ -31,6 +33,8 @@ from automated_security_helper.workspace.execution import (
     workspace_reporter_classes,
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
+
+pytestmark = pytest.mark.unit
 
 MASK = "<value>"
 

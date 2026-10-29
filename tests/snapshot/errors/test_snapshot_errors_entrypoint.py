@@ -24,6 +24,8 @@ import pytest
 from automated_security_helper.cli import entrypoint
 from automated_security_helper.cli import main as cli_main
 
+pytestmark = pytest.mark.unit
+
 
 def _fd_output(capfd) -> dict[str, str]:
     captured = capfd.readouterr()

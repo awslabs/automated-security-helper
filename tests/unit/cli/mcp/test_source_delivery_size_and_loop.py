@@ -108,6 +108,7 @@ def _alive(pid: int) -> bool:
     return True
 
 
+@pytest.mark.integration
 def test_a_clone_inside_the_size_limit_succeeds(fake_git) -> None:
     """Positive control: the limit does not refuse a clone that stays under it."""
 
@@ -118,6 +119,7 @@ def test_a_clone_inside_the_size_limit_succeeds(fake_git) -> None:
     assert result.get("success") is True, result
 
 
+@pytest.mark.integration
 def test_a_clone_past_the_size_limit_is_stopped_with_its_process(fake_git) -> None:
     fake_git["install"](size=3 * 1024 * 1024, hang=True)
 
@@ -131,6 +133,7 @@ def test_a_clone_past_the_size_limit_is_stopped_with_its_process(fake_git) -> No
     assert not (fake_git["workspace"] / SESSION / "source").exists()
 
 
+@pytest.mark.integration
 def test_a_clone_that_finishes_oversized_between_polls_is_refused(
     fake_git, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -180,6 +183,7 @@ def _ctx() -> Any:
         ("clear_source", "mcp_clear_source", {}),
     ],
 )
+@pytest.mark.unit
 def test_delivery_tools_do_not_block_the_event_loop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

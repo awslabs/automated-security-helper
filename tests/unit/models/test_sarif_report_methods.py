@@ -1,5 +1,7 @@
 """Tests for self-contained methods on the SarifReport model."""
 
+import pytest
+
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Location,
@@ -12,6 +14,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
     Message,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_run(driver_name: str, result_uris: list[str] | None = None) -> Run:

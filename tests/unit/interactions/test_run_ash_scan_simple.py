@@ -1,6 +1,10 @@
 """Simple unit tests for the run_ash_scan module."""
 
+import pytest
+
 from automated_security_helper.interactions.run_ash_scan import format_duration
+
+pytestmark = pytest.mark.unit
 
 
 def test_format_duration_seconds():

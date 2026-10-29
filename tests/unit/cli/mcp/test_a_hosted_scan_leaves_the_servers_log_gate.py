@@ -33,12 +33,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.utils.helpers import importing_this_checkout
 from tests.utils.stand_in_uv import (
     install_stand_in_uv,
     reaching_the_stand_in,
     stand_in_env,
 )
+
+pytestmark = pytest.mark.integration
 
 _PLUGIN_PACKAGE = "hosted_scan_probe_ash_plugins"
 _MARKER = "hosted-scan-gate-marker-after-the-scan"

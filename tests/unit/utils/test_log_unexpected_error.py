@@ -14,6 +14,7 @@ name its own text gives in "1 validation error for <title>".
 from typing import Dict
 from unittest.mock import MagicMock
 
+import pytest
 from pydantic import BaseModel, ValidationError
 
 from automated_security_helper.utils.error_text import (
@@ -21,6 +22,8 @@ from automated_security_helper.utils.error_text import (
     log_unexpected_error,
     traceback_text,
 )
+
+pytestmark = pytest.mark.unit
 
 CANARY = "ash-canary-7f3e"
 

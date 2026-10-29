@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 PROFILE = (
     "project_name: demo\n"
     "global_settings:\n"

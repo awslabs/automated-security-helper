@@ -27,6 +27,8 @@ from automated_security_helper.workspace.reporting import MANIFEST_FILENAME
 from tests.unit.workspace import test_workspace_report_path_links as links
 from tests.utils.helpers import builtin_reporter_classes
 
+pytestmark = pytest.mark.unit
+
 RUN = "0123456789abcdef0123456789abcdef"  # pragma: allowlist secret
 
 

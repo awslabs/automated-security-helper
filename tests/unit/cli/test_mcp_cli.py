@@ -23,6 +23,8 @@ from automated_security_helper.cli.mcp import (
     mcp_command,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Tests for validate_log_options

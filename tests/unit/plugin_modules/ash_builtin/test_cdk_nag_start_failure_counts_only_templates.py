@@ -52,6 +52,8 @@ from automated_security_helper.utils.cfn_template_model import (
     NO_CLOUDFORMATION_TEMPLATE,
 )
 
+pytestmark = pytest.mark.unit
+
 SUBPROCESS_UTILS = "automated_security_helper.utils.subprocess_utils"
 
 CFN_TEMPLATE = """Resources:

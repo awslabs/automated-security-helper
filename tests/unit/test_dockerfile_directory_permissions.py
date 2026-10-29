@@ -44,6 +44,8 @@ from typing import Dict, List, NamedTuple, Optional
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 

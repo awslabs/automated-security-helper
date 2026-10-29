@@ -33,6 +33,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 
+pytestmark = pytest.mark.unit
+
 CONFIG, TARGET, USAGE, INTERNAL = 3, 4, 5, 1
 SESSION = "client-one"
 

@@ -49,6 +49,7 @@ IGNORES_SIGTERM = (
 )
 
 
+@pytest.mark.unit
 def test_only_a_prompt_stop_shortens_the_grace():
     event = CancelEvent()
     assert subprocess_utils._stop_grace(event) == (
@@ -63,6 +64,7 @@ def test_only_a_prompt_stop_shortens_the_grace():
     )
 
 
+@pytest.mark.unit
 def test_the_window_holds_the_stop():
     """The poll, the grace and the wait all fit before the client's SIGTERM."""
     assert (
@@ -75,6 +77,7 @@ def test_the_window_holds_the_stop():
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.integration
 async def test_the_client_leaving_stops_a_tool_that_ignores_sigterm(
     tmp_path, monkeypatch
 ):

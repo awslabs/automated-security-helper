@@ -138,6 +138,7 @@ def _settings(tmp_path, context, inputs) -> list[tuple[str, Any]]:
     return found
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "context",
     [
@@ -156,6 +157,7 @@ def test_the_required_check_lets_its_ash_skip_unknown_tools(tmp_path, context):
     )
 
 
+@pytest.mark.integration
 def test_any_other_caller_still_has_an_unknown_tool_refused(tmp_path):
     called = ga.load_workflow(SCAN_WORKFLOW)
     context = _event("pull_request")
@@ -199,6 +201,7 @@ def test_any_other_caller_still_has_an_unknown_tool_refused(tmp_path):
         assert not wrong, f"{label}: installs run with {SETTING} set: {wrong}"
 
 
+@pytest.mark.unit
 def test_the_switch_is_a_boolean_input_that_defaults_to_off():
     called = ga.load_workflow(SCAN_WORKFLOW)
     spec = (called.on["workflow_call"] or {})["inputs"].get("skip-unknown-tools")

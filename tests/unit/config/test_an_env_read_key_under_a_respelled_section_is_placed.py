@@ -20,6 +20,8 @@ from automated_security_helper.config.runtime_patch import (
     _refuse_a_profile_whose_key_can_name_a_built_in,
 )
 
+pytestmark = pytest.mark.unit
+
 VAR_FIELD = "ASH_TEST_KEYMAP_FIELD"
 
 

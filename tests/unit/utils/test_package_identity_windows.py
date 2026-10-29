@@ -48,6 +48,8 @@ from automated_security_helper.utils import package_identity
 from automated_security_helper.utils.path_matching import _path_pattern_matches
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+pytestmark = pytest.mark.unit
+
 BUNDLED_KEY = "node_modules/aws-cdk-lib/node_modules/brace-expansion"
 TOP_KEY = "node_modules/brace-expansion"
 WIN_ROOT = PureWindowsPath("D:/a/repo/repo")

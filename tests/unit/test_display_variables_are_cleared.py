@@ -47,10 +47,12 @@ _CALLERS_DISPLAY = {
 _CONSOLE_AT_IMPORT = Console()
 
 
+@pytest.mark.unit
 def test_the_pin_sets_every_display_variable():
     assert sorted(_CALLERS_DISPLAY) == sorted(DISPLAY_VARIABLES)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(
     os.environ.get(_PROBE_FLAG) != "1", reason="the probe runs in the pin's child"
 )
@@ -67,6 +69,7 @@ def test_the_probe_sees_none_of_the_callers_display_variables():
     assert console.is_interactive is False
 
 
+@pytest.mark.integration
 def test_a_test_sees_no_display_variable_from_its_caller(tmp_path):
     env = dict(os.environ)
     env.update(

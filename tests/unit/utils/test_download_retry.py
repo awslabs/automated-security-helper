@@ -36,6 +36,8 @@ from automated_security_helper.utils.download_utils import (
     download_file,
 )
 
+pytestmark = pytest.mark.unit
+
 PAYLOAD = b"#!/bin/sh\necho retry-fixture\n"
 DIGEST = hashlib.sha256(PAYLOAD).hexdigest()
 URL = "https://example.invalid/tool/tool.tar.gz"

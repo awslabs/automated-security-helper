@@ -2,6 +2,8 @@
 
 from datetime import date, timedelta
 
+import pytest
+
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.suppression_matcher import (
@@ -12,6 +14,8 @@ from automated_security_helper.utils.suppression_matcher import (
     file_path_matches,
     _line_range_matches,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestSuppressionMatcher:

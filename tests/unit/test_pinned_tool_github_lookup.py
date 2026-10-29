@@ -41,6 +41,8 @@ from typing import Any, Callable
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_pinned_tool_versions.py"
 

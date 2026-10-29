@@ -85,6 +85,7 @@ def _tree(tmp_path: Path, modules: List[str]) -> Path:
         (f"{SNYK}.snyk_code_scanner", "source"),
     ],
 )
+@pytest.mark.unit
 def test_an_in_tree_config_cannot_add_them(tmp_path, ash_log, entry, sends):
     source = _tree(tmp_path, [entry])
 
@@ -99,6 +100,7 @@ def test_an_in_tree_config_cannot_add_them(tmp_path, ash_log, entry, sends):
     assert "--ash-plugin-modules" in warnings[0]
 
 
+@pytest.mark.unit
 def test_the_other_entries_of_that_config_are_kept(tmp_path, ash_log):
     source = _tree(tmp_path, [AWS, SNYK, *COMMUNITY])
 
@@ -111,6 +113,7 @@ def test_the_other_entries_of_that_config_are_kept(tmp_path, ash_log):
 
 
 @pytest.mark.parametrize("package", OFF_HOST)
+@pytest.mark.unit
 def test_an_uploaded_config_cannot_add_them(tmp_path, ash_log, package):
     upload = tmp_path / "upload" / "ash.yaml"
     upload.parent.mkdir()
@@ -127,6 +130,7 @@ def test_an_uploaded_config_cannot_add_them(tmp_path, ash_log, package):
 
 @pytest.mark.parametrize("package", OFF_HOST)
 @pytest.mark.parametrize("delivered", ["upload", "tree"])
+@pytest.mark.unit
 def test_a_config_an_mcp_client_delivered_cannot_add_them(
     tmp_path, monkeypatch, ash_log, package, delivered
 ):
@@ -169,6 +173,7 @@ def test_a_config_an_mcp_client_delivered_cannot_add_them(
 
 
 @pytest.mark.parametrize("package", OFF_HOST)
+@pytest.mark.unit
 def test_an_operator_config_outside_the_tree_can(tmp_path, ash_log, package):
     _tree(tmp_path, [])
     operator = tmp_path / "operator.yaml"
@@ -181,6 +186,7 @@ def test_an_operator_config_outside_the_tree_can(tmp_path, ash_log, package):
 
 
 @pytest.mark.parametrize("package", OFF_HOST)
+@pytest.mark.unit
 def test_an_operator_default_config_replaced_by_the_tree_can(
     tmp_path, ash_log, package
 ):
@@ -199,6 +205,7 @@ def test_an_operator_default_config_replaced_by_the_tree_can(
 
 @pytest.mark.parametrize("package", OFF_HOST)
 @pytest.mark.parametrize("key", ["ash_plugin_modules", "ash-plugin-modules"])
+@pytest.mark.unit
 def test_config_overrides_can(tmp_path, ash_log, key, package):
     source = _tree(tmp_path, [])
 
@@ -211,6 +218,7 @@ def test_config_overrides_can(tmp_path, ash_log, key, package):
 
 @pytest.mark.parametrize("package", OFF_HOST)
 @pytest.mark.parametrize("how", ["option", "environment"])
+@pytest.mark.unit
 def test_the_command_line_hands_them_to_the_scan(tmp_path, monkeypatch, how, package):
     """``--ash-plugin-modules`` and ``ASH_PLUGIN_MODULES`` reach the scan as given."""
     from typer.testing import CliRunner
@@ -266,6 +274,7 @@ print(json.dumps({
         (SNYK, f"{SNYK}.snyk_code_scanner"),
     ],
 )
+@pytest.mark.integration
 def test_the_scan_engine_loads_them_only_from_the_command_line(
     tmp_path, package, plugin
 ):
@@ -290,6 +299,7 @@ def test_the_scan_engine_loads_them_only_from_the_command_line(
     assert plugin in from_the_command_line["loaded"]
 
 
+@pytest.mark.unit
 def test_ash_community_plugins_file_keeps_its_modules(tmp_path, ash_log):
     """This repository's own CI scan loads these from a config inside its tree.
 
@@ -308,6 +318,7 @@ def test_ash_community_plugins_file_keeps_its_modules(tmp_path, ash_log):
     assert not _module_warnings(ash_log)
 
 
+@pytest.mark.unit
 def test_the_ci_legs_using_that_file_pass_snyk_on_the_command_line():
     """Every scan the run-scan-test action starts with the community file names snyk."""
     action = (REPO / ".github" / "actions" / "run-scan-test" / "action.yml").read_text()
@@ -540,6 +551,7 @@ def _reached(module: str, repo: Path = REPO) -> Dict[str, Set[str]]:
     return found
 
 
+@pytest.mark.integration
 def test_every_plugin_package_that_sends_data_off_the_host_is_listed(tmp_path):
     """Derived from the code: each package's ASH_REPORTERS, event handlers and ASH_SCANNERS.
 
@@ -622,6 +634,7 @@ def test_every_plugin_package_that_sends_data_off_the_host_is_listed(tmp_path):
     assert not unreviewed
 
 
+@pytest.mark.unit
 def test_the_walk_follows_shared_helpers_and_sees_processes(tmp_path):
     """A reporter reaching the network or a process through utils is seen."""
     root = tmp_path / "repo"
@@ -673,6 +686,7 @@ def test_the_walk_follows_shared_helpers_and_sees_processes(tmp_path):
     assert fetch["network"] == {"automated_security_helper.plugin_modules.probe.fetch"}
 
 
+@pytest.mark.unit
 def test_the_staleness_probes_share_the_refreshs_paths_without_reaching_it():
     """The reporters reach utils/content_db_staleness, which shares the empty tool
     config with utils/content_db_refresh through utils/content_db_shared. That
@@ -848,6 +862,7 @@ print(json.dumps(out))
     sys.platform == "win32",
     reason="the recorders use POSIX process functions and a Unix socket pair",
 )
+@pytest.mark.integration
 def test_no_reporter_outside_those_packages_connects_or_starts_a_process(tmp_path):
     from automated_security_helper.config.plugin_module_trust import (
         OFF_HOST_PLUGIN_PACKAGES,

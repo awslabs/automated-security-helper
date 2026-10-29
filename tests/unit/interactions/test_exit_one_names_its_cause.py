@@ -34,6 +34,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerTargetStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def console(monkeypatch):

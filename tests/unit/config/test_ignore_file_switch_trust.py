@@ -36,6 +36,8 @@ from automated_security_helper.config.runtime_patch import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 CONFIG_KEY = "honor_ignore_files"
 
 

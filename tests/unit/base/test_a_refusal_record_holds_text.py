@@ -25,6 +25,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
 )
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def ash_warnings():

@@ -7,6 +7,8 @@ import logging
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Bug #165 -- addLoggingLevel AttributeError on re-import

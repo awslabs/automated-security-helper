@@ -34,10 +34,13 @@ from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
 PluginContext.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    not hasattr(os, "symlink") or os.name == "nt",
-    reason="creates symbolic links, which need privileges on Windows",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        not hasattr(os, "symlink") or os.name == "nt",
+        reason="creates symbolic links, which need privileges on Windows",
+    ),
+]
 
 
 @pytest.fixture(autouse=True)

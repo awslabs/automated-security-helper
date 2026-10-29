@@ -20,6 +20,8 @@ import pytest
 
 from automated_security_helper.utils.link_locations import link_locations
 
+pytestmark = pytest.mark.unit
+
 
 def _delete_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # os.rmdir of the process's working directory is PermissionError on Windows,

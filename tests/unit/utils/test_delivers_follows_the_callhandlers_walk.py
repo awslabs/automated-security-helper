@@ -21,7 +21,11 @@ from __future__ import annotations
 import io
 import logging
 
+import pytest
+
 from automated_security_helper.utils import log as log_module
+
+pytestmark = pytest.mark.unit
 
 
 def _fresh_logger(name: str) -> logging.Logger:

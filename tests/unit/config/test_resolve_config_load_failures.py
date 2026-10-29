@@ -31,6 +31,8 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 #: Every name discovery looks for, where it looks: each dedicated name at the root
 #: and in .ash/, each ashrc name at the root, and pyproject.toml.
 EVERY_DISCOVERY_LOCATION = [

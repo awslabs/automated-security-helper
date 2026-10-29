@@ -19,7 +19,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.utils.helpers import importing_this_checkout
+
+pytestmark = pytest.mark.integration
 
 RENDER = """
 import sys

@@ -38,6 +38,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import exit_status
 
+pytestmark = pytest.mark.unit
+
 CFN_TEMPLATE = """Resources:
   MyRole:
     Type: AWS::IAM::Role

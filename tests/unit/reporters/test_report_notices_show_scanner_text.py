@@ -33,6 +33,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporte
 )
 from automated_security_helper.schemas.sarif_schema_model import Invocation, Result
 
+pytestmark = pytest.mark.unit
+
 #: The marker each probe text carries, so only its own lines are inspected.
 MARKER = "probe-mark"
 

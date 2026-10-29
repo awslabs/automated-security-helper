@@ -21,6 +21,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 _NEEDS_PERMISSION_BITS = pytest.mark.skipif(
     os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="needs POSIX permission bits, which root reads past",

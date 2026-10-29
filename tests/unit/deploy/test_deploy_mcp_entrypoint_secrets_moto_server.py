@@ -171,6 +171,7 @@ def secretsmanager(moto_endpoint: str):
     )
 
 
+@pytest.mark.integration
 class TestSecretRead:
     def test_the_secret_value_is_read_byte_exact(
         self, stack, child_env, secretsmanager, unique_name, tmp_path: pathlib.Path
@@ -254,6 +255,7 @@ class TestSecretRead:
         assert captured.read_bytes() == b"value-with-newline"
 
 
+@pytest.mark.unit
 class TestReadShape:
     def test_at_least_one_stack_emits_the_entrypoint(self):
         """The parametrization must not be able to cover nothing.

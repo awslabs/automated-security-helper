@@ -22,6 +22,8 @@ from automated_security_helper.utils.offline_mode_validator import (
     validate_trivy_offline_mode,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 

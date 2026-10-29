@@ -11,6 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 class TestTotalDoesNotDoubleCountSuppressed:
     """total must NOT include suppressed so verify doesn't double-count.

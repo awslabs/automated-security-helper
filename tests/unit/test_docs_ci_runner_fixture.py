@@ -95,6 +95,7 @@ def _make(root: Path, event: str | None, pipeline_text: str = PIPELINE_TEXT):
     )
 
 
+@pytest.mark.integration
 def test_the_base_commit_holds_the_fixture_and_the_pipeline(tmp_path):
     fixture = _make(tmp_path / "run", None)
     project = fixture.project
@@ -118,6 +119,7 @@ def test_the_base_commit_holds_the_fixture_and_the_pipeline(tmp_path):
     assert _git("status", "--porcelain", cwd=project) == ""
 
 
+@pytest.mark.integration
 def test_the_same_inputs_give_the_same_commits(tmp_path):
     first = _make(tmp_path / "one", "pull_request")
     second = _make(tmp_path / "two", "pull_request")
@@ -131,6 +133,7 @@ def test_the_same_inputs_give_the_same_commits(tmp_path):
     )
 
 
+@pytest.mark.integration
 def test_origin_is_a_bare_repository_holding_main(tmp_path):
     fixture = _make(tmp_path / "run", "pull_request")
     assert _git("rev-parse", "--is-bare-repository", cwd=fixture.origin) == "true"
@@ -143,6 +146,7 @@ def test_origin_is_a_bare_repository_holding_main(tmp_path):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("event", ["pull_request", "merge_request"])
 def test_a_change_event_adds_one_file_with_exactly_one_finding(tmp_path, event):
     fixture = _make(tmp_path / "run", event)
@@ -181,6 +185,7 @@ def test_a_change_event_adds_one_file_with_exactly_one_finding(tmp_path, event):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("event", [None, "push"])
 def test_other_events_scan_main_as_it_is(tmp_path, event):
     fixture = _make(tmp_path / "run", event)
@@ -189,6 +194,7 @@ def test_other_events_scan_main_as_it_is(tmp_path, event):
     assert not (fixture.project / "changed.py").exists()
 
 
+@pytest.mark.unit
 def test_an_event_no_page_uses_is_refused(tmp_path):
     with pytest.raises(ValueError):
         _make(tmp_path / "run", "merge_group")
@@ -217,6 +223,7 @@ def _unused_tmp_path(name: str) -> Path:
     return path
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(not os.path.isdir("/tmp"), reason="no /tmp on this host")
 def test_a_root_in_tmp_outside_a_pytest_directory_is_refused(nothing_made):
     """The tmp_path roots every other cell uses are the control: they are made."""
@@ -227,6 +234,7 @@ def test_a_root_in_tmp_outside_a_pytest_directory_is_refused(nothing_made):
     assert not os.path.lexists(probe), "refused before anything was made"
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(not os.path.isdir("/tmp"), reason="no /tmp on this host")
 def test_a_root_that_resolves_into_tmp_through_a_link_is_refused(tmp_path):
     link = tmp_path / "link"
@@ -240,6 +248,7 @@ def test_a_root_that_resolves_into_tmp_through_a_link_is_refused(tmp_path):
     assert not os.path.lexists(probe), "refused before anything was made"
 
 
+@pytest.mark.unit
 def test_a_relative_root_is_refused(tmp_path, monkeypatch):
     """A relative root is read against the working directory, which can be inside
     another checkout; it is refused before anything is made."""
@@ -260,6 +269,7 @@ def _unused_basetemp() -> Path:
     return path
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(not os.path.isdir("/tmp"), reason="no /tmp on this host")
 def test_a_root_in_a_pytest_directory_in_tmp_passes_the_root_check(nothing_made):
     """pytest's default basetemp is /tmp/pytest-of-<user>/pytest-<n>. An event no page
@@ -271,6 +281,7 @@ def test_a_root_in_a_pytest_directory_in_tmp_passes_the_root_check(nothing_made)
     assert not os.path.lexists(basetemp)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(not os.path.isdir("/tmp"), reason="no /tmp on this host")
 @pytest.mark.parametrize(
     "root",
@@ -300,6 +311,7 @@ def test_a_root_in_tmp_under_a_directory_pytest_did_not_make_is_refused(
     assert not os.path.lexists(path.parent), "refused before anything was made"
 
 
+@pytest.mark.integration
 def test_every_run_gets_a_new_empty_home(tmp_path):
     first = _make(tmp_path / "one", None)
     second = _make(tmp_path / "two", None)
@@ -313,6 +325,7 @@ def test_every_run_gets_a_new_empty_home(tmp_path):
     assert first.home != second.home
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the runners run on Linux; the hook is a sh script"
 )
@@ -358,6 +371,7 @@ def _ignore_in(directory: Path, pattern: str) -> None:
     ignore.write_text(pattern + "\n", encoding="utf-8")
 
 
+@pytest.mark.integration
 def test_the_fixture_s_files_are_listed_with_an_empty_home(tmp_path):
     """git reads a per-user ignore file under HOME, so a source directory used as HOME
     would hide its own files from the listing."""
@@ -380,6 +394,7 @@ def test_the_fixture_s_files_are_listed_with_an_empty_home(tmp_path):
     assert "app.py" in listed and "extra.py" in listed, listed
 
 
+@pytest.mark.integration
 def test_the_fixture_s_commits_are_made_with_an_empty_home(tmp_path):
     """The directory a caller names for the run may already hold files; none of them
     is git's per-user configuration for the fixture's own commands."""
@@ -394,6 +409,7 @@ def test_the_fixture_s_commits_are_made_with_an_empty_home(tmp_path):
     assert fixture.home.is_dir() and not any(fixture.home.iterdir())
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "event,changed_files,expected",
     [
@@ -409,6 +425,7 @@ def test_the_findings_each_run_expects(event, changed_files, expected):
     assert _api("expected_findings")(event, changed_files=changed_files) == expected
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("event", [None, "push"])
 def test_a_changed_files_scan_needs_a_change_event(event):
     with pytest.raises(ValueError):

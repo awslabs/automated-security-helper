@@ -31,6 +31,8 @@ import pytest
 
 from automated_security_helper.utils.inner_run_outcome import completion_marker
 
+pytestmark = pytest.mark.unit
+
 CONFIG_TEXT = "project_name: operator-config\n"
 
 

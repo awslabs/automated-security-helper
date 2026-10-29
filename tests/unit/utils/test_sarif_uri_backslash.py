@@ -34,6 +34,8 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
 )
 
+pytestmark = pytest.mark.unit
+
 posix_only = pytest.mark.skipif(
     sys.platform == "win32",
     reason="a Windows file name cannot contain a backslash",

@@ -150,6 +150,7 @@ def _initialize(orchestrator: ASHScanOrchestrator) -> None:
         orchestrator.initialize()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("keep_previous_results", [False, True])
 @pytest.mark.parametrize("committed", RESULTS_PATHS)
 def test_a_committed_file_where_a_scan_writes_stops_it_before_anything_is_deleted(
@@ -178,6 +179,7 @@ def test_a_committed_file_where_a_scan_writes_stops_it_before_anything_is_delete
     assert _snapshot(output) == before
 
 
+@pytest.mark.integration
 def test_a_committed_file_elsewhere_in_the_output_dir_is_kept_and_the_scan_goes_on(
     tmp_path, monkeypatch
 ):
@@ -199,6 +201,7 @@ def test_a_committed_file_elsewhere_in_the_output_dir_is_kept_and_the_scan_goes_
         assert not (output / leftover).exists(), leftover
 
 
+@pytest.mark.unit
 def test_outside_git_a_previous_runs_files_are_removed(tmp_path, monkeypatch):
     source = tmp_path / "plain"
     output = source / ".ash" / "ash_output"
@@ -217,6 +220,7 @@ def test_outside_git_a_previous_runs_files_are_removed(tmp_path, monkeypatch):
         assert not (output / relative).exists(), relative
 
 
+@pytest.mark.integration
 def test_the_scan_exits_3_and_leaves_the_committed_results_file_as_it_was(
     tmp_path, monkeypatch, capsys
 ):
@@ -247,6 +251,7 @@ def test_the_scan_exits_3_and_leaves_the_committed_results_file_as_it_was(
     assert tracked.read_bytes() == committed
 
 
+@pytest.mark.integration
 def test_ash_report_reads_the_results_file_at_its_fixed_path_after_the_refusal(
     tmp_path, monkeypatch, capsys
 ):
@@ -276,6 +281,7 @@ def test_ash_report_reads_the_results_file_at_its_fixed_path_after_the_refusal(
     ]
 
 
+@pytest.mark.unit
 def test_setting_the_previous_results_aside_moves_the_scan_set_record_with_them(
     tmp_path,
 ):
@@ -325,6 +331,7 @@ DIRECTORY_LINKS = ("reports", ".ash_previous_results")
 LINKED_RESULTS_PATHS = (*RESULTS_PATHS, *DIRECTORY_LINKS)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
@@ -373,6 +380,7 @@ def test_a_committed_link_where_a_scan_writes_stops_it_before_anything_is_delete
     assert _entries(outside) == outside_before
 
 
+@pytest.mark.integration
 def test_a_repository_layout_in_the_output_dir_does_not_hide_its_committed_files(
     tmp_path, monkeypatch
 ):

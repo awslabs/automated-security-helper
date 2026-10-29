@@ -75,6 +75,8 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 
+pytestmark = pytest.mark.unit
+
 # --------------------------------------------------------------------------- #
 # The measured table.
 # --------------------------------------------------------------------------- #

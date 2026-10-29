@@ -25,6 +25,8 @@ import yaml
 
 from automated_security_helper.core.community_scanners import community_module_for
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE_ARG = re.compile(r'^ARG (\w+)="([^"]*)"$', re.MULTILINE)
 

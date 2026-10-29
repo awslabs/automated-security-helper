@@ -153,6 +153,7 @@ def _scan(root, config=None, **kwargs):
     )
 
 
+@pytest.mark.integration
 class TestASectionWithOptionsButNoEnabled:
     @pytest.mark.parametrize("key", sorted(OPTIONS_ONLY))
     def test_is_named_once_and_sends_nothing(
@@ -236,6 +237,7 @@ class TestASectionWithOptionsButNoEnabled:
         assert _about("s3", warnings_logged) == []
 
 
+@pytest.mark.integration
 class TestNoWarning:
     def test_when_enabled_is_true_and_the_reporter_runs(
         self, tmp_path, monkeypatch, requests, warnings_logged
@@ -296,6 +298,7 @@ class TestNoWarning:
         assert [m for m in warnings_logged if ".enabled" in m] == []
 
 
+@pytest.mark.integration
 class TestAWorkspaceRun:
     def test_names_the_reporter_once_for_every_project(
         self, tmp_path, requests, sessions, warnings_logged
@@ -341,6 +344,7 @@ class TestAWorkspaceRun:
         assert len(_about("s3", warnings_logged)) == 1, warnings_logged
 
 
+@pytest.mark.unit
 class TestMerge:
     def _merge(self, tmp_path, config, overrides=None):
         import typer

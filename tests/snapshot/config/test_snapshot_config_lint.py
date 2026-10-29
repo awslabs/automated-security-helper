@@ -25,6 +25,8 @@ from automated_security_helper.config.config_linter import (
 from tests.snapshot.support.cli import run_cli
 from tests.snapshot.support.fixture_model import pin_clock
 
+pytestmark = pytest.mark.unit
+
 # Everything except a parse failure and an unused suppression, which need their own
 # fixtures: a parse failure stops the lint, and unused suppressions need a report.
 EVERY_ISSUE = """\

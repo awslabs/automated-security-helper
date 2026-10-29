@@ -63,6 +63,8 @@ from automated_security_helper.workspace.policy import (
     policy_for_project,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 #: A non-ASCII letter whose Unicode lowercase is ASCII ``k``, written as an escape.

@@ -33,6 +33,8 @@ from automated_security_helper.cli.mcp import mcp_command
 from automated_security_helper.utils.log import get_logger
 from tests.utils.env_assertions import environ_value
 
+pytestmark = pytest.mark.unit
+
 _VAR = "ASH_LOG_TO_STDERR"
 _DEPS = "automated_security_helper.cli.mcp.validate_mcp_dependencies"
 _STDIO_SERVER = "automated_security_helper.cli.mcp_server.run_mcp_server"

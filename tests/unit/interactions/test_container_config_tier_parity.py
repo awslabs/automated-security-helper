@@ -48,6 +48,8 @@ from automated_security_helper.workspace.resolver import resolve_workspace
 from tests.utils.container_scan import RecordingContainer, scan_inside
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 REMEDY = (
     "move the file outside every git checkout, or pass the setting with "
     "--config-overrides"

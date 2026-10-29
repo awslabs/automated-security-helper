@@ -36,6 +36,8 @@ import pytest
 from tests.utils import undecodable_names as names
 from tests.utils.undecodable_names import ODD_BYTES
 
+pytestmark = pytest.mark.integration
+
 # Every test here plants a file whose name is not UTF-8.
 if os.name == "nt":
     pytest.skip(

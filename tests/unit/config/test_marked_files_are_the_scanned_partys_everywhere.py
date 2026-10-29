@@ -26,6 +26,8 @@ from automated_security_helper.config.sandbox_grants import (
 from automated_security_helper.interactions import run_ash_container
 from automated_security_helper.config.path_trust import honored_path, in_scanned_tree
 
+pytestmark = pytest.mark.unit
+
 
 def test_a_marked_file_is_in_the_scanned_tree_wherever_it_sits(tmp_path):
     copy = tmp_path / "mounted" / "cfg.yaml"

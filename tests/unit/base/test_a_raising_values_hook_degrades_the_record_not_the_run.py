@@ -12,7 +12,11 @@ crash.
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tests.unit.base.test_uv_tool_mixin import FakePlugin
+
+pytestmark = pytest.mark.unit
 
 
 class _HookBroke(RuntimeError):

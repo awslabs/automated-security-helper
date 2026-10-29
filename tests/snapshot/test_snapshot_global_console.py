@@ -22,6 +22,8 @@ import rich.console
 
 from automated_security_helper.utils.console import CommandSafeStream
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(scope="module", autouse=True)
 def _a_host_rich_takes_for_legacy_windows() -> Iterator[None]:

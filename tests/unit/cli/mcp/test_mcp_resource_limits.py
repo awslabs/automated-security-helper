@@ -128,6 +128,7 @@ def held(monkeypatch) -> threading.Event:
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 class TestMaxConcurrentScans:
     async def test_a_scan_over_the_limit_is_refused(self, tmp_path, monkeypatch, held):
         _operator_config(tmp_path, monkeypatch, max_concurrent_scans=1)
@@ -186,6 +187,7 @@ class TestMaxConcurrentScans:
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_scan_past_scan_timeout_seconds_is_stopped_and_failed(
     tmp_path, monkeypatch
 ):
@@ -257,6 +259,7 @@ async def test_a_scan_past_scan_timeout_seconds_is_stopped_and_failed(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("no_limit", ["0", "null"])
+@pytest.mark.unit
 async def test_zero_or_null_concurrency_is_no_limit(
     tmp_path, monkeypatch, held, no_limit
 ):
@@ -277,6 +280,7 @@ async def test_zero_or_null_concurrency_is_no_limit(
 
 
 @pytest.mark.parametrize("no_limit", [0, None])
+@pytest.mark.unit
 def test_zero_or_null_timeout_is_no_limit(no_limit):
     from automated_security_helper.config.ash_config import (
         MCPResourceManagementConfig,
@@ -297,6 +301,7 @@ def test_zero_or_null_timeout_is_no_limit(no_limit):
         ("max_concurrent_scans", -1, False),
     ],
 )
+@pytest.mark.unit
 def test_the_ceilings(field, value, accepted):
     from pydantic import ValidationError
 
@@ -312,6 +317,7 @@ def test_the_ceilings(field, value, accepted):
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_the_timeout_counts_from_when_the_scan_gets_its_session_lock(
     tmp_path, monkeypatch
 ):
@@ -498,6 +504,7 @@ async def _scan_workspace(workspace: Path) -> Dict[str, Any]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 class TestMaxConcurrentScansForWorkspaceScans:
     async def test_a_workspace_scan_over_the_limit_is_refused_like_a_single_scan(
         self, tmp_path, monkeypatch, held, held_workspace
@@ -692,6 +699,7 @@ async def _ended(scan_id: str) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 class TestTheRefusalAtTheLimit:
     """A refused scan takes no slot, and its refusal names the limit only.
 
@@ -909,6 +917,7 @@ def _assert_stopped(tmp_path: Path, keys) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_workspace_scan_past_scan_timeout_seconds_is_stopped_and_failed(
     tmp_path, monkeypatch
 ):
@@ -953,6 +962,7 @@ async def test_a_workspace_scan_past_scan_timeout_seconds_is_stopped_and_failed(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("no_limit", [0, None])
+@pytest.mark.integration
 async def test_zero_or_null_timeout_leaves_a_workspace_scan_to_finish(
     tmp_path, monkeypatch, no_limit
 ):
@@ -971,6 +981,7 @@ async def test_zero_or_null_timeout_leaves_a_workspace_scan_to_finish(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_cancelling_one_project_of_a_workspace_scan_stops_that_project_only(
     tmp_path, monkeypatch
 ):
@@ -1010,6 +1021,7 @@ async def test_cancelling_one_project_of_a_workspace_scan_stops_that_project_onl
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_timed_out_workspace_scan_holds_its_slot_until_its_thread_stops(
     tmp_path, monkeypatch, held, held_workspace
 ):
@@ -1071,6 +1083,7 @@ async def _wait_for_status(project: str, status: str) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_cancelled_workspace_call_stops_its_projects(tmp_path, monkeypatch):
     """Cancelling the call does not stop its thread; the call stops the projects.
 
@@ -1103,6 +1116,7 @@ async def _executor_refuses(*args: Any, **kwargs: Any) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["cancelled", "raised"])
+@pytest.mark.unit
 async def test_a_workspace_call_ending_before_its_thread_starts_frees_its_slot(
     tmp_path, monkeypatch, held, ending
 ):
@@ -1143,6 +1157,7 @@ async def test_a_workspace_call_ending_before_its_thread_starts_frees_its_slot(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_project_cancelled_while_queued_never_starts(tmp_path, monkeypatch):
     """One worker, two projects: the second, cancelled while it waits, never runs."""
     started = _child_process_scans(
@@ -1189,6 +1204,7 @@ def _alive(pid: int) -> bool:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("held_by", ["slot", "directory"])
+@pytest.mark.integration
 async def test_a_project_past_its_project_timeout_is_stopped_before_the_call_returns(
     tmp_path, monkeypatch, held, held_by
 ):
@@ -1261,6 +1277,7 @@ async def test_a_project_past_its_project_timeout_is_stopped_before_the_call_ret
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_stopping_the_server_stops_a_running_workspace_scan(
     tmp_path, monkeypatch
 ):
@@ -1315,6 +1332,7 @@ async def test_stopping_the_server_stops_a_running_workspace_scan(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_a_timeout_after_every_project_ended_is_not_reported(
     tmp_path, monkeypatch, held_workspace
 ):
@@ -1348,6 +1366,7 @@ async def test_a_timeout_after_every_project_ended_is_not_reported(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_worker_freed_by_a_stopped_project_runs_the_rest_of_the_queue(
     tmp_path, monkeypatch
 ):
@@ -1388,6 +1407,7 @@ async def test_a_worker_freed_by_a_stopped_project_runs_the_rest_of_the_queue(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 class TestARefusedScanLeavesNothingOnDisk:
     """A scan the registry refuses creates no output directory.
 
@@ -1509,6 +1529,7 @@ class TestARefusedScanLeavesNothingOnDisk:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("configured", [64, 2])
+@pytest.mark.unit
 async def test_a_scanned_workspace_cannot_raise_its_own_parallelism(
     tmp_path, monkeypatch, configured
 ):

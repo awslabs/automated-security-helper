@@ -29,6 +29,8 @@ from pathlib import Path
 import pytest
 from typing_extensions import Self
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROXY_VARIABLES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
 

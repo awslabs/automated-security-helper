@@ -191,6 +191,7 @@ def _names_the_code(errors, code) -> bool:
     return any(re.search(rf"\b{code}\b", str(error)) for error in errors)
 
 
+@pytest.mark.integration
 class TestARejectedExitCodeIsAnError:
     @pytest.mark.parametrize("results", sorted(RESULTS_FILES))
     @pytest.mark.parametrize(
@@ -238,6 +239,7 @@ class TestARejectedExitCodeIsAnError:
         assert container.status == ScannerStatus.ERROR
 
 
+@pytest.mark.integration
 class TestAnAcceptedExitCodeIsGradedOnFindings:
     """Controls: the same tool and harness, with codes the scanner accepts."""
 
@@ -310,6 +312,7 @@ class TestAToolKilledByASignalIsAnError:
             pytest.param({0, 3}, 3, id="SIGQUIT-against-0-3"),
         ],
     )
+    @pytest.mark.integration
     def test_the_row_is_error(
         self, plugin_context, tmp_path, monkeypatch, success_codes, signum
     ):
@@ -329,6 +332,7 @@ class TestAToolKilledByASignalIsAnError:
         )
         assert container.exit_code == 128 + signum
 
+    @pytest.mark.unit
     def test_an_accumulated_code_is_recorded_the_same_way(self, plugin_context):
         """``_process_command_response``, which overriding scanners rely on, agrees."""
         scanner = _scanner_class({0, 1})(config=_ToolConfig(), context=plugin_context)
@@ -339,6 +343,7 @@ class TestAToolKilledByASignalIsAnError:
         assert not scanner._exit_code_accepted()
 
 
+@pytest.mark.unit
 class TestASignalCauseIsAttributedOnlyWhenTheRunnerRecordedOne:
     """The runner leaves ``signaled`` out of a post-run-error response when ASH's
     own stop may have sent the signal (SIGKILL or SIGTERM after a failed wait
@@ -449,6 +454,7 @@ class TestASignalCauseIsAttributedOnlyWhenTheRunnerRecordedOne:
         assert f"(signal {-returncode})" in kept[1], kept
 
 
+@pytest.mark.integration
 def test_each_target_is_judged_by_its_own_run(plugin_context, tmp_path):
     """The converted target's exit 1 is not hidden by the source target's exit 2.
 
@@ -487,6 +493,7 @@ def test_each_target_is_judged_by_its_own_run(plugin_context, tmp_path):
     assert (converted_row.status, converted_row.exit_code) == (ScannerStatus.ERROR, 1)
 
 
+@pytest.mark.unit
 class TestTheRunnersOwnFailureIsAnError:
     """ASH failing to run the tool is not an accepted exit code.
 

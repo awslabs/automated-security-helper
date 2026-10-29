@@ -20,7 +20,11 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.interactions import run_ash_container
+
+pytestmark = pytest.mark.unit
 
 _ASH_NAME = re.compile(r"ASH_[A-Z0-9_]+\Z")
 

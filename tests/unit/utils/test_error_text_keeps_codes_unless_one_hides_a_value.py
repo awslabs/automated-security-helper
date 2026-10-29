@@ -29,6 +29,8 @@ from automated_security_helper.utils.error_text import (
     traceback_text,
 )
 
+pytestmark = pytest.mark.unit
+
 ESC = chr(0x1B)
 RED = ESC + "[31m"
 RESET = ESC + "[0m"

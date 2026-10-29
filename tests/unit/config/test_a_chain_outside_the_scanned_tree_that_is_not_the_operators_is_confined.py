@@ -38,6 +38,8 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 #: The two lists the client-policy step does not compare with the trusted base.
 SCANNER_GRANTS: Dict[str, Any] = {
     "sandbox": {

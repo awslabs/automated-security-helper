@@ -32,11 +32,14 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="runs the kit's bash script against a POSIX tree layout; the workflow "
-    "runs it on Linux, and the bash first on a Windows runner's PATH is the WSL launcher",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="runs the kit's bash script against a POSIX tree layout; the workflow "
+        "runs it on Linux, and the bash first on a Windows runner's PATH is the WSL launcher",
+    ),
+]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_agentic_plugins_drift.sh"

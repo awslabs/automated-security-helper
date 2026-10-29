@@ -29,6 +29,10 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKS_PATH = REPO_ROOT / "scripts" / "docs_checks.py"
 FENCE = "```"

@@ -31,6 +31,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
     session_client_rules,
 )
 
+pytestmark = pytest.mark.unit
+
 MINE = "session-a"
 THEIRS = "session-b"
 PROBE_VAR = "ASH_ENV_PROBE"

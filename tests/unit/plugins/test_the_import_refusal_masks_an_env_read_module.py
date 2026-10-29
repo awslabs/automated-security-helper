@@ -28,6 +28,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from tests.utils.helpers import builtin_scanner_config_names
 
+pytestmark = pytest.mark.unit
+
 #: The variable's value: a plantable namespace package whose name nothing else
 #: in these runs would print, so finding it in the refusal is the leak.
 CANARY = "refusalcanary_ash_plugins"

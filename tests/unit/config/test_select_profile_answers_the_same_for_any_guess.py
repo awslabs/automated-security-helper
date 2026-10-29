@@ -21,6 +21,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 PROJECT = "ash-canary-7f3e-0123456789"
 PATH_VALUE = "ash-canary-7f3e-path-0123456789"
 LITERAL = "literal-control-0123456789"

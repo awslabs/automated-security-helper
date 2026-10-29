@@ -219,6 +219,7 @@ def _scan_in_a_child(tmp_path: Path, endpoint: str, **kwargs):
 
 
 @pytest.mark.parametrize("section", sorted(SECTIONS))
+@pytest.mark.integration
 def test_a_config_the_repository_wrote_does_not_turn_an_off_host_reporter_on(
     tmp_path, aws, section
 ):
@@ -237,6 +238,7 @@ def test_a_config_the_repository_wrote_does_not_turn_an_off_host_reporter_on(
 
 
 @pytest.mark.parametrize("section", sorted(OPERATOR_DESTINATIONS))
+@pytest.mark.integration
 def test_the_operators_destination_receives_it_past_the_repositorys(
     tmp_path, aws, section
 ):
@@ -261,6 +263,7 @@ def test_the_operators_destination_receives_it_past_the_repositorys(
     assert _anything_repo_chosen(requests, bodies) == [], (requests, bodies)
 
 
+@pytest.mark.unit
 def test_the_default_chains_operator_files_reach_the_reporter_view(
     tmp_path, monkeypatch
 ):
@@ -344,6 +347,7 @@ def _report_s3_in_the_checkout(tmp_path: Path, endpoint: str, overrides: List[st
     )
 
 
+@pytest.mark.integration
 def test_ash_report_in_the_repository_does_not_send_with_its_config(tmp_path, aws):
     """The operator loads the module and turns nothing on: refused, nothing sent."""
     endpoint, requests, bodies = aws
@@ -354,6 +358,7 @@ def test_ash_report_in_the_repository_does_not_send_with_its_config(tmp_path, aw
     assert requests == [], requests
 
 
+@pytest.mark.integration
 def test_ash_report_sends_to_the_operators_bucket_past_the_repositorys_config(
     tmp_path, aws
 ):
@@ -393,6 +398,7 @@ def _refused_the_clients_file(result) -> bool:
     )
 
 
+@pytest.mark.integration
 def test_a_config_an_mcp_client_uploaded_does_not_turn_one_on(tmp_path, aws):
     """The client's file turns S3 on: the scan either runs without its S3
     section or refuses the file, and sends nothing."""
@@ -416,6 +422,7 @@ def test_a_config_an_mcp_client_uploaded_does_not_turn_one_on(tmp_path, aws):
     assert requests == [], (requests, result.stderr[-2000:])
 
 
+@pytest.mark.integration
 def test_the_operators_overrides_reach_past_an_mcp_clients_config(tmp_path, aws):
     """The twin: the operator's overrides turn S3 on and aim it. Where the
     server refuses the client's file outright, no reporter runs, so nothing is
@@ -443,6 +450,7 @@ def test_the_operators_overrides_reach_past_an_mcp_clients_config(tmp_path, aws)
     assert _anything_repo_chosen(requests, bodies) == [], (requests, bodies)
 
 
+@pytest.mark.integration
 def test_the_operators_overrides_reach_past_a_clients_config_that_sets_no_reporter(
     tmp_path, aws
 ):
@@ -475,6 +483,7 @@ def test_the_operators_overrides_reach_past_a_clients_config_that_sets_no_report
     assert _anything_repo_chosen(requests, bodies) == [], (requests, bodies)
 
 
+@pytest.mark.integration
 def test_the_operators_config_file_outside_the_tree_turns_it_on(tmp_path, aws):
     """Control: an operator --config outside the tree enables S3 to its bucket."""
     endpoint, requests, bodies = aws
@@ -601,6 +610,7 @@ def _archived_or_victim(requests: List[tuple], bodies: List[tuple]) -> List[tupl
     ] + [body for body in bodies if "victim" in body[1]]
 
 
+@pytest.mark.integration
 def test_a_decoy_section_does_not_let_the_repository_choose_the_scope(
     tmp_path, security_hub
 ):
@@ -626,6 +636,7 @@ def test_a_decoy_section_does_not_let_the_repository_choose_the_scope(
     assert _archived_or_victim(requests, bodies) == [], (requests, bodies)
 
 
+@pytest.mark.integration
 def test_a_mirrored_decoy_takes_the_scope_the_operators_own_file_sets(
     tmp_path, security_hub, monkeypatch
 ):
@@ -795,6 +806,7 @@ def _report_security_hub(tmp_path, endpoint, source, format_spelling, overrides)
     "operator_archives", [False, True], ids=["operator-imports", "operator-archives"]
 )
 @pytest.mark.parametrize("shape", sorted(DECOY_SHAPES))
+@pytest.mark.integration
 def test_a_decoy_section_does_not_reach_ash_report_either(
     tmp_path, security_hub_with_stored_findings, shape, operator_archives
 ):
@@ -859,6 +871,7 @@ def test_a_decoy_section_does_not_reach_ash_report_either(
         assert receipt["archive_skipped"] == "archive_resolved_findings is false"
 
 
+@pytest.mark.integration
 def test_a_mirrored_decoy_does_not_turn_on_archiving_in_ash_report(
     tmp_path, security_hub_with_stored_findings
 ):
@@ -930,6 +943,7 @@ AIMING = {
 
 
 @pytest.mark.parametrize("section", sorted(AIMING))
+@pytest.mark.integration
 def test_the_operator_enabling_a_reporter_lets_the_repository_aim_it_nowhere(
     tmp_path, aws, section
 ):

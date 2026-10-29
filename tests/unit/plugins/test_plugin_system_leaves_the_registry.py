@@ -19,8 +19,11 @@ import subprocess
 import sys
 from pathlib import Path
 import defusedxml.ElementTree as ET
+import pytest
 
 from tests.utils.helpers import checkout_env
+
+pytestmark = pytest.mark.integration
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 
@@ -36,6 +39,10 @@ REPOSITORY = Path(__file__).resolve().parents[3]
 # the same no-op; the guard is for unit tests, and the probes are not ones.
 _PLACEMENT_SHADOW = """\
 import pytest
+
+# tests/conftest.py refuses a test that carries no tier marker, and the
+# probes run under it.
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)

@@ -21,6 +21,8 @@ import pytest
 from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.workspace.resolver import resolve_workspace
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

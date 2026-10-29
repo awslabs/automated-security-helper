@@ -35,6 +35,8 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.base.plugin_context import PluginContext
 
+pytestmark = pytest.mark.unit
+
 PluginContext.model_rebuild()
 
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (  # noqa: E402

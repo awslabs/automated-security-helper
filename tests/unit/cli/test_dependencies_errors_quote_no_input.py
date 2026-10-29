@@ -23,6 +23,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli import dependencies as dependencies_module
 from automated_security_helper.cli.dependencies import dependencies_app
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e"
 
 

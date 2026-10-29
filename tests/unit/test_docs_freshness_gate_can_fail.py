@@ -148,6 +148,7 @@ def _registered_check_names() -> list[str]:
     return [label for label, _function in _registered_checks()]
 
 
+@pytest.mark.unit
 def test_every_registered_check_is_covered_here():
     """A check with no non-vacuity test is a check nothing stops from going quiet."""
     registered = set(_registered_check_names())
@@ -161,6 +162,7 @@ def test_every_registered_check_is_covered_here():
     )
 
 
+@pytest.mark.unit
 def test_the_coverage_table_names_real_tests():
     """A typo in the table above would silently exempt a check."""
     module = sys.modules[__name__]
@@ -188,6 +190,7 @@ def test_the_coverage_table_names_real_tests():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_config_path_check_can_fail(gate, tmp_path, monkeypatch):
     """The check this file exists for. It could not fail at all before.
 
@@ -230,6 +233,7 @@ def _generator():
     return module
 
 
+@pytest.mark.integration
 def test_reporter_check_passes_on_the_generated_table():
     """The gate must accept the table the generator writes.
 
@@ -271,6 +275,7 @@ def test_reporter_check_passes_on_the_generated_table():
     assert failures == []
 
 
+@pytest.mark.unit
 def test_reporter_check_reads_the_generators_registry(gate):
     """The gate's reporter inventory is the generator's, not a second opinion.
 
@@ -283,6 +288,7 @@ def test_reporter_check_reads_the_generators_registry(gate):
     assert set(gate.reporter_names()) == expected
 
 
+@pytest.mark.unit
 def test_reporter_check_can_fail_in_both_directions(gate, tmp_path, monkeypatch):
     """A row naming a removed reporter used to pass; that was the whole defect."""
     names = sorted(gate.reporter_names())
@@ -308,6 +314,7 @@ def test_reporter_check_can_fail_in_both_directions(gate, tmp_path, monkeypatch)
     assert any(names[0] in f for f in dropped)
 
 
+@pytest.mark.unit
 def test_reporter_check_fails_when_a_real_row_is_deleted(gate, tmp_path, monkeypatch):
     """Against a copy of the real page, not a synthetic table.
 
@@ -327,6 +334,7 @@ def test_reporter_check_fails_when_a_real_row_is_deleted(gate, tmp_path, monkeyp
     )
 
 
+@pytest.mark.unit
 def test_reporter_check_fails_for_a_registered_reporter_with_no_row(gate, monkeypatch):
     """The other half: the registry grows and the committed page does not."""
     generator = gate._reporter_generator()
@@ -345,6 +353,7 @@ def test_reporter_check_fails_for_a_registered_reporter_with_no_row(gate, monkey
     ), f"a registered reporter with no table row was accepted: {failures}"
 
 
+@pytest.mark.unit
 def test_reporter_check_fails_closed_on_an_empty_registry(gate, monkeypatch):
     generator = gate._reporter_generator()
     monkeypatch.setattr(generator, "registered_reporters", list)
@@ -381,6 +390,7 @@ def _builtin_registered_reporter_names() -> set[str]:
     return names
 
 
+@pytest.mark.unit
 def test_declared_reporter_fields_match_the_builtin_registry(gate):
     """ReporterConfigSegment and the built-in reporter registry agree, both ways.
 
@@ -421,6 +431,7 @@ def test_declared_reporter_fields_match_the_builtin_registry(gate):
     )
 
 
+@pytest.mark.unit
 def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
     names = sorted(gate.scanner_names())
     doc = tmp_path / "scanners.md"
@@ -437,6 +448,7 @@ def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
     assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
 
 
+@pytest.mark.unit
 def test_scanner_check_passes_on_the_generated_page_and_fails_without_a_real_row(
     gate, tmp_path, monkeypatch
 ):
@@ -458,6 +470,7 @@ def test_scanner_check_passes_on_the_generated_page_and_fails_without_a_real_row
     assert any("'trivy-repo'" in f and "no row" in f for f in failures), failures
 
 
+@pytest.mark.unit
 def test_mcp_tool_check_can_fail(gate, tmp_path, monkeypatch):
     """And that the parse sees plain `def` tools, which the old regex could not."""
     server = tmp_path / "mcp_server.py"
@@ -504,6 +517,7 @@ def test_mcp_tool_check_can_fail(gate, tmp_path, monkeypatch):
     assert any("## deleted_tool" in f and "left behind" in f for f in ghost), ghost
 
 
+@pytest.mark.unit
 def test_mcp_tool_check_passes_on_the_generated_page_and_fails_without_a_section(
     gate, tmp_path, monkeypatch
 ):
@@ -520,6 +534,7 @@ def test_mcp_tool_check_passes_on_the_generated_page_and_fails_without_a_section
     assert any("'validate_config'" in f and "has no" in f for f in failures), failures
 
 
+@pytest.mark.unit
 def test_a_missing_table_fails_closed(gate, tmp_path, monkeypatch):
     """No table must never mean nothing to check.
 
@@ -553,6 +568,7 @@ def test_a_missing_table_fails_closed(gate, tmp_path, monkeypatch):
     assert no_sections and "has no '## <tool>' sections" in no_sections[0]
 
 
+@pytest.mark.unit
 def test_suppression_check_can_fail(gate, tmp_path, monkeypatch):
     doc = tmp_path / "suppressions.md"
     doc.write_text(
@@ -566,6 +582,7 @@ def test_suppression_check_can_fail(gate, tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_plugin_options_check_can_fail(gate, tmp_path, monkeypatch):
     doc = tmp_path / "config.md"
     doc.write_text(
@@ -597,6 +614,7 @@ def _one_config_block(tmp_path, monkeypatch, gate, marker: str, body: str) -> No
     monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "marker",
     ["", "<!-- doctest: config kind=ash -->"],
@@ -614,6 +632,7 @@ def test_an_invented_option_fails_both_checks_in_a_config_block(
     assert any("severity_level" in f for f in gate.check_doc_config_blocks())
 
 
+@pytest.mark.unit
 def test_an_ash_invalid_block_may_show_an_invented_option(gate, tmp_path, monkeypatch):
     """A page may show the config ASH refuses, as long as it says so.
 
@@ -628,6 +647,7 @@ def test_an_ash_invalid_block_may_show_an_invented_option(gate, tmp_path, monkey
     assert gate.check_doc_config_blocks() == []
 
 
+@pytest.mark.unit
 def test_an_ash_invalid_block_that_validates_is_still_reported(
     gate, tmp_path, monkeypatch
 ):
@@ -642,6 +662,7 @@ def test_an_ash_invalid_block_that_validates_is_still_reported(
     assert any("ASH accepts this one" in f for f in failures), failures
 
 
+@pytest.mark.unit
 def test_version_check_can_fail(gate, tmp_path, monkeypatch):
     assert gate.check_version_consistency() == [], "the committed pins were rejected"
     doc = tmp_path / "install.md"
@@ -653,6 +674,7 @@ def test_version_check_can_fail(gate, tmp_path, monkeypatch):
     assert any("does not reference" in f for f in gate.check_version_consistency())
 
 
+@pytest.mark.unit
 def test_version_check_reports_a_stale_pin_beside_the_current_one(
     gate, tmp_path, monkeypatch
 ):
@@ -687,6 +709,7 @@ def test_version_check_reports_a_stale_pin_beside_the_current_one(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_the_md_corpus_reaches_past_the_docs_directory(gate):
     """The glob was `docs/**/*.md` plus README.md, so most of the tree was exempt.
 
@@ -715,6 +738,7 @@ def test_the_md_corpus_reaches_past_the_docs_directory(gate):
     assert not any("/__snapshots__/" in f for f in files)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("parent", [".cache", "site", "venv", "node_modules"])
 def test_a_checkout_under_an_excluded_directory_name_still_collects_its_docs(
     gate, tmp_path, monkeypatch, parent
@@ -738,6 +762,7 @@ def test_a_checkout_under_an_excluded_directory_name_still_collects_its_docs(
     assert files == {"README.md", "docs/page.md"}
 
 
+@pytest.mark.integration
 def test_dated_notes_stay_out_of_the_corpus_and_their_neighbors_stay_in(gate):
     """ferret-scan's spec/ notes are a record of one upgrade, kept as written.
 
@@ -754,6 +779,7 @@ def test_dated_notes_stay_out_of_the_corpus_and_their_neighbors_stay_in(gate):
     assert {plugin + "README.md", plugin + "DEVELOPMENT.md"} <= files
 
 
+@pytest.mark.integration
 def test_an_empty_corpus_is_a_failure_not_a_pass(gate, tmp_path, monkeypatch):
     """Zero files makes every corpus check vacuous; it must fail, loudly."""
     root = tmp_path / "no-docs"
@@ -766,6 +792,7 @@ def test_an_empty_corpus_is_a_failure_not_a_pass(gate, tmp_path, monkeypatch):
         gate.check_doc_markers()
 
 
+@pytest.mark.integration
 def test_the_md_corpus_excludes_generated_interface_artifacts(
     gate, tmp_path, monkeypatch
 ):
@@ -792,6 +819,7 @@ def test_the_md_corpus_excludes_generated_interface_artifacts(
     } == {"docs/content/index.md", "docs/content/index.md.template"}
 
 
+@pytest.mark.integration
 def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
     """Docs rendered from a sibling .template are edited in the template.
 
@@ -921,6 +949,7 @@ GATE_WIRING = {
 }
 
 
+@pytest.mark.unit
 def test_the_wiring_table_names_every_registered_check():
     registered = set(_registered_check_names())
     assert registered, "main() registers no checks; nothing is compared"
@@ -1012,6 +1041,7 @@ def _wire(gate, monkeypatch, tmp_path, planted_label=None, raises=False):
     return planted_line, calls, expected_args
 
 
+@pytest.mark.unit
 def test_the_gate_passes_when_every_check_is_silent(
     gate, monkeypatch, tmp_path, capsys
 ):
@@ -1030,6 +1060,7 @@ def test_the_gate_passes_when_every_check_is_silent(
     }, calls
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("label", list(GATE_WIRING))
 def test_a_finding_fails_the_gate_under_its_own_label(
     gate, monkeypatch, tmp_path, capsys, label
@@ -1065,6 +1096,7 @@ def test_a_finding_fails_the_gate_under_its_own_label(
 # ordinary finding.
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("label", list(GATE_WIRING))
 def test_a_check_that_raises_fails_the_gate_under_its_own_label(
     gate, monkeypatch, tmp_path, capsys, label
@@ -1100,6 +1132,7 @@ GIT_LISTING_CHECKS = (
 )
 
 
+@pytest.mark.integration
 def test_the_gate_on_an_extract_fails_the_checks_that_list_files_with_git(
     gate, monkeypatch, tmp_path, capsys
 ):

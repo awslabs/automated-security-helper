@@ -33,6 +33,8 @@ import pytest
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 _ALIASED = (
     "project_name: shared-options\n"
     "reporters:\n"

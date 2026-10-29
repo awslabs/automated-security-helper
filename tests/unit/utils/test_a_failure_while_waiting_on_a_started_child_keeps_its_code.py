@@ -114,6 +114,7 @@ def _communicate_returns_then_raises():
     return patch.object(subprocess.Popen, "communicate", communicate)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_run_command_keeps_the_exit_code_of_a_child_that_exited(tmp_path, kind):
     marker = tmp_path / "started"
@@ -127,6 +128,7 @@ def test_run_command_keeps_the_exit_code_of_a_child_that_exited(tmp_path, kind):
     assert "never ran" not in (result.stderr or ""), result
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_run_command_with_output_handling_keeps_the_exit_code_of_a_child_that_exited(
     tmp_path, kind
@@ -148,6 +150,7 @@ def test_run_command_with_output_handling_keeps_the_exit_code_of_a_child_that_ex
     assert not (results / "Tool.stderr.log").exists()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_run_command_reports_no_code_for_a_child_ash_stopped(kind):
     """The child was still running when waiting on it failed, so ASH stopped it.
@@ -161,6 +164,7 @@ def test_run_command_reports_no_code_for_a_child_ash_stopped(kind):
     assert not getattr(result, "spawn_failed", False), result
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_run_command_with_output_handling_reports_no_code_for_a_child_ash_stopped(
     tmp_path, kind
@@ -212,6 +216,7 @@ def _waiting_fails_once_the_stderr_was_read(
     return patch.object(subprocess.Popen, "communicate", communicate)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_a_child_ash_stopped_keeps_the_stderr_read_before_the_failure(tmp_path, kind):
     """The tool's diagnostics are what explain ASH's own failure."""
@@ -229,6 +234,7 @@ def test_a_child_ash_stopped_keeps_the_stderr_read_before_the_failure(tmp_path, 
     assert "diag before the failure" in response.get("stderr", ""), response
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_a_child_that_exited_keeps_its_code_and_the_stderr_read_before_the_failure(
     tmp_path, kind
@@ -273,6 +279,7 @@ def _kill_the_grandchild(pid_file) -> None:
         os.kill(pid, signal.SIGKILL)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="the grandchild is POSIX's case")
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_the_stderr_read_before_the_failure_is_collected_within_a_bound(tmp_path, kind):
@@ -323,6 +330,7 @@ def _tool_that_ends_by_its_own_signal(marker, signum=None) -> list:
     return [sys.executable, "-c", program]
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
 @pytest.mark.parametrize("signal_name", ["SIGUSR1", "SIGKILL", "SIGTERM"])
 @pytest.mark.parametrize("kind", RUNNERS)
@@ -366,6 +374,7 @@ def test_a_tool_that_ended_by_its_own_signal_keeps_that_code(
     assert ASH_STOPPED not in str(info.value), info.value
 
 
+@pytest.mark.integration
 def test_a_failure_right_after_popen_returned_is_after_the_start(monkeypatch):
     """The child counts as started once Popen returns. A step that fails between
     that and the first wait, here the cancellable runner's own record of the
@@ -430,6 +439,7 @@ def _the_runner_raises(monkeypatch, error: BaseException) -> None:
     monkeypatch.setattr(subprocess_utils, "_run_stoppable", runner)
 
 
+@pytest.mark.unit
 def test_a_runner_error_that_refuses_attributes_reaches_spawn_runs_caller(
     monkeypatch,
 ):
@@ -445,6 +455,7 @@ def test_a_runner_error_that_refuses_attributes_reaches_spawn_runs_caller(
     assert excinfo.value is raised
 
 
+@pytest.mark.unit
 def test_a_runner_error_that_refuses_attributes_reaches_the_uv_runners_caller(
     tmp_path, monkeypatch
 ):
@@ -473,6 +484,7 @@ def test_a_runner_error_that_refuses_attributes_reaches_the_uv_runners_caller(
 _NOTING_FAILED = "noting the start failed"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_a_raise_while_noting_the_start_stops_the_child(tmp_path, monkeypatch, kind):
     """Popen returned, so the child has started, and the runner's own note of the
@@ -531,6 +543,7 @@ def test_a_raise_while_noting_the_start_stops_the_child(tmp_path, monkeypatch, k
                 process.wait(timeout=30)
 
 
+@pytest.mark.integration
 def test_a_noting_failure_leaves_no_spawn_counted(monkeypatch):
     """A cancellable spawn is counted before its child starts, and uncounted when
     the child is recorded or the spawn gives up. A raise in the runner's note of
@@ -641,6 +654,7 @@ def _the_kernel_refuses_the_stop() -> Iterator[list]:
                 child.wait(timeout=30)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="EPERM on a stop is POSIX's case")
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_a_failed_wait_whose_stop_the_kernel_refused_says_so(tmp_path, kind):
@@ -672,6 +686,7 @@ def test_a_failed_wait_whose_stop_the_kernel_refused_says_so(tmp_path, kind):
     assert "diag before the failure" in response.get("stderr", ""), response
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="EPERM on a stop is POSIX's case")
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_a_timeout_whose_stop_the_kernel_refused_is_still_a_timeout(tmp_path, kind):
@@ -718,6 +733,7 @@ _KEEPS_WRITING_PROGRAM = (
 _KEEPS_WRITING_MARKED = [sys.executable, "-c", _KEEPS_WRITING_PROGRAM, _MARK]
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="EPERM on a stop is POSIX's case")
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_a_failed_wait_whose_stop_was_refused_never_reports_the_sigpipe_ash_caused(
@@ -741,6 +757,7 @@ def test_a_failed_wait_whose_stop_was_refused_never_reports_the_sigpipe_ash_caus
     assert "diag before the failure" in response.get("stderr", ""), response
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="EPERM on a stop is POSIX's case")
 @pytest.mark.parametrize("kind", _POPEN_STOPPED)
 def test_a_timeout_whose_stop_was_refused_never_reports_the_sigpipe_ash_caused(
@@ -764,6 +781,7 @@ def test_a_timeout_whose_stop_was_refused_never_reports_the_sigpipe_ash_caused(
     assert "timed out" in error, error
 
 
+@pytest.mark.integration
 def test_a_reused_exception_instance_carries_no_start_from_an_earlier_run(
     tmp_path, monkeypatch
 ):
@@ -838,6 +856,7 @@ def _logging_the_result_fails(message_start: str) -> Iterator[None]:
         yield
 
 
+@pytest.mark.integration
 def test_run_command_after_its_run_returned_keeps_that_runs_stderr():
     """The tool exited 3 and its result was in hand when ASH failed: the post-run
     result keeps the code and the stderr the run wrote."""
@@ -849,6 +868,7 @@ def test_run_command_after_its_run_returned_keeps_that_runs_stderr():
     assert "err-line" in (result.stderr or ""), result
 
 
+@pytest.mark.integration
 def test_run_command_check_after_its_run_returned_raises_with_that_runs_stderr():
     with (
         _logging_the_result_fails("Command succeeded with return code"),
@@ -861,6 +881,7 @@ def test_run_command_check_after_its_run_returned_raises_with_that_runs_stderr()
     assert "err-line" in (getattr(raised, "stderr", "") or ""), repr(raised)
 
 
+@pytest.mark.integration
 def test_run_command_check_after_a_failed_wait_raises_with_the_stderr_read():
     """check=True after a failure while waiting: the raised error carries the
     stderr read before the failure, as the returned result would."""
@@ -877,6 +898,7 @@ def test_run_command_check_after_a_failed_wait_raises_with_the_stderr_read():
     )
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform == "win32", reason="the stand-in uv is a shell script")
 def test_a_uv_run_whose_wait_failed_keeps_the_stderr_read(tmp_path, monkeypatch):
     """run_tool without a results directory runs through spawn_run. Waiting on the
@@ -901,6 +923,7 @@ def test_a_uv_run_whose_wait_failed_keeps_the_stderr_read(tmp_path, monkeypatch)
     assert "diag before the failure" in (result.stderr or ""), result
 
 
+@pytest.mark.integration
 def test_the_log_line_names_the_failure_after_the_start(caplog):
     with _reading_the_pipes_fails(), caplog.at_level("ERROR", logger="ash"):
         run_command(SLEEPER)
@@ -910,6 +933,7 @@ def test_the_log_line_names_the_failure_after_the_start(caplog):
     assert not any("Could not start" in m for m in logged), logged
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "preference, carried",
     [("write", False), ("return", True)],
@@ -1001,6 +1025,7 @@ def test_a_raising_handler_keeps_the_refused_stop_and_the_stderr_read(
     ), reason
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("preference", "written", "carried"),
     [
@@ -1065,6 +1090,7 @@ def test_a_failed_waits_stdout_reaches_the_stream_log_under_the_preference(
     assert has_body is carried, response
 
 
+@pytest.mark.integration
 def test_the_fallbacks_failed_wait_streams_reach_the_stream_logs(monkeypatch, tmp_path):
     """The outer fallback answers when the wait failure's own handler raised,
     and the streams the wait had read go to the stream logs there under the
@@ -1120,6 +1146,7 @@ def test_the_fallbacks_failed_wait_streams_reach_the_stream_logs(monkeypatch, tm
     assert stderr_log.read_text(encoding="utf-8") == "diag before the stop", response
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which_handler", ["first-handler", "fallback"])
 def test_the_sandbox_cleanup_runs_before_a_failed_waits_stream_writes(
     monkeypatch, tmp_path, which_handler
@@ -1208,6 +1235,7 @@ def test_the_sandbox_cleanup_runs_before_a_failed_waits_stream_writes(
         assert ", then: " not in reason, response
 
 
+@pytest.mark.integration
 def test_a_completed_run_whose_stdout_write_breaks_keeps_its_stderr_log(
     monkeypatch, tmp_path
 ):
@@ -1246,6 +1274,7 @@ def test_a_completed_run_whose_stdout_write_breaks_keeps_its_stderr_log(
     assert log.read_text(encoding="utf-8") == "diag from the tool", response
 
 
+@pytest.mark.integration
 def test_a_failed_stdout_write_under_both_keeps_the_body_in_the_response(
     monkeypatch, tmp_path
 ):
@@ -1284,6 +1313,7 @@ def test_a_failed_stdout_write_under_both_keeps_the_body_in_the_response(
     assert (results / "ProbeScanner.stderr.log").is_file(), response
 
 
+@pytest.mark.integration
 def test_every_failed_completed_run_write_is_named_in_the_reason(
     monkeypatch, tmp_path, caplog
 ):
@@ -1479,6 +1509,7 @@ def _run_linked_path(path, layout, monkeypatch, steps=()):
     return response
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="links and the sandbox are POSIX's case")
 def test_the_sandbox_debug_line_hides_the_scopes_values(
     link_layout, monkeypatch, caplog
@@ -1515,6 +1546,7 @@ def test_the_sandbox_debug_line_hides_the_scopes_values(
     assert all(value not in line for line in lines), lines
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="links and the sandbox are POSIX's case")
 @pytest.mark.parametrize("mode", ["as-built", "plain-open", "plain-open-no-sweep"])
 @pytest.mark.parametrize("path", _LINK_PATHS)
@@ -1601,6 +1633,7 @@ _LINK_REFUSAL = (
 )
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="links and the sandbox are POSIX's case")
 @pytest.mark.parametrize("path", _LINK_PATHS)
 def test_without_the_sweep_the_write_refuses_a_planted_link(
@@ -1649,6 +1682,7 @@ def test_without_the_sweep_the_write_refuses_a_planted_link(
     assert _LINK_REFUSAL in str(response.get("error")), response
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="links and the sandbox are POSIX's case")
 @pytest.mark.parametrize("path", _LINK_PATHS)
 def test_the_cleanup_runs_once_and_before_the_stderr_write(
@@ -1677,6 +1711,7 @@ def test_the_cleanup_runs_once_and_before_the_stderr_write(
     )
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="symlink creation needs a privilege on Windows, and fs_guard's "
@@ -1768,6 +1803,7 @@ def test_a_failed_waits_write_refuses_a_link_a_scanner_planted(
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("stderr_preference", "written"),
     [
@@ -1845,6 +1881,7 @@ def test_a_failed_waits_stderr_log_honors_its_own_preference(
     assert response.get("stderr") == "diag before the stop", response
 
 
+@pytest.mark.integration
 def test_a_failed_wait_whose_stdout_log_cannot_be_written_says_so(
     monkeypatch, tmp_path
 ):
@@ -1888,6 +1925,7 @@ def test_a_failed_wait_whose_stdout_log_cannot_be_written_says_so(
     assert "could not write its stdout log" in reason, response
 
 
+@pytest.mark.integration
 def test_a_handlers_nested_except_does_not_lose_the_wait_failure(monkeypatch, tmp_path):
     """The first handler's own raise can happen inside its own try/except -- a
     log write that failed, say -- and the raise's ``__context__`` is then that
@@ -1945,6 +1983,7 @@ def test_a_handlers_nested_except_does_not_lose_the_wait_failure(monkeypatch, tm
     ), reason
 
 
+@pytest.mark.integration
 def test_a_disavowing_handler_keeps_the_wait_failure_out_of_the_reason(
     monkeypatch, tmp_path
 ):
@@ -1997,6 +2036,7 @@ def test_a_disavowing_handler_keeps_the_wait_failure_out_of_the_reason(
     assert "the failure's own handling broke" in reason, response
 
 
+@pytest.mark.integration
 def test_a_handler_crash_chained_from_a_cause_keeps_the_wait_failure_leading(
     monkeypatch, tmp_path
 ):
@@ -2075,6 +2115,7 @@ class _FakeChild:
         return self._code
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("preference", "carried"),
     [
@@ -2129,6 +2170,7 @@ def test_the_timeouts_partial_stdout_honors_the_preference(
     assert "stderr.log" in written, written
 
 
+@pytest.mark.unit
 def test_an_empty_stderr_read_is_carried_by_every_builder(monkeypatch, tmp_path):
     """A record whose stderr is the empty string was read: the tool wrote
     nothing. The fallback and the watch carried that "" while the first
@@ -2180,6 +2222,7 @@ def test_an_empty_stderr_read_is_carried_by_every_builder(monkeypatch, tmp_path)
     assert watched.get("stderr") == "", watched
 
 
+@pytest.mark.unit
 def test_the_fallback_and_the_watch_compose_one_reason_for_an_ash_stopped_child(
     monkeypatch,
 ):
@@ -2239,6 +2282,7 @@ def test_the_fallback_and_the_watch_compose_one_reason_for_an_ash_stopped_child(
     assert (watched or {}).get("returncode") is None, watched
 
 
+@pytest.mark.integration
 def test_control_check_true_raises_the_error():
     """check=True keeps its documented contract: the caller gets an exception, not
     a response. It carries the flag and ASH's reason, and no exit code, since ASH
@@ -2252,6 +2296,7 @@ def test_control_check_true_raises_the_error():
     assert getattr(raised, "returncode", None) is None, repr(raised)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_control_a_command_that_cannot_start_is_127(tmp_path, kind):
     missing = [str(tmp_path / "no-such-tool")]
@@ -2281,6 +2326,7 @@ def _a_step_before_the_spawn_starts_a_child_that_fails(monkeypatch):
     monkeypatch.setattr(subprocess_utils, "_prepare_spawn", prepare)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_a_child_a_step_before_the_spawn_started_is_not_the_tools(
     tmp_path, monkeypatch, kind
@@ -2337,6 +2383,7 @@ def _runner_behind_a_shim(kind: Optional[str]) -> Iterator[None]:
         yield
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_run_command_behind_a_shim_keeps_the_exit_code_of_a_child_that_exited(
     tmp_path, kind
@@ -2352,6 +2399,7 @@ def test_run_command_behind_a_shim_keeps_the_exit_code_of_a_child_that_exited(
     assert not getattr(result, "spawn_failed", False), result
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_run_command_with_output_handling_behind_a_shim_keeps_the_exit_code(
     tmp_path, kind
@@ -2369,6 +2417,7 @@ def test_run_command_with_output_handling_behind_a_shim_keeps_the_exit_code(
     assert response["spawn_failed"] is False, response
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "kind", [None, "cancel-scope"], ids=["plain", "in-a-cancel-scope"]
 )
@@ -2392,6 +2441,7 @@ def test_spawn_run_behind_a_shim_keeps_the_exit_code_of_a_child_that_exited(
     assert "handling the output failed" in result.error, result
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_a_child_that_never_started_behind_a_shim_is_still_127(tmp_path, kind):
     missing = [str(tmp_path / "no-such-tool")]
@@ -2444,6 +2494,7 @@ def _runner_behind_a_shim_that_drops_the_traceback(
         yield
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_run_command_behind_a_shim_that_drops_the_traceback_keeps_the_exit_code(
     tmp_path, kind
@@ -2462,6 +2513,7 @@ def test_run_command_behind_a_shim_that_drops_the_traceback_keeps_the_exit_code(
     assert not getattr(result, "spawn_failed", False), result
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_output_handling_behind_a_shim_that_drops_the_traceback_keeps_the_exit_code(
     tmp_path, kind
@@ -2482,6 +2534,7 @@ def test_output_handling_behind_a_shim_that_drops_the_traceback_keeps_the_exit_c
     assert response["spawn_failed"] is False, response
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "kind", [None, "cancel-scope"], ids=["plain", "in-a-cancel-scope"]
 )
@@ -2507,6 +2560,7 @@ def test_spawn_run_behind_a_shim_that_drops_the_traceback_keeps_the_exit_code(
     assert "handling the output failed" in result.error, result
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_control_never_started_behind_a_shim_that_drops_the_traceback_is_127(
     tmp_path, kind
@@ -2523,6 +2577,7 @@ def test_control_never_started_behind_a_shim_that_drops_the_traceback_is_127(
     assert response["spawn_failed"] is True, response
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_a_popen_that_refuses_its_arguments_is_still_127(tmp_path, kind):
     """Popen raising anything, not only an OSError, is a start that never happened:
@@ -2554,6 +2609,7 @@ def _a_step_before_the_spawn_runs_a_child_through_an_ash_runner(monkeypatch):
     monkeypatch.setattr(subprocess_utils, "_prepare_spawn", prepare)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_a_child_a_step_ran_through_an_ash_runner_is_not_the_tools(
     tmp_path, monkeypatch, kind
@@ -2575,6 +2631,7 @@ def test_a_child_a_step_ran_through_an_ash_runner_is_not_the_tools(
     assert not response.get("post_run_error"), response
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", RUNNERS)
 def test_a_step_child_that_failed_after_its_start_is_not_the_tools(
     tmp_path, monkeypatch, kind
@@ -2595,6 +2652,7 @@ def test_a_step_child_that_failed_after_its_start_is_not_the_tools(
     assert not response.get("post_run_error"), response
 
 
+@pytest.mark.unit
 def test_a_response_with_no_code_grades_by_its_flag_without_raising():
     """A scanner reads the response before post_run_error grades its scan; a code
     of None raised there ('<' between None and int), and the TypeError took the
@@ -2622,6 +2680,7 @@ def test_a_response_with_no_code_grades_by_its_flag_without_raising():
     assert scanner.errors == ["warning"]
 
 
+@pytest.mark.integration
 def test_the_module_imports_while_subprocess_run_is_a_stand_in():
     """Nothing reads subprocess.run at import: a test that patches it with a
     MagicMock before ASH is imported raised there."""
@@ -2643,6 +2702,7 @@ def test_the_module_imports_while_subprocess_run_is_a_stand_in():
     assert child.returncode == 0, child.stderr
 
 
+@pytest.mark.integration
 def test_a_watch_sees_a_start_whose_noting_raised(tmp_path, monkeypatch):
     """A raise while noting the start does not blind a held watch. The child
     started when Popen returned, whatever noting it managed: the runner recovers
@@ -2698,6 +2758,7 @@ _WRITES_BOTH_STREAMS = [
 ]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "preference, carried",
     [("write", False), ("return", True)],
@@ -2755,6 +2816,7 @@ def _shown_raises_once(monkeypatch) -> list:
     return fired
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
 @pytest.mark.parametrize("signal_name", ["SIGKILL", "SIGHUP"])
 def test_a_kept_signal_death_stays_signaled_after_the_run_returned(
@@ -2792,6 +2854,7 @@ def test_a_kept_signal_death_stays_signaled_after_the_run_returned(
     assert len(deaths) == 1, deaths
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
 def test_a_signal_death_under_check_raises_the_stock_error(tmp_path):
     """A plain signal death on a check=True path keeps the stock
@@ -2812,6 +2875,7 @@ def test_a_signal_death_under_check_raises_the_stock_error(tmp_path):
     assert not hasattr(error, "signaled"), vars(error)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
 def test_a_kept_signal_death_stays_signaled_on_the_waited_check_raise(
     tmp_path, monkeypatch
@@ -2835,6 +2899,7 @@ def test_a_kept_signal_death_stays_signaled_on_the_waited_check_raise(
     assert getattr(error, "signal", None) == int(signal.SIGKILL), error
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="a signal death is POSIX's case")
 def test_a_kept_signal_death_stays_signaled_in_the_late_response(tmp_path, monkeypatch):
     """run_command_with_output_handling's run returned a signal death, and ASH
@@ -2922,6 +2987,7 @@ HANDLING_FAILS = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("shape,code", HANDLING_FAILS)
 def test_a_started_child_whose_failure_handling_raises_is_still_after_the_start(
     monkeypatch, shape, code
@@ -2947,6 +3013,7 @@ def test_a_started_child_whose_failure_handling_raises_is_still_after_the_start(
     assert "never ran" not in str(response.get("error", "")), response
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("shape,code", HANDLING_FAILS)
 def test_run_command_lets_the_failure_of_its_own_handling_raise(
     monkeypatch, shape, code
@@ -3008,6 +3075,7 @@ def _runner_after_the_start(
     return run
 
 
+@pytest.mark.unit
 def test_a_poll_error_whose_text_cannot_be_formatted_is_still_an_answer(monkeypatch):
     """The child's poll() raises an error whose text cannot be formatted, inside
     the handler for a failure after the start. The fallback that answers for
@@ -3031,6 +3099,7 @@ def test_a_poll_error_whose_text_cannot_be_formatted_is_still_an_answer(monkeypa
     assert response.get("returncode") == 3, response
 
 
+@pytest.mark.unit
 def test_a_refused_stop_is_still_said_when_the_failure_handling_raises(monkeypatch):
     """ASH's stop of the recorded child was refused, and the handler for the
     failure after the start then raised (on an error whose text cannot be
@@ -3057,6 +3126,7 @@ def test_a_refused_stop_is_still_said_when_the_failure_handling_raises(monkeypat
     assert "may still be running" in str(response.get("error", "")), response
 
 
+@pytest.mark.unit
 def test_the_output_a_failed_wait_read_is_kept_when_the_failure_handling_raises(
     monkeypatch,
 ):
@@ -3097,6 +3167,7 @@ class _TextIsAStrSubclass(Exception):
         return _FormatRaises("poll failed")
 
 
+@pytest.mark.unit
 def test_a_poll_error_whose_text_is_a_str_subclass_is_still_an_answer(monkeypatch):
     """The child's poll() raises an error whose str() is a str subclass whose
     formatting raises, inside the handler for a failure after the start. The
@@ -3122,6 +3193,7 @@ def test_a_poll_error_whose_text_is_a_str_subclass_is_still_an_answer(monkeypatc
     assert "poll failed" in str(response.get("error", "")), response
 
 
+@pytest.mark.unit
 def test_the_stdout_a_failed_wait_read_follows_the_callers_preference(monkeypatch):
     """Under the scanners' default "write" the stdout body went to the results
     file, and the handler's own answer returns it only when the preference
@@ -3144,6 +3216,7 @@ def test_the_stdout_a_failed_wait_read_follows_the_callers_preference(monkeypatc
     assert "stdout" not in response, response
 
 
+@pytest.mark.unit
 def test_the_stdout_a_failed_wait_read_is_returned_when_asked(monkeypatch):
     """The admit side of the preference bound: with "return" the fallback
     carries the stdout the record holds, as the handler's answer would."""
@@ -3165,6 +3238,7 @@ def test_the_stdout_a_failed_wait_read_is_returned_when_asked(monkeypatch):
     assert response.get("stdout") == "the whole stdout body\n", response
 
 
+@pytest.mark.unit
 def test_the_handlers_own_failure_keeps_the_original_on_the_answer(monkeypatch):
     """The handler for a failure after the start raised while answering the
     runner's original failure, which its raise chains (``__context__``). That
@@ -3194,6 +3268,7 @@ def test_the_handlers_own_failure_keeps_the_original_on_the_answer(monkeypatch):
     ), error_text
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "stdout", ["the whole stdout body\n", ""], ids=["body", "empty"]
 )
@@ -3237,6 +3312,7 @@ def test_the_fallbacks_stdout_parity_with_the_handler(monkeypatch, preference, s
 _ENV_READ_VALUE = "/nonexistent/ENVCANARY-91bd/settings.yaml"
 
 
+@pytest.mark.unit
 def test_the_fallbacks_log_line_carries_no_value_its_caller_hands_it(monkeypatch):
     """The fallback that answers when the handler for a failure after the
     start raised logs one line of its own, built from the error's text. It is

@@ -26,6 +26,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.utils import log as ash_log
 
+pytestmark = pytest.mark.unit
+
 #: No arm below resolves to CRITICAL: a gate still here means the entry never
 #: set it.
 _PARKED = logging.CRITICAL

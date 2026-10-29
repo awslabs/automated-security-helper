@@ -11,6 +11,8 @@ into "unverifiable".
 
 from types import SimpleNamespace
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     npm_audit_scanner,
 )
@@ -18,6 +20,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
 )
 from automated_security_helper.utils import error_text, pre_installed_tool
+
+pytestmark = pytest.mark.unit
 
 #: One probe per escape family a narrower pattern kept: SGR color, a
 #: non-color CSI (erase line), a colon-form SGR, a private-mode code, an

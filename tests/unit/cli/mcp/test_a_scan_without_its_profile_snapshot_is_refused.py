@@ -42,6 +42,8 @@ from automated_security_helper.utils.log import ASHLogger
 from tests.utils.mcp_sessions import a_session_with_a_bound_profile
 from tests.utils.tasks import drain
 
+pytestmark = pytest.mark.unit
+
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 _MGMT = "automated_security_helper.core.resource_management.scan_management"
 

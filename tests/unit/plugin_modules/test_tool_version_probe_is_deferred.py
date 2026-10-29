@@ -193,6 +193,7 @@ def _defined_below_plugin_modules() -> set:
     return found
 
 
+@pytest.mark.unit
 def test_the_sweep_covers_every_shipped_scanner_and_converter():
     names = {cls.__name__ for cls in SHIPPED}
     assert set(PROBED) <= names
@@ -200,6 +201,7 @@ def test_the_sweep_covers_every_shipped_scanner_and_converter():
     assert set(SHIPPED) == _defined_below_plugin_modules(), sorted(names)
 
 
+@pytest.mark.unit
 def test_the_recorders_see_a_process_start_by_any_route(recorders, tmp_path):
     """Control: each route a constructor could take to start a tool is caught."""
     import threading
@@ -227,6 +229,7 @@ def test_the_recorders_see_a_process_start_by_any_route(recorders, tmp_path):
 @pytest.mark.skipif(
     not os.path.isdir("/proc/self/task"), reason="lists threads through /proc"
 )
+@pytest.mark.unit
 def test_the_os_thread_listing_sees_a_thread_threading_does_not():
     """Control: _thread.start_new_thread is not in threading.enumerate().
 
@@ -266,6 +269,7 @@ def test_the_os_thread_listing_sees_a_thread_threading_does_not():
 @pytest.mark.skipif(
     not os.path.isdir("/proc/self/task"), reason="lists threads through /proc"
 )
+@pytest.mark.unit
 def test_a_thread_count_misses_a_left_raw_thread_the_tid_set_catches():
     """Pin of the miss the id-set comparison closes.
 
@@ -340,6 +344,7 @@ def _os_thread_ids():
 
 
 @pytest.mark.parametrize("plugin_class", SHIPPED, ids=lambda cls: cls.__name__)
+@pytest.mark.unit
 def test_constructing_a_plugin_starts_nothing(plugin_class, plugin_context, recorders):
     import threading
 
@@ -365,6 +370,7 @@ def test_constructing_a_plugin_starts_nothing(plugin_class, plugin_context, reco
 
 
 @pytest.mark.parametrize("class_name", sorted(PROBED))
+@pytest.mark.unit
 def test_the_first_dependency_check_runs_the_probe_once(
     class_name, plugin_context, recorders
 ):
@@ -385,6 +391,7 @@ def test_the_first_dependency_check_runs_the_probe_once(
     assert plugin.tool_version == f"{PROBED[class_name]} 0.0.0"
 
 
+@pytest.mark.unit
 def test_the_jupyter_probe_waits_for_a_notebook(plugin_context, recorders):
     """No notebook: the check passes and nbconvert is not asked about."""
     from automated_security_helper.plugin_modules.ash_builtin.converters import (
@@ -399,6 +406,7 @@ def test_the_jupyter_probe_waits_for_a_notebook(plugin_context, recorders):
 
 
 @pytest.mark.parametrize("version, expected", [((1, 6, 0), 1), ((1, 30, 2), 0)])
+@pytest.mark.unit
 def test_opengrep_asks_its_version_when_the_arguments_are_resolved(
     plugin_context, monkeypatch, tmp_path, version, expected
 ):
@@ -432,6 +440,7 @@ def test_opengrep_asks_its_version_when_the_arguments_are_resolved(
     assert [argv.count("--metrics") for argv in runs] == [expected, expected], runs
 
 
+@pytest.mark.unit
 def test_an_old_opengrep_gets_the_same_arguments_plus_metrics(
     plugin_context, monkeypatch, tmp_path
 ):
@@ -463,6 +472,7 @@ def test_an_old_opengrep_gets_the_same_arguments_plus_metrics(
     assert old == argvs[(1, 30, 2)]
 
 
+@pytest.mark.unit
 def test_the_sarif_reader_runs_a_pending_probe(plugin_context, recorders, tmp_path):
     """A scanner whose dependency check never ran still reports its tool's version.
 
@@ -510,6 +520,7 @@ DRIVER = reaching_the_stand_in(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the stand-in uv is a POSIX shell script"
 )
+@pytest.mark.integration
 def test_a_scan_of_one_scanner_probes_only_that_scanner(tmp_path):
     bin_dir, log = install_stand_in_uv(tmp_path)
     source = tmp_path / "src"
@@ -556,6 +567,7 @@ def test_a_scan_of_one_scanner_probes_only_that_scanner(tmp_path):
     assert others == [], others
 
 
+@pytest.mark.unit
 def test_the_recorders_see_a_probe(plugin_context, recorders):
     """Control: the recorders catch the probe the old construction made."""
     _, probed = recorders

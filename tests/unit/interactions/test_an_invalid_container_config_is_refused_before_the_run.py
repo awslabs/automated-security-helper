@@ -38,6 +38,8 @@ from automated_security_helper.utils.inner_run_outcome import (
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
+pytestmark = pytest.mark.unit
+
 
 def _checkout(root: Path) -> None:
     (root / ".git").mkdir(parents=True, exist_ok=True)

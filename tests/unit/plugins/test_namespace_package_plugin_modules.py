@@ -71,6 +71,7 @@ def site(tmp_path, monkeypatch):
     importlib.invalidate_caches()
 
 
+@pytest.mark.unit
 class TestTheRefusal:
     def test_a_top_level_namespace_package_is_refused(self, site):
         with pytest.raises(PluginModuleNamespaceError) as raised:
@@ -115,6 +116,7 @@ class TestTheRefusal:
         assert name.split(".", 1)[0] not in sys.modules
 
 
+@pytest.mark.unit
 class TestTheInTreeConfigFilter:
     def test_a_namespace_subpackage_in_an_in_tree_config_resolves(
         self, site, tmp_path, monkeypatch
@@ -140,6 +142,7 @@ class TestTheInTreeConfigFilter:
         assert REGULAR not in sys.modules
 
 
+@pytest.mark.unit
 class TestTheWorkspacePrewarm:
     def test_a_project_naming_a_namespace_package_is_refused(self, site, tmp_path):
         plan = WorkspacePlan(
@@ -166,6 +169,7 @@ class TestTheWorkspacePrewarm:
         assert REGULAR not in sys.modules
 
 
+@pytest.mark.integration
 class TestAScanNamingANamespacePackage:
     def _run(self, tmp_path: Path) -> _Run:
         run = _Run(tmp_path)

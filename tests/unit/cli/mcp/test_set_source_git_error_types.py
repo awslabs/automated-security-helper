@@ -104,6 +104,7 @@ def _clone(url: str, **kwargs):
     ["--upload-pack=touch /tmp/x", "ext::sh -c touch% /tmp/x"],
     ids=["option-like", "ext-transport"],
 )
+@pytest.mark.unit
 def test_a_url_that_makes_git_run_a_command(url):
     result = _clone(url)
     assert (result["success"], result.get("error_type")) == (
@@ -112,17 +113,20 @@ def test_a_url_that_makes_git_run_a_command(url):
     ), result
 
 
+@pytest.mark.unit
 def test_an_option_like_ref():
     result = _clone("https://example.invalid/repo.git", ref="--output=/tmp/x")
     assert result.get("error_type") == "clone_ref_not_permitted", result
 
 
+@pytest.mark.unit
 def test_a_negative_depth():
     result = _clone("https://example.invalid/repo.git", depth=-1)
     assert result.get("error_type") == "invalid_clone_depth", result
 
 
 @pytest.mark.parametrize("depth", [1_000_001, 2**31, 10**12], ids=repr)
+@pytest.mark.unit
 def test_a_depth_above_the_maximum_is_refused_like_one_below_one(tmp_path, depth):
     """Fails on a depth with no upper bound: ``depth=2**31`` was accepted and
     cloned the whole history, the full clone that ``depth=0`` is refused for."""
@@ -135,6 +139,7 @@ def test_a_depth_above_the_maximum_is_refused_like_one_below_one(tmp_path, depth
     assert not (tmp_path / "workspaces" / SESSION).exists()
 
 
+@pytest.mark.unit
 def test_the_depth_just_above_the_maximum_is_refused(tmp_path):
     result = _clone(
         "https://example.invalid/repo.git", depth=source_delivery.MAX_CLONE_DEPTH + 1
@@ -143,6 +148,7 @@ def test_the_depth_just_above_the_maximum_is_refused(tmp_path):
     assert not (tmp_path / "workspaces" / SESSION).exists()
 
 
+@pytest.mark.unit
 def test_a_local_source_outside_the_scan_roots(tmp_path):
     """A local source is refused whatever the scan roots allow: the tool clones
     from a remote only, so the refusal names the local source, not the roots."""
@@ -152,6 +158,7 @@ def test_a_local_source_outside_the_scan_roots(tmp_path):
     assert result.get("error_type") == "local_clone_source_refused", result
 
 
+@pytest.mark.unit
 def test_an_invalid_session_id():
     result = mcp_tools.mcp_set_source_git(
         url="https://example.invalid/repo.git", session_id="../escape"
@@ -159,6 +166,7 @@ def test_an_invalid_session_id():
     assert result.get("error_type") == "invalid_session_id", result
 
 
+@pytest.mark.integration
 def test_a_clone_git_refuses(tmp_path, monkeypatch):
     not_a_repo = tmp_path / "repos" / "plain"
     not_a_repo.mkdir(parents=True)
@@ -171,6 +179,7 @@ def test_a_clone_git_refuses(tmp_path, monkeypatch):
     assert "git clone failed" in result["error"]
 
 
+@pytest.mark.integration
 def test_a_ref_that_does_not_exist(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     _real_git_at(monkeypatch, repo)
@@ -182,6 +191,7 @@ def test_a_ref_that_does_not_exist(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("depth", [0, -1])
+@pytest.mark.unit
 def test_a_depth_that_is_not_a_positive_number_is_refused(tmp_path, depth):
     """The refusal comes before anything is created for the session, and git does not
     run."""
@@ -194,6 +204,7 @@ def test_a_depth_that_is_not_a_positive_number_is_refused(tmp_path, depth):
     assert not (tmp_path / "workspaces" / SESSION).exists()
 
 
+@pytest.mark.integration
 def test_the_default_depth_is_shallow(tmp_path, monkeypatch):
     repo = _repo(tmp_path, commits=3)
     _real_git_at(monkeypatch, repo)
@@ -207,6 +218,7 @@ def _session_source(tmp_path: Path) -> Path:
     return tmp_path / "workspaces" / SESSION / "source"
 
 
+@pytest.mark.integration
 def test_git_that_cannot_be_run(tmp_path, monkeypatch):
     """No git on PATH: the clone fails as a clone, not as a FileNotFoundError."""
     _repo(tmp_path)
@@ -224,6 +236,7 @@ def test_git_that_cannot_be_run(tmp_path, monkeypatch):
     assert not _session_source(tmp_path).exists(), "an empty clone target was left"
 
 
+@pytest.mark.integration
 def test_git_that_cannot_be_run_for_the_checkout(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     _real_git_at(monkeypatch, repo)
@@ -245,6 +258,7 @@ def test_git_that_cannot_be_run_for_the_checkout(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_the_tool_reports_missing_git_in_its_vocabulary(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
 

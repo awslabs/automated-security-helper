@@ -57,6 +57,8 @@ from automated_security_helper.utils.suppression_matcher import (
     ignore_path_matches,
 )
 
+pytestmark = pytest.mark.unit
+
 # The constants below are file names that are not UTF-8.
 if os.name == "nt":
     pytest.skip(

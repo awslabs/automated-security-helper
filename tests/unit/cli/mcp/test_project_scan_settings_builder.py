@@ -68,6 +68,8 @@ from automated_security_helper.core.enums import (
 from automated_security_helper.interactions.run_ash_scan import ScanOptions
 from automated_security_helper.workspace.execution import ProjectScanSettings
 
+pytestmark = pytest.mark.unit
+
 MODULE_UNDER_TEST = "automated_security_helper.cli.mcp.workspace"
 RUN_ASH_SCAN_MODULE = "automated_security_helper.interactions.run_ash_scan"
 

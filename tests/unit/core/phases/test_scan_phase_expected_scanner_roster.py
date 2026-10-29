@@ -58,6 +58,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _scanner_double(name, module=None):
     """A plugin that passes every filter, optionally posing as a built-in."""

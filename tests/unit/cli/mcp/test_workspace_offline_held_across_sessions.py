@@ -21,6 +21,8 @@ import pytest
 
 from automated_security_helper.cli.mcp import workspace as workspace_module
 
+pytestmark = pytest.mark.unit
+
 WAIT = 30
 
 

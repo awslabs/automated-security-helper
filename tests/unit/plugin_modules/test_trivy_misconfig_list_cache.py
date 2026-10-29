@@ -20,7 +20,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins import (
 )
 from automated_security_helper.utils import subprocess_utils
 
-pytestmark = pytest.mark.live_tool_probes
+pytestmark = [pytest.mark.unit, pytest.mark.live_tool_probes]
 
 HELP = (
     "      --misconfig-scanners strings   comma-separated list of misconfig scanners to "

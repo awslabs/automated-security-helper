@@ -11,6 +11,8 @@ import pytest
 
 from tests.snapshot.support.cli import run_cli
 
+pytestmark = pytest.mark.unit
+
 VALID_CONFIG = """\
 project_name: snapshot-demo
 global_settings:

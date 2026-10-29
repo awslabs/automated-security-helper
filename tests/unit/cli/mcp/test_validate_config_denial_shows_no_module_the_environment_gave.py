@@ -12,10 +12,14 @@ module the file wrote is still named.
 
 from types import SimpleNamespace
 
+import pytest
+
 from automated_security_helper.cli.mcp_tools import (
     _plugin_modules_shown,
     _with_modules_shown,
 )
+
+pytestmark = pytest.mark.unit
 
 READ = "probemodulefromenv"
 WRITTEN = "probemodulewritten"

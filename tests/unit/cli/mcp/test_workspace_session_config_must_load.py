@@ -20,6 +20,8 @@ from automated_security_helper.cli.mcp.workspace import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "content",

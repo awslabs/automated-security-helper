@@ -22,6 +22,8 @@ import pytest
 
 from automated_security_helper.utils import get_scan_set, scan_output_dirs
 
+pytestmark = pytest.mark.unit
+
 FIRST = "wq2v-first-piece-k8d3"
 SECOND = "wq2v-second-piece-m5f1"
 

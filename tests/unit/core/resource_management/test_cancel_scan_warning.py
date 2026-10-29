@@ -11,11 +11,15 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
     ScanRegistryEntry,
     MCScanStatus,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_registry_with_running_scan():

@@ -38,6 +38,8 @@ from automated_security_helper.utils.rich_log_handler import (
     RichLogPanel,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Text Rich reads as markup: a closing tag with no opener (raises), an opening
 #: style tag, a whole style tag around a word, and a link (all three silently
 #: removed).

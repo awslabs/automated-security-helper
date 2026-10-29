@@ -69,6 +69,7 @@ CONTEXT_NO_DIGEST = f"{BASE_OCI_LAYOUT_CONTEXT}=oci-layout://{LAYOUT_DIR}"
 BASE_ARG = f"BASE_IMAGE={BASE_OCI_LAYOUT_CONTEXT}"
 
 
+@pytest.mark.unit
 def test_the_context_name_is_the_one_every_entrypoint_uses():
     """One name, three files. A mismatch would point FROM at a context nobody attached."""
     assert BASE_OCI_LAYOUT_CONTEXT == "ash-base-image"
@@ -124,6 +125,7 @@ def _pairs(argv: List[str], flag: str) -> List[str]:
     return [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == flag]
 
 
+@pytest.mark.unit
 class TestThePythonEntrypoint:
     """``_build_image``: the python-container legs and every validate-container leg."""
 
@@ -328,6 +330,7 @@ def _ash_build(tmp_path: Path, runner_name: str, value: str | None):
     return proc, argv
 
 
+@pytest.mark.integration
 class TestTheBashEntrypoint:
     """``./ash``: the bash scan legs, on docker, podman and finch."""
 
@@ -376,6 +379,7 @@ class TestTheBashEntrypoint:
 # --------------------------------------------------------------------------- powershell
 
 
+@pytest.mark.unit
 class TestThePowerShellEntrypoint:
     """``utils/ash_helpers.ps1``: the powershell scan legs, asserted as text.
 
@@ -424,6 +428,7 @@ class TestThePowerShellEntrypoint:
 # --------------------------------------------------------------------------- completeness
 
 
+@pytest.mark.unit
 class TestEveryBuildEntrypointIsCovered:
     def test_all_three_build_entrypoints_read_the_variable(self):
         missing = [

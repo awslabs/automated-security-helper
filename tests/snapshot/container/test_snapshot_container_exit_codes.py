@@ -33,7 +33,10 @@ SCAN = [
 ]
 
 #: The host prints "ASH Scan Completed in <duration>" from its own wall clock.
-pytestmark = pytest.mark.snapshot_masking(mask_durations=True)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.snapshot_masking(mask_durations=True),
+]
 
 #: The snapshots are POSIX text by construction: they name /nonexistent/ash-test/docker.
 _POSIX_TEXT = pytest.mark.skipif(

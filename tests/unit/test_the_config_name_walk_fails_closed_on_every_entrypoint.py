@@ -387,6 +387,7 @@ def _unlock(path: Path) -> None:
 # ------------------------------------------------------------ fail-closed cells: python entrypoint
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", PY_SHAPES)
 def test_py_the_failing_shapes_fail_closed(which, tmp_path, monkeypatch):
     checkout = _checkout(tmp_path)
@@ -410,6 +411,7 @@ def test_py_the_failing_shapes_fail_closed(which, tmp_path, monkeypatch):
 # -------------------------------------------------------------- fail-closed cells: bash entrypoint
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "which",
     [
@@ -436,6 +438,7 @@ def test_bash_fn_the_failing_shapes_report_undecided(which, tmp_path):
     assert status == 2
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "which",
     [
@@ -483,6 +486,7 @@ def _py_refusal_text(named: Path, source: Path) -> str:
     return str(raised.value)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(IS_ROOT, reason="root searches any directory")
 def test_py_a_directory_that_cannot_be_searched_is_named_as_that(tmp_path):
     checkout = _checkout(tmp_path)
@@ -496,6 +500,7 @@ def test_py_a_directory_that_cannot_be_searched_is_named_as_that(tmp_path):
     assert "link loop" not in text, text
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "which", ["loop-as-the-final-component", "loop-as-a-directory-component"]
 )
@@ -506,6 +511,7 @@ def test_py_a_link_loop_is_named_as_a_loop(which, tmp_path):
     assert "cannot be searched" not in text, text
 
 
+@pytest.mark.unit
 def test_py_a_link_whose_collapse_raises_is_named_as_unreadable(tmp_path, monkeypatch):
     named = _shape("loop-as-the-final-component", tmp_path)
 
@@ -519,6 +525,7 @@ def test_py_a_link_whose_collapse_raises_is_named_as_unreadable(tmp_path, monkey
     assert UNREADABLE_WORDING in str(raised.value), str(raised.value)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(IS_ROOT, reason="root searches any directory")
 def test_py_a_link_into_a_directory_the_process_cannot_search_is_named_with_its_whole_cause(
     tmp_path,
@@ -565,6 +572,7 @@ def _bash_fn_undecided_at(source: Path, named: Path) -> str:
     return last[-1]
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(IS_ROOT, reason="root searches any directory")
 def test_bash_fn_a_directory_that_cannot_be_searched_says_directory(tmp_path):
     checkout = _checkout(tmp_path)
@@ -577,6 +585,7 @@ def test_bash_fn_a_directory_that_cannot_be_searched_says_directory(tmp_path):
     assert said == "status=2 at=directory", said
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(IS_ROOT, reason="root searches any directory")
 def test_py_a_link_to_a_directory_that_cannot_be_searched_is_named_as_that(tmp_path):
     """The launcher collapses the link without entering its target, so the next
@@ -592,6 +601,7 @@ def test_py_a_link_to_a_directory_that_cannot_be_searched_is_named_as_that(tmp_p
     assert "link loop" not in text, text
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(IS_ROOT, reason="root searches any directory")
 def test_bash_fn_a_link_to_a_directory_that_cannot_be_searched_says_directory(tmp_path):
     checkout = _checkout(tmp_path)
@@ -605,6 +615,7 @@ def test_bash_fn_a_link_to_a_directory_that_cannot_be_searched_says_directory(tm
     assert said == "status=2 at=directory", said
 
 
+@pytest.mark.integration
 def test_bash_fn_a_directory_link_up_to_the_tree_is_collapsed_by_name(tmp_path):
     """A directory link whose last name is ".." lands on the physical parent of
     the directory holding the link, so a name that goes on into the scanned
@@ -619,6 +630,7 @@ def test_bash_fn_a_directory_link_up_to_the_tree_is_collapsed_by_name(tmp_path):
     assert status == 0
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "which", ["loop-as-the-final-component", "loop-as-a-directory-component"]
 )
@@ -629,6 +641,7 @@ def test_bash_fn_a_link_loop_says_link(which, tmp_path):
     assert said == "status=2 at=link", said
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "which", ["loop-as-the-final-component", "loop-as-a-directory-component"]
 )
@@ -651,6 +664,7 @@ def test_bash_run_a_link_loop_is_refused_as_a_missing_file_before_any_link_is_fo
     assert observed == (3, 0, True, False, False)
 
 
+@pytest.mark.unit
 def test_bash_refuses_each_undecided_place_in_its_own_words():
     """The refusals read from the shipped script: the caller picks by UNDECIDED_AT."""
     text = ASH_SCRIPT.read_text(encoding="utf-8")
@@ -662,6 +676,7 @@ def test_bash_refuses_each_undecided_place_in_its_own_words():
     assert "a link loop, or a link that cannot be read" in text
 
 
+@pytest.mark.unit
 def test_the_extracted_walk_carries_every_function_it_reaches():
     """The walk runs alone, so a function it starts to call and the harness does not carry fails here by name."""
     carried = set(_FUNCTION_HEADER.findall(_ash_function_text()))
@@ -696,6 +711,7 @@ def _control_layout(which: str, tmp_path: Path):
     return checkout, checkout["root"] / "ci" / "link.yaml", True
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", ["plain-outside-file", "name-is-a-tree-file-link"])
 def test_controls_hold_on_every_entrypoint(which, fake_runner, tmp_path):
     checkout, named, tree_link = _control_layout(which, tmp_path)
@@ -747,6 +763,7 @@ def _steered_layout(layout: str, tmp_path: Path, marker: str = "git-with-head"):
     return source.resolve(), out.resolve(), config
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("marker", ["git-with-head", "bare-dot-git-directory"])
 @pytest.mark.parametrize("layout", NAMES_STEERED_BY_THE_SCANNED_CHECKOUT)
 def test_the_steered_layouts_reach_the_same_verdict_on_both_entrypoints(
@@ -807,6 +824,7 @@ def _env_layout(tmp_path: Path, discoverable: bool) -> Dict[str, Path]:
     }
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("discoverable", [True, False])
 def test_a_marked_env_config_that_is_not_the_scans_config(
     discoverable, tmp_path, monkeypatch
@@ -838,6 +856,7 @@ def test_a_marked_env_config_that_is_not_the_scans_config(
         assert observed == (True, True, True)
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(
     os.name != "posix" or IS_ROOT,
     reason="needs a directory the process cannot search",
@@ -855,6 +874,7 @@ def test_an_unexaminable_component_reads_as_a_link(tmp_path, request):
     assert _is_a_link(locked / "x") is True
 
 
+@pytest.mark.unit
 def test_a_provably_absent_component_does_not_read_as_a_link(tmp_path):
     """The must-not twin: a path that provably is not a link, because it does
     not exist under a searchable directory or sits under a plain file,

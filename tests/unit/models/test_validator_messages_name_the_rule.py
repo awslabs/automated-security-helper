@@ -30,6 +30,8 @@ from automated_security_helper.models.asharp_model import ReportMetadata
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.utils.content_databases import CONTENT_DATABASES
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 
 EXPIRATION = "Invalid expiration date format. Use YYYY-MM-DD"

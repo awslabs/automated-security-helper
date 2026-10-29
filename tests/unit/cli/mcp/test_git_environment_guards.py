@@ -75,6 +75,7 @@ def git_env(tmp_path, monkeypatch) -> Dict[str, Any]:
     return {"env": calls[0]["env"], "cmd": calls[0]["cmd"], "server_home": server_home}
 
 
+@pytest.mark.integration
 def test_ssh_offers_no_identity_and_checks_host_keys_strictly(
     git_env, tmp_path
 ) -> None:
@@ -112,6 +113,7 @@ def test_ssh_offers_no_identity_and_checks_host_keys_strictly(
     assert "proxycommand" not in settings and "proxyjump" not in settings
 
 
+@pytest.mark.unit
 def test_git_home_is_the_session_directory_with_no_netrc(git_env) -> None:
     home = git_env["env"].get("HOME")
 
@@ -120,6 +122,7 @@ def test_git_home_is_the_session_directory_with_no_netrc(git_env) -> None:
     assert not (Path(home) / ".netrc").exists()
 
 
+@pytest.mark.integration
 def test_global_config_is_off_even_with_the_servers_home(git_env, tmp_path) -> None:
     git = shutil.which("git")
     assert git, "git is required to evaluate configuration scopes"

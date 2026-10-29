@@ -35,6 +35,8 @@ from automated_security_helper.config.runtime_patch import (
     apply_runtime_patch,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-5c1d-9876543210"
 ALLOWLIST = RuntimeOverridesConfig(
     enabled=True,

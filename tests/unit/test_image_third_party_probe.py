@@ -22,9 +22,12 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / ".github" / "scripts"
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt", reason="the probe runs only inside the Linux image"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        os.name == "nt", reason="the probe runs only inside the Linux image"
+    ),
+]
 
 
 def _load(name: str, filename: str):

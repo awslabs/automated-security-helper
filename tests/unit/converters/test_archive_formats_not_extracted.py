@@ -31,6 +31,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
     ArchiveConverter,
 )
 
+pytestmark = pytest.mark.unit
+
 ARCHIVE_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter"
 )

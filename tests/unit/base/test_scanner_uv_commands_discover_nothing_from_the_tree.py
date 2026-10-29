@@ -117,6 +117,7 @@ def repo(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(("args", "plant", "mark"), CASES)
+@pytest.mark.integration
 def test_control_without_the_overrides_the_scanners_uv_uses_the_plant(
     repo, tmp_path, monkeypatch, args, plant, mark
 ):
@@ -128,6 +129,7 @@ def test_control_without_the_overrides_the_scanners_uv_uses_the_plant(
 
 
 @pytest.mark.parametrize(("args", "plant", "mark"), CASES)
+@pytest.mark.integration
 def test_a_scanners_uv_command_uses_no_venv_or_project_from_the_tree(
     repo, tmp_path, args, plant, mark
 ):
@@ -137,6 +139,7 @@ def test_a_scanners_uv_command_uses_no_venv_or_project_from_the_tree(
     assert not marker.exists(), marker.read_text(encoding="utf-8")
 
 
+@pytest.mark.unit
 def test_the_overrides_reach_the_spawn_and_keep_the_scanners_own_env(
     repo, tmp_path, monkeypatch
 ):

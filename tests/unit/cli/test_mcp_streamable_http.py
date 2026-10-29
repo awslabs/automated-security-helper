@@ -145,6 +145,7 @@ class _ResilientFalseCtx:
     resilient_parsing = False
 
 
+@pytest.mark.unit
 def test_build_streamable_http_app_rejects_missing_header() -> None:
     """The auth middleware returns 401 when the configured header is absent."""
     app = build_streamable_http_app(
@@ -159,6 +160,7 @@ def test_build_streamable_http_app_rejects_missing_header() -> None:
     assert resp.status_code == 401
 
 
+@pytest.mark.unit
 def test_build_streamable_http_app_rejects_wrong_value() -> None:
     """Wrong header value also gets 401."""
     app = build_streamable_http_app(
@@ -175,6 +177,7 @@ def test_build_streamable_http_app_rejects_wrong_value() -> None:
     assert resp.status_code == 401
 
 
+@pytest.mark.unit
 def test_build_streamable_http_app_no_auth_when_not_configured() -> None:
     """If no header is configured, the auth middleware is not installed."""
     app = build_streamable_http_app(
@@ -184,6 +187,7 @@ def test_build_streamable_http_app_no_auth_when_not_configured() -> None:
     assert "_StaticHeaderAuth" not in middleware_names
 
 
+@pytest.mark.unit
 def test_build_streamable_http_app_installs_auth_middleware() -> None:
     """When both auth options are set, the middleware is on the app."""
     app = build_streamable_http_app(
@@ -193,6 +197,7 @@ def test_build_streamable_http_app_installs_auth_middleware() -> None:
     assert "_StaticHeaderAuth" in middleware_names
 
 
+@pytest.mark.integration
 def test_streamable_http_rejects_unauthenticated_request(streamable_server) -> None:
     """A live server returns 401 when the auth header is missing."""
     url = f"http://{streamable_server['host']}:{streamable_server['port']}{streamable_server['mount_path']}"
@@ -201,6 +206,7 @@ def test_streamable_http_rejects_unauthenticated_request(streamable_server) -> N
     assert resp.status_code == 401
 
 
+@pytest.mark.integration
 def test_streamable_http_check_installation_via_client(
     streamable_server, monkeypatch
 ) -> None:
@@ -294,6 +300,7 @@ def test_streamable_http_check_installation_via_client(
     assert not os.path.isabs(report["ash_command_output"]), report
 
 
+@pytest.mark.unit
 def test_mcp_wrapper_exposes_streamable_http_flags() -> None:
     """``ash mcp --help`` must list the streamable-HTTP flags from the wrapper.
 

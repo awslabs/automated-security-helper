@@ -51,6 +51,7 @@ UTC = timezone.utc
 # --------------------------------------------------------------------------- the registry
 
 
+@pytest.mark.unit
 class TestTheRegistry:
     def test_names_are_unique(self):
         names = [e.name for e in cdb.CONTENT_DATABASES]
@@ -92,6 +93,7 @@ class TestTheRegistry:
 # --------------------------------------------------------------------------- the argument
 
 
+@pytest.mark.unit
 class TestTheBucketKeepsRestoredEntriesInsideTheBound:
     def test_grype_buckets_are_a_day_wide(self):
         assert cdb.bucket_width(GRYPE) == timedelta(hours=24)
@@ -148,6 +150,7 @@ class TestTheBucketKeepsRestoredEntriesInsideTheBound:
         assert a.startswith(f"grype-db-{cdb.KEY_VERSION}-w86400-b")
 
 
+@pytest.mark.integration
 class TestTheCommandLine:
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(  # nosec B603 — fixed interpreter and module, list args
@@ -205,6 +208,7 @@ def _source_files():
     yield REPO_ROOT / "ash"
 
 
+@pytest.mark.unit
 class TestTheRegistryIsTheOnlySource:
     # grype's bound in every spelling a second copy would plausibly take.
     SECOND_COPY = re.compile(
@@ -270,6 +274,7 @@ def grype_scanner(test_plugin_context):
     return make
 
 
+@pytest.mark.unit
 class TestGrypeIsToldTheDeclaredBound:
     def test_online_passes_the_registry_bound(self, grype_scanner, monkeypatch):
         for name in GRYPE.bound_env:
@@ -310,6 +315,7 @@ class TestGrypeIsToldTheDeclaredBound:
         assert "Where a stale database used to be used SILENTLY" in REGISTRY.read_text()
 
 
+@pytest.mark.unit
 class TestTheOfflineValidatorWarnsAgainstTheSameBound:
     def test_six_days_now_warns(self, tmp_path):
         """Past grype's 120h but inside the old 7-day literal: silent before, warned now."""
@@ -412,6 +418,7 @@ def _run_guard(
 _REQUIRES_BASH = pytest.mark.skipif(os.name == "nt", reason="the guards are bash steps")
 
 
+@pytest.mark.integration
 @_REQUIRES_BASH
 class TestTheCiGuards:
     RESTORE_GUARD = "Refuse a restored grype database older than its declared bound"
@@ -476,6 +483,7 @@ class TestTheCiGuards:
         assert "ok=true" in output.read_text(), proc.stdout + proc.stderr
 
 
+@pytest.mark.unit
 class TestTheCommandLineInProcess:
     """The same entry points, called in-process so their branches are measured."""
 
@@ -589,6 +597,7 @@ class TestTheCommandLineInProcess:
         assert cdb.go_duration(timedelta(seconds=-60)) == "-0h1m0s"
 
 
+@pytest.mark.unit
 class TestTheGrypeStatusErrorIsRedactedBeforeItsCut:
     def test_a_value_straddling_the_cut_is_hidden_whole(self, monkeypatch):
         """`grype db status` without a build time raises with the status
@@ -622,6 +631,7 @@ class TestTheGrypeStatusErrorIsRedactedBeforeItsCut:
         assert "Zq7K" not in message, message
 
 
+@pytest.mark.unit
 class TestTheProbeContextCarriesThePluginsValues:
     def test_the_hooks_values_reach_the_context(self, tmp_path):
         """The probe's excerpts are redacted with ProbeContext.values, and
@@ -651,6 +661,7 @@ class TestTheProbeContextCarriesThePluginsValues:
         assert context.values == ("Zq7Kx9Lm2Pw4Nv",), context.values
 
 
+@pytest.mark.unit
 class TestARaisingProbeContextHook:
     def test_the_scan_keeps_its_verdict_and_the_database_is_unmeasurable(self):
         """content_database_probe_context calls the plugin's overridable

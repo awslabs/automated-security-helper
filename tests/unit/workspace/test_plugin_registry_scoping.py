@@ -62,6 +62,8 @@ from automated_security_helper.workspace.resolver import (
     resolve_workspace,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _acme_is_installed(tmp_path_factory, monkeypatch):

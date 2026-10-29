@@ -139,6 +139,7 @@ def _session(sts=None, bedrock=None) -> MagicMock:
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_probe_failure_names_no_environment_value(mock_session_cls, tmp_path, logged):
     """The reachability probe's failure line can echo a configured value back.
 
@@ -168,6 +169,7 @@ def test_probe_failure_names_no_environment_value(mock_session_cls, tmp_path, lo
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_invalid_model_and_fallback_lines_name_no_environment_value(
     mock_session_cls, tmp_path, logged
 ):
@@ -206,6 +208,7 @@ def test_invalid_model_and_fallback_lines_name_no_environment_value(
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_aws_api_error_line_names_no_environment_value(
     mock_session_cls, tmp_path, logged
 ):
@@ -230,6 +233,7 @@ def test_aws_api_error_line_names_no_environment_value(
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_unexpected_error_line_names_no_environment_value(
     mock_session_cls, tmp_path, logged
 ):
@@ -283,6 +287,7 @@ class _DeniedRuntime:
         ("ThrottlingException", "Rate limit exceeded"),
     ],
 )
+@pytest.mark.unit
 def test_written_reports_carry_no_environment_value(
     tmp_path, logged_all, code, control
 ):
@@ -330,6 +335,7 @@ def test_written_reports_carry_no_environment_value(
     "var",
     ["ASH_BEDROCK_MODEL_ID", "ASH_BEDROCK_TEMPERATURE", "ASH_BEDROCK_MAX_TOKENS"],
 )
+@pytest.mark.unit
 def test_ash_bedrock_default_joins_the_redaction_values(monkeypatch, var):
     """An option sourced from an ASH_BEDROCK_* default never went through the
     config's ``${VAR}`` expansion, so its value has to join the redaction
@@ -341,6 +347,7 @@ def test_ash_bedrock_default_joins_the_redaction_values(monkeypatch, var):
 
 
 @pytest.mark.parametrize("value", ["0", "1", "0.50", "4000", "-1", "+0.5"])
+@pytest.mark.unit
 def test_a_purely_numeric_default_is_not_a_redaction_needle(monkeypatch, value):
     """A purely numeric value (digits with at most one dot, one leading sign
     allowed) of one of the two numeric knobs, ASH_BEDROCK_TEMPERATURE and
@@ -356,6 +363,7 @@ def test_a_purely_numeric_default_is_not_a_redaction_needle(monkeypatch, value):
     assert value not in reporter_module._read_ash_bedrock_defaults()
 
 
+@pytest.mark.unit
 def test_a_numeric_model_id_still_joins_the_needles(monkeypatch):
     """The exclusion is by name: a model id that happens to be all digits is
     still the value the rule exists to hide."""
@@ -364,6 +372,7 @@ def test_a_numeric_model_id_still_joins_the_needles(monkeypatch):
     assert "482915" in reporter_module._read_ash_bedrock_defaults()
 
 
+@pytest.mark.unit
 def test_a_numeric_model_id_is_redacted_in_the_lines_the_reporter_writes(
     tmp_path, monkeypatch
 ):
@@ -402,6 +411,7 @@ def test_a_numeric_model_id_is_redacted_in_the_lines_the_reporter_writes(
         assert "<value>" in line, line
 
 
+@pytest.mark.unit
 def test_a_numeric_knob_leaves_a_date_inside_a_model_id_intact(tmp_path, monkeypatch):
     """The control for the by-name exclusion: ASH_BEDROCK_MAX_TOKENS=2024 is no
     needle, so a model id carrying a 2024 date keeps it in the error string a
@@ -426,6 +436,7 @@ def test_a_numeric_knob_leaves_a_date_inside_a_model_id_intact(tmp_path, monkeyp
     assert model_id in denied, denied
 
 
+@pytest.mark.unit
 def test_a_config_read_knob_leaves_a_date_inside_a_model_id_intact(
     tmp_path, monkeypatch
 ):
@@ -479,6 +490,7 @@ def test_a_config_read_knob_leaves_a_date_inside_a_model_id_intact(
     assert model_id in denied, denied
 
 
+@pytest.mark.unit
 def test_a_knob_value_another_variable_also_supplied_stays_a_needle(
     tmp_path, monkeypatch
 ):
@@ -516,6 +528,7 @@ def test_a_knob_value_another_variable_also_supplied_stays_a_needle(
     assert "2024" in reporter._redaction_values()
 
 
+@pytest.mark.unit
 def test_an_operator_value_equal_to_a_knob_s_stays_a_needle(tmp_path, monkeypatch):
     """End to end through resolve_config with an operator's config: the
     operator's file reads 2024 from another variable for an option only it may
@@ -588,6 +601,7 @@ def _knob_reference(written: str, value: str):
     return EnvironmentReference(("reporters",), written, value, value)
 
 
+@pytest.mark.unit
 def test_a_value_another_reference_read_stays_a_needle_whatever_the_count():
     """Each guard of the exclusion on its own. Here the other reference alone
     keeps the value: the values list records it once, which the count would
@@ -602,6 +616,7 @@ def test_a_value_another_reference_read_stays_a_needle_whatever_the_count():
     assert reporter_module._config_read_knob_values(config, ["2024"]) == frozenset()
 
 
+@pytest.mark.unit
 def test_a_value_recorded_more_often_than_a_knob_read_it_stays_a_needle():
     """The count on its own: a second occurrence no reference accounts for
     (a value a trusted config contributed) keeps the value a needle."""
@@ -633,6 +648,7 @@ def test_a_value_recorded_more_often_than_a_knob_read_it_stays_a_needle():
         pytest.param("${ASH_BEDROCK_TEMPERATURE}", "0.5", True, id="temperature"),
     ],
 )
+@pytest.mark.unit
 def test_the_knob_rule_by_name_value_and_written_form(written, value, left_out):
     config = SimpleNamespace(_environment_references=(_knob_reference(written, value),))
 
@@ -641,6 +657,7 @@ def test_the_knob_rule_by_name_value_and_written_form(written, value, left_out):
     assert result == (frozenset({value}) if left_out else frozenset()), result
 
 
+@pytest.mark.unit
 def test_an_excluded_knob_values_typed_spellings_are_excluded_with_it():
     """The exclusion and the derived needles move together: a knob-only value
     is left out of the needles, so the spellings environment_record_read
@@ -658,6 +675,7 @@ def test_an_excluded_knob_values_typed_spellings_are_excluded_with_it():
     assert result == frozenset({"1000000", "1e+06"}), result
 
 
+@pytest.mark.integration
 def test_importing_the_reporter_with_a_knob_set_stays_off_the_config_package():
     """``_ASH_BEDROCK_DEFAULT_VALUES`` is built while the module loads, and
     with a numeric knob set it runs the shared number predicate right there.
@@ -686,6 +704,7 @@ def test_importing_the_reporter_with_a_knob_set_stays_off_the_config_package():
     assert done.returncode == 0, done.stderr
 
 
+@pytest.mark.integration
 def test_the_numeric_leaf_imports_no_other_ash_module():
     """utils.numeric_text is a leaf on purpose: this module and the config
     package both run its predicates at import, so anything the leaf pulled in
@@ -718,6 +737,7 @@ def test_the_numeric_leaf_imports_no_other_ash_module():
     assert done.returncode == 0, done.stderr
 
 
+@pytest.mark.unit
 def test_a_numeric_default_leaves_written_error_strings_intact(monkeypatch):
     """The control at the sink: with ASH_BEDROCK_TEMPERATURE=0 and
     ASH_BEDROCK_MAX_TOKENS=4000 in the needle set's source, an error string a
@@ -738,6 +758,7 @@ def test_a_numeric_default_leaves_written_error_strings_intact(monkeypatch):
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_an_aws_profile_sourced_name_stays_as_written(
     mock_session_cls, tmp_path, logged_all, monkeypatch
 ):
@@ -759,6 +780,7 @@ def test_an_aws_profile_sourced_name_stays_as_written(
     assert profile in text, text
 
 
+@pytest.mark.unit
 def test_aws_identifiers_do_not_join_the_redaction_values(monkeypatch):
     """The boundary: AWS_REGION, AWS_DEFAULT_REGION and AWS_PROFILE are
     identifiers and stay as written. The reader leaves them even when set,
@@ -780,6 +802,7 @@ def test_aws_identifiers_do_not_join_the_redaction_values(monkeypatch):
         assert value not in read, read
 
 
+@pytest.mark.integration
 def test_the_snapshot_reads_the_import_environment():
     """The check on the snapshot assignment itself: a fresh interpreter
     with ASH_BEDROCK_MODEL_ID in its environment holds the value in
@@ -824,6 +847,7 @@ def test_the_snapshot_reads_the_import_environment():
     assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
 
+@pytest.mark.unit
 def test_the_snapshot_reaches_the_redaction_values(tmp_path, monkeypatch):
     """What the import-time snapshot holds is in every reporter's redaction
     values, whatever the environment says now."""
@@ -835,6 +859,7 @@ def test_the_snapshot_reaches_the_redaction_values(tmp_path, monkeypatch):
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_a_snapshot_sourced_model_id_is_redacted_in_lines(
     mock_session_cls, tmp_path, logged_all, monkeypatch
 ):
@@ -873,6 +898,7 @@ def test_a_snapshot_sourced_model_id_is_redacted_in_lines(
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_model_validation_helper_lines_name_no_environment_value(
     mock_session_cls, tmp_path, logged_all
 ):
@@ -909,6 +935,7 @@ def test_model_validation_helper_lines_name_no_environment_value(
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_shim_strings_name_no_environment_value(mock_session_cls, tmp_path, logged_all):
     """The backward-compat shim's own strings name the configured model id:
     the primary-validation error string, the exhaustion error string, and the
@@ -944,6 +971,7 @@ def test_shim_strings_name_no_environment_value(mock_session_cls, tmp_path, logg
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_shim_exhaustion_starting_at_nova_lite_names_no_value(
     mock_session_cls, tmp_path, logged_all
 ):
@@ -980,6 +1008,7 @@ def test_shim_exhaustion_starting_at_nova_lite_names_no_value(
 
 
 @patch("boto3.Session")
+@pytest.mark.unit
 def test_shim_success_line_names_no_environment_value(
     mock_session_cls, tmp_path, logged_all, monkeypatch
 ):
@@ -1018,6 +1047,7 @@ def test_shim_success_line_names_no_environment_value(
     assert NOVA_PRO not in text, text
 
 
+@pytest.mark.unit
 def test_markdown_writer_lines_name_no_environment_value(tmp_path, logged, monkeypatch):
     """The three "written to" INFO lines name the configured output file names,
     each of which can be ``${VAR}``-sourced."""
@@ -1065,6 +1095,7 @@ def test_markdown_writer_lines_name_no_environment_value(tmp_path, logged, monke
     )
 
 
+@pytest.mark.unit
 def test_a_bare_string_of_environment_values_is_one_redaction_value(tmp_path):
     """A bare string of environment values is one redaction value, never
     characters, on every surface the value reaches.

@@ -75,6 +75,7 @@ except ASHConfigValidationError as error:
         ("undiscoverable", "two config files named"),
     ],
 )
+@pytest.mark.integration
 def test_the_workspace_config_refusal_is_shown(tmp_path, case, says):
     env = {key: value for key, value in os.environ.items() if key != "ASH_CONFIG"}
     child = subprocess.run(  # nosec B603 - this interpreter, fixed code
@@ -112,6 +113,7 @@ _SECRET_TAIL = "Pw4Nv2Rt-canary"
 
 
 @pytest.mark.parametrize("carried", [True, False], ids=["value-carried", "control"])
+@pytest.mark.unit
 def test_the_refusal_hides_a_value_a_complete_code_splits(capsys, carried):
     """The refusal's lines hold a carried environment value neither whole nor in pieces.
 

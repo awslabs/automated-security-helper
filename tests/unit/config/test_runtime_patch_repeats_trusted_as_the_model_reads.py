@@ -17,11 +17,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import pytest
+
 from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
 )
 from automated_security_helper.config.runtime_patch import config_document_denials
+
+pytestmark = pytest.mark.unit
 
 #: The operator's entries as a profile file writes them: no defaulted keys.
 _OPERATOR_SUPPRESSION = {

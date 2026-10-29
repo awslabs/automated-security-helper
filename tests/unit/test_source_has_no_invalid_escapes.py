@@ -13,7 +13,11 @@ selected rules, so nothing else reports it. One slipped into
 import warnings
 from pathlib import Path
 
+import pytest
+
 import automated_security_helper
+
+pytestmark = pytest.mark.unit
 
 PACKAGE = Path(automated_security_helper.__file__).resolve().parent
 

@@ -112,6 +112,7 @@ _RAISING_COMMAND = (
         pytest.param("hook-raises", id="exception-when-the-hook-fails"),
     ],
 )
+@pytest.mark.integration
 def test_typer_never_prints_argv_or_repository_text_as_given(tmp_path, case):
     extra = {}
     if case == "usage-error":
@@ -151,6 +152,7 @@ def test_typer_never_prints_argv_or_repository_text_as_given(tmp_path, case):
     _assert_shown(written)
 
 
+@pytest.mark.integration
 def test_a_command_module_run_with_python_m_shows_an_escaping_exception(tmp_path):
     """`python -m automated_security_helper.cli.config` runs config_app through
     the entry point, so an exception that escapes it is shown, not obeyed."""
@@ -175,6 +177,7 @@ def test_a_command_module_run_with_python_m_shows_an_escaping_exception(tmp_path
     _assert_shown(written)
 
 
+@pytest.mark.unit
 def test_every_cli_module_runs_through_the_entry_point_when_run_as_main():
     """A module of the CLI run as a script goes through cli/entrypoint.py, whose
     failure path prints an escaping exception shown, not obeyed."""
@@ -207,6 +210,7 @@ def test_every_cli_module_runs_through_the_entry_point_when_run_as_main():
 
 
 @pytest.mark.parametrize("method", ["make_context", "invoke"])
+@pytest.mark.unit
 def test_typers_no_args_help_passes_through_as_it_came(method):
     """typer prints nothing for its NoArgsIsHelpError, so it is re-raised as is,
     not made its own cause."""
@@ -238,6 +242,7 @@ def test_typers_no_args_help_passes_through_as_it_came(method):
 _SGR = re.compile(r"\x1b\[[0-9;]*m")
 
 
+@pytest.mark.integration
 def test_a_usage_error_keeps_typers_color_and_highlighting_under_github_actions(
     tmp_path,
 ):
@@ -268,6 +273,7 @@ def test_a_usage_error_keeps_typers_color_and_highlighting_under_github_actions(
     _assert_shown(_SGR.sub("", done.stdout + done.stderr))
 
 
+@pytest.mark.integration
 def test_a_traceback_is_as_wide_as_the_console(tmp_path):
     """typer lets the traceback take the console's width; Rich's default is 100."""
     body = (

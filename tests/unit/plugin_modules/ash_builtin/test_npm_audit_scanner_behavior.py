@@ -34,6 +34,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 from automated_security_helper.utils import offline_mode_validator
 from tests.utils.env_assertions import differing_names
 
+pytestmark = pytest.mark.unit
+
 # npm severity -> SARIF level. critical/high both map to error and low/info both
 # map to note, so six inputs produce three outcomes. That collapse is npm's own
 # vocabulary being wider than SARIF's, not a bug; test_severity_map_is_not_vacuous

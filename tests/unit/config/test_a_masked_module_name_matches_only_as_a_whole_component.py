@@ -28,8 +28,12 @@ that is not masked, a plain value that shares a form).
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.config.config_validator import redact_values
 from automated_security_helper.plugins.loader import _masked_module_forms
+
+pytestmark = pytest.mark.unit
 
 MASK = "<value>"
 

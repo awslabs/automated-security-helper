@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 FORMULA_PATH = Path(__file__).resolve().parents[2] / "Formula" / "ash.rb"
 
 SYSTEM_CALL = re.compile(r"^[ \t]*system\b[ \t(]", re.MULTILINE)

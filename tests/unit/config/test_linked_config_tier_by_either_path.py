@@ -28,10 +28,13 @@ from tests.utils.helpers import mark_git_checkout
 GRANT = "/opt/linked-grant"
 GRANTS = f"project_name: linked\nsandbox:\n  extra_read_paths: ['{GRANT}']\n"
 
-pytestmark = pytest.mark.skipif(
-    not hasattr(os, "symlink") or os.name == "nt",
-    reason="creates symbolic links, which need privileges on Windows",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        not hasattr(os, "symlink") or os.name == "nt",
+        reason="creates symbolic links, which need privileges on Windows",
+    ),
+]
 
 
 @pytest.fixture(autouse=True)

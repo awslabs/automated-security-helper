@@ -36,6 +36,8 @@ from tests.unit.workspace.test_execution import (
     _scanner,
 )
 
+pytestmark = pytest.mark.unit
+
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
 
 

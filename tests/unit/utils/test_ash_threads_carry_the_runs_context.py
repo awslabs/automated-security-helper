@@ -20,7 +20,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from tests.unit.walked_package import PACKAGE, package_sources
+
+pytestmark = pytest.mark.unit
 
 #: The one module that may call threading.Thread: the factory's own home.
 _THREAD_FACTORY = "utils/threads.py"

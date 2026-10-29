@@ -17,6 +17,8 @@ import typer
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("command", ["scan", None], ids=["ash scan", "ash"])
 def test_the_help_says_every_file_is_still_scanned(command):

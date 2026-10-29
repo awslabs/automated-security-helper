@@ -16,6 +16,8 @@ import hashlib
 import string
 from urllib.parse import quote, quote_plus
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.secret_masking import (
@@ -24,6 +26,8 @@ from automated_security_helper.utils.secret_masking import (
     mask_secret_values_in_text,
     mask_secrets_in_results,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _derived(label, length):

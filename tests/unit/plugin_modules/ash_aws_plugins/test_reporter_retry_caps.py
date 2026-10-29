@@ -25,6 +25,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
 )
 
+pytestmark = pytest.mark.unit
+
 RETRY_OPTIONS = ("max_retries", "base_delay", "max_delay")
 
 

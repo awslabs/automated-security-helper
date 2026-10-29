@@ -33,6 +33,8 @@ from tests.unit.cli.mcp.test_scan_refusal_quotes_no_input import (
     _validation_error,
 )
 
+pytestmark = pytest.mark.unit
+
 SESSION = "client-one"
 
 

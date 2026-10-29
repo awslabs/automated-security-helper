@@ -35,9 +35,10 @@ from automated_security_helper.core.exceptions import ScannerError
 
 PluginContext.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the fixtures use POSIX paths"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(sys.platform == "win32", reason="the fixtures use POSIX paths"),
+]
 
 EMPTY_SARIF = {
     "version": "2.1.0",

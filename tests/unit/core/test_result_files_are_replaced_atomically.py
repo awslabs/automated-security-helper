@@ -38,6 +38,8 @@ import pytest
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.utils.helpers import sarif_report_written
 
+pytestmark = pytest.mark.unit
+
 PREVIOUS = "previous contents, complete"
 _REAL_REPLACE = os.replace
 

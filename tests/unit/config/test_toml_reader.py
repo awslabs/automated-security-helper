@@ -20,6 +20,8 @@ import pytest
 from automated_security_helper.config.config_sources import read_config_file
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 
 def test_an_array_of_mixed_types_is_read(tmp_path):
     target = tmp_path / ".ashrc.toml"

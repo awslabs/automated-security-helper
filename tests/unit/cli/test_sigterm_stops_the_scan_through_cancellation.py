@@ -111,6 +111,7 @@ def _installed_sigint_handler():
     return handler
 
 
+@pytest.mark.unit
 def test_a_sigterm_cancels_the_registered_scan_event(sigterm_state):
     sigterm_state.install_sigterm_shutdown()
     event = CancelEvent()
@@ -130,6 +131,7 @@ def test_a_sigterm_cancels_the_registered_scan_event(sigterm_state):
 # fresh interpreter whose mirror can hold only what the cell put there.
 
 
+@pytest.mark.unit
 def test_shutdown_cancels_refuses_a_plain_event(sigterm_state):
     """Registration takes only a CancelEvent. The handler and the die-now
     walk read CancelEvent's own state (stop_promptly, the latch), so a plain
@@ -144,6 +146,7 @@ def test_shutdown_cancels_refuses_a_plain_event(sigterm_state):
     )
 
 
+@pytest.mark.unit
 def test_a_second_sigterm_takes_the_recorded_tool_groups_along(
     sigterm_state, raised_signals, monkeypatch
 ):
@@ -178,6 +181,7 @@ def test_a_second_sigterm_takes_the_recorded_tool_groups_along(
     assert raised_signals == [signal.SIGTERM]
 
 
+@pytest.mark.unit
 def test_a_sigterm_with_no_scan_still_takes_the_tool_groups_along(
     sigterm_state, raised_signals, monkeypatch
 ):
@@ -193,6 +197,7 @@ def test_a_sigterm_with_no_scan_still_takes_the_tool_groups_along(
     assert raised_signals == [signal.SIGTERM]
 
 
+@pytest.mark.unit
 def test_a_gone_tool_group_does_not_break_the_default_kill(
     sigterm_state, raised_signals, monkeypatch
 ):
@@ -218,6 +223,7 @@ def test_a_gone_tool_group_does_not_break_the_default_kill(
     )
 
 
+@pytest.mark.unit
 def test_a_group_kill_the_kernel_refuses_falls_back_to_the_pid(
     sigterm_state, raised_signals, monkeypatch
 ):
@@ -247,6 +253,7 @@ def test_a_group_kill_the_kernel_refuses_falls_back_to_the_pid(
     assert raised_signals == [signal.SIGTERM]
 
 
+@pytest.mark.unit
 def test_a_first_sigint_latches_the_scopes_and_keeps_the_interrupt(sigint_state):
     """A Ctrl-C must stay an interrupt and still reach the scan's pollers.
 
@@ -268,6 +275,7 @@ def test_a_first_sigint_latches_the_scopes_and_keeps_the_interrupt(sigint_state)
         assert sigint_state.shutdown_requested()
 
 
+@pytest.mark.unit
 def test_a_pool_projects_chained_event_sees_the_first_sigint(sigint_state):
     """A workspace pool's project event must see the operator's first Ctrl-C.
 
@@ -290,6 +298,7 @@ def test_a_pool_projects_chained_event_sees_the_first_sigint(sigint_state):
         assert project_event.stop_promptly
 
 
+@pytest.mark.unit
 def test_a_second_sigint_takes_the_recorded_tool_groups_along(
     sigint_state, raised_signals, monkeypatch
 ):
@@ -324,6 +333,7 @@ def test_a_second_sigint_takes_the_recorded_tool_groups_along(
     assert signal.getsignal(signal.SIGINT) == signal.SIG_DFL
 
 
+@pytest.mark.unit
 def test_a_second_sigint_takes_the_recorded_launcher_children_along(
     sigint_state, raised_signals, monkeypatch
 ):
@@ -353,6 +363,7 @@ def test_a_second_sigint_takes_the_recorded_launcher_children_along(
     assert raised_signals == [signal.SIGINT]
 
 
+@pytest.mark.unit
 def test_a_sigterm_then_a_ctrl_c_takes_the_recorded_tool_groups_along(
     sigterm_state, sigint_state, raised_signals, monkeypatch
 ):
@@ -401,6 +412,7 @@ def test_a_sigterm_then_a_ctrl_c_takes_the_recorded_tool_groups_along(
     assert signal.getsignal(signal.SIGINT) == signal.SIG_DFL
 
 
+@pytest.mark.unit
 def test_a_ctrl_c_then_a_sigterm_takes_the_recorded_tool_groups_along(
     sigterm_state, sigint_state, raised_signals, monkeypatch
 ):
@@ -429,6 +441,7 @@ def test_a_ctrl_c_then_a_sigterm_takes_the_recorded_tool_groups_along(
     assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL
 
 
+@pytest.mark.unit
 def test_a_first_sigint_with_no_scan_stays_an_interrupt(
     sigint_state, raised_signals, monkeypatch
 ):
@@ -447,6 +460,7 @@ def test_a_first_sigint_with_no_scan_stays_an_interrupt(
     assert raised_signals == []
 
 
+@pytest.mark.unit
 def test_install_leaves_an_ignored_sigint_ignored(sigint_state):
     """A process started with SIGINT ignored (a shell's background job) keeps
     it ignored, for the reason cli.SIGINT_IGNORED_AT_START documents."""
@@ -455,6 +469,7 @@ def test_install_leaves_an_ignored_sigint_ignored(sigint_state):
     assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
 
 
+@pytest.mark.unit
 def test_the_subprocess_registry_mirrors_groups_for_the_handler(
     sigterm_state, monkeypatch
 ):
@@ -511,6 +526,7 @@ def test_the_subprocess_registry_mirrors_groups_for_the_handler(
         subprocess_utils._unregister_group(later)
 
 
+@pytest.mark.unit
 def test_the_handler_chains_to_the_previous_python_handler(sigterm_state):
     chained: List[Tuple[int, object]] = []
     signal.signal(signal.SIGTERM, lambda signum, frame: chained.append((signum, frame)))
@@ -524,6 +540,7 @@ def test_the_handler_chains_to_the_previous_python_handler(sigterm_state):
     )
 
 
+@pytest.mark.unit
 def test_install_leaves_an_ignored_sigterm_ignored(sigterm_state):
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     sigterm_state.install_sigterm_shutdown()
@@ -533,6 +550,7 @@ def test_install_leaves_an_ignored_sigterm_ignored(sigterm_state):
     )
 
 
+@pytest.mark.unit
 def test_install_twice_does_not_chain_to_itself(sigterm_state):
     sigterm_state.install_sigterm_shutdown()
     sigterm_state.install_sigterm_shutdown()
@@ -542,6 +560,7 @@ def test_install_twice_does_not_chain_to_itself(sigterm_state):
     )
 
 
+@pytest.mark.unit
 def test_a_scope_registered_after_the_signal_is_cancelled_at_once(sigterm_state):
     sigterm_state.install_sigterm_shutdown()
     first = CancelEvent()
@@ -555,6 +574,7 @@ def test_a_scope_registered_after_the_signal_is_cancelled_at_once(sigterm_state)
             )
 
 
+@pytest.mark.integration
 def test_a_sigterm_inside_the_grace_waits_lock_window_still_returns(tmp_path):
     """The handler must take no event lock, or the stop stops the stopper.
 
@@ -616,6 +636,7 @@ def test_a_sigterm_inside_the_grace_waits_lock_window_still_returns(tmp_path):
     assert "returned" in result.stdout
 
 
+@pytest.mark.unit
 def test_a_parents_cancel_ends_a_childs_wait_within_a_slice():
     """``wait`` must see every state ``is_set`` reports, not the local flag only.
 
@@ -642,6 +663,7 @@ def test_a_parents_cancel_ends_a_childs_wait_within_a_slice():
     )
 
 
+@pytest.mark.unit
 def test_a_handler_latched_stop_wakes_a_blocked_prompt_wait(sigterm_state):
     """A grace wait already blocked when the SIGTERM lands must still end.
 
@@ -669,6 +691,7 @@ def test_a_handler_latched_stop_wakes_a_blocked_prompt_wait(sigterm_state):
     assert record["elapsed"] < 5.0
 
 
+@pytest.mark.integration
 def test_importing_the_library_installs_no_handler(tmp_path):
     """The install happens in the CLI entry point, never at import time.
 
@@ -707,6 +730,7 @@ def _scan_command_app() -> typer.Typer:
     return app
 
 
+@pytest.mark.unit
 def test_the_scan_command_exits_terminated_when_a_sigterm_stops_the_scan(
     sigterm_state, monkeypatch, tmp_path
 ):
@@ -752,6 +776,7 @@ def test_the_scan_command_exits_terminated_when_a_sigterm_stops_the_scan(
     assert "stopped by SIGTERM" in result.output
 
 
+@pytest.mark.unit
 def test_a_keyboard_interrupt_cancels_the_scans_scope_before_exit(
     monkeypatch, tmp_path
 ):
@@ -790,6 +815,7 @@ def test_a_keyboard_interrupt_cancels_the_scans_scope_before_exit(
     )
 
 
+@pytest.mark.integration
 def test_an_unstopped_tools_shutdown_line_says_the_tool_may_still_run(
     sigterm_state, monkeypatch, tmp_path
 ):
@@ -848,6 +874,7 @@ def test_an_unstopped_tools_shutdown_line_says_the_tool_may_still_run(
     assert "(pid " in result.output, result.output
 
 
+@pytest.mark.unit
 def test_a_clean_shutdown_line_does_not_warn_about_a_surviving_tool(
     sigterm_state, monkeypatch, tmp_path
 ):
@@ -872,6 +899,7 @@ def test_a_clean_shutdown_line_does_not_warn_about_a_surviving_tool(
     assert "may still be running" not in result.output
 
 
+@pytest.mark.unit
 def test_an_unexplained_cancel_is_not_dressed_up_as_a_shutdown(
     sigterm_state, monkeypatch, tmp_path
 ):
@@ -892,6 +920,7 @@ def test_an_unexplained_cancel_is_not_dressed_up_as_a_shutdown(
         )
 
 
+@pytest.mark.unit
 def test_the_commands_scope_is_registered_with_the_shutdown_handler(
     sigterm_state, monkeypatch, tmp_path
 ):

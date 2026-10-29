@@ -13,6 +13,10 @@ import ast
 from pathlib import Path
 from typing import Dict, List
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 PAGE_CLAIMS = Path(__file__).with_name("test_page_claims.py")
 
 

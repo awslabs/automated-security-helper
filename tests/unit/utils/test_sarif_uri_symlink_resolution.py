@@ -38,10 +38,13 @@ import pytest
 from automated_security_helper.utils.sarif_utils import _sanitize_uri
 from automated_security_helper.utils.suppression_matcher import file_path_matches
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="Creating symlinks on Windows requires developer mode or elevation",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="Creating symlinks on Windows requires developer mode or elevation",
+    ),
+]
 
 
 @pytest.fixture

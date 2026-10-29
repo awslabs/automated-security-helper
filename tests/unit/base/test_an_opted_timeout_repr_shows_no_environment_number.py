@@ -21,6 +21,8 @@ import pytest
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.utils.redacted_model import carry_environment_values
 
+pytestmark = pytest.mark.unit
+
 
 def _options(timeout: int, carried: str) -> ScannerOptionsBase:
     options = ScannerOptionsBase(scan_timeout=timeout)

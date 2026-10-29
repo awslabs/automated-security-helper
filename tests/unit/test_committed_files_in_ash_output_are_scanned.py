@@ -46,7 +46,10 @@ capture = named.capture
 
 #: The scanners built here start no tool, and a tree built without ``git init`` is
 #: outside git wherever tmp_path is (tests/unit/conftest.py).
-pytestmark = pytest.mark.usefixtures("no_tool_probes", "no_checkout_above_tmp_path")
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.usefixtures("no_tool_probes", "no_checkout_above_tmp_path"),
+]
 
 COMMITTED = (
     ".ash/ash_output/hidden/app.py",

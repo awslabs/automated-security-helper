@@ -15,7 +15,11 @@ date from its first eight digits.
 import re
 from datetime import datetime, timezone
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 
 def test_default_metadata_report_id_contains_current_month():

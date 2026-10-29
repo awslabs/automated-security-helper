@@ -367,6 +367,7 @@ C_PAGE = [
 ]
 
 
+@pytest.mark.unit
 def test_the_census_of_a_synthetic_corpus(tmp_path):
     texts = {}
     lines = {}
@@ -567,6 +568,7 @@ EXPECTED_RUNNER_NONE = [
 EXPECTED_STATIC_ONLY = [(OTHER_PAGE, 3, "azure-pipelines")]
 
 
+@pytest.mark.integration
 def test_the_census_of_the_corpus_is_exactly_the_blocks_each_leg_runs(counted):
     """Red until the CI pages carry their runner markers (the Jenkinsfile marker, the
     CircleCI section, save-as/extends/event and runner=none); exact after that, so a
@@ -602,6 +604,7 @@ def test_the_census_of_the_corpus_is_exactly_the_blocks_each_leg_runs(counted):
     ]
 
 
+@pytest.mark.integration
 def test_every_ci_block_of_the_corpus_is_in_exactly_one_class(counted):
     """Whatever the pages hold: each CI block the count here finds is run by some leg,
     marked runner=none, or static-only, and in only one of those."""

@@ -11,7 +11,11 @@ tool or the gate.
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.utils.helpers import mark_git_checkout
+
+pytestmark = pytest.mark.unit
 
 
 def _refusing_walk(monkeypatch) -> None:

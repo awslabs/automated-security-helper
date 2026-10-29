@@ -44,6 +44,8 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.drop_window import TheDropWindow
 from tests.utils.tasks import drain as _drain
 
+pytestmark = pytest.mark.unit
+
 _LAUNCHER = "automated_security_helper.interactions.run_ash_scan.run_ash_scan"
 #: How long a held drop or a waiting scan stand-in waits before it gives up:
 #: far past any cell, so a cell that fails early cannot leave a thread behind

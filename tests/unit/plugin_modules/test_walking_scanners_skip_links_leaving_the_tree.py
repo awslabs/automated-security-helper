@@ -316,6 +316,7 @@ def _registered_scanner_names() -> set[str]:
     return names
 
 
+@pytest.mark.unit
 def test_every_registered_scanner_has_a_link_handling():
     assert _registered_scanner_names() == set(LINK_HANDLING) == set(SCANNER_CLASSES)
 
@@ -347,6 +348,7 @@ HANDLING_FILES = {
 
 
 @pytest.mark.parametrize("name", sorted(LINK_HANDLING))
+@pytest.mark.unit
 def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
     """What LINK_HANDLING says of each scanner, checked on a tree with such links."""
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
@@ -448,6 +450,7 @@ DOUBLESTAR_EXCLUDES = {
 }
 
 
+@pytest.mark.unit
 def test_grype_is_given_each_link_leaving_its_target_and_nothing_else(tmp_path):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
         GrypeScanner,
@@ -487,6 +490,7 @@ def _scanner_named(name: str, source: Path, base: Path):
 
 
 @pytest.mark.parametrize("name", ["grype", "checkov", "bandit"])
+@pytest.mark.unit
 def test_the_list_extra_args_held_is_left_as_it_was(tmp_path, name):
     """The per-target entries go into a new list, not the one extra_args held.
 
@@ -518,6 +522,7 @@ def test_the_list_extra_args_held_is_left_as_it_was(tmp_path, name):
     assert any("link_out" in str(arg) for arg in argv)
 
 
+@pytest.mark.unit
 def test_grypes_own_resolution_leaves_the_list_it_holds_as_it_was(tmp_path):
     """grype's _resolve_arguments adds an --exclude per ASH output directory inside
     the target, for that resolution only, in a new list: the one extra_args held is
@@ -551,6 +556,7 @@ def test_grypes_own_resolution_leaves_the_list_it_holds_as_it_was(tmp_path):
 
 
 @pytest.mark.parametrize("name", ["grype", "checkov", "bandit"])
+@pytest.mark.unit
 def test_a_target_with_no_link_leaving_it_leaves_the_list_as_it_was(tmp_path, name):
     """The entries every resolution adds (bandit's --ini, grype's --config) too.
 
@@ -574,6 +580,7 @@ def test_a_target_with_no_link_leaving_it_leaves_the_list_as_it_was(tmp_path, na
     ]
 
 
+@pytest.mark.unit
 def test_syft_is_given_each_link_leaving_its_target_and_nothing_else(tmp_path):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
         SyftScanner,
@@ -590,6 +597,7 @@ def test_syft_is_given_each_link_leaving_its_target_and_nothing_else(tmp_path):
     assert set(_values(argv, "--exclude")) == DOUBLESTAR_EXCLUDES
 
 
+@pytest.mark.unit
 def test_the_operators_syft_excludes_are_kept_beside_them(tmp_path):
     from automated_security_helper.models.core import IgnorePathWithReason
     from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
@@ -617,6 +625,7 @@ def test_the_operators_syft_excludes_are_kept_beside_them(tmp_path):
 
 
 @pytest.mark.parametrize("scanner_name", ["trivy-repo", "trivy"])
+@pytest.mark.unit
 def test_trivy_is_given_each_link_leaving_its_target_without_a_comma(
     tmp_path, monkeypatch, scanner_name
 ):
@@ -667,6 +676,7 @@ def test_trivy_is_given_each_link_leaving_its_target_without_a_comma(
     }
 
 
+@pytest.mark.unit
 def test_a_link_trivy_cannot_be_given_is_logged_once(tmp_path):
     """A link left out of --skip-files is named in one debug record, not dropped silently."""
     from automated_security_helper.utils import link_exclusions
@@ -695,6 +705,7 @@ def test_a_link_trivy_cannot_be_given_is_logged_once(tmp_path):
     assert "'link_out.txt'" not in message
 
 
+@pytest.mark.unit
 def test_nothing_is_logged_when_every_link_can_be_given_to_trivy(tmp_path):
     from automated_security_helper.utils import link_exclusions
     from automated_security_helper.utils.log import ASH_LOGGER
@@ -739,6 +750,7 @@ def _added_excludes(scanner, source: Path) -> list[str]:
     return added
 
 
+@pytest.mark.unit
 def test_a_grep_scanner_is_given_no_link_exclusion(
     tmp_path, monkeypatch, grep_scanner_class
 ):
@@ -768,6 +780,7 @@ def test_a_grep_scanner_is_given_no_link_exclusion(
     assert [(a.key, a.value) for a in scanner.args.extra_args] == before
 
 
+@pytest.mark.integration
 def test_a_link_named_like_the_targets_own_directory_does_not_hide_it(
     tmp_path, monkeypatch, grep_scanner_class
 ):
@@ -836,6 +849,7 @@ def snyk_refusals_set_aside(monkeypatch):
     ],
     ids=["file", "top-level directory", "nested directory"],
 )
+@pytest.mark.unit
 def test_snyk_code_refuses_a_target_holding_a_link_leaving_it(
     tmp_path, monkeypatch, links, named
 ):
@@ -849,6 +863,7 @@ def test_snyk_code_refuses_a_target_holding_a_link_leaving_it(
     assert f"'{named}': link leaves the scanned tree" in refusal, refusal
 
 
+@pytest.mark.unit
 def test_snyk_codes_copy_leaves_out_a_link_leaving_the_target(
     tmp_path, monkeypatch, snyk_refusals_set_aside
 ):
@@ -872,6 +887,7 @@ def test_snyk_codes_copy_leaves_out_a_link_leaving_the_target(
     ["creds", "deep/aws"],
     ids=["top-level", "nested"],
 )
+@pytest.mark.unit
 def test_snyk_codes_copy_holds_nothing_below_a_directory_link_leaving_it(
     tmp_path, monkeypatch, snyk_refusals_set_aside, link
 ):
@@ -895,6 +911,7 @@ def test_snyk_codes_copy_holds_nothing_below_a_directory_link_leaving_it(
 # (open_in_scanned_tree) refuses a link the scan set kept.
 
 
+@pytest.mark.unit
 def test_the_scan_set_snyk_code_copies_leaves_out_a_file_link_leaving_it(tmp_path):
     from automated_security_helper.utils.get_scan_set import scan_set
 
@@ -912,6 +929,7 @@ def test_the_scan_set_snyk_code_copies_leaves_out_a_file_link_leaving_it(tmp_pat
     ]
 
 
+@pytest.mark.unit
 def test_the_scan_set_snyk_code_copies_does_not_enter_a_directory_link(tmp_path):
     """Not even one to a directory inside the tree, whose files all resolve inside
     it: so nothing below a directory link reaches the copy by the scan set."""
@@ -931,6 +949,7 @@ def test_the_scan_set_snyk_code_copies_does_not_enter_a_directory_link(tmp_path)
     ]
 
 
+@pytest.mark.unit
 def test_snyk_code_still_scans_a_target_whose_links_stay_inside(tmp_path, monkeypatch):
     source = _tree(
         tmp_path,

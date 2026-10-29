@@ -26,6 +26,8 @@ import pytest
 
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 
+pytestmark = pytest.mark.unit
+
 
 def _with_its_tool(scanner_class):
     """The real scanner class with its dependency check answering True."""

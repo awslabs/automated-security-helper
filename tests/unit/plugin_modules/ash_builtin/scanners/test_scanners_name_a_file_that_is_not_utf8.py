@@ -56,6 +56,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner
 )
 from tests.utils import undecodable_names as names
 
+pytestmark = pytest.mark.unit
+
 # Every test here plants a file whose name is not UTF-8.
 if os.name == "nt":
     pytest.skip(

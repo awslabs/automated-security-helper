@@ -49,6 +49,8 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
 )
 from automated_security_helper.utils.sbom_merge import merge_cyclonedx_reports
 
+pytestmark = pytest.mark.unit
+
 HELD_SERIAL = "urn:uuid:11111111-1111-4111-8111-111111111111"
 INCOMING_SERIAL = "urn:uuid:22222222-2222-4222-8222-222222222222"
 

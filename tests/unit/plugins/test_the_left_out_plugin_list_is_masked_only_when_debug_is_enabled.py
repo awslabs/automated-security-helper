@@ -39,6 +39,8 @@ from automated_security_helper.plugins.loader import masked_module_scope
 from automated_security_helper.plugins.plugin_manager import masked_module_names
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 MASK = "<value>"
 PARENT = "kqlft_ash_plugins"
 CHILD = "kqlftchild_ash_plugins"

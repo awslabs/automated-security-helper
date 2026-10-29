@@ -39,9 +39,12 @@ from automated_security_helper.utils import link_exclusions
 
 PluginContext.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the entries are POSIX paths here"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="the entries are POSIX paths here"
+    ),
+]
 
 FILES = [
     "app.py",

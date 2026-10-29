@@ -22,11 +22,15 @@ runner raises before the double is reached.
 import asyncio
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from automated_security_helper.cli.mcp_tools import _run_scan_async
 from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
     ScanRegistryEntry,
 )
+
+pytestmark = pytest.mark.unit
 
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 _PROFILE_REGISTRY = "automated_security_helper.cli.mcp.profile_registry"

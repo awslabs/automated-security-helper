@@ -60,6 +60,8 @@ from automated_security_helper.config.sandbox_grants import (
 from automated_security_helper.config.untrusted_source import IN_TREE_OR_DELIVERED
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 _WALK_STOPPED = "resolving its name stopped before the walk finished"
 _OWN_GRANT = "/opt/operator-own-grant"
 #: Fragments of the sentences that claim a location, one for each way

@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
@@ -34,12 +35,14 @@ def _help() -> str:
     return " ".join(result.output.split())
 
 
+@pytest.mark.unit
 def test_the_default_is_shown_as_the_documented_path():
     text = _help()
     assert "[default: (~/.ash/bin)]" in text, text
     assert "[env var: ASH_BIN_PATH]" in text, text
 
 
+@pytest.mark.unit
 def test_the_help_does_not_contain_the_resolved_default():
     """The resolved path is this machine's; it has no place in the help text."""
     resolved = str(constants.ASH_BIN_PATH)
@@ -80,6 +83,7 @@ def _help_with_home(directory, home: str) -> str:
     return result.stdout
 
 
+@pytest.mark.integration
 def test_the_help_does_not_depend_on_the_length_of_home(tmp_path):
     """The snapshots of this help failed once HOME was long enough to wrap the default.
 
@@ -95,6 +99,7 @@ def test_the_help_does_not_depend_on_the_length_of_home(tmp_path):
     assert "h" * 19 not in short, short
 
 
+@pytest.mark.unit
 def test_the_option_defaults_to_the_resolved_path():
     """Only the displayed text is fixed; the value the command uses is unchanged."""
     from automated_security_helper.cli.dependencies import install_dependencies

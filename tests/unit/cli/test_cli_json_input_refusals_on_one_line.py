@@ -20,6 +20,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 
+pytestmark = pytest.mark.unit
+
 RUN_ASH_SCAN = "automated_security_helper.cli.scan.run_ash_scan"
 
 #: Each refusal of a document, by the document that draws it: None for no file.

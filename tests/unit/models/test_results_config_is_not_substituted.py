@@ -18,6 +18,8 @@ from pydantic import ValidationError
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 
 def test_no_recorded_config_stays_none(tmp_path, monkeypatch):
     operator = tmp_path / "operator.yaml"

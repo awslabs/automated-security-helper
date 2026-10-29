@@ -28,9 +28,12 @@ from automated_security_helper.core import cancellation
 from automated_security_helper.interactions.run_ash_container import run_cmd_direct
 from automated_security_helper.utils import subprocess_utils
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="process groups and SIGKILL are POSIX"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="process groups and SIGKILL are POSIX"
+    ),
+]
 
 _CHILD_SLEEP_SECONDS = 20.0
 _BOUND_SECONDS = 10.0

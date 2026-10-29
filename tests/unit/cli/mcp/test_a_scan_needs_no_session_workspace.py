@@ -26,6 +26,8 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 from automated_security_helper.cli.mcp.session_identity import serving_local_client
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def root(tmp_path, monkeypatch) -> Path:

@@ -47,6 +47,8 @@ from automated_security_helper.cli.mcp.session_paths import (
 )
 from automated_security_helper.cli.mcp_tools import mcp_select_profile
 
+pytestmark = pytest.mark.unit
+
 DAY = 24 * 3600
 SESSION = "idle-for-a-year"
 
