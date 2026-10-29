@@ -636,11 +636,14 @@ class TestATierRunThatRanNothingInARealPytest:
         "a leg that runs nothing is not green"
     )
 
-    def _plant(self, root: Path) -> None:
+    def _plant(
+        self, root: Path, *, leg_assertion: bool = False, real_test: bool = False
+    ) -> None:
+        """One skipped test, plus a passing leg assertion and/or a passing real test."""
         (root / "conftest.py").write_text(self.CONFTEST, encoding="utf-8")
         (root / "pytest.ini").write_text(
             "[pytest]\ntestpaths = suite\npython_files = test_*.py\n"
-            "markers =\n    unit: the unit tier\n",
+            "markers =\n    unit: the unit tier\n    leg_assertion: asserts a leg\n",
             encoding="utf-8",
         )
         (root / "suite").mkdir()
@@ -650,6 +653,19 @@ class TestATierRunThatRanNothingInARealPytest:
             "def test_it():\n    pass\n",
             encoding="utf-8",
         )
+        if leg_assertion:
+            (root / "suite" / "test_the_leg_has_its_tools.py").write_text(
+                "import pytest\n\n"
+                "pytestmark = [pytest.mark.unit, pytest.mark.leg_assertion]\n\n\n"
+                "def test_the_leg_has_its_tools():\n    pass\n",
+                encoding="utf-8",
+            )
+        if real_test:
+            (root / "suite" / "test_a_real_one.py").write_text(
+                "import pytest\n\npytestmark = pytest.mark.unit\n\n\n"
+                "def test_a_real_one():\n    pass\n",
+                encoding="utf-8",
+            )
 
     def _run(self, root: Path, *, under_ci: bool):
         env = _clean_env(PYTHONPATH=str(REPO_ROOT))
@@ -688,6 +704,22 @@ class TestATierRunThatRanNothingInARealPytest:
         done = self._run(tmp_path, under_ci=True)
         assert done.returncode == 1, done.stdout + done.stderr
         assert self.LINE in done.stdout, done.stdout
+
+    def test_a_passing_leg_assertion_does_not_hide_an_all_skipped_leg(self, tmp_path):
+        """The e2e tools test passes on every leg that has its tools; it must not count."""
+        self._plant(tmp_path, leg_assertion=True)
+        done = self._run(tmp_path, under_ci=True)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "tier run executed no test: 2 collected, 1 skipped, 0 executed" in (
+            done.stdout
+        ), done.stdout
+
+    def test_the_same_leg_with_a_real_passing_test_stays_green(self, tmp_path):
+        """The control for the case above: one executed test is enough."""
+        self._plant(tmp_path, leg_assertion=True, real_test=True)
+        done = self._run(tmp_path, under_ci=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "executed no test" not in done.stdout, done.stdout
 
     def test_the_same_run_on_a_developer_machine_stays_green(self, tmp_path):
         """The control: without the opt-in and a shard, a skipped test is a skip."""
@@ -1011,6 +1043,54 @@ class TestATierRunThatExecutedNoTestFails:
         for report in reports:
             plugin.pytest_runtest_logreport(report)
         assert (plugin.executed, plugin.skipped) == (3, 2)
+
+    def test_a_leg_assertion_report_is_left_out_of_both_counts(self):
+        plugin = sharding._TierRunOutcome()
+        marked = [(sharding.LEG_ASSERTION_PROPERTY, True)]
+        for when, outcome in (("setup", "passed"), ("call", "passed")):
+            plugin.pytest_runtest_logreport(
+                self._report(when, outcome, user_properties=marked)
+            )
+        plugin.pytest_runtest_logreport(
+            self._report("call", "skipped", user_properties=marked)
+        )
+        assert (plugin.executed, plugin.skipped) == (0, 0)
+        plugin.pytest_runtest_logreport(self._report("call", "passed"))
+        assert (plugin.executed, plugin.skipped) == (1, 0)
+
+    @pytest.mark.parametrize(
+        ("marker_name", "marked"), [("leg_assertion", True), ("unit", False)]
+    )
+    def test_the_report_of_a_leg_assertion_is_marked_where_the_test_ran(
+        self, marker_name, marked
+    ):
+        """Only the report reaches an xdist controller, so the mark is put on it."""
+        item = SimpleNamespace(
+            get_closest_marker=lambda name: object() if name == marker_name else None
+        )
+        report = SimpleNamespace(user_properties=[])
+        plugin = sharding._TierRunOutcome()
+        wrapper = plugin.pytest_runtest_makereport(item, None)
+        next(wrapper)
+        with pytest.raises(StopIteration):
+            wrapper.send(SimpleNamespace(get_result=lambda: report))
+        assert (
+            (sharding.LEG_ASSERTION_PROPERTY, True) in report.user_properties
+        ) is marked
+
+    def test_a_leg_whose_only_pass_is_a_leg_assertion_still_fails_the_floor(self):
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        marked = [(sharding.LEG_ASSERTION_PROPERTY, True)]
+        plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
+        plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
+        plugin.pytest_runtest_logreport(
+            self._report("call", "passed", user_properties=marked)
+        )
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert "2 skipped, 0 executed" in written[0], written
 
     def test_a_controller_counts_the_reports_xdist_forwards_once(self):
         """The workers' own counts are not summed too: that would count each test twice."""

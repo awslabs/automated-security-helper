@@ -70,6 +70,15 @@ class TestRendering:
     pytestmark = pytest.mark.unit
 ```
 
+One kind of test is marked by the leg it asserts and not by what it does: a leg
+assertion, such as `tests/integration/test_e2e_runner_has_its_tools.py`, checks what a CI
+leg is provisioned with. It starts no process, which by the rule above would make it
+unit, but it carries the tier of the leg it asserts (e2e there) so that exactly that leg
+runs it, and it also carries `leg_assertion`. The marker keeps it out of the
+executed-test count, so a leg whose only passing test is a leg assertion still fails the
+executed-test floor in `tests/utils/sharding.py`. Do not reclassify a leg assertion by
+what it does.
+
 There is no directory default. A test with no tier marker, or with more than one (a
 module-level `integration` and a function-level `unit` count as two), makes collection
 refuse the whole session with a usage error that lists the first offenders, so nothing

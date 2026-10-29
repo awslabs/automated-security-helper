@@ -300,6 +300,13 @@ def fail_a_tier_run_that_executed_no_test(
 
 #: The ``workeroutput`` key a worker hands its deselected count back under.
 WORKEROUTPUT_KEY = "ash_shard_deselected"
+#: The marker of a leg assertion: a test that checks what a CI leg is provisioned with.
+#: It carries the tier of the leg it asserts, and the floor does not count it as a test
+#: that executed, because a pass there says nothing about the product.
+LEG_ASSERTION_MARKER = "leg_assertion"
+#: The user property the plugin puts on a leg assertion's reports. A report is all the
+#: controller of an xdist run receives, and user properties travel with it.
+LEG_ASSERTION_PROPERTY = "ash_leg_assertion"
 
 
 class _TierRunOutcome:
@@ -319,6 +326,17 @@ class _TierRunOutcome:
     def pytest_deselected(self, items: Sequence[Any]) -> None:
         self.deselected += len(items)
 
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_runtest_makereport(self, item: Any, call: Any) -> Any:
+        """Mark the reports of a leg assertion, in the process that ran the test.
+
+        The controller of an xdist run never sees the item, only the report, so the
+        mark has to be on the report.
+        """
+        outcome = yield
+        if item.get_closest_marker(LEG_ASSERTION_MARKER) is not None:
+            outcome.get_result().user_properties.append((LEG_ASSERTION_PROPERTY, True))
+
     def pytest_runtest_logreport(self, report: Any) -> None:
         """Count executed and skipped tests from the reports this process receives.
 
@@ -327,8 +345,12 @@ class _TierRunOutcome:
         count is the same either way. A test is executed when its call phase ran
         without skipping, or when its setup failed (an error is a result). A skip
         in setup, or ``pytest.skip`` in the body, is skipped; an expected failure
-        (``wasxfail``) ran its body and is executed.
+        (``wasxfail``) ran its body and is executed. A leg assertion is neither: it
+        is left out of both counts.
         """
+        properties = getattr(report, "user_properties", None) or []
+        if any(name == LEG_ASSERTION_PROPERTY for name, _ in properties):
+            return
         if report.when == "setup":
             if report.failed:
                 self.executed += 1

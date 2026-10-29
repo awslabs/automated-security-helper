@@ -33,7 +33,9 @@ tests/integration/scanners/test_links_leaving_the_tree_reach_no_output.py is the
 nearest thing to a shared skip; there is no fixture shared by all e2e modules).
 Provisioning them is a separate CI change. Until it lands, the executed-test floor in
 tests/utils/sharding.py (``fail_a_tier_run_that_executed_no_test``) is what makes an
-e2e leg that ran nothing fail.
+e2e leg that ran nothing fail. This test carries the ``leg_assertion`` marker for that
+reason: it passes on every leg that has its tools, so counted as an executed test it
+would keep the floor from ever firing on an e2e leg whose real tests all skipped.
 
 The check applies to a CI tier run only, as ``sharding.is_ci_tier_run`` in
 tests/utils/sharding.py defines it, the same test the executed-test floor uses. On a
@@ -53,7 +55,10 @@ import pytest
 
 from tests.utils import sharding
 
-pytestmark = pytest.mark.e2e
+#: A leg assertion: marked with the tier of the leg it asserts, not by what it does (it
+#: starts nothing), and left out of the executed-test count, so that passing it does
+#: not hide an e2e leg whose product tests all skipped. See tests/NAMING_CONVENTIONS.md.
+pytestmark = [pytest.mark.e2e, pytest.mark.leg_assertion]
 
 #: Console scripts of this checkout's environment, found beside the interpreter.
 ENVIRONMENT_SCRIPTS = ("ash", "cfn-lint", "detect-secrets")
