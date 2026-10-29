@@ -108,6 +108,9 @@ global_settings:
       path: tests/unit/config/test_config_messages_hide_values.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/models/test_flat_occurrence_identity.py
+      reason: "False positive. One message text holds a made-up password that the masking test feeds through the id; the ferret-scan keyword heuristic reads the word before it."
+    - rule_id: API_KEY_OR_SECRET
       path: tests/unit/plugin_modules/ash_aws_plugins/test_security_hub_batch_import.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET
