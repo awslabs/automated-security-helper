@@ -34,6 +34,19 @@ _DEPRECATED_PARAM_PATTERN = re.compile(
     r"`(?P<name>[A-Za-z0-9_]+)`\s+is\s+deprecated", re.IGNORECASE
 )
 
+# The other refusal of an inference parameter: a model that takes either
+# temperature or top_p, not both ("`temperature` and `top_p` cannot both be
+# specified for this model. Please use only one."). The client always sends the
+# two, so without this repair every call to such a model failed and the walk
+# switched models with no word of why. The second-named parameter is dropped
+# and the first kept: the message names them in the order the model prefers,
+# and temperature is the knob an operator sets.
+_EXCLUSIVE_PARAMS_PATTERN = re.compile(
+    r"`(?P<first>[A-Za-z0-9_]+)`\s+and\s+`(?P<second>[A-Za-z0-9_]+)`\s+"
+    r"(?:cannot|can\s*not|can't|may\s+not)\s+both\s+be\s+(?:specified|set|used)",
+    re.IGNORECASE,
+)
+
 
 def _normalize_param_name(name: str) -> str:
     """Compare parameter names across spellings.
@@ -332,6 +345,17 @@ class BedrockModelClient:
                             )
                         )
                         continue
+                    pair = _EXCLUSIVE_PARAMS_PATTERN.search(msg)
+                    if pair and _drop_parameter(converse_args, pair.group("second")):
+                        ASH_LOGGER.verbose(
+                            self._redacted(
+                                f"Model {self._model_label} takes "
+                                f"'{pair.group('first')}' or '{pair.group('second')}' "
+                                f"but not both; retrying without "
+                                f"'{pair.group('second')}'"
+                            )
+                        )
+                        continue
                     return self._failed(
                         f"*Error: Validation error with model {self._model_label}: {msg}*",
                         model_specific,
@@ -382,11 +406,42 @@ class BedrockModelClient:
 
 
 class BedrockPromptBuilder:
-    """Pure prompt-template assembly. No I/O, no config dependencies."""
+    """Pure prompt-template assembly. No I/O, no config dependencies.
+
+    A finding that stands for several (``properties.summarized`` with
+    ``properties.original_count``, what the reporter's ``_summarize_findings``
+    builds) counts for all of them in every total and severity count here, so
+    the numbers the model is told do not shrink to the number of rule groups.
+
+    A builder given nothing to analyze answers ``""``, no prompt: the caller
+    writes its own line for the section. The builders used to answer a
+    sentence ("No findings to analyze.", "No compliance frameworks specified
+    for analysis."), which the reporter sent to the model as the prompt, so a
+    secrets-only scan got risk, compliance and technical sections that were a
+    model's reply to a placeholder, and the compliance one said no frameworks
+    were specified when they were.
+    """
 
     # ------------------------------------------------------------------
     # Prompt builders
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _count(finding: Dict[str, Any]) -> int:
+        """How many findings this one stands for: its ``original_count`` when it
+        is a summary of several, else one."""
+        properties = finding.get("properties") or {}
+        count = properties.get("original_count") if properties.get("summarized") else 1
+        return count if isinstance(count, int) and count > 0 else 1
+
+    def _severity_counts(self, findings: List[Dict[str, Any]]) -> Dict[str, int]:
+        severity_counts: Dict[str, int] = defaultdict(int)
+        for f in findings:
+            severity_counts[self._extract_severity(f)] += self._count(f)
+        return severity_counts
+
+    def _total(self, findings: List[Dict[str, Any]]) -> int:
+        return sum(self._count(f) for f in findings)
 
     def executive_summary(
         self,
@@ -394,15 +449,13 @@ class BedrockPromptBuilder:
         secret_findings: List[Dict[str, Any]],
         scanner_results: List[str],
     ) -> str:
-        severity_counts: Dict[str, int] = defaultdict(int)
-        for f in findings:
-            severity_counts[self._extract_severity(f)] += 1
+        severity_counts = self._severity_counts(findings)
 
         counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         return (
             f"Generate an executive summary for a security scan with the following results:\n\n"
             f"SCAN OVERVIEW:\n"
-            f"- Total actionable findings: {len(findings)}\n"
+            f"- Total actionable findings: {self._total(findings)}\n"
             f"- Secret findings: {len(secret_findings)}\n"
             f"- Scanners used: {', '.join(scanner_results)}\n\n"
             f"FINDINGS BY SEVERITY:\n{counts_str}\n\n"
@@ -411,7 +464,7 @@ class BedrockPromptBuilder:
 
     def severity_analysis(self, findings: List[Dict[str, Any]], severity: str) -> str:
         if not findings:
-            return f"No findings with {severity} level severity."
+            return ""
 
         lines = [f"Analyze the following {severity} level security findings:\n"]
         for i, finding in enumerate(findings):
@@ -434,7 +487,7 @@ class BedrockPromptBuilder:
 
     def secret_advice(self, secret_findings: List[Dict[str, Any]]) -> str:
         if not secret_findings:
-            return "No secret findings detected."
+            return ""
         return (
             f"The security scan has identified {len(secret_findings)} potential secrets in the codebase.\n\n"
             "Provide short action items covering:\n"
@@ -447,7 +500,7 @@ class BedrockPromptBuilder:
 
     def findings_summary(self, findings: List[Dict[str, Any]]) -> str:
         if not findings:
-            return "No findings to analyze."
+            return ""
 
         lines = ["Summarize the following security findings:\n"]
         for i, finding in enumerate(findings):
@@ -473,9 +526,7 @@ class BedrockPromptBuilder:
         findings: List[Dict[str, Any]],
         max_findings: int,
     ) -> str:
-        severity_counts: Dict[str, int] = defaultdict(int)
-        for f in findings:
-            severity_counts[self._extract_severity(f)] += 1
+        severity_counts = self._severity_counts(findings)
 
         # Prioritise most severe findings first
         severity_order = {
@@ -525,7 +576,7 @@ class BedrockPromptBuilder:
         include_code_snippets: bool,
     ) -> str:
         if not findings:
-            return "No findings to analyze."
+            return ""
 
         lines = [
             "Generate a detailed technical analysis of the following security findings:\n"
@@ -565,13 +616,15 @@ class BedrockPromptBuilder:
         self,
         findings: List[Dict[str, Any]],
         compliance_frameworks: List[str],
+        max_findings: int = 5,
     ) -> str:
+        """``max_findings`` is how many sample findings the prompt carries: the
+        reporter passes its ``max_findings_to_analyze``, which used to govern
+        every other section while this one always sent five."""
         if not findings:
-            return "No findings to assess risk."
+            return ""
 
-        severity_counts: Dict[str, int] = defaultdict(int)
-        for f in findings:
-            severity_counts[self._extract_severity(f)] += 1
+        severity_counts = self._severity_counts(findings)
 
         counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         lines = [
@@ -581,7 +634,7 @@ class BedrockPromptBuilder:
                 "Sample findings:\n"
             )
         ]
-        for i, finding in enumerate(findings[:5]):
+        for i, finding in enumerate(findings[:max_findings]):
             msg = self._extract_message(finding)
             rule_id = self._extract_rule_id(finding)
             level = finding.get("level", "none")
@@ -610,13 +663,13 @@ class BedrockPromptBuilder:
         findings: List[Dict[str, Any]],
         compliance_frameworks: List[str],
         industry_context: Optional[str],
+        max_findings: int = 5,
     ) -> str:
+        """``max_findings`` as for ``risk_assessment``."""
         if not findings or not compliance_frameworks:
-            return "No compliance frameworks specified for analysis."
+            return ""
 
-        severity_counts: Dict[str, int] = defaultdict(int)
-        for f in findings:
-            severity_counts[self._extract_severity(f)] += 1
+        severity_counts = self._severity_counts(findings)
 
         counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         fw_str = ", ".join(compliance_frameworks)
@@ -628,7 +681,7 @@ class BedrockPromptBuilder:
                 "Sample findings:\n"
             )
         ]
-        for i, finding in enumerate(findings[:5]):
+        for i, finding in enumerate(findings[:max_findings]):
             msg = self._extract_message(finding)
             rule_id = self._extract_rule_id(finding)
             level = finding.get("level", "none")
@@ -660,7 +713,7 @@ class BedrockPromptBuilder:
             (
                 f"I need a security summary report for a codebase scan.\n\n"
                 f"SCAN OVERVIEW:\n"
-                f"- Total actionable findings: {len(findings)}\n"
+                f"- Total actionable findings: {self._total(findings)}\n"
                 f"- Secret findings: {len(secret_findings)}\n"
                 f"- Scanners used: {', '.join(scanner_results)}\n\n"
                 "FINDINGS SUMMARY:\n"
@@ -705,7 +758,9 @@ class BedrockPromptBuilder:
     ) -> str:
         if custom_prompt:
             user_message = f"{custom_prompt}\n\n{user_message}"
-        if industry_context or compliance_frameworks:
+        # custom_context on its own reaches the model too: it used to be sent
+        # only when industry_context or compliance_frameworks was also set.
+        if industry_context or compliance_frameworks or custom_context:
             context_info = "\nADDITIONAL CONTEXT:\n"
             if industry_context:
                 context_info += f"- Industry: {industry_context}\n"
@@ -812,13 +867,14 @@ class BedrockReportPipeline:
     def run(self, prompts: Dict[str, str]) -> Dict[str, str]:
         """
         Execute all sections. Returns {cache_key: generated_content}.
-        Sections whose prompt is missing are skipped.
+        Sections whose prompt is missing or empty (a builder with nothing to
+        analyze) are skipped: an empty prompt is never sent to the model.
         """
         results: Dict[str, str] = {}
         for section in self._sections:
             key = section.cache_key
             prompt = prompts.get(key)
-            if prompt is None:
+            if not prompt:
                 continue
             content = self._get_or_generate(key, prompt, section.system_prompt)
             results[key] = content
