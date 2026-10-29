@@ -4,6 +4,7 @@
 """Module containing the JupyterConverter implementation."""
 
 import glob
+import hashlib
 import json
 import re
 import shutil
@@ -87,6 +88,14 @@ _STAGED_NAME = "notebook"
 #: exporter appends the notebook's value to the output name, so one holding a path
 #: separator or ``..`` would place the output outside the directory it was given.
 _PLAIN_EXTENSION = re.compile(r"\.[A-Za-z0-9_+-]{1,16}")
+
+#: The most bytes of UTF-8 the folded part of a converted file's name may take.
+#: A file name is 255 bytes at most on the common filesystems; the rest of the
+#: name is "-converted", the exporter's extension and, where one is added, the
+#: digest. See _output_base.
+_OUTPUT_NAME_MAX_BYTES = 200
+#: How many characters of the notebook path's SHA-256 tell two outputs apart.
+_OUTPUT_DIGEST_CHARS = 12
 
 
 class _NbconvertNotRun(Exception):
@@ -953,6 +962,52 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 result.returncode, direct, result.stdout, result.stderr
             )
 
+    def _output_base(self, ipynb_file: str, taken: Dict[str, str]) -> Path:
+        """``<results_dir>/<name>-converted``, where this notebook's output goes.
+
+        The name is the notebook's path folded into one component
+        (get_normalized_filename), as it was. Two things change it, each written
+        to the log with the notebook it stands for. A folded name another
+        notebook of this run already took (``a b.ipynb`` and ``a-b.ipynb`` fold
+        to one name) gets a digest of this notebook's path relative to the
+        scanned tree, so neither output overwrites the other: before this the
+        later conversion removed the earlier notebook's output, and that
+        notebook was never scanned. A folded name longer than a file name may be
+        is cut to _OUTPUT_NAME_MAX_BYTES and given the digest, so a long or
+        non-ASCII notebook path does not fail its own conversion. ``taken`` maps
+        each name used so far to its notebook.
+        """
+        folded = get_normalized_filename(get_shortest_name(ipynb_file)).replace(
+            ".ipynb", ""
+        )
+        relative = relative_display(ipynb_file, self.context.source_dir)
+        digest = hashlib.sha256(
+            relative.encode("utf-8", "surrogateescape")
+        ).hexdigest()[:_OUTPUT_DIGEST_CHARS]
+        name = folded
+        reason = None
+        if len(name.encode("utf-8")) > _OUTPUT_NAME_MAX_BYTES:
+            name = (
+                name.encode("utf-8")[:_OUTPUT_NAME_MAX_BYTES]
+                .decode("utf-8", "ignore")
+                .rstrip("-_")
+            )
+            reason = "its folded name is longer than a file name may be"
+        if name in taken:
+            reason = f"its folded name is also that of {taken[name]}"
+        if reason is not None:
+            name = f"{name}-{digest}"
+            while name in taken:
+                name = f"{name}-{digest}"
+            ASH_LOGGER.info(
+                shown_on_one_line(
+                    f"Converting {relative} to {name}-converted: {reason}"
+                ),
+                extra=NO_MARKUP,
+            )
+        taken[name] = relative
+        return self.results_dir.joinpath(f"{name}-converted")
+
     @staticmethod
     def _move_output(output_dir: Path, target_base: Path) -> Optional[Path]:
         """Move nbconvert's output to ``target_base`` plus its extension.
@@ -1063,6 +1118,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             active_ignore_paths(self.context.config.global_settings.ignore_paths),
             ignore_suppressions=self.context.ignore_suppressions,
         )
+        # The output names this run has used, each with its notebook, so two
+        # notebooks whose paths fold to one name get two outputs (_output_base).
+        taken: Dict[str, str] = {}
 
         for ipynb_file in ipynb_files:
             try:
@@ -1088,12 +1146,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     continue
 
                 ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")
-                short_ipynb_file = get_shortest_name(ipynb_file)
-                normalized_ipynb_file = get_normalized_filename(short_ipynb_file)
                 # The converted file is <name>-converted plus the exporter's extension,
-                # .py for a Python notebook; see _move_output.
-                filename_base = normalized_ipynb_file.replace(".ipynb", "")
-                target_base = self.results_dir.joinpath(f"{filename_base}-converted")
+                # .py for a Python notebook; see _output_base and _move_output.
+                target_base = self._output_base(ipynb_file, taken)
 
                 ASH_LOGGER.verbose(
                     f"Converting {ipynb_file} to target_path: {target_base.as_posix()}"

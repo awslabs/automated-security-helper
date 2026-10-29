@@ -2085,3 +2085,60 @@ class TestCandidateInputCount:
             "both convert() and candidate_input_count() must go through "
             "_notebooks_in_scan_set, or the two selections can drift"
         )
+
+
+class TestOutputNames:
+    """Every notebook that converts keeps an output of its own.
+
+    The converted file is named after the notebook's path folded into one
+    component, so two paths can fold to one name (``a b.ipynb`` and ``a-b.ipynb``),
+    and a long path folds to a name longer than a file name may be. The first
+    used to make the later conversion remove the earlier notebook's output, with
+    nothing recording that the earlier notebook was never scanned; the second
+    failed the conversion on the name alone.
+    """
+
+    def _convert(self, converter, monkeypatch, notebooks):
+        monkeypatch.setattr(
+            f"{MODULE}.scan_set", lambda **kwargs: [str(n) for n in notebooks]
+        )
+        use_stand_in_nbconvert(monkeypatch, converter)
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+        return converter.convert(), run
+
+    def test_two_notebooks_whose_folded_names_collide_both_keep_an_output(
+        self, converter, ash_log_records, monkeypatch
+    ):
+        # Out of the way, so only the collision changes a name here.
+        monkeypatch.setattr(f"{MODULE}._OUTPUT_NAME_MAX_BYTES", 100_000, raising=False)
+        spaced = write_notebook(converter.context.source_dir, "a b.ipynb")
+        dashed = write_notebook(converter.context.source_dir, "a-b.ipynb")
+
+        results, run = self._convert(converter, monkeypatch, [spaced, dashed])
+
+        assert len(run.calls) == 2
+        assert len(results) == 2, results
+        assert len(set(results)) == 2, "the second notebook overwrote the first's"
+        assert all(path.is_file() for path in results)
+        # The first keeps the plain folded name; the second is told apart from it.
+        assert results[0].name.endswith(expected_output_name(dashed))
+        assert results[1].name.endswith("-converted.py")
+        assert converter.failed_inputs == []
+        info = messages_at(ash_log_records, logging.INFO)
+        assert any("a-b.ipynb" in m and "a b.ipynb" in m for m in info), info
+
+    def test_a_notebook_whose_folded_name_is_too_long_for_a_file_still_converts(
+        self, converter, monkeypatch
+    ):
+        """The notebook's own name is a legal file name; folded with its
+        directories into one component it is not, so the output's name is cut."""
+        notebook = write_notebook(converter.context.source_dir, "n" * 240 + ".ipynb")
+
+        results, run = self._convert(converter, monkeypatch, [notebook])
+
+        assert len(run.calls) == 1
+        assert converter.failed_inputs == [], converter.failed_inputs
+        assert len(results) == 1 and results[0].is_file()
+        assert len(results[0].name.encode("utf-8")) <= 255
+        assert results[0].name.endswith("-converted.py")
