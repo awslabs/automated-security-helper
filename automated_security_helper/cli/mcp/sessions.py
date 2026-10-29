@@ -750,7 +750,13 @@ def end_session(session_id: str) -> bool:
         session: Optional[MCPSession] = get_default_registry().session_for(session_id)
     except ValueError:
         session = None
-    if session is not None and not session.try_begin_change():
+    # Marked before the change is tried: a scan or a write that releases the
+    # session right after the refusal below must already find the removal pending.
+    with _ended_lock:
+        _ended_while_scanning.add(session_id)
+    # try_begin_change answers None when the change began, and why it was refused
+    # otherwise.
+    if session is not None and session.try_begin_change() is not None:
         return False
     try:
         outcome = _remove_unless_a_scan_elsewhere_holds(session_id)
