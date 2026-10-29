@@ -50,6 +50,7 @@ from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
     ash_bin_path_from_environment,
     home_bin_path,
+    is_anchored,
     is_blank_bin_path,
     usable_home,
 )
@@ -69,7 +70,11 @@ from automated_security_helper.utils.download_utils import (
     pinned_install_already_satisfied,
 )
 from automated_security_helper.utils.error_text import error_text, text_without_values
-from automated_security_helper.utils.log import ASH_LOGGER, get_logger
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    get_logger,
+    show_debug_locals,
+)
 
 # Not rich.markup.escape, which shows a trailing backslash twice or lets it escape
 # the next tag; see escape_markup.
@@ -92,6 +97,11 @@ dependencies_app = typer.Typer(
     name="dependencies",
     help="Install dependencies for ASH plugins",
     pretty_exceptions_enable=True,
+    pretty_exceptions_short=True,
+    # As the other command apps: typer's default shows every frame's locals, and
+    # this module's frames hold the values the configuration read from the
+    # environment, which every line it prints is redacted with (utils/log.py).
+    pretty_exceptions_show_locals=show_debug_locals(),
 )
 
 console = ash_console(theme=rich_theme())
@@ -1504,9 +1514,12 @@ def _bin_path_hint(target: Path, from_environment: Optional[str]) -> Optional[st
             return None
     # is_blank_bin_path is True for None, so this branch always has a string; the
     # check says so to the type checker, which cannot see through the helper.
+    # Anchored, as the lookup requires (subprocess_utils.find_executable): on
+    # Windows before Python 3.13 isabs accepts a drive-less "\\tools", which the
+    # lookup does not search, so the hint is owed for it.
     elif (
         from_environment is not None
-        and os.path.isabs(from_environment)
+        and is_anchored(from_environment)
         and Path(os.path.abspath(from_environment)) == directory
     ):
         return None
