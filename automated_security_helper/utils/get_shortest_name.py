@@ -24,17 +24,20 @@ def get_shortest_name(input: str | Path):  # noqa: A002
     if not in_path.exists():
         # Just return the input, not an existing Path
         return input
-    cwd = Path.cwd()
-    input_posix = in_path.absolute().as_posix()
-    cwd_posix = cwd.absolute().as_posix()
+    cwd = Path.cwd().absolute()
+    absolute = in_path.absolute()
     # Annotated because the two branches bind different types: relative_to() gives a
     # Path, while `input` is still str | Path. Without this mypy infers Path from the
     # first branch and rejects the second -- the union is the honest type here, and
     # Path() accepts either.
     shortest: str | Path
-    if input_posix.startswith(cwd_posix) and input_posix != cwd_posix:
-        # If input starts with the cwd, use the relative path
-        shortest = in_path.absolute().relative_to(cwd)
+    # Compared by path components, not by text: with the cwd /work/app, the input
+    # /work/app-src/f starts with the cwd's text but is not below it, and
+    # relative_to() then raised ValueError out of every scanner and converter that
+    # names a file this way.
+    if absolute != cwd and absolute.is_relative_to(cwd):
+        # If input is below the cwd, use the relative path
+        shortest = absolute.relative_to(cwd)
     else:
         shortest = input
     return Path(shortest).as_posix()
