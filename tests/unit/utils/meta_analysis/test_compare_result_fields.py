@@ -123,3 +123,54 @@ def test_fields_aggregation_rewrites_on_purpose_are_not_differences():
     aggregated = {"ruleId": "R1", "ruleIndex": 0}
 
     assert compare_result_fields(original, aggregated) == []
+
+
+def _located(uri):
+    return {
+        "ruleId": "R1",
+        "message": {"text": "finding"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri},
+                    "region": {"startLine": 3, "endLine": 4},
+                }
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("original_uri", "aggregated_uri"),
+    [
+        ("file:///work/app/src/a.py", "src/a.py"),
+        ("/work/app/src/a.py", "src/a.py"),
+        ("./src/a.py", "src/a.py"),
+        ("src\\a.py", "src/a.py"),
+    ],
+)
+def test_a_location_uri_aggregation_made_relative_is_not_a_difference(
+    original_uri, aggregated_uri
+):
+    """Aggregation rewrites every kept result's file URI relative to the scan
+    root; compared as text, that read as a missing critical field on every
+    result of a healthy aggregation."""
+    assert compare_result_fields(_located(original_uri), _located(aggregated_uri)) == []
+
+
+def test_a_location_uri_naming_another_file_is_still_a_critical_difference():
+    missing = compare_result_fields(_located("src/a.py"), _located("src/b.py"))
+
+    assert [field["path"] for field in missing] == [
+        "locations[0].physicalLocation.artifactLocation.uri"
+    ]
+    assert missing[0]["importance"] == "critical"
+    assert missing[0]["original_value"] == "src/a.py"
+
+
+def test_two_relative_uris_with_one_as_the_others_tail_are_two_files():
+    missing = compare_result_fields(_located("other/src/a.py"), _located("src/a.py"))
+
+    assert [field["path"] for field in missing] == [
+        "locations[0].physicalLocation.artifactLocation.uri"
+    ]

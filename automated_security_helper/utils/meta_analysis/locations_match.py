@@ -37,7 +37,7 @@ def locations_match(loc1: Dict, loc2: Dict) -> bool:
     # URIs (a file:// URI or an absolute path becomes a path relative to the scan
     # root), so the two spellings are compared as paths, not as text.
     if file1 and file2:
-        if not _file_paths_match(file1, file2):
+        if not file_paths_match(file1, file2):
             return False
     # If one has a file path and the other doesn't, they don't match
     elif file1 or file2:
@@ -156,7 +156,7 @@ def _normalize_file_path(path: str) -> str:
     return text.rstrip("/")
 
 
-def _file_paths_match(file1: str, file2: str) -> bool:
+def file_paths_match(file1: str, file2: str) -> bool:
     """Whether two location URIs name the same file.
 
     Equal once normalized, or one is absolute and the other, relative, is its

@@ -172,6 +172,29 @@ def test_every_run_of_a_multi_run_aggregate_is_read():
     assert results["unmatched_results"] == {}
 
 
+def test_a_uri_aggregation_made_relative_counts_no_critical_field_missing():
+    """A scanner writes file:///<scan root>/src/a.py; aggregation writes src/a.py.
+    The results pair (locations_match compares the two as paths), and the field
+    comparison has to read the rewritten URI the same way, or every matched
+    result of a healthy aggregation counts one critical field missing."""
+    original = {
+        "bandit": _report(
+            [
+                _result("R1", "file:///work/app/src/a.py", 3),
+                _result("R2", "/work/app/src/b.py", 7),
+            ]
+        )
+    }
+    aggregated = _report([_result("R1", "src/a.py", 3), _result("R2", "src/b.py", 7)])
+
+    results = validate_sarif_aggregation(original, aggregated)
+
+    assert results["match_statistics"]["bandit"]["matched_results"] == 2
+    assert results["match_statistics"]["bandit"]["critical_fields_missing"] == 0
+    assert results["summary"]["critical_missing_fields"] == 0
+    assert results["missing_fields"]["bandit"]["critical"] == []
+
+
 def test_two_originals_cannot_share_one_aggregated_result():
     """Two identical original findings against one surviving aggregated copy: one
     was dropped by aggregation, and both were counted as matched."""

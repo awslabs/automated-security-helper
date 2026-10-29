@@ -7,6 +7,16 @@ import re
 from collections import Counter
 from typing import Any, Dict, List, Set
 
+from automated_security_helper.utils.meta_analysis.locations_match import (
+    file_paths_match,
+)
+
+# The leaf aggregation rewrites in every result it keeps: a location's file URI
+# (a ``file://`` URI or an absolute path becomes a path relative to the scan
+# root). The two spellings are compared as paths, as ``locations_match`` does
+# when it pairs the results, never as text.
+_LOCATION_URI_LEAF = ".artifactLocation.uri"
+
 
 # ---------------------------------------------------------------------------
 # extract_field_paths
@@ -191,6 +201,22 @@ def _leaf_paths(obj: Any, prefix: str = "") -> List[str]:
     return [prefix] if prefix else []
 
 
+def _leaf_values_equivalent(path: str, original: Any, aggregated: Any) -> bool:
+    """Whether the aggregated leaf at *path* carries the original's value.
+
+    A location's file URI is compared as a path (``file:///work/src/a.py`` and
+    ``src/a.py`` name one file once aggregation has made the URI relative to
+    the scan root); every other leaf goes through ``are_values_equivalent``.
+    """
+    if (
+        path.endswith(_LOCATION_URI_LEAF)
+        and isinstance(original, str)
+        and isinstance(aggregated, str)
+    ):
+        return file_paths_match(original, aggregated)
+    return are_values_equivalent(original, aggregated)
+
+
 def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> List[Dict]:
     """
     Compare fields between original and aggregated results.
@@ -200,7 +226,9 @@ def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> Lis
     not accept, is reported with the importance ``categorize_field_importance``
     gives its path: one of :data:`IMPORTANCE_LEVELS`, the vocabulary
     ``validate_sarif_aggregation`` buckets by. Fields aggregation rewrites on
-    purpose (:data:`EXPECTED_TRANSFORMATIONS`) are not compared.
+    purpose (:data:`EXPECTED_TRANSFORMATIONS`) are not compared, and a
+    location's file URI is compared as a path, since aggregation rewrites it
+    relative to the scan root.
 
     Args:
         original_result: Result from original scanner report
@@ -219,8 +247,8 @@ def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> Lis
             continue
         original = get_value_from_path(original_result, path)
         aggregated = get_value_from_path(aggregated_result, path)
-        if aggregated["exists"] and are_values_equivalent(
-            original["value"], aggregated["value"]
+        if aggregated["exists"] and _leaf_values_equivalent(
+            path, original["value"], aggregated["value"]
         ):
             continue
         missing_fields.append(
