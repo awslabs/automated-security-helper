@@ -52,6 +52,7 @@ from automated_security_helper.utils.get_scan_set import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.scan_output_dirs import record_converted_sources
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     relative_display,
@@ -1710,6 +1711,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
         # Shared by every archive below; only an archive that is extracted uses it.
         scan_budget = _ScanBudget()
+        # Each extraction directory and the archive it came from, recorded beside
+        # the output once the loop ends (record_converted_sources): a finding in
+        # an extracted member is placed by the archive under --changed-files-only.
+        sources: Dict[Path, str] = {}
         for archive_file in archive_files:
             # The target directory once this iteration has made it: a directory
             # no other archive wrote (see _unused_target), so a failure part way
@@ -1794,6 +1799,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             archive_handle, target_path / plain_gzip, plain_gzip, budget
                         )
                         results.append(target_path)
+                        sources[target_path] = archive_display
                         scan_budget.commit(budget)
                         continue
 
@@ -1940,6 +1946,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
                 # Add the extracted directory to results
                 results.append(target_path)
+                sources[target_path] = archive_display
                 scan_budget.commit(budget)
                 if unscannable:
                     ASH_LOGGER.debug(
@@ -2004,4 +2011,6 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     kind=_failure_kind(e),
                 )
 
+        if sources:
+            record_converted_sources(self.results_dir, self.context.work_dir, sources)
         return results

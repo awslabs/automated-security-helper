@@ -63,6 +63,7 @@ from automated_security_helper.utils.sandbox.scope import (
     sandbox_scope,
     scanner_sandbox_scope,
 )
+from automated_security_helper.utils.scan_output_dirs import record_converted_sources
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     refusal_reason,
@@ -1171,6 +1172,10 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # The output names this run has used, each with its notebook, so two
         # notebooks whose paths fold to one name get two outputs (_output_base).
         taken: Dict[str, str] = {}
+        # Each converted file and the notebook it came from, recorded beside the
+        # output once the loop ends (record_converted_sources): a finding in the
+        # converted file is placed by the notebook under --changed-files-only.
+        sources: Dict[Path, str] = {}
 
         for ipynb_file in ipynb_files:
             try:
@@ -1249,6 +1254,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     )
                     continue
                 results.append(converted)
+                sources[converted] = relative_display(
+                    ipynb_file, self.context.source_dir
+                )
                 ASH_LOGGER.debug(f"Successfully converted {ipynb_file} to {converted}")
 
             # The scope could not be built, or the backend refused the spawn.
@@ -1289,4 +1297,6 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     f"Jupyter conversion error traceback: {traceback.format_exc()}"
                 )
 
+        if sources:
+            record_converted_sources(self.results_dir, self.context.work_dir, sources)
         return results

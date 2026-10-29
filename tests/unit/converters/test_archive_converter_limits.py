@@ -220,6 +220,57 @@ def numbered(count: int, size: int = 16) -> Dict[str, bytes]:
     return {f"m{i}.py": incompressible(size, seed=i) for i in range(count)}
 
 
+class TestConvertedSources:
+    """An extracted archive is recorded, beside the output, as the source of every
+    member below its extraction directory, so a finding in a member follows the
+    archive under --changed-files-only."""
+
+    @pytest.mark.parametrize("kind", ["zip", "tar", "tar.gz"])
+    def test_an_extracted_archive_is_recorded_as_its_members_source(
+        self, tree, test_plugin_context, monkeypatch, kind
+    ):
+        import json
+
+        from automated_security_helper.utils.scan_output_dirs import (
+            CONVERTED_SOURCES_FILE_NAME,
+        )
+
+        archive = place(tree, kind, {"m.py": b"x = 1\n"}, stem="lib")
+        converter = converter_for(test_plugin_context, monkeypatch, [archive])
+
+        (extracted,) = converter.convert()
+
+        recorded = json.loads(
+            (Path(converter.results_dir) / CONVERTED_SOURCES_FILE_NAME).read_text(
+                encoding="utf-8"
+            )
+        )
+        key = (
+            extracted.resolve()
+            .relative_to(Path(test_plugin_context.work_dir).resolve())
+            .as_posix()
+            + "/"
+        )
+        assert recorded == {key: f"lib.{kind}"}
+
+    def test_a_refused_archive_is_not_recorded(
+        self, tree, test_plugin_context, monkeypatch, ash_warnings
+    ):
+        from automated_security_helper.utils.scan_output_dirs import (
+            CONVERTED_SOURCES_FILE_NAME,
+        )
+
+        archive = place(tree, "zip", numbered(3))
+        converter = converter_for(
+            test_plugin_context, monkeypatch, [archive], limits={"max_members": 2}
+        )
+
+        results = converter.convert()
+
+        assert_refused(converter, results, "a.zip", ash_warnings, "max_members")
+        assert not (Path(converter.results_dir) / CONVERTED_SOURCES_FILE_NAME).exists()
+
+
 def gnu_sparse_header_over_stored_data(name: str, stored: int, gz: bool) -> bytes:
     """A tar of one old GNU sparse member whose header says ``stored`` bytes of
     data follow while its real size and sparse map are zero.

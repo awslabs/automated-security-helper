@@ -1596,6 +1596,54 @@ class TestConvert:
             "nbconvert appends .py itself"
         )
 
+    def test_a_converted_notebook_is_recorded_with_its_source(
+        self, converter, tmp_path, monkeypatch, installed_jupyter
+    ):
+        """converted-sources.json beside the output maps the converted file, as a
+        finding in it names it (relative to the work directory), to the notebook
+        in the scanned tree, so --changed-files-only places the finding by the
+        notebook."""
+        from automated_security_helper.utils.scan_output_dirs import (
+            CONVERTED_SOURCES_FILE_NAME,
+        )
+
+        notebook = write_notebook(converter.context.source_dir / "nb", "analysis.ipynb")
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
+        use_stand_in_nbconvert(monkeypatch, converter)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", nbconvert_double())
+
+        (out,) = converter.convert()
+
+        recorded = json.loads(
+            (converter.results_dir / CONVERTED_SOURCES_FILE_NAME).read_text(
+                encoding="utf-8"
+            )
+        )
+        converted_path = (
+            out.resolve()
+            .relative_to(Path(converter.context.work_dir).resolve())
+            .as_posix()
+        )
+        assert recorded == {converted_path: "nb/analysis.ipynb"}
+
+    def test_nothing_is_recorded_when_no_notebook_converted(
+        self, converter, tmp_path, monkeypatch, installed_jupyter
+    ):
+        from automated_security_helper.utils.scan_output_dirs import (
+            CONVERTED_SOURCES_FILE_NAME,
+        )
+
+        notebook = write_notebook(converter.context.source_dir, "analysis.ipynb")
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
+        use_stand_in_nbconvert(monkeypatch, converter)
+        monkeypatch.setattr(
+            f"{MODULE}.run_ended_with_the_server",
+            nbconvert_double(returncode=1, stderr="boom"),
+        )
+
+        assert converter.convert() == []
+        assert not (converter.results_dir / CONVERTED_SOURCES_FILE_NAME).exists()
+
     def test_directories_in_the_scan_set_are_skipped(
         self, converter, ash_log_records, monkeypatch
     ):
