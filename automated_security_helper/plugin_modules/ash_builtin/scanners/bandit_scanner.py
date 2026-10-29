@@ -205,7 +205,7 @@ def _skipped_file_paths(run: Any) -> set:
     return skipped
 
 
-#: bandit's file selection when no config file sets ``include``
+#: bandit's file selection when no ``--configfile`` is passed
 #: (``bandit/core/config.py``, 1.9.4).
 _BANDIT_DEFAULT_INCLUDE = ("*.py", "*.pyw")
 
@@ -215,13 +215,16 @@ def _config_file_filters(final_args: Sequence[Any]) -> Tuple[List[str], List[str
 
     As bandit 1.9.4 reads them (``core/config.py``: the top level of a YAML
     file, or ``[tool.bandit]`` of a ``.toml`` file; ``core/manager.py``
-    ``discover_files``: ``include`` defaults to ``*.py`` and ``*.pyw``, and
-    ``exclude_dirs`` entries are matched like ``--exclude`` entries). Both are
-    applied before the ``--exclude`` argument, so the scanned-file check has to
-    know them: an operator config that leaves every Python file out was read as
-    bandit having scanned no file, an error. No ``--configfile``, a file that
-    cannot be read or parsed, or a value of another shape, leaves the defaults;
-    bandit itself then fails the scan on the same file, with its own message.
+    ``discover_files``: ``include`` selects the files, and ``exclude_dirs``
+    entries join the ``--exclude`` entries as one list, each matched the same
+    way). The scanned-file check has to apply the same selection: an operator
+    config that leaves every Python file out was read as bandit having scanned
+    no file, an error. With no ``--configfile`` bandit includes ``*.py`` and
+    ``*.pyw``; with one, a non-empty ``include`` list is used as written and
+    anything else (no key, an empty list) means ``*.py`` only, which is
+    bandit's ``or ["*.py"]`` fallback. A file that cannot be read or parsed, or
+    a parse that is not a mapping, leaves the no-config defaults; bandit itself
+    then fails the scan on the same file, with its own message.
     """
     include = list(_BANDIT_DEFAULT_INCLUDE)
     exclude_dirs: List[str] = []
@@ -264,6 +267,12 @@ def _config_file_filters(final_args: Sequence[Any]) -> Tuple[List[str], List[str
     configured_include = data.get("include")
     if isinstance(configured_include, list) and configured_include:
         include = [str(item) for item in configured_include]
+    else:
+        # A config file that sets no include, or an empty one, leaves bandit
+        # with ``*.py`` only: ``discover_files`` reads
+        # ``get_option("include") or ["*.py"]``, and the ``*.pyw`` default is
+        # set only when no config file is given at all (core/config.py).
+        include = ["*.py"]
     configured_exclude = data.get("exclude_dirs")
     if isinstance(configured_exclude, list):
         exclude_dirs = [str(item) for item in configured_exclude if str(item)]
@@ -1005,8 +1014,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         matched as an ``fnmatch`` glob or a plain substring against the walked
         path, unanchored. Only the operator's configured ``.bandit`` is read
         (``_process_config_options``); a file from the scanned tree never is.
-        An entry holding a line break cannot be passed and is left out with a
-        warning; an ini that does not parse adds nothing, with a warning.
+        The value is split on lines and then on commas, so no entry read here
+        holds a line break; an ini that does not parse adds nothing, with a
+        warning.
         """
         if self._ini_file is None:
             return []

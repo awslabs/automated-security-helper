@@ -365,7 +365,7 @@ def test_a_parsed_file_is_still_counted(tmp_path):
 
 
 def test_an_operator_config_whose_exclude_dirs_cover_the_tree_is_skipped(tmp_path):
-    """bandit applies the config file's exclude_dirs before --exclude, so a
+    """bandit applies the config file's exclude_dirs like --exclude entries, so a
     tree it legitimately leaves out is SKIPPED (0 scanned), not an error."""
     source = _tree(tmp_path, ["legacy/a.py"])
     config = tmp_path / "bandit.yaml"
@@ -390,6 +390,36 @@ def test_an_operator_config_whose_include_names_no_file_is_skipped(tmp_path):
     )
 
     assert scanner.targets_attempted == 0
+
+
+@pytest.mark.parametrize(
+    "body", ["include: []\n", "skips: []\n"], ids=["empty-include", "no-include"]
+)
+def test_a_config_file_without_an_include_list_means_py_only(tmp_path, body):
+    """bandit reads ``get_option("include") or ["*.py"]`` once a config file is
+    given, so under such a config a ``.pyw``-only tree is scanned by no file
+    and is SKIPPED, not "scanned no file"; the ``*.pyw`` default holds only
+    with no config file at all."""
+    source = _tree(tmp_path, ["script.pyw"])
+    config = tmp_path / "bandit.yaml"
+    config.write_text(body, encoding="utf-8")
+    scanner = _scanner(source, tmp_path)
+
+    scanner._record_scanned_files(
+        _report(source, [], []), ["bandit", "--configfile", str(config)], source
+    )
+
+    assert scanner.targets_attempted == 0
+
+
+def test_without_a_config_file_pyw_files_are_still_expected(tmp_path):
+    """The control: with no --configfile, bandit's defaults include ``*.pyw``,
+    so a ``.pyw``-only tree bandit reported nothing for is still an error."""
+    source = _tree(tmp_path, ["script.pyw"])
+    scanner = _scanner(source, tmp_path)
+
+    with pytest.raises(ScannerError, match="scanned no file"):
+        scanner._record_scanned_files(_report(source, [], []), ["bandit"], source)
 
 
 def test_an_operator_config_that_leaves_python_files_in_still_errors(tmp_path):
