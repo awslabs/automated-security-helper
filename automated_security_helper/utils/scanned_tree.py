@@ -203,7 +203,10 @@ def is_inside_tree(path: PathLike, root: PathLike) -> bool:
     starts with the root's components and leaves the tree in the next one, and
     its lexical parents include the root itself, so both the as-written prefix
     check and the as-written ancestor walk said "inside" for a tool outside the
-    tree, which was then refused as an in-tree one.
+    tree, which was then refused as an in-tree one. The directory-resolved
+    spelling is skipped for it as well: ``<root>/..`` has the root as its
+    directory, so that spelling read ``<real root>/..``, which starts with the
+    root's components and names its parent.
     """
     named = _absolute(path)
     literal = ".." not in named.parts
@@ -214,7 +217,10 @@ def is_inside_tree(path: PathLike, root: PathLike) -> bool:
     # As named, with its directory resolved, and fully resolved: a link on PATH
     # whose directory is a link into the tree, and a file in the tree that is
     # itself a link elsewhere, are both in the tree.
-    for spelling in (Path(os.path.realpath(named.parent)) / named.name, resolved):
+    spellings = [resolved]
+    if literal:
+        spellings.insert(0, Path(os.path.realpath(named.parent)) / named.name)
+    for spelling in spellings:
         if _starts_with(spelling, real_root):
             return True
     if literal and _has_ancestor_file(named, root):

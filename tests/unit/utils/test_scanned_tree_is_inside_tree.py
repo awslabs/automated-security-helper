@@ -42,6 +42,25 @@ def test_a_path_that_returns_into_the_root_through_dot_dot_is_inside(layout):
     assert is_inside_tree(root / "bin" / ".." / "bin" / "tool", root) is True
 
 
+@pytest.mark.parametrize("steps", [("..",), ("bin", "..", "..")])
+def test_the_roots_own_parent_is_outside(layout, steps):
+    """``<root>/..`` names the root's parent. Its directory is the root, so the
+    spelling with the directory resolved read ``<real root>/..``, which starts
+    with the root's components; only the resolved path is asked for a ``..``
+    spelling now."""
+    root, _elsewhere = layout
+    spelled = root.joinpath(*steps)
+    assert spelled.resolve() == root.resolve().parent
+
+    assert is_inside_tree(spelled, root) is False
+
+
+def test_a_dot_dot_that_stays_below_the_root_is_inside(layout):
+    root, _elsewhere = layout
+    (root / "tool").write_text("", encoding="utf-8")
+    assert is_inside_tree(root / "bin" / ".." / "tool", root) is True
+
+
 def test_a_plain_path_below_the_root_is_inside(layout):
     root, _elsewhere = layout
     assert is_inside_tree(root / "bin" / "tool", root) is True
