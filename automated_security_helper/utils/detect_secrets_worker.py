@@ -33,7 +33,8 @@ OUTPUT is written only on success, as a JSON list of ``[key, [secret, ...]]`` pa
 the collection's own key order, each secret in ``PotentialSecret.json()`` form. The key
 is kept separately from the secret's ``filename`` because they differ: scan_files keys a
 multi-file scan by the path relative to ``root`` while the secret keeps the absolute
-name.
+name. A baseline's entries are in the collection too; one the baseline's audit marked
+``is_secret: false`` (accepted as not a secret) is left out of OUTPUT.
 
 A secret found by this scan also carries ``ash_start_column``, the 1-based column its
 value starts at in its line, when the value is found there. detect-secrets reports no
@@ -52,7 +53,7 @@ import json
 import multiprocessing
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from automated_security_helper.utils.process_env import (
     apply_environ_overrides,
@@ -167,6 +168,45 @@ def refuse_http_requests() -> None:
     setattr(HTTPAdapter, "send", refuse)
 
 
+#: A baseline entry its audit accepted as not a secret: its key in the baseline,
+#: the secret's type and its hash.
+_Accepted = Set[Tuple[str, str, str]]
+
+
+def _accepted_by_the_baseline(collection: Any) -> _Accepted:
+    """The entries of *collection*, as loaded from the baseline, that the
+    baseline's audit marked ``is_secret: false``.
+
+    Taken before the scan adds to the collection. The baseline was loaded into
+    the same collection the scan adds to, so its entries are in the result too,
+    each keeping the audit result the baseline recorded (a secret found again
+    under the baseline's key is the same set element). One audited and accepted as not
+    a secret is not reported; an unaudited one, or one audited as a secret, is.
+    """
+    return {
+        (key, secret.type, secret.secret_hash)
+        for key, secrets in collection.data.items()
+        for secret in secrets
+        if getattr(secret, "is_secret", None) is False
+    }
+
+
+def _is_accepted(accepted: _Accepted, key: str, secret: Any, root: str) -> bool:
+    """Whether *secret*, keyed by *key* in the scanned collection, is one the
+    baseline accepted.
+
+    A multi-file scan keys a secret by its path relative to ``root``, as the
+    baseline does; a lone file is keyed by the name it was handed, an absolute
+    one, so that key is also tried relative to ``root``.
+    """
+    if not accepted:
+        return False
+    keys = {key}
+    if root and os.path.isabs(key):
+        keys.add(os.path.relpath(key, root))
+    return any((k, secret.type, secret.secret_hash) in accepted for k in keys)
+
+
 def run(request: Dict[str, Any]) -> List[List[Any]]:
     from detect_secrets.core.secrets_collection import SecretsCollection
     from detect_secrets.settings import transient_settings
@@ -201,11 +241,19 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
             else SecretsCollection()
         )
         collection.root = request["root"]
+        accepted = _accepted_by_the_baseline(collection)
         with transient_settings(request["settings"]):
             _scan_files(collection, request["paths"])
         lines_by_file: Dict[str, Optional[List[str]]] = {}
         return [
-            [key, [_with_column(secret, lines_by_file) for secret in secrets]]
+            [
+                key,
+                [
+                    _with_column(secret, lines_by_file)
+                    for secret in secrets
+                    if not _is_accepted(accepted, key, secret, collection.root)
+                ],
+            ]
             for key, secrets in collection.data.items()
         ]
     finally:
