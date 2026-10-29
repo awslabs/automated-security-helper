@@ -1433,7 +1433,8 @@ _TYPED_ENVIRONMENT_VALUE = _TypedEnvironmentValue()
 
 
 def without_env_scalars(value: Any) -> Any:
-    """*value* with every EnvResolvedScalar inside downcast to plain str.
+    """*value* with every EnvResolvedScalar inside downcast to plain str, a
+    dict's keys included.
 
     Walks lists, tuples, sets and dicts on its own stack, in post-order:
     each container is rebuilt after its entries. The input is a config
@@ -1482,13 +1483,18 @@ def without_env_scalars(value: Any) -> Any:
                 )
             in_progress.add(id(node))
             stack.append((node, True))
-            entries = node.values() if isinstance(node, dict) else node
-            stack.extend((entry, False) for entry in entries)
+            if isinstance(node, dict):
+                # Keys are entries too: a marker written as a mapping key is
+                # downcast like one written as a value.
+                stack.extend((key, False) for key in node)
+                stack.extend((entry, False) for entry in node.values())
+            else:
+                stack.extend((entry, False) for entry in node)
         else:
             in_progress.discard(id(node))
             if isinstance(node, dict):
                 rebuilt[id(node)] = {
-                    key: rebuilt[id(entry)] for key, entry in node.items()
+                    rebuilt[id(key)]: rebuilt[id(entry)] for key, entry in node.items()
                 }
             elif isinstance(node, list):
                 rebuilt[id(node)] = [rebuilt[id(entry)] for entry in node]
@@ -1515,7 +1521,10 @@ def _set_member_order(member: Any) -> Tuple[int, str]:
 
 def first_env_scalar(value: Any) -> Optional["EnvResolvedScalar"]:
     """The first EnvResolvedScalar *value* is or contains; None when it holds
-    none. Dict keys are not walked, only values.
+    none. Dict keys are walked as well as values, each key before its value:
+    a YAML mapping key can be a reference too (``${VAR}: 1``), and a key the
+    detector skipped reached pydantic as a str subclass, which a typed key
+    slot converted silently and an untyped one kept into the validated model.
 
     Iterative, on its own stack, like :func:`without_env_scalars`: this one
     answers for every container field of every section, nested however deep
@@ -1549,7 +1558,11 @@ def first_env_scalar(value: Any) -> Optional["EnvResolvedScalar"]:
                 continue
             seen.add(id(current))
             if isinstance(current, dict):
-                stack.extend(reversed(current.values()))
+                entries: List[Any] = []
+                for key, item in current.items():
+                    entries.append(key)
+                    entries.append(item)
+                stack.extend(reversed(entries))
             elif isinstance(current, set):
                 stack.extend(sorted(current, key=_set_member_order, reverse=True))
             else:
