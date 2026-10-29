@@ -19,8 +19,13 @@ class KeyPairAsCFnParameterRule < BaseRule
 
     parameters = cfn_model.parameters.select do |name, properties|
 
+      # cfn-model gives the type as {"value" => ..., "line" => ...} when it keeps
+      # line numbers and as the plain string otherwise; String#[]("value") is nil,
+      # so the plain shape never matched and the rule never reported.
       # TODO: find way to preserve the line number from properties.type["line"]
-      properties.type["value"] == "AWS::EC2::KeyPair::KeyName"
+      type = properties.type
+      type = type["value"] if type.is_a?(Hash)
+      type == "AWS::EC2::KeyPair::KeyName"
     end
 
     parameters.values.map(&:id)
