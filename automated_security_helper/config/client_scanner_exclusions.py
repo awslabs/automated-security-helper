@@ -51,9 +51,16 @@ Matching
 Each entry is matched the way its scanner reads it, as closely as can be done
 on a finding's path after the fact:
 
-* bandit ``excluded_paths``: ASH passes bandit ``**/<path>/**``, which bandit
-  matches with ``fnmatch`` against the file's path. The same pattern is matched
-  against the finding's absolute path.
+* bandit ``excluded_paths``: the ``--exclude`` globs bandit is given for the
+  entry (``bandit_scanner.bandit_excluded_path_globs``, anchored at the scan
+  root, which is read off the finding's absolute and relative paths), matched
+  as bandit 1.9.4 matches them: ``fnmatch`` against the file's absolute path, or
+  a plain substring of it. One builder serves the argument and this matcher, so
+  the matcher cannot drift from what bandit skipped. (It matched the retired
+  unanchored ``**/<path>/**`` against the absolute path before: an entry naming
+  a directory above the scan root suppressed every bandit finding, a file entry
+  such as ``app.py`` suppressed nothing, and ``.`` or an empty entry became
+  ``**/**`` and suppressed everything, while bandit had excluded none of it.)
 * checkov ``skip_path``: as checkov's own filter reads it, a regular
   expression found in, or a substring of, the absolute path of the file or of a
   directory above it (``checkov_skips``).
@@ -105,7 +112,7 @@ import fnmatch
 import re
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import (
     Any,
     Iterable,
@@ -193,9 +200,7 @@ class ClientScannerExclusion(BaseModel):
     def hides(self, *, relative: str, absolute: str, rule_id: Optional[str]) -> bool:
         """Whether the scanner would have left out a finding at this location."""
         if self.kind == "bandit":
-            return fnmatch.fnmatch(
-                absolute, str(PurePosixPath("**").joinpath(self.pattern, "**"))
-            )
+            return bandit_would_skip(self.pattern, relative=relative, absolute=absolute)
         if self.kind == "checkov":
             return checkov_skips(self.pattern, absolute, relative)
         if self.kind == "glob":
@@ -216,6 +221,36 @@ class ClientScannerExclusion(BaseModel):
             f"(ASH, client-supplied config) Suppressing finding excluded by "
             f"{self.key} {what} with reason: {self.reason}"
         )
+
+
+def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
+    """Whether bandit, given ``excluded_paths`` entry ``pattern``, skips the file at ``absolute``.
+
+    The entry's ``--exclude`` globs come from the builder the scanner uses
+    (``bandit_scanner.bandit_excluded_path_globs``), anchored at the scan root,
+    and are matched as bandit 1.9.4 matches them (``manager._is_file_included``):
+    ``fnmatch`` against the walked path, or a plain substring of it. The root is
+    the part of ``absolute`` above ``relative``. A finding whose absolute path is
+    not ``<root>/<relative>`` (an absolute URI the SARIF step could not make
+    relative to the source directory) names no root, so nothing is hidden: that
+    finding is reported, never suppressed on a guess.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+        bandit_excluded_path_globs,
+    )
+
+    below = relative.replace("\\", "/")
+    while below.startswith("./"):
+        below = below[2:]
+    below = below.lstrip("/")
+    path = absolute.replace("\\", "/")
+    if not below or not path.endswith("/" + below):
+        return False
+    root = path[: -(len(below) + 1)]
+    return any(
+        fnmatch.fnmatchcase(path, entry) or entry in path
+        for entry in bandit_excluded_path_globs(root, pattern)
+    )
 
 
 def checkov_skips(pattern: str, absolute: str, relative: str) -> bool:
