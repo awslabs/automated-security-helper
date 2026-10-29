@@ -23,6 +23,7 @@ import enum
 import os
 import pathlib
 import types
+import typing
 from typing import (
     Annotated,
     Any,
@@ -282,6 +283,25 @@ _ENV_SCALAR_SPELLING = {
 }
 
 
+#: The classes a type alias (``type X = ...``, or ``TypeAliasType("X", ...)``)
+#: is an instance of. On Python 3.12 and 3.13 typing_extensions defines a
+#: TypeAliasType of its own instead of re-exporting typing's, so an alias the
+#: ``type`` statement makes (a typing.TypeAliasType) matched an isinstance
+#: check against typing_extensions' class on neither version and was never
+#: unwrapped: a scalar alias over a number admitted a reference, and a
+#: container or section alias hid its slots. Both classes are read.
+_TYPE_ALIAS_TYPES: Tuple[type, ...] = tuple(
+    dict.fromkeys(
+        kind
+        for kind in (
+            typing_extensions.TypeAliasType,
+            getattr(typing, "TypeAliasType", None),
+        )
+        if isinstance(kind, type)
+    )
+)
+
+
 def _unwrap_annotated(annotation: Any, seen: Optional[Set[Any]] = None) -> Any:
     """The underlying type of an Annotated shape, a NewType or a TypeAliasType
     (parameterized or not), which pydantic expands to the type they stand for;
@@ -299,8 +319,8 @@ def _unwrap_annotated(annotation: Any, seen: Optional[Set[Any]] = None) -> Any:
             annotation = get_args(annotation)[0]
         elif hasattr(annotation, "__supertype__"):
             annotation = annotation.__supertype__
-        elif isinstance(annotation, typing_extensions.TypeAliasType) or isinstance(
-            origin, typing_extensions.TypeAliasType
+        elif isinstance(annotation, _TYPE_ALIAS_TYPES) or isinstance(
+            origin, _TYPE_ALIAS_TYPES
         ):
             if annotation in seen:
                 return Any
