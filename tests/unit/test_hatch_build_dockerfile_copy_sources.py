@@ -21,13 +21,23 @@ context does not contain, and the packaged image build failed at that COPY with
 staged text: the existing hook test checks which files are written, not what the
 Dockerfile says.
 
+The fix for that replaced the prefix throughout the line, which rewrote too much:
+a ``--from=`` COPY's paths, which name another image stage's filesystem and not
+the build context, and a destination that held the assets path. And it still
+missed a source on a ``\``-continued line, whose first word is not ``COPY``. The
+rewrite now reads each instruction, continuation lines joined, as tokens, skips
+a ``--from=`` instruction, and rewrites only the source tokens.
+
 What is asserted
 ----------------
 The rewrite is a pure function of the Dockerfile's text, so it is asserted here
 in-process over the committed Dockerfile: every source of every COPY from the build
 context is a bare name, and the staged package files are named by their staged
 names. A planted two-source line pins the mechanism directly, so the assertion
-over the real Dockerfile cannot pass by the cfn-nag step having moved.
+over the real Dockerfile cannot pass by the cfn-nag step having moved. Planted
+lines pin the shapes the line-wide replacement got wrong: a ``--from=`` COPY and a
+destination holding the assets path are left as they are, and a source on a
+continued line is rewritten.
 """
 
 from __future__ import annotations
@@ -55,21 +65,38 @@ def _load_hook(monkeypatch):
     return module
 
 
+def _instructions(dockerfile_text: str) -> list[str]:
+    """Each instruction of the Dockerfile as one string, continued lines joined."""
+    found: list[str] = []
+    pending: list[str] = []
+    for line in dockerfile_text.splitlines():
+        pending.append(line)
+        stripped = line.rstrip()
+        if stripped.endswith("\\") and not stripped.lstrip().startswith("#"):
+            continue
+        found.append(" ".join(pending))
+        pending = []
+    if pending:
+        found.append(" ".join(pending))
+    return found
+
+
 def _copy_sources(dockerfile_text: str) -> list[tuple[str, list[str]]]:
-    """``(line, sources)`` for every COPY from the build context.
+    """``(instruction, sources)`` for every COPY from the build context.
 
     A ``--from=`` COPY reads another stage, not the context, so it is left out;
-    other ``--`` flags are not sources; the last argument is the destination.
+    other ``--`` flags are not sources; the last argument is the destination. A
+    ``\\``-continued COPY is read whole, so a source on its second line counts.
     """
     found = []
-    for line in dockerfile_text.splitlines():
-        words = line.split()
+    for instruction in _instructions(dockerfile_text):
+        words = [word for word in instruction.split() if word != "\\"]
         if not words or words[0] != "COPY":
             continue
         if any(word.startswith("--from=") for word in words[1:]):
             continue
         arguments = [word for word in words[1:] if not word.startswith("--")]
-        found.append((line, arguments[:-1]))
+        found.append((instruction, arguments[:-1]))
     return found
 
 
@@ -99,6 +126,51 @@ class TestEverySourceIsRewritten:
             "RUN cat automated_security_helper/assets/x\n"
         )
         assert hook.staged_dockerfile_text(text) == text
+
+    def test_a_copy_from_another_stage_keeps_its_paths(self, monkeypatch):
+        """``--from=`` reads an image stage, not the context: a path under that
+        stage's copy of the package is not an asset of the context, and a text
+        replacement over the whole line pointed it at a file the stage lacks."""
+        hook = _load_hook(monkeypatch)
+        text = (
+            "COPY --from=uv-reqs /src/automated_security_helper/assets/with-retry.sh "
+            "/usr/local/bin/\n"
+        )
+        assert hook.staged_dockerfile_text(text) == text
+
+    def test_the_destination_is_left_as_it_is(self, monkeypatch):
+        hook = _load_hook(monkeypatch)
+        text = (
+            "COPY automated_security_helper/assets/with-retry.sh "
+            "/opt/automated_security_helper/assets/with-retry.sh\n"
+        )
+        assert hook.staged_dockerfile_text(text) == (
+            "COPY with-retry.sh /opt/automated_security_helper/assets/with-retry.sh\n"
+        )
+
+    def test_a_source_on_a_continued_line_is_rewritten(self, monkeypatch):
+        """The second line's first word is a path, not ``COPY``; read one line at
+        a time, it was never an instruction and kept its checkout path."""
+        hook = _load_hook(monkeypatch)
+        text = (
+            "COPY automated_security_helper/assets/Gemfile \\\n"
+            "     automated_security_helper/assets/Gemfile.lock \\\n"
+            "     /deps/\n"
+        )
+        assert hook.staged_dockerfile_text(text) == (
+            "COPY Gemfile \\\n     Gemfile.lock \\\n     /deps/\n"
+        )
+
+    def test_a_flagged_copy_keeps_its_flags_and_destination(self, monkeypatch):
+        """The control for the token reading: flags are not sources."""
+        hook = _load_hook(monkeypatch)
+        text = (
+            "COPY --chown=ash:ash --chmod=644 automated_security_helper/assets/x "
+            "/opt/x\n"
+        )
+        assert hook.staged_dockerfile_text(text) == (
+            "COPY --chown=ash:ash --chmod=644 x /opt/x\n"
+        )
 
 
 class TestTheCommittedDockerfile:

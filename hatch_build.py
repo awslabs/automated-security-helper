@@ -52,6 +52,69 @@ DOCKERFILE_STAGED_PACKAGE_FILES: tuple = (
 _ASSETS_PREFIX = "automated_security_helper/assets/"
 
 
+def _staged_source(token: str) -> str:
+    """A COPY source as the assets build context names it, or the token itself.
+
+    A source in DOCKERFILE_STAGED_PACKAGE_FILES becomes its staged name; a source
+    under ``automated_security_helper/assets/`` loses that prefix. Any other
+    source, such as ``.``, is already a path the context contains and is kept.
+    """
+    for source_rel, staged_name in DOCKERFILE_STAGED_PACKAGE_FILES:
+        if token == f"automated_security_helper/{source_rel}":
+            return staged_name
+    if token.startswith(_ASSETS_PREFIX):
+        return token[len(_ASSETS_PREFIX) :]
+    return token
+
+
+def _continues(line: str) -> bool:
+    """Whether a Dockerfile line ends in a ``\\`` continuation.
+
+    A comment line inside an instruction is dropped by the Dockerfile parser,
+    so a ``\\`` ending one continues nothing. The root Dockerfile keeps the
+    default escape character; no ``# escape=`` directive is read here.
+    """
+    stripped = line.rstrip()
+    return (
+        bool(stripped)
+        and not stripped.lstrip().startswith("#")
+        and stripped.endswith("\\")
+    )
+
+
+def _staged_instruction(text: str) -> str:
+    """One COPY or ADD instruction, its continuation lines joined, sources staged.
+
+    The instruction is read as tokens: the instruction word, its ``--`` flags,
+    its sources, and the destination last. Only a source token is rewritten,
+    through _staged_source, so a destination that happens to hold the assets
+    path keeps it, and a flag is never a source. A ``--from=`` instruction reads
+    another image stage, not the build context: its paths are that stage's and
+    are left as they are, whatever they hold. The whitespace and the ``\\``
+    tokens between the tokens are kept, so the staged text keeps the layout of
+    the root Dockerfile's.
+    """
+    tokens = [(m.start(), m.end(), m.group()) for m in re.finditer(r"\S+", text)]
+    arguments = [
+        index
+        for index, (_start, _end, word) in enumerate(tokens[1:], start=1)
+        if word != "\\" and not word.startswith("--")
+    ]
+    if len(arguments) < 2 or any(
+        word.startswith("--from=") for _start, _end, word in tokens
+    ):
+        return text
+    sources = set(arguments[:-1])
+    staged = []
+    last = 0
+    for index, (start, end, word) in enumerate(tokens):
+        staged.append(text[last:start])
+        staged.append(_staged_source(word) if index in sources else word)
+        last = end
+    staged.append(text[last:])
+    return "".join(staged)
+
+
 def staged_dockerfile_text(content: str) -> str:
     """The root Dockerfile's text with every COPY source inside the assets context.
 
@@ -61,19 +124,27 @@ def staged_dockerfile_text(content: str) -> str:
     source, not the first: ``COPY <a> <b> /dest/`` carries two, and rewriting
     only the one right after ``COPY`` left the second pointing outside the
     context, so the packaged image build failed at that line while the same
-    Dockerfile built from a checkout. Comments and every other instruction are
-    left as they are; the paths in them are documentation.
+    Dockerfile built from a checkout. Only sources, not the whole line: a
+    text replacement over the line also rewrote a ``--from=`` instruction's
+    paths, which name another stage's filesystem and not the context, and a
+    destination that held the assets path. The lines of a ``\\``-continued
+    instruction are read together, so a source on a continuation line, whose
+    first word is not ``COPY``, is rewritten like the first. Comments and every
+    other instruction are left as they are; the paths in them are documentation.
     """
     staged = []
+    pending = []
     for line in content.splitlines(keepends=True):
-        instruction = line.split(maxsplit=1)[0].upper() if line.strip() else ""
-        if instruction in ("COPY", "ADD"):
-            for source_rel, staged_name in DOCKERFILE_STAGED_PACKAGE_FILES:
-                line = line.replace(
-                    f"automated_security_helper/{source_rel}", staged_name
-                )
-            line = line.replace(_ASSETS_PREFIX, "")
-        staged.append(line)
+        pending.append(line)
+        if _continues(line):
+            continue
+        instruction = "".join(pending)
+        pending = []
+        first = instruction.split(maxsplit=1)[0].upper() if instruction.strip() else ""
+        if first in ("COPY", "ADD"):
+            instruction = _staged_instruction(instruction)
+        staged.append(instruction)
+    staged.extend(pending)
     return "".join(staged)
 
 
