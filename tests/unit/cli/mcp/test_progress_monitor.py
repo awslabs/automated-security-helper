@@ -76,8 +76,7 @@ class TestMonitorScanProgress:
                 new=AsyncMock(
                     return_value={
                         "success": True,
-                        "findings_count": 0,
-                        "severity_counts": {},
+                        "summary_stats": {"severity_counts": {}, "total": 0},
                     }
                 ),
             ),
@@ -197,8 +196,10 @@ class TestMonitorScanProgress:
                 new=AsyncMock(
                     return_value={
                         "success": True,
-                        "findings_count": 3,
-                        "severity_counts": {"high": 2, "medium": 1},
+                        "summary_stats": {
+                            "severity_counts": {"high": 2, "medium": 1},
+                            "total": 3,
+                        },
                     }
                 ),
             ),
@@ -207,3 +208,139 @@ class TestMonitorScanProgress:
             await monitor_scan_progress(mock_ctx, "scan-progress")
 
         assert mock_ctx.report_progress.await_count >= 1
+
+
+def _results_reply(**summary_stats) -> dict:
+    """What ``mcp_get_scan_results`` answers for a completed scan.
+
+    The producer returns the aggregated results' ``summary_stats``
+    (``severity_counts`` and ``total``) and never a top-level ``findings_count``
+    or ``severity_counts``; the stubs here carry its shape so a monitor that
+    reads the wrong keys is caught.
+    """
+    return {"success": True, "summary_stats": summary_stats}
+
+
+async def _completed_scan(mock_ctx, tmp_path, results_reply, **monitor_kwargs):
+    """Run the monitor over a scan whose aggregated results already exist."""
+    output_dir = tmp_path / ".ash" / "ash_output"
+    output_dir.mkdir(parents=True)
+    (output_dir / "ash_aggregated_results.json").write_text("{}")
+    get_results = AsyncMock(return_value=results_reply)
+
+    with (
+        patch(
+            "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
+            new=AsyncMock(
+                return_value={"success": True, "directory_path": str(tmp_path)}
+            ),
+        ),
+        patch(
+            "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
+            new=get_results,
+        ),
+    ):
+        await monitor_scan_progress(mock_ctx, "scan-done", **monitor_kwargs)
+    return get_results
+
+
+class TestCompletionSummaryReadsTheResultsReply:
+    """The completion summary is built from what the results call returns.
+
+    The monitor read ``findings_count`` and ``severity_counts`` from the reply,
+    which carries neither (they are inside ``summary_stats``), so every
+    completed scan was announced as "Scan completed with no findings." whatever
+    it found. Red at the base: the summary sent names no findings.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_scan_with_findings_is_announced_with_its_counts(
+        self, mock_ctx, tmp_path
+    ):
+        await _completed_scan(
+            mock_ctx,
+            tmp_path,
+            _results_reply(
+                severity_counts={
+                    "suppressed": 1,
+                    "critical": 0,
+                    "high": 2,
+                    "medium": 1,
+                    "low": 0,
+                    "info": 0,
+                },
+                total=3,
+            ),
+        )
+
+        summaries = [
+            call.args[0]
+            for call in mock_ctx.info.await_args_list
+            if str(call.args[0]).startswith("Scan completed")
+        ]
+        assert summaries == [
+            "Scan completed with 3 findings: 1 suppressed, 2 high, 1 medium"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_total_the_reply_omits_is_summed_from_the_severities(
+        self, mock_ctx, tmp_path
+    ):
+        """A reply whose stats carry the counts but no total still counts them.
+
+        Suppressed findings are left out of the count, as the model's own
+        ``total`` leaves them out.
+        """
+        await _completed_scan(
+            mock_ctx,
+            tmp_path,
+            _results_reply(severity_counts={"suppressed": 4, "high": 1, "low": 2}),
+        )
+
+        summaries = [
+            call.args[0]
+            for call in mock_ctx.info.await_args_list
+            if str(call.args[0]).startswith("Scan completed")
+        ]
+        assert summaries == [
+            "Scan completed with 3 findings: 4 suppressed, 1 high, 2 low"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_clean_scan_is_announced_as_clean(self, mock_ctx, tmp_path):
+        """Control: a reply with every count at zero still reads as no findings."""
+        await _completed_scan(
+            mock_ctx,
+            tmp_path,
+            _results_reply(severity_counts={"high": 0, "suppressed": 0}, total=0),
+        )
+
+        mock_ctx.info.assert_any_await("Scan completed with no findings.")
+
+    @pytest.mark.asyncio
+    async def test_the_results_are_read_as_the_scans_session(self, mock_ctx, tmp_path):
+        """The results call is made as the session that started the scan.
+
+        A delivered tree's output sits in that session's sandbox, which no
+        operator grant names, so a read with no session is refused and the
+        completion summary was never sent for a delivered tree. Red at the base:
+        the call carried no session.
+        """
+        get_results = await _completed_scan(
+            mock_ctx,
+            tmp_path,
+            _results_reply(severity_counts={}, total=0),
+            session_id="session-a",
+        )
+
+        assert get_results.await_count == 1
+        assert get_results.await_args.kwargs.get("session_id") == "session-a"
+
+    @pytest.mark.asyncio
+    async def test_the_default_session_passes_no_session(self, mock_ctx, tmp_path):
+        """Control: with no session the results call names none, as before."""
+        get_results = await _completed_scan(
+            mock_ctx, tmp_path, _results_reply(severity_counts={}, total=0)
+        )
+
+        assert "session_id" not in get_results.await_args.kwargs

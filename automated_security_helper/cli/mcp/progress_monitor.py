@@ -109,12 +109,50 @@ def _build_findings_summary(severity_counts: dict) -> str:
     )
 
 
+def _findings_in(final_results: dict) -> Tuple[int, dict]:
+    """The finding count and per-severity counts of a ``mcp_get_scan_results`` reply.
+
+    The reply carries the aggregated results' ``summary_stats``: its
+    ``severity_counts`` mapping and its ``total``, the number of findings that
+    are not suppressed. It has never carried a top-level ``findings_count`` or
+    ``severity_counts``, which is what this monitor used to read, so every
+    completed scan was announced as having no findings whatever it found.
+
+    ``total`` is read when it is a number; otherwise the non-suppressed
+    severities are summed, which is how the model derives it.
+    """
+    stats = final_results.get("summary_stats")
+    if not isinstance(stats, dict):
+        return 0, {}
+    severity_counts = stats.get("severity_counts")
+    if not isinstance(severity_counts, dict):
+        severity_counts = {}
+    total = stats.get("total")
+    if isinstance(total, bool) or not isinstance(total, int):
+        total = sum(
+            count
+            for severity, count in severity_counts.items()
+            if isinstance(count, int)
+            and not isinstance(count, bool)
+            and str(severity).lower() != "suppressed"
+        )
+    return total, severity_counts
+
+
 async def _handle_scan_completed(
-    ctx: Context, output_dir: Path, connection_alive: bool
+    ctx: Context,
+    output_dir: Path,
+    connection_alive: bool,
+    session_id: Optional[str] = None,
 ) -> bool:
     """Emit completion progress + summary once the aggregated results file exists.
 
     Returns the (possibly updated) ``connection_alive`` flag.
+
+    The results are read as the scan's own session. A delivered tree's output
+    sits inside that session's sandbox, which no operator grant names, so a
+    read with no session is refused and the completion summary was never sent
+    for a scan of a delivered tree.
     """
     connection_alive = await _safe_send(
         connection_alive,
@@ -126,12 +164,13 @@ async def _handle_scan_completed(
         "Failed to send completion progress",
     )
 
-    final_results = await mcp_get_scan_results(output_dir=str(output_dir))
+    final_results = await mcp_get_scan_results(
+        output_dir=str(output_dir), **_in_session(session_id)
+    )
     if not final_results.get("success", False):
         return connection_alive
 
-    findings_count = final_results.get("findings_count", 0)
-    severity_counts = final_results.get("severity_counts", {})
+    findings_count, severity_counts = _findings_in(final_results)
 
     if findings_count > 0:
         summary = (
@@ -388,7 +427,9 @@ async def _run_monitor_loop(
         # converting one of them buys nothing measurable while changing the loop's
         # timing. Wants doing as one pass over the whole monitor.
         if ash_aggregated_results.exists():  # noqa: ASYNC240
-            await _handle_scan_completed(ctx, output_dir, connection_alive)
+            await _handle_scan_completed(
+                ctx, output_dir, connection_alive, session_id=session_id
+            )
             return
 
         progress_info = await mcp_get_scan_progress(
