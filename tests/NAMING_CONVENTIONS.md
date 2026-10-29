@@ -42,8 +42,12 @@ is decided by what the test does when it runs, not by the directory it sits in.
   run as a subprocess for one command), a sandbox backend is exercised for real,
   boto3 or moto stands up an AWS stand-in, or a converter invokes a tool. A child
   process counts even when the program it runs is a script the test wrote itself, such
-  as a `#!/bin/sh` fixture the code under test executes. A test that cannot be classed
-  from its text is integration.
+  as a `#!/bin/sh` fixture the code under test executes. The tier is read on every
+  path the test can take, not on the outcome it asserts: a test whose code path starts
+  a process, opens a socket or runs git on ANY outcome is integration, even when what
+  it checks is that nothing started (a refusal, a pre-filter that empties the scan
+  set, a rerender), because a regression that re-enables the path would start one. A
+  test that cannot be classed from its text is integration.
 - `e2e`: the whole product, driven as an operator would drive it. The `ash` CLI runs as
   a subprocess against a real target tree with real scanners and its output is
   asserted, the container image is built or run, or the MCP server is started as a

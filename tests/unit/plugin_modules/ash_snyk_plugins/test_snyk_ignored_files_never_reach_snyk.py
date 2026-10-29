@@ -214,7 +214,10 @@ def _findings_step_drops(context: PluginContext, uri: str) -> bool:
 
 
 class TestTheSourceTarget:
-    @pytest.mark.unit
+    # The refusal tests are integration like the tests that run snyk: each drives
+    # the scanner's scan(), which starts the stand-in snyk on any path the refusal
+    # does not take, so a regression in the refusal would start a process here.
+    @pytest.mark.integration
     def test_a_source_target_holding_an_ignored_file_never_starts_snyk(
         self, tmp_path, record
     ):
@@ -260,7 +263,7 @@ class TestTheSourceTarget:
         assert _canary_in(received) == ["thirdparty/zz-canary.js"]
 
     @pytest.mark.parametrize("gitignored", [True, False])
-    @pytest.mark.unit
+    @pytest.mark.integration
     def test_a_source_target_holding_the_output_dir_is_refused(
         self, tmp_path, record, gitignored
     ):
@@ -343,7 +346,7 @@ class TestTheSourceTarget:
 
 
 class TestTheConvertedTarget:
-    @pytest.mark.unit
+    @pytest.mark.integration
     def test_an_ignored_member_of_a_work_dir_outside_the_source_is_refused(
         self, tmp_path, record
     ):

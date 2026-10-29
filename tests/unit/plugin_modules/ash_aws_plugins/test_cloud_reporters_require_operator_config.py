@@ -234,7 +234,9 @@ class TestCloudReportersNeedTheOperator:
         assert not cloud.any(), cloud.summary()
         assert reports_run == []
 
-    @pytest.mark.unit
+    # integration: _rerender runs run_ash_scan, a path that can start reporters
+    # and scanners whatever this call's arguments keep it from doing.
+    @pytest.mark.integration
     def test_rerendering_stored_results_contacts_nothing(
         self, tmp_path, cloud, reports_run, constructed
     ):
@@ -253,7 +255,7 @@ class TestCloudReportersNeedTheOperator:
         assert not cloud.any(), cloud.summary()
         assert reports_run == []
 
-    @pytest.mark.unit
+    @pytest.mark.integration
     def test_rerendering_results_that_hold_no_scan_is_refused(
         self, tmp_path, cloud, reports_run
     ):
