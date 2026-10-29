@@ -11,7 +11,10 @@ from unittest.mock import patch
 import pytest
 
 from automated_security_helper.utils import subprocess_utils
-from automated_security_helper.utils.subprocess_utils import TimedOutProcess, run_command
+from automated_security_helper.utils.subprocess_utils import (
+    TimedOutProcess,
+    run_command,
+)
 
 pytestmark = pytest.mark.unit
 

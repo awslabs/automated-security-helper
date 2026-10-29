@@ -32,7 +32,9 @@ def test_a_timeout_stops_the_tree_the_child_leads():
     expired = subprocess.TimeoutExpired(["uv", "run", "tool"], 1)
     process = _child_that_outlives_its_timeout(expired)
     with (
-        patch.object(subprocess_utils.subprocess, "Popen", return_value=process) as popen,
+        patch.object(
+            subprocess_utils.subprocess, "Popen", return_value=process
+        ) as popen,
         patch.object(subprocess_utils, "_note_start", return_value=None),
         patch.object(subprocess_utils, "_stop_tree") as stop_tree,
         patch.object(subprocess_utils, "_output_after_stop", return_value=(b"", b"")),
@@ -69,7 +71,9 @@ def test_a_failed_wait_stops_the_tree_the_child_leads():
 def test_a_caller_that_names_the_session_flag_keeps_its_value():
     process = _child_that_outlives_its_timeout(KeyboardInterrupt())
     with (
-        patch.object(subprocess_utils.subprocess, "Popen", return_value=process) as popen,
+        patch.object(
+            subprocess_utils.subprocess, "Popen", return_value=process
+        ) as popen,
         patch.object(subprocess_utils, "_note_start", return_value=None),
         patch.object(subprocess_utils, "_claim_started", return_value=None),
         patch.object(subprocess_utils, "_note_failed_wait"),
