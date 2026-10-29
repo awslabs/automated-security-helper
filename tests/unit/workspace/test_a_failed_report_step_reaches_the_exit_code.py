@@ -53,6 +53,8 @@ from tests.unit.workspace.test_workspace_reporting import (
     FakeRaisingReporter,
 )
 
+pytestmark = pytest.mark.unit
+
 INTERNAL_ERROR = int(WorkspaceExitCode.INTERNAL_ERROR)
 
 

@@ -28,6 +28,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 #: The value of a variable the project's config reads for an ignore path's
 #: reason, a field no plan entry shows; the crashing module quotes it.
 OTHER = "zzother-secret-9137"

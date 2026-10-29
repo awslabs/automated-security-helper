@@ -18,6 +18,8 @@ from automated_security_helper.workspace.workspace_file import (
     load_workspace_file,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers
