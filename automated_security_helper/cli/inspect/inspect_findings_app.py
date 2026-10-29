@@ -1056,7 +1056,16 @@ class FindingsExplorerApp(App):
         table.focus()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if self.screen_stack and isinstance(self.screen, FindingDetailScreen):
+        # The app's bindings stay live under a screen it pushed, so under the
+        # detail screen and the suppress dialog they are refused: a j or k
+        # that reached the hidden table moved its cursor, and the dialog's
+        # result then marked the row the cursor had moved to; an x opened a
+        # second dialog over the first. Under the dialog q is refused too: a
+        # key the operator typed with the Save button focused would otherwise
+        # quit the app with the reason they typed.
+        if self.screen_stack and isinstance(
+            self.screen, (FindingDetailScreen, SuppressDialog)
+        ):
             if action in {
                 "toggle_filters",
                 "toggle_search",
@@ -1068,6 +1077,8 @@ class FindingsExplorerApp(App):
                 "previous_finding",
                 "suppress_selected",
             }:
+                return False
+            if action == "quit" and isinstance(self.screen, SuppressDialog):
                 return False
         return True
 
@@ -1260,17 +1271,27 @@ class FindingsExplorerApp(App):
                 finding = self.filtered_findings[finding_idx]
                 self.push_screen(
                     SuppressDialog(finding, self.config_path),
-                    self._on_suppress_result,
+                    lambda result: self._on_suppress_result(result, finding),
                 )
 
-    def _on_suppress_result(self, result: Optional[str]) -> None:
-        """Handle the result from the suppression dialog."""
+    def _on_suppress_result(
+        self, result: Optional[str], finding: Optional[dict] = None
+    ) -> None:
+        """Handle the result from the suppression dialog.
+
+        *finding* is the one the dialog was opened for, and the one marked
+        suppressed. Marking the row under the table's cursor instead marked
+        whatever row the cursor had moved to while the dialog was open.
+        """
         if result in (SuppressDialog.SAVED, SuppressDialog.ALREADY_SUPPRESSED):
             status_bar = self.query_one("#status_bar", Static)
-            table = self.query_one("#findings_table", DataTable)
-            idx = table.cursor_row
-            if idx is not None and idx < len(self.filtered_findings):
-                self.filtered_findings[idx]["suppressed"] = True
+            if finding is None:
+                table = self.query_one("#findings_table", DataTable)
+                idx = table.cursor_row
+                if idx is not None and idx < len(self.filtered_findings):
+                    finding = self.filtered_findings[idx]
+            if finding is not None:
+                finding["suppressed"] = True
                 self._populate_table()
 
             # After the repopulate, which writes the view's counts to the
@@ -1547,13 +1568,15 @@ class FindingsExplorerApp(App):
                 ),
                 reverse=self.sort_reverse,
             )
+        # `or ""` on both: a None rule id or message text (see _apply_search)
+        # cannot be ordered against a str, and the sort raised TypeError.
         elif self.current_sort == "message":
             self.filtered_findings.sort(
-                key=lambda f: f.get("message", ""), reverse=self.sort_reverse
+                key=lambda f: f.get("message") or "", reverse=self.sort_reverse
             )
         elif self.current_sort == "rule_id":
             self.filtered_findings.sort(
-                key=lambda f: f.get("rule_id", ""), reverse=self.sort_reverse
+                key=lambda f: f.get("rule_id") or "", reverse=self.sort_reverse
             )
 
     def _apply_search(self) -> None:
@@ -1561,15 +1584,18 @@ class FindingsExplorerApp(App):
         if not self.search_query:
             return
 
+        # Each field `or ""`: a result without a ruleId, or whose message has no
+        # text, gives the finding a None there (extract_findings), which the
+        # dict default does not replace, and .lower() on it ended the explorer.
         search_term = self.search_query.lower()
         self.filtered_findings = [
             f
             for f in self.filtered_findings
             if (
-                search_term in f.get("message", "").lower()
-                or search_term in f.get("rule_id", "").lower()
+                search_term in (f.get("message") or "").lower()
+                or search_term in (f.get("rule_id") or "").lower()
                 or search_term in (f.get("file") or "").lower()
-                or search_term in f.get("scanner", "").lower()
+                or search_term in (f.get("scanner") or "").lower()
                 or search_term in str(f.get("line", "")).lower()
             )
         ]
