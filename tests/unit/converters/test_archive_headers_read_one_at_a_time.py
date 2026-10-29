@@ -18,12 +18,16 @@ import tarfile
 import zlib
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
     ArchiveConverterConfig,
     ArchiveConverterConfigOptions,
 )
 from tests.utils.archive_builders import GENEROUS_LIMITS, incompressible
+
+pytestmark = pytest.mark.unit
 
 ARCHIVE_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter"

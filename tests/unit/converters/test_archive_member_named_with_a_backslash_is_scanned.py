@@ -39,9 +39,12 @@ from automated_security_helper.utils.suppression_matcher import (
     ignore_path_matches,
 )
 
-pytestmark = pytest.mark.skipif(
-    os.sep != "/", reason="a backslash separates where os.sep is one"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        os.sep != "/", reason="a backslash separates where os.sep is one"
+    ),
+]
 
 PATTERNS = ["lib/b.KIND/a/**", "**/a/**"]
 

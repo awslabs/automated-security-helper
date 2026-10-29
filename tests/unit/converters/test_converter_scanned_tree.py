@@ -55,9 +55,12 @@ JUPYTER_MODULE = (
 
 MARKER = "HOST-ONLY-CONTENT-3b9d"
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 @pytest.fixture
