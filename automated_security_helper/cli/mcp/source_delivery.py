@@ -1307,7 +1307,27 @@ def _git_environment(home: Path) -> Dict[str, str]:
 # construction. This repository has already been bitten by this class of bug
 # once (see the GitPython argument-injection dependency patches), so the guards
 # below reject the option-like shape outright rather than trying to escape it.
-_DANGEROUS_URL_PREFIXES = ("ext::",)
+
+#: A url whose text before its first ``::`` is made of scheme characters (letters,
+#: digits, ``+``, ``-`` and ``.``) names a git remote helper, ``ext::`` among them.
+#: Tested as a plain string prefix; every such form is refused.
+_REMOTE_HELPER_PREFIX = re.compile(r"[A-Za-z0-9+.\-]+::")
+
+
+def _refuse_remote_helper_prefix(url: str) -> None:
+    """Refuse ``url`` when a scheme-shaped prefix precedes its first ``::``.
+
+    Raises:
+        ValueError: if ``url`` names a remote helper before ``::``.
+    """
+
+    helper = _REMOTE_HELPER_PREFIX.match(url)
+    if helper is not None:
+        raise ValueError(
+            f"refusing a clone url with the {helper.group()!r} remote helper "
+            f"transport: git would run that helper rather than connect to a host"
+        )
+
 
 #: ``error_type`` values set_source_git returns, besides the scan-target refusal
 #: of a local clone source (scan_target_not_permitted) and invalid_session_id.
@@ -1392,17 +1412,11 @@ def _validate_clone_url(url: str) -> str:
 
     Raises:
         ValueError: if ``url`` is option-like, holds a control character or a
-            lone surrogate, or uses a command-executing transport.
+            lone surrogate, or names a remote helper before ``::``.
     """
 
     _reject_option_like(url, "url")
-    lowered = url.lower()
-    for prefix in _DANGEROUS_URL_PREFIXES:
-        if lowered.startswith(prefix):
-            raise ValueError(
-                f"refusing url with {prefix!r} transport: it instructs git to "
-                f"execute an arbitrary command"
-            )
+    _refuse_remote_helper_prefix(url)
     return url
 
 
@@ -1459,6 +1473,8 @@ def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
         raise ValueError(
             "refusing a clone url with whitespace, control characters or backslashes"
         )
+    # Before the scp-like reading below, which would take the helper name for a host.
+    _refuse_remote_helper_prefix(url)
     if local_clone_path(url) is not None:
         raise ValueError(
             "refusing a local clone source: set_source_git clones from a remote "
