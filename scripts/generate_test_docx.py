@@ -17,7 +17,18 @@ from pathlib import Path
 
 from docx import Document
 
-OUTPUT_PATH = Path("tests/test_data/scanners/ferret-scan/synthetic-pii-test.docx")
+# Anchored on this file, not on the working directory: a relative path wrote the
+# fixture into whatever directory the script was run from, silently creating a
+# new tests/test_data/... tree there when that was not the repository root.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+OUTPUT_PATH = (
+    REPO_ROOT
+    / "tests"
+    / "test_data"
+    / "scanners"
+    / "ferret-scan"
+    / "synthetic-pii-test.docx"
+)
 
 # Seed for reproducibility
 random.seed(42)
@@ -97,31 +108,59 @@ def fake_ssn():
     return f"{area}-{group}-{serial}"
 
 
+def luhn_check_digit(partial: str) -> str:
+    """The digit that makes ``partial`` + digit pass the Luhn check.
+
+    ferret-scan validates every card-number candidate with Luhn before it
+    reports one, so a fixture number with a random last digit is dropped nine
+    times in ten and the fixture under-exercises the detector it exists to test.
+    """
+    total = 0
+    for index, char in enumerate(reversed(partial)):
+        digit = int(char)
+        if index % 2 == 0:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return str((10 - total % 10) % 10)
+
+
+def luhn_valid(number: str) -> bool:
+    """Whether the digits of ``number`` (separators ignored) pass the Luhn check."""
+    digits = "".join(char for char in number if char.isdigit())
+    return len(digits) > 1 and luhn_check_digit(digits[:-1]) == digits[-1]
+
+
+def _random_digits(count: int) -> str:
+    return "".join(str(random.randint(0, 9)) for _ in range(count))  # nosec B311
+
+
 def fake_visa():
-    """Generate a fake Visa-like number (starts with 4, random digits)."""
-    digits = "4" + "".join(str(random.randint(0, 9)) for _ in range(15))  # nosec B311
+    """Generate a fake Visa-like number (starts with 4, Luhn-valid)."""
+    partial = "4" + _random_digits(14)
+    digits = partial + luhn_check_digit(partial)
     return f"{digits[0:4]}-{digits[4:8]}-{digits[8:12]}-{digits[12:16]}"
 
 
 def fake_mastercard():
-    """Generate a fake MasterCard-like number (starts with 5)."""
-    digits = (
-        "5"
-        + str(random.randint(1, 5))  # nosec B311
-        + "".join(str(random.randint(0, 9)) for _ in range(14))  # nosec B311
-    )
+    """Generate a fake MasterCard-like number (starts with 5, Luhn-valid)."""
+    partial = "5" + str(random.randint(1, 5)) + _random_digits(13)  # nosec B311
+    digits = partial + luhn_check_digit(partial)
     return f"{digits[0:4]}-{digits[4:8]}-{digits[8:12]}-{digits[12:16]}"
 
 
 def fake_amex():
-    """Generate a fake AMEX-like number (starts with 37)."""
-    digits = "37" + "".join(str(random.randint(0, 9)) for _ in range(13))  # nosec B311
+    """Generate a fake AMEX-like number (starts with 37, Luhn-valid)."""
+    partial = "37" + _random_digits(12)
+    digits = partial + luhn_check_digit(partial)
     return f"{digits[0:4]}-{digits[4:10]}-{digits[10:15]}"
 
 
 def fake_discover():
-    """Generate a fake Discover-like number (starts with 6011, random digits)."""
-    digits = "6011" + "".join(str(random.randint(0, 9)) for _ in range(12))  # nosec B311
+    """Generate a fake Discover-like number (starts with 6011, Luhn-valid)."""
+    partial = "6011" + _random_digits(11)
+    digits = partial + luhn_check_digit(partial)
     return f"{digits[0:4]} {digits[4:8]} {digits[8:12]} {digits[12:16]}"
 
 
