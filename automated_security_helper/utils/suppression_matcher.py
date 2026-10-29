@@ -312,6 +312,14 @@ def accepting_unconverted_input(
     ``expiration`` take part: an expired entry, or one kept from a results file
     with unknown keys, accepts nothing (_has_expired, _has_unknown_keys).
 
+    Only the operator's entries accept. An entry a delivered tree's own config
+    or a workspace policy file supplied (``client_supplied``) is left to the
+    finding step, where it marks results suppressed and the results show what
+    the client's config hid; it never waives scan coverage, as a client-supplied
+    ignore path never skips scanning (``ignore_paths_that_skip_scanning``).
+    Without this a tree could carry a suppression that waives the completeness
+    gate for an archive or notebook the tree itself made unreadable.
+
     Consulted only for an input error, the record of a file that is not one the
     converter could hand to its tool. A tool failure never reaches this, so a
     broken tool cannot be suppressed into a complete scan.
@@ -319,6 +327,9 @@ def accepting_unconverted_input(
     for index, suppression in enumerate(suppressions or []):
         rule_id = suppression.rule_id
         if rule_id is None or rule_id.lower() != UNCONVERTED_INPUT_RULE:
+            continue
+        # Read with getattr: a record built outside this model carries no flag.
+        if getattr(suppression, "client_supplied", False) is True:
             continue
         location = f"{where}[{index}]"
         if _has_expired(suppression, location) or _has_unknown_keys(
