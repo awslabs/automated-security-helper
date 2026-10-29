@@ -961,3 +961,93 @@ def test_a_relative_work_root_still_hands_the_child_paths_it_can_find(
     request_path, response_path = Path(calls[0][-2]), Path(calls[0][-1])
     assert request_path.is_absolute(), request_path
     assert response_path.is_absolute(), response_path
+
+
+def _children_in_turn(*fakes):
+    """Dispatch each child start to the next fake in order."""
+    calls: List[List[str]] = []
+
+    def fake(command, **kwargs):
+        index = min(len(calls), len(fakes) - 1)
+        calls.append(list(command))
+        return fakes[index](command, **kwargs)
+
+    return fake, calls
+
+
+@pytest.mark.unit
+def test_two_answerless_children_with_different_reasons_are_not_one_shared_failure(
+    tmp_path, monkeypatch
+):
+    """Two neighboring templates each crash the child for their own reason: the second
+    crash is not the first's, so the third template still gets its own child instead of
+    being failed with the second template's reason, as it was before this read."""
+    templates = _templates(tmp_path, 3)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    fake, calls = _children_in_turn(
+        _fake_child(None, [], returncode=134),
+        _fake_child(None, [], returncode=139),
+        _fake_child(answers, []),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        with pytest.raises(RuntimeError, match="exited 134"):
+            _call(templates[0], outdir)
+        with pytest.raises(RuntimeError, match="exited 139"):
+            _call(templates[1], outdir)
+        assert _call(templates[2], outdir) is None
+    assert len(calls) == 3
+
+
+@pytest.mark.unit
+def test_three_answerless_children_in_a_row_fail_the_rest_whatever_their_reasons(
+    tmp_path, monkeypatch
+):
+    """The bound: a run of crashes with differing reasons stops at the third child."""
+    templates = _templates(tmp_path, 4)
+    fake, calls = _children_in_turn(
+        _fake_child(None, [], returncode=1),
+        _fake_child(None, [], returncode=2),
+        _fake_child(None, [], returncode=3),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        with pytest.raises(RuntimeError, match="exited 1 "):
+            _call(templates[0], outdir)
+        with pytest.raises(RuntimeError, match="exited 2 "):
+            _call(templates[1], outdir)
+        with pytest.raises(RuntimeError, match="exited 3 "):
+            _call(templates[2], outdir)
+        with pytest.raises(RuntimeError, match="exited 3 "):
+            _call(templates[3], outdir)
+    assert len(calls) == 3
+
+
+@pytest.mark.unit
+def test_a_runner_that_raised_before_any_child_ran_leaves_no_child_record(
+    tmp_path, monkeypatch
+):
+    """The runner raising is not a child's exit; nothing is recorded for the scanner's
+    exit-code recorder to read. Before this read an empty response was appended."""
+    templates = _templates(tmp_path, 2)
+
+    def raising(*args, **kwargs):
+        raise RuntimeError("the scratch directory could not be made")
+
+    monkeypatch.setattr(cdk_nag_worker, "_run_child", raising)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ) as batch:
+        for t in templates:
+            with pytest.raises(RuntimeError, match="scratch directory"):
+                _call(t, outdir)
+
+    assert batch.failed_child_responses == []
+    assert batch.could_not_stop_response is None

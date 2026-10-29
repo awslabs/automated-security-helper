@@ -148,18 +148,43 @@ def _resource_location(
     ``Ref``, ``GetAtt`` or ``DependsOn`` of the resource, a ``Type`` whose last segment
     matches a short id such as ``Bucket``, or another resource's property can all come
     earlier in the file, and the finding was then placed on that other resource's line,
-    which also misapplied same-line suppressions. When several key lines match (a property
+    which also misapplied same-line suppressions. The key lines are read inside the
+    ``Resources`` section only: Outputs, Conditions and Mappings are separate namespaces, so
+    an Output named like the resource (``Outputs: {MyBucket: {Value: !Ref MyBucket}}``) is
+    legal and common, and a resource named like a top-level section would otherwise match
+    the section key itself. Within the section, when several key lines match (a property
     with the same spelling nested under another resource), the shallowest one is the
-    declaration: resources sit at the shallowest depth below the top-level sections, and
-    CloudFormation forbids two logical ids spelling the same. A template with no key line
-    for the id falls back to the first word-boundary mention, as before, so the location is
-    never lost outright.
+    declaration, since resources sit at the shallowest depth of the section and
+    CloudFormation forbids two logical ids spelling the same. A template whose Resources
+    section cannot be found, or has no key line for the id, falls back to the first
+    word-boundary mention, as before, so the location is never lost outright.
     """
     key_pattern = re.compile(
         r"^(\s*)[\"']?" + re.escape(resource_log_id) + r"[\"']?\s*:"
     )
-    best: tuple[int, int, int] | None = None
+    section_pattern = re.compile(r"^(\s*)[\"']?Resources[\"']?\s*:")
+    any_key_pattern = re.compile(r"^(\s*)[\"']?[A-Za-z0-9_.-]+[\"']?\s*:")
+    # The Resources section: from its key line to the next key line at the same or a
+    # shallower indent (the next top-level section, or JSON's closing brace).
+    section_indent: int | None = None
+    section_lines: List[tuple[int, str]] = []
     for i, line_str in enumerate(template_lines, start=1):
+        if section_indent is None:
+            section_match = section_pattern.match(line_str)
+            if section_match is not None:
+                section_indent = len(section_match.group(1))
+            continue
+        stripped = line_str.strip()
+        if not stripped:
+            continue
+        indent = len(line_str) - len(line_str.lstrip())
+        if indent <= section_indent and (
+            any_key_pattern.match(line_str) or stripped[0] in "}]"
+        ):
+            break
+        section_lines.append((i, line_str))
+    best: tuple[int, int, int] | None = None
+    for i, line_str in section_lines:
         match = key_pattern.match(line_str)
         if match is None:
             continue
@@ -737,15 +762,26 @@ def _violations_from_validation_report(
         conclusion = _plugin_conclusion(plugin_report)
         violations = plugin_report.get("violations", []) or []
         if conclusion is not None and conclusion != "success" and not violations:
-            # The pack reported failure with nothing to show for it: its validate() threw,
-            # or CDK could not run it. No rule of it was evaluated against this template.
+            # The plugin reported failure with nothing to show for it: its validate()
+            # threw, or CDK could not run it. No rule of it was evaluated against this
+            # template. That fails the template only for a pack the caller REQUESTED;
+            # CDK's own CloudFormation Validate plugin writes into the same report, and
+            # its failure says nothing about the requested packs' rules, so it is logged
+            # and not counted. With no requested names known, every failed entry counts.
             error = _plugin_error_text(plugin_report)
             detail = f": {error}" if error else ""
-            failed_packs.append(f"{pack_name}{detail}")
-            ASH_LOGGER.error(
-                f"cdk-nag pack '{pack_name}' reported '{conclusion}' with no violations, "
-                f"so it did not evaluate this template{detail}"
-            )
+            if not expected_plugins or pack_name in expected_plugins:
+                failed_packs.append(f"{pack_name}{detail}")
+                ASH_LOGGER.error(
+                    f"cdk-nag pack '{pack_name}' reported '{conclusion}' with no "
+                    f"violations, so it did not evaluate this template{detail}"
+                )
+            else:
+                ASH_LOGGER.warning(
+                    f"validation plugin '{pack_name}', which was not requested, reported "
+                    f"'{conclusion}' with no violations{detail}; the requested packs' "
+                    "results are unaffected"
+                )
             continue
         for violation in violations:
             rule_id = violation.get("ruleName") or ""

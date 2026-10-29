@@ -1247,3 +1247,60 @@ def test_a_worker_child_that_died_leaves_its_exit_code_on_the_plugin(
 
     assert scanner.exit_code == 139, scanner.exit_code
     assert scanner.scan_could_not_stop is None
+
+
+# ---------------------------------------------------------------------------
+# A partial failure keeps the findings of the packs that ran
+# ---------------------------------------------------------------------------
+
+
+def test_findings_from_the_packs_that_ran_reach_the_report_when_another_pack_failed(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """One requested pack found a violation; another threw. The template counts as
+    failed (the second pack's rules were never evaluated) AND the finding is reported.
+    Before this read the failure branch left the loop before the findings were added, so
+    a violating template read as empty, and the log said it was not evaluated at all."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": [nag_result(rule_id="AwsSolutions-S1")]},
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "HIPAA.Security)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == ["AwsSolutions-S1"], (
+        "the AwsSolutions finding is a fact about the template and must be reported"
+    )
+    assert scanner.targets_failed == 1
+    assert any("HIPAA.Security" in error for error in scanner.errors), scanner.errors
+    assert any(
+        "not evaluate every requested pack" in r.message for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any(
+        r.message.startswith("cdk-nag did not evaluate ")
+        and "every requested" not in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+
+
+def test_the_missing_dependency_reason_offers_no_install_hint_for_a_wrapper_import_failure(
+    scanner, monkeypatch
+):
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", [])
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "_CDK_WRAPPER_IMPORT_ERROR",
+        "ModuleNotFoundError: No module named 'cfn_tools'",
+    )
+    scanner.dependency_unavailable_reason = None
+
+    reason = scanner.missing_dependency_reason()
+
+    assert "cfn_tools" in reason
+    assert "ash dependencies install" not in reason, reason

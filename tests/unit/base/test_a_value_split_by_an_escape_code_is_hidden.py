@@ -170,7 +170,7 @@ def test_the_cdk_nag_workers_reason_hides_a_value_split_by_a_code(
         "_CHILD_BOOTSTRAP",
         _bootstrap_writing(f"node crashed reading {HEAD}{code}{TAIL} here\n"),
     )
-    answers, reason, timed_out = cdk_nag_worker._run_child(
+    answers, reason, timed_out, _response = cdk_nag_worker._run_child(
         ["t.yaml"], {}, tmp_path / "work", tmp_path, 60, (value,)
     )
     assert answers == [] and timed_out is False, (answers, reason)

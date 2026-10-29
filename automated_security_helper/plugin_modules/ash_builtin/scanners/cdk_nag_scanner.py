@@ -835,8 +835,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 remedy = "Install them with: ash dependencies install --tool cdk-nag"
             else:
                 remedy = (
-                    "The CDK packages are installed; the error above names what "
-                    "failed in ASH's own import."
+                    "The CDK packages are installed, so reinstalling them would "
+                    "change nothing; the import error is the fault to fix."
                 )
             reason = (
                 f"CDK dependencies are not usable ({_cdk_unusable_detail()}). {remedy}"
@@ -886,9 +886,15 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         ):
             return self.dependency_unavailable_reason
         if not _CDK_AVAILABLE:
+            # The install hint only when a distribution is missing, as the dependency
+            # check words it: with every distribution present, reinstalling changes nothing.
+            if _CDK_MISSING_DISTRIBUTIONS or not _CDK_WRAPPER_IMPORT_ERROR:
+                return (
+                    f"the CDK packages it needs are not usable ({_cdk_unusable_detail()}); "
+                    "install them with `ash dependencies install`"
+                )
             return (
-                f"the CDK packages it needs are not usable ({_cdk_unusable_detail()}); "
-                "install them with `ash dependencies install`"
+                f"the CDK packages it needs are not usable ({_cdk_unusable_detail()})"
             )
         if find_executable("node") is None:
             return (
@@ -1272,9 +1278,28 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         failure = text_without_values(
                             str(nag_result_dict.failure), self._environment_values()
                         )
-                        ASH_LOGGER.error(
-                            f"cdk-nag did not evaluate {cfn_file}: {failure}"
-                        )
+                        # A failure can come with findings: one requested pack threw
+                        # while another evaluated the template and found a violation.
+                        # Those findings are facts about the template and are kept;
+                        # the target still counts as failed, because the rules of the
+                        # pack that threw were never evaluated. Dropping them read a
+                        # violating template as empty, and "did not evaluate" was false.
+                        kept = [
+                            finding
+                            for findings in (nag_result_dict.results or {}).values()
+                            for finding in findings
+                        ]
+                        if kept:
+                            sarif_results.extend(kept)
+                            ASH_LOGGER.error(
+                                f"cdk-nag did not evaluate every requested pack against "
+                                f"{cfn_file} ({len(kept)} finding(s) from the packs that "
+                                f"ran are kept): {failure}"
+                            )
+                        else:
+                            ASH_LOGGER.error(
+                                f"cdk-nag did not evaluate {cfn_file}: {failure}"
+                            )
                         self.errors.append(f"{cfn_file}: {failure}")
                         continue
 
@@ -1441,10 +1466,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # state the run-level gate reads (which fail_on_incomplete_scanners does not
         # relax). Until this was recorded, a worker child ASH could not stop reached the
         # results as per-template text only, and the gate never fired for cdk-nag.
-        for child_response in worker_batch.failed_child_responses:
+        # Read with defaults: a test that stands the batch in with a bare context
+        # manager yields None, and the recorders then have nothing to record.
+        for child_response in getattr(worker_batch, "failed_child_responses", ()) or ():
             self._record_target_exit_code(child_response)
-        if worker_batch.could_not_stop_response is not None:
-            self._record_could_not_stop(worker_batch.could_not_stop_response)
+        could_not_stop = getattr(worker_batch, "could_not_stop_response", None)
+        if could_not_stop is not None:
+            self._record_could_not_stop(could_not_stop)
 
         # Every template failed. Say so loudly here as well as through the returned status:
         # this is the one line that distinguishes "your templates are compliant" from "cdk-nag

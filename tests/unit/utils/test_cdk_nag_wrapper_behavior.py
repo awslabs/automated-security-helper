@@ -2983,3 +2983,121 @@ def test_a_colon_in_the_template_name_is_folded_out_of_the_synth_directory_name(
 
     assert ":" not in Path(response.outdir).name, response.outdir
     assert Path(response.outdir).parent == outdir
+
+
+def test_an_unrequested_plugins_failure_does_not_fail_the_template(
+    cdk_doubles, template_file, outdir, monkeypatch, caplog
+):
+    """CDK's own CloudFormation Validate plugin writes into the same report. Its failure
+    says nothing about the requested packs' rules, so it is logged, not counted; before
+    this read every failed entry counted, and an unrequested plugin's error failed every
+    template and dropped every cdk-nag finding with it."""
+    _name_packs_by_class(monkeypatch)
+    cdk_doubles.report_text = json.dumps(
+        {
+            "version": "54.0.0",
+            "title": "Validation Report",
+            "pluginReports": [
+                {
+                    "pluginName": "CloudFormation Validate",
+                    "conclusion": "failure",
+                    "violations": [],
+                    "metadata": {"error": "validator crashed"},
+                },
+                {
+                    "pluginName": "AwsSolutions",
+                    "conclusion": "success",
+                    "violations": [],
+                },
+            ],
+        }
+    )
+
+    with caplog.at_level("WARNING"):
+        response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is None, response.failure
+    assert any(
+        "CloudFormation Validate" in r.message and "not requested" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+
+
+def test_a_requested_packs_failure_still_fails_the_template_when_names_are_known(
+    cdk_doubles, template_file, outdir, monkeypatch
+):
+    """The control for the previous test: the same failed entry under a requested name."""
+    _name_packs_by_class(monkeypatch)
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="failure")
+    )
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None
+    assert "AwsSolutions" in response.failure
+
+
+TEMPLATE_WITH_OUTPUT_FIRST = """Outputs:
+  MyDataBucket:
+    Value: !Ref MyDataBucket
+Resources:
+  MyDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: placeholder-name
+"""
+
+
+def test_an_output_named_like_the_resource_does_not_take_the_finding(
+    cdk_doubles, tmp_path, outdir
+):
+    """Outputs are their own namespace, so an Output spelled like the resource is legal.
+    The declaration is the key line inside the Resources section, line 5 here; before
+    this read the Output's key line at the same indent won by coming first."""
+    template = tmp_path / "output-first.yaml"
+    template.write_text(TEMPLATE_WITH_OUTPUT_FIRST, encoding="utf-8")
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == 5, region
+
+
+def test_a_json_output_named_like_the_resource_does_not_take_the_finding(
+    cdk_doubles, tmp_path, outdir
+):
+    template = tmp_path / "output-first.json"
+    template.write_text(
+        json.dumps(
+            {
+                "Outputs": {"MyDataBucket": {"Value": {"Ref": "MyDataBucket"}}},
+                "Resources": {
+                    "MyDataBucket": {
+                        "Type": "AWS::S3::Bucket",
+                        "Properties": {"BucketName": "placeholder-name"},
+                    }
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    lines = template.read_text(encoding="utf-8").splitlines()
+    resources_at = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if line.strip().startswith('"Resources"')
+    )
+    declaration = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if i > resources_at and line.strip().startswith('"MyDataBucket"')
+    )
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == declaration, (region, lines)

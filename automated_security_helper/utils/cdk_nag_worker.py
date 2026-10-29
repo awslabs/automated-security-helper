@@ -51,10 +51,12 @@ What crosses the process boundary, and why each piece does:
   even let it enter, so it names templates against the parent's.
 
 Failure and time limits. Each child is bounded by the scanner's ``scan_timeout``. A
-child that dies after answering some templates keeps those answers, fails the template
-it was working on, and a new child takes the rest; a child that answered nothing, or
-was killed at the timeout, fails every template still pending, each with the child's
-exit status (or the timeout) and the tail of its stderr, redacted whole with the
+child that dies keeps the answers it gave, fails the template it was working on, and a
+new child takes the rest, whether it died on the first template or a later one. A child
+killed at the timeout fails every template still pending, and so does a second child in
+a row that answers nothing with the same reason as the first (a failure every child
+shares, such as cdk-nag not importing), each with the child's exit status (or the
+timeout) and the tail of its stderr, redacted whole with the
 scan's environment values before it is cut into lines. ``SystemExit`` and
 ``KeyboardInterrupt`` raised inside the child are not exceptions the wrapper could
 raise to the scanner before; they now end the child and fail its pending templates.
@@ -128,8 +130,12 @@ class _RecordCollector(logging.Handler):
 def _shortest_name_relative_to(cwd: Path) -> Callable[["str | Path"], "str | Path"]:
     """``get_shortest_name`` as the parent process would compute it.
 
-    Same logic as ``utils/get_shortest_name.py``, with the parent's working directory in
-    place of ``Path.cwd()``.
+    The logic of ``utils/get_shortest_name.py`` with the parent's working directory in
+    place of ``Path.cwd()``: a copy, because the shared helper reads the cwd of the process
+    that calls it, and this process may not be able to enter the parent's (a sandbox). The
+    one deliberate difference is the prefix test, which here requires the separator after
+    the working directory, so a sibling directory whose name merely starts with it is not
+    made relative; the shared helper's test is its own unit's.
     """
 
     def get_shortest_name(input: "str | Path") -> "str | Path":  # noqa: A002
@@ -663,11 +669,16 @@ class _Batch:
         template provokes used to fail every template in the batch, while the same
         crash on a later template failed only that one. The retry is bounded so a
         failure every child shares (cdk-nag not importing, node refused) is not paid
-        once per template: a second child in a row that answers nothing fails
-        everything still pending with its reason. A child that ran out of time fails
-        everything still pending at once, as before.
+        once per template: a second child in a row that answers nothing WITH THE SAME
+        REASON as the first fails everything still pending with it. Two neighboring
+        templates that each crash the child for their own reasons give two different
+        reasons, so the second is not taken as shared and the next template still gets
+        its own child; three answerless children in a row fail the rest whatever their
+        reasons, so a run of crashing templates stays bounded. A child that ran out of
+        time fails everything still pending at once, as before.
         """
         answerless_in_a_row = 0
+        last_answerless_error: Optional[str] = None
         while pending:
             try:
                 answers, error, timed_out, response = _run_child(
@@ -685,13 +696,26 @@ class _Batch:
                 self.answers[template] = answer
             if error is None:
                 return
-            self._record_child(response)
+            if response:
+                # An empty response is the runner raising before any child ran; it
+                # carries no exit code and is not a child's record.
+                self._record_child(response)
             rest = pending[len(answers) :]
-            if timed_out or (not answers and answerless_in_a_row > 0):
+            shared = (
+                not answers
+                and answerless_in_a_row > 0
+                and (error == last_answerless_error or answerless_in_a_row >= 2)
+            )
+            if timed_out or shared:
                 for template in rest:
                     self.errors[template] = error
                 return
-            answerless_in_a_row = answerless_in_a_row + 1 if not answers else 0
+            if answers:
+                answerless_in_a_row = 0
+                last_answerless_error = None
+            else:
+                answerless_in_a_row += 1
+                last_answerless_error = error
             self.errors[rest[0]] = error
             pending = rest[1:]
 
