@@ -323,7 +323,15 @@ class ScannerStateTracker:
                 "failure_reason": scanner_state.enablement_reason,
             }
 
-        if scanner_state.enablement_status == "disabled":
+        # "disabled" is the enablement bucket for a registered scanner that is
+        # neither enabled, excluded nor missing a dependency, which includes one
+        # whose construction failed and was recorded with a failure_reason. A
+        # recorded failure is not an exclusion: it falls through to the failed
+        # readings below, so the scan does not report it SKIPPED.
+        if (
+            scanner_state.enablement_status == "disabled"
+            and not scanner_state.failure_reason
+        ):
             return {
                 "status": "excluded",
                 "dependencies_satisfied": True,
@@ -651,10 +659,18 @@ class ValidationCheckpointer:
         else:
             self.logger.verbose("  All expected scanners completed execution")
 
+        # Recorded as discrepancies, so the checkpoint's has_issues() is True and
+        # the scan phase reports the shortfall instead of "validation passed":
+        # it branches on has_issues(), which reads the recorded discrepancies
+        # and errors, never the missing-scanner count on its own.
         return self.create_checkpoint(
             checkpoint_name="execution_completion",
             expected_scanners=expected_scanners,
             actual_scanners=completed_scanners,
+            discrepancies=[
+                f"Scanner '{scanner_name}' was queued for execution but did not complete"
+                for scanner_name in missing_completions
+            ],
             metadata={
                 "expected_count": len(expected_scanners),
                 "completed_count": len(completed_scanners),
