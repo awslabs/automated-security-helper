@@ -222,6 +222,56 @@ def normalize_name(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", _MD_LINK.sub(r"\1", text).lower())
 
 
+_TRAILING_PARENTHETICAL = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _row_name(row: str) -> str:
+    """A table row's first cell without a trailing parenthetical qualifier."""
+    return _TRAILING_PARENTHETICAL.sub("", row.strip())
+
+
+def _load_options_yaml(body: str):
+    """Parse a documented YAML block, keeping an ``!ENV`` scalar as its own text.
+
+    ``yaml.safe_load`` raises on ASH's ``!ENV`` tag, and that error used to be read
+    as a deliberately invalid block, so every options block that referenced the
+    environment was skipped and its option keys were never validated. The tag is
+    the config's own syntax, so it is accepted here as text; YAML that does not
+    parse still returns None.
+    """
+    import yaml
+
+    class _KeepsEnvTag(yaml.SafeLoader):
+        pass
+
+    _KeepsEnvTag.add_constructor(
+        "!ENV", lambda loader, node: loader.construct_scalar(node)
+    )
+    try:
+        return yaml.load(body, Loader=_KeepsEnvTag)  # nosec B506 - a SafeLoader subclass
+    except yaml.YAMLError:
+        return None
+
+
+def _model_for(models: dict[str, type], plugin_name: str) -> type | None:
+    """The options model for a documented plugin key, under either spelling.
+
+    ASH accepts ``cdk_nag`` and ``cdk-nag`` for one scanner (the config field and
+    its alias), and the docs use both. Looking the model up by the exact key
+    skipped every block written under the spelling the registry does not use, so
+    four documented scanner blocks were never validated.
+    """
+    for candidate in (
+        plugin_name,
+        plugin_name.replace("_", "-"),
+        plugin_name.replace("-", "_"),
+    ):
+        model = models.get(candidate)
+        if model is not None:
+            return model
+    return None
+
+
 def table_first_column(text: str, header_cell: str) -> list[str] | None:
     """Return the first cell of each data row of one specific markdown table.
 
@@ -296,19 +346,25 @@ def compare_inventories(
             )
         ]
 
-    normalized_rows = {row: normalize_name(row) for row in rows}
+    # Whole names, never substrings. A substring test let one row cover two
+    # names whenever one name contained another: a table with only a
+    # gitlab-cyclonedx row satisfied the cyclonedx entry, and a leftover
+    # cyclonedx row was covered by the gitlab-cyclonedx entry, so a missing or
+    # stale row was hidden in both directions. A trailing parenthetical on a
+    # row ("cfn-nag (CloudFormation)") is not part of the name.
+    normalized_rows = {row: normalize_name(_row_name(row)) for row in rows}
     normalized_code = {name: normalize_name(name) for name in code_names}
 
     for name, origin in sorted(code_names.items()):
         needle = normalized_code[name]
-        if not any(needle in row for row in normalized_rows.values()):
+        if needle not in normalized_rows.values():
             failures.append(
                 f"{label}: '{name}' (from {origin}) is in the code but no row of "
                 f"the '{header_cell}' table in {doc_label} names it"
             )
 
     for row, normalized in sorted(normalized_rows.items()):
-        if not any(needle in normalized for needle in normalized_code.values()):
+        if normalized not in normalized_code.values():
             failures.append(
                 f"{label}: the '{header_cell}' table in {doc_label} has a row "
                 f"'{row}' that names nothing in the code -- it was removed or "
@@ -589,9 +645,72 @@ def check_version_consistency() -> list[str]:
 # prose that happens to mention a filename is not mistaken for a published
 # inventory.
 _CONFIG_LIST_ITEM = re.compile(
-    r"^\s*(?:[-*+]|\d+[.)])\s+`(?:\./)?(?:\.ash/)?"
+    r"^\s*(?:[-*+]|\d+[.)])\s+`(?:\./)?(\.ash/)?"
     r"([A-Za-z0-9_.-]+\.(?:ya?ml|json|toml))`\s*$"
 )
+
+
+def _config_list_problems(
+    rel_path: str,
+    lines: list[str],
+    supported: set[str],
+    newer: set[str],
+) -> tuple[list[str], int]:
+    """Check every config-discovery list in one page; return (failures, lists).
+
+    The ``.ash/`` prefix is kept, not stripped: ASH searches for the
+    ASH_CONFIG_FILE_NAMES names under ``.ash/`` but discovers the ashrc names and
+    pyproject.toml at the project root only, so a list placing one of those
+    under ``.ash/`` sends a reader to a file ASH never reads there. Stripping the
+    prefix before comparing let exactly that list pass.
+    """
+    failures: list[str] = []
+    lists_found = 0
+    run: list[tuple[int, str, str]] = []
+    for lineno, line in enumerate(lines + [""], start=1):
+        match = _CONFIG_LIST_ITEM.match(line)
+        if match:
+            run.append((lineno, match.group(1) or "", match.group(2)))
+            continue
+
+        # A run of one is a single example, not an inventory.
+        if len(run) >= 2:
+            lists_found += 1
+            names = {name for _, _, name in run}
+            start = run[0][0]
+
+            missing = sorted(supported - names)
+            if names & newer:
+                missing += sorted(newer - names)
+            if missing:
+                failures.append(
+                    f"{rel_path}:{start} publishes a config-discovery list of "
+                    f"{len(names)} name(s) but omits {missing}, which ASH does "
+                    f"search for (ASH_CONFIG_FILE_NAMES, or ASH_RC_FILE_NAMES and "
+                    f"pyproject.toml). A reader cannot "
+                    f"discover a working config filename from this list."
+                )
+            unknown = sorted(names - supported - newer)
+            if unknown:
+                failures.append(
+                    f"{rel_path}:{start} publishes a config-discovery list "
+                    f"naming {unknown}, which ASH does NOT search for "
+                    f"(ASH_CONFIG_FILE_NAMES, ASH_RC_FILE_NAMES, pyproject.toml). "
+                    f"A file with that name is "
+                    f"silently ignored unless --config points at it."
+                )
+            misplaced = sorted(
+                f"{prefix}{name}" for _, prefix, name in run if prefix and name in newer
+            )
+            if misplaced:
+                failures.append(
+                    f"{rel_path}:{start} publishes a config-discovery list placing "
+                    f"{misplaced} under .ash/, where ASH never looks for them: the "
+                    f"ashrc names and pyproject.toml are discovered at the project "
+                    f"root only. A reader who puts the file there is silently ignored."
+                )
+        run = []
+    return failures, lists_found
 
 
 def check_config_path() -> list[str]:
@@ -637,42 +756,12 @@ def check_config_path() -> list[str]:
     for md_file in collect_md_files():
         rel_path = md_file.relative_to(REPO_ROOT)
         lines = read_text(md_file).splitlines()
-
         # Group consecutive matching list items into one published inventory.
-        run: list[tuple[int, str]] = []
-        for lineno, line in enumerate(lines + [""], start=1):
-            match = _CONFIG_LIST_ITEM.match(line)
-            if match:
-                run.append((lineno, match.group(1)))
-                continue
-
-            # A run of one is a single example, not an inventory.
-            if len(run) >= 2:
-                lists_found += 1
-                names = {name for _, name in run}
-                start = run[0][0]
-
-                missing = sorted(supported - names)
-                if names & newer:
-                    missing += sorted(newer - names)
-                if missing:
-                    failures.append(
-                        f"{rel_path}:{start} publishes a config-discovery list of "
-                        f"{len(names)} name(s) but omits {missing}, which ASH does "
-                        f"search for (ASH_CONFIG_FILE_NAMES, or ASH_RC_FILE_NAMES and "
-                        f"pyproject.toml). A reader cannot "
-                        f"discover a working config filename from this list."
-                    )
-                unknown = sorted(names - supported - newer)
-                if unknown:
-                    failures.append(
-                        f"{rel_path}:{start} publishes a config-discovery list "
-                        f"naming {unknown}, which ASH does NOT search for "
-                        f"(ASH_CONFIG_FILE_NAMES, ASH_RC_FILE_NAMES, pyproject.toml). "
-                        f"A file with that name is "
-                        f"silently ignored unless --config points at it."
-                    )
-            run = []
+        page_failures, page_lists = _config_list_problems(
+            str(rel_path), lines, supported, newer
+        )
+        failures.extend(page_failures)
+        lists_found += page_lists
 
     if not lists_found:
         failures.append(
@@ -824,7 +913,6 @@ def check_plugin_option_keys() -> list[str]:
     with docs_checks.parse_page, the parser that check and the docs runner use, so
     the three agree on which marker governs which block.
     """
-    import yaml
     from pydantic import ValidationError
 
     from automated_security_helper.base.options import (
@@ -856,11 +944,9 @@ def check_plugin_option_keys() -> list[str]:
             if block.lang not in ("yaml", "yml") or block.config_kind == "ash-invalid":
                 continue
             line_no = block.body_line
-            try:
-                parsed = yaml.safe_load(block.body)
-            except yaml.YAMLError:
-                # Deliberately-invalid YAML is documented on purpose in places.
-                continue
+            # Deliberately-invalid YAML is documented on purpose in places and
+            # returns None; an !ENV reference is valid ASH config and parses.
+            parsed = _load_options_yaml(block.body)
             if not isinstance(parsed, dict):
                 continue
 
@@ -875,7 +961,7 @@ def check_plugin_option_keys() -> list[str]:
                     options = plugin_cfg.get("options")
                     if not isinstance(options, dict):
                         continue
-                    model = models[section].get(plugin_name)
+                    model = _model_for(models[section], plugin_name)
                     if model is None:
                         continue
 
