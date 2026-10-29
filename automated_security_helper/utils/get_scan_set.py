@@ -84,6 +84,11 @@ SOURCE_DIR_TOKEN = "${SOURCE_DIR}/"
 # The file names ASH reads as ignore files when it walks the scanned tree.
 IGNORE_FILE_NAMES = frozenset({".ignore", ".gitignore"})
 
+# What compiling or matching one ignore rule can raise in igittigitt: a pattern
+# its glob translation refuses. Caught per rule wherever a rule is added or
+# matched, so one bad line costs that rule and not the scan.
+_IGNORE_RULE_ERRORS = (ValueError, TypeError, IndexError, re.error)
+
 # Written into ash-ignore-report.txt in place of the repository's ignore files when
 # the operator turned them off, so the report says why they are missing from it.
 # A comment line: get_ash_ignorespec_with_attribution skips it.
@@ -260,6 +265,23 @@ def _is_link_to_directory(path: str | Path) -> bool:
     return bool(isjunction is not None and isjunction(path))
 
 
+def _walk_without_link_directories(top: str | Path):
+    """``os.walk(top)`` that never descends a link or junction to a directory.
+
+    ``os.walk`` lists a symlink to a directory among the directories without
+    descending it on every interpreter, but a Windows junction is a directory to
+    the ``os.walk`` of Python 3.10 and 3.11 (3.12 stopped following junctions), so
+    a junction that points outside the scan root put everything behind it into
+    the scan set, and one that points at an ancestor recursed. Each such entry is
+    taken out of the directory list before ``os.walk`` reaches it. The lists are
+    the ones ``os.walk`` yields, so a caller that prunes ``dirs`` in place still
+    prunes the walk.
+    """
+    for root, dirs, files in os.walk(top):
+        dirs[:] = [d for d in dirs if not _is_link_to_directory(os.path.join(root, d))]
+        yield root, dirs, files
+
+
 def _walk_unless_link(top: str | Path):
     """``os.walk(top)``, or nothing when *top* is a link or junction to a directory.
 
@@ -268,10 +290,11 @@ def _walk_unless_link(top: str | Path):
     scan goes through here, so a link the repository placed, at any depth, is
     never followed: nothing behind it is in a scan set, honored or not, and
     following it would read wherever the link points, outside the tree included.
+    Below the top, a junction is left out too (:func:`_walk_without_link_directories`).
     """
     if _is_link_to_directory(top):
         return iter(())
-    return os.walk(top)
+    return _walk_without_link_directories(top)
 
 
 def _left_out_as_a_link_leaving_the_tree(
@@ -345,7 +368,14 @@ def file_links_leaving_tree(
                 ):
                     pending.append((entry.path, f"{relative}/"))
                     continue
-                if entry.is_symlink() and os.path.isdir(entry.path):
+                # A symlink to a directory, or a Windows junction: on Python 3.12
+                # and later a junction is neither a symlink nor, with
+                # follow_symlinks=False, a directory to DirEntry, so tested by
+                # itself; otherwise it was listed among the files and never
+                # recorded as a directory link.
+                if (
+                    entry.is_symlink() or _is_link_to_directory(entry.path)
+                ) and os.path.isdir(entry.path):
                     if directory_links is not None and not resolves_inside(
                         entry.path, root
                     ):
@@ -587,12 +617,78 @@ def _is_cdk_cloud_assembly(directory: Path) -> bool:
     directory is pruned before the ``!**/*.template.json`` inclusion is applied:
     the same rule in a nested ignore file never pruned anything, so the
     templates came back there and not here.
+
+    A directory the scanning user cannot search is not an assembly: before
+    Python 3.13 ``Path.is_file`` raises ``PermissionError`` for a child of such
+    a directory, and one ignored directory with that mode aborted the scan.
     """
     if directory.name == "cdk.out":
         return True
-    return all(
-        directory.joinpath(name).is_file() for name in _CDK_ASSEMBLY_MARKER_FILES
-    )
+    try:
+        return all(
+            directory.joinpath(name).is_file() for name in _CDK_ASSEMBLY_MARKER_FILES
+        )
+    except OSError:
+        return False
+
+
+def _negations_that_unprune(
+    root_path: Path, extra_ignorefiles: List[str], honor_ignore_files: bool
+) -> List[Tuple[str, Path]]:
+    """The negation rules of the root ``.ignore`` and the caller's ignore files,
+    each with the base it compiles against, for the pruning pre-pass.
+
+    The pre-pass is compiled from the root ``.gitignore`` alone, and git never
+    descends a directory it excludes, so a nested ignore file cannot bring one
+    back. But ASH's full spec compiles the root ``.ignore`` after the root
+    ``.gitignore``, and a caller-named ignore file after both, with the last
+    matching rule deciding: a ``!vendor/`` in either re-includes ``vendor/`` in
+    the full spec, while the pre-pass, which never saw it, had already pruned the
+    directory, so its files were missing from the scan set. The negations are
+    added to the pre-pass parser, where they take effect the same way, so such a
+    directory is walked and the full spec has the last word on each file.
+
+    Only negations: a positive rule in these files is left to the full spec, so
+    whatever the pre-pass prunes is still the root ``.gitignore``'s doing and is
+    counted to it. A file that cannot be read contributes nothing here; the full
+    spec reports it. A caller-named file outside the scan root compiles against
+    the root, as the full spec compiles it (:func:`_confine_base_path`).
+    """
+    sources: List[Tuple[List[str], Path]] = []
+    if honor_ignore_files:
+        root_ignore = root_path / ".ignore"
+        if root_ignore.is_file():
+            try:
+                with io.TextIOWrapper(
+                    open_in_scanned_tree(root_ignore, root_path),
+                    errors=IGNORE_FILE_ERRORS,
+                    newline=IGNORE_FILE_NEWLINE,
+                ) as handle:
+                    sources.append((ignore_file_lines(handle), root_path))
+            except (TreeInputRefused, OSError):
+                pass
+    root_absolute = Path(os.path.abspath(root_path))
+    for extra in extra_ignorefiles:
+        extra_path = os.path.join(root_path, extra)
+        if not os.path.isfile(extra_path):
+            continue
+        base = Path(os.path.dirname(os.path.abspath(extra_path)))
+        if not base.is_relative_to(root_absolute):
+            base = root_path
+        try:
+            with open(
+                extra_path, errors=IGNORE_FILE_ERRORS, newline=IGNORE_FILE_NEWLINE
+            ) as handle:
+                sources.append((ignore_file_lines(handle), base))
+        except OSError:
+            continue
+    negations: List[Tuple[str, Path]] = []
+    for lines, base in sources:
+        for line in lines:
+            rule = gitignore_rule_for_igittigitt(ignore_file_line(line))
+            if rule.lstrip().startswith("!"):
+                negations.append((rule, base))
+    return negations
 
 
 def _warn_about_scanned_earlier_output_dirs(
@@ -741,14 +837,26 @@ def _collect_ignorefiles_and_all_files(
             root_ignore_parser = candidate_parser
         except TreeInputRefused:
             pass
-        except (OSError, ValueError, TypeError, IndexError, re.error):
-            # If the root .gitignore can't be parsed (malformed patterns,
-            # encoding issues, etc.), proceed without directory pruning.
-            # All files will still be filtered by the full ignore spec later.
+        except (OSError, *_IGNORE_RULE_ERRORS):
+            # If the root .gitignore can't be read or parsed (malformed patterns,
+            # encoding issues, etc.), proceed without directory pruning. The full
+            # ignore spec reads the same file later and tolerates the same errors
+            # one rule at a time (get_ash_ignorespec_with_attribution), warning
+            # about each, so the files are still filtered by every rule that does
+            # compile.
             debug_echo(
                 f"Could not parse root .gitignore for directory pruning: {root_gitignore}",
                 debug=debug,
             )
+    for negation, base in _negations_that_unprune(
+        root_path, extra_ignorefiles, honor_ignore_files
+    ):
+        try:
+            root_ignore_parser.add_rule(negation, base_path=base)
+        except _IGNORE_RULE_ERRORS:
+            # The full spec reports the rule it cannot compile; here it merely
+            # brings nothing back.
+            pass
 
     pruned_key = os.path.join(path, ".gitignore")
     # The output directory is followed if it is reached through a link above the
@@ -756,7 +864,10 @@ def _collect_ignorefiles_and_all_files(
     # not followed (_OwnOutput); the orchestrator refuses a symlinked one anyway.
     own = _own_output_of(own_output, path)
 
-    for root, dirs, files in os.walk(path):
+    # A link or junction to a directory below the root is not descended, on any
+    # interpreter (_walk_without_link_directories); the root itself is walked as
+    # given, as before.
+    for root, dirs, files in _walk_without_link_directories(path):
         root_path = Path(os.path.abspath(root))
         kept_dirs = []
         for d in dirs:
@@ -833,7 +944,7 @@ def _collect_ignorefiles_and_all_files(
                         debug_echo(
                             f"Skipping ignored directory: {dir_path}", debug=debug
                         )
-                except (ValueError, TypeError, IndexError, re.error):
+                except _IGNORE_RULE_ERRORS:
                     # If matching fails for a specific directory (e.g. due to a
                     # malformed pattern), skip pruning for that directory only.
                     pass
@@ -943,8 +1054,24 @@ def get_ash_ignorespec_lines(
                 lines.append("")
                 continue
             except FileNotFoundError:
-                # Gone since the walk: what the isfile() check here used to skip. Any
-                # other OSError propagates, as it did from the open() this replaced.
+                # Gone since the walk: what the isfile() check here used to skip.
+                continue
+            except OSError as error:
+                # Permission denied, an I/O error: one ignore file the scan cannot
+                # read used to raise out of here and abort the whole scan, while
+                # the pruning pre-pass tolerates the same error on the root
+                # .gitignore. Skipped and said, like a refused one; its rules are
+                # not applied, so the scan set is larger, never smaller.
+                reason = error.strerror or type(error).__name__
+                ASH_LOGGER.warning(
+                    f"Skipped ignore file '{clean}': it could not be read "
+                    f"({reason}), so its rules were not applied",
+                    extra=NO_MARKUP,
+                )
+                lines.append(
+                    f"######### SKIPPED: {clean}: could not be read ({reason}) #########"
+                )
+                lines.append("")
                 continue
             # TextIOWrapper with no encoding decodes exactly as open() does.
             with io.TextIOWrapper(
@@ -1349,7 +1476,20 @@ def get_ash_ignorespec_with_attribution(
             continue
 
         added_from = len(parser.rules)
-        parser.add_rule(rule, base_path=current_base_path)
+        try:
+            parser.add_rule(rule, base_path=current_base_path)
+        except _IGNORE_RULE_ERRORS as error:
+            # One pattern the parser refuses used to raise out of here and abort
+            # the scan, while the pruning pre-pass tolerated the same pattern.
+            # Skipped and said: the rule applies to nothing, so the scan set is
+            # larger, never smaller. The rule is the repository's text, shown and
+            # not obeyed.
+            ASH_LOGGER.warning(
+                f"Skipped ignore rule {shown_not_obeyed(rule)!r} from {current_marker}: "
+                f"it could not be compiled ({error})",
+                extra=NO_MARKUP,
+            )
+            continue
         rule_ids_by_marker.setdefault(current_marker, []).extend(
             id(rule) for rule in parser.rules[added_from:]
         )
