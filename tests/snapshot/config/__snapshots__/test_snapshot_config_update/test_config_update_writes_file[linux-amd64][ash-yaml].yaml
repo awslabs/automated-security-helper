@@ -5,7 +5,6 @@ global_settings:
   ignore_paths:
   - path: dist/**
     reason: build output
-    client_supplied: false
   suppressions: []
   mcp:
     runtime_overrides:
