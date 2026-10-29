@@ -14,9 +14,11 @@ takes.
 These cells read what each runner does with the child; no process is started and
 no signal is sent. The stand-in for Popen delivers the Ctrl-C the way the
 interpreter does, by calling the handler installed at that moment, and returns a
-recorded stand-in child. The runners' stops are replaced by recorders. Two cells
+recorded stand-in child. The runners' stops are replaced by recorders. Four tests
 read the hold itself: a release that cannot put the handler back leaves nothing
-held, and hands a Ctrl-C that was held to the previous handler.
+held, and hands a Ctrl-C that was held to the previous handler; leaving the
+``with`` block puts the handler back after such a release, and after a body that
+raised before any release.
 """
 
 import os
@@ -244,6 +246,39 @@ def test_a_release_that_cannot_put_the_handler_back_hands_over_a_held_ctrl_c(
         _ctrl_c_arrives()
 
 
+def test_a_handler_that_failed_to_go_back_is_put_back_on_leaving(
+    default_sigint, restore_fails_once
+):
+    """The hold forgot it held the signal before putting the handler back, so a
+    failure there left the recording handler in place, and every later Ctrl-C was
+    swallowed. Leaving the ``with`` block puts it back: ``HeldInterrupt.__exit__``
+    restores again after a release whose restore failed, and raises the failure."""
+    with pytest.raises(OSError, match="could not be set"):
+        with subprocess_utils.HeldInterrupt() as held:
+            held.release()
+
+    assert restore_fails_once, "the failing restore was never reached"
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    with pytest.raises(KeyboardInterrupt):
+        _ctrl_c_arrives()
+
+
+def test_a_ctrl_c_after_the_block_whose_handler_did_not_go_back_is_not_lost(
+    default_sigint, restore_fails_once
+):
+    """The block raised before release, and putting the handler back on leaving
+    failed, so the recording handler stayed installed and every later Ctrl-C was
+    recorded for a block that was over. Once the block is left, a Ctrl-C goes to
+    the handler that was held."""
+    with pytest.raises(OSError, match="could not be set"):
+        with subprocess_utils.HeldInterrupt():
+            raise FileNotFoundError("runtime")
+
+    assert restore_fails_once, "the failing restore was never reached"
+    with pytest.raises(KeyboardInterrupt):
+        _ctrl_c_arrives()
+
+
 def _stopped_by_terminate(child: _Child, stops: _Stops) -> None:
     assert "terminate" in child.calls, child.calls
 
@@ -269,7 +304,9 @@ def test_a_path_whose_release_fails_leaves_no_ctrl_c_held(
     path, stopped_the_child, default_sigint, monkeypatch, stops, restore_fails_once
 ):
     """Each path stops the child when its release fails and raises the failure.
-    A Ctrl-C after that is not held for a start that is over."""
+    The previous handler is back on the way out (the hold is left even though
+    its own restore failed), so a Ctrl-C after that is not held for a start that
+    is over."""
     child = _Child()
     _popen_that_starts(monkeypatch, child, ctrl_c=False)
 
@@ -279,6 +316,7 @@ def test_a_path_whose_release_fails_leaves_no_ctrl_c_held(
     assert restore_fails_once, "the failing restore was never reached"
     stopped_the_child(child, stops)
 
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
     with pytest.raises(KeyboardInterrupt):
         _ctrl_c_arrives()
 
