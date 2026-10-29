@@ -38,7 +38,7 @@ import struct
 import time
 import sys
 import unicodedata
-from typing import Any, Callable, Dict, List, NoReturn, Tuple
+from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple
 
 SYS_LANDLOCK_CREATE_RULESET = 444
 SYS_LANDLOCK_ADD_RULE = 445
@@ -73,6 +73,11 @@ FILE_ONLY_RIGHTS = (
 
 PR_SET_NO_NEW_PRIVS = 38
 PR_SET_CHILD_SUBREAPER = 36
+#: The most /proc entries one fallback scan reads (``_parent_map``). A host can
+#: carry tens of thousands of processes and each entry costs an open and a read,
+#: so an unbounded scan could on its own outlast STOP_REAP_DEADLINE_SECONDS;
+#: processes listed past this many are not seen by that scan.
+PROC_SCAN_LIMIT = 4096
 #: How long the wrapper keeps reaping after its scanner exits on its own. Below
 #: ASH's SANDBOX_STOP_GRACE_SECONDS (10), so the wrapper finishes before ASH gives up on it.
 REAP_DEADLINE_SECONDS = 5.0
@@ -396,46 +401,109 @@ def exec_with_socket_filter(allow_ip: bool, command: List[str]) -> NoReturn:
         fail(f"exec {command[0]}: {e}")
 
 
-def _children(pid: int = 0) -> List[int]:
-    """Processes whose parent is ``pid`` (this process when 0).
+def _children_files(pid: int = 0) -> Optional[List[int]]:
+    """Children of ``pid`` (this process when 0) from /proc/<pid>/task/*/children.
 
-    /proc/self/task/*/children when the kernel provides it (CONFIG_PROC_CHILDREN),
-    which costs one read per thread; otherwise every /proc/<pid>/stat, which on a
-    host with thousands of processes costs a few hundred milliseconds. Read as
-    bytes: a text open may need to import a codec, and after Landlock the
+    One read per thread. None when the kernel provides no children file
+    (CONFIG_PROC_CHILDREN off), so the caller lists /proc instead. Any other
+    failure gives the children read so far: a process that is gone has nothing
+    left to reap, and a file this process may not read is one a listing of /proc
+    could not read either, so neither is a reason to scan every entry of /proc.
+    Read as bytes: a text open may need to import a codec, and after Landlock the
     interpreter's own library is not necessarily readable.
     """
+    base = f"/proc/{pid}" if pid else "/proc/self"
     found: List[int] = []
     try:
-        base = f"/proc/{pid}" if pid else "/proc/self"
         tasks = os.listdir(f"{base}/task")
-        for tid in tasks:
-            with open(f"{base}/task/{tid}/children", "rb") as f:
-                found += [int(pid) for pid in f.read().split()]
-        return found
     except OSError:
-        pass
-    me = str(pid or os.getpid()).encode()
+        return found
+    read_one = False
+    for tid in tasks:
+        try:
+            with open(f"{base}/task/{tid}/children", "rb") as f:
+                found += [int(child) for child in f.read().split()]
+            read_one = True
+        except FileNotFoundError:
+            # A thread that exited has no files left; a thread still there with
+            # no children file is a kernel that provides none.
+            if not read_one and os.path.isdir(f"{base}/task/{tid}"):
+                return None
+            return found
+        except OSError:
+            return found
+    return found
+
+
+def _parent_map(
+    until: Optional[float] = None, limit: Optional[int] = None
+) -> Dict[int, List[int]]:
+    """Parent pid to child pids, from one listing of /proc.
+
+    The fallback for a kernel without children files: every /proc/<pid>/stat,
+    which on a host with thousands of processes costs a few hundred
+    milliseconds. At most ``limit`` entries are read (PROC_SCAN_LIMIT), and none
+    past the time.monotonic() deadline ``until``, so the map holds what was read
+    by then.
+    """
+    if limit is None:
+        limit = PROC_SCAN_LIMIT
+    parents: Dict[int, List[int]] = {}
+    read = 0
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
+        if read >= limit or (until is not None and time.monotonic() >= until):
+            break
+        read += 1
         try:
             with open(f"/proc/{entry}/stat", "rb") as f:
                 fields = f.read().rsplit(b")", 1)[1].split()
         except (OSError, IndexError):
             continue
-        if len(fields) > 1 and fields[1] == me:
-            found.append(int(entry))
-    return found
+        if len(fields) > 1:
+            parents.setdefault(int(fields[1]), []).append(int(entry))
+    return parents
 
 
-def _descendants() -> List[int]:
-    """Every process below this one, at any depth, breadth first."""
+def _children(pid: int = 0) -> List[int]:
+    """Processes whose parent is ``pid`` (this process when 0)."""
+    found = _children_files(pid)
+    if found is not None:
+        return found
+    return _parent_map().get(pid or os.getpid(), [])
+
+
+def _descendants(until: Optional[float] = None) -> List[int]:
+    """Every process below this one, at any depth, breadth first.
+
+    ``until`` is a time.monotonic() deadline: past it the walk returns what it
+    has found by then, so one reap pass ends inside STOP_REAP_DEADLINE_SECONDS
+    however deep the tree or slow /proc, and that pass kills that much. The
+    direct children are always read. On a kernel without children files /proc is
+    listed once for the whole walk (``_parent_map``), not once per descendant.
+    """
     found: List[int] = []
-    frontier = _children()
+    parents: Optional[Dict[int, List[int]]] = None
+    frontier = _children_files()
+    if frontier is None:
+        parents = _parent_map(until)
+        frontier = parents.get(os.getpid(), [])
     while frontier:
         found += frontier
-        frontier = [grandchild for child in frontier for grandchild in _children(child)]
+        following: List[int] = []
+        for child in frontier:
+            if until is not None and time.monotonic() >= until:
+                return found
+            if parents is None:
+                read = _children_files(child)
+                if read is None:
+                    parents = _parent_map(until)
+                    read = parents.get(child, [])
+            else:
+                read = parents.get(child, [])
+            following += read
+        frontier = following
     return found
 
 
@@ -525,7 +593,7 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     passes = 0
     while passes == 0 or time.monotonic() < deadline():
         passes += 1
-        leftovers = _descendants()
+        leftovers = _descendants(until=deadline())
         if not leftovers:
             quiet += 1
             if quiet >= 5:

@@ -54,7 +54,9 @@ NEVER_GONE = 2**22 + 1
 late = sys.argv[2] == "late"
 
 
-def never_gone():
+def never_gone(*_args, **_kwargs):
+    # Called as the wrapper calls _descendants: with its deadline, which this
+    # descendant ignores, since the loop's own deadline is what is measured.
     if not announced:
         announced.append(True)
         os.write(1, b"reaping\\n")
