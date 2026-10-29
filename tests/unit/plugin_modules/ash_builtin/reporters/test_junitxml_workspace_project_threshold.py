@@ -110,6 +110,20 @@ def test_each_project_is_graded_by_its_own_recorded_gate(tmp_path, workspace_mod
     )
 
 
+def test_a_recorded_gate_is_read_whatever_its_case(tmp_path, workspace_model):
+    """``"critical"`` grades as CRITICAL here as it does in the HTML report.
+
+    Both readers now take the recorded gate from one normalized table, so a
+    spelling the ladder would not recognise cannot grade one report and not
+    the other.
+    """
+    workspace_model.workspace.projects[1].severity_threshold = "critical"
+
+    cases = _cases(tmp_path, workspace_model)
+
+    assert _outcome(cases["RULE-LAX"]) == "below-threshold"
+
+
 def test_the_suites_still_carry_the_project(tmp_path, workspace_model):
     """The grading change leaves the suite naming as it was."""
     output = _get_reporter(tmp_path).report(workspace_model)

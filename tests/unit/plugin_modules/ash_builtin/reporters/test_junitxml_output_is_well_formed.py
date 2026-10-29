@@ -111,3 +111,27 @@ class TestAResultWithoutPropertiesKeepsItsCase:
         suites = {suite.get("name"): suite for suite in root.iter("testsuite")}
         assert "ash" in suites
         assert suites["ash"].find("testcase").get("classname") == "NOPROPS"
+
+
+class TestAScannerNameThatIsNotTextKeepsItsCase:
+    @pytest.mark.parametrize(
+        "name", [["bandit", "semgrep"], {"tool": "bandit"}, 7, None], ids=repr
+    )
+    def test_the_result_lands_under_the_default_suite(self, tmp_path, name):
+        """An imported SARIF can write anything as ``properties.scanner_name``.
+
+        The name is the key the reporter memoizes the scanner's threshold under
+        and the suite the case is filed in, so a list or a mapping there raised
+        TypeError (unhashable) and lost the whole artefact, the same loss the
+        properties-less case above guards against.
+        """
+        result = _make_result(rule_id="ODDNAME", level="error")
+        result.properties.__pydantic_extra__["scanner_name"] = name
+        result.properties.tags = []
+
+        output = _render(tmp_path, [result])
+
+        root = ET.fromstring(output)  # nosec B314
+        suites = {suite.get("name"): suite for suite in root.iter("testsuite")}
+        assert "ash" in suites
+        assert suites["ash"].find("testcase").get("classname") == "ODDNAME"

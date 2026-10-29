@@ -19,7 +19,7 @@ from automated_security_helper.models.flat_vulnerability import (
     extract_workspace_project,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
-    workspace_project_threshold,
+    workspace_project_thresholds,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
     skipped_project_detail,
@@ -82,9 +82,12 @@ def _configured_severity_threshold(model: "AshAggregatedResults") -> str:
 
     Read from ``global_settings.severity_threshold``, which is where the gate
     actually lives. This is the same field the exit code reads
-    (``run_ash_scan._compute_exit_code``) and the same one
-    ``ReportContentEmitter`` reads, so the report and the exit code cannot
-    describe different runs.
+    (``run_ash_scan._compute_exit_code``) for a finding whose scanner has no
+    threshold of its own and whose project recorded none, and the same one
+    ``ReportContentEmitter`` falls back to in that case, so the report and the
+    exit code cannot describe different runs. The per-project and per-scanner
+    gates are read ahead of it in ``report`` (``workspace_project_thresholds``,
+    ``_scanner_threshold``).
 
     Upper-cased because the ladder in ``utils.severity_ladder`` is
     case-SENSITIVE and ``_compute_exit_code`` upper-cases too. Without it a
@@ -137,9 +140,13 @@ def _scanner_threshold(
     Read through ``ScannerStatisticsCalculator.get_scanner_threshold_info``, the
     resolver the exit code grades each result by and the summary table prints,
     so the report cannot call a finding actionable that the exit code ignores
-    (or the reverse). Only a threshold the scanner's own config sets counts
-    here; the global one is ``_configured_severity_threshold``'s, which also
-    validates it. Memoized per scanner because the resolver dumps the whole
+    (or the reverse). The resolver names three sources: ``config`` (the
+    scanner's own ``options.severity_threshold``), ``global`` (the scan's
+    ``global_settings``) and ``unavailable`` (no recorded configuration, so
+    ASH's default). Only ``config`` counts here: the other two are the one
+    value ``_configured_severity_threshold`` already reads, and it validates
+    that value and warns where the resolver would pass an unrecognised one
+    through. Memoized per scanner because the resolver dumps the whole
     scanners section on every call and a large SARIF carries one result per
     finding.
     """
@@ -272,6 +279,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         # block per finding.
         configured_threshold = _configured_severity_threshold(model)
         scanner_thresholds: dict = {}
+        project_thresholds = workspace_project_thresholds(model)
 
         # Process SARIF report @ model.sarif
         if model.sarif is not None:
@@ -315,6 +323,12 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     and hasattr(props.scanner_details, "tool_name")
                 ):
                     actual_scanner = props.scanner_details.tool_name
+                # An imported SARIF can name its scanner with anything (a list,
+                # a mapping). The name is a cache key and a suite name below, so
+                # a value that is not text falls back to the default suite
+                # instead of losing the whole artefact to a TypeError.
+                if not isinstance(actual_scanner, str) or not actual_scanner:
+                    actual_scanner = "ash"
                 # Read through the shared helper rather than inline, so this and
                 # the flattening path cannot disagree about where the attribution
                 # lives -- which is how a finding ends up under the wrong project
@@ -329,6 +343,28 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             type_="suppression",
                         )
                         for suppression in result.suppressions
+                    ]
+                elif result.kind == "notApplicable":
+                    # SARIF 2.1.0 3.27.9: "the rule specified by ruleId was not
+                    # evaluated". cdk-nag writes this for a rule that raised
+                    # instead of reaching an answer, and the exit code fails the
+                    # scan for that rule through the run-level notification. A
+                    # bare test case says the rule passed, which it did not;
+                    # JUnit's own word for a test that did not run is skipped,
+                    # which no CI front end counts as a pass or a failure.
+                    #
+                    # Decided here, before any threshold grading, because the
+                    # result has no severity to grade: its level is `none` for a
+                    # cdk-nag rule, which under every gate but ALL would have
+                    # read "below configured severity threshold", and a
+                    # producer writing `warning` or `error` on such a result
+                    # would have had it reported as an error. Neither says what
+                    # happened, which is that the rule was never run.
+                    test_case.result = [
+                        Skipped(
+                            message="Rule was not evaluated for this target",
+                            type_="not-evaluated",
+                        )
                     ]
                 else:
                     # Determine if finding is actionable based on severity threshold
@@ -396,9 +432,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             _normalized_threshold(
                                 getattr(props, "severity_threshold", None)
                             )
-                            or _normalized_threshold(
-                                workspace_project_threshold(model, project)
-                            )
+                            or project_thresholds.get(project)
                             or _scanner_threshold(
                                 model, actual_scanner, scanner_thresholds
                             )
@@ -453,21 +487,6 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             test_case.result = [
                                 Error(message=message_text, type_="warning")
                             ]
-                        elif result.kind == "notApplicable":
-                            # SARIF 2.1.0 3.27.9: "the rule specified by ruleId was
-                            # not evaluated". cdk-nag writes this for a rule that
-                            # raised instead of reaching an answer, and the exit
-                            # code fails the scan for that rule through the
-                            # run-level notification. A bare test case says the
-                            # rule passed, which it did not; JUnit's own word for
-                            # a test that did not run is skipped, which no CI
-                            # front end counts as a pass or a failure.
-                            test_case.result = [
-                                Skipped(
-                                    message="Rule was not evaluated for this target",
-                                    type_="not-evaluated",
-                                )
-                            ]
                         elif result.kind in _FINDING_KINDS:
                             # An actionable finding at `note` or `none` whose kind
                             # still asserts a finding -- `open` or `review`. Before
@@ -477,14 +496,16 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             # actionable and then publish it as a pass. That is the
                             # one direction a security report must not fail in.
                             #
-                            # Deliberately not extended to every kind. `pass`,
-                            # `informational` and `notApplicable` assert the
-                            # opposite -- the rule ran and found nothing -- and
-                            # cdk-nag uses `informational` with level `none` for a
-                            # COMPLIANT check (cdk_nag_wrapper._level_and_kind).
-                            # Erroring on those would report passed controls as
-                            # problems, which is how a threshold of ALL would turn
-                            # a clean compliance scan red.
+                            # Deliberately not extended to every kind. `pass` and
+                            # `informational` assert the opposite -- the rule ran
+                            # and found nothing -- and cdk-nag uses
+                            # `informational` with level `none` for a COMPLIANT
+                            # check (cdk_nag_wrapper._level_and_kind). Erroring on
+                            # those would report passed controls as problems,
+                            # which is how a threshold of ALL would turn a clean
+                            # compliance scan red. `notApplicable` (the rule was
+                            # not evaluated) never reaches this cascade: it is
+                            # decided ahead of the gate, above.
                             #
                             # `Error` rather than `Failure` because the module
                             # imports only Error and Skipped; type_ carries the

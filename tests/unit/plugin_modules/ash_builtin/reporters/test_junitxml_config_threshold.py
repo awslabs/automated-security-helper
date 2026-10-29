@@ -62,6 +62,24 @@ pytestmark = pytest.mark.unit
 # TestQualifyingLevelsMatchTheLadder.
 
 
+def _without_scanner_thresholds(model):
+    """Clear every scanner's own ``options.severity_threshold`` in *model*.
+
+    The reporter grades a finding by its scanner's own threshold ahead of the
+    global one, and ``get_default_config`` honours the ``ASH_CONFIG``
+    environment variable, so a configuration that sets one for bandit or
+    cdk-nag would silently override every entry of the matrices below and the
+    tests would no longer measure the global threshold they name. The
+    per-scanner tests set the one threshold they mean after this.
+    """
+    scanners = model.ash_config.scanners
+    for name in type(scanners).model_fields:
+        options = getattr(getattr(scanners, name, None), "options", None)
+        if options is not None and hasattr(options, "severity_threshold"):
+            options.severity_threshold = None
+    return model
+
+
 def _render_from_config(tmp_path, level, threshold, issue_severity=None):
     """Report one finding whose threshold comes only from the scan config.
 
@@ -76,7 +94,7 @@ def _render_from_config(tmp_path, level, threshold, issue_severity=None):
     if issue_severity is not None:
         result.properties.__pydantic_extra__["issue_severity"] = issue_severity
 
-    model = _make_model(runs=[_make_run(results=[result])])
+    model = _without_scanner_thresholds(_make_model(runs=[_make_run(results=[result])]))
     model.ash_config.global_settings.severity_threshold = threshold
 
     output = _get_reporter(tmp_path).report(model)
@@ -87,7 +105,7 @@ def _render_kind(tmp_path, level, threshold, kind):
     """Report one finding at an explicit SARIF ``kind`` and return its testcase."""
     result = _make_result(level=level, scanner_name="cdk-nag")
     result.kind = kind
-    model = _make_model(runs=[_make_run(results=[result])])
+    model = _without_scanner_thresholds(_make_model(runs=[_make_run(results=[result])]))
     model.ash_config.global_settings.severity_threshold = threshold
     output = _get_reporter(tmp_path).report(model)
     return ET.fromstring(output).find(".//testcase")  # nosec B314
@@ -353,7 +371,9 @@ class TestScannerThresholdIsRead:
     @staticmethod
     def _render(tmp_path, scanner_name, level, scanner_threshold):
         result = _make_result(level=level, scanner_name=scanner_name)
-        model = _make_model(runs=[_make_run(results=[result])])
+        model = _without_scanner_thresholds(
+            _make_model(runs=[_make_run(results=[result])])
+        )
         model.ash_config.global_settings.severity_threshold = "MEDIUM"
         model.ash_config.scanners.bandit.options.severity_threshold = scanner_threshold
         output = _get_reporter(tmp_path).report(model)
@@ -412,8 +432,11 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
         assert testcase.find("failure") is None
         assert testcase.find("skipped") is None
 
-    @pytest.mark.parametrize("level", ["note", "none"])
-    def test_a_not_applicable_result_is_skipped_not_passed(self, tmp_path, level):
+    @pytest.mark.parametrize("threshold", ["ALL", "MEDIUM"])
+    @pytest.mark.parametrize("level", ["none", "note", "warning", "error"])
+    def test_a_not_applicable_result_is_skipped_not_passed(
+        self, tmp_path, level, threshold
+    ):
         """SARIF ``notApplicable`` says the rule was NOT evaluated.
 
         cdk-nag writes it, with level ``none``, for a rule that raised instead
@@ -422,15 +445,22 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
         result as a bare passing test case, so the JUnit artefact said the rule
         passed while the process status said it was never evaluated. Skipped is
         JUnit's own word for a test that did not run.
+
+        The reading does not depend on the gate or the level. A first fix put
+        the arm inside the actionable branch, so under the default MEDIUM gate
+        a cdk-nag ``none`` result read "below configured severity threshold"
+        and a ``warning`` or ``error`` one was reported as an error: a severity
+        for a rule that was never run.
         """
         testcase = _render_kind(
-            tmp_path, level=level, threshold="ALL", kind="notApplicable"
+            tmp_path, level=level, threshold=threshold, kind="notApplicable"
         )
         assert testcase.find("error") is None
         assert testcase.find("failure") is None
         skipped = testcase.find("skipped")
         assert skipped is not None
         assert skipped.get("type") == "not-evaluated"
+        assert skipped.get("message") == "Rule was not evaluated for this target"
 
     def test_cdk_nag_compliant_check_is_not_reported_as_a_problem(self, tmp_path):
         """cdk-nag's real compliant shape, named explicitly.
