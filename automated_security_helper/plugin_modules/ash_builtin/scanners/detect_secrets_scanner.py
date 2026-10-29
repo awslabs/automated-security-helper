@@ -163,6 +163,11 @@ DEFAULT_WORKER_OUTPUT_MIB = 256
 #: (config/operator_only_options.py).
 MAX_WORKER_OUTPUT_MIB = 4096
 
+#: The detect-secrets filter whose ``pattern`` entries leave files out of the
+#: scan. ASH applies it to the scan set itself, against each file's path
+#: relative to the scan root, and does not hand it to the worker.
+SHOULD_EXCLUDE_FILE_FILTER = "detect_secrets.filters.regex.should_exclude_file"
+
 
 class DetectSecretsScanSettingsPluginsUsed(RedactedSection):
     # Built directly from a baseline's entries, so a refused value must not be
@@ -1070,9 +1075,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """
         patterns = []
         for filter_config in scan_settings_dict.get("filters_used", []):
-            if filter_config.get("path") == (
-                "detect_secrets.filters.regex.should_exclude_file"
-            ):
+            if filter_config.get("path") == SHOULD_EXCLUDE_FILE_FILTER:
                 raw_patterns = filter_config.get("pattern", [])
                 if isinstance(raw_patterns, str):
                     raw_patterns = [raw_patterns]
@@ -1094,15 +1097,50 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         return patterns
 
     @staticmethod
+    def _root_relative(path: str, root: Optional[Path]) -> str:
+        """``path`` relative to ``root``, ``/``-separated, as a baseline names a file.
+
+        detect-secrets writes a baseline from the repository's root, so its
+        ``should_exclude_file`` patterns and its result keys name files
+        relative to that root: ``^tests/``, ``src/settings.py``. The scan set
+        and the scan paths are absolute, so a pattern or key matched against
+        them as they are matched nothing when anchored, and an unanchored one
+        that happened to match a directory above the checkout matched every
+        file. A path that is not under ``root`` (a converted file outside the
+        source directory) is returned absolute, ``/``-separated. With no root
+        the path is returned as given.
+        """
+        if root is None:
+            return path
+        absolute = os.path.normpath(os.path.abspath(path))
+        root_abs = os.path.normpath(os.path.abspath(root))
+        try:
+            relative = os.path.relpath(absolute, root_abs)
+        except ValueError:
+            # Another drive on Windows: there is no relative path.
+            return Path(absolute).as_posix()
+        if relative == os.curdir or relative == os.pardir:
+            return Path(absolute).as_posix()
+        if relative.startswith(os.pardir + os.sep):
+            return Path(absolute).as_posix()
+        return Path(relative).as_posix()
+
+    @staticmethod
     def _apply_file_exclusions(
         files: List[str],
         exclude_patterns: List[re.Pattern],
+        root: Optional[Path] = None,
     ) -> List[str]:
         """Filter out files matching any of the exclude patterns.
+
+        Each pattern is searched in the file's path relative to ``root``
+        (``_root_relative``), the form the baseline's patterns were written
+        for; with no root, in the path as given.
 
         Args:
             files: List of file paths to filter.
             exclude_patterns: Compiled regex patterns to match against.
+            root: The directory the scan set was enumerated from.
 
         Returns:
             Filtered list of file paths.
@@ -1112,7 +1150,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         return [
             f
             for f in files
-            if not any(pattern.search(f) for pattern in exclude_patterns)
+            if not any(
+                pattern.search(DetectSecretsScanner._root_relative(f, root))
+                for pattern in exclude_patterns
+            )
         ]
 
     @staticmethod
@@ -1711,6 +1752,25 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 str(item) for item in candidates if Path(item).name not in skipped_names
             ]
 
+            # The baseline in use is not scanned. Its entries hold the hashes
+            # of the secrets it records, which the entropy detectors report,
+            # and the file is the record of the findings, not a finding. The
+            # scan set holds an in-tree baseline like any other file, so it is
+            # removed here, under the name it was chosen by and the name it
+            # resolves to.
+            if target_type == "source" and self._baseline_in_use():
+                baseline_names = {
+                    self._root_relative(str(path), scan_root)
+                    for path in (self._baseline_named, self._baseline_real)
+                    if path is not None
+                }
+                if baseline_names:
+                    scannable = [
+                        item
+                        for item in scannable
+                        if self._root_relative(item, scan_root) not in baseline_names
+                    ]
+
             # Build the scan_settings dict for transient_settings, ensuring
             # filters_used from the baseline are included so detect-secrets
             # can apply should_exclude_file and other filters during scanning.
@@ -1749,12 +1809,23 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # BEFORE passing files to detect-secrets. This prevents unnecessary
             # file I/O and entropy calculations on excluded files, which is
             # critical for performance on large repos (e.g. 400+ JSON test files).
+            #
+            # Matched against each file's path relative to the scan root, the
+            # form the patterns were written for (_root_relative). The filter is
+            # then left out of the settings the worker gets: detect-secrets
+            # applies it to the absolute path it is handed, where an anchored
+            # pattern matched nothing and an unanchored one that matched a
+            # directory above the checkout matched every file, and a pattern
+            # written as one string was read as one pattern per character. The
+            # files it would exclude are already gone from the scan set here.
             exclude_patterns = self._get_baseline_exclude_patterns(
                 scan_settings_dict, values
             )
             if exclude_patterns:
                 pre_filter_count = len(scannable)
-                scannable = self._apply_file_exclusions(scannable, exclude_patterns)
+                scannable = self._apply_file_exclusions(
+                    scannable, exclude_patterns, scan_root
+                )
                 excluded_count = pre_filter_count - len(scannable)
                 if excluded_count > 0:
                     self._plugin_log(
@@ -1763,20 +1834,29 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         level=logging.VERBOSE,
                         target_type=target_type,
                     )
+            if "filters_used" in scan_settings_dict:
+                scan_settings_dict["filters_used"] = [
+                    item
+                    for item in scan_settings_dict["filters_used"]
+                    if item.get("path") != SHOULD_EXCLUDE_FILE_FILTER
+                ]
 
             if global_ignore_paths:
                 from automated_security_helper.utils.suppression_matcher import (
                     ignore_path_matches as path_matches_pattern,
                 )
 
+                # Each path relative to the scan root, as the ignore paths are
+                # written (_root_relative): a prefix cut from a resolved source
+                # directory left a relative, symlinked or Windows source
+                # directory's paths uncut, and then no ignore path matched.
                 original_count = len(scannable)
-                source_prefix = str(self.context.source_dir.resolve()) + "/"
                 scannable = [
                     file_path
                     for file_path in scannable
                     if not any(
                         path_matches_pattern(
-                            file_path.removeprefix(source_prefix),
+                            self._root_relative(file_path, scan_root),
                             ignore_path.path,
                         )
                         for ignore_path in global_ignore_paths
@@ -1844,9 +1924,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # anchor it -- so source_dir="./sub" arrives relative and the
             # scan set inherits that. Absolutize here: with a relative name a
             # non-empty root would send detect-secrets looking for
-            # <root>/<root>/<file> and quietly find nothing. Kept separate
-            # from ``scannable`` so the baseline exclude patterns above still
-            # match against the paths they were written for.
+            # <root>/<root>/<file> and quietly find nothing.
             scan_paths = [str(Path(item).absolute()) for item in scannable]
             from automated_security_helper.config.environment_record import (
                 setting_names,

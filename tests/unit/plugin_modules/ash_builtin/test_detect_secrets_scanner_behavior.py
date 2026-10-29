@@ -989,11 +989,9 @@ def test_excluded_files_are_never_handed_to_detect_secrets(scanner, monkeypatch)
     Both directions are asserted: the excluded file is absent and the kept file
     is present, so the test cannot pass by handing over nothing at all.
 
-    The pattern is anchored on a full filename because it is matched against the
-    *absolute* path, which includes pytest's per-test tmp directory -- and that
-    directory is named after the test. A loose pattern like "excluded_" matches
-    the directory name of any test whose own name contains it, silently
-    excluding every file and emptying the scan set.
+    The pattern is matched against each file's path relative to the scan root
+    (the converted target here), never the absolute path, so pytest's per-test
+    tmp directory, which is named after the test, cannot match it.
     """
     # The scan runs in a worker subprocess, so the list handed to scan_files is
     # observed as the worker's request: the worker passes request["paths"] to
