@@ -222,8 +222,16 @@ def test_a_scan_under_the_bound_profile_shows_no_value(bound, tmp_path):
     # reason sits in the log that starts() reads, which a returncode
     # assertion alone would never show.
     assert started.starts() == [], diagnosis
-    assert scan.returncode == 0, diagnosis
-    assert SHOWN_SECTION in printed, "the reporter section was not shown"
+    # Bound first, asserted by name: pytest's assertion rewriting prints the
+    # operands of a failing comparison (the CompletedProcess repr with its
+    # stdout and stderr, the raw child output) into the explanation, which is
+    # the showing these assertions' redacted messages exist to withhold.
+    exited_clean = scan.returncode == 0
+    assert exited_clean, diagnosis
+    section_shown = SHOWN_SECTION in printed
+    assert section_shown, _redacted(
+        f"the reporter section was not shown (ash exited {scan.returncode})"
+    )
     shown = _shows_the_value(printed)
     assert not shown, "the scan printed the value"
     logs = [path for path in output.rglob("ash.log*") if path.is_file()]
