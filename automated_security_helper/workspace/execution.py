@@ -422,6 +422,15 @@ _DEADLINE_POLL_SECONDS = 0.05
 #: without bound. Small against any ``project_timeout``, large against a stop.
 _ABANDONED_STOP_GRACE_POLLS = 40
 
+#: How many polls an abandoned worker WITHOUT a caller-given event is given
+#: before its slot is counted lost to the projects still queued. One: the pool
+#: does not wait for such a worker's stop, so the slot is written off almost at
+#: once, but never in the poll that abandoned it. Its pool-built event stops a
+#: scan that checks its scope within that poll, and the slot it frees then
+#: starts a queued project instead of that project being failed as never
+#: started in the same breath as the abandon.
+_REAPER_GRACE_POLLS = 1
+
 #: The phase name that selects report generation, as ``run_ash_scan`` spells it.
 _REPORT_PHASE = "report"
 
@@ -2854,7 +2863,11 @@ def _run_projects(
                 for future, since in abandoned_at.items()
                 if not future.done()
                 and polls - since
-                >= (_ABANDONED_STOP_GRACE_POLLS if future in stoppable_futures else 0)
+                >= (
+                    _ABANDONED_STOP_GRACE_POLLS
+                    if future in stoppable_futures
+                    else _REAPER_GRACE_POLLS
+                )
             ]
             if len(held) < bound:
                 continue
@@ -2866,10 +2879,14 @@ def _run_projects(
             # three projects at bound 1 with a 1s budget ran past 12s -- which
             # is precisely the shape the default bound of 4 produces for a
             # workspace of five.
+            # A future that is running has started: its worker took the slot a
+            # stop just freed and has not yet recorded its start time (the
+            # start_lock window). It is judged against its budget on a later poll,
+            # not failed as never started while it runs.
             never_started = [
                 future
                 for future in list(pending)
-                if start_times.get(futures[future].key) is None
+                if start_times.get(futures[future].key) is None and not future.running()
             ]
             for future in never_started:
                 project = futures[future]
