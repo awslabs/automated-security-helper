@@ -5,7 +5,8 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 
 - the binary command (`opengrep`) and its custom URL-based install commands
 - version-gated `--metrics` (deprecated in opengrep 1.7.0+)
-- patterns mode (`--pattern`) which switches the scanner to JSON output
+- the refusal of patterns mode (`--pattern`), which opengrep runs only with a
+  language that no option of this scanner supplies
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import platform
 import struct
 import sys
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal, Optional, Tuple
+from typing import Annotated, ClassVar, Dict, List, Literal
 
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -23,7 +24,8 @@ from automated_security_helper.base.options import ScannerOptionsBase, release_t
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
-from automated_security_helper.models.core import ToolArgs, ToolExtraArg
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     GrepScannerBase,
 )
@@ -166,6 +168,26 @@ def _refuse_unverified_install_command(
             unverified_version_refusal(version, target_platform, arch, asset),
         ],
         shell=False,
+    )
+
+
+def patterns_mode_refusal(patterns: List[str]) -> str:
+    """The message a configuration that sets ``options.patterns`` is refused with.
+
+    It names the option, the language option opengrep needs for a ``--pattern``
+    search and that this scanner has none, and the supported shape for several
+    patterns: a rule file named with ``options.config``, where each rule carries
+    its own language.
+    """
+    count = len(patterns)
+    return (
+        "opengrep patterns mode is refused: scanners.opengrep.options.patterns "
+        f"names {count} pattern{'' if count == 1 else 's'}, and opengrep runs a "
+        "--pattern search only with a language (its --lang option), which no "
+        "option of this scanner supplies. Write the patterns as rules in a rule "
+        "file, which carries several patterns each with its language, and name "
+        "the file with scanners.opengrep.options.config; or clear patterns to "
+        "scan with the configured rules."
     )
 
 
@@ -389,41 +411,23 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         return True
 
     # ---------------------------------------------------------------
-    # Patterns mode — opengrep-only override
+    # Patterns mode — refused
     # ---------------------------------------------------------------
 
     def _process_config_options(self):
-        result = super()._process_config_options()
+        """The shared argument build, after refusing patterns mode.
 
-        # Patterns mode: JSON output and --pattern entries in place of the rule
-        # configs, SARIF output and metrics flag. Every other argument stays,
-        # --x-ignore-semgrepignore-files and the exclusions among them, so a
-        # .semgrepignore in the tree is not honored here either.
+        ``options.patterns`` used to switch the command to one ``--pattern`` per
+        entry with JSON output. opengrep runs a ``--pattern`` search only with a
+        language (``--lang``), which no option of this scanner carries, so every
+        such command was built, started and failed at the tool, and the report
+        showed a tool failure for a configuration opengrep can never run. The
+        refusal is raised here, while the scanner is built and before any argument
+        exists: the scan phase records a scanner whose constructor raised as that
+        scanner's ERROR with this text, so the report names the option and what to
+        write instead, and a run that did not select opengrep records it as not
+        selected, as for any other construction-time refusal.
+        """
         if self.config.options.patterns:
-            kept = [
-                arg
-                for arg in self.args.extra_args
-                if arg.key not in ("--config", "--sarif", "--metrics", "--json")
-            ]
-            self.args.extra_args = [ToolExtraArg(key="--json", value=""), *kept]
-            for pattern in self.config.options.patterns:
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--pattern", value=pattern)
-                )
-
-        return result
-
-    def _execute_scan(
-        self,
-        target: Path,
-        target_type: Literal["source", "converted"],
-        global_ignore_paths,
-    ) -> Tuple[List[str], Path, Optional[dict]]:
-        final_args, results_file, env = super()._execute_scan(
-            target, target_type, global_ignore_paths
-        )
-        if self.config.options.patterns:
-            results_file = results_file.parent / "opengrep_results.json"
-            # Re-resolve final_args so output_arg uses the json path.
-            final_args = self._resolve_scan_arguments(target, results_file)
-        return final_args, results_file, env
+            raise ScannerError(patterns_mode_refusal(self.config.options.patterns))
+        return super()._process_config_options()
