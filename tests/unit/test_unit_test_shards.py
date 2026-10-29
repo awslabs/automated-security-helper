@@ -289,6 +289,28 @@ class TestTheShardFilter:
         assert min(sizes) > 0.5 * (1000 / count), sizes
         assert max(sizes) < 1.5 * (1000 / count), sizes
 
+    def test_the_real_module_list_splits_about_evenly(self):
+        """The integration tier's shards are sized by ``owner`` over the real module
+        paths, and the job timeout assumes the split is about even; the synthetic
+        names above do not say how the real names fall. Measured on the tree of
+        2026-10-29 (2,176 modules, 4 shards): 544 / 588 / 512 / 532, the largest 1.08
+        times the mean and the smallest 0.94; the bound leaves room for growth and
+        still catches a split that would double one leg's wall."""
+        count = sharding.parse_shard(_shard_axis()[0])[1]
+        patterns = _pytest_ini_patterns("python_files")
+        modules = sorted(
+            path.relative_to(REPO_ROOT).as_posix()
+            for path in (REPO_ROOT / "tests").rglob("*.py")
+            if sharding.matches_python_files(path, patterns)
+        )
+        assert len(modules) > 1000, len(modules)
+        sizes = [0] * count
+        for module in modules:
+            sizes[sharding.owner(module, count) - 1] += 1
+        mean = len(modules) / count
+        assert max(sizes) <= 1.25 * mean, (sizes, mean)
+        assert min(sizes) >= 0.75 * mean, (sizes, mean)
+
     def test_a_file_pytest_does_not_take_as_a_test_module_is_left_alone(self):
         """The filter reads python_files from pytest.ini, so it never ignores data files."""
         patterns = _pytest_ini_patterns("python_files")
@@ -329,12 +351,24 @@ class TestTheShardFilter:
         with pytest.raises(ValueError):
             sharding.shard_from_env({sharding.ENV_VAR: text})
 
-    def test_the_root_conftest_registers_the_hook(self):
-        text = ROOT_CONFTEST.read_text(encoding="utf-8")
-        assert "from tests.utils.sharding import (" in text
-        assert "    pytest_ignore_collect,\n" in text
-        assert "    pytest_configure_node,\n" in text
-        assert "sharding.configure(config)" in text
+    def test_the_root_conftest_registers_the_hook(self, pytestconfig):
+        """Read from this session's plugin manager, not from the conftest's source
+        text: the root conftest is the plugin that carries the sharding hooks, and
+        ``configure`` ran for this config (the shard setting is in its stash)."""
+        manager = pytestconfig.pluginmanager
+        root = [
+            plugin
+            for plugin in manager.get_plugins()
+            if getattr(plugin, "__file__", None)
+            and Path(plugin.__file__).resolve() == ROOT_CONFTEST
+        ]
+        assert len(root) == 1, root
+        (conftest,) = root
+        assert conftest.pytest_ignore_collect is sharding.pytest_ignore_collect
+        assert conftest.pytest_configure_node is sharding.pytest_configure_node
+        impls = manager.hook.pytest_ignore_collect.get_hookimpls()
+        assert any(impl.function is sharding.pytest_ignore_collect for impl in impls)
+        assert sharding._SHARD_KEY in pytestconfig.stash
 
 
 @pytest.mark.integration
@@ -1526,7 +1560,7 @@ class TestATierRunThatExecutedNoTestFails:
             when=when,
             failed=False,
             skipped=True,
-            keywords={name: 1 for name in keywords},
+            keywords=dict.fromkeys(keywords, 1),
             longrepr=(path, line, prefix + reason),
             location=location,
             **extra,
@@ -1644,9 +1678,11 @@ class TestATierRunThatExecutedNoTestFails:
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.OK
         assert written == [
-            "tier run executed no test; admitted, because every skip is a skipif "
-            "condition that held: 3 skipped "
-            "(2 x 'not supported on Windows', 1 x 'needs a newer tool')"
+            (
+                "tier run executed no test; admitted, because every skip is a skipif "
+                "condition that held: 3 skipped "
+                "(2 x 'not supported on Windows', 1 x 'needs a newer tool')"
+            )
         ]
 
     def test_a_gate_skip_among_skipif_skips_keeps_the_failure(self):
