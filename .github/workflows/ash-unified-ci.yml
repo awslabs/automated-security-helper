@@ -614,7 +614,60 @@ jobs:
   unit-test-linux:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     needs: [ensure-cache]
-    runs-on: ${{ matrix.os }}
+    # WHERE THE LINUX LEGS RUN, AND THE SWITCH THAT MOVES THEM
+    #
+    # The Linux legs of the unit and integration tiers (10 and 40 of them) are the largest
+    # pool in the workflow, and the hosted runner queue is what bounds a run's wall time.
+    # This `runs-on`, and the identical one on integration-test-linux, can send them to
+    # self-hosted runners instead, behind a repository configuration variable, so the
+    # switch is a settings change and not a commit:
+    #
+    # - ASH_CI_SELF_HOSTED_LINUX unset (the default), or anything but the string `true`:
+    #   the expression falls through to `matrix.os`, exactly the hosted image this job
+    #   has always run on. A reader who has not set the variable sees no change.
+    # - ASH_CI_SELF_HOSTED_LINUX set to `true`: the leg asks for one custom runner label,
+    #   `ash-ci-linux-x64` for ubuntu-latest or `ash-ci-linux-arm64` for ubuntu-24.04-arm.
+    #   The label encodes the architecture because .github/actions/run-unit-tests derives
+    #   its artifact and check names from `runner.arch`, so a leg scheduled onto the wrong
+    #   architecture would collide with its sibling's artifact name and fail rather than
+    #   mislabel it. `matrix.os` still flows to that action as `inputs.os`, so the names
+    #   themselves do not change.
+    #
+    # One variable for both tiers, not one per tier: the integration jobs are held to
+    # run on the runner images of their unit job (tests/unit/test_unit_test_shards.py), and
+    # one switch keeps that true by construction. The e2e tier stays on the hosted images:
+    # it drives the container image and the installed scanners, which a bare runner host
+    # does not carry.
+    #
+    # WHICH EVENTS MAY USE THEM. This repository is public. GitHub's own guidance is that
+    # self-hosted runners should almost never run a public repository's pull requests,
+    # because anyone can open one and the workflow it carries runs on the runner. So the
+    # switch applies only to `push` (main only, see the trigger), `workflow_dispatch`
+    # (write access required) and a `pull_request` whose head repository IS this
+    # repository. A pull request from a fork, and every merge_group run, keeps
+    # `matrix.os` whatever the variable says. The second control is the repository
+    # setting that requires approval before a fork's workflows run at all; the two are
+    # meant to be on together.
+    #
+    # WHAT A SELF-HOSTED RUNNER MUST LOOK LIKE for the rest of this workflow to hold:
+    # one job per runner (ephemeral), a work folder of /home/runner/work so that
+    # `runner.temp` and the workspace path are the strings the hosted Linux image
+    # uses (unit-coverage combines the unit tier's coverage data by absolute path, and
+    # the sandbox-policy tests read `runner.temp` as a path outside /tmp), and the two
+    # labels above. The runner fleet itself is not described in this repository.
+    #
+    # tests/unit/test_unit_test_runner_opt_in.py pins this expression's shape: the
+    # variable name, the three events, the head-repository comparison, the two labels,
+    # that the last alternative is `matrix.os`, and that integration-test-linux carries
+    # the same expression while every other job keeps the literal.
+    runs-on: >-
+      ${{ vars.ASH_CI_SELF_HOSTED_LINUX == 'true'
+          && (github.event_name == 'push'
+              || github.event_name == 'workflow_dispatch'
+              || (github.event_name == 'pull_request'
+                  && github.event.pull_request.head.repo.full_name == github.repository))
+          && (contains(matrix.os, '-arm') && 'ash-ci-linux-arm64' || 'ash-ci-linux-x64')
+          || matrix.os }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -859,7 +912,18 @@ jobs:
     name: "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
     if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
-    runs-on: ${{ matrix.os }}
+    # The same switch as unit-test-linux, byte for byte; the note on that job says what it
+    # does, which events it admits and what a self-hosted runner has to look like. The
+    # integration jobs run on the runner images of their unit job, and one variable keeps
+    # that so when the switch is on.
+    runs-on: >-
+      ${{ vars.ASH_CI_SELF_HOSTED_LINUX == 'true'
+          && (github.event_name == 'push'
+              || github.event_name == 'workflow_dispatch'
+              || (github.event_name == 'pull_request'
+                  && github.event.pull_request.head.repo.full_name == github.repository))
+          && (contains(matrix.os, '-arm') && 'ash-ci-linux-arm64' || 'ash-ci-linux-x64')
+          || matrix.os }}
     timeout-minutes: 30
     permissions:
       contents: read
