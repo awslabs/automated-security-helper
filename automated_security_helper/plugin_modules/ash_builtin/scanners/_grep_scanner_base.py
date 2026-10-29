@@ -16,6 +16,7 @@ patterns mode, version-gated `--metrics`). Everything else lives here.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
 from pathlib import Path
@@ -68,6 +69,22 @@ CONVERTED_FILE_EXCLUDE = "*-converted.py"
 #: is skipped whole.
 NO_GIT_IGNORE_FLAG = "--no-git-ignore"
 
+#: The ``paths.skipped`` reasons under which the tool found a file in a language
+#: its rules cover and did not read it. A target where nothing was scanned and a
+#: file was skipped for one of these is not "nothing to scan": the tool says
+#: nothing about that file, and the scan is refused rather than graded SKIPPED.
+#: Every other reason (a language the rules do not cover, a path the tool's own
+#: defaults or ASH's exclusions leave out, a minified or binary file) is a file
+#: the tool chose not to scan, which SKIPPED describes.
+UNREAD_SKIP_REASONS: frozenset[str] = frozenset(
+    {
+        "exceeded_size_limit",
+        "too_big",
+        "analysis_failed_parser_or_internal_error",
+        "insufficient_permissions",
+    }
+)
+
 
 #: The paths semgrep and opengrep skip by default when no .semgrepignore is
 #: read. Passed as --exclude with --x-ignore-semgrepignore-files, so that a
@@ -99,6 +116,9 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # The names the current target's command excludes for the global ignore paths
     # (_execute_scan), which _post_process_sarif tells apart from other excludes.
     _ignore_exclude_names: List[str] = PrivateAttr(default_factory=list)
+    # The ASH output directories the current target's command excludes, relative
+    # to the target (_output_dir_exclude_patterns), told apart the same way.
+    _output_dir_excluded: List[Path] = PrivateAttr(default_factory=list)
     # Which target the current command is for: the converted target drops the
     # converted-file exclude and reads git-ignored files (_resolve_scan_arguments).
     _scan_target_type: str = PrivateAttr(default="source")
@@ -617,6 +637,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         )
 
         relatives = self._ash_output_dirs_inside(target)
+        self._output_dir_excluded = list(relatives)
         if not relatives:
             return []
         target_abs = Path(os.path.abspath(target))
@@ -638,21 +659,59 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             for relative in relatives
         ]
 
+    def _left_out_by_ash(self, path: str) -> bool:
+        """Whether ``path``, which the tool excluded, matches one of the exclusions
+        ASH itself adds to every command rather than one the operator configured.
+
+        Three sets, each what the tool would have skipped on its own or what ASH
+        skips for every scanner: the names given for the global ignore paths
+        (``_ignore_exclude_names``), the ASH output directories inside the target
+        (``_output_dir_excluded``), and the tools' own default ignore list, which
+        ASH re-passes as ``--exclude`` because ``--x-ignore-semgrepignore-files``
+        drops it (``SEMGREP_DEFAULT_IGNORES``). Matched on path components, as the
+        tools match a directory pattern, and on the file name for a file glob.
+        """
+        parts = Path(path).parts
+        if set(self._ignore_exclude_names).intersection(parts):
+            return True
+        for relative in self._output_dir_excluded:
+            needle = relative.parts
+            if needle and any(
+                parts[i : i + len(needle)] == needle
+                for i in range(len(parts) - len(needle) + 1)
+            ):
+                return True
+        name = parts[-1] if parts else ""
+        for pattern in SEMGREP_DEFAULT_IGNORES:
+            if pattern.endswith("/"):
+                if pattern[:-1] in parts[:-1]:
+                    return True
+            elif fnmatch.fnmatchcase(name, pattern):
+                return True
+        return False
+
     def _post_process_sarif(self, sarif_report, final_args: List[str], target: Path):
         """Record how many files the tool scanned, and refuse a scan of none.
 
         semgrep 1.180.0 and opengrep 1.30.2 write ``paths.scanned`` to
         ``--json-output``, and with ``--verbose`` also ``paths.skipped``, each with
         its reason (measured). The count becomes ``targets_attempted``. None scanned
-        while files were skipped by ``--exclude`` (``cli_exclude_flags_match``) means
-        the patterns left out every file the tool found, so the scan says nothing
-        about them: that is an error, not a PASSED with no findings. None scanned and
-        none skipped that way means nothing below the target is in a language the
-        rules cover, which the executor grades SKIPPED (``targets_attempted`` 0). An
-        unreadable or absent file leaves the count unset (no claim).
+        while files were skipped by the operator's ``--exclude`` patterns
+        (``cli_exclude_flags_match``, and not one of ASH's own exclusions, see
+        ``_left_out_by_ash``) means the patterns left out every file the tool
+        found, so the scan says nothing about them: that is an error, not a PASSED
+        with no findings. The same when the tool found a file in a covered language
+        and did not read it (``UNREAD_SKIP_REASONS``: too large, unreadable, a
+        parse failure). None scanned otherwise means nothing below the target is
+        in a language the rules cover, or every such file is one the tool's own
+        defaults or ASH's exclusions leave out, which the executor grades SKIPPED
+        (``targets_attempted`` 0). An absent or unreadable paths file leaves the
+        count unset (no claim).
 
         Raises:
-            ScannerError: When ``--exclude`` left out every file the tool found.
+            ScannerError: When the operator's ``--exclude`` patterns left out every
+                file the tool found, or the tool did not read a file it found in a
+                covered language.
         """
         paths = _read_paths_output(final_args)
         if paths is not None:
@@ -669,15 +728,16 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                     if isinstance(entry, dict)
                     and entry.get("reason") == "cli_exclude_flags_match"
                 ]
-                # Files left out for the global ignore paths were left out on
-                # purpose, so a scan that found only those had nothing to scan.
-                ignored_names = set(self._ignore_exclude_names)
+                # Files left out for the global ignore paths, the ASH output
+                # directories or the tools' own default ignore list were left out
+                # on purpose, so a scan that found only those had nothing to scan.
+                # A target whose files all sit under tests/ or vendor/, say, was
+                # SKIPPED by the tools' defaults before ASH re-passed that list as
+                # --exclude, and is SKIPPED still.
                 not_ignored = [
                     entry
                     for entry in excluded
-                    if not ignored_names.intersection(
-                        Path(str(entry.get("path", ""))).parts
-                    )
+                    if not self._left_out_by_ash(str(entry.get("path", "")))
                 ]
                 if not_ignored:
                     raise ScannerError(
@@ -686,12 +746,30 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         f"all {len(excluded)} files it found, so its result says "
                         "nothing about them."
                     )
+                unread = [
+                    entry
+                    for entry in skipped
+                    if isinstance(entry, dict)
+                    and str(entry.get("reason")) in UNREAD_SKIP_REASONS
+                ]
+                if unread:
+                    unread_reasons = sorted(
+                        {str(entry.get("reason")) for entry in unread}
+                    )
+                    raise ScannerError(
+                        f"{self.command} scanned no file below "
+                        f"{Path(target).as_posix()}: it found {len(unread)} file(s) in "
+                        "a language its rules cover and did not read them "
+                        f"(skipped: {', '.join(unread_reasons)}), so its result says "
+                        "nothing about them."
+                    )
                 self.targets_attempted = 0
                 if excluded:
                     self._plugin_log(
                         f"{self.command} scanned no file below "
                         f"{Path(target).as_posix()}: every file it found is in "
-                        "global_settings.ignore_paths.",
+                        "global_settings.ignore_paths, in an ASH output directory, "
+                        "or on the tool's own default ignore list.",
                         level=logging.INFO,
                     )
                     return super()._post_process_sarif(sarif_report, final_args, target)
