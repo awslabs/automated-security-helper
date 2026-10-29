@@ -832,90 +832,98 @@ class ScannerExecutor:
                             # in a directory of the run's own, outside the scanned
                             # tree, which the sandbox lets the scanner read and
                             # which is removed when the run ends.
-                            with (
-                                sandbox_scope(sandbox),
-                                tool_config_scope(self.plugin_context),
-                            ):
-                                try:
-                                    scan_called = True
-                                    raw_results = scanner_plugin.scan(
-                                        target=scan_target,
-                                        config=scanner_config,
-                                        target_type=target_type,
-                                        global_ignore_paths=self._global_ignore_paths,
-                                    )
-                                finally:
-                                    heartbeat.stop()
-                                # A tool that never started found nothing, so the
-                                # scan is an error even when scan() returned
-                                # normally. A scanner that overrides scan() may have
-                                # read the empty output as "no findings", or accepted
-                                # the exit code; neither may stand.
-                                spawn_failure = _spawn_failure(scanner_plugin)
-                                if spawn_failure is not None:
-                                    raise ScannerError(
-                                        f"{scanner_config_name} could not start its "
-                                        f"tool on {target_type}: {spawn_failure}"
-                                    )
-                                # Next, a run whose response kept a flag that says
-                                # it did not finish: a timeout (or a stop that did
-                                # not end it), a cancel, a rejected result, a signal
-                                # ASH did not send. What it wrote is not the whole
-                                # scan, so scan() may have read it as clean. This
-                                # gates BEFORE the post-run error, matching the run
-                                # recorder's own flag order: a killed tool commonly
-                                # fails its record step too, and the reason raised
-                                # has to lead with the cause (the run did not
-                                # finish), not that consequence.
-                                kept = _kept_flag(scanner_plugin)
-                                if kept is not None:
-                                    raise ScannerError(
-                                        _unfinished_run_reason(
-                                            scanner_config_name,
-                                            target_type,
-                                            kept,
-                                            _timed_out_after(scanner_plugin),
-                                            self._plugin_environment_values(
-                                                scanner_plugin
-                                            ),
+                            try:
+                                with (
+                                    sandbox_scope(sandbox),
+                                    tool_config_scope(self.plugin_context),
+                                ):
+                                    try:
+                                        scan_called = True
+                                        raw_results = scanner_plugin.scan(
+                                            target=scan_target,
+                                            config=scanner_config,
+                                            target_type=target_type,
+                                            global_ignore_paths=self._global_ignore_paths,
                                         )
+                                    finally:
+                                        heartbeat.stop()
+                                    # A tool that never started found nothing, so the
+                                    # scan is an error even when scan() returned
+                                    # normally. A scanner that overrides scan() may have
+                                    # read the empty output as "no findings", or accepted
+                                    # the exit code; neither may stand.
+                                    spawn_failure = _spawn_failure(scanner_plugin)
+                                    if spawn_failure is not None:
+                                        raise ScannerError(
+                                            f"{scanner_config_name} could not start its "
+                                            f"tool on {target_type}: {spawn_failure}"
+                                        )
+                                    # Next, a run whose response kept a flag that says
+                                    # it did not finish: a timeout (or a stop that did
+                                    # not end it), a cancel, a rejected result, a signal
+                                    # ASH did not send. What it wrote is not the whole
+                                    # scan, so scan() may have read it as clean. This
+                                    # gates BEFORE the post-run error, matching the run
+                                    # recorder's own flag order: a killed tool commonly
+                                    # fails its record step too, and the reason raised
+                                    # has to lead with the cause (the run did not
+                                    # finish), not that consequence.
+                                    kept = _kept_flag(scanner_plugin)
+                                    if kept is not None:
+                                        raise ScannerError(
+                                            _unfinished_run_reason(
+                                                scanner_config_name,
+                                                target_type,
+                                                kept,
+                                                _timed_out_after(scanner_plugin),
+                                                self._plugin_environment_values(
+                                                    scanner_plugin
+                                                ),
+                                            )
+                                        )
+                                    # And for a tool that ran to completion when ASH
+                                    # could not record its output: the exit code is
+                                    # the tool's own, so scan() may have read the run
+                                    # as clean. After the unfinished gate: on a run
+                                    # both states describe, the record failure is the
+                                    # detail, not the reason.
+                                    post_run_error = _post_run_error(scanner_plugin)
+                                    if post_run_error is not None:
+                                        raise ScannerError(
+                                            f"{scanner_config_name} ran on {target_type}, "
+                                            "but ASH could not record the scanner's "
+                                            f"output: {post_run_error}"
+                                        )
+                                    # Inside the scope: this runs the scanner's own
+                                    # binary (`grype db status`), which is that
+                                    # scanner's code like any other spawn of it.
+                                    content_db_records = records = (
+                                        self._assess_content_databases(
+                                            scanner_plugin, raw_results
+                                        )
+                                        or []
                                     )
-                                # And for a tool that ran to completion when ASH
-                                # could not record its output: the exit code is
-                                # the tool's own, so scan() may have read the run
-                                # as clean. After the unfinished gate: on a run
-                                # both states describe, the record failure is the
-                                # detail, not the reason.
-                                post_run_error = _post_run_error(scanner_plugin)
-                                if post_run_error is not None:
-                                    raise ScannerError(
-                                        f"{scanner_config_name} ran on {target_type}, "
-                                        "but ASH could not record the scanner's "
-                                        f"output: {post_run_error}"
+                                    databases_absent = [
+                                        record.message()
+                                        for record in records or []
+                                        if getattr(record, "absent", False)
+                                    ]
+                            finally:
+                                if sandbox is not None:
+                                    # Again after the scan, for anything a process
+                                    # that outlived its spawn left behind, before the
+                                    # results are written into this directory. In a
+                                    # finally, so the sweep runs on every raise above
+                                    # too: a tool that could not start, a run that
+                                    # did not finish (the timeout and could-not-stop
+                                    # case, which is when a process that outlived its
+                                    # spawn is most likely), a post-run error, or a
+                                    # scan() that raised.
+                                    sweep_writable(
+                                        [sandbox.results_dir],
+                                        sandbox.environment_values,
+                                        values_unread=sandbox.environment_values_unread,
                                     )
-                                # Inside the scope: this runs the scanner's own
-                                # binary (`grype db status`), which is that
-                                # scanner's code like any other spawn of it.
-                                content_db_records = records = (
-                                    self._assess_content_databases(
-                                        scanner_plugin, raw_results
-                                    )
-                                    or []
-                                )
-                                databases_absent = [
-                                    record.message()
-                                    for record in records or []
-                                    if getattr(record, "absent", False)
-                                ]
-                            if sandbox is not None:
-                                # Again after the scan, for anything a process that
-                                # outlived its spawn left behind, before the results
-                                # are written into this directory.
-                                sweep_writable(
-                                    [sandbox.results_dir],
-                                    sandbox.environment_values,
-                                    values_unread=sandbox.environment_values_unread,
-                                )
                     else:
                         # NO_MARKUP, as the sibling records: the scanner name is
                         # data, and a "[/x]" in one is a closing Rich tag that
