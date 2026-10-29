@@ -260,3 +260,48 @@ def test_the_last_dependency_fallback_runs_the_binary_it_found(ash_temp_path):
     assert scanner.use_uv_tool is False, (
         "the scan would go through uv, whose install failed"
     )
+
+
+def test_a_failing_batchs_stderr_is_redacted_before_it_is_cut():
+    """The value straddles the excerpt's cut (the first quarter of 500 characters
+    ends inside it), so a redaction of the excerpt would see neither half of it;
+    redacting the whole text first leaves nothing of it in the message."""
+    value = "probe-value-that-must-not-print"
+    stderr = "a" * 110 + value + "b" * 600
+    failure = CfnLintScanner._batch_failure(
+        {"returncode": 1, "stderr": stderr}, Path("batch.sarif"), values=(value,)
+    )
+    assert "cfn-lint exited 1" in failure
+    assert value not in failure
+    assert "probe-value" not in failure and "not-print" not in failure
+
+
+def test_unreadable_redaction_values_withhold_cfn_lints_stderr():
+    failure = CfnLintScanner._batch_failure(
+        {"returncode": 1, "stderr": "secret-looking text"},
+        Path("batch.sarif"),
+        values=None,
+    )
+    assert "secret-looking" not in failure
+    assert "withheld" in failure
+
+
+def test_the_scan_passes_its_redaction_values_to_the_failure_message(ash_temp_path):
+    """At the base the excerpt was cut unredacted, so the head of a value that
+    straddled the cut reached ``self.errors``."""
+    repo = _repo(ash_temp_path, "one.yaml")
+    value = "probe-value-that-must-not-print"
+
+    def fake(command, **kwargs):
+        return {
+            "stdout": "",
+            "stderr": "a" * 110 + value + "b" * 600,
+            "returncode": 1,
+        }
+
+    scanner = _scanner(repo)
+    with patch.object(CfnLintScanner, "_values_to_redact", return_value=(value,)):
+        _run(scanner, fake, repo)
+    joined = "\n".join(scanner.errors)
+    assert "cfn-lint exited 1" in joined
+    assert "probe-value" not in joined and "not-print" not in joined

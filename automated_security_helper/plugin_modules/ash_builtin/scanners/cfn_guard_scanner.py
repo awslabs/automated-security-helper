@@ -73,7 +73,18 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+)
 
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator, model_validator
 
@@ -82,6 +93,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.base.uv_tool_mixin import guarded_values
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.exceptions import ScannerError
@@ -115,6 +127,7 @@ from automated_security_helper.utils.config_trust import (
     scan_root,
     set_by_operator,
 )
+from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
@@ -152,6 +165,31 @@ VIOLATION_SEVERITY = "HIGH"
 VIOLATION_LEVEL = "error"
 
 _SUCCESS_EXIT_CODES = frozenset({0, 19})
+
+#: Shown in a failure message in place of the tool's stderr when the scanner's
+#: redaction values could not be read (``guarded_values`` answered None): the text
+#: is withheld rather than printed unredacted.
+_STDERR_WITHHELD = "(stderr withheld: the scanner's redaction values could not be read)"
+
+
+def _stderr_for_message(
+    response: Dict[str, Any], values: Optional[Iterable[str]]
+) -> str:
+    """cfn-guard's stderr for a failure message, redacted before it is cut.
+
+    The excerpt keeps the start and the end of the text and drops the middle, so a
+    value that straddles a cut survives a redaction run on the excerpt (neither
+    half matches it). The redaction therefore runs on the whole text first.
+    ``values`` None means the scanner's redaction values could not be read; then
+    the text is withheld, never shown unredacted.
+    """
+    raw = response.get("stderr") or ""
+    if not raw.strip():
+        return ""
+    if values is None:
+        return _STDERR_WITHHELD
+    return tool_output_excerpt(text_without_values(raw, values).strip(), 500)
+
 
 #: The executable this scanner runs.
 _COMMAND = "cfn-guard"
@@ -752,7 +790,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     stderr_preference="both",
                     timeout=self._effective_scan_timeout(),
                 )
-                failure, template_report = self._parse_response(response)
+                failure, template_report = self._parse_response(
+                    response, guarded_values(self)
+                )
                 if failure is not None or template_report is None:
                     failure = failure or "cfn-guard output could not be read"
                     self.targets_failed += 1
@@ -822,8 +862,15 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     @staticmethod
     def _parse_response(
         response: object,
+        values: Optional[Iterable[str]] = (),
     ) -> Tuple[Optional[str], Optional[SarifReport]]:
-        """(failure reason or None, parsed report or None) for one invocation."""
+        """(failure reason or None, parsed report or None) for one invocation.
+
+        ``values`` are the scanner's redaction values (``guarded_values(self)`` at
+        the call site): the tool's stderr is redacted with them before it is cut
+        for the message, and ``None`` (the values could not be read) shows a note in
+        place of the stderr rather than the text unredacted.
+        """
         if not isinstance(response, dict):
             return "cfn-guard did not run", None
         if response.get("timed_out"):
@@ -831,7 +878,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         if "error" in response:
             return f"cfn-guard could not be started: {response['error']}", None
         code = response.get("returncode")
-        stderr = tool_output_excerpt((response.get("stderr") or "").strip(), 500)
+        stderr = _stderr_for_message(response, values)
         if code not in _SUCCESS_EXIT_CODES:
             return (
                 f"cfn-guard exited {code}" + (f": {stderr}" if stderr else ""),

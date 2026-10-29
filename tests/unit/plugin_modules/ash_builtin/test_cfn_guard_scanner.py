@@ -353,6 +353,27 @@ class TestParseResponse:
         )
         assert "no results" in failure
 
+    def test_a_failing_exits_stderr_is_redacted_before_it_is_cut(self):
+        """The value straddles the excerpt's cut (the first quarter of 500 characters
+        ends inside it), so a redaction of the excerpt would see neither half of it;
+        redacting the whole text first leaves nothing of it in the message."""
+        value = "probe-value-that-must-not-print"
+        stderr = "a" * 110 + value + "b" * 600
+        failure, report = CfnGuardScanner._parse_response(
+            {"returncode": 1, "stdout": "", "stderr": stderr}, values=(value,)
+        )
+        assert report is None and "cfn-guard exited 1" in failure
+        assert value not in failure
+        assert "probe-value" not in failure and "not-print" not in failure
+
+    def test_unreadable_redaction_values_withhold_the_stderr(self):
+        failure, _ = CfnGuardScanner._parse_response(
+            {"returncode": 1, "stdout": "", "stderr": "secret-looking text"},
+            values=None,
+        )
+        assert "secret-looking" not in failure
+        assert "withheld" in failure
+
 
 class TestRuleSelection:
     def test_default_rule_set_is_the_security_pillar(self):
@@ -956,6 +977,28 @@ class TestScan:
             for e in scanner.errors
         )
         assert _observed(report.runs[0].results) == EXPECTED_INSECURE
+
+    def test_a_failing_templates_stderr_is_redacted_with_the_scanners_values(
+        self, repo, rules_root
+    ):
+        """At the base the excerpt was cut unredacted, so the head of a value that
+        straddled the cut reached ``self.errors``."""
+        _fake_bundle(rules_root)
+        value = "probe-value-that-must-not-print"
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 255,
+                "stdout": "",
+                "stderr": "a" * 110 + value + "b" * 600,
+            }
+
+        scanner = _scanner(repo)
+        with patch.object(CfnGuardScanner, "_values_to_redact", return_value=(value,)):
+            self._run(scanner, fake)
+        joined = "\n".join(scanner.errors)
+        assert "cfn-guard exited 255" in joined
+        assert "probe-value" not in joined and "not-print" not in joined
 
     def test_rules_removed_between_validation_and_scan_raise(self, repo, rules_root):
         scanner = _scanner(repo)

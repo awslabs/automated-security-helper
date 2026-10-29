@@ -82,6 +82,7 @@ from typing import (
     ClassVar,
     ContextManager,
     Dict,
+    Iterable,
     List,
     Literal,
     Optional,
@@ -105,6 +106,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.base.uv_tool_mixin import guarded_values
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -133,6 +135,7 @@ from automated_security_helper.utils.config_trust import (
     set_by_operator,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -308,6 +311,31 @@ def _successful_exit(code: object) -> bool:
     except (TypeError, ValueError):
         return False
     return 0 <= value <= 14 and value % 2 == 0
+
+
+#: Shown in a failure message in place of the tool's stderr when the scanner's
+#: redaction values could not be read (``guarded_values`` answered None): the text
+#: is withheld rather than printed unredacted.
+_STDERR_WITHHELD = "(stderr withheld: the scanner's redaction values could not be read)"
+
+
+def _stderr_for_message(
+    response: Dict[str, Any], values: Optional[Iterable[str]]
+) -> str:
+    """cfn-lint's stderr for a failure message, redacted before it is cut.
+
+    The excerpt keeps the start and the end of the text and drops the middle, so a
+    value that straddles a cut survives a redaction run on the excerpt (neither
+    half matches it). The redaction therefore runs on the whole text first.
+    ``values`` None means the scanner's redaction values could not be read; then
+    the text is withheld, never shown unredacted.
+    """
+    raw = response.get("stderr") or ""
+    if not raw.strip():
+        return ""
+    if values is None:
+        return _STDERR_WITHHELD
+    return tool_output_excerpt(text_without_values(raw, values).strip(), 500)
 
 
 class CfnLintScannerConfigOptions(ScannerOptionsBase):
@@ -1316,7 +1344,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             env=child_env,
             timeout=self._effective_scan_timeout(),
         )
-        failure = self._batch_failure(response, batch_file)
+        failure = self._batch_failure(response, batch_file, guarded_values(self))
         batch_report = None
         if failure is None:
             try:
@@ -1338,8 +1366,18 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         return failure, batch_report, response if isinstance(response, dict) else {}
 
     @staticmethod
-    def _batch_failure(response: object, batch_file: Path) -> Optional[str]:
-        """Why one cfn-lint invocation produced nothing usable, or None if it did."""
+    def _batch_failure(
+        response: object,
+        batch_file: Path,
+        values: Optional[Iterable[str]] = (),
+    ) -> Optional[str]:
+        """Why one cfn-lint invocation produced nothing usable, or None if it did.
+
+        ``values`` are the scanner's redaction values (``guarded_values(self)`` at
+        the call site): the tool's stderr is redacted with them before it is cut
+        for the message, and ``None`` (the values could not be read) shows a note in
+        place of the stderr rather than the text unredacted.
+        """
         if not isinstance(response, dict):
             return "cfn-lint did not run"
         if response.get("timed_out"):
@@ -1348,7 +1386,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             return f"cfn-lint could not be started: {response['error']}"
         code = response.get("returncode")
         if not _successful_exit(code):
-            stderr = tool_output_excerpt((response.get("stderr") or "").strip(), 500)
+            stderr = _stderr_for_message(response, values)
             return f"cfn-lint exited {code}" + (f": {stderr}" if stderr else "")
         if not batch_file.is_file() or batch_file.stat().st_size == 0:
             return f"cfn-lint exited {code} without writing {batch_file.name}"
