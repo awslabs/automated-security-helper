@@ -9,8 +9,9 @@ The stderr excerpt beside it is redacted with the scanner's values before its
 cut; the notification excerpt was cut with no redaction at all, so a tool that
 echoed a configured value (a path it could not read, say) printed it into the
 failure message in the clear. The reader now takes the same values and
-redacts BEFORE the cut, and a values hook that gives no usable answer leaves
-the notifications unquoted, as the stderr path does.
+redacts BEFORE the cut. On a rejected result (whose stderr log is named, not
+read) a values hook that gives no usable answer leaves the notifications
+unquoted with the file named; the hook is read at most once per failure.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     _STDERR_EXCERPT_LIMIT,
+    _RejectedResultError,
     _error_notifications,
 )
 from automated_security_helper.config.ash_config import AshConfig
@@ -108,6 +110,10 @@ def test_the_reader_redacts_before_the_cut(tmp_path):
 
 
 def test_a_raising_values_hook_leaves_the_notifications_unquoted(tmp_path):
+    # A REJECTED result: its stderr log is named, never read, so the only
+    # text the hook guards here is the notification excerpt. (On a
+    # non-rejected failure the stderr block reads the hook first and returns
+    # with the log named before the notifications are reached.)
     scanner = _scanner(_context(tmp_path, [CANARY]))
     scanner.exit_code = 2
     scanner.errors = []
@@ -117,9 +123,25 @@ def test_a_raising_values_hook_leaves_the_notifications_unquoted(tmp_path):
         raise RuntimeError("hook broke")
 
     with patch.object(scanner, "_values_to_redact", side_effect=_raising_hook):
-        detail = scanner._describe_scan_failure(ScannerError("planted"), results)
+        detail = scanner._describe_scan_failure(
+            _RejectedResultError("planted"), results
+        )
 
     assert CANARY not in detail, detail
     assert "reports:" not in detail, detail
     # The file is still named, so the reader can open it.
     assert results.as_posix() in detail, detail
+
+
+def test_the_hook_is_read_once_for_a_failure_that_quotes_both(tmp_path):
+    scanner = _scanner(_context(tmp_path, [CANARY]))
+    scanner.exit_code = 2
+    scanner.errors = []
+    results = _results_file(tmp_path, f"rules file {CANARY} could not be read")
+    hook = scanner._values_to_redact
+
+    with patch.object(scanner, "_values_to_redact", side_effect=hook) as read:
+        detail = scanner._describe_scan_failure(ScannerError("planted"), results)
+
+    assert read.call_count == 1, read.call_args_list
+    assert "reports:" in detail and CANARY not in detail, detail

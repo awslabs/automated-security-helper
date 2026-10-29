@@ -1796,6 +1796,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
             )
 
+        # _values_to_redact is read at most ONCE per failure: the stderr block
+        # reads it when it quotes the log, and the notification block below
+        # reuses that read instead of asking the hook a second time.
+        values_read = False
+        read_values: Optional[Tuple[str, ...]] = None
         if not stderr_text and log_path is not None and not rejected:
             # The log keeps the tool's text verbatim, so a quoted env-read
             # value sits in it in clear. The whole pipeline -- the bounded
@@ -1820,6 +1825,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # values the redaction hides.
             trim_inputs: Tuple[str, ...] = ()
             guarded = guarded_values(self)
+            values_read, read_values = True, guarded
             if guarded is None:
                 # The hook raised or gave no usable answer BEFORE the log was
                 # read, so nothing here knows whether stderr was captured:
@@ -1902,11 +1908,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             results_path = Path(results_file)
             # The notifications are quoted only with the values to hide in
             # hand: a hook that raised or gave no usable answer leaves the
-            # text unquoted and the file named below, as the stderr path does.
-            notification_values = guarded_values(self)
+            # text unquoted and the file named below. (On the non-rejected
+            # path such a hook already returned above with the stderr log
+            # named; this read is the rejected path's, and the one read for
+            # a failure whose stderr block did not need the hook.)
+            if not values_read:
+                read_values = guarded_values(self)
             reported = (
-                _error_notifications(results_path, notification_values)
-                if notification_values is not None
+                _error_notifications(results_path, read_values)
+                if read_values is not None
                 else ""
             )
             if reported:
