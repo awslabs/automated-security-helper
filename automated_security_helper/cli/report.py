@@ -871,6 +871,25 @@ def report_command(
                 report_format,
             )
             raise typer.Exit(1)
+        if report_format.lower() in JSON_STDOUT_FORMATS:
+            # A reporter whose report is a JSON document returns its error text
+            # in its place when it could not produce one (the cloudwatch-logs
+            # reporter, after a publish that failed its retries), and the
+            # command took any text as a report: off a terminal the text went to
+            # stdout as the document and the exit was 0, and on a terminal the
+            # json.loads in _write_report failed, so a decode error stood in
+            # for the reporter's reason. The text is the reason, so it is the
+            # error, and the exit says the report was not produced.
+            try:
+                json.loads(report_content)
+            except ValueError:
+                _print_error(
+                    "[red]Error: reporter '{}' did not produce a JSON document: "
+                    "{}[/red]",
+                    report_format,
+                    report_content,
+                )
+                raise typer.Exit(1)
         _write_report(
             report_content,
             report_format,
