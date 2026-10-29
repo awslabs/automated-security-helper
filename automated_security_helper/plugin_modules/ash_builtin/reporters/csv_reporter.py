@@ -42,6 +42,27 @@ SKIPPED_PROJECT_ROW_TYPE = "skipped-project"
 #: finding identifier. Deterministic, so the same skip on a re-run is the same row.
 SKIPPED_PROJECT_ID_PREFIX = "ash-workspace-skipped-project:"
 
+#: The characters a spreadsheet reads as the start of a formula, or as a
+#: field-splitting control, when a CSV cell begins with one.
+_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def spreadsheet_safe(value: Any) -> Any:
+    """*value* with a leading formula character neutralized by a quote prefix.
+
+    Every text cell of this report is repository- or scanner-derived: a code
+    snippet, a finding's message, a file path, a rule title. Written verbatim, a
+    cell beginning with ``=``, ``+``, ``-`` or ``@`` is evaluated as a formula by
+    the spreadsheet the format targets (CSV injection), so a snippet such as
+    ``=HYPERLINK(...)`` in a scanned file ran in the reviewer's sheet. A single
+    quote in front makes the cell text in every spreadsheet and leaves a
+    programmatic consumer one leading character to strip. Only strings are
+    touched; a number stays a number.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_LEADS):
+        return "'" + value
+    return value
+
 
 class CSVReporterConfigOptions(ReporterOptionsBase):
     pass
@@ -166,7 +187,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
                 # scan whose findings predate it -- would otherwise raise a
                 # KeyError and lose the whole report rather than one cell.
                 value = vuln.get(field)
-                row.append(value if value is not None else "")
+                row.append(spreadsheet_safe(value) if value is not None else "")
             writer.writerow(row)
 
         for entry in skipped:
@@ -228,7 +249,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
             "title": f"Project '{entry.project}' was not scanned",
             "description": skipped_project_detail(entry),
         }
-        return [values.get(field, "") for field in fields]
+        return [spreadsheet_safe(values.get(field, "")) for field in fields]
 
     @staticmethod
     def _header(is_workspace: bool) -> list[str]:
