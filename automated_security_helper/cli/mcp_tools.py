@@ -1500,13 +1500,17 @@ def _client_config_denial(
         # The scan reads the same rules and refuses on the same failure
         # (``_run_scan_async``); refused here too, as a response the caller can
         # read rather than an exception out of the tool.
-        _logger.warning(f"Session config rules not read before the scan: {exc}")
+        # Described (error_text): a validation error's own text quotes the
+        # refused input, and the response goes to a remote client.
+        _logger.warning(
+            f"Session config rules not read before the scan: {error_text(exc)}"
+        )
         return {
             "success": False,
             "operation": operation,
-            "error": (
+            "error": raw_controls_on_one_line(
                 "The config could not be checked against this session's "
-                f"runtime-override policy: {exc}"
+                f"runtime-override policy: {error_text(exc)}"
             ),
             "error_type": CONFIG_POLICY_UNREADABLE,
         }
@@ -1555,11 +1559,16 @@ def _client_config_denial(
         # Not left to the scan: the check is what decides whether the client's
         # file may be used, so one that cannot finish stops the scan here, as a
         # refusal the caller can read rather than an exception out of the tool.
-        _logger.warning(f"Config policy check failed before the scan: {exc}")
+        # Described (error_text), as create_error_response described it: the
+        # raw text of a validation error quotes the refused input, and both the
+        # log line and the response leave the server.
+        _logger.warning(
+            f"Config policy check failed before the scan: {error_text(exc)}"
+        )
         response = create_error_response(error=exc, operation=operation)
         response["error"] = raw_controls_on_one_line(
             "The config could not be checked against this session's "
-            f"runtime-override policy: {exc}"
+            f"runtime-override policy: {error_text(exc)}"
         )
         # A documented type, not the exception's class name: a client branches
         # on error_type (mcp_server.run_ash_scan answers scan_start_failure for
@@ -1621,8 +1630,10 @@ async def mcp_scan_directory(
 
     # No session id is an in-process caller, not a network caller the server
     # could not identify (UNIDENTIFIED_SESSION_ID), so there is nothing to refuse.
+    # An id another tool resolved and passed down: no request is in reach here,
+    # so the refusal claims no cause and gives the mode-less advice.
     refusal = (
-        session_identity_refusal(session_id, "scan_directory")
+        session_identity_refusal(session_id, "scan_directory", ctx=None)
         if session_id is not None
         else None
     )
@@ -3762,7 +3773,9 @@ def _load_flat_vulns_for_explain(results_path: Optional[str]) -> list:
     agg_file = output_dir / "ash_aggregated_results.json"
     if not agg_file.exists():
         raise FileNotFoundError(f"Results file not found: {agg_file}")
-    model = AshAggregatedResults.from_json(agg_file.read_text())
+    # ASH writes its results files as UTF-8; the locale default is cp1252 on
+    # Windows, which cannot decode every byte they hold.
+    model = AshAggregatedResults.from_json(agg_file.read_text(encoding="utf-8"))
     return model.to_flat_vulnerabilities()
 
 
@@ -4054,8 +4067,14 @@ def mcp_diff_scan_results(
         }
 
     try:
-        before_results = AshAggregatedResults.from_json(before_file.read_text())
-        after_results = AshAggregatedResults.from_json(after_file.read_text())
+        # ASH writes its results files as UTF-8; the locale default is cp1252 on
+        # Windows, which cannot decode every byte they hold.
+        before_results = AshAggregatedResults.from_json(
+            before_file.read_text(encoding="utf-8")
+        )
+        after_results = AshAggregatedResults.from_json(
+            after_file.read_text(encoding="utf-8")
+        )
     except Exception as e:
         return {
             "success": False,
@@ -5228,8 +5247,8 @@ def mcp_validate_config(
 
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
+        client_named_config_is_untrusted,
         config_base_gate,
-        config_is_client_supplied,
         validate_config_input,
     )
     from automated_security_helper.config.config_sources import (
@@ -5314,9 +5333,15 @@ def mcp_validate_config(
         check = ConfigValidator.check_config_file(
             path,
             permit_base=permit_base,
-            # A client-supplied path is judged as the scan judges it (the
-            # untrusted path); a server-side one keeps the operator's trust.
-            untrusted_config=config_is_client_supplied(path),
+            # A path the client named is judged as the scan judges it
+            # (resolve_config's untrusted_config, through the same predicate):
+            # the client's unless the operator set it aside, in a config root or
+            # as this session's own profile file. Judging only whether a client
+            # delivered the file passed a repository config elsewhere as the
+            # operator's, which the scan then refused, and the reverse.
+            untrusted_config=client_named_config_is_untrusted(
+                path, session_id=session_id
+            ),
             expect=checked,
             # The environment is the server's. A remote caller's config reads
             # nothing from it unless it is one of the operator's files
@@ -5682,7 +5707,11 @@ def mcp_suggest_suppression(
         }
 
     try:
-        results = AshAggregatedResults.from_json(results_file.read_text())
+        # ASH writes its results files as UTF-8; the locale default is cp1252 on
+        # Windows, which cannot decode every byte they hold.
+        results = AshAggregatedResults.from_json(
+            results_file.read_text(encoding="utf-8")
+        )
     except Exception as e:
         return {
             "success": False,
@@ -5722,11 +5751,15 @@ def mcp_suggest_suppression(
             ),
         }
 
+    # A suppression with line_start and no line_end is open-ended (the matcher
+    # reads it as "from this line to the end of the file"), so a finding that
+    # reports one line gets a suppression that covers that one line.
+    line_end = finding.line_end if finding.line_end is not None else finding.line_start
     suppression = AshSuppression(
         path=path_pattern,
         rule_id=finding.rule_id,
         line_start=finding.line_start,
-        line_end=finding.line_end,
+        line_end=line_end,
         expiration=expiration_date,
         reason=reason,
     )

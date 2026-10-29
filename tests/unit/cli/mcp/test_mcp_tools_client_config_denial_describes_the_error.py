@@ -1,0 +1,117 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A pre-scan config check that cannot finish describes its error, never quoting the input.
+
+``_client_config_denial`` put the raw text of the exception into its response
+and its log line: for the rules that could not be read, and for a check that
+raised. A pydantic validation error's own text quotes the refused input, which
+can be a value of the operator's or the client's config, and the response goes
+to a remote client. Both arms now use the described error, as
+``create_error_response`` does.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import io
+import zipfile
+from pathlib import Path
+from typing import Any, Dict
+
+import pytest
+from pydantic import ValidationError
+
+from automated_security_helper.cli import mcp_tools
+from automated_security_helper.cli.mcp.profile_registry import (
+    clear_all_session_state,
+    clear_profile_registry,
+)
+from automated_security_helper.config import client_config_policy
+from automated_security_helper.config.ash_config import AshConfig
+
+pytestmark = pytest.mark.unit
+
+REMOTE = "client-1"
+CONFIG = "project_name: x\nfail_on_findings: false\n"
+QUOTED_INPUT = "value-the-error-quotes-verbatim"
+
+
+@pytest.fixture(autouse=True)
+def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path / "scan-root"))
+    monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
+    clear_profile_registry()
+    clear_all_session_state()
+    yield
+    clear_profile_registry()
+    clear_all_session_state()
+
+
+def _upload(files: Dict[str, str]) -> Path:
+    from automated_security_helper.cli.mcp.source_delivery import (
+        set_source_zip_chunk,
+        set_source_zip_finalize,
+    )
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, text in files.items():
+            archive.writestr(name, text)
+    data = buffer.getvalue()
+    set_source_zip_chunk(
+        "u1", 0, base64.b64encode(data).decode("ascii"), True, session_id=REMOTE
+    )
+    return set_source_zip_finalize(
+        "u1", hashlib.sha256(data).hexdigest(), session_id=REMOTE
+    )
+
+
+def _a_validation_error_quoting(value: str) -> ValidationError:
+    try:
+        AshConfig.model_validate({"global_settings": value})
+    except ValidationError as exc:
+        assert value in str(exc), "the stand-in error does not quote its input"
+        return exc
+    raise AssertionError("AshConfig accepted a string for global_settings")
+
+
+def test_a_check_that_raises_describes_the_error(monkeypatch) -> None:
+    error = _a_validation_error_quoting(QUOTED_INPUT)
+    source = _upload({"ash.yaml": CONFIG})
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise error
+
+    monkeypatch.setattr(client_config_policy, "apply_client_config_rules", broken)
+
+    response = mcp_tools._client_config_denial(
+        str(source / "ash.yaml"), source, REMOTE, "scan_directory"
+    )
+
+    assert response is not None and response["success"] is False, response
+    assert response["error_type"] == "scan_start_failure", response
+    assert "ValidationError" in response["error"], response
+    assert QUOTED_INPUT not in response["error"], response
+
+
+def test_rules_that_cannot_be_read_describe_the_error(monkeypatch) -> None:
+    error = _a_validation_error_quoting(QUOTED_INPUT)
+    source = _upload({"ash.yaml": CONFIG})
+
+    def unreadable(session_id: Any, **kwargs: Any) -> Any:
+        raise error
+
+    monkeypatch.setattr(mcp_tools, "_session_client_rules", unreadable)
+
+    response = mcp_tools._client_config_denial(
+        str(source / "ash.yaml"), source, REMOTE, "scan_directory"
+    )
+
+    assert response is not None and response["success"] is False, response
+    assert response["error_type"] == mcp_tools.CONFIG_POLICY_UNREADABLE, response
+    assert QUOTED_INPUT not in response["error"], response
