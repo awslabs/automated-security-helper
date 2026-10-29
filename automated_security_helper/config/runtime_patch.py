@@ -129,7 +129,19 @@ class _PolicyNames:
             self._patterns = {}
             return
         references = tuple(getattr(config, "_environment_references", ()) or ())
-        denied_paths = list(allowlist.denied_paths)
+        # A reference sits at the index its file wrote the entry at. The list of
+        # a policy ``client_config_policy.effective_policy`` returned starts with
+        # the shipped defaults, which moves every entry the operator listed to a
+        # later index, where no reference is. The operator's own list is kept on
+        # that copy, in the order it was written, so it is what the references
+        # are matched against. An entry of the policy that is not in it is a
+        # shipped default, which the maps below name as written.
+        listed = (
+            getattr(allowlist, "_listed_denied_paths", None)
+            if getattr(allowlist, "_effective", False)
+            else None
+        )
+        denied_paths = list(allowlist.denied_paths if listed is None else listed)
         patterns = dict(allowlist.denied_value_patterns)
         # Each entry by its own index: an entry the file wrote that holds the
         # text of one read from the environment is named as written. Shown as

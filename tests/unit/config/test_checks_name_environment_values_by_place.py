@@ -994,6 +994,74 @@ def test_a_workspace_scans_override_refusal_names_a_policy_entry_read_from_the_e
     assert expected in refusal, refusal
 
 
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        pytest.param(
+            "/probesection",
+            "writes a subtree that contains denied_paths entry "
+            f"'{ENVIRONMENT_VALUE_SHOWN}'",
+            id="denied-path-read",
+        ),
+        pytest.param(
+            "/literalprobedenied",
+            "matches denied_paths entry '/literalprobedenied'",
+            id="denied-path-written",
+        ),
+    ],
+)
+def test_select_profile_s_patch_refusal_names_a_policy_entry_read_from_the_environment_by_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str, expected: str
+) -> None:
+    """select_profile checks a client's patch_ops against the policy of the
+    profile it binds, the same policy the workspace tools use: the profile's own
+    list added after the shipped defaults. The refusal goes to the client, so the
+    entry that refused the patch is named by place there too: <value> for one the
+    profile read from the environment, as written for one it wrote."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_all_session_state,
+        clear_profile_registry,
+        register_profiles,
+        set_profile_registry,
+    )
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace-root"))
+    monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv("ASH_PROBE_CANARY_DENIED", "/probesection/probecanarydenied")
+    profile = tmp_path / "profile.yaml"
+    profile.write_text(
+        "project_name: probe\n"
+        "global_settings:\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        "      allowed_paths: ['/**']\n"
+        "      denied_paths:\n"
+        "        - ${ASH_PROBE_CANARY_DENIED}\n"
+        "        - /literalprobedenied\n",
+        encoding="utf-8",
+    )
+    clear_profile_registry()
+    clear_all_session_state()
+    set_profile_registry(register_profiles([f"probe={profile}"]))
+    try:
+        result = mcp_select_profile(
+            "probe",
+            patch_ops=[{"op": "add", "path": path, "value": {}}],
+            session_id="select-profile-refusal",
+        )
+    finally:
+        clear_profile_registry()
+        clear_all_session_state()
+
+    assert result["success"] is False, result
+    refusal = str(result["error"])
+    assert "probecanarydenied" not in refusal, refusal
+    assert expected in refusal, refusal
+
+
 def test_a_workspace_scans_override_is_refused_when_no_profile_enables_overrides(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
