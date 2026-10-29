@@ -202,16 +202,13 @@ def build_nix_command(
     ]
 
 
-def run_ash_nix(
-    argv: Optional[List[str]] = None,
-    flake_ref: Optional[str] = None,
-    debug: bool = False,
-    outer_run_id: Optional[str] = None,
-) -> subprocess.CompletedProcess:
-    """Re-execute this scan inside a Nix shell holding the pinned scanners.
+def nix_executable_for_this_run() -> str:
+    """The ``nix`` this run enters its shell with, or :class:`NixModeRefused`.
 
-    ``outer_run_id`` is handed to the inner run, which writes it into its results
-    file when it completes (utils/inner_run_outcome.py).
+    The two refusals of Nix mode, in one place so the scan entry point can ask
+    them before it clears the previous run's output: a refused run never starts
+    a shell, so it must not delete the reports of one that did. ``run_ash_nix``
+    asks them again for a caller that reaches it directly.
 
     Raises:
         NixModeRefused: if `nix` is not installed, or if called from inside a Nix-mode run.
@@ -235,6 +232,24 @@ def run_ash_nix(
             "because that would scan with whatever tools happen to be installed and "
             "report the absent ones as MISSING."
         )
+    return nix_executable
+
+
+def run_ash_nix(
+    argv: Optional[List[str]] = None,
+    flake_ref: Optional[str] = None,
+    debug: bool = False,
+    outer_run_id: Optional[str] = None,
+) -> subprocess.CompletedProcess:
+    """Re-execute this scan inside a Nix shell holding the pinned scanners.
+
+    ``outer_run_id`` is handed to the inner run, which writes it into its results
+    file when it completes (utils/inner_run_outcome.py).
+
+    Raises:
+        NixModeRefused: if `nix` is not installed, or if called from inside a Nix-mode run.
+    """
+    nix_executable = nix_executable_for_this_run()
 
     resolved_ref = resolve_flake_ref(flake_ref)
     inner_args = rewrite_mode_args(list(argv if argv is not None else sys.argv[1:]))

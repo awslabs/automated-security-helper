@@ -213,3 +213,36 @@ def test_the_defaults_forward_only_the_two_directories(tmp_path):
     assert _after_flag(rest, "--strategy") == [ExecutionStrategy.PARALLEL.value]
     flags = [arg for arg in rest if arg.startswith("--")]
     assert set(flags) == {"--phases", "--strategy"}, rest
+
+
+def test_a_host_without_nix_keeps_the_previous_runs_output(tmp_path, monkeypatch):
+    """The refusal is asked before the previous run's output is cleared: a
+    refused run starts no shell, so it must not delete the reports of one that
+    did."""
+    from automated_security_helper.interactions import run_ash_nix
+
+    monkeypatch.delenv(run_ash_nix.ASH_IN_NIX_ENV_VAR, raising=False)
+    monkeypatch.setattr(run_ash_nix, "find_executable", lambda _name: None)
+    monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
+    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    src = tmp_path / "src"
+    src.mkdir()
+    out = tmp_path / "out"
+    prior = out / "reports" / "ash.sarif"
+    prior.parent.mkdir(parents=True)
+    prior.write_text('{"runs": []}\n', encoding="utf-8")
+    (out / "ash_aggregated_results.json").write_text("{}\n", encoding="utf-8")
+    opts = ras.ScanOptions(
+        source_dir=src,
+        output_dir=out,
+        mode=RunMode.nix,
+        progress=False,
+        show_summary=False,
+    )
+
+    with pytest.raises(SystemExit) as refused:
+        ras._run_nix_mode(opts, MagicMock())
+
+    assert refused.value.code == 1
+    assert prior.exists(), "the previous run's report was cleared before the refusal"
+    assert (out / "ash_aggregated_results.json").exists()

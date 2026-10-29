@@ -5359,14 +5359,23 @@ def _run_nix_mode(
     # A container an earlier container-mode run left behind may still be writing into
     # this output directory, so it is removed before the clear, as container mode does.
     # A host with no container runtime has nothing to remove and its records stay.
-    sweep_leftovers_before_run(opts.oci_runner)
-    sweep_env_dirs()
-    _discard_prior_run_artifacts(opts, logger)
+    #
+    # The two refusals of Nix mode (`nix` missing, the recursion guard) are asked
+    # first: a refused run starts no shell, so it must not delete the reports of a
+    # run that did. run_ash_nix asks them again for a caller that reaches it directly.
+    from automated_security_helper.interactions.run_ash_nix import (
+        nix_executable_for_this_run,
+    )
 
-    # Written into the results file by the inner run when it completes, so a file it
-    # did not finish is not read back as a verdict. See utils/inner_run_outcome.py.
-    outer_run_id = new_outer_run_id()
     try:
+        nix_executable_for_this_run()
+        sweep_leftovers_before_run(opts.oci_runner)
+        sweep_env_dirs()
+        _discard_prior_run_artifacts(opts, logger)
+
+        # Written into the results file by the inner run when it completes, so a file it
+        # did not finish is not read back as a verdict. See utils/inner_run_outcome.py.
+        outer_run_id = new_outer_run_id()
         nix_result = run_ash_nix(
             argv=_nix_inner_argv(opts), debug=opts.debug, outer_run_id=outer_run_id
         )
