@@ -114,8 +114,12 @@ class VersionTemplateManager:
             patterns.append((branch_pattern, branch_replacement))
 
         # Pattern 3: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)"),
-        # and `<owner>/automated-security-helper@v3.x.y` as a `uses:` step names
-        # it. Bare means not glued to a preceding path or name: unanchored, the
+        # and the `uses:` form, `<owner>/<this repository>@v<version>`. The
+        # repository name is interpolated below, not written out, for the reason
+        # the flake pattern gives: the tree walk in
+        # tests/unit/test_agent_plugin_ash_version.py reads a literal
+        # `<repository>@v<something>` in a comment as an install pin.
+        # Bare means not glued to a preceding path or name: unanchored, the
         # pattern also templatized third-party pins such as a
         # `uses: actions/checkout@v4.1.2` line in a CI example, and `generate`
         # then stamped ASH's version into another project's reference.
