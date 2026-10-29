@@ -48,13 +48,16 @@ when no test file differs. Its functions can also be imported, for example
 
 ## Measure coverage
 
-CI's unit-test job splits each operating system and Python version into eight shards.
-A shard runs every eighth test file and measures coverage of `automated_security_helper/`
-without a threshold. The `unit-coverage` job then combines the eight shards of each
-operating system family at Python 3.12 and fails when total coverage is under 80%. The
-unit-test step passes the options itself (`.github/actions/run-unit-tests/action.yml`);
-`.coveragerc` says what to measure and where to write the reports, and sets no
-threshold. To run the whole suite with the same options and the threshold:
+CI runs the suite by tier, selected by marker. The unit-test job runs `-m unit` once per
+operating system and Python version, unsharded, and measures coverage of
+`automated_security_helper/` without a threshold. The `unit-coverage` job then combines
+the unit tier's coverage data of each operating system family at Python 3.12 and fails
+when total coverage is under 80%. The integration-test jobs run `-m integration` in
+four shards per operating system and Python version, and the e2e-test jobs run `-m e2e`
+once per runner on Python 3.12; neither measures coverage. The test step passes the
+options itself (`.github/actions/run-unit-tests/action.yml`); `.coveragerc` says what to
+measure and where to write the reports, and sets no threshold. To run the whole suite
+with the same options and the threshold:
 
 <!-- doctest: illustrative reason="runs the full test suite in a checkout of this repository" -->
 ```bash
