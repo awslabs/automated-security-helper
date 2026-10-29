@@ -37,8 +37,13 @@ from automated_security_helper.config.config_validator import (
 
 pytestmark = pytest.mark.unit
 
-KEY_VARIABLE = "ASH_PAIRING_KEY"
+#: Names a config file may read: the ASH_ prefix, and no credential suffix
+#: (``_KEY``, ``_TOKEN``, ... are refused by ``config_env_var_is_secret_shaped``
+#: and left as written, which would pair nothing here).
+KEY_VARIABLE = "ASH_PAIRING_NAME"
 VALUE_VARIABLE = "ASH_PAIRING_VALUE"
+OTHER_KEY_VARIABLE = "ASH_PAIRING_OTHER_NAME"
+OTHER_VALUE_VARIABLE = "ASH_PAIRING_OTHER_VALUE"
 #: Long enough to be redacted wherever it appears, and unlike any other text.
 MERGED_VALUE = "qzmerged-secret-5519"
 PART_VARIABLE = "ASH_PART_CANARY"
@@ -85,19 +90,19 @@ class TestReferencedKeyPairing:
     def test_a_later_referenced_key_does_not_shift_the_pairing(self, monkeypatch):
         """Two referenced keys, the first merging onto a plain key: the second
         still pairs with its own resolved key, not with the leftover one."""
-        monkeypatch.setenv("ASH_PAIRING_OTHER_KEY", "b")
-        monkeypatch.setenv("ASH_PAIRING_OTHER_VALUE", "qzother-secret-6624")
+        monkeypatch.setenv(OTHER_KEY_VARIABLE, "b")
+        monkeypatch.setenv(OTHER_VALUE_VARIABLE, "qzother-secret-6624")
         written = {
             "a": "1",
             f"${{{KEY_VARIABLE}}}": f"${{{VALUE_VARIABLE}}}",
-            "${ASH_PAIRING_OTHER_KEY}": "${ASH_PAIRING_OTHER_VALUE}",
+            f"${{{OTHER_KEY_VARIABLE}}}": f"${{{OTHER_VALUE_VARIABLE}}}",
         }
         resolved = {"a": MERGED_VALUE, "b": "qzother-secret-6624"}
 
         pairs = _interpolated_pairs(written, resolved)
 
-        assert ("qzother-secret-6624", "${ASH_PAIRING_OTHER_VALUE}") in pairs, pairs
-        assert ("b", "${ASH_PAIRING_OTHER_KEY}") in pairs, pairs
+        assert ("qzother-secret-6624", f"${{{OTHER_VALUE_VARIABLE}}}") in pairs, pairs
+        assert ("b", f"${{{OTHER_KEY_VARIABLE}}}") in pairs, pairs
         assert (MERGED_VALUE, f"${{{VALUE_VARIABLE}}}") in pairs, pairs
 
     def test_a_plain_key_written_last_keeps_its_own_value(self):
@@ -161,8 +166,14 @@ def test_path_pattern_advice_survives_a_stat_that_raises(tmp_path, monkeypatch):
     past the system's length) is advised on as "fine", not raised through
     every other structural warning."""
 
+    is_dir = Path.is_dir
+
     def refused(self):
-        raise PermissionError(13, "Permission denied", str(self))
+        # Only the paths the advice stats; a fixture's teardown stats its own
+        # directories while this patch is still in place.
+        if self == tmp_path or tmp_path in self.parents:
+            raise PermissionError(13, "Permission denied", str(self))
+        return is_dir(self)
 
     monkeypatch.setattr(Path, "is_dir", refused)
 
