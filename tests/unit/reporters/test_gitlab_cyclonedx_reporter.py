@@ -17,6 +17,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclo
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.plugin_context import PluginContext
 
+pytestmark = pytest.mark.unit
+
 AshAggregatedResults.model_rebuild()
 
 

@@ -14,6 +14,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppr
     UnusedSuppressionsReporter,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def test_plugin_context(tmp_path):

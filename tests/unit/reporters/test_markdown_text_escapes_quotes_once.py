@@ -25,6 +25,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_rep
 )
 from automated_security_helper.schemas.sarif_schema_model import Result
 
+pytestmark = pytest.mark.unit
+
 RULE_ID = "the-user-is-'root'-and-\"x\""
 
 

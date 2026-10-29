@@ -24,6 +24,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_
 )
 from automated_security_helper.schemas.sarif_schema_model import Level, Message, Result
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def reporter(tmp_path):

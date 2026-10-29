@@ -48,6 +48,8 @@ from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils import content_db_staleness as staleness
 from automated_security_helper.utils.content_databases import STALENESS_WARN
 
+pytestmark = pytest.mark.unit
+
 #: The marker each probe name ends with, after its line feed.
 MARKER = "probe-mark"
 

@@ -11,12 +11,16 @@ earlier file path, so neither the input order nor a location-only order can put
 HIGH first.
 """
 
+import pytest
+
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
 from automated_security_helper.schemas.sarif_schema_model import Result
+
+pytestmark = pytest.mark.unit
 
 
 def _result(rule_id, severity, path):

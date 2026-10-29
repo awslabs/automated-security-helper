@@ -45,6 +45,8 @@ from automated_security_helper.models.scan_results_container import ScanResultsC
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 
+pytestmark = pytest.mark.unit
+
 
 def _scanner_report(results, rules=None) -> SarifReport:
     report = SarifReport.model_validate(

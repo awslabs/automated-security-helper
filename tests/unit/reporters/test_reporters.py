@@ -1,5 +1,7 @@
 """Tests for reporter plugins."""
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter import (
     FlatJSONReporter,
 )
@@ -10,6 +12,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter
     CsvReporter,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 
 class TestJSONFormatter:

@@ -14,6 +14,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Region,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestHTMLReporter:
     """Test cases for HTMLReporter."""

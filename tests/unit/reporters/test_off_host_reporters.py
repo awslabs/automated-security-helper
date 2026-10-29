@@ -30,6 +30,8 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Packages whose import means a module can talk to the network.
 NETWORK_MODULES = frozenset(
     {

@@ -30,6 +30,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     State,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestOcsfReporterHelperMethods:
     """Test cases for OCSF reporter helper methods."""

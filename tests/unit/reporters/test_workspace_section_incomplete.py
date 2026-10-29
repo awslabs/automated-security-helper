@@ -19,6 +19,8 @@ start with ``FAILED`` changes the text and leaves the row green. Both are
 asserted here for that reason.
 """
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
@@ -33,6 +35,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
     text_workspace_section,
     workspace_project_rows,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _project(key: str, **overrides) -> WorkspaceProjectResult:
