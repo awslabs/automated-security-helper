@@ -103,6 +103,24 @@ CheckFrameworks = Literal[
 _CHECKOV_UNSAFE_SKIP_PATH_CHARS = frozenset("()")
 
 
+def _known_ignore_skip_pattern(entry: str) -> str:
+    """The ``--skip-path`` value for one ``KNOWN_IGNORE_PATHS`` directory name.
+
+    checkov applies each value with ``re.search`` and as a substring against the
+    walked path (``filter_ignored_paths``), so the bare ``venv/`` skipped every
+    file under any directory whose name merely ends in ``venv`` (``devenv/``,
+    ``prevenv/``), and ``node_modules/`` every file under ``old_node_modules/``.
+    Anchored to a path component instead: ``(^|/)venv/`` matches ``venv/`` as a
+    whole directory name at any depth and nothing else, and the substring half
+    of checkov's test cannot match a real path either. Every dot is ``[.]``, not
+    ``\\.``, for the reason ``_link_skip_patterns`` gives. The group is balanced,
+    so the regex checkov's terraform module finder builds from every value still
+    compiles (``_module_finder_compiles``).
+    """
+    name = entry.strip("/")
+    return "(^|/)" + re.escape(name).replace("\\.", "[.]") + "/"
+
+
 def _module_finder_compiles(values: List[str]) -> bool:
     """Whether checkov's terraform module finder can compile its regex over
     ``values``, the ``--skip-path`` values in the order checkov is given them.
@@ -617,7 +635,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         for item in KNOWN_IGNORE_PATHS:
             self.args.extra_args.append(
-                ToolExtraArg(key=f"--skip-path={item}", value=None)
+                ToolExtraArg(
+                    key=f"--skip-path={_known_ignore_skip_pattern(item)}", value=None
+                )
             )
 
         for item in active_ignore_paths(
@@ -894,8 +914,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ``outt1/``, and ``out|q/`` skipped every directory. Measured by calling
         checkov 3.3.26's ``filter_ignored_paths`` the way its runners walk a tree.
 
-        Not anchored or grouped, and a path holding ``(`` or ``)`` is not emitted
-        at all; the warning names ``skip_path`` instead. Checkov's terraform
+        Anchored at the start with ``^`` (unanchored, the value also skipped a
+        deeper path holding the same text), not grouped, and a path holding ``(``
+        or ``)`` is not emitted at all; the warning names ``skip_path`` instead.
+        Checkov's terraform
         module finder joins every ``--skip-path`` value into one regex a character
         at a time (``'|'.join(f"({excluded_paths})")`` in ``module_finder.py``),
         which separates each escape from the character it escapes. Measured on
@@ -954,5 +976,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 "reason: ASH output directory",
                 extra=NO_MARKUP,
             )
-            patterns.append(escape_for_pattern(output_path, PatternSyntax.REGEX))
+            # Anchored at the start: unanchored, the value also skipped a deeper
+            # path that holds the same text (a copy of the tree under itself).
+            patterns.append("^" + escape_for_pattern(output_path, PatternSyntax.REGEX))
         return patterns
