@@ -5,7 +5,9 @@ This module provides utilities to manage version information dynamically
 from pyproject.toml, ensuring a single source of truth.
 """
 
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import Optional, Tuple
@@ -195,7 +197,9 @@ def update_version_in_pyproject(
     Sets ``[project] version`` and, when the table exists, ``[tool.commitizen]
     version`` to the same value. The file is replaced atomically: the new text is
     written beside it and renamed over it, so a write that fails leaves the old
-    file in place instead of a truncated one.
+    file in place instead of a truncated one. The file keeps its permission bits,
+    and a pyproject.toml that is a symlink keeps being one: the file it points to
+    is the one replaced.
 
     Args:
         new_version: New version string to set.
@@ -232,11 +236,27 @@ def _replace_file_text(path: Path, text: str) -> None:
 
     Through the project's own atomic-write helper, the one every other writer in
     the package uses and the fs_guard inventory test admits: a staging file created
-    exclusively in the target's directory with the mode a plain open gives, renamed
-    over the target when the write completes and removed when it does not.
-    """
-    # Not at the top: atomic_write reaches fs_guard, which imports the sandbox
-    # package, and this module is imported by the package __init__.
-    from automated_security_helper.utils.atomic_write import write_text_atomically
+    exclusively in the target's directory, renamed over the target when the write
+    completes and removed when it does not.
 
-    write_text_atomically(path, text)
+    The file replaced is the one ``path`` refers to, not the name: a pyproject.toml
+    that is a symlink keeps being one and its target carries the new text, where a
+    rename over the name itself replaced the link with a plain file. The target's
+    permission bits are read first and set on the staging file before the rename,
+    so the file keeps the mode it had; the helper creates its staging file with the
+    umask's default, as a plain ``open`` would, which is right for a new file and
+    not for one that already has a mode.
+    """
+    # Not at the top: fs_guard imports the sandbox package, and this module is
+    # imported by the package __init__.
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
+
+    target = Path(os.path.realpath(path))
+    mode = stat.S_IMODE(target.stat().st_mode)
+    fchmod = getattr(os, "fchmod", None)
+    with open_for_atomic_write(target) as handle:
+        handle.write(text)
+        if fchmod is not None:
+            fchmod(handle.fileno(), mode)
+    if fchmod is None:  # pragma: no cover - a platform without fchmod (Windows)
+        os.chmod(target, mode)
