@@ -198,8 +198,15 @@ def is_inside_tree(path: PathLike, root: PathLike) -> bool:
     spellings that differ only in case on a case-insensitive volume, and macOS's
     ``/var`` for ``/private/var``. Components are compared through
     ``os.path.normcase``.
+
+    The answer as written counts only when no component below the root is
+    ``..``: ``<root>/../elsewhere/tool`` starts with the root's components and
+    leaves the tree in the next one, so it is judged by where it resolves to,
+    like any other spelling, and a tool outside the tree is not refused as an
+    in-tree one.
     """
-    if _below(path, root) is not None:
+    below = _below(path, root)
+    if below is not None and ".." not in below[1]:
         return True
     named = _absolute(path)
     real_root = Path(os.path.realpath(root))
