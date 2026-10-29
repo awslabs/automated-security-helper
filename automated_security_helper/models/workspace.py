@@ -504,6 +504,35 @@ class WorkspaceProjectResult(RecordModel):
             ),
         ),
     ]
+    unevaluated_rules: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "Rules a scanner reported, at run level, that it could not "
+                "evaluate, as the single-scan payload's unevaluated_rules lists "
+                "them. A rule here fails the project (scan_incomplete) whatever "
+                "fail_on_incomplete_scanners says: `ash --source-dir P` exits 1 on "
+                "it, because the scan reports nothing about compliance with that "
+                "rule. Empty in a workspace file written before the field existed."
+            ),
+        ),
+    ]
+    unstoppable_tools: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "Scanner name to reason, for each scanner whose run ended with a "
+                "tool ASH could not stop, as the single-scan payload's "
+                "could_not_stop rows record it. Such a tool may still write into "
+                "the project's output after the verdict read it, so the project "
+                "fails (scan_incomplete) whatever fail_on_incomplete_scanners "
+                "says, as `ash --source-dir P` does. Empty in a workspace file "
+                "written before the field existed."
+            ),
+        ),
+    ]
     inputs_not_scanned: Annotated[
         List[ProjectInputNotScanned],
         Field(
@@ -560,7 +589,9 @@ class WorkspaceProjectResult(RecordModel):
                 "Stored rather than derived from them for the same reason "
                 "exceeds_threshold is: fail_on_incomplete_scanners can be off, in "
                 "which case a project has scanners that did not run and still "
-                "passes."
+                "passes. Always true for a stale content database under a fail "
+                "policy, an unevaluated rule or a tool ASH could not stop: no "
+                "setting silences those in `ash --source-dir P` either."
             ),
         ),
     ] = False

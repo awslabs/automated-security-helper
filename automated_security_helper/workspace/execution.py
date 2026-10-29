@@ -1028,7 +1028,7 @@ def changed_file_set(
 
 
 def _coverage_fields(results: Any) -> Dict[str, Any]:
-    """The four ``WorkspaceProjectResult`` coverage fields, from one read of *results*.
+    """The six ``WorkspaceProjectResult`` coverage fields, from one read of *results*.
 
     The read is ``scan_incompleteness(results, gate=True)``, the object
     ``_compute_exit_code`` asks the same questions of, so a project's outcome and
@@ -1039,6 +1039,11 @@ def _coverage_fields(results: Any) -> Dict[str, Any]:
     workspace project is never one shard of a split (``ProjectScanSettings`` carries
     no shard fields), so ``one_shard_of_a_split`` is not passed and
     ``no_scanner_ran`` is the plain set-level answer.
+
+    ``unevaluated_rules`` and ``unstoppable_tools`` are the two exit-1 arms
+    ``_compute_exit_code`` asks with the gate on or off. They used to be read into
+    the same object and dropped here, so a project that exits 1 alone on a rule
+    that raised, or on a tool ASH could not stop, passed inside a workspace.
 
     Imported inside the function because ``run_ash_scan`` imports this module for
     workspace mode; a module-level import closes that into a cycle.
@@ -1053,6 +1058,8 @@ def _coverage_fields(results: Any) -> Dict[str, Any]:
         "incomplete_scanner_details": dict(coverage.scanners),
         "partial_coverage_scanners": list(coverage.partial_coverage),
         "no_scanner_ran": coverage.no_scanner_ran,
+        "unevaluated_rules": list(coverage.unevaluated_rules),
+        "unstoppable_tools": dict(coverage.could_not_stop),
     }
 
 
@@ -1251,10 +1258,11 @@ def _scan_one_project(
     # SUCCESS, while `ash --source-dir P` on the same project exited 1 -- the
     # workspace layer mirrored only the threshold pass.
     #
-    # One scan_incompleteness read, taken inside _coverage_fields, supplies four
-    # coverage fields below (the names, the display details, the partial-audit names
-    # and the set-level "nothing ran" answer), so they cannot disagree with each
-    # other or with what _compute_exit_code reads.
+    # One scan_incompleteness read, taken inside _coverage_fields, supplies six
+    # coverage fields below (the names, the display details, the partial-audit names,
+    # the set-level "nothing ran" answer, the rules no scanner could evaluate and the
+    # tools ASH could not stop), so they cannot disagree with each other or with
+    # what _compute_exit_code reads.
     coverage_fields = _coverage_fields(results)
     incomplete = coverage_fields["incomplete_scanners"]
     # The set-level question is not implied by the per-entry list. The per-entry
@@ -1358,6 +1366,12 @@ def _scan_one_project(
         # A stale content database under `content_db_staleness: fail` fails the project
         # whatever fail_on_incomplete says, matching _compute_exit_code's own arm for it:
         # `ash --source-dir P` exits 1 on it, so P inside a workspace must not pass.
+        # The same holds for a rule a scanner could not evaluate and for a tool ASH
+        # could not stop: _compute_exit_code returns 1 on either with the gate off,
+        # and neither is subject to the policy-scanner exclusion above, because a
+        # rule that raised reports nothing about compliance with it and a tool still
+        # running may write into this project's output after the verdict read it,
+        # whichever config asked for the scanner.
         scan_incomplete=(
             (
                 bool(gating_incomplete)
@@ -1366,7 +1380,9 @@ def _scan_one_project(
             )
             and fail_on_incomplete
         )
-        or bool(stale),
+        or bool(stale)
+        or bool(coverage_fields["unevaluated_rules"])
+        or bool(coverage_fields["unstoppable_tools"]),
         ceiling_unreachable_findings=unreachable,
         ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
