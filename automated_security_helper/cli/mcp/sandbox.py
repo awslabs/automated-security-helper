@@ -138,6 +138,11 @@ ASH_MCP_ALLOWED_ROOTS_ENV = "ASH_MCP_ALLOWED_ROOTS"
 #: would let an operator widen the scan surface by naming a config directory.
 ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV = "ASH_MCP_ALLOWED_CONFIG_ROOTS"
 
+#: The parent of every session workspace, read by ``source_delivery`` (its
+#: resolution order is documented there). Named here so a refusal can tell the
+#: caller which setting moves the workspace area.
+ASH_MCP_WORKSPACE_ROOT_ENV = "ASH_MCP_WORKSPACE_ROOT"
+
 #: Subdirectory of a session sandbox holding the delivered source tree. Matches
 #: what ``source_delivery`` writes; the two must agree or a delivered tree is
 #: refused by the boundary that exists to permit it.
@@ -505,7 +510,9 @@ def client_named_config_is_untrusted(
     config_roots = operator_config_roots()
     # Resolved as the gates resolve it, so an id that cannot name one directory
     # owns no config directory here either.
-    own = _sandbox_for_gate(session_id or DEFAULT_SESSION_ID).root
+    own = _sandbox_for_gate(
+        DEFAULT_SESSION_ID if session_id is None else session_id
+    ).root
 
     def chosen_by_operator(candidate: Path) -> bool:
         if own is not None:
@@ -812,16 +819,25 @@ def _refusal(
     sets on the ``mcp_tools`` side.
     """
 
-    shown = path.as_posix() if isinstance(path, PurePath) else path
     return MCPResourceError(
-        f"{what} is outside the permitted roots: {shown}. {remedy}",
-        context={
-            "cwd": str(Path.cwd()),
-            "directory_path": str(path),
-            "resolved_path": str(resolved),
-            "error_category": ErrorCategory.INVALID_PATH.value,
-        },
+        f"{what} is outside the permitted roots: {_shown_path(path)}. {remedy}",
+        context=_refusal_context(path, resolved),
     )
+
+
+def _shown_path(path: object) -> object:
+    """The caller's own spelling of ``path``, as every refusal shows it."""
+    return path.as_posix() if isinstance(path, PurePath) else path
+
+
+def _refusal_context(path: object, resolved: Path) -> dict[str, str]:
+    """The context every refusal in this module carries; see ``_refusal``."""
+    return {
+        "cwd": str(Path.cwd()),
+        "directory_path": str(path),
+        "resolved_path": str(resolved),
+        "error_category": ErrorCategory.INVALID_PATH.value,
+    }
 
 
 def _running_on_windows() -> bool:
@@ -879,7 +895,7 @@ def _sibling_refusal(
     sandbox: SessionSandbox, path: object, resolved: Path
 ) -> Optional[MCPResourceError]:
     """Refuse a path inside the shared workspace root but not inside this sandbox,
-    and a path the shared workspace root is inside.
+    and a path an existing shared workspace root is inside.
 
     Checked before anything that could allow, and independent of both the
     operator grant and the transport. That independence is the point: the
@@ -900,24 +916,27 @@ def _sibling_refusal(
     shared = shared_workspace_root()
     if shared is None:
         return None
-    if _is_or_below(shared, resolved) and not _is_or_below(resolved, shared):
+    if (
+        _is_or_below(shared, resolved)
+        and not _is_or_below(resolved, shared)
+        and os.path.exists(shared)
+    ):
         # The target is an ancestor of the shared root: its parent, the home
         # directory, a granted tree above it. A scan of it walks every
         # session's delivered source, which is the same disclosure as scanning
         # a sibling directly, so it is refused on the same footing, before
-        # any grant is consulted. The path shown is the caller's own, which
-        # names no other session.
-        return _refusal(
-            "Target",
-            path,
-            resolved,
-            remedy=(
-                "It contains the MCP session workspace area, so a scan of it "
-                "would read every session's delivered source. Scan a tree this "
-                "session delivered, or a directory the operator granted with "
-                f"{ASH_MCP_ALLOWED_ROOTS_ENV} that does not contain the "
-                "workspace area."
-            ),
+        # any grant is consulted. A root that is not on disk holds no
+        # session's source, so nothing above it is refused for containing it.
+        # The path shown is the caller's own, which names no other session.
+        # No grant admits this target, so the remedy names the setting that
+        # moves the workspace area rather than the one that grants roots.
+        return MCPResourceError(
+            f"Target {_shown_path(path)} contains the MCP session workspace "
+            "area, so a scan of it would read every session's delivered source. "
+            "Scan a tree this session delivered, or set "
+            f"{ASH_MCP_WORKSPACE_ROOT_ENV} to a workspace area the granted "
+            "directory does not contain.",
+            context=_refusal_context(path, resolved),
         )
     inside_shared = _is_or_below(resolved, shared)
     if not inside_shared or sandbox.owns(resolved):
@@ -1491,7 +1510,8 @@ def _legacy_denylist_refusal(
     the documented container workspace root (/var/cache/ash-mcp), "/usr" would
     refuse tool installs, and "/home" would refuse the common case. A grant is
     the mechanism for narrowing beyond this; on a network transport the sandbox
-    is, and this function is not reached there.
+    is, and this function is not reached there. An ancestor of an existing
+    workspace root is refused earlier, by ``_sibling_refusal``.
     """
 
     from automated_security_helper.cli.mcp.scan_target import _denied_roots
@@ -1519,6 +1539,7 @@ def _legacy_denylist_refusal(
 __all__ = [
     "ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV",
     "ASH_MCP_ALLOWED_ROOTS_ENV",
+    "ASH_MCP_WORKSPACE_ROOT_ENV",
     "ASH_MCP_TRANSPORT_ENV",
     "DEFAULT_TRANSPORT",
     "CLIENT_CONFIG_DIR_NAME",

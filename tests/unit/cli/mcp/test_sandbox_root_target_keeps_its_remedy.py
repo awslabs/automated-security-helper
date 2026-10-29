@@ -8,6 +8,10 @@ A target of ``/`` (or a drive root) is reached most often by omitting the
 directory, so its refusal tells the caller to pass the directory explicitly.
 That judgment runs before the session workspace gate, which would otherwise
 describe the root as a tree that contains the workspace area.
+
+The workspace gate itself refuses an ancestor of the workspace root only when
+that root is on disk, and its remedy names the setting that moves the workspace
+area, since no grant admits such a target.
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ from automated_security_helper.cli.mcp.sandbox import (
     ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV,
     ASH_MCP_ALLOWED_ROOTS_ENV,
     ASH_MCP_TRANSPORT_ENV,
+    ASH_MCP_WORKSPACE_ROOT_ENV,
+    _sibling_refusal,
     session_sandbox,
     shared_workspace_root,
     validate_scan_target_in_sandbox,
@@ -63,3 +69,32 @@ def test_the_filesystem_root_keeps_the_explicit_directory_remedy(tmp_path):
     message = str(refusal)
     assert ROOT_REMEDY in message, message
     assert "session workspace" not in message, message
+
+
+def test_a_home_above_a_workspace_root_that_is_not_on_disk_is_admitted(tmp_path):
+    """No root on disk means no session's source under it: the home passes."""
+    home = tmp_path / "home"
+    home.mkdir()
+    shared = shared_workspace_root()
+    assert shared is not None
+    assert not shared.exists()
+
+    refusal = _sibling_refusal(session_sandbox(OWN), home, home.resolve())
+
+    assert refusal is None, str(refusal)
+
+
+def test_a_home_above_an_existing_workspace_root_names_the_root_setting(tmp_path):
+    """Root on disk: the home is refused, and the remedy names the setting that
+    moves the workspace area, not the one that grants roots."""
+    _delivered(OWN)
+    home = tmp_path / "home"
+    assert home.is_dir()
+
+    refusal = _sibling_refusal(session_sandbox(OWN), home, home.resolve())
+
+    assert refusal is not None
+    message = str(refusal)
+    assert ASH_MCP_WORKSPACE_ROOT_ENV in message, message
+    assert "permitted roots" not in message, message
+    assert refusal.context["resolved_path"] == str(home.resolve())
