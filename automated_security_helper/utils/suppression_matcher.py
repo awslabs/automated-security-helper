@@ -596,11 +596,22 @@ def find_inline_suppressions(
             f"Inline suppressions in '{refused.path}' were not read: {refused.reason}"
         )
         return suppressions
-    except (OSError, UnicodeDecodeError) as exc:
+    except (OSError, ValueError) as exc:
+        # ValueError covers UnicodeDecodeError, and the two refusals the OS
+        # layer gives a path before opening it: an embedded NUL, and a lone
+        # surrogate the file-system encoding cannot encode (UnicodeEncodeError).
+        # Either is one unreadable file, not a reason to drop every other
+        # file's suppressions with it.
         ASH_LOGGER.debug(f"Could not read {file_path} for inline suppressions: {exc}")
         return suppressions
 
-    for line_num_0, line in enumerate(text.splitlines()):
+    # Lines are counted as the scanners count them, by line feed (a carriage
+    # return before it belongs to the line). str.splitlines also breaks a line
+    # at a form feed, a vertical tab, NEL, LINE SEPARATOR, PARAGRAPH SEPARATOR
+    # and the \x1c-\x1e separators, so after any of those every directive was
+    # attached to a line number the SARIF results never carry.
+    for line_num_0, line in enumerate(text.split("\n")):
+        line = line.rstrip("\r")
         line_num = line_num_0 + 1  # 1-based
 
         matched = False
