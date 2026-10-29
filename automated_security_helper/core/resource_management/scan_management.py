@@ -10,7 +10,10 @@ cancelling scans, and cleaning up completed scans. It builds on the scan registr
 to provide a higher-level interface for scan management.
 """
 
+import asyncio
+import os
 import shutil
+import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -27,6 +30,49 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 # Configure module logger
 _logger = ASH_LOGGER
+
+#: How long cleanup waits for a cancelled scan's runner thread to stop and settle
+#: its output directory before giving the scan back to the caller as still
+#: stopping. The runner stops its scanner's child process and puts the previous
+#: results back, which takes seconds; the registry entry and the output
+#: directory are removed only once it is done.
+_RUNNER_SETTLE_TIMEOUT_SECONDS = 30.0
+
+
+class _OutputDirectoryInUse(Exception):
+    """The output directory must not be removed now; the message says why."""
+
+
+def _link_in_output_path(output_dir: Path, directory_path: Optional[str]) -> bool:
+    """Whether a component of ``output_dir`` is a symbolic link at cleanup time.
+
+    The output directory is stored as a string at registration and removed by
+    that path later. Every component from the scan's source directory down to
+    the output directory (``<source>/.ash/ash_output`` for a scan) is checked
+    without following links, and the output directory itself always is: a
+    ``.ash`` that became a link after the scan would otherwise redirect the
+    recursive delete to wherever it points, outside the scanned tree.
+    """
+    components = [output_dir]
+    if directory_path:
+        source = Path(directory_path)
+        try:
+            relative = output_dir.relative_to(source)
+        except ValueError:
+            relative = None
+        if relative is not None:
+            components = []
+            current = source
+            for part in relative.parts:
+                current = current / part
+                components.append(current)
+    for component in components:
+        try:
+            if stat.S_ISLNK(os.lstat(component).st_mode):
+                return True
+        except FileNotFoundError:
+            return False
+    return False
 
 
 def _scoped(session_id: Optional[str]) -> Dict[str, str]:
@@ -213,7 +259,9 @@ async def cleanup_scan_resources(
     Returns:
         Dictionary with cleanup result information, or the error response
         produced by ``create_error_response`` on failure. This does not raise;
-        callers should branch on ``success``.
+        callers should branch on ``success``. A scan whose runner is still
+        stopping after the cancel is reported with ``success`` False and
+        nothing removed; retry once it has settled.
     """
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
@@ -271,12 +319,66 @@ async def cleanup_scan_resources(
                     f"Failed to cancel scan {scan_id} during cleanup: {str(e)}"
                 )
 
+        # A cancel closes the entry at once, while the in-process runner thread
+        # may run for seconds more: it stops its scanner's child process and
+        # puts the previous results back into the output directory. Removing
+        # that directory and the entry while it does so deletes a tree the
+        # runner still writes into, and lets a new scan of the directory in
+        # that the restore then overwrites. So the runner is waited for, and a
+        # scan whose runner has not settled in time is handed back as still
+        # stopping with nothing removed.
+        if entry.has_runner and not entry.runner_done.is_set():
+            settled = await asyncio.to_thread(
+                entry.runner_done.wait, _RUNNER_SETTLE_TIMEOUT_SECONDS
+            )
+            if not settled:
+                return {
+                    "success": False,
+                    "scan_id": scan_id,
+                    "removed_output": False,
+                    "removed_from_registry": False,
+                    "message": (
+                        "Scan is still stopping: its runner has not finished "
+                        "settling the output directory"
+                    ),
+                    "status": entry.status.value,
+                    "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                    "suggestions": [
+                        (
+                            "Retry in a few seconds: the scan stops its scanner and "
+                            "puts the previous results back before its resources "
+                            "can be removed"
+                        ),
+                    ],
+                    "timestamp": datetime.now().isoformat(),
+                }
+
         # Remove output files if requested
         removed_output = False
         output_dir_error = None
         if remove_output and entry.output_directory:
             try:
                 output_dir = Path(entry.output_directory)
+                # Every scan of one source directory writes the same output
+                # tree under it, so this scan's output directory is also a
+                # newer scan's while that scan runs or settles. Removing it
+                # then deletes the newer scan's results from under it.
+                occupants = list(
+                    registry.occupants_of_directory(
+                        entry.directory_path, except_scan_id=scan_id
+                    )
+                )
+                if occupants:
+                    raise _OutputDirectoryInUse(
+                        "another scan of the same directory is running or "
+                        "stopping and shares this output directory"
+                    )
+                # The path was recorded at registration; a link placed on it
+                # since would redirect the delete outside the scanned tree.
+                if _link_in_output_path(output_dir, entry.directory_path):
+                    raise _OutputDirectoryInUse(
+                        "a component of the output path is now a symbolic link"
+                    )
                 # Deferred, and this site is the clearest case for deferring. Fixing the exists()
                 # and is_dir() calls flagged here would leave the shutil.rmtree() on the next
                 # line -- which blocks for as long as it takes to delete an entire scan output
@@ -287,6 +389,9 @@ async def cleanup_scan_resources(
                 if output_dir.exists() and output_dir.is_dir():  # noqa: ASYNC240
                     shutil.rmtree(output_dir)
                     removed_output = True
+            except _OutputDirectoryInUse as e:
+                output_dir_error = f"Output directory not removed: {e}"
+                _logger.warning(f"Output directory of scan {scan_id} not removed: {e}")
             except PermissionError as e:
                 output_dir_error = (
                     f"Permission denied: Cannot remove output directory: {str(e)}"
