@@ -174,13 +174,37 @@ class LiveProgressDisplay:
 
                 # The traceback quotes the error's text, which can quote a path.
                 print(shown_not_obeyed(traceback.format_exc()), file=sys.stderr, end="")
-                # Fall back to non-progress mode
+                # Fall back to non-progress mode. The panel handler __init__
+                # attached fed a panel that will never be rendered, and with
+                # show_progress on, get_logger added no console handler, so
+                # every later log line went to the unrendered panel and nowhere
+                # else. The panel handler comes off and a console sink at the
+                # same level takes its place, marked as the run's handler so
+                # stop() and the run's end remove it as they would the panel's.
                 self.show_progress = False
+                self._replace_panel_handler_with_console()
                 ASH_LOGGER.error(f"Failed to initialize progress display: {str(e)}")
                 ASH_LOGGER.info("Continuing without progress display")
 
         # Log a message to show in the log panel
         ASH_LOGGER.info("ASH Security Scan started")
+
+    def _replace_panel_handler_with_console(self) -> None:
+        """Swap the panel's log handler for a console sink at the same level.
+
+        For the fallback start() takes when the live display cannot be built:
+        the lines the panel would have shown go to standard error instead, with
+        the panel handler's level and formatter. The new handler becomes
+        ``self.log_handler`` so stop() removes it as it removes the panel's.
+        """
+        panel_handler = self.log_handler
+        if panel_handler in ASH_LOGGER.handlers:
+            ASH_LOGGER.removeHandler(panel_handler)
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(panel_handler.level)
+        console_handler.setFormatter(logging.Formatter("%(message)s"))
+        self.log_handler = run_handler(console_handler)
+        ASH_LOGGER.addHandler(self.log_handler)
 
     def stop(self, interrupted: bool = False):
         """Stop the live display if it's running.
