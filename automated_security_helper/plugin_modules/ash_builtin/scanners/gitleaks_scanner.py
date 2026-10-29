@@ -598,6 +598,22 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 level=logging.WARNING,
             )
         elif set_vars:
+            # gitleaks resolves a relative GITLEAKS_CONFIG against its working
+            # directory, which is the scanned source directory here, so a
+            # relative value the operator set in ASH's own working directory
+            # would be read from the scanned tree: the repository would supply
+            # the config file. Anchor it where the operator typed it and pass
+            # it as --config, which gitleaks reads before the variable. An
+            # absolute path, or GITLEAKS_CONFIG_TOML (the config's text, not a
+            # path), is left to gitleaks as before.
+            relative = os.environ.get("GITLEAKS_CONFIG")
+            if relative and not os.path.isabs(os.path.expanduser(relative)):
+                anchored = Path(os.path.abspath(os.path.expanduser(relative)))
+                ASH_LOGGER.debug(
+                    "GITLEAKS_CONFIG is a relative path; passing it to gitleaks "
+                    "resolved against the working directory ASH runs in"
+                )
+                return anchored
             ASH_LOGGER.debug(
                 f"{', '.join(set_vars)} set; leaving gitleaks config resolution to gitleaks"
             )
