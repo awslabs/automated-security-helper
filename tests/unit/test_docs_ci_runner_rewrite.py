@@ -2910,7 +2910,11 @@ def test_the_real_scan_workflow_runs_its_steps_on_bash_and_is_kept():
     result = rewrite_called(
         "run-ash-security-scan.yml", text, where="run-ash-security-scan.yml"
     )
-    assert [a.rule for a in result.applied] == ["called-provenance"]
+    assert [a.rule for a in result.applied] == [
+        "artifact-actions",
+        "artifact-actions",
+        "called-provenance",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -3639,7 +3643,13 @@ def test_a_bump_of_the_scan_workflow_s_action_pins_is_kept(pin):
     bumped = re.sub(r"(uses: [\w./-]+@)[0-9a-f]{40}", lambda m: m[1] + pin, text)
     assert bumped.count(f"@{pin}") == len(pins), "every pin was bumped"
     result = rewrite_called("run-ash-security-scan.yml", bumped, where="bumped")
-    assert [a.rule for a in result.applied] == ["called-provenance"]
+    # The bumped artifact actions are swapped to the v4 pins as any ref is; the
+    # bump of every other pin is kept.
+    assert [a.rule for a in result.applied] == [
+        "artifact-actions",
+        "artifact-actions",
+        "called-provenance",
+    ]
     name, sha = pins[0]
     tagged = text.replace(f"{name}@{sha}", f"{name}@v1", 1)
     with pytest.raises(error) as raised:
