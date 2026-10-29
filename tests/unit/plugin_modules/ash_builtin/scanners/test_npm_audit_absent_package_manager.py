@@ -349,11 +349,14 @@ def test_a_bracketed_directory_name_does_not_crash_the_scan(
 def test_an_audit_naming_a_bracketed_path_keeps_its_findings(
     context, monkeypatch, markup_console
 ):
-    """npm-audit logs each audit's result dict, stdout included, at INFO.
+    """npm-audit used to log each audit's result dict, stdout included, at INFO.
 
     A successful audit whose JSON names "pkgs/[/x]/node_modules/left-pad" raised
     MarkupError out of that log call; the scanner caught it as "the audit raised",
-    and that lockfile's findings were discarded (scan() raised ScannerError).
+    and that lockfile's findings were discarded (scan() raised ScannerError). The
+    raw response is no longer logged (a one-line redacted summary is, at DEBUG),
+    so the bracketed path reaches the console only through the lockfile list,
+    and the finding keeps the path in its properties.
 
     scan() is called directly. Through the executor the result processor's
     suppression matcher logs the finding's path with markup on too, which is the
@@ -396,9 +399,11 @@ def test_an_audit_naming_a_bracketed_path_keeps_its_findings(
     finally:
         ASH_LOGGER.removeHandler(file_log)
 
-    assert len(report.runs[0].results) == 1, report.runs[0].results
+    (result,) = report.runs[0].results
     assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
-    assert "pkgs/[/x]/node_modules/left-pad" in markup_console.getvalue()
+    assert "pkgs/[/x]/node_modules/left-pad" in result.model_dump_json()
+    # The console shows the package's path with its brackets intact.
+    assert "pkgs/[/x]/package.json" in markup_console.getvalue()
     # The lockfile list reaches ash.log as the paths are, not escaped for Rich.
     (listed,) = [m for m in file_log.messages if "package locks" in m]
     assert "pkgs/[/x]/package.json" in listed and "\\[" not in listed, listed

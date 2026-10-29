@@ -11,8 +11,10 @@ entry's severity and range, not the advisory's own, so an unscored low or
 moderate advisory on a package with a critical one was graded critical; a
 ``via`` entry with ``"cvss": null`` raised; npm's ``{"score": 0, "vectorString":
 null}`` reached the rule as security-severity 0, which GHAS forwards as "0";
-and an entry with no ``nodes`` (npm) or no ``versions`` (yarn, pnpm) produced a
-rule and no result while the report's metadata counted the advisory.
+and a yarn or pnpm record with no ``versions`` produced a rule and no result
+while the report's metadata counted the advisory. An npm entry with no ``nodes``
+names no installed copy and stays a rule with no result, as the behavior tests
+pin.
 """
 
 from __future__ import annotations
@@ -144,7 +146,10 @@ def test_a_scored_advisory_is_graded_by_its_cvss_score(scanner):
     assert list(grades.values()) == ["CRITICAL"], grades
     rule = report.runs[0].tool.driver.rules[0]
     assert rule.properties.model_extra["security_severity"] == 9.8
-    assert "issue_severity" not in report.runs[0].results[0].properties.model_extra
+    # The scanner itself declares no word-grade; the normalizer writes the
+    # result's issue_severity from the rule's score afterwards.
+    raw = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+    assert "issue_severity" not in raw.runs[0].results[0].properties.model_extra
 
 
 def test_npm_s_zero_score_without_a_vector_is_no_score(scanner):
@@ -222,45 +227,6 @@ def test_an_advisory_without_a_version_range_keeps_the_package_s(scanner):
     assert result.properties.model_extra["vulnerable_versions"] == "<3.0.0"
 
 
-def test_an_npm_entry_with_no_nodes_still_produces_a_result(scanner):
-    """npm counted the advisory in the report's metadata; a rule with no result
-    dropped it. One result for the package by name, no installed path."""
-    document = _report(pkg=("high", [_via("pkg", "high", score=0, vector=None)], []))
-
-    report, grades = _graded(scanner, document)
-
-    (result,) = report.runs[0].results
-    location = result.locations[0].model_dump(by_alias=True, exclude_none=True)
-    assert (
-        location["physicalLocation"]["artifactLocation"]["uri"]
-        == "node_modules/pkg/package.json"
-    )
-    props = result.properties.model_extra
-    assert props["package_name"] == "pkg"
-    assert "package_path" not in props
-    assert "package_version" not in props
-    assert list(grades.values()) == ["HIGH"], grades
-
-
-def test_a_transitive_entry_with_no_nodes_still_produces_a_result(scanner):
-    document = _report(
-        root=(
-            "high",
-            [_via("root", "high", score=0, vector=None)],
-            ["node_modules/root"],
-        ),
-        child=("high", ["root"], []),
-    )
-
-    report, grades = _graded(scanner, document)
-
-    transitive = [
-        r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-child"
-    ]
-    assert len(transitive) == 1, [r.ruleId for r in report.runs[0].results]
-    assert grades[("npm-audit-transitive-child", "*")] == "HIGH"
-
-
 def test_a_yarn_or_pnpm_record_with_no_versions_still_produces_a_result(scanner):
     """The v1 and berry readers list each installed version under the record's
     versions map; a record with an empty map is still the tool's finding."""
@@ -312,8 +278,9 @@ def test_a_yarn_record_with_a_score_grades_from_it(scanner):
 
     report, grades = _graded(scanner, document)
 
-    (result,) = report.runs[0].results
-    assert "issue_severity" not in result.properties.model_extra
+    raw = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+    (raw_result,) = raw.runs[0].results
+    assert "issue_severity" not in raw_result.properties.model_extra
     rule = report.runs[0].tool.driver.rules[0]
     assert rule.properties.model_extra["security_severity"] == 9.8
     assert grades[("GHSA-xvch-5gv4-984h", "0.0.8")] == "CRITICAL"

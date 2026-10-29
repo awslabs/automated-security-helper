@@ -141,6 +141,9 @@ def _usable_cvss_score(cvss: Any) -> float | None:
     return float(score)
 
 
+# The userinfo of a URL (``https://user:token@host``), masked in log excerpts.
+_URL_USERINFO = re.compile(r"(://)[^\s/@]+@")
+
 # One comparator of an npm advisory range: an operator, a version and an
 # optional prerelease or build suffix.
 _RANGE_COMPARATOR = re.compile(
@@ -350,6 +353,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         """
         if self._scanner_offline():
             self.dependency_unavailable_reason = _OFFLINE_REASON
+            # scan() is not called after a False, so the lockfiles the audit
+            # would have read are recorded here; ScanPhase copies them onto
+            # the MISSING row. The converted tree does not exist yet at this
+            # point, so the source tree is what is recorded.
+            self.inputs_not_scanned = self._offline_skips(
+                self._package_manifests("source"), "source"
+            )
             return False
         found = find_executable(self.command)
         if found:
@@ -578,18 +588,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _node_place(
         self,
         pkg_name: str,
-        node_path: str | None,
+        node_path: str,
         lock_rel: str | None,
         lock_index: NpmLockIndex | None,
     ) -> tuple[str, Dict[str, str]]:
-        """The result URI's package location and the identity of one node.
-
-        For a vulnerability entry that lists no node, the package by name alone:
-        npm counted the advisory, so it is reported against
-        ``node_modules/<name>/package.json`` with no installed version or path.
-        """
-        if node_path is None:
-            return pkg_name, identity_properties(pkg_name, None, None)
+        """The result URI's package location and the identity of one node."""
         return (
             str(node_path).replace("node_modules/", ""),
             self._node_identity(pkg_name, node_path, lock_rel, lock_index),
@@ -1509,11 +1512,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         )
                         rules_dict[vuln_id] = rule
 
-                    # Create a result for each installed copy (node), or one
-                    # for the package by name when npm lists no node: the
-                    # advisory is counted in the report's metadata, so a rule
-                    # with no result silently dropped a finding.
-                    for node_path in vuln_info.get("nodes") or [None]:
+                    # Create a result for each installed copy (node). An entry
+                    # with no node names no installed copy, so it stays a rule
+                    # with no result.
+                    for node_path in vuln_info.get("nodes") or []:
                         # The URI keeps its historical shape, which existing
                         # path-based suppressions match; package_path holds
                         # the real install path.
@@ -1606,7 +1608,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         lock_rel,
                         lock_index,
                     )
-                    for node_path in vuln_info.get("nodes") or [None]:
+                    for node_path in vuln_info.get("nodes") or []:
                         pkg_location, identity = self._node_place(
                             pkg_name, node_path, lock_rel, lock_index
                         )
@@ -1778,7 +1780,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if values is not None and stderr.strip():
             shown = shown_tool_stderr(stderr, values).strip().splitlines()
             if shown:
-                parts.append(f"stderr starts: {shown[0].strip()[:200]}")
+                # A registry URL on stderr can carry its credentials inline
+                # (``https://user:token@host/``), and the user part is not one
+                # of the env-read values, so the whole userinfo is masked.
+                first = _URL_USERINFO.sub(r"\1***@", shown[0].strip())
+                parts.append(f"stderr starts: {first[:200]}")
         return "; ".join(parts)
 
     def _sarif_exit_code_accepted(self) -> bool:
@@ -1805,6 +1811,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         "not audited"
     )
 
+    def _offline_skips(
+        self, package_files: List[str], target_type: str
+    ) -> List[Dict[str, str]]:
+        """The not-scanned entries for every lockfile beside *package_files*.
+
+        The one lockfile selection scan() audits by (LOCKFILE_NAMES, so
+        npm-shrinkwrap.json counts): a shrinkwrap-only package used to record
+        nothing here and read as a clean, empty report offline.
+        """
+        skipped = []
+        for item in package_files:
+            lock_file = self._lockfile_beside(item)
+            if lock_file is not None:
+                shown = self._shown_path(lock_file, target_type)
+                skipped.append({"path": shown, "reason": self._OFFLINE_REASON})
+        return skipped
+
     def _skip_offline(
         self, package_files: List[str], target: Path, target_type: str
     ) -> None:
@@ -1821,15 +1844,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         scanner that did not run. With no lockfile there was nothing the network
         would have audited, so ``targets_attempted = 0`` grades that target SKIPPED.
         """
-        skipped = []
-        for item in package_files:
-            # The one lockfile selection scan() audits by (LOCKFILE_NAMES, so
-            # npm-shrinkwrap.json counts): a shrinkwrap-only package used to
-            # record nothing here and read as a clean, empty report offline.
-            lock_file = self._lockfile_beside(item)
-            if lock_file is not None:
-                shown = self._shown_path(lock_file, target_type)
-                skipped.append({"path": shown, "reason": self._OFFLINE_REASON})
+        skipped = self._offline_skips(package_files, target_type)
         self.inputs_not_scanned = skipped
         if not skipped:
             # None elsewhere: no claim (scanner_executor._target_count_attr).

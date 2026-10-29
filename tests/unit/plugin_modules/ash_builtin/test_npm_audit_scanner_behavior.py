@@ -730,9 +730,10 @@ def test_numeric_metadata_is_summed_across_packages(
 ):
     """Counts add up across audits rather than being replaced.
 
-    The merge walks metadata keys: dict values are updated, numeric values are
-    added. ``dependencies.total`` is nested under a dict key, so it is updated;
-    this asserts the observable outcome of both arms.
+    The merge walks metadata keys by type: two dicts merge recursively and two
+    numbers add, so the per-severity counters nested under
+    ``metadata.vulnerabilities`` sum across lockfiles (a ``dict.update`` kept
+    only the last lockfile's).
     """
     node_project(directory=scanner.context.work_dir / "packages" / "api")
     node_project(directory=scanner.context.work_dir / "packages" / "web")
@@ -754,10 +755,9 @@ def test_numeric_metadata_is_summed_across_packages(
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     metrics = report.runs[0].properties.model_extra["metrics"]
-    # The second audit's vulnerability counts replaced the first's, since
-    # metadata.vulnerabilities is a dict and dicts are updated, not summed.
-    assert metrics["high"] == 2
-    assert metrics["total"] == 2
+    # One high in the first lockfile plus two in the second.
+    assert metrics["high"] == 3
+    assert metrics["total"] == 3
 
 
 def test_a_numeric_metadata_key_shared_by_both_audits_is_summed(

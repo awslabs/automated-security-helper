@@ -80,13 +80,17 @@ def _package(root: Path, lockfile: str = "package-lock.json") -> Path:
 
 
 def _audited(monkeypatch) -> list:
-    """The package directories npm-audit started an audit in."""
+    """The manifest name of each package npm-audit started an audit in.
+
+    Read while the audit runs: the audit's working directory is the private
+    copy of the package, which is removed once the audit returns."""
     started = []
 
     def fake_run(self, command, **kwargs):
         if "--version" in command:
             return {"stdout": "10.9.4\n", "returncode": 0}
-        started.append(Path(kwargs["cwd"]))
+        manifest = Path(kwargs["cwd"]) / "package.json"
+        started.append(json.loads(manifest.read_text())["name"])
         return {"stdout": NPM_CLEAN, "returncode": 0}
 
     monkeypatch.setattr(NpmAuditScanner, "_run_subprocess", fake_run)
@@ -94,11 +98,7 @@ def _audited(monkeypatch) -> list:
 
 
 def _names(started) -> list:
-    """The copied package's manifest names, read from each audit's directory."""
-    names = []
-    for cwd in started:
-        names.append(json.loads((cwd / "package.json").read_text())["name"])
-    return sorted(names)
+    return sorted(started)
 
 
 class TestTheHandedIgnoreList:
