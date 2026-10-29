@@ -157,14 +157,24 @@ def _real_path(path: PathLike) -> Path:
 
 
 def _is_below(path: Path, root: Path, root_identity: Optional[Tuple[int, int]]) -> bool:
-    """Whether ``root`` is one of ``path``'s parents, by name or by identity.
+    """Whether ``root`` is one of ``path``'s parents, by name, by real path or by identity.
 
     Compared by device and inode as well as by name, so the answer is the same
     however either path is spelled. A parent that does not exist has no identity
-    and is compared by name.
+    and is compared by name. The parent is also compared with every link
+    resolved: an operator link above the tree that lands in a subdirectory of
+    ``root`` (``/opt/link`` to ``<root>/sub``) puts everything spelled below it
+    inside the tree, so a repository link at a later component is examined,
+    where by name and by identity alone only a parent that IS ``root`` counted.
     """
     named_root = os.path.normcase(root)
     if any(os.path.normcase(parent) == named_root for parent in path.parents):
+        return True
+    real_root = os.path.normcase(_real_path(root))
+    real_parent = _real_path(path.parent)
+    if os.path.normcase(real_parent) == real_root or any(
+        os.path.normcase(parent) == real_root for parent in real_parent.parents
+    ):
         return True
     if root_identity is None:
         return False
