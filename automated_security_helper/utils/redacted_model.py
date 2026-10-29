@@ -1381,7 +1381,7 @@ def _arm_would_take(arm: Any, value: Any) -> bool:
     """
     arm = _root_annotation(arm)
     holder, _ = _typed_container_class(arm)
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set, frozenset)):
         if get_origin(arm) is tuple:
             args = get_args(arm)
             return not args or Ellipsis in args or len(args) == len(value)
@@ -1554,6 +1554,13 @@ def _marker_a_slot_would_type(
             # for a list as for a tuple. On a length mismatch zip pairs the
             # shared prefix: the model's own validation owns the length error.
             pairs: Iterable[Tuple[Any, Any]] = zip(args, value)
+        elif origin is tuple and Ellipsis not in args:
+            # A set or frozenset at a fixed tuple (a Python caller's value):
+            # pydantic lands its members by iteration order, which a set does
+            # not fix, so any member may reach any positional slot. Each
+            # member is read against every slot, and a marker is admitted
+            # only where every slot would keep it.
+            pairs = ((arg, item) for item in value for arg in args)
         else:
             pairs = ((args[0], item) for item in value)
         for item_annotation, item in pairs:
