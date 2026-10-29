@@ -243,6 +243,8 @@ def test_building_the_download_command_creates_no_directory(tmp_path, monkeypatc
     assert sorted(p.name for p in work.iterdir()) == []
 
 
+# integration although urlopen is patched: on macOS install_binary_from_url ends by
+# unquarantining the file with a child xattr process, a path this test takes there.
 @pytest.mark.integration
 def test_the_install_creates_its_directory_when_it_runs(tmp_path):
     """What the builder leaves undone, the run does."""
