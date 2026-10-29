@@ -73,6 +73,8 @@ Failure modes and limitations
 from __future__ import annotations
 
 import argparse
+import ast
+import json
 import re
 import sys
 from pathlib import Path
@@ -220,18 +222,47 @@ def locate_block(lines: list[str]) -> tuple[int, int]:
 
 
 def committed_requirements(lines: list[str]) -> list[str]:
+    """The constant's elements, read as the Python string literals they are.
+
+    Read with the parser rather than by stripping quote characters: stripping
+    took the closing ``'`` off a requirement whose environment marker ends in
+    one (``...; python_version < '3.11'``), so the committed value never
+    equaled the declared one and ``--fix`` rewrote the same list on every run.
+    """
     first, closer = locate_block(lines)
     found = []
     for line in lines[first:closer]:
         stripped = line.strip().rstrip(",")
         if not stripped or stripped.startswith("#"):
             continue
-        found.append(stripped.strip('"').strip("'"))
+        try:
+            value = ast.literal_eval(stripped)
+        except (SyntaxError, ValueError) as exc:
+            raise SystemExit(
+                f"{SCANNER}: {stripped!r} inside _CDK_EXTRA_FALLBACK_REQUIREMENTS is "
+                f"not one string literal ({exc}); refusing to read a block this "
+                "script does not understand"
+            ) from exc
+        if not isinstance(value, str):
+            raise SystemExit(
+                f"{SCANNER}: {stripped!r} inside _CDK_EXTRA_FALLBACK_REQUIREMENTS is "
+                "not a string"
+            )
+        found.append(value)
     return found
 
 
 def render(requirements: list[str]) -> list[str]:
-    return [f'    "{requirement}",' for requirement in requirements]
+    """One double-quoted Python string literal per requirement.
+
+    Through json.dumps, whose escapes are Python's, so a requirement holding a
+    double quote or a backslash is written as a literal that reads back as
+    itself instead of as a syntax error in the scanner module.
+    """
+    return [
+        f"    {json.dumps(requirement, ensure_ascii=False)},"
+        for requirement in requirements
+    ]
 
 
 def main() -> int:
