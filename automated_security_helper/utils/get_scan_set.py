@@ -930,8 +930,11 @@ def _collect_ignorefiles_and_all_files(
                 # it instead pruned a directory whose children alone are excluded
                 # ("vendor/*"), so a later "!vendor/keep.js" could not bring keep.js
                 # back, as git does.
+                # Absolute, because igittigitt runs os.path.expanduser over the
+                # path it is asked about: under a root given as ".", a directory
+                # named "~" was asked about as "~", which is the home directory.
                 try:
-                    if root_ignore_parser.match(dir_path):
+                    if root_ignore_parser.match(Path(os.path.abspath(dir_path))):
                         if _is_cdk_cloud_assembly(dir_path):
                             kept_assemblies.append(Path(os.path.abspath(dir_path)))
                             debug_echo(
@@ -1561,7 +1564,8 @@ def report_ignore_file_exclusions(
             counts[marker] = counts.get(marker, 0) + 1
             paths_by_marker.setdefault(marker, []).append(excluded_file)
             continue
-        _ignored, rule = spec.match_with_rule(Path(excluded_file))
+        # Absolute: igittigitt expands a leading "~" in the path it is asked about.
+        _ignored, rule = spec.match_with_rule(Path(os.path.abspath(excluded_file)))
         if rule is not None and id(rule) in marker_by_rule_id:
             marker = marker_by_rule_id[id(rule)]
         else:
@@ -1697,7 +1701,12 @@ def get_files_not_matching_spec(
             continue
         if _left_out_as_a_link_leaving_the_tree(inc_full, path, links_not_scanned):
             continue
-        file_path = Path(inc_full)
+        # Absolute for the parsers, which run os.path.expanduser over the path they
+        # are asked about: under a root given as ".", "~/inside.py" (a top-level
+        # directory named "~") was asked about as a file in the home directory, so
+        # no rule of that directory's ignore file matched it and it stayed in the
+        # scan set. abspath, not resolve: the rules are anchored on abspath bases.
+        file_path = Path(os.path.abspath(inc_full))
         if spec.match(file_path) and not forced_inclusions.match(file_path):
             continue
         clean = _source_dir_marker(path, inc_full)
@@ -1734,16 +1743,22 @@ _GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
 
 
 def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
-    """The environment every git command in this module is started with.
+    """The environment the nesting check's git commands are started with.
 
     ``child_environ`` (a copy, never the live environ; PATH reduced to its anchored
     entries, so a program git starts by name, a credential helper or a textconv
     driver, cannot be found through the working directory), less GIT_DIR and its
-    siblings (:data:`_GIT_LOCATION_ENV`), so that git answers about the directory
-    it is started in and not about the repository ASH's own environment names: a
-    scan started from a git hook carries GIT_DIR, and with it the repository root
-    and the diff described the hook's repository, not the scanned path. *without*
-    names more variables to leave out.
+    siblings (:data:`_GIT_LOCATION_ENV`), so that the common dir, the git dir, the
+    worktree list and the index listing describe the directory git is started in
+    and not the repository ASH's own environment names. *without* names more
+    variables to leave out.
+
+    The repository-root lookup and the diff deliberately keep those variables
+    (plain ``child_environ``): a pre-commit hook in a linked worktree runs ASH
+    with GIT_DIR set to that worktree's admin dir, git then calls the scanned
+    directory the root, and the nesting check records nothing for it. Dropping
+    GIT_DIR there made the root the enclosing checkout and the scan recorded a
+    label for a directory that is not its own repository.
     """
     dropped = set(_GIT_LOCATION_ENV).union(without)
     return {key: value for key, value in child_environ().items() if key not in dropped}
@@ -1928,7 +1943,8 @@ def _rev_parse_toplevel(
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=path,
-            env=_git_environ(),
+            # GIT_DIR is kept on purpose: see _git_environ.
+            env=child_environ(),
         )
     except FileNotFoundError as error:
         return None, _why_git_did_not_start(error, path)
@@ -2427,7 +2443,10 @@ def get_changed_files(
             stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=cwd,
-            env=_git_environ(),
+            # GIT_DIR is kept on purpose, as the root lookup keeps it: see
+            # _git_environ. The diff and the root it is resolved against must
+            # describe the same repository.
+            env=child_environ(),
         )
     except FileNotFoundError as error:
         ASH_LOGGER.warning(

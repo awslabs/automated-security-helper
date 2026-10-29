@@ -224,7 +224,11 @@ class TestADirectoryNamedTildeIsNotAHome:
     """Under a scan root given as ``.``, an ignore file in a top-level directory
     named ``~`` got the base ``~/``, which ``os.path.expanduser`` (igittigitt's and
     ``_confine_base_path``'s) turned into the home directory, outside the root, so
-    its rules were re-anchored at the scan root and applied to the whole tree."""
+    its rules were re-anchored at the scan root and applied to the whole tree.
+    With the bases absolute, the files were still asked about as ``~/inside.py``,
+    which igittigitt expands the same way before matching, so the rule found
+    nothing under the home directory and the file stayed in the scan set; the
+    ``~someone`` case passes ``expanduser`` unchanged and told the two apart."""
 
     @pytest.mark.parametrize("name", ["~", "~someone"])
     def test_the_rules_stay_in_the_directory_that_holds_them(

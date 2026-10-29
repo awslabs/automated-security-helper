@@ -12,15 +12,16 @@ lookups the nesting check makes (common dir, git dir, worktrees, ls-files),
 which passed ``git_argv``'s default program to ``subprocess`` while the
 repository-root lookup and the diff resolved it. Those four also handed git a
 raw copy of the environment, whose PATH may hold relative or empty entries that
-let a program git starts by name be found through the working directory. And
-the repository-root lookup and the diff kept GIT_DIR and GIT_WORK_TREE, so a
-scan started from a git hook described the hook's repository, not the scanned
-path.
+let a program git starts by name be found through the working directory.
 
 The tests pin the shape every spawn now has: ``argv[0]`` is the path
-``_git_executable`` resolved, the environment's PATH holds anchored entries
-only, and GIT_DIR, GIT_WORK_TREE and GIT_COMMON_DIR are left out. Nothing is
-started: ``subprocess.run`` is replaced by a recorder.
+``_git_executable`` resolved and the environment's PATH holds anchored entries
+only. The four nesting lookups leave GIT_DIR, GIT_WORK_TREE and GIT_COMMON_DIR
+out; the repository-root lookup and the diff keep them on purpose, because a
+pre-commit hook in a linked worktree runs ASH with GIT_DIR set to that
+worktree's admin dir, git then calls the scanned directory the root, and the
+nesting check records nothing for it (``test_scan_source`` pins that end to
+end). Nothing is started: ``subprocess.run`` is replaced by a recorder.
 """
 
 from __future__ import annotations
@@ -55,6 +56,12 @@ HELPERS = [
     pytest.param(lambda d: gss.get_changed_files("main", cwd=d), id="diff"),
 ]
 
+#: The nesting check's lookups, which answer about the directory they run in.
+NESTING_HELPERS = HELPERS[1:6]
+
+#: The two that keep the caller's repository location (a git hook's GIT_DIR).
+LOCATION_KEEPING_HELPERS = [HELPERS[0], HELPERS[6]]
+
 
 @pytest.fixture
 def recorded(monkeypatch):
@@ -78,15 +85,18 @@ def test_each_helper_runs_the_resolved_git(tmp_path, recorded, ask):
     assert [argv[0] for argv, _ in recorded] == [RESOLVED] * len(recorded)
 
 
-@pytest.mark.parametrize("ask", HELPERS)
-def test_each_helper_leaves_the_repository_location_variables_out(
-    tmp_path, monkeypatch, recorded, ask
-):
-    """GIT_DIR and its siblings would make git answer about another repository."""
-    elsewhere = tmp_path / "elsewhere"
+def _with_location_variables(monkeypatch, elsewhere: Path) -> None:
     monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
     monkeypatch.setenv("GIT_WORK_TREE", str(elsewhere))
     monkeypatch.setenv("GIT_COMMON_DIR", str(elsewhere / ".git"))
+
+
+@pytest.mark.parametrize("ask", NESTING_HELPERS)
+def test_each_nesting_lookup_leaves_the_repository_location_variables_out(
+    tmp_path, monkeypatch, recorded, ask
+):
+    """GIT_DIR and its siblings would make git answer about another repository."""
+    _with_location_variables(monkeypatch, tmp_path / "elsewhere")
 
     ask(tmp_path)
 
@@ -95,6 +105,25 @@ def test_each_helper_leaves_the_repository_location_variables_out(
         env = kwargs["env"]
         assert env is not os.environ
         assert not set(env) & set(LOCATION_VARIABLES), sorted(env)
+
+
+@pytest.mark.parametrize("ask", LOCATION_KEEPING_HELPERS)
+def test_the_root_lookup_and_the_diff_keep_the_callers_repository_location(
+    tmp_path, monkeypatch, recorded, ask
+):
+    """A hook's GIT_DIR names the repository the scan is about; both must read it,
+    or the diff is resolved against a root git found for another repository."""
+    elsewhere = tmp_path / "elsewhere"
+    _with_location_variables(monkeypatch, elsewhere)
+
+    ask(tmp_path)
+
+    assert recorded, "git was not started"
+    for _argv, kwargs in recorded:
+        env = kwargs["env"]
+        assert env is not os.environ
+        assert env.get("GIT_DIR") == str(elsewhere / ".git")
+        assert env.get("GIT_WORK_TREE") == str(elsewhere)
 
 
 @pytest.mark.parametrize("ask", HELPERS)
