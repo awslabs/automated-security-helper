@@ -1154,6 +1154,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         stopped: List[int],
         budget_spent: bool = False,
         ended: Optional[List[int]] = None,
+        archive_file: Optional[str] = None,
     ) -> None:
         """Record ``archive``, a tar, as extracted only in part. Where the header at
         byte ``unreadable[0]`` (the first that could not be read) named a member,
@@ -1204,8 +1205,18 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # the unextracted remainder is tried-and-could-not coverage lost, so it
         # is a FAILED input (a refusal without a limit is invisible to the
         # gate). The extracted members stay, and archives_extracted_whole
-        # holds the archive back from whole-archive consumers.
-        self.record_failed_input(archive, f"it was extracted only in part: {detail}")
+        # holds the archive back from whole-archive consumers. Recorded by the
+        # path the scan set gave, as every failed input is: record_failed_input
+        # relativizes it against the tree, and the display name, relativized
+        # again, would resolve against the working directory instead. An
+        # archive that cannot be read whole is an INPUT error (there is no tool
+        # here), which an ash-unconverted-input suppression on the archive's
+        # path may accept.
+        self.record_failed_input(
+            archive if archive_file is None else archive_file,
+            f"it was extracted only in part: {detail}",
+            kind="input",
+        )
 
     def inspect_members(
         self,
@@ -1614,6 +1625,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 stopped,
                                 budget_spent=skipped_blocks.spent,
                                 ended=ended,
+                                archive_file=archive_file,
                             )
                     elif _named_kind(archive_file) is not None:
                         # Named as an archive the converter extracts, and none can
@@ -1625,11 +1637,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         # a FAILED input, not a refusal: the completeness gate
                         # reads failed_inputs, and an archive that could not be
                         # read is coverage lost; a refusal without a limit is
-                        # invisible to it.
+                        # invisible to it. An input error, by the scan-set path
+                        # (see _record_extracted_in_part): no tool is involved,
+                        # and a reviewed ash-unconverted-input suppression may
+                        # accept the file.
                         self.record_failed_input(
-                            archive_display,
+                            archive_file,
                             f"it is named as {_named_kind(archive_file)} but "
                             "could not be read as one",
+                            kind="input",
                         )
                         continue
                     else:
@@ -1681,7 +1697,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     if created_target is not None:
                         shutil.rmtree(created_target, ignore_errors=True)
                     self.record_failed_input(
-                        archive_file, _failure_reason(e, created_target)
+                        archive_file, _failure_reason(e, created_target), kind="input"
                     )
             except Exception as e:
                 # Named for the converter, a .zip, .tar or .gz it could not read: a
@@ -1692,11 +1708,14 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 # scanners do not read a partial extraction as the archive.
                 # Recorded, not only logged: the completeness gate reads
                 # failed_inputs, and an archive that could not be extracted is
-                # coverage lost.
+                # coverage lost. As an INPUT error: this converter runs no tool,
+                # so the default kind, "tool", told the operator to fix a tool
+                # that does not exist and let no ash-unconverted-input
+                # suppression accept the archive.
                 if created_target is not None:
                     shutil.rmtree(created_target, ignore_errors=True)
                 self.record_failed_input(
-                    archive_file, _failure_reason(e, created_target)
+                    archive_file, _failure_reason(e, created_target), kind="input"
                 )
 
         return results
