@@ -1171,23 +1171,20 @@ def _own_path(path: str) -> str:
 
 
 def _is_running_interpreter(candidate: str) -> bool:
-    """The Python running ASH, or a tool installed beside it: the scan already
-    runs from there, so refusing it protects nothing.
+    """The Python running ASH: already started, so refusing it protects nothing.
 
     Compared by path, never by inode. A tree's virtual environment links its
     python to the interpreter running ASH, and ``samefile`` calls the two one
     file; started through the venv's path, that python reads the tree's
     pyvenv.cfg and site-packages, so the link is not the running interpreter.
     The same holds for an in-tree link named after another tool, which would
-    start the interpreter with that tool's arguments. A tool next to the running
-    interpreter (uv installed with ASH, when ASH runs from the scanned
-    repository's own environment) belongs to the environment ASH is running from.
+    start the interpreter with that tool's arguments. Only the interpreter's own
+    path is exempt: a tool installed beside it inside a scanned tree is refused
+    like any other in-tree file.
     """
     if not sys.executable:
         return False
-    own = _own_path(candidate)
-    running = _own_path(sys.executable)
-    return own == running or os.path.dirname(own) == os.path.dirname(running)
+    return _own_path(candidate) == _own_path(sys.executable)
 
 
 def _containing_tree(candidate: str, roots: Sequence[str]) -> Optional[str]:

@@ -7,8 +7,9 @@ A scanned tree's virtual environment links its python to the interpreter that ru
 ASH. ``os.path.samefile`` calls the two one file, but the venv's python, started by
 its own path, reads the tree's pyvenv.cfg and site-packages, so it is an in-tree
 tool and is refused. An in-tree link named after another tool is refused for the
-same reason. The interpreter itself, and a tool installed beside it when ASH runs
-from the scanned repository's own environment, are admitted.
+same reason. Only the interpreter's own path is admitted: a tool installed beside
+it, when ASH runs from a virtual environment inside the scanned tree, is refused
+like any other in-tree file.
 """
 
 from __future__ import annotations
@@ -80,28 +81,20 @@ def test_the_running_interpreter_is_admitted_inside_a_scanned_tree():
     assert refused is None
 
 
-def test_a_tool_beside_the_running_interpreter_is_admitted(tmp_path, monkeypatch):
-    """uv installed with ASH is admitted when ASH runs from the scanned tree's venv."""
+def test_a_tool_beside_the_running_interpreter_is_refused(tmp_path, monkeypatch):
+    """A sibling of the interpreter in a venv inside the tree is still in-tree."""
     tree = tmp_path / "repo"
     venv_bin = tree / ".venv" / "bin"
-    monkeypatch.setattr(sys, "executable", str(_tool(venv_bin, "python")))
-    uv = _tool(venv_bin, "uv")
+    python = _tool(venv_bin, "python")
+    monkeypatch.setattr(sys, "executable", str(python))
+    sibling = _tool(venv_bin, "uv")
 
-    chosen, refused = _first_usable("uv", iter([str(uv)]), _scope_of(tree))
-
-    assert chosen == str(uv)
-    assert refused is None
-
-
-def test_a_venv_link_elsewhere_in_the_tree_is_not_beside_the_interpreter(
-    tmp_path, monkeypatch, same_file_everywhere
-):
-    """Running from one venv in the tree does not admit another venv's python."""
-    tree = tmp_path / "repo"
-    monkeypatch.setattr(sys, "executable", str(_tool(tree / ".venv" / "bin", "python")))
-    other = _tool(tree / "tools" / ".venv" / "bin", "python")
-
-    chosen, refused = _first_usable("python", iter([str(other)]), _scope_of(tree))
+    chosen, refused = _first_usable("uv", iter([str(sibling)]), _scope_of(tree))
 
     assert chosen is None
-    assert refused == str(other)
+    assert refused == str(sibling)
+
+    chosen, refused = _first_usable("python", iter([str(python)]), _scope_of(tree))
+
+    assert chosen == str(python)
+    assert refused is None
