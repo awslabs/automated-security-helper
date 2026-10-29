@@ -123,6 +123,54 @@ def _sha256_of_path(path: Path) -> str:
     return hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()
 
 
+def _profile_kept_where_a_scan_may_rewrite_it(path: Path) -> Optional[str]:
+    """Name the place a ``--profile`` is kept that makes it not the operator's alone.
+
+    A profile is the operator's trusted base: a scan reads a copy of it as the
+    configuration a client cannot override, and judges a client's config against
+    it. The scan-time classification sees only the server's own copy, in the
+    session's ``config/`` directory, so where the original lives is judged once,
+    here, before anything is read from it. Two places are refused:
+
+    - A file a client delivered: under a session workspace below the MCP
+      workspace root, by the scan's own classifier
+      (``sandbox.config_is_client_supplied``), which admits the profile files
+      the server itself writes in a session's ``config/`` directory.
+    - A git checkout inside a granted scan root: a ``.git`` entry among the
+      profile's ancestors at or below a directory ``ASH_MCP_ALLOWED_ROOTS``
+      names. Such a tree is scanned, and the checkout's owner can rewrite the
+      profile between the server's start and the scan. A checkout outside every
+      granted root, and a plain file under a granted root, are not judged here.
+
+    The git walk reads the resolved path, so a link into a checkout counts.
+    Returns None when neither applies.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        config_is_client_supplied,
+        operator_scan_roots,
+    )
+
+    if config_is_client_supplied(path):
+        return (
+            "a session workspace under the MCP workspace root, where clients "
+            "deliver files"
+        )
+    resolved = Path(os.path.realpath(path))
+    for root in operator_scan_roots():
+        if resolved != root and not resolved.is_relative_to(root):
+            continue
+        for ancestor in (resolved.parent, *resolved.parent.parents):
+            if (ancestor / ".git").exists():
+                return (
+                    f"the git checkout at {ancestor}, inside the scan root {root} "
+                    f"({ASH_MCP_ALLOWED_ROOTS_ENV})"
+                )
+            if ancestor == root:
+                break
+    return None
+
+
 def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
     """Parse + load every ``--profile`` spec into a registry dict.
 
@@ -134,8 +182,9 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
     values.
 
     Raises:
-        ProfileRegistryError: on duplicate name, missing file, malformed
-            YAML, or AshConfig validation failure.
+        ProfileRegistryError: on duplicate name, missing file, a file kept where
+            a scan may rewrite it (``_profile_kept_where_a_scan_may_rewrite_it``),
+            malformed YAML, or AshConfig validation failure.
     """
     registry: Dict[str, ProfileEntry] = {}
     for spec in specs:
@@ -148,6 +197,16 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
         if not path.exists():
             raise ProfileRegistryError(
                 f"--profile {name!r} points at missing file: {path}"
+            )
+        # Before the file is read: a profile kept where a client's delivery or a
+        # scanned checkout's owner can rewrite it would still be loaded and
+        # trusted as the operator's, and the scan cannot tell later.
+        kept_in = _profile_kept_where_a_scan_may_rewrite_it(path)
+        if kept_in is not None:
+            raise ProfileRegistryError(
+                f"--profile {name!r} is kept at {path}, inside {kept_in}, so its "
+                "content is not the operator's alone. Keep profiles outside the "
+                "MCP workspace root and outside any checkout the server scans."
             )
         unparsed: Optional[str] = None
         try:

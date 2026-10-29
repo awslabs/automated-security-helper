@@ -11,11 +11,13 @@ per-session bind path (``mcp_select_profile``) lives in a sibling test file.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
+    SESSION_CONFIG_FILENAME,
     ProfileEntry,
     ProfileRegistryError,
     clear_profile_registry,
@@ -24,6 +26,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     register_profiles,
     set_profile_registry,
 )
+from automated_security_helper.cli.mcp.sandbox import CONFIG_DIR_NAME
 from automated_security_helper.config.ash_config import AshConfig
 
 pytestmark = pytest.mark.unit
@@ -326,3 +329,101 @@ class TestPathSha256IsPathOnly:
         rb = register_profiles([f"b={b}"])["b"]
         # Same content, different absolute paths → different hashes.
         assert ra.path_sha256 != rb.path_sha256
+
+
+class TestAProfileKeptWhereAScanMayRewriteIt:
+    """A profile is the operator's trusted base, so one kept where a client's
+    delivery or a scanned checkout's owner can rewrite it is refused when it is
+    registered, before its content is read: a file under a session workspace
+    below the MCP workspace root (by the scan's own classifier, which admits the
+    profile files the server writes in a session's ``config/`` directory), and a
+    file inside a git checkout at or below a granted scan root. A plain file
+    under a granted root, and a checkout outside every granted root, register as
+    before."""
+
+    @pytest.fixture(autouse=True)
+    def _roots(self, tmp_path: Path, monkeypatch) -> None:
+        self.allowed = tmp_path / "allowed"
+        self.workspaces = tmp_path / "workspaces"
+        self.allowed.mkdir()
+        self.workspaces.mkdir()
+        monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(self.allowed))
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(self.workspaces))
+
+    def test_a_profile_under_a_sessions_delivered_source_is_refused(self) -> None:
+        delivered = self.workspaces / "some-session" / "source"
+        delivered.mkdir(parents=True)
+        profile = _write_yaml(delivered / "ash.yaml", _valid_config_yaml())
+
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"default={profile}"])
+
+        message = str(exc.value)
+        assert "'default'" in message
+        assert str(profile) in message
+        assert "workspace root" in message
+
+    def test_a_sessions_own_config_profile_still_registers(self) -> None:
+        # The file select_profile materializes for a session: written by the
+        # server, so the classifier does not count it as the client's.
+        config_dir = self.workspaces / "some-session" / CONFIG_DIR_NAME
+        config_dir.mkdir(parents=True)
+        profile = _write_yaml(
+            config_dir / SESSION_CONFIG_FILENAME, _valid_config_yaml("own")
+        )
+
+        registry = register_profiles([f"own={profile}"])
+
+        assert registry["own"].config.project_name == "own"
+
+    def test_a_profile_inside_a_git_checkout_under_a_scan_root_is_refused(
+        self,
+    ) -> None:
+        checkout = self.allowed / "checkout"
+        (checkout / ".git").mkdir(parents=True)
+        (checkout / ".ash").mkdir()
+        profile = _write_yaml(checkout / ".ash" / "ash.yaml", _valid_config_yaml())
+
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"default={profile}"])
+
+        message = str(exc.value)
+        assert str(profile) in message
+        assert str(checkout.resolve()) in message
+        assert "ASH_MCP_ALLOWED_ROOTS" in message
+
+    def test_the_same_profile_under_a_root_with_no_checkout_registers(self) -> None:
+        plain = self.allowed / "plain" / ".ash"
+        plain.mkdir(parents=True)
+        profile = _write_yaml(plain / "ash.yaml", _valid_config_yaml("plain"))
+
+        registry = register_profiles([f"default={profile}"])
+
+        assert registry["default"].config.project_name == "plain"
+
+    def test_a_checkout_outside_every_scan_root_is_not_judged_here(
+        self, tmp_path: Path
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / ".git").mkdir(parents=True)
+        profile = _write_yaml(elsewhere / "ash.yaml", _valid_config_yaml("outside"))
+
+        registry = register_profiles([f"default={profile}"])
+
+        assert registry["default"].config.project_name == "outside"
+
+    @pytest.mark.skipif(os.name != "posix", reason="symbolic links need a posix host")
+    def test_a_link_into_a_scanned_checkout_is_judged_by_where_it_leads(
+        self, tmp_path: Path
+    ) -> None:
+        checkout = self.allowed / "checkout"
+        (checkout / ".git").mkdir(parents=True)
+        inside = _write_yaml(checkout / "ash.yaml", _valid_config_yaml())
+        link = tmp_path / "etc" / "linked.yaml"
+        link.parent.mkdir()
+        os.symlink(inside, link)
+
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"default={link}"])
+
+        assert "ASH_MCP_ALLOWED_ROOTS" in str(exc.value)

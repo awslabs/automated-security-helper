@@ -104,6 +104,27 @@ def test_a_profile_that_does_not_load_stops_startup(
     assert get_profile_registry() == {}
 
 
+def test_a_profile_inside_a_scanned_checkout_stops_startup(
+    tmp_path: Path, server_start: dict, monkeypatch
+) -> None:
+    """A profile kept in a git checkout under a granted scan root is refused at
+    registration (its owner could rewrite it before the scan), so the server
+    exits 3 and never starts."""
+    allowed = tmp_path / "allowed"
+    checkout = allowed / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    profile = _profile(checkout, "default")
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(allowed))
+
+    result = CliRunner().invoke(
+        ash_app, ["mcp", "--quiet", "--profile", f"default={profile}"]
+    )
+
+    assert result.exit_code == 3, result.output
+    assert "registry" not in server_start
+    assert get_profile_registry() == {}
+
+
 def test_without_profile_nothing_is_registered(server_start: dict) -> None:
     result = CliRunner().invoke(ash_app, ["mcp", "--quiet"])
 
