@@ -196,6 +196,23 @@ def _source_relative_path(file_path: str, cwd: str) -> str:
     return f"/{'/'.join(path.parts[1:])}"
 
 
+def _within(path: str, root: str) -> bool:
+    """Whether ``path`` is ``root`` or below it, both absolute, as spelled."""
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # another drive, on Windows
+        return False
+
+
+#: The most characters the ``--skip-path`` values for globally ignored paths may
+#: take together. Every ignored file that is not under a wholly ignored directory
+#: is its own value, so a large ignore set could exceed the argument-list limit
+#: (checkov cannot start) or multiply checkov's per-directory filtering until the
+#: scan timeout. Past the budget the rest are left out: ASH drops checkov's
+#: findings under an ignored path anyway.
+_IGNORE_SKIP_PATH_CHAR_BUDGET = 100_000
+
+
 def rewrite_checkov_paths(
     document: Any,
     *,
@@ -225,6 +242,7 @@ def rewrite_checkov_paths(
     is kept: its output cannot tell the two apart.
     """
     cwd = os.path.realpath(source_dir)
+    given = os.path.abspath(source_dir)
     prefixes = [
         (checkov_repo_file_path(root, ran_in).rstrip("/"), root)
         for root in scanned_dirs
@@ -264,7 +282,12 @@ def rewrite_checkov_paths(
         return joined
 
     def _uri(uri: str) -> str:
-        return quote(_source_relative_path(_absolute(uri), cwd).lstrip("/"))
+        # Relative to the source directory as given before its real path: the
+        # scanned dirs were spelled as given, so with a symlink component in the
+        # source directory the real path alone gave an absolute-looking path.
+        absolute = _absolute(uri)
+        base = given if _within(absolute, given) else cwd
+        return quote(_source_relative_path(absolute, base).lstrip("/"))
 
     def _locations(items: Any) -> None:
         for location in items or []:
@@ -643,6 +666,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         for item in active_ignore_paths(
             self.config.options.skip_path, where="scanners.checkov.options.skip_path"
         ):
+            if not str(item.path).strip():
+                # "--skip-path=" matches every path, as a regex and as a substring,
+                # so checkov would scan nothing and the scan would read as clean.
+                ASH_LOGGER.warning(
+                    f"Ignoring an empty scanners.checkov.options.skip_path entry "
+                    f"(reason: {text_without_values(str(item.reason), self._environment_values())}): "
+                    "an empty --skip-path would exclude every file.",
+                    extra=NO_MARKUP,
+                )
+                continue
             # NO_MARKUP: the path and the reason are the config's text, and a
             # "[/" in either is a closing Rich tag that raises instead of printing.
             # Redacted: a configured value can come from the environment, and
@@ -683,6 +716,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         target_results_dir = Path(
             os.path.abspath(self.results_dir.joinpath(target_type))
         )
+        if "," in str(target_results_dir):
+            # checkov splits --output-file-path on commas into one path per
+            # output format, so a results directory holding one is written
+            # outside the results directory, possibly over an existing file.
+            raise ScannerError(
+                f"Not running checkov: its results directory "
+                f"{target_results_dir.as_posix()} holds a comma, which checkov "
+                "reads as a separator between per-format output paths. Use an "
+                "--output-dir without a comma."
+            )
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
 
@@ -707,7 +750,29 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 "checkov's terraform scan, so checkov would read the file it points at."
             )
         skips.extend(links)
-        for value in self._ignore_skip_patterns(target, global_ignore_paths):
+        ignored = self._ignore_skip_patterns(target, global_ignore_paths)
+        budgeted: List[str] = []
+        used = 0
+        for value in ignored:
+            used += len(value) + len("--skip-path") + 2
+            if used > _IGNORE_SKIP_PATH_CHAR_BUDGET:
+                ASH_LOGGER.debug(
+                    f"Not passing {len(ignored) - len(budgeted)} of {len(ignored)} "
+                    "ignored paths to checkov --skip-path: together they take more "
+                    f"than {_IGNORE_SKIP_PATH_CHAR_BUDGET} characters of command "
+                    "line. ASH drops checkov's findings there.",
+                    extra=NO_MARKUP,
+                )
+                break
+            budgeted.append(value)
+        # One compile over the whole list first: compiling once per value over the
+        # accumulated list was quadratic in the number of ignored files, before
+        # the tool started and outside its timeout. Only when the whole list fails
+        # is each value tried on its own, to find the ones that break it.
+        if _module_finder_compiles([*given, *skips, *budgeted]):
+            skips.extend(budgeted)
+            budgeted = []
+        for value in budgeted:
             if _module_finder_compiles([*given, *skips, value]):
                 skips.append(value)
                 continue
