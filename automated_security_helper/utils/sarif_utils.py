@@ -516,21 +516,45 @@ _INACTIVE_SUPPRESSION_STATES = frozenset(
 )
 
 
+def suppressions_in_effect(suppressions: Iterable[Any] | None) -> list:
+    """The suppression objects of *suppressions* that are in effect.
+
+    A suppression whose ``state`` is ``rejected`` or ``underReview`` has not
+    taken effect (SARIF 3.35.4) and is left out; one whose state is ``accepted``,
+    or that states none, is kept. This is the one reading of a result's
+    suppressions for every consumer: the per-scanner counts here, the flat
+    finding's ``is_suppressed``, the OCSF record's status and the workspace
+    aggregation's actionable count, so a report row, a SIEM record and the exit
+    code agree on whether a finding is hidden. A suppression given as a mapping,
+    as a result read back from its JSON holds it, is read the same way.
+    """
+    in_effect = []
+    for suppression in suppressions or []:
+        if isinstance(suppression, dict):
+            state = suppression.get("state")
+        else:
+            state = getattr(suppression, "state", None)
+        if state is None or (
+            str(getattr(state, "value", state)) not in _INACTIVE_SUPPRESSION_STATES
+        ):
+            in_effect.append(suppression)
+    return in_effect
+
+
 def is_result_suppressed(result: Any) -> bool:
     """Whether *result* carries a suppression that is in effect.
 
     One answer for every reader in this module: a suppression object whose
-    ``state`` is ``rejected`` or ``underReview`` does not count, so a
-    scanner-supplied one awaiting review neither hides the result from the
-    per-scanner counts nor stands in for a root advisory's suppression.
+    ``state`` is ``rejected`` or ``underReview`` does not count
+    (:func:`suppressions_in_effect`), so a scanner-supplied one awaiting review
+    neither hides the result from the per-scanner counts nor stands in for a
+    root advisory's suppression. *result* may be the model or its mapping form.
     """
-    for suppression in getattr(result, "suppressions", None) or []:
-        state = getattr(suppression, "state", None)
-        if state is None:
-            return True
-        if str(getattr(state, "value", state)) not in _INACTIVE_SUPPRESSION_STATES:
-            return True
-    return False
+    if isinstance(result, dict):
+        suppressions = result.get("suppressions")
+    else:
+        suppressions = getattr(result, "suppressions", None)
+    return bool(suppressions_in_effect(suppressions))
 
 
 def get_severity_metrics_from_sarif(

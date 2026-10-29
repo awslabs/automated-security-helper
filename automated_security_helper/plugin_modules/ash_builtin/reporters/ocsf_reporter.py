@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 import uuid
 from typing import Optional, List, Tuple
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sarif_utils import suppressions_in_effect
 from automated_security_helper.utils.severity_ladder import result_severity
 
 #: OCSF severity_id for each ASH severity (OCSF: 1 Informational, 2 Low,
@@ -440,10 +441,21 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             - status_id: StatusId enum value or None
             - status_detail: String with suppression details or None
             - status: String with suppression status correlating to the returned status_id
+
+        Only a suppression in effect closes the finding. One ``rejected`` by the
+        reviewer or still ``underReview`` has not taken effect (SARIF 3.35.4),
+        and the exit code and the per-scanner counts read it that way
+        (``sarif_utils.suppressions_in_effect``), so the record reads it the same
+        way instead of reporting a finding the scan failed on as closed. Such a
+        suppression is also left out of ``status_detail``, which explains why the
+        finding is closed.
         """
-        if not suppressions or len(suppressions) == 0:
-            # No suppressions - finding is active/open
-            ASH_LOGGER.debug(f"No suppressions found for {rule_id} - marking as active")
+        suppressions = suppressions_in_effect(suppressions)
+        if not suppressions:
+            # No suppression in effect - finding is active/open
+            ASH_LOGGER.debug(
+                f"No suppression in effect for {rule_id} - marking as active"
+            )
             return StatusId.integer_1, None, "New"
 
         suppression_count = len(suppressions)

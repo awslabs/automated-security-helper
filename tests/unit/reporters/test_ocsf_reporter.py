@@ -249,7 +249,7 @@ class TestOcsfReporterHelperMethods:
             ),
             Suppression(
                 kind=Kind1.external,
-                state=State.underReview,
+                state=State.accepted,
                 justification="Second suppression",
             ),
         ]
@@ -263,6 +263,32 @@ class TestOcsfReporterHelperMethods:
         assert "First suppression" in status_detail
         assert "Second suppression" in status_detail
         assert " | " in status_detail  # Multiple suppressions separated by |
+
+    def test_a_suppression_under_review_is_left_out_of_the_detail(self, reporter):
+        """An accepted suppression closes the finding; one still under review has
+        not taken effect and does not explain the closed status."""
+        suppressions = [
+            Suppression(
+                kind=Kind1.inSource,
+                state=State.accepted,
+                justification="First suppression",
+            ),
+            Suppression(
+                kind=Kind1.external,
+                state=State.underReview,
+                justification="Second suppression",
+            ),
+        ]
+
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
+            suppressions
+        )
+
+        assert status_id == StatusId.integer_3
+        assert status == "Suppressed"
+        assert "First suppression" in status_detail
+        assert "Second suppression" not in status_detail
+        assert " | " not in status_detail
 
     def test_determine_status_from_suppressions_minimal_suppression(self, reporter):
         """Test status determination with minimal suppression data."""
@@ -293,7 +319,9 @@ class TestOcsfReporterHelperMethods:
         assert "kind: inSource" in status_detail
 
     def test_determine_status_from_suppressions_all_states(self, reporter):
-        """Test status determination with all possible suppression states."""
+        """Only an accepted suppression closes the finding (SARIF 3.35.4): one
+        rejected by the reviewer or still under review has not taken effect, so
+        the finding is reported as it is gated, open."""
         # Test accepted state
         suppressions_accepted = [Suppression(kind=Kind1.inSource, state=State.accepted)]
         status_id, status_detail, status = reporter._determine_status_from_suppressions(
@@ -309,16 +337,18 @@ class TestOcsfReporterHelperMethods:
         status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_review
         )
-        assert status_id == StatusId.integer_3
-        assert "state: underReview" in status_detail
+        assert status_id == StatusId.integer_1
+        assert status_detail is None
+        assert status == "New"
 
         # Test rejected state
         suppressions_rejected = [Suppression(kind=Kind1.inSource, state=State.rejected)]
         status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_rejected
         )
-        assert status_id == StatusId.integer_3
-        assert "state: rejected" in status_detail
+        assert status_id == StatusId.integer_1
+        assert status_detail is None
+        assert status == "New"
 
     def test_determine_status_from_suppressions_all_kinds(self, reporter):
         """Test status determination with all possible suppression kinds."""
