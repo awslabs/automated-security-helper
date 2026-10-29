@@ -1023,10 +1023,24 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         in_tree = 0
         itself = False
         not_checked = 0
+        listings: Dict[Path, List[str]] = {}
+        spellings_seen: Set[str] = set()
         for index, relative in enumerate(relatives):
             if in_tree + int(itself) >= MAX_RESCAN_FILES:
                 not_checked = len(relatives) - index
                 break
+            # The name as the directory lists it (_on_disk_spelling). On a
+            # case-insensitive filesystem an entry spelled in another case
+            # reaches the same file; the copy's path, the test for the ignore
+            # file itself and the comparison with the first run's results all
+            # need the spelling the directory scan reports, and two spellings
+            # of one file are one copy. A name that reaches no file is skipped
+            # here, as the open below skipped it.
+            spelled = self._on_disk_spelling(target_abs, relative, listings)
+            if spelled is None or spelled in spellings_seen:
+                continue
+            spellings_seen.add(spelled)
+            relative = spelled
             if relative in skipped_names:
                 continue
             if (
@@ -1074,6 +1088,61 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         if itself:
             batches.append((self_dir, IGNORE_FILE_NAME, reports_dir / "self.sarif"))
         return batches, in_tree + int(itself), not_checked
+
+    @staticmethod
+    def _on_disk_spelling(
+        root: Path, relative: str, listings: Dict[Path, List[str]]
+    ) -> Optional[str]:
+        """``relative`` spelled as the directories under ``root`` list it, or None.
+
+        gitleaks walks the directory and reports each file by the name the
+        directory lists, and a ``.gitleaksignore`` entry can spell that name in
+        another letter case. On a case-sensitive filesystem that entry names no
+        file; on a case-insensitive one (macOS and Windows by default) it names
+        the listed file, so the re-scan copied it under the entry's spelling,
+        reported it under that spelling, which matched none of the first run's
+        results, and added each finding a second time; two spellings of one
+        file were two copies of one path, which failed the scan; and an entry
+        naming the ignore file itself in another case put a copy of it at the
+        copy tree's root, where gitleaks read it as the ignore file again.
+
+        Each component is taken as listed when the listing holds it; otherwise
+        the listed name that differs only in case and is the same file as the
+        entry's spelling (``os.path.samefile``) is taken. On a case-sensitive
+        filesystem that comparison fails, so a wrong-case entry gives None, as
+        the open did before. ``listings`` caches each directory's entries
+        across the entries of one ignore file.
+        """
+        parts: List[str] = []
+        current = root
+        for part in PurePosixPath(relative).parts:
+            names = listings.get(current)
+            if names is None:
+                try:
+                    with os.scandir(current) as entries:
+                        names = [entry.name for entry in entries]
+                except OSError:
+                    return None
+                listings[current] = names
+            chosen: Optional[str] = None
+            if part in names:
+                chosen = part
+            else:
+                folded = part.casefold()
+                for name in names:
+                    if name.casefold() != folded:
+                        continue
+                    try:
+                        if os.path.samefile(current / name, current / part):
+                            chosen = name
+                            break
+                    except OSError:
+                        continue
+            if chosen is None:
+                return None
+            parts.append(chosen)
+            current = current / chosen
+        return "/".join(parts)
 
     def _rescan_copies_dir(self) -> Path:
         """A new, empty directory for the re-scan's copies, outside the scanned tree.
