@@ -330,10 +330,12 @@ def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
 def _run(
     command: List[str], timeout: int
 ) -> Optional[subprocess.CompletedProcess[str]]:
-    """Run one probe; None when it could not run.
+    """Run one probe in an empty directory; None when it could not run.
 
-    ``command``'s output is read here, so it runs without the caller's display
-    variables (``environ_for_parsed_output``).
+    ASH is usually started in the repository it scans, and a tool reads modules
+    and configuration from where it starts, so a probe does not start there.
+    Under a scanner sandbox the plan gives the probe its own directory, and none
+    is made here.
 
     Raises:
         SandboxUnavailable: The active scanner sandbox scope refused the spawn. The
@@ -342,7 +344,32 @@ def _run(
             run.
     """
     from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+    from automated_security_helper.utils.sandbox.scope import active_scope
 
+    if active_scope() is not None:
+        return _probe(command, timeout, None)
+    try:
+        with tempfile.TemporaryDirectory(prefix="ash-probe-cwd-") as empty:
+            return _probe(command, timeout, empty)
+    except SandboxUnavailable:
+        raise
+    except OSError:
+        # No empty directory to start it in: it is not started from anywhere else.
+        return None
+
+
+def _probe(
+    command: List[str], timeout: int, cwd: Optional[str]
+) -> Optional[subprocess.CompletedProcess[str]]:
+    """``command`` run with its output read, from ``cwd`` when there is one.
+
+    ``command``'s output is read here, so it runs without the caller's display
+    variables (``environ_for_parsed_output``). Only a given ``cwd`` is passed on,
+    so a call without one reaches the spawn with the arguments it always had.
+    """
+    from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+    where = {} if cwd is None else {"cwd": cwd}
     try:
         return spawn_run(  # nosec B603 - list args; executable resolved from PATH by the caller
             command,
@@ -353,6 +380,7 @@ def _run(
             encoding="utf-8",
             errors="replace",
             env=environ_for_parsed_output(),
+            **where,
         )
     except SandboxUnavailable:
         raise

@@ -94,9 +94,7 @@ _SQUEEZE = re.compile(r"[\s─-╿]")
 #: of the module's processes. Recorded starts are refused, with one exception:
 #: ASH's own detect-secrets worker — this exact interpreter running exactly
 #: that module, nothing looser — which does the scanning and is not a tool,
-#: runs for real. detect-secrets asks for its CLI (``uv tool run
-#: detect-secrets --version``) only to log where it is, so a refused probe
-#: changes no result.
+#: runs for real.
 _RECORDER = (
     "import os as _os\n"
     "import sys as _sys\n"
@@ -131,7 +129,12 @@ _RECORDER = (
     "                _os.environ['REFUSED_STARTS'], 'a', encoding='utf-8'\n"
     "            ) as log:\n"
     "                log.write(' '.join(argv) + '\\n')\n"
-    "            own_worker = argv[:3] == [\n"
+    # The product starts its Python children with -P on 3.11 and later
+    # (utils/python_child.py, _SAFE_PATH_FLAGS), so the worker's argv is
+    # [python, -P, -m, module]. One leading -P after the interpreter is dropped
+    # before the comparison; any other argv is still refused.
+    "            shape = argv[:1] + (argv[2:] if argv[1:2] == ['-P'] else argv[1:])\n"
+    "            own_worker = shape[:3] == [\n"
     "                _sys.executable,\n"
     "                '-m',\n"
     "                'automated_security_helper.utils.detect_secrets_worker',\n"
@@ -389,11 +392,13 @@ def test_the_scan_ran_and_records_the_reason_as_its_reference(run):
 def test_the_scan_starts_no_tool_but_the_version_probes(run):
     """Every process of the module records each start at ``subprocess.Popen``
     (_RECORDER, loaded through sitecustomize in the CLI child and the worker
-    it starts), so the module's scans start no real tool. Each scan asks for
-    exactly two: detect-secrets' CLI version probe, refused and scanned
-    without, and ASH's own detect-secrets worker — this interpreter running
-    exactly that module — which runs. The source tree here sits outside every
-    repository, so the scan starts no git probe either: it looks for a .git
+    it starts), so the module's scans start no real tool. Each scan starts
+    exactly one process: ASH's own detect-secrets worker — this interpreter
+    running exactly that module — which runs. The scanner runs the in-process
+    library, so it no longer asks uv for detect-secrets' CLI version, and a
+    recorded version probe is a start this module never intended. The source
+    tree here sits outside every repository, so the scan starts no git probe
+    either: it looks for a .git
     entry first and records the absolute path without starting git (the
     contract test_a_scan_outside_a_git_repository_starts_no_program.py pins on
     its own; the zero count here keeps this module's accounting exact). A
@@ -415,17 +420,20 @@ def test_the_scan_starts_no_tool_but_the_version_probes(run):
     version_probes = [
         line for line in lines if line.endswith(" tool run detect-secrets --version")
     ]
-    worker_start = (
-        f"{sys.executable} -m automated_security_helper.utils.detect_secrets_worker "
+    # The product starts its Python children with -P on 3.11 and later
+    # (utils/python_child.py, _SAFE_PATH_FLAGS), so the recorded line may carry it.
+    worker_starts = tuple(
+        f"{sys.executable} {flags}-m automated_security_helper.utils."
+        "detect_secrets_worker "
+        for flags in ("", "-P ")
     )
-    workers = [line for line in lines if line.startswith(worker_start)]
-    expected = {*version_probes, *workers}
-    unexpected = [line for line in lines if line not in expected]
+    workers = [line for line in lines if line.startswith(worker_starts)]
+    unexpected = [line for line in lines if line not in workers]
     assert unexpected == [], unexpected
     assert git_probes == [], git_probes
-    assert len(version_probes) == scans, lines
+    assert version_probes == [], version_probes
     assert len(workers) == scans, lines
-    assert len(lines) == 2 * scans, lines
+    assert len(lines) == scans, lines
 
 
 def test_the_results_file_holds_no_value(run):

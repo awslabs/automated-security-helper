@@ -2583,7 +2583,9 @@ class SarifReport(RecordModel):
         report_tool = report_run.tool
         report_invocations = report_run.invocations
         report_results = []
-        for res in report_run.results:
+        # A run may carry no results list at all (SARIF allows omitting it, and a
+        # scanner that failed leaves it so), which merges as no results.
+        for res in report_run.results or []:
             clean_result = res.model_dump(
                 # Remove `ruleIndex`, since we're reordering rules. RuleId should
                 # correctly correlate results to associated rules in our set of scanners
@@ -2626,7 +2628,7 @@ class SarifReport(RecordModel):
                                 rule.id: rule
                                 for rule in (existing_extension.rules or [])
                             }
-                            for rule in report_tool.driver.rules:
+                            for rule in report_tool.driver.rules or []:
                                 if rule.id not in cur_rule_id_hash:
                                     existing_extension.rules.append(rule)
 

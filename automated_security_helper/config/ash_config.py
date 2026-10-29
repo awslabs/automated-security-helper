@@ -2143,6 +2143,13 @@ class AshConfig(RedactedSection):
     # MCP get_config tool). Every other consumer reads _environment_references.
     _displayed_environment_references: Tuple[Any, ...] = PrivateAttr(default=())
 
+    # True when _environment_references are the base's followed through a
+    # client's patch (config/runtime_patch.apply_runtime_patch): a reference an
+    # op wrote over is gone from them, and one it moved is at its new entry. A
+    # session copy written from such a config records them as they stand, not
+    # as the registered profile had them (cli/mcp/profile_registry).
+    _references_followed: bool = PrivateAttr(default=False)
+
     def _redaction_values(self) -> Tuple[str, ...]:
         """repr and str of this config are redacted with the values it read
         from the environment (utils/redacted_model.py).

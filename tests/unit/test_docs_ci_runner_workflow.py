@@ -1346,6 +1346,7 @@ LEG_STEPS = (
         _if(NOT_ACT, SELECTED, "startsWith(matrix.runner, 'jenkinsfile-runner-')"),
     ),
     ("Start recording image pulls", _if(NOT_ACT, SELECTED)),
+    ("Write the one_line helper", _if(NOT_ACT, SELECTED)),
     ("Install the leg's runner, tools and images", _if(NOT_ACT, SELECTED)),
     (
         "Show disk use after the CodeBuild pulls",

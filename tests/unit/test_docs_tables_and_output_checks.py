@@ -1010,9 +1010,9 @@ def test_generic_and_help_keys_need_no_row_in_a_complete_table(tmp_path):
         ),
     )
     assert dc.check_option_tables([page], tmp_path) == []
-    # offline is read from every scanner's options without being declared; a field
-    # the options model declares (scan_timeout, on ScannerOptionsBase) is its own.
-    assert "offline" not in listed
+    # ScannerOptionsBase declares offline and scan_timeout (options.py), so both are
+    # fields of the section's options model and are listed with the others.
+    assert "offline" in listed
     assert "scan_timeout" in listed
 
 
@@ -1408,7 +1408,7 @@ def test_a_page_plugin_config_validates_against_the_pages_module(tmp_path):
                 "ash_plugin_modules: [acme_plugins]\nscanners:\n  acme-scan:\n"
                 "    options:\n      selct: S\n"
             ),
-            "scanners.acme-scan.options.selct is not a field of AcmeOptions",
+            "scanners.acme-scan.options: Value error, Unknown key 'selct'",
         ),
         (
             "a plugin neither ASH nor the page defines",
@@ -1731,7 +1731,7 @@ def test_a_plugin_module_saved_at_the_project_root_is_imported(tmp_path):
     )
     _assert_reports(
         dc.check_config_blocks([page], tmp_path),
-        "scanners.acme-scan.options.selct is not a field of AcmeOptions",
+        "scanners.acme-scan.options: Value error, Unknown key 'selct'",
     )
 
 
@@ -1747,7 +1747,7 @@ def test_the_page_module_runs_without_the_callers_credentials(tmp_path, monkeypa
     page = _write(tmp_path, "docs/page.md", guarded + _typo_config())
     _assert_reports(
         dc.check_config_blocks([page], tmp_path),
-        "scanners.acme-scan.options.selct is not a field of AcmeOptions",
+        "scanners.acme-scan.options: Value error, Unknown key 'selct'",
     )
 
 

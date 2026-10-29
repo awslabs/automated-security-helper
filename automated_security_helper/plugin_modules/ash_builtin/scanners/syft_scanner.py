@@ -192,7 +192,15 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # A refused configured value drops the ``--config`` rather than falling
         # through to discovery: the option named one file, and discovery would
         # silently replace it. Whether a candidate may be used is honored_path's
-        # call (config/path_trust.py), which weighs who named the path.
+        # call (config/path_trust.py), which weighs who named the path. Whether
+        # the operator wrote the configured value is operator_wrote_value's
+        # answer, as for checkov, bandit and grype: a work product the scan
+        # derived from the repository reaches syft only when it is.
+        from automated_security_helper.config.operator_only_options import (
+            operator_wrote_value,
+        )
+
+        context_config = getattr(self.context, "config", None)
         for index, conf_path in enumerate(possible_config_paths):
             configured = index == 0 and self.config.options.config_file is not None
             candidate = Path(conf_path)
@@ -202,10 +210,19 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 honored = honored_path(
                     conf_path,
                     source_dir=source_dir,
-                    config=getattr(self.context, "config", None),
+                    config=context_config,
                     key="scanners.syft.options.config_file"
                     if configured
                     else f"syft config file {conf_path}",
+                    operator_written=configured
+                    and operator_wrote_value(
+                        context_config,
+                        "scanner",
+                        "syft",
+                        ("options", "config_file"),
+                        conf_path,
+                        config_from_context=self._config_from_context,
+                    ),
                 )
                 if honored is None:
                     if configured:

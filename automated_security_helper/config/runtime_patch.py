@@ -41,6 +41,7 @@ import fnmatch
 import json
 import re
 import secrets
+from dataclasses import replace
 from typing import (
     AbstractSet,
     Any,
@@ -129,7 +130,19 @@ class _PolicyNames:
             self._patterns = {}
             return
         references = tuple(getattr(config, "_environment_references", ()) or ())
-        denied_paths = list(allowlist.denied_paths)
+        # A reference sits at the index its file wrote the entry at. The list of
+        # a policy ``client_config_policy.effective_policy`` returned starts with
+        # the shipped defaults, which moves every entry the operator listed to a
+        # later index, where no reference is. The operator's own list is kept on
+        # that copy, in the order it was written, so it is what the references
+        # are matched against. An entry of the policy that is not in it is a
+        # shipped default, which the maps below name as written.
+        listed = (
+            getattr(allowlist, "_listed_denied_paths", None)
+            if getattr(allowlist, "_effective", False)
+            else None
+        )
+        denied_paths = list(allowlist.denied_paths if listed is None else listed)
         patterns = dict(allowlist.denied_value_patterns)
         # Each entry by its own index: an entry the file wrote that holds the
         # text of one read from the environment is named as written. Shown as
@@ -1282,8 +1295,21 @@ def apply_runtime_patch(
 
     # One op at a time, in order, as jsonpatch applies a patch, so a refusal can
     # name its op. The base is never touched: each op applies to a copy.
+    from automated_security_helper.config.config_validator import (
+        environment_record_of_references,
+    )
+
     patched: Any = base.model_dump(mode="python", by_alias=False)
     references = _ReferencesThroughPatch(base, patched)
+    # The references the configuration keeps for its views and its session
+    # copies, followed through the same ops (they are not the rewrites above).
+    environment_references = tuple(getattr(base, "_environment_references", ()) or ())
+    followed = _ReferencesThroughPatch(
+        base,
+        patched,
+        items=environment_record_of_references(environment_references)[1],
+        strict=False,
+    )
     for op in patch_ops:
         if _goes_into_text(op.get("path", ""), patched):
             # jsonpointer indexes a string like a list, so a test op there
@@ -1291,6 +1317,7 @@ def apply_runtime_patch(
             # value, and no op is applied.
             raise RuntimePatchDeniedError(op, INTO_TEXT_REFUSAL)
         references.follow(op, patched)
+        followed.follow(op, patched)
         failure = None
         try:
             if op.get("op") == "test":
@@ -1324,6 +1351,8 @@ def apply_runtime_patch(
         # still standing: one an op wrote over is the client's text.
         references.track(op)
         references.settle()
+        followed.track(op)
+        followed.settle()
 
     try:
         rebuilt = AshConfig.model_validate(patched)
@@ -1341,6 +1370,11 @@ def apply_runtime_patch(
     rebuilt.__pydantic_private__ = copy.deepcopy(base.__pydantic_private__)
     if references.rewrites is not None:
         rebuilt._written_references = references.rewrites
+    if environment_references:
+        rebuilt._environment_references = followed.references_in(
+            environment_references, patched
+        )
+        rebuilt._references_followed = True
     return rebuilt
 
 
@@ -1444,12 +1478,28 @@ class _ReferencesThroughPatch:
     refuses the patch, rather than write the value there as text. Nothing else
     is compared: a default, or any other string equal to a value, is not one of
     the profile's values.
+
+    ``items`` are the rewrites to follow where they are not the base's own
+    (``references_in`` follows the configuration's references this way), and
+    ``strict`` False drops a value that moved where its reference did not follow
+    instead of refusing the patch: the other rewrites already refuse it.
     """
 
-    def __init__(self, base: AshConfig, dumped: Any) -> None:
+    def __init__(
+        self,
+        base: AshConfig,
+        dumped: Any,
+        items: Optional[List[Any]] = None,
+        strict: bool = True,
+    ) -> None:
         from automated_security_helper.config.config_validator import dumped_path
 
-        rewrites = list(getattr(base, "_written_references", None) or [])
+        rewrites = list(
+            items
+            if items is not None
+            else getattr(base, "_written_references", None) or []
+        )
+        self._strict = strict
         #: None when the base has no references to follow.
         self.rewrites: List[Any] | None = rewrites or None
         # Each rewrite's path in the dump's keys, which an op's pointer names.
@@ -1538,9 +1588,31 @@ class _ReferencesThroughPatch:
         # configuration.
         if any(ident not in ids for ident in landed):
             moved = True
-        if moved:
+        if moved and self._strict:
             raise RuntimePatchDeniedError(None, MOVED_WITHOUT_ITS_REFERENCE)
         self.rewrites, self._where, self._ids = rewrites, where, ids
+
+    def references_in(self, references: Sequence[Any], dumped: Any) -> Tuple[Any, ...]:
+        """``references``, the base's, as the ops left them: each one whose value
+        or key was not written over, at the place it was followed to, and with the
+        length of the list it stands in as ``dumped`` now has it.
+
+        What a session copy is written from, so that a client's string equal to a
+        value, at the entry a reference stood at or anywhere else, is written as
+        the client wrote it, and the reference is written at its own entry.
+        """
+        if self.rewrites is None:
+            return ()
+        followed = []
+        for ident, rewrite, at in zip(self._ids, self.rewrites, self._where):
+            reference = references[ident]
+            length = reference.length
+            if length is not None and reference.index_at is not None and at:
+                holder = _node_at(dumped, at[: reference.index_at])
+                if isinstance(holder, list):
+                    length = len(holder)
+            followed.append(replace(reference, path=rewrite.path, length=length))
+        return tuple(followed)
 
     def follow(self, op: Dict[str, Any], document: Any) -> None:
         if self.rewrites is None or op.get("op") not in ("add", "remove"):

@@ -161,6 +161,7 @@ def replace_subprocess(monkeypatch, run) -> None:
         "subprocess",
         types.SimpleNamespace(
             run=run,
+            DEVNULL=subprocess.DEVNULL,
             CompletedProcess=subprocess.CompletedProcess,
             CalledProcessError=subprocess.CalledProcessError,
             TimeoutExpired=subprocess.TimeoutExpired,

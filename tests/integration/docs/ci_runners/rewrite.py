@@ -106,7 +106,8 @@ environment with ``uvx --reinstall`` (the scan), and runs even when that step fa
 in a workflow where no step reinstalls, it goes right after the first uvx step, which
 builds the environment the others reuse. ASH_UVX_SOURCE has to be the workflow's own
 form of the two inputs (CALLED_SCAN_SOURCE). A workflow with two reinstalling steps is
-refused, and so is one that sets ASH_UVX_SOURCE again for a job or a step, names it in
+refused, and so is one that sets ASH_UVX_SOURCE again for a job or a step (the two
+statements of _SOURCE_WRITERS, which pin the source to a commit, excepted), names it in
 a script, an action's input or an env value other than to read its value, names
 GITHUB_ENV, BASH_ENV or ENV, runs the set-env workflow command, or names
 ACTIONS_ALLOW_UNSECURE_COMMANDS (_uvx_source_problem); one with a uvx, ``uv tool run``
@@ -243,6 +244,29 @@ CALLED_SCAN_SOURCE = (
     REQUIREMENT
     + " @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}"
 )
+#: The statements, by the id of the step that holds them, with which the scan workflow
+#: replaces the workflow-level ASH_UVX_SOURCE through GITHUB_ENV. The first step writes
+#: the same form from the checked inputs; the second writes it again with the commit
+#: the ref names, and ASH_ASSETS_URL beside it. Each is the workflow's own form of the
+#: source (REQUIREMENT, the repository, one ref or commit), so a later uvx call still
+#: installs from one source. rewrite_called_workflow cuts these exact statements out of
+#: the step's script before it reads the script (_without_source_writer); every other
+#: line of the step is read as before, and so is a changed statement or the same
+#: statement in a step with another id.
+_SOURCE_WRITERS = {
+    "ash-source": (
+        f'echo "ASH_UVX_SOURCE={REQUIREMENT} @ '
+        'git+https://github.com/${repo}@${version_url}" >> "${GITHUB_ENV}"'
+    ),
+    "ash-pin": (
+        "{\n"
+        f'  echo "ASH_UVX_SOURCE={REQUIREMENT} @ '
+        'git+https://github.com/${ASH_REPO}@${COMMIT}"\n'
+        '  echo "ASH_ASSETS_URL=https://raw.githubusercontent.com/'
+        '${ASH_REPO}/${COMMIT}/automated_security_helper/assets"\n'
+        '} >> "$GITHUB_ENV"'
+    ),
+}
 
 _SHA1 = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -370,6 +394,7 @@ _SCAN_ACTIONS = frozenset(
         "actions/cache/restore",
         "actions/cache/save",
         "actions/checkout",
+        "actions/download-artifact",
         "actions/setup-python",
         "actions/upload-artifact",
         "astral-sh/setup-uv",
@@ -383,8 +408,11 @@ _SCAN_ACTIONS = frozenset(
 #: 40 hex digits.
 _ACTION_PIN = re.compile(r"[0-9a-fA-F]{40}")
 #: The variables that name a file bash or sh runs before a script, and the names bash
-#: reads functions from (``BASH_FUNC_echo%%``).
-_SHELL_ENV = re.compile(r"(?<!\w)(?:(?:BASH_)?ENV(?!\w)|BASH_FUNC_\S*)")
+#: reads functions from (``BASH_FUNC_echo%%``). ``!ENV`` is not one: it is the name of
+#: the YAML tag ASH's configuration loader uses for an environment reference, which a
+#: Python script of the scan workflow writes as a string, and a word that starts with
+#: ``!`` is neither an assignment nor an expansion of ENV in bash or sh.
+_SHELL_ENV = re.compile(r"(?<![\w!])(?:(?:BASH_)?ENV(?!\w)|BASH_FUNC_\S*)")
 #: pip's commands that install nothing and change no setting. ``pip config`` is not
 #: among them: its set, unset and edit write the configuration a later install reads.
 _PIP_READ_ONLY = frozenset(
@@ -1826,6 +1854,14 @@ _GROOVY_ESCAPES = {
 #: read as scripts of their own (_scripts_run).
 _SHELLS = frozenset({"bash", "sh", "dash", "zsh", "ksh", "mksh"})
 _SWITCH_USER = frozenset({"su", "runuser"})
+#: A Python interpreter as a word of a command: ``python``, ``python3``, ``python3.12``
+#: or a path to one.
+_PYTHON_PROGRAM = re.compile(r"(?:.*/)?python[0-9.]*")
+#: The words that make a here-document shell input even when a Python interpreter is
+#: also a word of its command (``bash -s python``, ``eval python``).
+_SHELL_INPUT_WORDS = (
+    _SHELLS | _SWITCH_USER | {"eval", "source", ".", "busybox", "toybox"}
+)
 #: The options of those shells that take a value (``-o pipefail``, ``-O extglob``).
 _SHELL_VALUE_OPTIONS = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
 #: How deep a script inside a script is read: the words eval runs, a -c script, a line
@@ -1958,10 +1994,13 @@ class _Reader:
         #: Where in ``code`` each line break that ends a line is.
         self.ends: list[int] = []
         #: The here-documents the line being read opens: delimiter, whether tabs are
-        #: stripped (``<<-``), whether the delimiter is quoted.
-        self.pending: list[tuple[str, bool, bool]] = []
-        #: Each here-document's lines, with how many lines of code end before them.
-        self.documents: list[tuple[int, list[str]]] = []
+        #: stripped (``<<-``), whether the delimiter is quoted, and whether it is
+        #: Python's input (a quoted delimiter on a command with a Python interpreter
+        #: and no shell among its words).
+        self.pending: list[tuple[str, bool, bool, bool]] = []
+        #: Each here-document's lines, with how many lines of code end before them and
+        #: whether it is Python's input.
+        self.documents: list[tuple[int, list[str], bool]] = []
         #: Each command read: its words and where it starts and ends in ``code``.
         self.found: list[tuple[list[_Word], int, int]] = []
 
@@ -2071,7 +2110,13 @@ class _Reader:
             if target:
                 if target in ("<<", "<<-"):
                     quoted = word.text != word.value
-                    self.pending.append((word.value, target == "<<-", quoted))
+                    names = {each.value.rsplit("/", 1)[-1] for each in words}
+                    python = (
+                        quoted
+                        and any(_PYTHON_PROGRAM.fullmatch(each.value) for each in words)
+                        and not names & _SHELL_INPUT_WORDS
+                    )
+                    self.pending.append((word.value, target == "<<-", quoted, python))
                 target = ""
                 end = word.end
                 continue
@@ -2282,7 +2327,7 @@ class _Reader:
         delimiter, and reads one with a quoted delimiter as written. Either way the
         lines a backslash continues are joined for reading (_joined), as a shell given
         the document joins them."""
-        for delimiter, strip, quoted in self.pending:
+        for delimiter, strip, quoted, python in self.pending:
             lines: list[str] = []
             pending = ""
             while self.index < len(self.text):
@@ -2301,7 +2346,7 @@ class _Reader:
                 lines.append(line)
             if pending:
                 lines.append(pending)
-            self.documents.append((len(self.ends), _joined(lines)))
+            self.documents.append((len(self.ends), _joined(lines), python))
         self.pending = []
 
 
@@ -2364,12 +2409,17 @@ def _read_script(text: str, depth: int = 0) -> tuple[_Line, ...]:
         line = code[start:end]
         comment = line.lstrip().startswith("#") and not _QUOTE_CHARACTERS & set(line)
         lines.append(_Line(line, comment, tuple(commands[number])))
-        for after, document in reader.documents:
+        for after, document, python in reader.documents:
             if after != number + 1:
                 continue
             for body in document:
+                # A here-document fed to Python is a line of text for the checks that
+                # read lines, but no commands: it is not a shell script, and what a
+                # Python program runs is not read by these checks, as for any program.
                 read = (
-                    _read_script(body, depth + 1) if depth < _MAX_SCRIPT_DEPTH else ()
+                    ()
+                    if python or depth >= _MAX_SCRIPT_DEPTH
+                    else _read_script(body, depth + 1)
                 )
                 lines.append(
                     _Line(body, False, tuple(c for each in read for c in each.commands))
@@ -3622,20 +3672,44 @@ def _scan_command_problem(command: _Command) -> str | None:
     return None
 
 
+def _without_printed_text(command: _Command, masked: str) -> str:
+    """``masked`` (the text of ``command``) with the words an ``echo`` or ``printf``
+    prints blanked, except the commands of their substitutions (``command.inner``),
+    which stay to be read. The program is the one word bash runs (_command_names), so
+    the words after it are text to print, and an ``ash`` or an installer named in a
+    message (``echo "run ash dependencies install"``) runs nothing. Any other command is
+    returned as it is."""
+    names = _command_names(command.words)
+    if len(names) != 1 or command.words[names[0]].name not in ("echo", "printf"):
+        return masked
+    kept = [False] * len(masked)
+    for start, end in command.inner:
+        for index in range(max(start, 0), min(end, len(masked))):
+            kept[index] = True
+    chars = list(masked)
+    for word in command.words[names[0] + 1 :]:
+        for index in range(word.start - command.start, word.end - command.start):
+            if 0 <= index < len(chars) and not kept[index]:
+                chars[index] = " "
+    return "".join(chars)
+
+
 def _scan_words_problem(command: _Command, group: list[_Command]) -> str | None:
     """Why a word of a scan workflow command could run another ASH: any word of ash or
     of an installer is refused wherever it stands, outside the own words of a uv call
     of the command or of its substitutions (``group``, _command_uv_calls), in its text
     read with its quoting removed (_readings). bash can run a word as a command where
     these checks do not read one (``timeout 10m ash``, ``eval ash``), and every such
-    word in the real workflow is the command of a uvx or uv run call. A read-only
-    command is refused with the rest."""
+    word in the real workflow is the command of a uvx or uv run call, or text an echo
+    or printf prints (_without_printed_text: its substitutions are still read). A
+    read-only command is refused with the rest."""
     shown = command.text.strip()
     masked = command.text
     for each in group:
         for call in _command_uv_calls(each, ""):
             start, end = call.start - command.start, call.end - command.start
             masked = masked[:start] + " " * (end - start) + masked[end:]
+    masked = _without_printed_text(command, masked)
     for reading in _readings(masked):
         for pattern in (_ASH_COMMAND, _PACKAGE_TOOL):
             found = pattern.search(reading)
@@ -3698,6 +3772,17 @@ def _check_env_names(env: Mapping[Any, Any], place: str, where: str) -> None:
             )
 
 
+def _without_source_writer(step: Mapping[str, Any]) -> Any:
+    """The script of a step with the one statement _SOURCE_WRITERS allows its id cut
+    out, written exactly and once. A script that does not hold it, or holds it twice,
+    is returned whole, so that every line of it is read."""
+    run = step.get("run")
+    allowed = _SOURCE_WRITERS.get(step.get("id"))
+    if isinstance(run, str) and allowed is not None and run.count(allowed) == 1:
+        return run.replace(allowed, "", 1)
+    return run
+
+
 def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> RewriteResult:
     """A reusable workflow a block calls, made to print the provenance of its ASH.
 
@@ -3713,11 +3798,14 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
     reuses. Two reinstalling steps are an error, since then no one environment is the
     scan's.
 
-    ASH_UVX_SOURCE has to be set once, for the whole workflow, to CALLED_SCAN_SOURCE:
+    ASH_UVX_SOURCE has to be set for the whole workflow to CALLED_SCAN_SOURCE:
     the ``ash-repo`` repository at the ``ash-version`` ref, the inputs the block's
-    rewrite set to the base repository and the head commit. A job or a step that sets
-    it again in its ``env`` is an error, since the print step reads the workflow's
-    value, and so is:
+    rewrite set to the base repository and the head commit. The workflow replaces it
+    for the steps after two of its steps, by id ``ash-source`` and ``ash-pin``, with
+    the same form of the repository and one ref, then the commit that ref names
+    (_SOURCE_WRITERS); those two statements are the only writes of it that are kept.
+    A job or a step that sets it again in its ``env`` is an error, since the print
+    step reads the workflow's value, and so is:
 
     * a script, an action's input or an env value with a line that could set it for
       the uvx calls after it (_uvx_source_problem);
@@ -3736,7 +3824,7 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
     * a job's or a step's env or inputs, or defaults, that are not a mapping (an
       expression), whose names no check can read;
     * a job with a container or services, whose image and env no check reads;
-    * a step that uses an action other than the ten the workflow uses (_SCAN_ACTIONS),
+    * a step that uses an action other than the eleven the workflow uses (_SCAN_ACTIONS),
       or one of them at anything but a full commit SHA (a tag or a branch can move),
       and a job that calls another workflow, whose code no check reads;
     * BASH_ENV, ENV, a BASH_FUNC_ name or a UV_ setting in an env;
@@ -3748,7 +3836,7 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
     ``uv.toml`` or ``pyproject.toml`` uv reads from the working directory, which can
     hold the same settings; what a step appends to GITHUB_PATH, which the real
     workflow does for its tools' directories, so a program a later step finds on the
-    PATH (uvx included) is not checked; and which commit of one of the ten actions a
+    PATH (uvx included) is not checked; and which commit of one of the eleven actions a
     step uses, so a pin bump passes and what the bumped action does is left to the
     review of that bump, as for the repository's other workflows. Any other file is
     returned as it is, with no records.
@@ -3818,7 +3906,8 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
             _check_env_names(holder_env, f"the job {job_id} or one of its steps", where)
             if "shell" in holder:
                 _check_shell(holder["shell"], f"the job {job_id}", where)
-            texts.append((f"a script of the job {job_id}", holder.get("run"), True))
+            script = _without_source_writer(holder)
+            texts.append((f"a script of the job {job_id}", script, True))
             for key, place in (("with", "an input"), ("env", "an env value")):
                 texts += [
                     (f"{place} in the job {job_id}", value, False)

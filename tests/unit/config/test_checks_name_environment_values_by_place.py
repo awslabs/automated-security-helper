@@ -52,6 +52,14 @@ SCANNER = "probecanaryscanner"
 LITERAL_MODULE = "literalprobemodule"
 LITERAL_DIRECTORY = "literalprobedir"
 
+#: A name outside ASH's plugin namespace is kept by the trust confinement for the
+#: scan's namespace refusal (``plugin_module_trust``, ``_is_allowed_module_path``),
+#: which imports nothing and warns of nothing. The in-tree warning is about a name
+#: inside the namespace that nothing installed provides, so the names those tests
+#: read end in the namespace suffix.
+NAMESPACE_SUFFIX = "_ash_plugins"
+LITERAL_NAMESPACED_MODULE = f"{LITERAL_MODULE}{NAMESPACE_SUFFIX}"
+
 CANARIES = (
     MODULE,
     DIRECTORY,
@@ -720,15 +728,21 @@ def test_mcp_get_config_shows_a_short_value_by_place(tmp_path: Path) -> None:
 
 
 def test_the_in_tree_module_warning_names_a_module_read_from_the_environment_by_place(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The warning for the ash_plugin_modules entries a file inside the scanned
     tree may not add: every module of an entry read from the environment, both
     pieces of the one that splits in two included, is <value>, and the module
-    the file wrote is named."""
+    the file wrote is named. Every name is inside ASH's plugin namespace
+    (``NAMESPACE_SUFFIX``) and provided by nothing installed: a name outside the
+    namespace is kept for the scan's own refusal and draws no warning here."""
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.utils.log import ASH_LOGGER
 
+    in_namespace_module = f"{MODULE}{NAMESPACE_SUFFIX}"
+    in_namespace_pair = tuple(f"{piece}{NAMESPACE_SUFFIX}" for piece in PAIR)
+    monkeypatch.setenv("ASH_PROBE_CANARY_MODULE", in_namespace_module)
+    monkeypatch.setenv("ASH_PROBE_CANARY_PAIR", ",".join(in_namespace_pair))
     source = tmp_path / "src"
     (source / ".ash").mkdir(parents=True)
     (source / ".ash" / ".ash.yaml").write_text(
@@ -736,7 +750,7 @@ def test_the_in_tree_module_warning_names_a_module_read_from_the_environment_by_
         "ash_plugin_modules:\n"
         "  - ${ASH_PROBE_CANARY_MODULE}\n"
         "  - ${ASH_PROBE_CANARY_PAIR}\n"
-        "  - literalprobemodule\n",
+        f"  - {LITERAL_NAMESPACED_MODULE}\n",
         encoding="utf-8",
     )
     records: List[logging.LogRecord] = []
@@ -760,16 +774,25 @@ def test_the_in_tree_module_warning_names_a_module_read_from_the_environment_by_
     assert len(warning) == 1, text
     _assert_hidden(text)
     assert warning[0].count(f"'{ENVIRONMENT_VALUE_SHOWN}'") == 3, warning
-    assert f"'{LITERAL_MODULE}'" in warning[0], warning
+    assert f"'{LITERAL_NAMESPACED_MODULE}'" in warning[0], warning
     # The check read the values: none of the refused modules is kept.
-    assert not set(config.ash_plugin_modules) & {MODULE, *PAIR, LITERAL_MODULE}
+    assert not set(config.ash_plugin_modules) & {
+        in_namespace_module,
+        *in_namespace_pair,
+        LITERAL_NAMESPACED_MODULE,
+    }
 
 
 #: The runtime policy's own entries, read from the environment by the profile's
 #: file: a denied path, a short regex, and the path a regex is bound to.
 DENIED = "/global_settings/probecanarydenied"
 REGEX = "q[7]"
-PATTERN_PATH = "/scanners/probecanarypatternpath"
+#: The path a regex is bound to. A client's op writes its parent
+#: (``/scanners/probesection``), which carries the bound child. It is not
+#: ``/scanners``: a write there contains the shipped denied_paths entries for the
+#: scanners that send data off the host (``ash_config.ALWAYS_DENIED_PATHS``), and
+#: those refuse it before any value pattern is read.
+PATTERN_PATH = "/scanners/probesection/probecanarypatternpath"
 
 
 @pytest.mark.parametrize(
@@ -788,7 +811,11 @@ PATTERN_PATH = "/scanners/probecanarypatternpath"
             id="regex-read",
         ),
         pytest.param(
-            {"op": "replace", "path": "/scanners", "value": {"x": "literalprobematch"}},
+            {
+                "op": "replace",
+                "path": "/scanners/probesection",
+                "value": {"x": "literalprobematch"},
+            },
             "matches denied_value_patterns regex 'literalprobematch' bound to "
             f"'{ENVIRONMENT_VALUE_SHOWN}'",
             id="pattern-path-read",
@@ -871,7 +898,7 @@ def test_the_runtime_policy_refusal_names_a_policy_entry_read_from_the_environme
     "override, expected",
     [
         pytest.param(
-            "global_settings={}",
+            "probesection={}",
             "writes a subtree that contains denied_paths entry "
             f"'{ENVIRONMENT_VALUE_SHOWN}'",
             id="denied-path-read",
@@ -883,7 +910,7 @@ def test_the_runtime_policy_refusal_names_a_policy_entry_read_from_the_environme
             id="regex-read",
         ),
         pytest.param(
-            "scanners={x: literalprobematch}",
+            "probepatterns={x: literalprobematch}",
             "matches denied_value_patterns regex 'literalprobematch' bound to "
             f"'{ENVIRONMENT_VALUE_SHOWN}'",
             id="pattern-path-read",
@@ -912,13 +939,32 @@ def test_a_workspace_scans_override_refusal_names_a_policy_entry_read_from_the_e
     by the session config's runtime policy (cli/mcp/workspace._gate_client_overrides),
     whose refusal goes to the client as select_profile's does. The policy entry
     that refused one is named by place: <value> for one the session config read
-    from the environment, as written for one it wrote."""
+    from the environment, as written for one it wrote.
+
+    The policy is the registered profile's, as the operator loaded it at
+    startup (``profile_registry.session_profile_entry``), so the profile is
+    registered and named in the call; the session file only gives the config the
+    override applies to. With no profile the policy is the default one, which is
+    off (the test after this one).
+
+    That policy is the profile's own list added after the shipped defaults
+    (``client_config_policy.effective_policy``), so a shipped entry that an op
+    reaches refuses it first. The entries this test reads from the environment
+    therefore sit under sections no shipped entry reaches: ``/probesection`` for
+    the denied path, ``/probepatterns`` for the bound path (the profile of the
+    direct policy test above can use ``/global_settings`` and ``/scanners``)."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        register_profiles,
+        set_profile_registry,
+    )
     from automated_security_helper.cli.mcp.workspace import _gate_client_overrides
     from automated_security_helper.config.runtime_patch import RuntimePatchDeniedError
 
-    monkeypatch.setenv("ASH_PROBE_CANARY_DENIED", DENIED)
+    monkeypatch.setenv("ASH_PROBE_CANARY_DENIED", "/probesection/probecanarydenied")
     monkeypatch.setenv("ASH_PROBE_CANARY_REGEX", REGEX)
-    monkeypatch.setenv("ASH_PROBE_CANARY_PATTERN_PATH", PATTERN_PATH)
+    monkeypatch.setenv(
+        "ASH_PROBE_CANARY_PATTERN_PATH", "/probepatterns/probecanarypatternpath"
+    )
     session = tmp_path / "session.yaml"
     session.write_text(
         "project_name: probe\n"
@@ -937,13 +983,115 @@ def test_a_workspace_scans_override_refusal_names_a_policy_entry_read_from_the_e
         encoding="utf-8",
     )
 
+    set_profile_registry(register_profiles([f"probe={session}"]))
+
     with pytest.raises(RuntimePatchDeniedError) as raised:
-        _gate_client_overrides([override], str(session))
+        _gate_client_overrides([override], str(session), profile="probe")
     refusal = str(raised.value)
     assert "probecanarydenied" not in refusal, refusal
     assert "probecanarypatternpath" not in refusal, refusal
     assert REGEX not in refusal, refusal
     assert expected in refusal, refusal
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        pytest.param(
+            "/probesection",
+            "writes a subtree that contains denied_paths entry "
+            f"'{ENVIRONMENT_VALUE_SHOWN}'",
+            id="denied-path-read",
+        ),
+        pytest.param(
+            "/literalprobedenied",
+            "matches denied_paths entry '/literalprobedenied'",
+            id="denied-path-written",
+        ),
+    ],
+)
+def test_select_profile_s_patch_refusal_names_a_policy_entry_read_from_the_environment_by_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str, expected: str
+) -> None:
+    """select_profile checks a client's patch_ops against the policy of the
+    profile it binds, the same policy the workspace tools use: the profile's own
+    list added after the shipped defaults. The refusal goes to the client, so the
+    entry that refused the patch is named by place there too: <value> for one the
+    profile read from the environment, as written for one it wrote."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_all_session_state,
+        clear_profile_registry,
+        register_profiles,
+        set_profile_registry,
+    )
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace-root"))
+    monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv("ASH_PROBE_CANARY_DENIED", "/probesection/probecanarydenied")
+    profile = tmp_path / "profile.yaml"
+    profile.write_text(
+        "project_name: probe\n"
+        "global_settings:\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        "      allowed_paths: ['/**']\n"
+        "      denied_paths:\n"
+        "        - ${ASH_PROBE_CANARY_DENIED}\n"
+        "        - /literalprobedenied\n",
+        encoding="utf-8",
+    )
+    clear_profile_registry()
+    clear_all_session_state()
+    set_profile_registry(register_profiles([f"probe={profile}"]))
+    try:
+        result = mcp_select_profile(
+            "probe",
+            patch_ops=[{"op": "add", "path": path, "value": {}}],
+            session_id="select-profile-refusal",
+        )
+    finally:
+        clear_profile_registry()
+        clear_all_session_state()
+
+    assert result["success"] is False, result
+    refusal = str(result["error"])
+    assert "probecanarydenied" not in refusal, refusal
+    assert expected in refusal, refusal
+
+
+def test_a_workspace_scans_override_is_refused_when_no_profile_enables_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A call that names no profile, and a session that bound none, is checked
+    against the default policy, which has runtime overrides off: the refusal
+    says so, and holds nothing of the session file's own policy, which is not
+    the policy in force."""
+    from automated_security_helper.cli.mcp.workspace import _gate_client_overrides
+    from automated_security_helper.config.runtime_patch import RuntimePatchDeniedError
+
+    monkeypatch.setenv("ASH_PROBE_CANARY_DENIED", DENIED)
+    session = tmp_path / "session.yaml"
+    session.write_text(
+        "project_name: probe\n"
+        "global_settings:\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        "      allowed_paths: ['/**']\n"
+        "      denied_paths:\n"
+        "        - ${ASH_PROBE_CANARY_DENIED}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimePatchDeniedError) as raised:
+        _gate_client_overrides(["project_name=q7"], str(session))
+
+    refusal = str(raised.value)
+    assert "runtime overrides disabled (allowlist.enabled is False)" in refusal, refusal
+    assert "probecanarydenied" not in refusal, refusal
 
 
 @pytest.mark.parametrize(
@@ -1068,6 +1216,22 @@ def test_an_invalid_policy_regex_the_file_wrote_keeps_its_reason(
     assert raised.value.__cause__ is None
 
 
+def _assert_denied_paths_hold(policy: Any, expected: List[str]) -> None:
+    """The policy's ``denied_paths`` holds ``expected`` and only shipped entries besides.
+
+    ``RuntimeOverridesConfig`` adds each entry of ``ALWAYS_DENIED_PATHS`` that a
+    profile's own list leaves out, at the list's end
+    (``_keep_the_always_denied_paths``): 25 entries at this base. The list a
+    profile writes is therefore a subset of the policy's, never equal to it, and
+    any entry in the policy beyond the expected ones has to be a shipped one.
+    """
+    from automated_security_helper.config.ash_config import ALWAYS_DENIED_PATHS
+
+    entries = set(policy.denied_paths)
+    assert set(expected) <= entries, policy.denied_paths
+    assert entries - set(expected) <= set(ALWAYS_DENIED_PATHS), policy.denied_paths
+
+
 def test_a_policy_entry_the_file_wrote_is_named_as_written_beside_one_read_from_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1100,7 +1264,7 @@ def test_a_policy_entry_the_file_wrote_is_named_as_written_beside_one_read_from_
     config = load_config_file_for_run(profile)[1]
     assert config.global_settings.mcp is not None
     policy = config.global_settings.mcp.runtime_overrides
-    assert policy.denied_paths == ["/probeqzprefix/qzxi9lit", "/probeqzprefix"]
+    _assert_denied_paths_hold(policy, ["/probeqzprefix/qzxi9lit", "/probeqzprefix"])
 
     refusals = []
     # The first only the entry the file wrote refuses (it is checked first), the
@@ -1185,7 +1349,7 @@ def test_a_policy_entry_a_patch_moves_is_named_by_its_place(
     assert config.global_settings.mcp is not None
     policy = config.global_settings.mcp.runtime_overrides
     # The check reads the value: the entry is where the operation left it.
-    assert sorted(policy.denied_paths) == sorted([*written, "/probeqzprefix"])
+    _assert_denied_paths_hold(policy, [*written, "/probeqzprefix"])
 
     def refusal(path: str) -> str:
         op = {"op": "replace", "path": path, "value": 1}
@@ -1205,8 +1369,8 @@ def test_a_policy_entry_a_patch_moves_is_named_by_its_place(
 #: warning that names the files it was read from.
 _IN_TREE_SETTINGS = {
     "plugin-modules": (
-        "ash_plugin_modules:\n  - literalprobemodule\n",
-        f"Ignoring ash_plugin_modules entries '{LITERAL_MODULE}'",
+        f"ash_plugin_modules:\n  - {LITERAL_NAMESPACED_MODULE}\n",
+        f"Ignoring ash_plugin_modules entries '{LITERAL_NAMESPACED_MODULE}'",
     ),
     "sandbox-grants": (
         "sandbox:\n  network_scanners:\n    - bandit\n",
@@ -1619,7 +1783,7 @@ def test_a_shipped_default_entry_read_from_the_environment_is_named_in_both_mode
     config = load_config_file_for_run(profile)[1]
     assert config.global_settings.mcp is not None
     policy = config.global_settings.mcp.runtime_overrides
-    assert policy.denied_paths == ["/fail_on_findings"]
+    _assert_denied_paths_hold(policy, ["/fail_on_findings"])
     op = {"op": "replace", "path": "/fail_on_findings", "value": False}
 
     with pytest.raises(RuntimePatchDeniedError) as raised:
