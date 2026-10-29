@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -190,8 +191,8 @@ def test_a_direct_posix_spawn_start_is_recorded_once(tmp_path):
 @pytest.mark.integration
 def test_a_cwd_popen_then_a_direct_spawn_of_the_same_tool_records_two(tmp_path):
     """A Popen given a cwd takes the fork_exec path and reports no posix_spawn
-    echo, so it must arm no echo drop: a direct posix_spawn of the same tool
-    right after it is a second start, not the first one's echo."""
+    echo, so a direct posix_spawn of the same tool right after it is a second
+    start, not the first one's echo: the record names two."""
     started = ChildToolStarts(tmp_path)
     quiet = _program_named(tmp_path / "beside-the-interpreter", "uv")
 
@@ -452,3 +453,43 @@ def test_a_tool_named_by_path_after_a_shell_option_is_among_the_words():
 
     assert "/venv/bin/uv" in words, words
     assert "-e" not in words, words
+
+
+def _frame_of(module_name: str, function_name: str) -> types.SimpleNamespace:
+    """A stand-in for the frame an audit event fired in: its code's name and the
+    ``__name__`` of the module that code belongs to, which is all the reader
+    reads of a frame."""
+    code = types.SimpleNamespace(co_name=function_name)
+    return types.SimpleNamespace(f_code=code, f_globals={"__name__": module_name})
+
+
+@pytest.mark.unit
+def test_a_posix_spawn_made_by_subprocess_for_a_popen_is_its_echo():
+    """subprocess reports a Popen it starts with posix_spawn twice, the second
+    time from Popen._posix_spawn; that frame, and only that frame, marks the
+    second report."""
+    popen_reported = readers()["_popen_reported"]
+
+    assert popen_reported(_frame_of("subprocess", "_posix_spawn")) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "frame",
+    [
+        pytest.param(_frame_of("__main__", "<module>"), id="the-childs-own-code"),
+        pytest.param(
+            _frame_of("subprocess", "_execute_child"), id="forked-not-spawned"
+        ),
+        pytest.param(
+            _frame_of("my_subprocess", "_posix_spawn"), id="a-same-named-helper"
+        ),
+        pytest.param(None, id="no-frame"),
+    ],
+)
+def test_a_posix_spawn_made_by_anything_else_is_a_start_of_its_own(frame):
+    """A direct os.posix_spawn, one from another module's function of the same
+    name, or an event with no frame to read, is recorded: nothing before it is
+    assumed to have been its first report, so no shared arm and no thread can
+    drop it."""
+    assert readers()["_popen_reported"](frame) is False

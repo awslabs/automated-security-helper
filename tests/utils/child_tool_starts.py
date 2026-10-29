@@ -232,30 +232,27 @@ def _words_of(argv):
     return words
 
 
-def _decoded(program, argv):
-    """(program, argv) with every part fsdecoded, for comparing the two
-    reports subprocess makes of one start, or None where that fails."""
+def _popen_reported(frame):
+    """Whether the os.posix_spawn audited from *frame* is subprocess's own call
+    for a Popen it has already reported: the frame is Popen._posix_spawn, in the
+    subprocess module. subprocess takes that path, and so reports one start
+    twice, only when the executable has a directory part, no descriptor or
+    session option is set and, before Python 3.13, close_fds is off; reading the
+    caller instead of predicting those conditions holds whatever the version
+    decides, and needs no state shared between starts or threads."""
     try:
-        if isinstance(argv, (str, bytes, _os.PathLike)):
-            seen = _os.fsdecode(argv)
-        else:
-            seen = tuple(_os.fsdecode(argument) for argument in argv)
-        return (_os.fsdecode(program) if program is not None else None, seen)
+        return (
+            frame is not None
+            and frame.f_code.co_name == "_posix_spawn"
+            and frame.f_globals.get("__name__") == "subprocess"
+        )
     except Exception:
-        return None
+        return False
 '''
 
 #: The hook: it logs a start whose words name a probed tool, then the check that
 #: PATH finds each stand-in. ``@SHADOWED_EXIT@`` is replaced with the exit status.
 _HOOK = """\
-#: The one start a subprocess.Popen echo may stand for, as the decoded
-#: (program, argv). Armed only by a Popen that reports its start twice (the
-#: posix_spawn path: no cwd), rewritten on EVERY audited start, and spent by
-#: whatever start comes next: a Popen that cannot echo (cwd set) arms nothing,
-#: so a direct posix_spawn of the same tool right after it is its own record.
-_LAST = [None]
-
-
 def _note(line):
     fd = _os.open(_LOG, _os.O_WRONLY | _os.O_APPEND | _os.O_CREAT, 0o644)
     try:
@@ -274,16 +271,12 @@ def _audit(event, args):
             program, argv = None, args[0]
         else:
             program, argv = args[0], args[1]
-        # The echo arm is rewritten on EVERY audited start, before any found
-        # check: a subprocess.Popen that can echo (the posix_spawn path - no
-        # cwd) arms the start it will report twice, and every other start,
-        # the echo itself included, spends the arm.
-        start = _decoded(program, argv)
-        previous = _LAST[0]
-        if event == "subprocess.Popen" and len(args) > 2 and args[2] is None:
-            _LAST[0] = start
-        else:
-            _LAST[0] = None
+        # subprocess reports one start twice when it uses posix_spawn (both
+        # subprocess.Popen and os.posix_spawn): keep the first report, read
+        # from the frame that made the call, and still log a posix_spawn that
+        # stands alone (_sys._getframe(1) is the frame the event fired in).
+        if event == "os.posix_spawn" and _popen_reported(_sys._getframe(1)):
+            return
         words = _words_of(argv)
         found = [
             name
@@ -291,11 +284,6 @@ def _audit(event, args):
             if name
         ]
         if found:
-            # subprocess reports one start twice when it uses posix_spawn
-            # (both subprocess.Popen and os.posix_spawn): keep the first
-            # report, and still log a posix_spawn that stands alone.
-            if event == "os.posix_spawn" and start is not None and previous == start:
-                return
             _note(event + " " + found[0] + " " + repr(argv))
     except Exception:
         # An audit hook that raises would break the start it watches.
