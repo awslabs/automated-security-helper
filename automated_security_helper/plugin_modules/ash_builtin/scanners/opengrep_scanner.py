@@ -213,7 +213,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     # Whether --metrics applies depends on the installed opengrep's version, and
     # asking starts opengrep. The arguments are built at construction, which the scan
     # phase does for every registered scanner, selected or not, so the question
-    # waits for _resolve_arguments.
+    # waits for _resolve_scan_arguments.
     _constructing: bool = PrivateAttr(default=False)
     _metrics_decision_pending: bool = PrivateAttr(default=False)
     # The answer, once asked, so the arguments rebuilt with it do not ask again.
@@ -294,7 +294,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         """`--metrics` was removed in opengrep 1.7.0; only emit on older versions.
 
         During construction the answer is no, and the question is left for
-        ``_resolve_arguments``.
+        ``_resolve_scan_arguments``.
         """
         if self._constructing:
             self._metrics_decision_pending = True
