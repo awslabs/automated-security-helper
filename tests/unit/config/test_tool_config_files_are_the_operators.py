@@ -454,38 +454,32 @@ def test_a_repositorys_config_does_not_choose_opengreps_patterns(
     assert _option(chosen, "opengrep", "patterns") == ["Y_9q"]
 
 
-def test_patterns_mode_keeps_the_semgrepignore_flag_and_the_exclusions(
+def test_patterns_mode_is_refused_whatever_else_the_section_sets(
     tmp_path: Path,
 ) -> None:
-    from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
-        SEMGREP_DEFAULT_IGNORES,
-    )
+    """A section that sets ``patterns`` is refused while the scanner is built.
+
+    opengrep runs a ``--pattern`` search only with a language, which no option of
+    this scanner supplies, so no command is built for it: the refusal names the
+    missing language option. The other settings of the section, an operator's
+    ``exclude`` here, do not change that.
+    """
+    from automated_security_helper.core.exceptions import ScannerError
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
         OpengrepScannerConfig,
     )
 
     context = _context(tmp_path)
-    scanner = OpengrepScanner(
-        context=context,
-        config=OpengrepScannerConfig.model_validate(
-            {"options": {"patterns": ["X_9q"], "exclude": ["operator-dir"]}}
-        ),
-    )
-    argv = [
-        str(a)
-        for a in scanner._resolve_arguments(
-            target=Path(context.source_dir), results_file=tmp_path / "r.json"
+    with pytest.raises(ScannerError) as refused:
+        OpengrepScanner(
+            context=context,
+            config=OpengrepScannerConfig.model_validate(
+                {"options": {"patterns": ["X_9q"], "exclude": ["operator-dir"]}}
+            ),
         )
-    ]
-    assert "--x-ignore-semgrepignore-files" in argv
-    assert set(SEMGREP_DEFAULT_IGNORES) | {"operator-dir"} <= set(
-        _values_after(argv, "--exclude")
-    )
-    assert _values_after(argv, "--pattern") == ["X_9q"]
-    assert "--json" in argv
-    for flag in ("--config", "--sarif", "--metrics"):
-        assert flag not in argv, argv
+    assert "--lang" in str(refused.value)
+    assert "scanners.opengrep.options.patterns" in str(refused.value)
 
 
 @pytest.mark.parametrize("scanner", ["opengrep", "semgrep"])
