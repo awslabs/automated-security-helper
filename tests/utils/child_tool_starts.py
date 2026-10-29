@@ -201,16 +201,42 @@ def _shell_command_line(arguments):
     return None
 
 
+def _module_word(argv):
+    """The word a probed name takes when *argv* runs it as an interpreter's -m
+    module, or None: the module's top-level package, with the hyphen a probed
+    name uses where an import needs an underscore (detect_secrets.main runs
+    detect-secrets)."""
+    module = _module_run_by(argv)
+    if module is None:
+        return None
+    return module.split(".")[0].replace("_", "-")
+
+
+def _with_module_words(words):
+    """*words* plus, for each word in it that is a Python interpreter, the word
+    of the module the rest of the line runs with -m: ``python3 -m detect_secrets
+    scan`` inside a shell line names detect-secrets after the interpreter's own
+    word, where a word-by-word compare sees only python3."""
+    found = list(words)
+    for position, word in enumerate(words):
+        if _os.path.basename(word).startswith("python"):
+            module_word = _module_word(words[position:])
+            if module_word is not None:
+                found.append(module_word)
+    return found
+
+
 def _words_of(argv):
     """The words of *argv* a probed name can hide in: the program word, every
     word of a shell command line (os.system's string, or the operand after a
     shell's -c wherever its options put it), and the module an interpreter
     runs with -m, read with the interpreter's own option rules
     (_module_run_by) and compared by its top-level package, with the hyphen a
-    probed name uses."""
+    probed name uses; the -m rule is read on an interpreter that is the program
+    and on one that is a word of a shell command line alike."""
     if isinstance(argv, (str, bytes, _os.PathLike)):
         # A shell command line: any word of it can be the tool.
-        return _os.fsdecode(argv).split()
+        return _with_module_words(_os.fsdecode(argv).split())
     if not argv:
         return []
     arguments = []
@@ -224,11 +250,11 @@ def _words_of(argv):
     if first in _SHELLS:
         command = _shell_command_line(arguments)
         if command is not None:
-            words += command.split()
+            words += _with_module_words(command.split())
     if first.startswith("python"):
-        module = _module_run_by(arguments)
-        if module is not None:
-            words.append(module.split(".")[0].replace("_", "-"))
+        module_word = _module_word(arguments)
+        if module_word is not None:
+            words.append(module_word)
     return words
 
 

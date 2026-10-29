@@ -493,3 +493,43 @@ def test_a_posix_spawn_made_by_anything_else_is_a_start_of_its_own(frame):
     assumed to have been its first report, so no shared arm and no thread can
     drop it."""
     assert readers()["_popen_reported"](frame) is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv, word",
+    [
+        pytest.param(
+            "python3 -m detect_secrets scan", "detect-secrets", id="os-system-string"
+        ),
+        pytest.param(
+            ["sh", "-c", "python -m uv.__main__ pip install x"],
+            "uv",
+            id="inside-a-shell-c-string",
+        ),
+        pytest.param(
+            ["bash", "-c", "cd /x && /opt/py/bin/python3.12 -Im detect_secrets"],
+            "detect-secrets",
+            id="an-interpreter-by-path-after-other-words",
+        ),
+        pytest.param(
+            ["python3", "-W", "ignore", "-m", "uv", "--version"],
+            "uv",
+            id="the-program-itself",
+        ),
+    ],
+)
+def test_a_module_run_by_an_interpreter_inside_a_shell_line_is_a_word(argv, word):
+    """The -m rule holds for an interpreter that is a word of a shell command
+    line as it does for one that is the program: the module's top-level package,
+    spelled with the hyphen a probed name uses, is among the words compared, so
+    ``python -m detect_secrets`` inside a shell line is recorded as the direct
+    form is."""
+    assert word in readers()["_words_of"](argv)
+
+
+@pytest.mark.unit
+def test_a_shell_line_with_no_interpreter_adds_no_module_word():
+    """The control: a shell line whose words run no Python module is read word
+    by word and nothing is added."""
+    assert readers()["_words_of"]("ls -l /tmp") == ["ls", "-l", "/tmp"]
