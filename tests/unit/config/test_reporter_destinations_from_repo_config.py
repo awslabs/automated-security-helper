@@ -28,6 +28,9 @@ from automated_security_helper.config.reporter_trust import (
 )
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.unit.config._client_policy_helpers import (
+    narrow_client_rules as _narrow_client_rules,
+)
 from tests.utils.helpers import mark_git_checkout
 
 #: Values that read like what a repository would write, for some options, each of
@@ -695,9 +698,11 @@ def test_an_operator_off_written_another_way_still_counts(tmp_path, trusted_valu
 def defaults_off(monkeypatch):
     """Each off-host reporter off by its own default.
 
-    Stands in for a release whose reporter models default ``enabled`` to false.
-    ``test_each_off_host_reporters_enabled_default_is_listed`` holds the table
-    equal to the models, so such a release changes both.
+    ``REPORTER_ENABLED_DEFAULTS`` reads false for all four at this release, so
+    the fixture changes nothing today; it pins the table at false so the checks
+    below stay about the fallback to the trusted base, not about a default, if a
+    release turns one on. ``test_each_off_host_reporters_enabled_default_is_listed``
+    holds the table equal to the models, so such a release changes both.
     """
     for reporter in REPORTER_ENABLED_DEFAULTS:
         monkeypatch.setitem(REPORTER_ENABLED_DEFAULTS, reporter, False)
@@ -759,29 +764,6 @@ _OPTIONS_ONLY: Dict[str, dict] = {
     "aws-security-hub": {"options": {}},
     "cloudwatch-logs": {"options": {}},
 }
-
-
-def _narrow_client_rules():
-    """A client policy that lists none of the reporter fields itself. The
-    sections of the reporters that send findings off the host are still denied
-    whole (ALWAYS_DENIED_PATHS)."""
-    from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.config.client_config_policy import rules_from
-
-    return rules_from(
-        AshConfig.model_validate(
-            {
-                "global_settings": {
-                    "mcp": {
-                        "runtime_overrides": {
-                            "denied_paths": ["/fail_on_findings"],
-                            "replace_default_denied_paths": True,
-                        }
-                    }
-                }
-            }
-        )
-    )
 
 
 @pytest.mark.unit
