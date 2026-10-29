@@ -752,6 +752,62 @@ class ConfigFileRefused(ASHConfigValidationError):
         self.after_overrides = after_overrides
 
 
+def _cached_reader(
+    reads: Dict[Path, Any], texts: Dict[Path, str]
+) -> Callable[..., Any]:
+    """A config file reader over the caches ``reads`` (each file's parsed data)
+    and ``texts`` (the text it was parsed from), both keyed by resolved path.
+
+    The one reader every file of a run's configuration is read through: the
+    selected chain's (``load_config_file_for_run``) and the workspace overlay's
+    (``_load_overlay``), so a file the two chains share is parsed once, and the
+    as-written view each record is built from (environment_record_read) parses
+    the text the load read, never a second read of the file.
+    """
+
+    def read_once(path: Path, expect: Optional[FileIdentity] = None) -> Any:
+        key = Path(path).resolve()
+        if expect is not None and key in reads and key in texts:
+            # A caller vetted this file, and the cache already holds a read of
+            # it that was made without that identity (the ASH_CONFIG chain is
+            # loaded into the same cache first, and may name this very file).
+            # The cached read is used only if it is what the vetted file holds:
+            # the file is read once more, held to the identity, and the cached
+            # text must be that text. A file replaced since, or rewritten in
+            # place, is refused and not shown from a read nobody held to the
+            # check. A cached read that holds no text has none to compare, so
+            # it is not read again here: it is returned as the cache holds it,
+            # and the load refuses it for the missing text
+            # (``_file_references``), a reason that names the caller's cache and
+            # no value.
+            fresh = read_config_text(path, expect=expect)
+            if texts.get(key) != fresh:
+                raise ConfigFileChangedError(
+                    errno.ESTALE,
+                    "changed while it was being read, so it is not read",
+                    os.fspath(path),
+                )
+            return reads[key]
+        if key not in reads:
+            # ``expect`` is the identity the chain walk vetted
+            # (config_sources._read_into_state hands it to a reader that takes
+            # it); a caller that vetted nothing gets the file's identity now,
+            # and for a path that leads nowhere now, the identity no file has
+            # (never None, which would hold the read to nothing).
+            # read_config_text with an identity reads through
+            # read_config_bytes, so the ASH_CONFIG_MAX_FILE_BYTES bound, the
+            # non-blocking open and the check that the file read is the file
+            # that was vetted bind on every chain read, as they do for the
+            # stock reader.
+            if expect is None:
+                expect = identity_to_hold(path)
+            texts[key] = read_config_text(path, expect=expect)
+            reads[key] = parse_config_text(path, texts[key])
+        return reads[key]
+
+    return read_once
+
+
 def load_config_file_for_run(
     config_path: Path | str,
     reads: Optional[Dict[Path, Any]] = None,
@@ -795,45 +851,7 @@ def load_config_file_for_run(
     if texts is None:
         texts = {}
 
-    def read_once(path: Path, expect: Optional[FileIdentity] = None) -> Any:
-        key = Path(path).resolve()
-        if expect is not None and key in reads and key in texts:
-            # A caller vetted this file, and the cache already holds a read of
-            # it that was made without that identity (the ASH_CONFIG chain is
-            # loaded into the same cache first, and may name this very file).
-            # The cached read is used only if it is what the vetted file holds:
-            # the file is read once more, held to the identity, and the cached
-            # text must be that text. A file replaced since, or rewritten in
-            # place, is refused and not shown from a read nobody held to the
-            # check. A cached read that holds no text has none to compare, so
-            # it is not read again here: it is returned as the cache holds it,
-            # and the load refuses it for the missing text
-            # (``_file_references``), a reason that names the caller's cache and
-            # no value.
-            fresh = read_config_text(path, expect=expect)
-            if texts.get(key) != fresh:
-                raise ConfigFileChangedError(
-                    errno.ESTALE,
-                    "changed while it was being read, so it is not read",
-                    os.fspath(path),
-                )
-            return reads[key]
-        if key not in reads:
-            # ``expect`` is the identity the chain walk vetted
-            # (config_sources._read_into_state hands it to a reader that takes
-            # it); a caller that vetted nothing gets the file's identity now,
-            # and for a path that leads nowhere now, the identity no file has
-            # (never None, which would hold the read to nothing).
-            # read_config_text with an identity reads through
-            # read_config_bytes, so the ASH_CONFIG_MAX_FILE_BYTES bound, the
-            # non-blocking open and the check that the file read is the file
-            # that was vetted bind on every chain read, as they do for the
-            # stock reader.
-            if expect is None:
-                expect = identity_to_hold(path)
-            texts[key] = read_config_text(path, expect=expect)
-            reads[key] = parse_config_text(path, texts[key])
-        return reads[key]
+    read_once = _cached_reader(reads, texts)
 
     # The references the load filled in from the operator's copy of a profile
     # a client patched (``fill``), each at the place it was read.
@@ -880,6 +898,16 @@ def load_config_file_for_run(
         *filled,
         *document.displayed_environment_references,
     )
+    overlay = kwargs.get("overlay")
+    if overlay is not None:
+        # The overlay's files were merged over the document before the model
+        # was built (load_config_file), so what they read from the environment
+        # is in the configuration too, and is recorded as the chain's own reads
+        # are: the results file's record, the off-host payloads and the
+        # redaction all read these attributes, and carried the overlay's
+        # resolved values in clear while only _environment_references held
+        # its reads.
+        _record_overlay_reads(config, overlay, reads, texts)
     # The references above are the file's own document's, and the config's
     # overrides were applied before they were attached: an override that
     # replaced ash_plugin_modules with a shorter list leaves a reference
@@ -925,6 +953,55 @@ def _written_key_mappings(
             continue
         found += mappings_with_written_reference_keys(written, (EXTENDS_KEY, PATCH_KEY))
     return tuple(found)
+
+
+def _record_overlay_reads(
+    config: AshConfig,
+    overlay: ResolvedConfigDocument,
+    reads: Dict[Path, Any],
+    texts: Dict[Path, str],
+) -> None:
+    """Record on ``config`` what the files of ``overlay`` read from the
+    environment, as ``load_config_file_for_run`` records the selected chain's
+    own reads.
+
+    A workspace's operator config (``resolve_config``'s ``overlay_config_path``)
+    is merged over each project's document before the model is built, and
+    stands alone where the project has no config file (``overlaid_fallback``),
+    so its values are in the configuration like the chain's own. The results
+    file's ``ash_config`` record and the payload an off-host reporter sends
+    (record_of_config) read ``_written_references``; the free-text redaction and
+    ``get_plugin_config``'s debug line read ``_environment_values``; the key
+    rules read ``_written_key_mappings``. Each rewrite is at the place its value
+    has in the merged configuration: a mapping key the overlay sets is the
+    merged document's key, and a list the overlay sets replaces the project's
+    whole (deep_merge), so the overlay's own indices hold. The overlay's files
+    were read into ``reads`` and ``texts`` by the chain's cached reader
+    (``_load_overlay``), so the as-written view is parsed from the text the
+    load read.
+    """
+    values, rewrites = environment_record_read(
+        overlay.chain, reads, texts, places=overlay.reference_places
+    )
+    config._environment_values = list(
+        dict.fromkeys([*config._environment_values, *values])
+    )
+    config._written_references = [
+        *config._written_references,
+        *placed_at_appends(config, rewrites),
+    ]
+    config._written_key_mappings = (
+        *tuple(config._written_key_mappings or ()),
+        *_written_key_mappings(overlay.chain, texts),
+    )
+    config._environment_references = (
+        *tuple(config._environment_references or ()),
+        *tuple(overlay.environment_references),
+    )
+    config._displayed_environment_references = (
+        *tuple(config._displayed_environment_references or ()),
+        *tuple(overlay.displayed_environment_references),
+    )
 
 
 def load_config_file(
@@ -1595,7 +1672,13 @@ def resolve_config(
     overlay: Optional[ResolvedConfigDocument] = None
     if overlay_config_path is not None:
         overlay = _load_overlay(
-            overlay_config_path, source_dir, permit_base, refuse_env, operators_files
+            overlay_config_path,
+            source_dir,
+            permit_base,
+            refuse_env,
+            operators_files,
+            reads=reads,
+            texts=texts,
         )
         if scanned_root is None:
             # With no root there is nothing to judge the overlay's files
@@ -4195,7 +4278,15 @@ def _resolve_config(
         if names_out is not None:
             names_out.update(overlay.names)
         overlaid = AshConfig.model_validate(overlay.data, strict=True)
-        overlaid._environment_references = tuple(overlay.environment_references)
+        # The overlay is the whole configuration here, so its environment
+        # reads are the configuration's: values, rewrites, key mappings and
+        # references, as a loaded chain's are.
+        _record_overlay_reads(
+            overlaid,
+            overlay,
+            reads if reads is not None else {},
+            texts if texts is not None else {},
+        )
         return overlaid
 
     try:
@@ -4503,13 +4594,10 @@ def _resolve_config(
                     documents_out.update(overlay.documents)
                 if names_out is not None:
                     names_out.update(overlay.names)
-                # What the overlay's files read from the environment joins the
-                # config's references, so the views and records hide those
-                # values too.
-                config._environment_references = (
-                    *tuple(config._environment_references or ()),
-                    *tuple(overlay.environment_references),
-                )
+                # What the overlay's files read from the environment was
+                # recorded on the config by the load (_record_overlay_reads
+                # in load_config_file_for_run): values, rewrites, key mappings
+                # and references, as the chain's own reads are.
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}", extra=NO_MARKUP)
             if discovered_label is not None:
                 ASH_LOGGER.info(
@@ -6487,12 +6575,21 @@ def _load_overlay(
     permit_base: Optional[Callable[[Path], bool]],
     refuse_env: RefuseEnv,
     anchor_paths: Optional[AnchorPaths] = None,
+    reads: Optional[Dict[Path, Any]] = None,
+    texts: Optional[Dict[Path, str]] = None,
 ) -> ResolvedConfigDocument:
     """The overlay file's merged document, read as the operator's config is.
 
     Refused rather than skipped when it is missing, cannot be read, or does not
     validate on its own: the caller asked for its fields to be final, and
     dropping the file would scan with the project's values for them instead.
+
+    ``reads`` and ``texts`` are the run's caches (``load_config_file_for_run``):
+    given both, the overlay's files are read through the same cached reader as
+    the selected chain, so the record of what they read from the environment
+    (``_record_overlay_reads``) is built from the text this load read, the
+    chain walkers that rebuild the extends tree find the overlay's documents
+    in the cache, and a base both chains extend is parsed once.
     """
     path = Path(overlay_config_path)
     if not path.is_file():
@@ -6512,6 +6609,12 @@ def _load_overlay(
             permit_base=permit_base,
             refuse_env=refuse_env,
             anchor_relative_paths=anchor_paths,
+            reader=(
+                _cached_reader(reads, texts)
+                if reads is not None and texts is not None
+                else None
+            ),
+            texts=texts,
         )
     except ASHConfigValidationError:
         raise
