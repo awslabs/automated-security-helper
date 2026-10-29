@@ -56,6 +56,9 @@ class ExitingScanner(ScannerPluginBase):
     def validate_plugin_dependencies(self) -> bool:
         return True
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):
+        raise NotImplementedError("scan() is overridden directly")
+
     def scan(self, target, target_type, global_ignore_paths=None, config=None):
         self._pre_scan(target=target, target_type=target_type, config=config)
         self._post_scan(target=target, target_type=target_type)
