@@ -27,7 +27,9 @@ these rules:
     ``actions/upload-artifact`` and ``actions/download-artifact`` at any ref become the
     pinned v4 releases (ACT_UPLOAD_ARTIFACT, ACT_DOWNLOAD_ARTIFACT), because act 0.2.89
     cannot take the v6 and later releases' requests (see _rewrite_artifact_actions).
-    The page keeps naming the current releases.
+    The page keeps naming the current releases. The same rule runs on the copy of
+    run-ash-security-scan.yml a block calls (rewrite_called_workflow), whose own
+    artifact steps act serves no better.
 ``serial-matrix`` (github-actions)
     Every ``strategy:`` with a ``matrix:`` gets ``max-parallel: 1``, because act runs
     the entries of a matrix at once and its action cache races on them (see
@@ -3840,9 +3842,20 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
     step uses, so a pin bump passes and what the bumped action does is left to the
     review of that bump, as for the repository's other workflows. Any other file is
     returned as it is, with no records.
+
+    Before the print is placed, the workflow's ``actions/upload-artifact`` and
+    ``actions/download-artifact`` steps are moved to the v4 releases act can serve
+    (rule ``artifact-actions``, _rewrite_artifact_actions), as a block's own steps
+    are: the workflow's current pins send the request act's artifact server refuses,
+    so its ``ash`` job would fail at the upload and the jobs that need the artifact
+    would never run. The swap changes a ``uses:`` line only, so the step list the
+    print is placed in is that of the given text.
     """
     if PurePosixPath(file_name).name != CALLED_SCAN_WORKFLOW:
         return RewriteResult(text=text, applied=(), original=text)
+    original = text
+    applied: list[Applied] = []
+    text = _rewrite_artifact_actions(text, where, applied)
     document = _load(text, where)
     root = _compose(text, where)
     env = document.get("env") if isinstance(document, dict) else None
@@ -3999,7 +4012,6 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
         matrix=matrix,
         condition=AFTER_THE_SCAN if reinstalls else None,
     )
-    applied: list[Applied] = []
     rewritten = _apply_insertions(text, [insertion], applied)
     new_steps = (_load(rewritten, where).get("jobs") or {}).get(job_id, {}).get("steps")
     names = [s.get("name") for s in new_steps or () if isinstance(s, dict)]
@@ -4012,7 +4024,7 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
             f"{where}: the provenance step did not land right after the uvx step that "
             "builds the environment the scan runs in"
         )
-    return RewriteResult(text=rewritten, applied=tuple(applied), original=text)
+    return RewriteResult(text=rewritten, applied=tuple(applied), original=original)
 
 
 # ---------------------------------------------------------------------------

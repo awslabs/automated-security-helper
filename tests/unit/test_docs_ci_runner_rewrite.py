@@ -2091,6 +2091,30 @@ def _scan_steps(text: str) -> list:
     return yaml.safe_load(text)["jobs"]["ash"]["steps"]
 
 
+def _on_v4_actions(steps: list) -> list:
+    """``steps`` with each artifact action's ``uses`` on the pin act runs it at."""
+    pins = {
+        "actions/upload-artifact": UPLOAD_V4,
+        "actions/download-artifact": DOWNLOAD_V4,
+    }
+    moved = []
+    for step in steps:
+        action = str(step.get("uses", "")).split("@")[0]
+        if action in pins:
+            step = {**step, "uses": pins[action]}
+        moved.append(step)
+    return moved
+
+
+def _artifact_steps(text: str) -> list:
+    return [
+        step
+        for job in yaml.safe_load(text)["jobs"].values()
+        for step in job["steps"]
+        if "-artifact@" in str(step.get("uses", ""))
+    ]
+
+
 def test_the_scan_workflow_prints_the_provenance_of_the_ash_it_runs():
     rewrite_called = _api("rewrite", "rewrite_called_workflow")
     begin = _api("provenance", "PROVENANCE_BEGIN")
@@ -2100,7 +2124,9 @@ def test_the_scan_workflow_prints_the_provenance_of_the_ash_it_runs():
         "run-ash-security-scan.yml", text, where="run-ash-security-scan.yml"
     )
     assert [(a.rule, a.count, a.job, a.matrix) for a in result.applied] == [
-        ("called-provenance", 1, "ash", False)
+        ("artifact-actions", 1, None, False),
+        ("artifact-actions", 1, None, False),
+        ("called-provenance", 1, "ash", False),
     ]
     original, steps = _scan_steps(text), _scan_steps(result.text)
     scans = [
@@ -2123,7 +2149,55 @@ def test_the_scan_workflow_prints_the_provenance_of_the_ash_it_runs():
         "the form the later steps use, which reuses the scan's environment"
     )
     assert step.get("if") == "${{ !cancelled() }}", "it runs when the scan failed too"
-    assert steps[: scans[0] + 1] + steps[scans[0] + 2 :] == original
+    assert steps[: scans[0] + 1] + steps[scans[0] + 2 :] == _on_v4_actions(original)
+
+
+def test_the_called_scan_workflow_runs_its_artifact_steps_on_the_pinned_v4_actions():
+    """The scan workflow's own upload and download steps pin the releases whose
+    requests act's artifact server refuses, as the pages' steps do, so the copy act
+    runs gets the same swap as a block; each step keeps its inputs and condition."""
+    rewrite_called = _api("rewrite", "rewrite_called_workflow")
+    text = SCAN_WORKFLOW.read_text(encoding="utf-8")
+    before = {s["uses"].split("@")[0]: s for s in _artifact_steps(text)}
+    assert set(before) == {"actions/upload-artifact", "actions/download-artifact"}
+    assert before["actions/upload-artifact"]["uses"] != UPLOAD_V4, (
+        "the workflow pins a release act cannot serve, which the swap stands in for"
+    )
+    assert before["actions/download-artifact"]["uses"] != DOWNLOAD_V4
+    result = rewrite_called(
+        "run-ash-security-scan.yml", text, where="run-ash-security-scan.yml"
+    )
+    assert result.original == text
+    after = _artifact_steps(result.text)
+    assert [s["uses"] for s in after] == [UPLOAD_V4, DOWNLOAD_V4]
+    assert "# v4.6.2" in result.text and "# v4.3.0" in result.text
+    for step in after:
+        given = before[step["uses"].split("@")[0]]
+        assert step["with"] == given["with"]
+        assert step.get("if") == given.get("if")
+    assert {
+        (a.old.split("@")[0], a.new.split(" #")[0], a.count)
+        for a in _applied(result, "artifact-actions")
+    } == {
+        ("actions/upload-artifact", UPLOAD_V4, 1),
+        ("actions/download-artifact", DOWNLOAD_V4, 1),
+    }
+    # Every other step is as given, and the print follows the scan as before.
+    rest = [
+        s
+        for s in _scan_steps(result.text)
+        if "-artifact@" not in str(s.get("uses", ""))
+    ]
+    print_steps = [
+        s
+        for s in rest
+        if s.get("name") == _api("rewrite", "CALLED_PROVENANCE_STEP_NAME")
+    ]
+    assert len(print_steps) == 1
+    rest.remove(print_steps[0])
+    assert rest == [
+        s for s in _scan_steps(text) if "-artifact@" not in str(s.get("uses", ""))
+    ]
 
 
 def test_only_the_first_uvx_step_of_the_scan_workflow_gets_the_print():
