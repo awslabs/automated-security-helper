@@ -70,7 +70,10 @@ on a finding's path after the fact:
   ``**/**`` and suppressed everything, while bandit had excluded none of it.)
 * checkov ``skip_path``: as checkov's own filter reads it, a regular
   expression found in, or a substring of, the absolute path of the file or of a
-  directory above it (``checkov_skips``).
+  directory above it (``checkov_skips``). The expression is the client's and
+  runs in ASH's own process, so it runs under the scanner's ``scan_timeout``,
+  carried on the entry when it is moved (``evaluated_within``); checkov itself
+  would have been killed at that limit.
 * opengrep and semgrep ``exclude``, ferret-scan ``exclude_patterns``, syft
   ``exclude``: a glob read as those tools read it (gitignore syntax for the
   grep family, doublestar globs for syft): ``*``, ``?`` and ``[...]`` match
@@ -108,6 +111,9 @@ Known limitations
 * The glob matching above is an approximation of each tool's own rules. A
   finding it misses is reported unsuppressed, which can fail a scan the
   client's exclusion would have passed; it is never hidden.
+* A regular expression still running at its bound cannot be interrupted: the
+  thread evaluating it is left behind and holds one core until it finishes or
+  the process exits (``evaluated_within``). The scan it was part of fails.
 
 Rejected alternatives
 ---------------------
@@ -124,11 +130,13 @@ from __future__ import annotations
 import fnmatch
 import functools
 import re
+import threading
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import (
     Any,
+    Callable,
     Dict,
     Iterable,
     List,
@@ -138,13 +146,17 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypeVar,
 )
 
 from pydantic import BaseModel, ConfigDict
 
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.log import ASH_LOGGER
 
 ExclusionKind = Literal["bandit", "checkov", "glob", "trivy-ignore-file"]
+
+T = TypeVar("T")
 
 #: A trivy ignore file larger than this is not read.
 _MAX_IGNORE_FILE_BYTES = 1024 * 1024
@@ -199,6 +211,11 @@ class ClientScannerExclusion(BaseModel):
     reason: str
     #: For a trivy ID from a ``.trivyignore.yaml``: the paths it is limited to.
     paths: Tuple[str, ...] = ()
+    #: The scanner's ``scan_timeout`` when the entry was moved out of its
+    #: options: the bound a regular expression of this entry runs under when
+    #: ASH evaluates it in its own process (``evaluated_within``). None leaves
+    #: it unbounded, as ``scan_timeout: null`` leaves the scanner.
+    scan_timeout: Optional[float] = None
 
     @property
     def key(self) -> str:
@@ -211,11 +228,18 @@ class ClientScannerExclusion(BaseModel):
         return _reduced(scanner_name) == _reduced(self.scanner)
 
     def hides(self, *, relative: str, absolute: str, rule_id: Optional[str]) -> bool:
-        """Whether the scanner would have left out a finding at this location."""
+        """Whether the scanner would have left out a finding at this location.
+
+        Raises:
+            ScannerError: a checkov regular expression of this entry ran past
+                ``scan_timeout`` (``checkov_skips``).
+        """
         if self.kind == "bandit":
             return bandit_would_skip(self.pattern, relative=relative, absolute=absolute)
         if self.kind == "checkov":
-            return checkov_skips(self.pattern, absolute, relative)
+            return checkov_skips(
+                self.pattern, absolute, relative, timeout=self.scan_timeout
+            )
         if self.kind == "glob":
             return glob_excludes(self.pattern, relative)
         if not rule_id or not _same_trivy_id(rule_id, self.pattern):
@@ -290,7 +314,58 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
     )
 
 
-def checkov_skips(pattern: str, absolute: str, relative: str) -> bool:
+def evaluated_within(timeout: Optional[float], source: str, run: Callable[[], T]) -> T:
+    """``run()``, finished within ``timeout`` seconds, or a ScannerError naming ``source``.
+
+    For a regular expression the scanned repository or a delivered config wrote
+    and ASH evaluates in its own process (a detect-secrets baseline's
+    ``should_exclude_file`` patterns, checkov's ``skip_path`` entries): the tool
+    would have run it under the scanner's ``scan_timeout``, so here it gets the
+    same bound. ``run`` is started in a daemon thread and waited for; its result,
+    or the exception it raised, comes back as if it had run inline. With
+    ``timeout`` None (the scanner left unbounded) it runs inline.
+
+    A search still running at the deadline cannot be interrupted: Python's
+    matcher returns to no one until it is done. The thread is left behind,
+    holding one core until it finishes or the process exits, and the
+    ScannerError fails the scan it was part of. That is the known cost of
+    bounding the evaluation in the host process; moving it into a process of
+    its own is a later design.
+    """
+    if timeout is None:
+        return run()
+    outcome: Dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            outcome["value"] = run()
+        except BaseException as error:  # re-raised below, in the caller's thread
+            outcome["error"] = error
+
+    thread = threading.Thread(target=target, name="ash-pattern-evaluation", daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise ScannerError(
+            f"A regular expression from {source} did not finish matching within "
+            f"{timeout} seconds, the scanner's scan_timeout. It is left running, "
+            "and the scan fails rather than wait on it."
+        )
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
+#: The characters that give a checkov skip path regular-expression meaning. An
+#: entry holding none of them is a literal, and ``re.search`` of a literal is
+#: linear in the path, so it is searched inline; only an entry with syntax takes
+#: the bounded thread (``checkov_skips``).
+_REGEX_SYNTAX = re.compile(r"[.*+?^$|()\[\]{}\\]")
+
+
+def checkov_skips(
+    pattern: str, absolute: str, relative: str, timeout: Optional[float] = None
+) -> bool:
     """Whether checkov's ``--skip-path`` ``pattern`` leaves out the file at ``absolute``.
 
     As checkov 3's ``filter_ignored_paths`` decides it while walking the tree:
@@ -298,6 +373,11 @@ def checkov_skips(pattern: str, absolute: str, relative: str) -> bool:
     out when the pattern, compiled as a regular expression with ``.terraform``
     escaped, is found in it, or when the pattern is a substring of it. A pattern
     that is not a valid regular expression is used only as a substring.
+
+    ``timeout`` is the scanner's ``scan_timeout``: a pattern with
+    regular-expression syntax is searched under it (``evaluated_within``), and a
+    search still running at the deadline raises ScannerError naming the option.
+    None, a literal pattern, or one that did not compile is searched inline.
     """
     candidates = [absolute]
     parts = [part for part in relative.replace("\\", "/").split("/") if part]
@@ -305,10 +385,21 @@ def checkov_skips(pattern: str, absolute: str, relative: str) -> bool:
     for end in range(1, len(parts)):
         candidates.append(f"{base}/{'/'.join(parts[:end])}")
     compiled = _checkov_pattern(pattern)
-    return any(
-        (compiled is not None and compiled.search(candidate) is not None)
-        or pattern in candidate
-        for candidate in candidates
+
+    def search() -> bool:
+        return any(
+            (compiled is not None and compiled.search(candidate) is not None)
+            or pattern in candidate
+            for candidate in candidates
+        )
+
+    if compiled is None or timeout is None or _REGEX_SYNTAX.search(pattern) is None:
+        return search()
+    return evaluated_within(
+        timeout,
+        "scanners.checkov.options.skip_path, an entry of a config an MCP client "
+        "delivered",
+        search,
     )
 
 
@@ -318,8 +409,9 @@ def _checkov_pattern(pattern: str) -> Optional[re.Pattern[str]]:
 
     None when it is not a regular expression; it is then used as a substring
     only, as checkov does. Compiled per candidate path before, for every
-    finding. The pattern is the client's and runs in ASH's own process with no
-    time bound, as it would in checkov's; what is bounded here is the compile.
+    finding. The pattern is the client's and runs in ASH's own process; the
+    compile is bounded here, and the search by the scanner's ``scan_timeout``
+    (``checkov_skips``).
     """
     try:
         return re.compile(pattern.replace(".terraform", r"\.terraform"))
@@ -630,6 +722,7 @@ def strip_client_scanner_exclusions(
                         kind=spec.kind,
                         pattern=pattern,
                         reason=reason or "set by a config an MCP client delivered",
+                        scan_timeout=_scan_timeout_of(options),
                     )
                 )
             if not moved and not expired and not unread and not replaced:
@@ -731,6 +824,33 @@ def _set(options: Any, option: str, value: Any) -> None:
         options[_resolve_dict_key(options, option)] = value
     else:
         setattr(options, option, value)
+
+
+def _scan_timeout_of(options: Any) -> Optional[float]:
+    """The section's ``scan_timeout`` as the scanner will run under it.
+
+    The value the section sets; the scanners' default for a plain mapping that
+    leaves it unset, or for a value that is not a positive number (the scanner's
+    own validation refuses one); None for an explicit null, the scanner left
+    unbounded.
+    """
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    default = ScannerOptionsBase.model_fields["scan_timeout"].default
+    if isinstance(options, dict):
+        from automated_security_helper.config.config_sources import _resolve_dict_key
+
+        key = _resolve_dict_key(options, "scan_timeout")
+        if key not in options:
+            return default
+        value = options[key]
+    else:
+        value = getattr(options, "scan_timeout", default)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return default
+    return value
 
 
 def _pattern_of(entry: Any) -> Tuple[Optional[str], Optional[str]]:
