@@ -170,7 +170,11 @@ from automated_security_helper.workspace.policy import (
     policy_for_project,
     resolve_workspace_policy,
 )
-from automated_security_helper.workspace.scanner_pins import PinVerdict, compare_pins
+from automated_security_helper.workspace.scanner_pins import (
+    PinVerdict,
+    compare_pin_set,
+    compare_pins,
+)
 from automated_security_helper.workspace.workspace_file import (
     NOT_UTF8_ON_THE_HOST,
     WorkspaceDefinition,
@@ -664,27 +668,42 @@ def _refuse_folders_that_are_not_utf8(
 
 
 def _refuse_config_files_that_are_not_utf8(
-    workspace_config: Optional[PathLike], default_config: Optional[PathLike]
+    workspace_config: Optional[PathLike],
+    default_config: Optional[PathLike],
+    trusted_config: Optional[PathLike] = None,
 ) -> None:
-    """Refuse a policy file or a default config whose path is not UTF-8, naming each.
+    """Refuse a policy file or an operator config whose path is not UTF-8, naming each.
 
-    The plan holds the policy file's resolved path, and the default config's for
-    every project that declares none, and the plan is UTF-8 only: both MCP
-    workspace tools built a response their client could not be sent. Checked as
-    given, made absolute, and resolved, so a link whose own name is UTF-8 does
-    not get around it. Refused whenever given, whether or not a project ends up
-    using the default config. Run with the folder check, before any project's
-    config is read.
+    The plan holds the policy file's resolved path, and the operator's config's
+    (``trusted_config`` when the MCP server registered one, else the default
+    config) for every project that declares none, and the plan is UTF-8 only:
+    both MCP workspace tools built a response their client could not be sent.
+    Checked as given, made absolute, and resolved, so a link whose own name is
+    UTF-8 does not get around it. Refused whenever given, whether or not a
+    project ends up using the operator's config. Run with the folder check,
+    before any project's config is read.
+
+    A path that holds a NUL byte is refused here too, as a definition error: the
+    string reaches ``Path`` but no file can have that name, and the filesystem
+    layer raises ``ValueError`` for it rather than ``OSError``.
     """
     problems = []
     for described, given in (
         ("the workspace policy file", workspace_config),
         ("the default config, for a project that declares none", default_config),
+        ("the operator's registered config", trusted_config),
     ):
         if given is None or given == "":
             continue
         absolute = Path(os.path.abspath(os.fspath(given)))
-        resolved = absolute.resolve()
+        try:
+            resolved = absolute.resolve()
+        except ValueError as exc:
+            raise WorkspaceDefinitionError(
+                f"The path given for {described} cannot be a file's name "
+                f"({type(exc).__name__} from the filesystem layer): "
+                f"{str(absolute)!r}. Check it for control characters."
+            ) from exc
         for path in dict.fromkeys((absolute, resolved)):
             if not is_utf8_path(path):
                 problems.append(f"{described}, '{path.as_posix()}'")
@@ -697,30 +716,59 @@ def _refuse_config_files_that_are_not_utf8(
         )
 
 
+def _same_directory(first: Path, second: Path) -> bool:
+    """Whether two canonical paths name one directory.
+
+    Equal as text, or one directory by identity (``os.path.samefile``), which is
+    what joins ``api`` and ``API`` on a case-insensitive filesystem and keeps them
+    apart on a case-sensitive one. A path that cannot be examined is judged by
+    its text alone; the existence check names it later.
+    """
+    if first == second:
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def _is_inside(inner: Path, outer: Path) -> bool:
+    """Whether *inner* is below *outer*: by text, or by the identity of one of
+    *inner*'s ancestors, so ``Api/sub`` is inside ``api`` where the two spellings
+    are one directory."""
+    if inner.is_relative_to(outer):
+        return True
+    return any(_same_directory(ancestor, outer) for ancestor in inner.parents)
+
+
 def _validate_no_overlap(
     definition: WorkspaceDefinition, candidates: List[_Candidate]
 ) -> None:
     """Reject entries that are the same directory, or nested one inside another.
 
     Compares canonicalised real paths, which is what catches a symlink alias that
-    containment validation accepts.
+    containment validation accepts, and then the directories themselves by
+    identity (``os.path.samefile``): on a case-insensitive filesystem whose
+    ``realpath`` keeps the case it was given (macOS APFS by default) ``api`` and
+    ``API`` are two texts naming one directory, and a text comparison accepted
+    them as two projects to be scanned twice and written to one output path.
     """
     problems: List[str] = []
     for first, second in combinations(candidates, 2):
-        if first.resolved == second.resolved:
+        if _same_directory(first.resolved, second.resolved):
             problems.append(
                 f"'{first.entry}' and '{second.entry}' resolve to the same "
                 f"directory '{first.resolved.as_posix()}'; findings would be "
                 f"attributed twice and suppressions applied twice"
             )
-        elif second.resolved.is_relative_to(first.resolved):
+        elif _is_inside(second.resolved, first.resolved):
             problems.append(
                 f"'{second.entry}' is inside '{first.entry}' "
                 f"('{second.resolved.as_posix()}' is below "
                 f"'{first.resolved.as_posix()}'); overlapping projects would be "
                 f"scanned twice"
             )
-        elif first.resolved.is_relative_to(second.resolved):
+        elif _is_inside(first.resolved, second.resolved):
             problems.append(
                 f"'{first.entry}' is inside '{second.entry}' "
                 f"('{first.resolved.as_posix()}' is below "
@@ -738,26 +786,64 @@ def _validate_no_overlap(
 def _validate_unique_keys(
     definition: WorkspaceDefinition, candidates: List[_Candidate]
 ) -> None:
-    """Reject two distinct projects that would share a project key."""
+    """Reject two distinct projects that would share a project key.
+
+    Keys that differ only by case are refused as well: a key names the project's
+    output directory, and ``projects/Api-sub`` and ``projects/api-sub`` are one
+    directory on macOS and Windows. A plan that holds on one host and writes two
+    projects' output into one directory on another is refused on both.
+    """
     by_key: Dict[str, List[_Candidate]] = {}
     for candidate in candidates:
-        by_key.setdefault(candidate.key, []).append(candidate)
+        by_key.setdefault(candidate.key.casefold(), []).append(candidate)
 
     problems: List[str] = []
-    for key, group in by_key.items():
+    for group in by_key.values():
         if len(group) < 2:
             continue
         listed = ", ".join(f"'{member.relative.as_posix()}'" for member in group)
-        problems.append(
-            f"{listed} all reduce to the same project key '{key}', so they "
-            f"would share an output path"
-        )
+        keys = sorted({member.key for member in group})
+        if len(keys) == 1:
+            problems.append(
+                f"{listed} all reduce to the same project key '{keys[0]}', so "
+                f"they would share an output path"
+            )
+        else:
+            spelled = ", ".join(f"'{key}'" for key in keys)
+            problems.append(
+                f"{listed} reduce to the project keys {spelled}, which differ "
+                f"only by case and so name one output path on a case-insensitive "
+                f"filesystem"
+            )
 
     if problems:
         raise _refuse(
             f"Workspace '{definition.path.as_posix()}' has colliding project keys:",
             problems,
         )
+
+
+def _unscannable_detail(candidate: _Candidate) -> Optional[str]:
+    """Why *candidate* cannot be scanned, or None when it can.
+
+    ``Path.is_dir()`` on Python 3.10-3.13 re-raises a ``PermissionError`` from an
+    unsearchable parent directory (3.14 reads it as absent), so the stat is
+    guarded: a project that cannot be examined is reported like one that is
+    missing or unreadable, never as a traceback.
+    """
+    where = f"'{candidate.entry}' at '{candidate.resolved.as_posix()}'"
+    try:
+        is_directory = candidate.resolved.is_dir()
+    except OSError as exc:
+        return f"{where} cannot be examined ({exc.strerror or type(exc).__name__})"
+    if not is_directory:
+        return (
+            f"'{candidate.entry}' does not exist as a directory at "
+            f"'{candidate.resolved.as_posix()}'"
+        )
+    if not os.access(candidate.resolved, os.R_OK | os.X_OK):
+        return f"{where} is not readable by this process"
+    return None
 
 
 def _apply_existence_checks(
@@ -773,17 +859,8 @@ def _apply_existence_checks(
     """
     problems: List[str] = []
     for candidate in candidates:
-        if not candidate.resolved.is_dir():
-            detail = (
-                f"'{candidate.entry}' does not exist as a directory at "
-                f"'{candidate.resolved.as_posix()}'"
-            )
-        elif not os.access(candidate.resolved, os.R_OK | os.X_OK):
-            detail = (
-                f"'{candidate.entry}' at '{candidate.resolved.as_posix()}' is "
-                f"not readable by this process"
-            )
-        else:
+        detail = _unscannable_detail(candidate)
+        if detail is None:
             continue
 
         if allow_missing_projects:
@@ -981,22 +1058,26 @@ def _validate_scanner_pins(
 
     problems: List[str] = []
     for scanner, by_pin in sorted(by_scanner.items()):
-        for first_pin, second_pin in combinations(sorted(by_pin), 2):
-            verdict = compare_pins(first_pin, second_pin)
-            if verdict is PinVerdict.COMPATIBLE:
-                continue
-            explanation = (
-                "no version satisfies both"
-                if verdict is PinVerdict.INCOMPATIBLE
-                else "ASH cannot prove any version satisfies both"
-            )
-            problems.append(
-                f"scanner '{scanner}': "
-                f"'{first_pin}' (required by "
-                f"{', '.join(sorted(by_pin[first_pin]))}) and "
-                f"'{second_pin}' (required by "
-                f"{', '.join(sorted(by_pin[second_pin]))}) -- {explanation}"
-            )
+        before = len(problems)
+        _refuse_incompatible_pin_pairs(scanner, by_pin, problems)
+        if len(problems) == before and len(by_pin) > 2:
+            # Every pair can be satisfied; that does not prove one version
+            # satisfies three or more pins together (scanner_pins.compare_pin_set).
+            together = compare_pin_set(sorted(by_pin))
+            if together is not PinVerdict.COMPATIBLE:
+                listed = "; ".join(
+                    f"'{pin}' (required by {', '.join(sorted(by_pin[pin]))})"
+                    for pin in sorted(by_pin)
+                )
+                explanation = (
+                    "no one version satisfies all of them together"
+                    if together is PinVerdict.INCOMPATIBLE
+                    else "ASH cannot prove one version satisfies all of them together"
+                )
+                problems.append(
+                    f"scanner '{scanner}': every pair of its pins can be "
+                    f"satisfied, but {explanation}: {listed}"
+                )
 
     if problems:
         raise _refuse(
@@ -1006,6 +1087,28 @@ def _validate_scanner_pins(
             f"is not supported, so scanning would silently ignore one project's "
             f"constraint. Reconcile the pins, or scan the projects separately:",
             problems,
+        )
+
+
+def _refuse_incompatible_pin_pairs(
+    scanner: str, by_pin: Dict[str, List[str]], problems: List[str]
+) -> None:
+    """Append a problem for each pair of *scanner*'s pins no version satisfies."""
+    for first_pin, second_pin in combinations(sorted(by_pin), 2):
+        verdict = compare_pins(first_pin, second_pin)
+        if verdict is PinVerdict.COMPATIBLE:
+            continue
+        explanation = (
+            "no version satisfies both"
+            if verdict is PinVerdict.INCOMPATIBLE
+            else "ASH cannot prove any version satisfies both"
+        )
+        problems.append(
+            f"scanner '{scanner}': "
+            f"'{first_pin}' (required by "
+            f"{', '.join(sorted(by_pin[first_pin]))}) and "
+            f"'{second_pin}' (required by "
+            f"{', '.join(sorted(by_pin[second_pin]))}) -- {explanation}"
         )
 
 
@@ -1258,7 +1361,10 @@ def _apply_workspace_policy(
         permit_base=permit_base,
         client_supplied=client_supplied,
     )
-    delivered = source is not None and config_is_client_supplied(source)
+    # The same predicate the loader used: under a remote client every policy
+    # file is the client's, so its entries are marked and it is held to the
+    # client-config rules, as the ``client_supplied`` closure already said.
+    delivered = source is not None and client_supplied(source)
     workspace_policy = policy.workspace if policy else None
 
     if workspace_policy is not None and scanner_twins:
@@ -1496,7 +1602,9 @@ def resolve_workspace(
 
     candidates = _validate_containment(definition)
     _refuse_folders_that_are_not_utf8(definition, candidates)
-    _refuse_config_files_that_are_not_utf8(workspace_config, default_config)
+    _refuse_config_files_that_are_not_utf8(
+        workspace_config, default_config, trusted_config
+    )
     _validate_no_overlap(definition, candidates)
     _validate_unique_keys(definition, candidates)
     _apply_existence_checks(definition, candidates, allow_missing_projects)

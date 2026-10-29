@@ -85,7 +85,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 #: A version reduced to its release segment, as a tuple of integers.
 ReleaseTuple = Tuple[int, ...]
@@ -337,6 +337,43 @@ def compare_pins(first: str, second: str) -> PinVerdict:
         return PinVerdict.UNDECIDABLE
 
     combined = first_constraints + second_constraints
+    for candidate in _candidates(combined):
+        if all(_satisfies(candidate, constraint) for constraint in combined):
+            return PinVerdict.COMPATIBLE
+    return PinVerdict.INCOMPATIBLE
+
+
+def compare_pin_set(pins: Sequence[str]) -> PinVerdict:
+    """Decide whether one version satisfies every pin in *pins* at once.
+
+    Pairwise compatibility does not prove it. ``>=1,<3``, ``>=2,<4`` and
+    ``!=2.*`` are compatible two at a time (``1.x``, ``2.x`` and ``3.x`` are the
+    three pairs' witnesses) and no version satisfies all three, so a workspace
+    whose three projects carried them was accepted and then could not be
+    installed for all of them. The witness search is :func:`compare_pins`'s,
+    run over every pin's constraints together.
+
+    Textually identical pins are folded first, as :func:`compare_pins` folds
+    them, so a shared exotic default is COMPATIBLE rather than UNDECIDABLE. One
+    distinct pin, or none, is trivially COMPATIBLE.
+
+    Returns:
+        ``COMPATIBLE``, ``INCOMPATIBLE`` or ``UNDECIDABLE``, read as for
+        :func:`compare_pins`. The result does not depend on the pins' order.
+    """
+    distinct: Dict[Tuple[str, ...], str] = {}
+    for pin in pins:
+        distinct.setdefault(_normalise(pin), pin)
+    if len(distinct) <= 1:
+        return PinVerdict.COMPATIBLE
+
+    combined: List[_Constraint] = []
+    for pin in distinct.values():
+        constraints = _parse_pin(pin)
+        if constraints is None:
+            return PinVerdict.UNDECIDABLE
+        combined.extend(constraints)
+
     for candidate in _candidates(combined):
         if all(_satisfies(candidate, constraint) for constraint in combined):
             return PinVerdict.COMPATIBLE
