@@ -285,7 +285,10 @@ def test_the_worker_refuses_when_a_verifying_scans_variable_is_lost(
     from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
 
     scrub_cloud_credentials(monkeypatch)
-    monkeypatch.delenv(REFUSE_HTTP_ENV, raising=False)
+    # Set, then delete, so the teardown records the key as absent (see
+    # _spawn_pool_run).
+    monkeypatch.setenv(REFUSE_HTTP_ENV, "")
+    monkeypatch.delenv(REFUSE_HTTP_ENV)
     proxy = RecordingProxy()
     route_through(monkeypatch, proxy)
     try:
