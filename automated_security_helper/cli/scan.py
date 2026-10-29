@@ -258,6 +258,20 @@ def _fail_state(message: str) -> NoReturn:
     raise typer.Exit(1)
 
 
+def _resolved(path: str | Path) -> Path:
+    """*path* with its links followed and its ``..`` folded, for a comparison.
+
+    Falls back to the absolute spelling when resolving fails: a symbolic link
+    that leads back to itself made ``Path.resolve`` raise (RuntimeError before
+    Python 3.13, OSError in strict mode), which ended ``ash scan`` in a traceback
+    where the output directory refusal below would have named the link.
+    """
+    try:
+        return Path(path).resolve()
+    except (OSError, RuntimeError):
+        return Path(path).absolute()
+
+
 def _settle_output_dir(
     source_dir: str, output_dir: str | Path | None, use_existing: bool
 ) -> tuple[str | Path, str | None]:
@@ -289,15 +303,15 @@ def _settle_output_dir(
         # the output (and config resolution) happens in the correct location.
         output_dir = Path(source_dir).joinpath(".ash", "ash_output").as_posix()
 
-    source_resolved = Path(source_dir).resolve()
-    if source_resolved == Path(output_dir).resolve():
+    source_resolved = _resolved(source_dir)
+    if source_resolved == _resolved(output_dir):
         output_dir = Path(output_dir).joinpath(".ash", "ash_output")
         print(
             "[bold yellow]output-dir has been adjusted to the following to avoid "
             "collisions and potential impact to source code: "
             f"{escape_markup(Path(output_dir).as_posix())}[/bold yellow]"
         )
-    output_resolved = Path(output_dir).resolve()
+    output_resolved = _resolved(output_dir)
     for working_dir in OUTPUT_WORKING_DIRS:
         cleared = output_resolved.joinpath(working_dir)
         if source_resolved == cleared or source_resolved.is_relative_to(cleared):

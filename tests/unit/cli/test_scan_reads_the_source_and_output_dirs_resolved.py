@@ -81,6 +81,17 @@ class TestTheCollisionGuardReadsResolvedPaths:
         _, kwargs = run.call_args
         assert kwargs["output_dir"] == "out"
 
+    @_NEEDS_SYMLINKS
+    def test_a_link_to_itself_as_the_output_directory_is_refused_not_a_traceback(
+        self, tmp_path
+    ):
+        """Resolving a link that leads back to itself raised (RuntimeError before
+        Python 3.13); the comparison now falls back to the absolute spelling and the
+        output directory refusal names the link."""
+        (tmp_path / "loop").symlink_to(tmp_path / "loop")
+
+        assert _refused(source_dir="src", output_dir="loop") == ASH_EXIT_USAGE_ERROR
+
 
 class TestASourceDirectoryTheScanWouldClearIsRefused:
     @pytest.mark.parametrize("cleared", OUTPUT_WORKING_DIRS)
