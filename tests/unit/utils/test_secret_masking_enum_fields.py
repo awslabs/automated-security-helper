@@ -87,9 +87,9 @@ class TestEnumFieldsOfOverlappingResults:
         mask_secrets_in_results(model)
 
         neighbor = model.sarif.runs[0].results[1]
-        assert neighbor.level is Level.warning
-        assert neighbor.kind is Kind.fail
-        assert model.sarif.runs[0].results[0].level is Level.error
+        assert neighbor.level == Level.warning
+        assert neighbor.kind == Kind.fail
+        assert model.sarif.runs[0].results[0].level == Level.error
 
     def test_a_value_equal_to_a_suppression_kind_leaves_the_kind_alone(self):
         model = _results(
@@ -105,7 +105,7 @@ class TestEnumFieldsOfOverlappingResults:
         mask_secrets_in_results(model)
 
         suppression = model.sarif.runs[0].results[1].suppressions[0]
-        assert suppression.kind is Kind1.inSource
+        assert suppression.kind == Kind1.inSource
 
     def test_the_masked_results_validate_when_loaded_back(self):
         model = _results(
@@ -116,8 +116,8 @@ class TestEnumFieldsOfOverlappingResults:
         mask_secrets_in_results(model)
         loaded = AshAggregatedResults.model_validate_json(model.model_dump_json())
 
-        assert loaded.sarif.runs[0].results[1].level is Level.warning
-        assert loaded.sarif.runs[0].results[1].kind is Kind.fail
+        assert loaded.sarif.runs[0].results[1].level == Level.warning
+        assert loaded.sarif.runs[0].results[1].kind == Kind.fail
 
     def test_the_secret_findings_own_values_are_still_masked(self):
         """Control: only the enum fields are exempt."""
@@ -131,7 +131,7 @@ class TestEnumFieldsOfOverlappingResults:
 
         assert value not in model.sarif.runs[0].results[0].message.root.text
         assert value not in model.sarif.runs[0].results[1].message.root.text
-        assert model.sarif.runs[0].results[1].level is Level.warning
+        assert model.sarif.runs[0].results[1].level == Level.warning
 
 
 class TestFreeTextFieldsNamedLikeAnEnum:
@@ -150,7 +150,7 @@ class TestFreeTextFieldsNamedLikeAnEnum:
         result = model.sarif.runs[0].results[1]
         logical = result.locations[0].logicalLocations[0]
         assert logical.kind == "function " + _mask_secret_value(value)
-        assert result.kind is Kind.fail
+        assert result.kind == Kind.fail
 
 
 class TestEnumFieldsOfAPlainJsonReport:

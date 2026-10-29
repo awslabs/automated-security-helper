@@ -12,9 +12,12 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Optional,
     Set,
     Tuple,
+    get_args,
+    get_origin,
 )
 from urllib.parse import quote, quote_plus, unquote
 
@@ -327,21 +330,52 @@ _METADATA_FIELDS = frozenset(
 
 
 def _is_skipped(name: str) -> bool:
-    """Whether nothing under a model field of this name is masked by value.
-
-    An enum-valued field of a model is left alone by its ``Enum`` type
-    (``_mask_tree``), so a free-text field that shares a name with one
-    (``Address.kind``, ``LogicalLocation.kind``, ``Exception.kind``) is still
-    masked.
-    """
+    """Whether nothing under a model field of this name is masked by value."""
     return name in _SKIPPED_FIELDS or name in _METADATA_FIELDS
+
+
+def _is_enum_annotated(model_type: type, name: str) -> bool:
+    """Whether ``name`` is a field of ``model_type`` declared as an enum or literal.
+
+    The SARIF models are configured with ``use_enum_values``, so such a field
+    holds the plain string of its member at runtime and ``_mask_tree``'s
+    ``Enum`` type check never sees it; its declaration is what tells it from a
+    free-text field of the same name.
+    """
+    field = getattr(model_type, "model_fields", {}).get(name)
+    if field is None:
+        return False
+    pending = [field.annotation]
+    while pending:
+        annotation = pending.pop()
+        origin = get_origin(annotation)
+        if origin is Literal:
+            return True
+        if origin is not None:
+            pending.extend(get_args(annotation))
+            continue
+        if isinstance(annotation, type) and issubclass(annotation, Enum):
+            return True
+    return False
+
+
+def _is_skipped_field(model_type: type, name: str) -> bool:
+    """Whether nothing under this field of a model is masked by value.
+
+    An enum-valued field (``_ENUM_FIELDS``) counts only when the model declares
+    it so, which keeps a free-text field that shares a name with one
+    (``Address.kind``, ``LogicalLocation.kind``, ``Exception.kind``) masked.
+    """
+    return _is_skipped(name) or (
+        name in _ENUM_FIELDS and _is_enum_annotated(model_type, name)
+    )
 
 
 def _is_skipped_key(key: str) -> bool:
     """Whether nothing under a plain-JSON key of this name is masked by value.
 
-    A report reduced to plain data has no enum members, so its enum-valued
-    fields are known by name (``_ENUM_FIELDS``) as well.
+    A report reduced to plain data carries no declarations, so its enum-valued
+    fields are known by name (``_ENUM_FIELDS``) alone.
     """
     return _is_skipped(key) or key in _ENUM_FIELDS
 
@@ -927,15 +961,16 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
             continue
         index.secret_results.append(result)
         private_key = _is_private_key_finding(result)
-        # cfn-nag reports a credential rule at its resource's first line only; the
-        # property holding the value is somewhere after it.
-        resource_only = getattr(
-            result, "ruleId", None
-        ) in described or _describes_a_credential_in_code(
-            _text_of(getattr(result, "message", None))
-        )
         text = _text_of(getattr(result, "message", None)) or ""
         quoted = _quoted_values(text)
+        # cfn-nag reports a credential rule at its resource's first line only; the
+        # property holding the value is somewhere after it. A finding that quotes
+        # its value (bandit's "Possible hardcoded password: '...'") names the
+        # line itself and is not one of these.
+        resource_only = not quoted and (
+            getattr(result, "ruleId", None) in described
+            or _describes_a_credential_in_code(text)
+        )
         exposed: List[str] = []
         for value_start, value_end in quoted:
             exposed.extend(_exposed_values(text[value_start:value_end].strip(), result))
@@ -1334,7 +1369,7 @@ def _mask_source_whole(node: Any, seen: Set[int]) -> Any:
         names = list(type(node).model_fields)
         names.extend((node.__pydantic_extra__ or {}).keys())
         for name in names:
-            if _is_skipped(name):
+            if _is_skipped_field(type(node), name):
                 continue
             value = getattr(node, name, None)
             if value is None:
@@ -1543,7 +1578,7 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
         names = list(fields)
         names.extend((node.__pydantic_extra__ or {}).keys())
         for name in names:
-            if _is_skipped(name):
+            if _is_skipped_field(type(node), name):
                 continue
             value = getattr(node, name, None)
             if value is None:
@@ -1647,7 +1682,7 @@ def _mask_report(
             for name in list(type(result).model_fields) + list(
                 (result.__pydantic_extra__ or {}).keys()
             ):
-                if name == "message" or _is_skipped(name):
+                if name == "message" or _is_skipped_field(type(result), name):
                     continue
                 value = getattr(result, name, None)
                 if value is None:

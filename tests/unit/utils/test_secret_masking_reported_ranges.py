@@ -196,6 +196,11 @@ RESOURCE_LINES = [
     "    Properties:\n",
     "      MasterUserPassword: placeholder-example-value\n",
 ]
+#: What the resource block reads as once masked: a masked line keeps its indent.
+RESOURCE_MASKED = "".join(
+    line[: len(line) - len(line.lstrip())] + MASKED_LINE + "\n"
+    for line in RESOURCE_LINES
+)
 
 
 class TestAResourceLevelCredentialFinding:
@@ -222,7 +227,7 @@ class TestAResourceLevelCredentialFinding:
 
         mask_secrets_in_results(model)
 
-        assert _context(model, 1) == (MASKED_LINE + "\n") * 4
+        assert _context(model, 1) == RESOURCE_MASKED
 
     def test_a_producers_real_end_line_bounds_the_range(self):
         """Control: checkov reports the resource block's own last line."""
@@ -233,4 +238,36 @@ class TestAResourceLevelCredentialFinding:
 
         mask_secrets_in_results(model)
 
-        assert _context(model, 1) == (MASKED_LINE + "\n") * 4 + "Outputs: {}\n"
+        assert _context(model, 1) == RESOURCE_MASKED + "Outputs: {}\n"
+
+    def test_a_finding_that_quotes_its_value_is_bounded_to_its_own_line(self):
+        """bandit's hardcoded-password rule names a credential in code too, but
+        it quotes the value on the line it reports, so the line itself is the
+        whole range; the lines after it are not the finding's."""
+        quoted = _result(
+            "B105",
+            "app.py",
+            3,
+            "Possible hardcoded password: 'placeholder-example-value'",
+            "bandit",
+            end=3,
+        )
+        model = _results(
+            quoted,
+            _neighbor(
+                "app.py",
+                5,
+                3,
+                [
+                    "password = 'placeholder-example-value'\n",
+                    "x = 1\n",
+                    "y = 2\n",
+                    "run()\n",
+                ],
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == MASKED_LINE + "\nx = 1\ny = 2\nrun()\n"
+        assert _region(model, 0).endLine == 3
