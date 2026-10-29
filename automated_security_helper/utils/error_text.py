@@ -59,7 +59,11 @@ def _chain(error: BaseException) -> Iterator[BaseException]:
     context only adds redaction; honoring the flag would leave the quote of a
     ValidationError raised ``from None`` unredacted. Python's own renderers
     already honor the flag, so a ``from None`` refusal prints without its
-    context everywhere."""
+    context everywhere.
+
+    An exception group's members are walked too, each with its own chain:
+    Python's renderers print every member's message, so a ValidationError
+    inside a group is quoted with its inputs unless it is found here."""
     seen: Set[int] = set()
     pending: List[Optional[BaseException]] = [error]
     while pending:
@@ -70,6 +74,23 @@ def _chain(error: BaseException) -> Iterator[BaseException]:
         yield current
         pending.append(current.__context__)
         pending.append(current.__cause__)
+        members = getattr(current, "exceptions", None)
+        if isinstance(members, tuple):
+            pending.extend(
+                member for member in members if isinstance(member, BaseException)
+            )
+
+
+def _own_text(error: BaseException) -> str:
+    """``str(error)``, or a line naming its type when its own ``__str__`` raises.
+
+    The printers here report an error; one whose message cannot be rendered
+    must not replace the error it is reporting with the renderer's own.
+    """
+    try:
+        return str(error)
+    except Exception:  # noqa: BLE001 -- whatever the error's __str__ raised
+        return f"<{type(error).__name__}: its message could not be rendered>"
 
 
 def _with_carried_values(error: BaseException, values: Iterable[str]) -> List[str]:
@@ -186,7 +207,7 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
     )
 
     values = list(environment_strings(values))
-    text = str(error)
+    text = _own_text(error)
     descriptions: List[str] = []
     withheld = False
     for validation_error in validation_errors_in(error):
@@ -194,7 +215,7 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
         if counted:
             described = f"{_counted(validation_error)}: {described}"
         if validation_error is error:
-            return _ESCAPE_CODES.sub("", described)
+            return _without_escape_codes(described)
         text, changed = _without_refused_inputs(text, validation_error, described)
         withheld = withheld or changed
         descriptions.append(described)
@@ -210,8 +231,8 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
     # are not terminals: a code in an exception's message, such as a file name a
     # repository chose, must not reach them. The sinks that print it to a
     # terminal show what remains (utils/terminal_text.py).
-    return _ESCAPE_CODES.sub(
-        "", _redacted_keeping_codes(text, values) if values else text
+    return _without_escape_codes(
+        _redacted_keeping_codes(text, values) if values else text
     )
 
 
@@ -308,8 +329,8 @@ def traceback_text(
     text = _files_as_given(error, text)
     # Redacted and stripped as in _described: the traceback is kept in results
     # and reports, so no complete code survives it.
-    return _ESCAPE_CODES.sub(
-        "", _redacted_keeping_codes(text, values) if values else text
+    return _without_escape_codes(
+        _redacted_keeping_codes(text, values) if values else text
     )
 
 
@@ -534,11 +555,11 @@ def _redacted_keeping_codes(
 
     if min_length is None:
         first = redact_values(text, values)
-        stripped = _ESCAPE_CODES.sub("", first)
+        stripped = _without_escape_codes(first)
         again = redact_values(stripped, values)
     else:
         first = redact_values(text, values, min_length=min_length)
-        stripped = _ESCAPE_CODES.sub("", first)
+        stripped = _without_escape_codes(first)
         again = redact_values(stripped, values, min_length=min_length)
     return first if again == stripped else again
 
@@ -560,8 +581,8 @@ def redact_then_split(text: str, values: Iterable[str]) -> List[str]:
     """
     values = list(environment_strings(values))
     if not values:
-        return _ESCAPE_CODES.sub("", text).splitlines()
-    return _ESCAPE_CODES.sub("", _redacted_keeping_codes(text, values)).splitlines()
+        return _without_escape_codes(text).splitlines()
+    return _without_escape_codes(_redacted_keeping_codes(text, values)).splitlines()
 
 
 #: Every complete CSI sequence, color included: the shown layers strip these
@@ -602,6 +623,22 @@ _ESCAPE_CODES = re.compile(rf"(?:{_CSI_CODES.pattern}|{_OSC_CODES.pattern})")
 ESCAPE_CODES = _ESCAPE_CODES
 
 
+def _without_escape_codes(text: str) -> str:
+    """*text* with every complete escape sequence removed, until none is left.
+
+    One pass is not enough: removing an inner sequence can join the bytes on
+    either side of it into a sequence that was not there before ("\\x1b[" then
+    "\\x1b[2K" then "m" is "\\x1b[m" once the inner one goes), and that one
+    would stay in the returned text. Each pass removes at least one character,
+    so the loop ends.
+    """
+    while True:
+        stripped = _ESCAPE_CODES.sub("", text)
+        if stripped == text:
+            return text
+        text = stripped
+
+
 def shown_tool_stderr(text: str, values: Iterable[str]) -> str:
     """A tool's stderr as the reports carry it: the caller's environment-read
     values hidden as written, then escape codes removed from the result.
@@ -623,7 +660,7 @@ def shown_tool_stderr(text: str, values: Iterable[str]) -> str:
     through shown_uv_output instead, which adds those spellings and the
     plugin-input origin filter.
     """
-    return _ESCAPE_CODES.sub("", text_without_values(text, values))
+    return _without_escape_codes(text_without_values(text, values))
 
 
 def pattern_error_text(
@@ -690,8 +727,13 @@ def log_unexpected_error(
             logged = f"{context}: {text}"
         else:
             # The error itself, as before, unless an OSError in it names a file,
-            # which its own text quotes by repr.
-            logged = error if text == str(error) else text
+            # which its own text quotes by repr, or its own __str__ raises,
+            # which would fail the record's formatting in the handler.
+            try:
+                own: Optional[str] = str(error)
+            except Exception:  # noqa: BLE001 -- whatever the error's __str__ raised
+                own = None
+            logged = error if own is not None and text == own else text
         try:
             getattr(error, "__notes__", None)
         except Exception:
