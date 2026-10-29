@@ -219,6 +219,21 @@ def test_errors_are_reset_for_each_scan_call(ash_temp_path):
     assert scanner.errors == []
 
 
+def test_an_already_missing_dependency_sends_no_version_probe(ash_temp_path):
+    """At the base the deferred version probe ran before the MISSING gate."""
+    repo = ash_temp_path / "repo"
+    repo.mkdir()
+    scanner = _scanner(repo)
+    scanner.dependency_unavailable_reason = "cfn-lint was recorded missing earlier"
+    with (
+        patch.object(CfnLintScanner, "resolve_deferred_tool_version") as probe,
+        patch.object(CfnLintScanner, "_validate_uv_tool_availability") as uv_check,
+    ):
+        assert scanner.validate_plugin_dependencies() is False
+    probe.assert_not_called()
+    uv_check.assert_not_called()
+
+
 def test_the_last_dependency_fallback_runs_the_binary_it_found(ash_temp_path):
     repo = ash_temp_path / "repo"
     repo.mkdir()

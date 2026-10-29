@@ -526,6 +526,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
     def validate_plugin_dependencies(self) -> bool:
         """The bandit/checkov resolution: uv, then a verified binary on PATH, then install."""
+        # Gate first: a scanner already recorded MISSING has nothing to probe, and
+        # the deferred version probe starts a uv run.
+        if self.dependency_unavailable_reason:
+            return False
         self.resolve_deferred_tool_version()
         if self.dependency_unavailable_reason:
             return False
