@@ -3125,16 +3125,24 @@ _LOCK_WAIT_SECONDS = 1.0
 
 
 def _forget_exited_groups() -> None:
-    """Drop the children that have exited. Called with _RUNNING_GROUPS_LOCK held.
+    """Drop the children whose process group is empty. Called with
+    _RUNNING_GROUPS_LOCK held.
 
-    poll() reaps them; once reaped a pid may be reused, so a child must not stay
-    recorded past that point -- in the SIGTERM handler's group mirror too, or
-    the die-now kill would aim at whatever holds the group id next.
+    poll() reaps the child; once reaped a pid may be reused, so a child must not
+    stay recorded past that point -- in the SIGTERM handler's group mirror too,
+    or the die-now kill would aim at whatever holds the group id next. A reaped
+    leader whose group still has members is kept: a sandbox wrapper exits while
+    the tool it started runs on, and the group id is the only handle a later
+    kill has on those processes. The kernel keeps a group id in use while any
+    member holds it, so the entry goes when the group does.
     """
     for pid, process in list(_RUNNING_GROUPS.items()):
-        if process.poll() is not None:
-            del _RUNNING_GROUPS[pid]
-            discard_tool_group(pid)
+        if process.poll() is None:
+            continue
+        if os.name != "nt" and _signal_group(pid, 0):
+            continue
+        del _RUNNING_GROUPS[pid]
+        discard_tool_group(pid)
 
 
 def _register_group(process: subprocess.Popen) -> None:
