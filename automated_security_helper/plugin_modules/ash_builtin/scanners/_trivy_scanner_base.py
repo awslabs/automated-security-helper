@@ -614,7 +614,30 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         name = self.config.name if self.config is not None else "trivy"
         key = f"scanners.{name}.options.{option}"
-        chosen = operator_path(self.context.config, key, value, self.context.source_dir)
+        # A configuration the embedding caller built is the operator's own write,
+        # as for syft, bandit, checkov and grype (operator_wrote_value): the
+        # repository cannot have written it. One read from the context is judged
+        # by set_by_operator alone, as before.
+        from automated_security_helper.config.operator_only_options import (
+            operator_wrote_value,
+        )
+
+        caller_built = not self._config_from_context
+        callers_own_write = caller_built and operator_wrote_value(
+            self.context.config,
+            "scanner",
+            name,
+            ("options", option),
+            value,
+            config_from_context=False,
+        )
+        chosen = operator_path(
+            self.context.config,
+            key,
+            value,
+            self.context.source_dir,
+            operator_wrote=callers_own_write,
+        )
         if chosen.path is not None:
             return chosen.path
         reason = chosen.refusal

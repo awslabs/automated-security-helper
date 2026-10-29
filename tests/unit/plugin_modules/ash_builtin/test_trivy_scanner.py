@@ -174,11 +174,14 @@ def _scanner(
         trusted=AshConfig(),
         config_overrides=list(overrides),
     )
+    # The config stands for the scan's own section, as a real scan builds it, so
+    # a value the tree set is judged by the section and not as the caller's write.
     return TrivyScanner(
         context=context,
         config=TrivyScannerConfig(
             enabled=True, options=TrivyScannerConfigOptions(**options)
         ),
+        config_from_context=True,
     )
 
 
@@ -1194,6 +1197,7 @@ def _repo_scanner(tmp_path: Path, **options) -> TrivyRepoScanner:
     return TrivyRepoScanner(
         context=_context(tmp_path),
         config=TrivyRepoScannerConfig(options=TrivyRepoScannerConfigOptions(**options)),
+        config_from_context=True,
     )
 
 

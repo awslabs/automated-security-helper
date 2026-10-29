@@ -499,6 +499,29 @@ def test_an_operator_environment_value_naming_the_work_product_reaches_trivy(
     assert passed == layout["product"].as_posix(), passed
 
 
+def test_an_operator_option_naming_the_work_product_reaches_trivy(
+    tmp_path, _no_trivy_env
+):
+    """Control: a scanner configuration the embedding caller built is the
+    operator's own write, as for syft, bandit, checkov and grype, so an option
+    naming the same path keeps today's answer even when the scanned tree holds a
+    config file of its own. The repository's entry for the same option is
+    refused (test_a_repository_config_cannot_name_a_work_product_as_trivys_input)."""
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScannerConfig,
+    )
+
+    layout = _layout(tmp_path)
+    _repo_config(layout["source"], "")
+    passed = _trivy_passed_path(
+        layout,
+        scanner_config=TrivyRepoScannerConfig(
+            options={"secret_config_file": layout["product"].as_posix()}
+        ),
+    )
+    assert passed == layout["product"].as_posix(), passed
+
+
 def _bandit_scanner(layout: dict, scanner_config=None):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScanner,
