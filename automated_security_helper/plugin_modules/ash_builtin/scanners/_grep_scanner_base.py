@@ -370,7 +370,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
         if not configured or not isinstance(configured, str):
             return None
-        if "://" in configured:
+        if "://" in configured or _is_registry_name(configured):
             return None
         candidate = Path(os.path.abspath(configured))
         if candidate.is_file() or candidate.is_dir():
@@ -848,6 +848,19 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                     level=logging.INFO,
                 )
         return super()._post_process_sarif(sarif_report, final_args, target)
+
+
+#: The ``--config`` spellings that name the tools' rule registry rather than a path:
+#: ``auto``, and the ``p/<ruleset>`` and ``r/<rule-id>`` registry entries. A file or
+#: directory in the working directory that happens to carry such a name is not read
+#: as the operator's local rules; a local path is spelled so it cannot be confused
+#: with a registry entry (``./p/ci``, an absolute path, a ``.yaml`` or ``.yml`` file).
+_REGISTRY_PREFIXES = ("p/", "r/")
+
+
+def _is_registry_name(configured: str) -> bool:
+    """Whether ``configured`` is a registry entry name (``auto``, ``p/...``, ``r/...``)."""
+    return configured == "auto" or configured.startswith(_REGISTRY_PREFIXES)
 
 
 #: The flag the scanned-paths JSON is written with (semgrep and opengrep alike).
