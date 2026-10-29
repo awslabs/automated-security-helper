@@ -1510,33 +1510,54 @@ def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
 ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
 
 
+def _read_git_allowed_entry(
+    text: str,
+) -> Optional[tuple[Optional[str], str, Optional[int]]]:
+    """One allowlist entry as ``(scheme, host, port)``, or None when unreadable."""
+
+    scheme: Optional[str] = None
+    rest = text.strip().lower()
+    if "://" in rest:
+        scheme, rest = rest.split("://", 1)
+        if scheme not in _CLONE_SCHEMES:
+            return None
+    host, colon, port_text = rest.partition(":")
+    port: Optional[int] = None
+    if colon:
+        if not (port_text.isascii() and port_text.isdigit()):
+            return None
+        port = int(port_text)
+        if not 1 <= port <= 65535:
+            return None
+    host = host.rstrip(".")
+    if not _HOST_NAME.fullmatch(host):
+        return None
+    return scheme, host, port
+
+
 def _git_allowed_entries() -> list[tuple[Optional[str], str, Optional[int]]]:
     """The operator's entries as ``(scheme, host, port)``, None where unnamed.
 
     An entry this cannot read (another scheme, a port that is not a number from 1
-    to 65535, a host that is not a plain name) allows nothing.
+    to 65535, a host that is not a plain name) allows nothing, and is logged once
+    per read of the list by its position, so an operator whose entry is dropped
+    learns which one. The entry's text is not logged.
     """
 
     raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
     entries: list[tuple[Optional[str], str, Optional[int]]] = []
-    for text in raw.replace(",", " ").split():
-        scheme: Optional[str] = None
-        rest = text.strip().lower()
-        if "://" in rest:
-            scheme, rest = rest.split("://", 1)
-            if scheme not in _CLONE_SCHEMES:
-                continue
-        host, colon, port_text = rest.partition(":")
-        port: Optional[int] = None
-        if colon:
-            if not (port_text.isascii() and port_text.isdigit()):
-                continue
-            port = int(port_text)
-            if not 1 <= port <= 65535:
-                continue
-        host = host.rstrip(".")
-        if _HOST_NAME.fullmatch(host):
-            entries.append((scheme, host, port))
+    for position, text in enumerate(raw.replace(",", " ").split(), start=1):
+        entry = _read_git_allowed_entry(text)
+        if entry is None:
+            _logger.warning(
+                "%s: entry %d cannot be read and allows nothing; an entry is "
+                "[scheme://]host[:port] with scheme https or ssh, a plain host "
+                "name and a port from 1 to 65535",
+                ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
+                position,
+            )
+            continue
+        entries.append(entry)
     return entries
 
 

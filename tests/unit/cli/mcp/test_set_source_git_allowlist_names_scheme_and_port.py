@@ -11,6 +11,7 @@ on either scheme. ``host:port`` allows that port, and ``https://host`` or
 from __future__ import annotations
 
 import itertools
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -18,6 +19,7 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
@@ -210,3 +212,44 @@ def test_an_unset_list_allows_no_remote(git) -> None:
 
     assert result.get("error_type") == "clone_host_not_permitted", result
     assert not git
+
+
+def test_an_entry_that_cannot_be_read_is_logged_once_by_its_position(
+    monkeypatch, caplog
+) -> None:
+    """The dropped entry is named by position, not by its text, so the operator
+    learns which one was skipped without the log quoting the list."""
+    monkeypatch.setenv(
+        "ASH_MCP_GIT_ALLOWED_HOSTS", "git.example.com, git.example.com:abc"
+    )
+
+    with caplog.at_level(logging.WARNING, logger=ASH_LOGGER.name):
+        entries = sd._git_allowed_entries()
+
+    assert entries == [(None, "git.example.com", None)]
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ]
+    assert len(warnings) == 1, warnings
+    assert "ASH_MCP_GIT_ALLOWED_HOSTS" in warnings[0]
+    assert "entry 2" in warnings[0]
+    assert "abc" not in warnings[0]
+
+
+def test_a_list_that_reads_whole_logs_nothing(monkeypatch, caplog) -> None:
+    """Control for the warning: every entry readable, no record."""
+    monkeypatch.setenv(
+        "ASH_MCP_GIT_ALLOWED_HOSTS", "git.example.com, ssh://git.example.com:2222"
+    )
+
+    with caplog.at_level(logging.WARNING, logger=ASH_LOGGER.name):
+        entries = sd._git_allowed_entries()
+
+    assert len(entries) == 2
+    assert [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ] == []
