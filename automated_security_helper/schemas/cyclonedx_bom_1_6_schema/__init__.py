@@ -30,6 +30,13 @@ from . import spdx
 # validating.
 OpenCreIdentifier = Annotated[str, StringConstraints(pattern=r"^CRE:[0-9]+-[0-9]+$")]
 
+# Not from the codegen: every model below that declares an aliased field
+# (`bom-ref`, `mime-type`) carries serialize_by_alias=True. pydantic resolves a
+# dump's by_alias per model, from each model's own config, when the caller
+# passes none, so the flag on CycloneDXReport alone left a nested `bom_ref` under
+# its Python name in a default dump, and the dumped document then failed
+# re-validation under extra="forbid".
+
 
 class BomFormat(str, Enum):
     CycloneDX = "CycloneDX"
@@ -123,6 +130,7 @@ class Lifecycles1(BaseModel):
 class OrganizationalContact(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -446,6 +454,7 @@ class Copyright(BaseModel):
 class Occurrence(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1030,6 +1039,7 @@ class EnergySource(str, Enum):
 class PostalAddress(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1302,6 +1312,7 @@ class ComponentIdentityEvidence(BaseModel):
 class Level(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1772,6 +1783,7 @@ class Contents(BaseModel):
 class OrganizationalEntity(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1997,6 +2009,7 @@ class Licensing(BaseModel):
 class License1(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2193,6 +2206,7 @@ class Licensing1(BaseModel):
 class License2(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2565,6 +2579,7 @@ class GraphicsCollection(BaseModel):
 class EnergyProvider(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2662,6 +2677,7 @@ class ResourceReferenceChoice(RootModel):
 class Requirement(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2910,6 +2926,7 @@ class CryptoProperties(BaseModel):
 class Assessor(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3029,6 +3046,7 @@ class EnergyConsumption(BaseModel):
 class Workspace(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: RefType = Field(
@@ -3546,6 +3564,7 @@ class ServiceData(BaseModel):
 class ComponentData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3602,6 +3621,7 @@ class EnvironmentalConsiderations(BaseModel):
 class Trigger(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: RefType = Field(
@@ -3697,6 +3717,7 @@ class Attestation(BaseModel):
 class Claim(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3750,6 +3771,7 @@ class Claim(BaseModel):
 class EvidenceItem(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3870,6 +3892,7 @@ class Affirmation(BaseModel):
 class Service(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3960,6 +3983,7 @@ class Service(BaseModel):
 class Compositions(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4076,6 +4100,7 @@ class Considerations(BaseModel):
 class ModelCard(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4109,6 +4134,7 @@ class ModelCard(BaseModel):
 class Task(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: RefType = Field(
@@ -4190,6 +4216,7 @@ class Task(BaseModel):
 class Standard(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4251,6 +4278,7 @@ class Definitions(BaseModel):
 class Workflow(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: RefType = Field(
@@ -4511,6 +4539,7 @@ class Pedigree(BaseModel):
 class Component(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     type: Type = Field(
@@ -4685,6 +4714,7 @@ class Component(BaseModel):
 class Vulnerability(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4874,6 +4904,7 @@ class Annotator3(BaseModel):
 class Annotations(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4910,6 +4941,7 @@ class Annotations(BaseModel):
 class Formula(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
     )
 
     bom_ref: Optional[RefType] = Field(
