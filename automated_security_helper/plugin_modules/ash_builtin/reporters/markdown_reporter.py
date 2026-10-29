@@ -28,6 +28,7 @@ from automated_security_helper.utils.converter_refusals import (
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
+    coverage_shortfall_text,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
     markdown_workspace_section,
@@ -104,8 +105,8 @@ def coverage_markdown(summary: Dict[str, Any]) -> str:
         )
         for scanner, attempted, failed in summary["shortfalls"]:
             parts.append(
-                f"- **{_text(shown_on_one_line(scanner))}**: evaluated {attempted - failed} of {attempted} "
-                f"target(s); {failed} could not be evaluated"
+                f"- **{_text(shown_on_one_line(scanner))}**: "
+                f"{coverage_shortfall_text(attempted, failed)}"
             )
         parts.append("")
     if summary["unavailable"]:

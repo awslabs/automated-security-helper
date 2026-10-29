@@ -15,7 +15,30 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.utils.severity_ladder import severity_fails_threshold
 from collections import Counter
+
+
+def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
+    """The sentence after a scanner's name in an "Incomplete coverage" row.
+
+    One renderer for the HTML, Markdown and text reports, because the three
+    each computed ``attempted - failed`` inline, and ``coverage_shortfalls``
+    yields ``(name, None, None)`` for a scanner whose stored target counters
+    could not be read. Each report then raised TypeError on that row and the
+    whole document was lost, for the one scanner whose coverage most needs
+    stating. The console renderer already printed "unknown" for it; this is
+    the same reading for the files.
+    """
+    if attempted is None or failed is None:
+        return (
+            "coverage unknown; its recorded target counters could not be read, "
+            "so how many targets it evaluated is not known"
+        )
+    return (
+        f"evaluated {attempted - failed} of {attempted} target(s); "
+        f"{failed} could not be evaluated"
+    )
 
 
 class ReportContentEmitter:

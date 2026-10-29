@@ -23,6 +23,7 @@ from automated_security_helper.utils.terminal_text import (
 from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
+    coverage_shortfall_text,
 )
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.core.unified_metrics import (
@@ -112,7 +113,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 text_parts.append(
                     str(
                         shown_on_one_line(
-                            f"- {scanner}: evaluated {attempted - failed} of {attempted} target(s); {failed} could not be evaluated"
+                            f"- {scanner}: {coverage_shortfall_text(attempted, failed)}"
                         )
                     )
                 )

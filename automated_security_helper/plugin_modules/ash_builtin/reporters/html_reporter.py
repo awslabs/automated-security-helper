@@ -23,6 +23,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
+    coverage_shortfall_text,
 )
 from automated_security_helper.core.unified_metrics import format_duration
 from automated_security_helper.utils.severity_ladder import SEVERITIES, result_severity
@@ -206,8 +207,8 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         notices = []
         if summary["shortfalls"]:
             rows = "".join(
-                f"<li><strong>{html.escape(str(shown_on_one_line(scanner)))}</strong>: evaluated {attempted - failed} "
-                f"of {attempted} target(s); {failed} could not be evaluated.</li>"
+                f"<li><strong>{html.escape(str(shown_on_one_line(scanner)))}</strong>: "
+                f"{html.escape(coverage_shortfall_text(attempted, failed))}.</li>"
                 for scanner, attempted, failed in summary["shortfalls"]
             )
             notices.append(
