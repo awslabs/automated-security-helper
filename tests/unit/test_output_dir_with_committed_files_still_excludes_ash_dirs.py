@@ -44,11 +44,13 @@ pytestmark = pytest.mark.usefixtures("no_checkout_above_tmp_path", "no_tool_prob
 @pytest.mark.unit
 def test_ashs_own_directories_include_where_previous_results_are_held():
     """An MCP scan sets the previous results aside in the output directory, whole
-    or part way: those are ASH's files as much as the working directories."""
+    or part way, and a restore stages them on the way back: those are ASH's files
+    as much as the working directories."""
     assert set(ash_own_dir_names()) == {
         *WORKING_DIR_NAMES,
         ".ash_previous_results",
         ".ash_previous_results.partial",
+        ".ash_previous_results.restoring",
     }
 
 
