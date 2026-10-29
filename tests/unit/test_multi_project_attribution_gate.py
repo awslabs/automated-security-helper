@@ -1242,9 +1242,12 @@ class TestWorkflowWiring:
         assert "multi-project-attribution" in workflow["jobs"], sorted(workflow["jobs"])
         return workflow["jobs"]["multi-project-attribution"]
 
-    def test_the_job_runs_on_ubuntu_and_windows(self, job):
+    def test_the_job_runs_on_linux_and_windows(self, job):
+        # The Linux leg is the arm64 Ubuntu image: bandit and checkov are Python tools,
+        # and the ubuntu-latest hosted pool queued this job for 2598 s on one measured
+        # run while the arm64 label queued jobs in seconds (the note on the matrix).
         assert set(job["strategy"]["matrix"]["os"]) == {
-            "ubuntu-latest",
+            "ubuntu-24.04-arm",
             "windows-latest",
         }
 

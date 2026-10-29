@@ -1385,7 +1385,12 @@ jobs:
       # run both external-target scan jobs at once, one per OS
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # The Linux leg runs on the arm64 label for the reason given on `lint`: nothing
+        # here depends on the architecture (bandit and checkov are Python tools that uv
+        # installs from wheels, and the tool download cache is keyed on runner.arch),
+        # and on run 40939758029 this job's ubuntu-latest leg queued 2598 s while the
+        # arm64 label queued 10 to 31 s.
+        os: [ubuntu-24.04-arm, windows-latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1729,7 +1734,10 @@ jobs:
       # run both attribution jobs at once, one per OS
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # arm64 for the Linux leg, as on external-target-scan: the same two Python
+        # tools, the same arch-keyed tool download cache, and a 2598 s ubuntu-latest
+        # queue on run 40939758029 against 10 to 31 s on the arm64 label.
+        os: [ubuntu-24.04-arm, windows-latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1814,7 +1822,9 @@ jobs:
   deploy-aws-helpers:
     name: deploy-tree AWS helpers (moto server)
     needs: [ensure-cache]
-    runs-on: ubuntu-latest
+    # arm64 for the reason given on `lint`: moto and the suite are pure Python, and on
+    # run 40939758029 this job queued 2598 s on ubuntu-latest for an 18 s run.
+    runs-on: ubuntu-24.04-arm
     # The suite's own slowest test uploads 1050 objects to force a second
     # ListObjectsV2 page; the whole run measures ~30s at 4 workers. 15 leaves room
     # for a slow runner without letting a hang sit for half an hour.
@@ -2120,7 +2130,9 @@ jobs:
   build-docs:
     name: build-docs
     needs: [ensure-cache]
-    runs-on: ubuntu-latest
+    # arm64 for the reason given on `lint`: mkdocs and the versions check are pure
+    # Python, and on run 40939758029 this job queued 2601 s on ubuntu-latest for a 32 s run.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     permissions:
       contents: read
