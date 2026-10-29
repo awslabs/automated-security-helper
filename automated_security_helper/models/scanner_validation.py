@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import List, Optional, Dict, Any, Set, TYPE_CHECKING
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.enums import ScannerStatus
 
@@ -145,25 +145,75 @@ def _is_class_name(name: str) -> bool:
     return name.endswith(_SCANNER_CLASS_SUFFIX)
 
 
+def _scanner_instance_name(scanner_instance: Any) -> str:
+    """The name a scanner instance is tracked under.
+
+    Its ``config.name``, else the lowercased class name: the fallback ScanPhase
+    uses for the display name it records results and exclusions under, so a
+    scanner whose config carries no name is tracked under the name its rows use
+    instead of being refused as an empty name.
+    """
+    config = getattr(scanner_instance, "config", None)
+    name = getattr(config, "name", None) if config is not None else None
+    if isinstance(name, str) and name:
+        return name
+    return scanner_instance.__class__.__name__.lower()
+
+
 class ScannerStateTracker:
     """Owns the scanner_states dict and provides state CRUD with name validation.
 
-    Scanner names are validated at insert time: class names (ending in 'Scanner')
-    and empty/None values are rejected, so no downstream guards are needed.
+    Scanner names are validated at insert time: empty/None values are rejected,
+    and so is a class name (ending in 'Scanner') passed in place of a scanner's
+    configured name. A configured name that happens to end in 'Scanner' is
+    accepted, with a warning, when the caller passes the scanner's class and the
+    name is not that class's own name; it is then tracked as given, and the
+    summaries read it as a scanner, not as a legacy class-name entry.
     """
 
     def __init__(self) -> None:
         self.scanner_states: Dict[str, ScannerValidationState] = {}
         self.logger = ASH_LOGGER
+        #: Configured names ending in the class-name suffix that were accepted as a
+        #: registered scanner's own name (see _validate_name).
+        self._class_shaped_names: Set[str] = set()
 
-    def _validate_name(self, scanner_name: str) -> None:
+    def _validate_name(self, scanner_name: str, plugin_class: Any = None) -> None:
         if not scanner_name:
             raise ValueError(f"Scanner name must be non-empty, got: {scanner_name!r}")
-        if _is_class_name(scanner_name):
+        if not _is_class_name(scanner_name) or scanner_name in self._class_shaped_names:
+            return
+        class_name = (
+            getattr(plugin_class, "__name__", None)
+            if plugin_class is not None
+            else None
+        )
+        if not isinstance(class_name, str) or scanner_name == class_name:
             raise ValueError(
                 f"Scanner name looks like a class name (ends with 'Scanner'): {scanner_name!r}. "
                 "Use scanner.config.name instead of the class name."
             )
+        # The caller holds the class and the name is not the class's: it is the
+        # scanner's configured name, which an operator may spell any way. A
+        # refusal here aborted the whole scan phase for a valid configuration.
+        self.logger.warning(
+            f"Scanner name {scanner_name!r} ends with '{_SCANNER_CLASS_SUFFIX}' like a "
+            f"class name; it is the configured name of {class_name}, so it is tracked "
+            "as given."
+        )
+        self._class_shaped_names.add(scanner_name)
+
+    def is_class_name_entry(self, scanner_name: str) -> bool:
+        """Whether *scanner_name* is a legacy class-name entry, not a scanner's name.
+
+        True for a name ending in 'Scanner' that was never accepted as a
+        registered scanner's configured name; such entries pre-date insert-time
+        validation and are left out of the summaries.
+        """
+        return (
+            _is_class_name(scanner_name)
+            and scanner_name not in self._class_shaped_names
+        )
 
     def get_scanner_state(self, scanner_name: str) -> Optional[ScannerValidationState]:
         """Return the state for scanner_name, or None if not tracked."""
@@ -183,7 +233,7 @@ class ScannerStateTracker:
         Returns:
             Updated ScannerValidationState
         """
-        self._validate_name(scanner_name)
+        self._validate_name(scanner_name, kwargs.get("plugin_class"))
 
         is_new_scanner = scanner_name not in self.scanner_states
         if is_new_scanner:
@@ -339,7 +389,7 @@ class ScannerStateTracker:
 
         for scanner_name in self.scanner_states:
             # Skip any legacy class-name entries that pre-date name validation
-            if _is_class_name(scanner_name):
+            if self.is_class_name_entry(scanner_name):
                 continue
             status_info = self.determine_scanner_status_from_execution_data(
                 scanner_name
@@ -424,7 +474,7 @@ class ValidationCheckpointer:
 
         scanner_names = []
         for scanner_instance in scanner_instances:
-            scanner_name = scanner_instance.config.name
+            scanner_name = _scanner_instance_name(scanner_instance)
             scanner_names.append(scanner_name)
             self._tracker.update_scanner_state(
                 scanner_name,
@@ -972,7 +1022,7 @@ class ValidationCheckpointer:
             existing_scanners = [
                 name
                 for name in aggregated_results.scanner_results.keys()
-                if name and not _is_class_name(name)
+                if name and not self._tracker.is_class_name_entry(name)
             ]
             executed_scanners.extend(existing_scanners)
             self.logger.debug(
@@ -980,7 +1030,7 @@ class ValidationCheckpointer:
             )
 
         for scanner_name, scanner_state in self._tracker.scanner_states.items():
-            if _is_class_name(scanner_name):
+            if self._tracker.is_class_name_entry(scanner_name):
                 continue
             if scanner_name in executed_scanners:
                 continue
