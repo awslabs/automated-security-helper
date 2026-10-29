@@ -1257,7 +1257,10 @@ class ComponentIdentityEvidence(BaseModel):
         description="The identity field of the component which the evidence describes.",
         title="Field",
     )
-    confidence: Optional[int] = Field(
+    # Not from the codegen: a number, as the schema types it. Typed int, a
+    # fractional confidence (the documented 0 - 1 range, 0.85 say) refused the
+    # whole SBOM.
+    confidence: Optional[float] = Field(
         None,
         description="The overall confidence of the evidence from 0 - 1, where 1 is 100% confidence.",
         title="Confidence",
@@ -1683,7 +1686,9 @@ class Conformance(BaseModel):
         extra="forbid",
     )
 
-    score: Optional[int] = Field(
+    # Not from the codegen: a number, as the schema types it (see
+    # ComponentIdentityEvidence.confidence).
+    score: Optional[float] = Field(
         None,
         description="The conformance of the claim between and inclusive of 0 and 1, where 1 is 100% conformance.",
         title="Score",
