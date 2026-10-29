@@ -60,22 +60,83 @@ from defusedxml import ElementTree as ET
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SUITE = "tests/unit/deploy"
 
-# A floor, not the exact count. 52 tests exist as this is written; 45 catches a
-# suite that stopped being collected without going red on every addition.
+# A floor on the moto-server modules TOGETHER, not the exact count and not the
+# whole directory. tests/unit/deploy also holds about thirty modules that never
+# start a moto server; counting those let the three moto modules shrink to one
+# test each while the directory total kept the floor satisfied. Only tests from
+# REQUIRED_MODULES count towards this number.
 MIN_TESTS = 45
 
 # Losing any one of these files should be red even if the others grew. Each covers
 # a different AWS surface, so one disappearing is not made up for by the rest.
-REQUIRED_MODULES = (
-    "test_deploy_s3_sync_moto_server",
-    "test_deploy_buildspec_ssm_moto_server",
-    "test_deploy_mcp_entrypoint_secrets_moto_server",
-)
+# The value is each module's own floor: a module that still runs but shrank to a
+# handful of tests is caught here, where "at least one test ran" was not.
+REQUIRED_MODULES = {
+    "test_deploy_s3_sync_moto_server": 20,
+    "test_deploy_buildspec_ssm_moto_server": 8,
+    "test_deploy_mcp_entrypoint_secrets_moto_server": 6,
+}
 
 # The two copies of the S3 helper. Each behavior test runs against both, so a
 # parametrization that stops being generated means one deployment tree is no
-# longer covered while the count still looks healthy.
+# longer covered while the count still looks healthy. Only the S3 module carries
+# this parametrization: matching the id anywhere in the suite let an unrelated
+# module's "terraform" satisfy it after the S3 helper's copy was lost.
+PARAMETRIZED_MODULE = "test_deploy_s3_sync_moto_server"
 REQUIRED_PARAMS = ("cdk-template", "terraform")
+
+
+def evaluate_report(totals: dict[str, int], names: list[str]) -> list[str]:
+    """The problems a parsed JUnit report shows, as strings; empty means clean.
+
+    ``names`` are ``classname::name`` per test case, so a module's tests are the
+    names that contain its module name.
+    """
+    problems: list[str] = []
+
+    if totals["failures"] or totals["errors"]:
+        problems.append(
+            f"{totals['failures']} failure(s) and {totals['errors']} error(s); "
+            f"see the pytest output above"
+        )
+
+    by_module = {
+        module: [name for name in names if module in name]
+        for module in REQUIRED_MODULES
+    }
+    moto_total = sum(len(module_names) for module_names in by_module.values())
+    if moto_total < MIN_TESTS:
+        problems.append(
+            f"only {moto_total} test(s) ran from the moto-server modules "
+            f"({sorted(REQUIRED_MODULES)}), below the floor of {MIN_TESTS}. The "
+            f"directory ran {totals['tests']} in all, but the other modules start "
+            f"no moto server and do not count. Either the suite stopped being "
+            f"collected, or it shrank enough to need a deliberate decision about "
+            f"this floor."
+        )
+
+    for module, floor in REQUIRED_MODULES.items():
+        ran = len(by_module[module])
+        if ran == 0:
+            problems.append(
+                f"no test ran from {module}. The file was renamed, moved or stopped "
+                f"being collected."
+            )
+        elif ran < floor:
+            problems.append(
+                f"only {ran} test(s) ran from {module}, below its floor of {floor}. "
+                f"The module shrank while the others kept the total healthy."
+            )
+
+    s3_names = by_module[PARAMETRIZED_MODULE]
+    for param in REQUIRED_PARAMS:
+        if not any(f"[{param}" in name or f"-{param}" in name for name in s3_names):
+            problems.append(
+                f"no test in {PARAMETRIZED_MODULE} ran against the {param!r} copy of "
+                f"the S3 helper, so that deployment tree is no longer covered even "
+                f"though the total count looks healthy."
+            )
+    return problems
 
 
 def run_suite(report: pathlib.Path, workers: str) -> int:
@@ -143,20 +204,7 @@ def main() -> int:
     cases = [c for suite in suites for c in suite.iter("testcase")]
     names = [f"{c.get('classname', '')}::{c.get('name', '')}" for c in cases]
 
-    problems: list[str] = []
-
-    if totals["failures"] or totals["errors"]:
-        problems.append(
-            f"{totals['failures']} failure(s) and {totals['errors']} error(s); "
-            f"see the pytest output above"
-        )
-
-    if totals["tests"] < MIN_TESTS:
-        problems.append(
-            f"only {totals['tests']} test(s) ran, below the floor of {MIN_TESTS}. "
-            f"Either the suite stopped being collected, or it shrank enough to "
-            f"need a deliberate decision about this floor."
-        )
+    problems = evaluate_report(totals, names)
 
     if totals["skipped"]:
         skipped = [
@@ -168,21 +216,6 @@ def main() -> int:
             f"{totals['skipped']} test(s) skipped. This gate runs on Linux, where "
             f"nothing in this suite is expected to skip: {skipped}"
         )
-
-    for module in REQUIRED_MODULES:
-        if not any(module in name for name in names):
-            problems.append(
-                f"no test ran from {module}. The file was renamed, moved or stopped "
-                f"being collected."
-            )
-
-    for param in REQUIRED_PARAMS:
-        if not any(f"[{param}" in name or f"-{param}" in name for name in names):
-            problems.append(
-                f"no test ran against the {param!r} copy of the S3 helper, so that "
-                f"deployment tree is no longer covered even though the total count "
-                f"looks healthy."
-            )
 
     print(
         f"\nmoto server-mode suite: {totals['tests']} tests, "
