@@ -19,6 +19,8 @@ from automated_security_helper.models.flat_vulnerability import (
     extract_workspace_project,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    workspace_policy_gates,
+    workspace_project_scanner_thresholds,
     workspace_project_thresholds,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
@@ -61,6 +63,33 @@ SKIPPED_PROJECT_SKIP_TYPE = "project-skipped"
 #: no scanner ran: attributing the case to one would put a project nothing
 #: examined inside a tool's results.
 SKIPPED_PROJECT_CLASSNAME = "ash.workspace"
+
+
+#: The ``properties.origin`` value the workspace executor writes on a finding from
+#: a scanner only the workspace policy added (``workspace.execution.POLICY_ORIGIN``,
+#: spelled here rather than imported so this reporter does not import the executor).
+_POLICY_ORIGIN = "workspace-policy"
+
+#: The ``type`` of the skip a non-gating policy-origin finding is reported with.
+POLICY_NOT_GATING_SKIP_TYPE = "policy-not-gating"
+
+
+def _is_policy_origin(props: object, extra: dict) -> bool:
+    """Whether a finding came from a scanner only the workspace policy added.
+
+    Read from ``properties.origin`` first (the field the schema documents) and
+    from the ``workspace-policy`` tag the executor writes beside it, as a
+    reporter that groups by tag would. Both land in the property bag's extras,
+    so the extras dict the caller already read is checked as well as the
+    attribute.
+    """
+    origin = extra.get("origin")
+    if origin is None and props is not None:
+        origin = getattr(props, "origin", None)
+    if origin == _POLICY_ORIGIN:
+        return True
+    tags = getattr(props, "tags", None) if props is not None else None
+    return isinstance(tags, (list, tuple)) and _POLICY_ORIGIN in tags
 
 
 def _normalized_threshold(value: object) -> str | None:
@@ -280,6 +309,13 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         configured_threshold = _configured_severity_threshold(model)
         scanner_thresholds: dict = {}
         project_thresholds = workspace_project_thresholds(model)
+        # The per-scanner gates each project's verdict recorded, and whether a
+        # policy scanner's findings decided it. Both read off the workspace
+        # block: the merged file carries no ash_config to read a scanner's own
+        # threshold from, and nothing else says a project's policy findings were
+        # excluded from its verdict.
+        project_scanner_thresholds = workspace_project_scanner_thresholds(model)
+        policy_gates = workspace_policy_gates(model)
 
         # Process SARIF report @ model.sarif
         if model.sarif is not None:
@@ -366,6 +402,30 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             type_="not-evaluated",
                         )
                     ]
+                elif (
+                    project
+                    and _is_policy_origin(props, extra)
+                    and not policy_gates.get(project, False)
+                ):
+                    # A finding from a scanner only the workspace policy added, in
+                    # a project whose policy_scanners_gate is off. The project's
+                    # verdict reported it and excluded it from the actionable count
+                    # (execution.py's gating_results), and the exit code followed
+                    # that verdict; an <error> here would say the finding failed
+                    # the project when the scan said it did not. Decided ahead of
+                    # the threshold, because it is not a question of severity: the
+                    # operator added the scanner for visibility, not as a gate.
+                    # Skipped rather than a bare passing case, so the finding is
+                    # still visible in the report with the reason it is not red.
+                    test_case.result = [
+                        Skipped(
+                            message=(
+                                "Finding is from a workspace-policy scanner that "
+                                "does not gate this project"
+                            ),
+                            type_=POLICY_NOT_GATING_SKIP_TYPE,
+                        )
+                    ]
                 else:
                     # Determine if finding is actionable based on severity threshold
                     is_actionable = True
@@ -419,18 +479,29 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         # scan-level default; it is simply no longer the only
                         # source.
                         #
-                        # After it, the most specific recorded gate: the project's
+                        # After it, the most specific recorded gate: the threshold
+                        # the project's verdict graded this finding's scanner by
+                        # (the scanner's own options.severity_threshold, as the
+                        # project's outcome recorded it), then the project's gate
                         # (a merged workspace file carries no ash_config, and each
                         # project's outcome was judged against its own recorded
                         # gate threshold, so grading every project against ASH's
                         # default here contradicted the per-project verdicts and
-                        # the exit code); then the scanner's own
-                        # options.severity_threshold, which the exit code grades
-                        # each result by and this reporter used to ignore; then
-                        # the scan's global threshold.
+                        # the exit code); then, for a single scan, the scanner's
+                        # own options.severity_threshold, which the exit code
+                        # grades each result by and this reporter used to ignore;
+                        # then the scan's global threshold. The recorded scanner
+                        # gate comes before the project gate because that is the
+                        # order the verdict resolved them in: a scanner the
+                        # project's config tightened or relaxed was judged by its
+                        # own setting, and reading the project gate first graded
+                        # its findings differently from the verdict.
                         threshold = (
                             _normalized_threshold(
                                 getattr(props, "severity_threshold", None)
+                            )
+                            or project_scanner_thresholds.get(project, {}).get(
+                                actual_scanner
                             )
                             or project_thresholds.get(project)
                             or _scanner_threshold(

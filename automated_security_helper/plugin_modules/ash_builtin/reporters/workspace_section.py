@@ -117,6 +117,61 @@ def workspace_project_thresholds(model: "AshAggregatedResults") -> Dict[str, str
     return thresholds
 
 
+def workspace_project_scanner_thresholds(
+    model: "AshAggregatedResults",
+) -> Dict[str, Dict[str, str]]:
+    """``{project key: {scanner name: threshold}}`` for every recorded scanner gate.
+
+    Read off ``WorkspaceProjectResult.scanner_thresholds``, where each project's
+    outcome recorded the threshold its verdict graded a scanner by when that is
+    the scanner's own ``options.severity_threshold`` (the workspace ceiling folded
+    in). A scanner with no entry was graded by the project's gate, which
+    :func:`workspace_project_thresholds` gives. The merged results file carries
+    no ``ash_config``, so a reporter grading a finding attributed to a project
+    had no other source for the scanner's gate and judged every project's
+    scanners at the project gate alone, which is not how the verdict judged a
+    scanner that tightened or relaxed its own.
+
+    Every value is the ladder's own spelling (``normalize_threshold``); a
+    recorded value the ladder does not recognise is left out, as in
+    :func:`workspace_project_thresholds`, so the finding falls back to the
+    project's gate. Empty for a single-directory scan and for a workspace file
+    written before the field existed.
+    """
+    if not is_workspace_scan(model):
+        return {}
+    by_project: Dict[str, Dict[str, str]] = {}
+    for project in model.workspace.projects:
+        recorded = getattr(project, "scanner_thresholds", None) or {}
+        gates: Dict[str, str] = {}
+        for scanner, value in recorded.items():
+            normalized = normalize_threshold(value)
+            if normalized is not None:
+                gates[str(scanner)] = normalized
+        if gates:
+            by_project[project.project] = gates
+    return by_project
+
+
+def workspace_policy_gates(model: "AshAggregatedResults") -> Dict[str, bool]:
+    """``{project key: policy_scanners_gate}`` for every project in the workspace.
+
+    Whether a finding from a scanner only the workspace policy added decided
+    that project's verdict. A reader grading such a finding (its
+    ``properties.origin`` is ``workspace-policy``) reads this before the
+    threshold: with the gate off the verdict excluded the finding from
+    ``actionable_finding_count``, so grading it as a failure contradicts the
+    project's own outcome and the exit code. Empty for a single-directory scan;
+    False for a project in a workspace file written before the field existed.
+    """
+    if not is_workspace_scan(model):
+        return {}
+    return {
+        project.project: bool(getattr(project, "policy_scanners_gate", False))
+        for project in model.workspace.projects
+    }
+
+
 def workspace_project_threshold(
     model: "AshAggregatedResults", project_key: Optional[str]
 ) -> Optional[str]:
@@ -210,6 +265,28 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # fact the counts in the row cannot convey.
             unconverted = "conversion incomplete: " + ", ".join(converters)
             detail = f"{detail}; {unconverted}" if detail else unconverted
+        refusals = getattr(project, "converter_refusals", None) or []
+        if refusals:
+            # The inputs behind the converter verdict, and the refusals that leave
+            # the scan complete (a member that is itself an archive, a link): the
+            # unified file holds no per-project converter rows, so this row is
+            # where a reader learns which input went unconverted in which project.
+            unread = "inputs not converted: " + _refusal_list(refusals)
+            detail = f"{detail}; {unread}" if detail else unread
+        policy_findings = getattr(project, "policy_origin_finding_count", 0) or 0
+        if policy_findings:
+            # Whether those findings decided the verdict: with the gate off they are
+            # reported and excluded from the Actionable column, which the counts
+            # alone cannot say.
+            gating = (
+                "gate this project"
+                if getattr(project, "policy_scanners_gate", False)
+                else "do not gate this project"
+            )
+            policy = (
+                f"{policy_findings} finding(s) from workspace-policy scanners {gating}"
+            )
+            detail = f"{detail}; {policy}" if detail else policy
         stale = [
             str(record.get("name"))
             for record in (project.stale_content_databases or [])
@@ -234,6 +311,41 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             }
         )
     return rows
+
+
+#: How many refused converter inputs a project's row names before counting the rest.
+REFUSALS_SHOWN_IN_ROW = 5
+
+
+def _refusal_text(record: Any) -> str:
+    """One refused converter input as ``converter: subject (reason)``.
+
+    The subject is the one ``utils/converter_refusals.py`` prints: the archive
+    member when one was refused, the count of further members a record stands
+    for, else the input's path. Marked when the completeness gate counts it.
+    """
+    path = getattr(record, "path", "")
+    unlisted = getattr(record, "unlisted_members", None)
+    member = getattr(record, "member", None)
+    if unlisted is not None:
+        subject = f"{unlisted} more members of '{path}'"
+    elif member:
+        subject = f"member '{member}' of '{path}'"
+    else:
+        subject = f"'{path}'"
+    text = f"{getattr(record, 'converter', '')}: {subject} ({getattr(record, 'reason', '')})"
+    if getattr(record, "scan_incomplete", False):
+        text += " [scan incomplete]"
+    return text
+
+
+def _refusal_list(records: Sequence[Any]) -> str:
+    """The first :data:`REFUSALS_SHOWN_IN_ROW` refusals, then a count of the rest."""
+    shown = [_refusal_text(record) for record in records[:REFUSALS_SHOWN_IN_ROW]]
+    rest = len(records) - len(shown)
+    if rest > 0:
+        shown.append(f"and {rest} more")
+    return ", ".join(shown)
 
 
 def _shown(value: Any) -> str:
