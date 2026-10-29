@@ -1210,8 +1210,19 @@ def parse_error_kind(error: BaseException) -> str:
 
 @dataclass(frozen=True)
 class ConfigSource:
+    """A config source discovery found: its path, its kind, and, under a
+    caller's ``permit``, the identity of the file the path led to when the permit
+    checked it (``identity_to_hold``), None when no permit checked it.
+
+    The identity is what the caller's read is held to (``resolve_config`` hands
+    it to the load as ``expect``, which ``read_config_bytes`` compares with the
+    opened file): a source that passed the check and was swapped for a link out
+    of the grant before the open is refused at the open, instead of read.
+    """
+
     path: Path
     kind: str
+    identity: Optional[FileIdentity] = None
 
     @property
     def label(self) -> str:
@@ -1525,12 +1536,24 @@ def _existing_candidates(
 
 def _check_candidates(
     candidates: List[ConfigSource], permit: Optional[PermitBase]
-) -> None:
+) -> List[ConfigSource]:
+    """``candidates``, each checked against ``permit`` and, when one checked,
+    carrying the identity of the file its path led to at the check.
+
+    The identity (``identity_to_hold``, taken right after the permit judged the
+    resolved path) binds the caller's read to the file that was judged: the
+    permit alone left the milliseconds between its check and the open, in which
+    the name could be made to lead to a file outside the grant. Without a
+    permit nothing is checked and no identity is taken, as before.
+    """
     if permit is None:
-        return
+        return list(candidates)
+    checked: List[ConfigSource] = []
     for candidate in candidates:
         if not _permitted(candidate.path, permit):
             raise _not_permitted(candidate.path)
+        checked.append(replace(candidate, identity=identity_to_hold(candidate.path)))
+    return checked
 
 
 def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -> None:
@@ -1560,8 +1583,7 @@ def discover_config_source(
     source as found. Without it nothing is checked.
     """
     search_dir = Path(search_dir)
-    candidates = _existing_candidates(search_dir, permit)
-    _check_candidates(candidates, permit)
+    candidates = _check_candidates(_existing_candidates(search_dir, permit), permit)
     found: List[ConfigSource] = []
     notes: List[str] = []
     for candidate in candidates:

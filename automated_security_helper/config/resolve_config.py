@@ -4639,9 +4639,13 @@ def _resolve_config(
             ]
             if discovery.selected is not None:
                 config_path = discovery.selected.path
-                # No caller checked a discovered file, so no identity is
-                # expected of it.
-                expect = None
+                # The identity the permit check took of the discovered file
+                # (ConfigSource.identity), so the load is held to the file the
+                # permit judged: a name made to lead elsewhere between the
+                # check and the open is refused at the open. With no permit
+                # no check was made, the identity is None, and no identity is
+                # expected of the file, as before.
+                expect = discovery.selected.identity
                 confinement_dir = source_dir
                 discovered_label = discovery.selected.label
                 ASH_LOGGER.verbose(
