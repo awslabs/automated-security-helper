@@ -479,12 +479,20 @@ def redact_credentials(payload: Any) -> Any:
     return {**payload, "errors": errors}
 
 
-def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
+def build_sarif(
+    payload: Any, exit_code: int, uri_base: Optional[Path] = None
+) -> Dict[str, Any]:
     """Convert actionlint's ``ACTIONLINT_FORMAT`` output into a SARIF 2.1.0 dict.
 
     An error whose ``line`` is not a positive integer (actionlint writes 0 for an
     error with no position) is kept as a result with no region, so one such
     workflow never drops the findings of every other workflow in the run.
+
+    ``uri_base``, when given, is joined in front of every ``filepath``: actionlint
+    writes paths relative to its working directory, and the scan reads a relative
+    URI as relative to the source directory. For the converted target the working
+    directory is the work directory, so its findings carry absolute URIs under
+    it, which is how ASH tells a converted file's finding from a source file's.
 
     Raises:
         ScannerError: if the payload is not the shape the template produces, or if
@@ -538,9 +546,10 @@ def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
         severity = severity_for(kind, message)
         kinds_seen.setdefault(kind, KIND_SEVERITY.get(kind, UNKNOWN_KIND_SEVERITY))
 
-        physical_location: Dict[str, Any] = {
-            "artifactLocation": {"uri": filepath.replace("\\", "/")}
-        }
+        uri = filepath.replace("\\", "/")
+        if uri_base is not None:
+            uri = (uri_base / uri).as_posix()
+        physical_location: Dict[str, Any] = {"artifactLocation": {"uri": uri}}
         # actionlint reports line 0 for an error that has no position: an empty
         # file, invalid UTF-8, a YAML error raised before the first line. That is
         # still a finding on the file, so it is kept without a region rather than
@@ -1257,7 +1266,17 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # later failure of this scanner does not persist the password.
             self.output[output_before:] = [json.dumps(redacted)]
 
-            sarif_dict = build_sarif(payload, self.exit_code)
+            # actionlint ran in the target, so its paths are relative to it. A
+            # source finding stays relative (the scan reads it from the source
+            # directory); a converted finding is made absolute under the work
+            # directory, which is how the scan recognizes a converted file.
+            sarif_dict = build_sarif(
+                payload,
+                self.exit_code,
+                uri_base=Path(target).absolute()
+                if target_type == "converted"
+                else None,
+            )
             self.tool_version = sarif_dict["runs"][0]["tool"]["driver"]["version"]
             if self.tool_version.lstrip("v") != PINNED_VERSION.lstrip("v"):
                 self._plugin_log(

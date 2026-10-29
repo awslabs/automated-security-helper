@@ -1317,6 +1317,41 @@ def test_a_relative_source_or_work_directory_names_existing_workflows(
     assert work_dir.is_dir()
 
 
+@pytest.mark.unit
+def test_a_converted_finding_carries_an_absolute_uri_under_the_work_dir(
+    repo, monkeypatch, on_path
+):
+    """actionlint runs in the target, so its paths are relative to it. The scan
+    reads a relative URI as relative to the source directory, so a converted
+    workflow's finding was reported at a source path that does not exist and
+    was never marked as converted; a converted file's URI is absolute."""
+    output = repo.parent / "ash_output"
+    work_dir = _converted_target(
+        output, repo / ".github" / "workflows" / "vulnerable.yml"
+    )
+    scanner = _scanner(repo, output=output)
+    _through_the_base_class(
+        monkeypatch,
+        [
+            {
+                "returncode": 1,
+                "stdout": (FIXTURES / "actionlint-1.7.12-default.json").read_text(),
+            }
+        ],
+    )
+
+    converted = scanner.scan(target=work_dir, target_type="converted")
+
+    uris = {
+        result.locations[0].physicalLocation.root.artifactLocation.uri
+        for result in converted.runs[0].results
+    }
+    assert uris == {
+        (work_dir.absolute() / ".github/workflows/vulnerable.yml").as_posix()
+    }
+    assert all(Path(uri).is_absolute() for uri in uris)
+
+
 @pytest.mark.parametrize("converted_has_workflows", [True, False])
 @pytest.mark.unit
 def test_each_target_starts_from_a_clean_exit_code(
