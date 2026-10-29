@@ -562,6 +562,26 @@ def _remove_die_now_cleanups() -> None:
             pass
 
 
+def _is_live_child(pid: int) -> bool:
+    """Whether *pid* is a child of this process that has not exited.
+
+    ``waitpid(pid, WNOHANG)`` answers in one syscall: ``(0, 0)`` for a running
+    child, the pid for one that exited (it is reaped here, which the die-now
+    path can afford: the process is about to die), and ECHILD for a pid that
+    is not this process's child, which is what a reaped child's pid becomes
+    once another process holds it. Anything else, including a platform with
+    no ``WNOHANG``, reads as not a live child, so no signal is sent on a guess.
+    """
+    flag = getattr(os, "WNOHANG", None)
+    if flag is None:
+        return False
+    try:
+        reaped, _status = os.waitpid(pid, flag)
+    except OSError:
+        return False
+    return reaped == 0
+
+
 def _kill_recorded_groups() -> None:
     """SIGKILL every recorded tool group, and interrupt every recorded pid.
 
@@ -592,15 +612,58 @@ def _kill_recorded_groups() -> None:
             # setsid leads no group of its own, so the group kill is ESRCH
             # while the child lives; one os.kill at the pid reaches it, as
             # the subprocess layer's _kill_group falls back for that child.
-            try:
-                os.kill(pgid, signal.SIGKILL)
-            except OSError:
-                pass
+            # Only while that pid is still a live child of this process: a
+            # group id left recorded after its child was reaped (the discard
+            # never ran) is a pid another process can hold by now, and the
+            # fallback kill landed on it. One waitpid(WNOHANG) tells the two
+            # apart in one syscall, as the signal frame allows.
+            if _is_live_child(pgid):
+                try:
+                    os.kill(pgid, signal.SIGKILL)
+                except OSError:
+                    pass
     for pid in _TOOL_PIDS:
         try:
             os.kill(pid, signal.SIGINT)
         except OSError:
             pass
+
+
+#: How many stops are waiting out a tool's grace period right now (SIGTERM sent,
+#: SIGKILL to follow when the grace ends). Written under its lock by
+#: :func:`stop_grace_in_progress` on normal thread frames; read without the lock
+#: by the SIGINT handler, one integer load, as the signal frame allows.
+_GRACE_WAITS = 0
+_GRACE_WAITS_WRITE_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def stop_grace_in_progress() -> Iterator[None]:
+    """While inside, a first Ctrl-C latches the cancel but does not interrupt.
+
+    For the subprocess layer's grace wait (``utils/subprocess_utils
+    ._wait_out_grace``): a stop a TIMEOUT began (SIGTERM sent, the grace being
+    waited out, SIGKILL to follow) is not a signal, so a first Ctrl-C during it
+    found neither latch set and chained the default handler, which raised
+    KeyboardInterrupt in the main thread's grace wait and aborted the SIGKILL
+    escalation the second-signal branch protects: a SIGTERM-ignoring tool then
+    outlived the exit. Inside this context the first Ctrl-C still latches every
+    registered scan's cancel (the scan unwinds through the same checks a cancel
+    uses once the stop returns), and the stop completes its escalation.
+    """
+    global _GRACE_WAITS
+    with _GRACE_WAITS_WRITE_LOCK:
+        _GRACE_WAITS += 1
+    try:
+        yield
+    finally:
+        with _GRACE_WAITS_WRITE_LOCK:
+            _GRACE_WAITS -= 1
+
+
+def grace_wait_in_progress() -> bool:
+    """Whether a stop is waiting out a tool's grace period on some thread."""
+    return _GRACE_WAITS > 0
 
 
 def shutdown_requested() -> bool:
@@ -728,6 +791,12 @@ def _handle_sigint(signum: int, frame: object) -> None:
             # The same plain store as the SIGTERM handler's, for the same
             # deadlock reason; it covers cancel and prompt both.
             event._signalled = True
+    if _GRACE_WAITS > 0:
+        # A stop is waiting out a tool's grace (stop_grace_in_progress): the
+        # latch above is what this Ctrl-C asks for, and chaining the default
+        # handler would raise KeyboardInterrupt inside that wait and abort the
+        # SIGKILL escalation. The stop completes; the scan unwinds after it.
+        return
     previous = _PREVIOUS_SIGINT
     if callable(previous):
         previous(signum, frame)
