@@ -37,6 +37,11 @@ Three parts, each doing what the others cannot:
 directories): every other variable, ``PYTHONPATH`` included, passes through
 unchanged, which is what lets a launch scan follow the caller's import path.
 
+The prelude's reading of a command line (which words of an argv can name a tool) is
+plain functions with no state, kept apart from the hook in ``_READERS`` so that
+``readers`` can run them in the test's own process: the tests that pin the walk call
+them on an argv and start nothing.
+
 The stand-ins are ``#!/bin/sh`` scripts, which Windows does not find on PATH, so the
 cells that use this class are skipped off POSIX (``POSIX_ONLY``).
 """
@@ -65,11 +70,13 @@ POSIX_ONLY = pytest.mark.skipif(
 #: What the exit status of a child is when a stand-in is not what PATH finds.
 SHADOWED_EXIT = 97
 
-#: Python source run first in the child. ``@LOG@``, ``@NAMES@`` and ``@STAND_INS@``
-#: are replaced with the quoted log path, the probed names and the stand-ins'
-#: directory. Every name starts with an underscore so it cannot collide with the
-#: code that follows in the same namespace.
-_PRELUDE = '''\
+#: Python source run first in the child, in three parts: the names the hook needs
+#: (``@LOG@``, ``@NAMES@`` and ``@STAND_INS@`` are replaced with the quoted log path,
+#: the probed names and the stand-ins' directory), the readers of a command line
+#: (``_READERS``, run in-process too by ``readers``) and the hook itself. Every name
+#: starts with an underscore so it cannot collide with the code that follows in the
+#: same namespace.
+_PRELUDE_HEAD = """\
 import os as _os
 import shutil as _shutil
 import sys as _sys
@@ -78,26 +85,33 @@ _LOG = @LOG@
 _NAMES = @NAMES@
 _STAND_INS = @STAND_INS@
 _EVENTS = ("subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn", "os.system")
+"""
+
+#: The shell tables the readers use: the test conftest's set (tests/conftest.py,
+#: ``_SHELLS``, ``_SHELL_OPTIONS_WITH_A_VALUE`` and ``_SHELL_LONG_FLAGS``).
+_TABLES = """\
 _SHELLS = ("sh", "bash", "dash", "zsh", "ksh", "mksh")
-#: Shell options whose value is the next argument, not where the options end
-#: (the test conftest's set).
+#: Shell options whose value is the next argument, not where the options end.
 _SHELL_OPTIONS_WITH_A_VALUE = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
-#: The one start a subprocess.Popen echo may stand for, as the decoded
-#: (program, argv). Armed only by a Popen that reports its start twice (the
-#: posix_spawn path: no cwd), rewritten on EVERY audited start, and spent by
-#: whatever start comes next: a Popen that cannot echo (cwd set) arms nothing,
-#: so a direct posix_spawn of the same tool right after it is its own record.
-_LAST = [None]
+#: Long shell options that take no value. Any other might take one, and then where
+#: the options end is unknown.
+_SHELL_LONG_FLAGS = (
+    "--norc",
+    "--noprofile",
+    "--login",
+    "--posix",
+    "--noediting",
+    "--restricted",
+    "--verbose",
+    "--debugger",
+    "--protected",
+)
+"""
 
-
-def _note(line):
-    fd = _os.open(_LOG, _os.O_WRONLY | _os.O_APPEND | _os.O_CREAT, 0o644)
-    try:
-        _os.write(fd, (line + "\\n").encode("utf-8", "replace"))
-    finally:
-        _os.close(fd)
-
-
+#: The readers of a command line: which words of an argv a probed name can hide in.
+#: Plain functions of ``_os``, ``_NAMES`` and the tables, so ``readers`` can run them
+#: in the test's own process on an argv that is never started.
+_READERS = '''\
 def _named(command):
     """The probed name *command* is, or None; a path counts by its last part."""
     try:
@@ -153,26 +167,37 @@ def _module_run_by(argv):
 
 
 def _shell_command_line(arguments):
-    """The command-line operand after a shell's -c, read left to right past
-    the options, or None: value-taking options skip their value, a long flag
-    is passed over, a short cluster holding c takes the next operand, and an
-    operand before any -c is a script, which ends the walk."""
+    """The command string of ``sh [OPTION]... -c STRING``, or None.
+
+    Read as the shell reads it (the test conftest's _shell_command_string): every
+    option is read first, c is noted wherever a short cluster holds it (``-c``,
+    ``-lc``, ``-sc``), a value-taking option skips its value, ``--`` and a lone
+    ``-`` end the options, and STRING is the first operand after them, so
+    ``bash -c -e STRING`` and ``sh -c -o pipefail STRING`` both run STRING. A long
+    option this reader does not know might take a value, and then where STRING is
+    would be a guess: None. An operand before any -c is a script, not a command
+    string: None.
+    """
+    given_c = False
     index = 1
     while index < len(arguments):
         argument = arguments[index]
-        index += 1
-        if argument in _SHELL_OPTIONS_WITH_A_VALUE:
+        if argument in ("--", "-"):
             index += 1
-            continue
-        if argument.startswith("--"):
-            continue
-        if argument in ("-", "-s"):
-            return None
-        if (argument.startswith("-") or argument.startswith("+")) and len(argument) > 1:
-            if "c" in argument[1:]:
-                return arguments[index] if index < len(arguments) else None
-            continue
-        return None
+            break
+        if argument in _SHELL_OPTIONS_WITH_A_VALUE:
+            index += 2
+        elif argument.startswith("--"):
+            if argument not in _SHELL_LONG_FLAGS:
+                return None
+            index += 1
+        elif len(argument) > 1 and argument[0] in "-+":
+            given_c = given_c or "c" in argument[1:]
+            index += 1
+        else:
+            break
+    if given_c and index < len(arguments):
+        return arguments[index]
     return None
 
 
@@ -218,6 +243,25 @@ def _decoded(program, argv):
         return (_os.fsdecode(program) if program is not None else None, seen)
     except Exception:
         return None
+'''
+
+#: The hook: it logs a start whose words name a probed tool, then the check that
+#: PATH finds each stand-in. ``@SHADOWED_EXIT@`` is replaced with the exit status.
+_HOOK = """\
+#: The one start a subprocess.Popen echo may stand for, as the decoded
+#: (program, argv). Armed only by a Popen that reports its start twice (the
+#: posix_spawn path: no cwd), rewritten on EVERY audited start, and spent by
+#: whatever start comes next: a Popen that cannot echo (cwd set) arms nothing,
+#: so a direct posix_spawn of the same tool right after it is its own record.
+_LAST = [None]
+
+
+def _note(line):
+    fd = _os.open(_LOG, _os.O_WRONLY | _os.O_APPEND | _os.O_CREAT, 0o644)
+    try:
+        _os.write(fd, (line + "\\n").encode("utf-8", "replace"))
+    finally:
+        _os.close(fd)
 
 
 def _audit(event, args):
@@ -267,7 +311,25 @@ for _name in _NAMES:
     ):
         _note("stand-in for " + _name + " is shadowed: PATH finds " + repr(_found))
         raise SystemExit(@SHADOWED_EXIT@)
-'''
+"""
+
+
+def _readers_source() -> str:
+    """The tables and the readers, as the prelude carries them."""
+    return _TABLES + "\n\n" + _READERS
+
+
+def readers() -> dict:
+    """The prelude's readers of a command line, run in this process.
+
+    The same text the child runs, with ``_os`` and the probed names bound and no
+    hook installed, so a test can call ``_words_of`` or ``_shell_command_line`` on
+    an argv the way the child's hook would, without starting anything.
+    """
+    namespace: dict = {"_os": os, "_NAMES": PROBED_TOOLS}
+    # This module's own text, never a caller's: the tests read what the child runs.
+    exec(_readers_source(), namespace)  # nosec B102 - the prelude's own source
+    return namespace
 
 
 class ChildToolStarts:
@@ -307,12 +369,13 @@ class ChildToolStarts:
     def prelude(self) -> str:
         """Python source to run first in the child: the audit hook and the check
         that PATH finds each stand-in."""
-        return (
-            _PRELUDE.replace("@LOG@", repr(str(self.log)))
+        head = (
+            _PRELUDE_HEAD.replace("@LOG@", repr(str(self.log)))
             .replace("@NAMES@", repr(PROBED_TOOLS))
             .replace("@STAND_INS@", repr(str(self.directory)))
-            .replace("@SHADOWED_EXIT@", str(SHADOWED_EXIT))
         )
+        hook = _HOOK.replace("@SHADOWED_EXIT@", str(SHADOWED_EXIT))
+        return head + "\n" + _readers_source() + "\n\n" + hook
 
     def program(self, source: str) -> str:
         """The code for ``python -c``: the prelude, the stubs that answer the

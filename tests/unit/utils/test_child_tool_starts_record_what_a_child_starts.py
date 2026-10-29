@@ -20,7 +20,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.child_tool_starts import POSIX_ONLY, SHADOWED_EXIT, ChildToolStarts
+from tests.utils.child_tool_starts import (
+    POSIX_ONLY,
+    SHADOWED_EXIT,
+    ChildToolStarts,
+    readers,
+)
 from tests.utils.helpers import checkout_env
 
 pytestmark = POSIX_ONLY
@@ -366,3 +371,84 @@ def test_an_entry_a_uv_left_in_its_directories_is_recorded(tmp_path):
 
     assert done.returncode == 0, done.stderr
     assert started.starts() == ["uv-cache/entry"]
+
+
+# The prelude's readers, run in this process on an argv that is never started
+# (``readers``): what the child's hook would make of each command line.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv, command",
+    [
+        pytest.param(["sh", "-c", "uv sync"], "uv sync", id="c-then-the-string"),
+        pytest.param(["bash", "-lc", "uv sync"], "uv sync", id="c-ends-a-cluster"),
+        pytest.param(
+            ["bash", "-c", "-e", "uv sync"], "uv sync", id="an-option-after-c"
+        ),
+        pytest.param(
+            ["sh", "-c", "-o", "pipefail", "uv sync"],
+            "uv sync",
+            id="a-valued-option-after-c",
+        ),
+        pytest.param(
+            ["bash", "-o", "pipefail", "-c", "uv sync"],
+            "uv sync",
+            id="a-valued-option-before-c",
+        ),
+        pytest.param(
+            ["bash", "--rcfile", "rc", "-c", "uv sync"],
+            "uv sync",
+            id="a-valued-long-option-before-c",
+        ),
+        pytest.param(["bash", "--norc", "-c", "uv sync"], "uv sync", id="a-long-flag"),
+        pytest.param(
+            ["sh", "-c", "--", "uv sync"], "uv sync", id="double-dash-ends-the-options"
+        ),
+        pytest.param(
+            ["sh", "-c", "-", "uv sync"], "uv sync", id="a-lone-dash-ends-the-options"
+        ),
+        pytest.param(["sh", "-s", "-c", "uv sync"], "uv sync", id="s-then-c"),
+        pytest.param(["sh", "-sc", "uv sync"], "uv sync", id="s-and-c-in-one-cluster"),
+    ],
+)
+def test_the_shell_command_string_is_the_first_operand_after_every_option(
+    argv, command
+):
+    """A shell reads all of its options before it takes the command string, so the
+    string is the first operand after them, wherever -c sat among the options; the
+    old walk took the word right after the cluster holding c, and so read ``-e`` or
+    ``-o`` as the command."""
+    assert readers()["_shell_command_line"](argv) == command
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param(["sh", "--", "-c", "uv sync"], id="a-script-named-dash-c"),
+        pytest.param(["sh", "script.sh", "-c", "uv sync"], id="a-script-before-c"),
+        pytest.param(["sh", "-c"], id="c-with-no-string"),
+        pytest.param(
+            ["bash", "--mystery", "-c", "uv sync"], id="an-unknown-long-option"
+        ),
+        pytest.param(["sh", "-e", "uv sync"], id="no-c-at-all"),
+    ],
+)
+def test_a_shell_argv_with_no_readable_command_string_gives_none(argv):
+    """After ``--`` the next word is a script, however it is spelled; a script before
+    any -c ends the options; a long option the reader does not know might take a
+    value, so where the string would be is a guess, and the reader says so with
+    None rather than naming the wrong word."""
+    assert readers()["_shell_command_line"](argv) is None
+
+
+@pytest.mark.unit
+def test_a_tool_named_by_path_after_a_shell_option_is_among_the_words():
+    """The case the module docstring promises: a tool named by path inside the
+    shell's command string is a word the hook compares, even when an option
+    follows -c."""
+    words = readers()["_words_of"](["bash", "-c", "-e", "/venv/bin/uv sync"])
+
+    assert "/venv/bin/uv" in words, words
+    assert "-e" not in words, words
