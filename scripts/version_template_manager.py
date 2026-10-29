@@ -114,16 +114,27 @@ class VersionTemplateManager:
             patterns.append((branch_pattern, branch_replacement))
 
         # Pattern 3: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)"),
-        # and the `uses:` form, `<owner>/<this repository>@v<version>`. The
-        # repository name is interpolated below, not written out, for the reason
-        # the flake pattern gives: the tree walk in
-        # tests/unit/test_agent_plugin_ash_version.py reads a literal
-        # `<repository>@v<something>` in a comment as an install pin.
+        # and the two `uses:` forms naming this repository: the action,
+        # `<owner>/<this repository>@v<version>`, and the reusable workflow,
+        # `<owner>/<this repository>/.github/workflows/<file>.yml@v<version>`,
+        # which is the form the CI pages document. The repository name is
+        # interpolated below, not written out, for the reason the flake pattern
+        # gives: the tree walk in tests/unit/test_agent_plugin_ash_version.py
+        # reads a literal `<repository>@v<something>` in a comment as an install
+        # pin.
         # Bare means not glued to a preceding path or name: unanchored, the
         # pattern also templatized third-party pins such as a
         # `uses: actions/checkout@v4.1.2` line in a CI example, and `generate`
-        # then stamped ASH's version into another project's reference.
-        at_version_pattern = rf"((?<![\w./-])@v|{_REPO_NAME}(?:\.git)?@v){semver}"
+        # then stamped ASH's version into another project's reference. Anchored
+        # on the repository name followed directly by `@v`, it missed the
+        # reusable-workflow form, whose `@v` follows the workflow's path, so
+        # `convert` wrote that pin into the template as a literal and `generate`
+        # never moved it again. The optional path after the repository name
+        # admits that form; a third-party workflow has another repository name
+        # in front of its path and is still left alone.
+        at_version_pattern = (
+            rf"((?<![\w./-])@v|{_REPO_NAME}(?:\.git)?(?:/[\w./-]+)?@v){semver}"
+        )
         at_version_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(at_version_pattern, content):
             patterns.append((at_version_pattern, at_version_replacement))

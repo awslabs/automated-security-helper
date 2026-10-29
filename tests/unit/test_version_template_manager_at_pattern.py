@@ -15,6 +15,15 @@ ASH's release number into another project's action pin.
 The bare form now has to be bare (not preceded by a path or name character), and
 ASH's own repository name before ``@v`` is matched explicitly, so a ``uses:``
 step naming this repository is still templatized.
+
+Anchoring on the repository name followed directly by ``@v`` missed the form the
+CI pages document, the reusable workflow
+``<owner>/<repository>/.github/workflows/run-ash-security-scan.yml@vX.Y.Z``: the
+``@`` there follows the workflow's path, so neither the bare form nor the
+repository form matched, ``convert`` wrote that pin into the template as a
+literal, and ``generate`` never moved it again. An optional path between the
+repository name and ``@v`` admits it; another repository's reusable workflow
+stays untouched.
 """
 
 from __future__ import annotations
@@ -72,6 +81,24 @@ def test_a_bare_inline_mention_is_still_templatized():
 def test_ash_s_own_action_pin_is_templatized():
     text = f"      - uses: awslabs/{REPO}@v3.4.0\n"
     assert _convert(text) == f"      - uses: awslabs/{REPO}@v{{{{VERSION}}}}\n"
+
+
+def test_ash_s_own_reusable_workflow_pin_is_templatized():
+    """The form the CI pages document: the workflow's path sits between the
+    repository name and the ``@v``."""
+    text = (
+        f"    uses: awslabs/{REPO}/.github/workflows/run-ash-security-scan.yml@v3.4.0\n"
+    )
+    assert _convert(text) == (
+        f"    uses: awslabs/{REPO}/.github/workflows/run-ash-security-scan.yml"
+        "@v{{VERSION}}\n"
+    )
+
+
+def test_another_repository_s_reusable_workflow_pin_is_left_alone():
+    """The control for the widened form: a third-party reusable workflow."""
+    text = "    uses: octo-org/security-tools/.github/workflows/scan.yml@v2.1.0\n"
+    assert _convert(text) == text
 
 
 def test_the_git_url_form_is_still_templatized():
