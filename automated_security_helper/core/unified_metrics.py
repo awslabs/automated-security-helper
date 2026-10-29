@@ -258,6 +258,11 @@ def target_counts(
             return -1, -1
         if failed_count is None and attempted_count > 0:
             return -1, -1
+        # More failures than attempts is a claim nobody can read either: 0
+        # attempted with 2 failed, or 3 attempted with 5 failed. Read as usable,
+        # it printed a negative evaluated count in the coverage line.
+        if failed_count is not None and failed_count > attempted_count:
+            return -1, -1
         attempted = (attempted or 0) + attempted_count
         if failed_count is not None:
             failed += failed_count
@@ -684,8 +689,21 @@ def get_unified_scanner_metrics(
             scan_result: ScannerTargetStatusInfo | None = (
                 asharp_model.scanner_results.get(scanner_name, None)
             )
-            status = (
+            recorded_status = (
                 scan_result.status if scan_result and scan_result.status else "PASSED"
+            )
+            # The recorded row is not authoritative about the finding count: a
+            # FAILED it carries from an earlier rebuild stayed on a scanner whose
+            # findings a later run dropped or suppressed, so the table and
+            # summary_stats said FAILED with 0 actionable while the exit code,
+            # from the finding counts, passed. With nothing actionable the gate
+            # passes, so FAILED here reads PASSED; what else the row says (a
+            # SKIPPED a shard recorded) is kept.
+            status = (
+                "PASSED"
+                if getattr(recorded_status, "value", recorded_status)
+                == ScannerStatus.FAILED.value
+                else recorded_status
             )
 
         # Read straight off the serialized per-target reports rather than through
@@ -1068,10 +1086,14 @@ def _populate_scanner_results_from_unified_metrics(
             skipped_reason=metrics.skipped_reason,
         )
         # The scan phase's reason for a MISSING row comes with the row's other fields:
-        # the metrics know the status, not why. It stays only while the row is MISSING.
-        if status != ScannerStatus.MISSING or not isinstance(
-            fields.get("missing_reason"), str
-        ):
+        # the metrics know the status, not why. It stays while the row is MISSING, and
+        # on a FAILED row whose dependencies were missing on one tree, the reason
+        # get_unified_scanner_metrics computes for it (contract clause 3i): dropped
+        # here, the rebuilt row said FAILED and nothing said which tree went unscanned.
+        if status not in (
+            ScannerStatus.MISSING,
+            ScannerStatus.FAILED,
+        ) or not isinstance(fields.get("missing_reason"), str):
             fields.pop("missing_reason", None)
         # The two flags say why the status is what it is, so they follow the
         # metrics when the metrics found the scanner missing or excluded. Every

@@ -1,0 +1,146 @@
+"""Three readings of the unified metrics over a scanner's recorded rows.
+
+- ``target_counts`` reads a failure count above the attempt count (3 attempted, 5
+  failed; 0 attempted, 2 failed) as a usable claim, and the coverage line printed
+  a negative evaluated count. Such counters are unusable, like a negative one.
+- ``get_unified_scanner_metrics`` inherited a recorded FAILED when nothing else
+  decided the status, so a scanner whose findings a later run dropped or
+  suppressed stayed FAILED with 0 actionable while the exit code passed. With
+  nothing actionable the gate passes, so the row reads PASSED.
+- the scanner_results rebuild dropped the ``missing_reason`` the metrics compute
+  for a FAILED scanner whose dependencies were missing on one tree, so the row
+  said FAILED and nothing said which tree went unscanned.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.unified_metrics import (
+    coverage_shortfalls,
+    get_unified_scanner_metrics,
+    populate_metrics_from_unified_source,
+    target_counts,
+)
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerTargetStatusInfo,
+)
+from automated_security_helper.schemas.sarif_schema_model import (
+    Message,
+    PropertyBag,
+    Result,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
+)
+
+pytestmark = pytest.mark.unit
+
+AshConfig.model_rebuild()
+AshAggregatedResults.model_rebuild()
+
+SCANNER = "cdk-nag"
+
+
+def _model(reports: dict) -> AshAggregatedResults:
+    model = AshAggregatedResults()
+    model.ash_config = get_default_config()
+    model.additional_reports = {SCANNER: reports}
+    return model
+
+
+def _report(target: str, **fields) -> dict:
+    report = {"scanner_name": SCANNER, "target_type": target, "status": "PASSED"}
+    report.update(fields)
+    return report
+
+
+class TestMoreFailuresThanAttemptsIsUnusable:
+    @pytest.mark.parametrize("attempted, failed", [(3, 5), (0, 2)])
+    def test_the_counters_are_unusable(self, attempted, failed):
+        model = _model(
+            {
+                "source": _report(
+                    "source", targets_attempted=attempted, targets_failed=failed
+                )
+            }
+        )
+
+        assert target_counts(model, SCANNER) == (-1, -1)
+        assert coverage_shortfalls(model) == [(SCANNER, None, None)]
+
+    def test_a_partial_loss_is_read_as_before(self):
+        """Control."""
+        model = _model(
+            {"source": _report("source", targets_attempted=3, targets_failed=1)}
+        )
+
+        assert target_counts(model, SCANNER) == (3, 1)
+        assert coverage_shortfalls(model) == [(SCANNER, 3, 1)]
+
+
+class TestARecordedFailedWithNothingActionableReadsPassed:
+    def test_the_row_is_passed(self):
+        model = _model({"source": _report("source", status="FAILED")})
+        model.scanner_results[SCANNER] = ScannerTargetStatusInfo(
+            status=ScannerStatus.FAILED
+        )
+
+        (metrics,) = get_unified_scanner_metrics(model)
+
+        assert metrics.actionable == 0
+        assert metrics.status == "PASSED"
+
+    def test_another_recorded_status_is_kept(self):
+        """Control: the row's SKIPPED (a shard's record) is still inherited."""
+        model = _model({"source": _report("source", status="SKIPPED")})
+        model.scanner_results[SCANNER] = ScannerTargetStatusInfo(
+            status=ScannerStatus.SKIPPED
+        )
+
+        (metrics,) = get_unified_scanner_metrics(model)
+
+        assert metrics.status == "SKIPPED"
+
+
+class TestAFailedRowKeepsTheMissingTreesReason:
+    def test_the_rebuilt_row_says_which_tree(self):
+        model = _model(
+            {
+                "source": _report("source", status="FAILED"),
+                "converted": _report(
+                    "converted",
+                    status="MISSING",
+                    dependencies_satisfied=False,
+                    missing_reason="the tool is not installed",
+                ),
+            }
+        )
+        model.sarif = SarifReport(
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name=SCANNER)),
+                    results=[
+                        Result(
+                            ruleId="R1",
+                            level="error",
+                            message=Message(text="x"),
+                            properties=PropertyBag(scanner_name=SCANNER),
+                        )
+                    ],
+                )
+            ]
+        )
+
+        rebuilt = populate_metrics_from_unified_source(model)
+        row = rebuilt.scanner_results[SCANNER]
+
+        assert row.status == ScannerStatus.FAILED
+        assert isinstance(row.missing_reason, str)
+        assert "the tool is not installed" in row.missing_reason
+        assert "converted" in row.missing_reason
