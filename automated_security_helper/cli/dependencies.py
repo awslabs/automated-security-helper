@@ -3,6 +3,7 @@
 
 """CLI command for installing dependencies for ASH plugins."""
 
+import contextvars
 import logging
 import os
 import platform
@@ -50,6 +51,7 @@ from automated_security_helper.core.constants import (
     ash_bin_path_from_environment,
     home_bin_path,
     is_blank_bin_path,
+    usable_home,
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
@@ -66,7 +68,7 @@ from automated_security_helper.utils.download_utils import (
     NO_BIN_DIRECTORY,
     pinned_install_already_satisfied,
 )
-from automated_security_helper.utils.error_text import error_text
+from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, get_logger
 
 # Not rich.markup.escape, which shows a trailing backslash twice or lets it escape
@@ -109,6 +111,17 @@ EXIT_BAD_SELECTION = ASH_EXIT_BAD_SELECTION
 # The code every ASH command uses for a configuration that cannot be used.
 EXIT_INVALID_CONFIG = 3
 
+#: The values the run's configuration read from the environment, while the
+#: install commands run: every line run_command prints or logs about a child
+#: (its argv, its output, the error it raised) is redacted with them, as the
+#: scan's runner redacts its own lines (subprocess_utils._SPAWN_VALUES). A
+#: context variable rather than an argument: run_command keeps the two-argument
+#: shape its callers and their stand-ins have, and the values belong to the whole
+#: install, not to one child.
+_INSTALL_VALUES: contextvars.ContextVar[Tuple[str, ...]] = contextvars.ContextVar(
+    "ash_install_values", default=()
+)
+
 # Set to exactly `skip`, a `--tool` name that no plugin of this ASH has, of any type,
 # is named and skipped rather than refused. ASH's own required check sets it, because
 # it installs ASH from an older commit than the workflow that asks for the tools: a
@@ -148,6 +161,17 @@ def _plugin_kind(plugin_type: str) -> str:
     if plugin_type not in PLUGIN_KINDS:
         raise ValueError(f"not a plugin type: {plugin_type!r}")
     return plugin_type
+
+
+def _selection_key(name: str) -> str:
+    """The key a plugin name is selected by: lower-cased and stripped.
+
+    The scan selects its scanners by this key (core.phases.scan_phase), so
+    ``--tool Bandit`` and ``--tool " bandit "`` select the plugin the scan would
+    rather than reading as tools this ASH lacks, which
+    ``ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip`` would then skip with exit 0.
+    """
+    return name.lower().strip()
 
 
 def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
@@ -552,8 +576,23 @@ def _uv_reads_project_config(args: List[str], shell: bool) -> bool:
     return True
 
 
+def _shown_command(args: Iterable[Any], values: Iterable[str]) -> str:
+    """The argv on one line as this command shows it: each element as text,
+    without the values the configuration read from the environment.
+
+    A plugin declares its argv; one that puts a Path, or a number, in it is
+    shown, and then fails in the child's spawn, instead of ``' '.join`` raising
+    TypeError over the whole install run.
+    """
+    return text_without_values(" ".join(str(part) for part in args), values)
+
+
 def run_command(args: List[str], shell: bool = False):
     """Run a command and return the exit code.
+
+    What this prints about the child (its output, the error its spawn raised)
+    is redacted with the install's environment values (``_INSTALL_VALUES``),
+    and the runner's own log lines are passed the same values.
 
     Every command starts in an empty directory of its own, not the current
     directory, which this command treats as the source tree. Run from there, a
@@ -570,6 +609,7 @@ def run_command(args: List[str], shell: bool = False):
     from automated_security_helper.utils.subprocess_utils import run_succeeded
     from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
 
+    values = _INSTALL_VALUES.get()
     if args and not shell and args[0] == "uv":
         # Plugins declare their uv installs as `uv ...`. Resolved like any other
         # program name, that found only a uv on PATH or in the ASH bin directory,
@@ -593,6 +633,7 @@ def run_command(args: List[str], shell: bool = False):
                     env=env,
                     check=False,
                     log_level=logging.INFO,
+                    values=values,
                 )
         else:
             overrides = {} if shell else uv_child_overrides(args)
@@ -608,12 +649,15 @@ def run_command(args: List[str], shell: bool = False):
                     shell=shell,
                     check=False,
                     log_level=logging.INFO,
+                    values=values,
                 )
         # The child's output is not markup. pip alone prints `[notice]` lines and
         # echoes extras such as `ash[sarif,toml]`, which rich would otherwise
-        # consume as tags and delete from the log.
-        print(escape(result.stdout))
-        print(escape(result.stderr))
+        # consume as tags and delete from the log. A child that echoes a value
+        # the configuration read from the environment (a token in a URL it was
+        # given, say) does not print it here.
+        print(escape(text_without_values(result.stdout, values)))
+        print(escape(text_without_values(result.stderr, values)))
         if not run_succeeded(result):
             # A run whose output ASH could not record, or one ASH stopped, failed
             # whatever its code says, and may have no code: the answer is a
@@ -623,8 +667,8 @@ def run_command(args: List[str], shell: bool = False):
         return result.returncode
     except Exception as e:
         print(
-            f"[bold red]Error running command {escape(' '.join(args))}: "
-            f"{escape(error_text(e))}[/bold red]"
+            f"[bold red]Error running command {escape(_shown_command(args, values))}: "
+            f"{escape(error_text(e, values))}[/bold red]"
         )
         return 1
 
@@ -735,14 +779,23 @@ def install_dependencies(
     bin_path_from_environment = ash_bin_path_from_environment()
     # The default when no bin path was given, or a blank one, from the option or
     # from a whitespace-only ASH_BIN_PATH that click passes through as given.
-    # expanduser for a "~" a shell left unexpanded.
-    target_bin_path = (
-        ASH_BIN_PATH if is_blank_bin_path(bin_path) else Path(bin_path).expanduser()
-    )
+    if is_blank_bin_path(bin_path):
+        target_bin_path = ASH_BIN_PATH
+    elif bin_path == "~" or bin_path[:2] in ("~/", "~\\"):
+        # A "~" a shell left unexpanded (a quoted --bin-path, or ASH_BIN_PATH set
+        # to it) is expanded from the home directory only when there is a usable
+        # one (usable_home), as ~/.ash/bin is. Path.expanduser takes HOME as given:
+        # an empty HOME made ~/.ash/bin the filesystem's /.ash/bin, and a relative
+        # HOME put it under the working directory, the scanned repository.
+        home = usable_home()
+        target_bin_path = None if home is None else home.joinpath(bin_path[2:])
+    else:
+        target_bin_path = Path(bin_path).expanduser()
     if target_bin_path is None:
-        # No --bin-path, no ASH_BIN_PATH and no usable home for ~/.ash/bin: nowhere
-        # to install. Refused before anything is installed or created, with a
-        # scan's invalid-configuration code, as an unusable --config is.
+        # No --bin-path, no ASH_BIN_PATH and no usable home for ~/.ash/bin, or a
+        # bin path under "~" with no usable home: nowhere to install. Refused
+        # before anything is installed or created, with a scan's
+        # invalid-configuration code, as an unusable --config is.
         print(f"[red]{escape(NO_BIN_DIRECTORY)}[/red]")
         raise typer.Exit(EXIT_INVALID_CONFIG)
     # Created and exported absolute, for the install's own commands and the sweep
@@ -953,10 +1006,11 @@ def install_dependencies(
     # it. Another plugin's problem is reported at info, as an unrelated plugin is
     # here.
     built_kinds = {candidate[1] for candidate in candidates}
+    requested_keys = {_selection_key(name) for name in requested_names}
     requested_classes = {
         candidate[2]
         for candidate in candidates
-        if candidate[3] is None or candidate[3] in requested_names
+        if candidate[3] is None or _selection_key(candidate[3]) in requested_keys
     }
 
     def builds(plugin_module_input: str, plugin_class: type) -> bool:
@@ -1050,6 +1104,16 @@ def install_dependencies(
             {candidate[3] for candidate in candidates if candidate[3]}
             | {name for _, name, _ in discovered}
         )
+        # Matched by the key the scan selects scanners with (_selection_key), so
+        # a name typed in another case, or with blanks around it, selects the
+        # plugin it names and is installed under the plugin's own spelling. An
+        # unknown name is still reported in the spelling the caller typed.
+        by_key = {_selection_key(name): name for name in available}
+        tool_resolution = {
+            typed: by_key.get(_selection_key(resolved_name), resolved_name)
+            for typed, resolved_name in tool_resolution.items()
+        }
+        requested_names = list(dict.fromkeys(tool_resolution.values()))
         unknown = [
             typed
             for typed, resolved_name in tool_resolution.items()
@@ -1089,8 +1153,9 @@ def install_dependencies(
                     found, failed = discover(kind, warn=False, classes=unnamed)
                     lookup_failures += failed
                     names |= {name for _, name, _ in found}
+                keys = {_selection_key(name) for name in names}
                 for typed in unknown:
-                    if tool_resolution[typed] in names:
+                    if _selection_key(tool_resolution[typed]) in keys:
                         elsewhere.setdefault(typed, []).append(kind)
         if elsewhere:
             # Every name the request got wrong, not only those of another type, so one
@@ -1233,6 +1298,8 @@ def install_dependencies(
         selected = discovered
 
     ash_environment_requirements: List[str] = []
+    # For run_command's lines about each child; reset once the installs are done.
+    install_values = _INSTALL_VALUES.set(tuple(environment_values))
     for plugin_type, plugin_name, plugin_instance in selected:
         outcome = PluginInstallOutcome(
             name=plugin_name,
@@ -1321,8 +1388,13 @@ def install_dependencies(
             # An argv routinely carries brackets -- `pip install ash[sarif,toml]` --
             # and rich would read `[sarif,toml]` as a tag and drop it from the line.
             # On one line, unfolded, so it can be copied; it carries the absolute
-            # bin directory, whose length differs from machine to machine.
-            console.print(f"Running command: {escape(' '.join(cmd))}", soft_wrap=True)
+            # bin directory, whose length differs from machine to machine. Shown
+            # as run_command shows it: without the values the configuration read
+            # from the environment, and whatever the plugin put in its argv.
+            console.print(
+                f"Running command: {escape(_shown_command(cmd, environment_values))}",
+                soft_wrap=True,
+            )
             outcome.commands_attempted += 1
             cmd_exit_code = run_command(cmd)
             if cmd_exit_code != 0:
@@ -1332,6 +1404,7 @@ def install_dependencies(
                 print(f"Command succeeded with exit code: {cmd_exit_code}")
                 outcome.commands_succeeded += 1
                 ash_environment_requirements.extend(_ash_environment_install(cmd))
+    _INSTALL_VALUES.reset(install_values)
 
     # Said once, after the installs, for packages added to ASH's own environment
     # when the tool that owns it removes them again later (uv tool upgrade, a
