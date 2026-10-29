@@ -44,11 +44,29 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
 )
+from automated_security_helper.utils.get_scan_set import honors_ignore_files
 from automated_security_helper.utils.link_exclusions import grep_ignore_names
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
+
+
+#: The default ``exclude`` entry of both scanners that names the files the
+#: jupyter converter writes (``<notebook>-converted.py``). It is meant for the
+#: source target, where an output directory inside the tree used to put those
+#: files in front of the tool twice; the output-directory excludes
+#: (_output_dir_exclude_patterns) cover that now. On the converted target the
+#: same pattern names every file the target exists for, so it is left out there.
+CONVERTED_FILE_EXCLUDE = "*-converted.py"
+
+#: The tools' switch for their git-ignore reading. Both skip every file the
+#: repository's ``.gitignore`` matches when the target is inside a git work tree.
+#: ASH's own output directory carries a ``.gitignore`` that ignores everything in
+#: it (utils/output_dir_links.ignore_output_dir_in_git), and the converted target
+#: lives under it, so without this flag a converted target inside a repository
+#: is skipped whole.
+NO_GIT_IGNORE_FLAG = "--no-git-ignore"
 
 
 #: The paths semgrep and opengrep skip by default when no .semgrepignore is
@@ -81,6 +99,9 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # The names the current target's command excludes for the global ignore paths
     # (_execute_scan), which _post_process_sarif tells apart from other excludes.
     _ignore_exclude_names: List[str] = PrivateAttr(default_factory=list)
+    # Which target the current command is for: the converted target drops the
+    # converted-file exclude and reads git-ignored files (_resolve_scan_arguments).
+    _scan_target_type: str = PrivateAttr(default="source")
 
     # ---------------------------------------------------------------
     # Hooks subclasses override
@@ -458,6 +479,10 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         target_results_dir.mkdir(exist_ok=True, parents=True)
 
+        # Read by _resolve_scan_arguments, which the subclass may call again for
+        # this target (opengrep's patterns mode).
+        self._scan_target_type = target_type
+
         # No --exclude for links leaving the target: semgrep 1.180.0 and opengrep
         # 1.30.2 follow no link (measured), and their --exclude cannot name one
         # path. semgrep matches a pattern against paths below its project root, the
@@ -503,6 +528,37 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None
         return final_args, results_file, subprocess_env
 
+    def _reads_git_ignored_files(self) -> bool:
+        """Whether this target's command carries ``--no-git-ignore``.
+
+        The converted target always: it lives under ASH's output directory, whose
+        ``.gitignore`` ignores everything in it, so inside a git work tree the tools
+        skipped every converted file and the target graded SKIPPED. The source
+        target when the operator set ``honor_ignore_files: false``, which asks for
+        the files the repository's ignore files match to be scanned too; the
+        tools' own git-ignore reading left them out whatever ASH's scan set did.
+        """
+        if self._scan_target_type == "converted":
+            return True
+        return not honors_ignore_files(getattr(self.context, "config", None))
+
+    def _extra_args_for_target(self) -> List[ToolExtraArg]:
+        """The configured extra arguments, as the current target's command takes them.
+
+        The converted target drops ``CONVERTED_FILE_EXCLUDE``: there the pattern
+        names every file the converter wrote, which is every file the target holds,
+        so the tools found files and excluded them all, and the scanned-nothing
+        refusal below (_post_process_sarif) made a repository of notebooks a
+        scanner error. An operator's own exclude patterns stay as written.
+        """
+        if self._scan_target_type != "converted":
+            return list(self.args.extra_args)
+        return [
+            arg
+            for arg in self.args.extra_args
+            if not (arg.key == "--exclude" and arg.value == CONVERTED_FILE_EXCLUDE)
+        ]
+
     def _resolve_scan_arguments(self, target: Path, results_file: Path) -> List[str]:
         """``_resolve_arguments`` plus an ``--exclude`` per ASH output directory,
         and one per name the global ignore paths give (``_execute_scan``).
@@ -510,12 +566,21 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         Added for this resolution only, as checkov does: the patterns depend on the
         target, and extra_args persists across scan() calls. The names go in the
         joined form right after the command, since a name can start with "-".
+        The converted target's command leaves out the converted-file exclude
+        (_extra_args_for_target) and reads git-ignored files, as does the source
+        target's when the operator does not honor ignore files
+        (_reads_git_ignored_files).
         """
         original_extra_args = list(self.args.extra_args)
+        self.args.extra_args = self._extra_args_for_target()
         self.args.extra_args.extend(
             ToolExtraArg(key="--exclude", value=pattern)
             for pattern in self._output_dir_exclude_patterns(target)
         )
+        if self._reads_git_ignored_files():
+            self.args.extra_args.append(
+                ToolExtraArg(key=NO_GIT_IGNORE_FLAG, value=None)
+            )
         try:
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file
