@@ -1475,6 +1475,51 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         return sarif_report
 
+    @classmethod
+    def _merge_metadata(
+        cls, into: Dict[str, Any], value: Dict[str, Any], lock_file: Path | str
+    ) -> None:
+        """Fold one lockfile's ``metadata`` into the merged results' ``metadata``.
+
+        By the type of each side, never by the key alone. npm 7+ counts its
+        dependencies in a dict (``"dependencies": {"prod": 1, ...}``) where
+        pnpm's v1 report counts them in an integer (``"dependencies": 5``), so
+        a scan with one lockfile of each raised when the second was merged:
+        ``dict.update`` on an integer, or ``+=`` of an integer onto a dict.
+        The raise was caught per lockfile and recorded as a failed audit, which
+        failed the whole scan over two valid reports.
+
+        Two dicts merge recursively, two numbers add, two lists join, so the
+        per-severity ``vulnerabilities`` counters sum across lockfiles (a
+        ``dict.update`` kept only the last lockfile's). Two values of other
+        kinds, or of different kinds, cannot be combined: the first stays and
+        the disagreement is logged once, since it is a count across tools and
+        not a finding.
+        """
+        for key, incoming in value.items():
+            if key not in into:
+                into[key] = copy.deepcopy(incoming)
+                continue
+            current = into[key]
+            if isinstance(current, dict) and isinstance(incoming, dict):
+                cls._merge_metadata(current, incoming, lock_file)
+            elif cls._is_number(current) and cls._is_number(incoming):
+                into[key] = current + incoming
+            elif isinstance(current, list) and isinstance(incoming, list):
+                current.extend(item for item in incoming if item not in current)
+            elif current != incoming:
+                ASH_LOGGER.debug(
+                    f"npm-audit: metadata key {key!r} of {lock_file} "
+                    f"({type(incoming).__name__}) does not combine with the "
+                    f"merged value ({type(current).__name__}); keeping the first",
+                    extra=NO_MARKUP,
+                )
+
+    @staticmethod
+    def _is_number(value: Any) -> bool:
+        """An int or a float, and not a bool (a bool adds as 0 or 1)."""
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
     def _sarif_exit_code_accepted(self) -> bool:
         """npm audit exits 0 or 1, and yarn classic exits a bitmask of the
         severity levels its audit found (1|2|4|8|16), so any code in 0-31
@@ -1950,16 +1995,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                         all_results.get("metadata"), dict
                                     ):
                                         all_results["metadata"] = {}
-                                    for key, value in audit_results["metadata"].items():
-                                        if key in all_results["metadata"]:
-                                            if isinstance(value, dict):
-                                                all_results["metadata"][key].update(
-                                                    value
-                                                )
-                                            elif isinstance(value, (int, float)):
-                                                all_results["metadata"][key] += value
-                                        else:
-                                            all_results["metadata"][key] = value
+                                    self._merge_metadata(
+                                        all_results["metadata"],
+                                        audit_results["metadata"],
+                                        lock_file,
+                                    )
                     except Exception as e:
                         ASH_LOGGER.warning(
                             f"Failed to run npm audit in {package_dir}: {str(e)}",
