@@ -234,6 +234,25 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             report_data["summary"]["evaluated"] = False
             report_data["not_evaluated"] = self.NOT_EVALUATED
 
+        # A suppression is matched against the findings a scanner reports. A
+        # scanner that did not run (its tool missing, an error, excluded or
+        # skipped) reported none, so a suppression for one of its findings
+        # could not be matched and reads as unused here although it is in
+        # force. The report names those scanners so the "remove it" reading
+        # is qualified; a suppression carries no scanner name, so it cannot
+        # say which entries are affected.
+        scanners_not_run = self._scanners_not_run(model)
+        if scanners_not_run and not suppressions_ignored:
+            report_data["scanners_not_run"] = scanners_not_run
+            report_data["scope_caveat"] = (
+                "These scanners did not run on this scan: "
+                + ", ".join(scanners_not_run)
+                + ". A suppression for a finding one of them would report could "
+                "not be matched and may be listed as unused although it is in "
+                "force; keep such entries until a scan with the scanner enabled "
+                "evaluates them."
+            )
+
         # In workspace mode the scope has to be stated, because the numbers above
         # are honest only about workspace-level suppressions. Read as a merge,
         # "unused_suppressions: 0" would mean "nothing unused anywhere in the
@@ -290,6 +309,25 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             )
         else:
             return json.dumps(report_data, indent=2, default=str)
+
+    @staticmethod
+    def _scanners_not_run(model: "AshAggregatedResults") -> List[str]:
+        """The scanners whose results say they did not run: status MISSING,
+        ERROR or SKIPPED, a dependency not satisfied, or excluded. Sorted by
+        name; empty when every recorded scanner ran."""
+        from automated_security_helper.core.enums import ScannerStatus
+
+        not_run = []
+        for name, info in (getattr(model, "scanner_results", None) or {}).items():
+            status = getattr(info, "status", None)
+            if (
+                status
+                in (ScannerStatus.MISSING, ScannerStatus.ERROR, ScannerStatus.SKIPPED)
+                or not getattr(info, "dependencies_satisfied", True)
+                or getattr(info, "excluded", False)
+            ):
+                not_run.append(str(name))
+        return sorted(not_run)
 
     @staticmethod
     def _suppression_to_dict(
@@ -373,6 +411,11 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 lines.append("")
         elif summary["unused_suppressions"] == 0:
             lines.append("✅ **All suppressions are being used!**")
+            lines.append("")
+        if report_data.get("scope_caveat"):
+            lines.append(
+                f"⚠️  **Scanners that did not run**: {report_data['scope_caveat']}"
+            )
             lines.append("")
         if summary["unused_suppressions"] != 0:
             percentage = (

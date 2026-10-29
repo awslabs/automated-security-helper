@@ -1560,17 +1560,31 @@ class ConfigLinter:
 
         # Checked first: joined to the root, an absolute path is itself, so the
         # directory check would advise a spelling of it under itself.
-        advice = absolute_path_warning(
-            path_pattern,
-            project_root,
-            ignore_path=ignore_path,
-            shown_pattern=shown_pattern,
-        ) or path_pattern_advice(
-            path_pattern,
-            project_root,
-            ignore_path=ignore_path,
-            shown_pattern=shown_pattern,
-        )
+        # The helpers probe the filesystem (``is_dir`` on the path joined to
+        # the root). A path the OS refuses to look at (a name past NAME_MAX, a
+        # directory this user cannot search, an embedded NUL, which is a
+        # ValueError) is no reason to end the whole lint run: such a path
+        # matches nothing, and the model and the validator's own check report
+        # what they report about it.
+        try:
+            advice = absolute_path_warning(
+                path_pattern,
+                project_root,
+                ignore_path=ignore_path,
+                shown_pattern=shown_pattern,
+            ) or path_pattern_advice(
+                path_pattern,
+                project_root,
+                ignore_path=ignore_path,
+                shown_pattern=shown_pattern,
+            )
+        except (OSError, ValueError) as exc:
+            logger.debug(
+                "The path check could not probe the pattern at %s: %s",
+                path_prefix,
+                exc,
+            )
+            return
         if advice is not None:
             result.issues.append(
                 LintIssue(
