@@ -76,7 +76,17 @@ def test_an_operator_config_beside_a_twin_loads_for_the_workspace_as_for_the_sca
     """The operator's --config extends its own section file and the workspace
     root's file, which writes a case-variant twin, and patches under a third
     spelling. The scan's own load, with ownership, takes it; so does the
-    workspace loader."""
+    workspace loader.
+
+    The root extends the repository's file first. ``extends`` joins the two
+    spellings into one section under the spelling of the file extended last
+    (config_sources.py module docstring, the plugin-section rule), so the
+    joined key is the operator's own and the patch folds onto it. Extended the
+    other way the joined key is the repository's spelling, which the operator's
+    files never wrote, and the scan refuses the patch as a path that does not
+    fit the document
+    (test_a_repository_twin_neither_blocks_nor_captures_the_operators_patch).
+    """
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     ws = _workspace(
         tmp_path,
@@ -103,7 +113,7 @@ def test_an_operator_config_beside_a_twin_loads_for_the_workspace_as_for_the_sca
     root = _write(
         tmp_path / "operator.yaml",
         {
-            "extends": [own.as_posix(), (ws / ".ash" / ".ash.yaml").as_posix()],
+            "extends": [(ws / ".ash" / ".ash.yaml").as_posix(), own.as_posix()],
             "patch": [
                 {
                     "op": "replace",

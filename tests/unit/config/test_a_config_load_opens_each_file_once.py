@@ -271,7 +271,41 @@ def test_the_stock_reader_holds_its_text_under_the_path_it_resolved(
     resolved, the key it looks the text up by. Kept under a second resolve
     taken at read time, a root symlink retargeted in between left the text
     under one path and the lookup under another, and the stock reader's own
-    read was refused as a caller's reader that had not filled its cache."""
+    read was refused as a caller's reader that had not filled its cache.
+
+    The link is retargeted to a second name for the same file (a hard link), so
+    the identity the walk vetted still holds at the open and only the path
+    differs: a read of a different file is refused by that identity
+    (``read_config_bytes``, ``ConfigFileChangedError``; the control below), so
+    it cannot reach the lookup this test pins."""
+    from automated_security_helper.config import config_sources
+
+    first = tmp_path / "first.yaml"
+    first.write_text("project_name: first\n", encoding="utf-8")
+    second = tmp_path / "second.yaml"
+    os.link(first, second)
+    link = tmp_path / "ash.yaml"
+    link.symlink_to(first)
+    real_read = config_sources.read_config_text
+    retargeted: list = []
+
+    def retarget_then_read(path, *args, **kwargs):
+        if Path(path) == link and not retargeted:
+            link.unlink()
+            link.symlink_to(second)
+            retargeted.append(True)
+        return real_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(config_sources, "read_config_text", retarget_then_read)
+    document = config_sources.resolve_config_document(link, confine_to=tmp_path)
+    assert retargeted == [True], "control: the link was never retargeted"
+    assert document.data["project_name"] == "first", document.data
+
+
+def test_control_a_link_retargeted_to_another_file_is_refused(tmp_path, monkeypatch):
+    """The read holds the file to the identity the walk vetted, so a root symlink
+    retargeted to a different file between the check and the open is refused
+    rather than read (``read_config_bytes``)."""
     from automated_security_helper.config import config_sources
 
     first = tmp_path / "first.yaml"
@@ -291,9 +325,9 @@ def test_the_stock_reader_holds_its_text_under_the_path_it_resolved(
         return real_read(path, *args, **kwargs)
 
     monkeypatch.setattr(config_sources, "read_config_text", retarget_then_read)
-    document = config_sources.resolve_config_document(link, confine_to=tmp_path)
+    with pytest.raises(config_sources.ConfigFileChangedError):
+        config_sources.resolve_config_document(link, confine_to=tmp_path)
     assert retargeted == [True], "control: the link was never retargeted"
-    assert document.data["project_name"] == "second", document.data
 
 
 def test_control_a_judgment_descriptor_is_not_a_read(chain, opens):

@@ -921,8 +921,6 @@
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
-          'scanner_reasons': dict({
-          }),
           'scanners': dict({
           }),
           'severity_threshold': 'MEDIUM',
@@ -961,8 +959,6 @@
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
-          'scanner_reasons': dict({
-          }),
           'scanners': dict({
           }),
           'severity_threshold': 'HIGH',
@@ -1001,8 +997,6 @@
           'sarif_run_index': None,
           'scan_id': None,
           'scan_incomplete': False,
-          'scanner_reasons': dict({
-          }),
           'scanners': dict({
           }),
           'severity_threshold': None,

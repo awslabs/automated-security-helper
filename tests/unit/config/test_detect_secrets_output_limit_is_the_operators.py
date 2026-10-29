@@ -1474,10 +1474,13 @@ def test_the_scanner_inventory_loads_past_the_tree_s_limit(tmp_path, monkeypatch
 
 
 def test_the_statistics_fallback_loads_past_the_tree_s_limit(tmp_path, monkeypatch):
-    """The threshold reader falls back to the operator's default configuration
-    when the results' record cannot be read. Inside a checkout whose in-tree
-    ASH_CONFIG file writes a limit the option refuses, the fallback still
-    answers a threshold."""
+    """The threshold reader does not consult the configuration of the process
+    that reads the results: when the results' record cannot be read, the
+    threshold is the default and its source is "unavailable"
+    (ScannerStatisticsCalculator._threshold_resolution). So inside a checkout
+    whose in-tree ASH_CONFIG file writes a limit the option refuses, the reader
+    answers without loading that file, and without raising over its value."""
+    from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
     from automated_security_helper.core.scanner_statistics_calculator import (
         ScannerStatisticsCalculator,
     )
@@ -1492,7 +1495,7 @@ def test_the_statistics_fallback_loads_past_the_tree_s_limit(tmp_path, monkeypat
     threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
         _Broken(), "bandit"
     )
-    assert source == "global"
+    assert (threshold, source) == (ASH_DEFAULT_SEVERITY_LEVEL, "unavailable")
 
 
 def test_the_mcp_server_s_scanner_resource_loads_past_the_tree_s_limit(
@@ -1848,10 +1851,12 @@ def test_a_live_cwd_in_the_named_checkout_answers_the_ash_config_value(
     tmp_path, monkeypatch
 ):
     """The same files with the working directory inside the named file's
-    checkout (a scan of it): the trusted base keeps ASH_CONFIG's 2048. With
-    the deleted-cwd cell above, this pins that no_scanned_tree and
-    any_checkout are judged from the live working directory, not forced
-    either way."""
+    checkout (a scan of it): ASH_CONFIG's file sits in a different checkout,
+    and a config file in a checkout other than the scanned one is never the
+    operator's (operator_only_options.scan_repository_settings), so its 2048 is
+    left out and the answer is the default, 256, as with the working directory
+    deleted above. The named file's 1024 is the scanned repository's own and
+    is left out too."""
     from automated_security_helper.cli import mcp_tools
 
     named_checkout, named = _checkouts_either_side(
@@ -1864,7 +1869,7 @@ def test_a_live_cwd_in_the_named_checkout_answers_the_ash_config_value(
     result = mcp_tools.mcp_get_config(config_path=str(named))
 
     assert result.get("project_name") == "named", result
-    assert _shown_limit(result) == 2048, result
+    assert _shown_limit(result) == 256, result
 
 
 def test_the_left_out_ash_config_value_is_warned(tmp_path, monkeypatch, caplog):
@@ -2854,16 +2859,28 @@ def test_an_untrusted_config_with_no_working_directory_refuses_its_modules(
     module's checkout could be the very one the missing working directory
     would have named, so every entry outside the trusted list refuses the
     load, naming the gone working directory -- never a judged keep. The
-    installed `yaml` rides along to pin that even an importable,
-    out-of-every-tree entry is refused here."""
+    installed `yaml` pins that even an importable, out-of-every-tree entry is
+    refused here, at the confinement (ASHConfigSourceError).
+
+    An entry no installed package provides never reaches the confinement: the
+    client config rules run first and deny it as a field a delivered config
+    may not set (ASHConfigFieldDeniedError; client_config_policy._widenings),
+    naming the file and the entry."""
     from automated_security_helper.config.resolve_config import resolve_config
-    from automated_security_helper.core.exceptions import ASHConfigSourceError
+    from automated_security_helper.core.exceptions import (
+        ASHConfigFieldDeniedError,
+        ASHConfigSourceError,
+    )
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     named = tmp_path / "ash.yaml"
-    missing = "automated_security_helper.plugin_modules.zz_missing_module"
     named.write_text(
-        f"project_name: client\nash_plugin_modules:\n  - {missing}\n  - yaml\n",
+        "project_name: client\nash_plugin_modules:\n  - yaml\n", encoding="utf-8"
+    )
+    missing = "automated_security_helper.plugin_modules.zz_missing_module"
+    unimportable = tmp_path / "unimportable.yaml"
+    unimportable.write_text(
+        f"project_name: client\nash_plugin_modules:\n  - {missing}\n",
         encoding="utf-8",
     )
     _delete_working_directory(tmp_path, monkeypatch)
@@ -2872,7 +2889,12 @@ def test_an_untrusted_config_with_no_working_directory_refuses_its_modules(
         resolve_config(config_path=named, untrusted_config=True)
     text = str(caught.value)
     assert "working directory" in text and "ash_plugin_modules" in text, text
-    assert "'yaml'" in text and "zz_missing_module" in text, text
+    assert "'yaml'" in text, text
+
+    with pytest.raises(ASHConfigFieldDeniedError) as denied:
+        resolve_config(config_path=unimportable, untrusted_config=True)
+    text = str(denied.value)
+    assert "ash_plugin_modules" in text and "zz_missing_module" in text, text
 
 
 def test_untrusted_content_with_trusted_modules_and_no_working_directory_loads(
@@ -2909,12 +2931,19 @@ def test_the_validator_judges_an_untrusted_config_with_no_working_directory(
     config with the working directory deleted reports the module entry as
     the FILE's error (valid False, naming the gone working directory), with
     no 'could not run' warning standing in for the judgement and no silent
-    skip passing the file."""
+    skip passing the file. The entry is an installed module outside ASH's own
+    package: one no installed package provides is denied by the client config
+    rules before the confinement judges it (see the refusal test above), and
+    is the file's error too, without the working directory in it."""
     from automated_security_helper.config.config_validator import ConfigValidator
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     named = tmp_path / "ash.yaml"
     named.write_text(
+        "project_name: client\nash_plugin_modules:\n  - yaml\n", encoding="utf-8"
+    )
+    unimportable = tmp_path / "unimportable.yaml"
+    unimportable.write_text(
         "project_name: client\nash_plugin_modules:\n"
         "  - automated_security_helper.plugin_modules.zz_missing_module\n",
         encoding="utf-8",
@@ -2930,6 +2959,14 @@ def test_the_validator_judges_an_untrusted_config_with_no_working_directory(
     ]
     assert named_in_errors, (check.errors, check.warnings)
     assert not [w for w in check.warnings if "could not run" in w], check.warnings
+
+    denied = ConfigValidator.check_config_file(unimportable, untrusted_config=True)
+
+    assert [
+        e
+        for e in denied.errors
+        if "ash_plugin_modules" in e and "zz_missing_module" in e
+    ], (denied.errors, denied.warnings)
 
 
 def test_discovery_with_no_working_directory_is_the_named_refusal(
@@ -2956,7 +2993,12 @@ def test_validate_config_with_plugin_modules_and_no_working_directory(
     with source_dir None). With the working directory deleted that read goes
     through working_directory(), so a missing cwd is no error of the checked
     file. The control (no ash_plugin_modules, so no module check) shows the
-    rest of the validator answers."""
+    rest of the validator answers. The named file is outside the directories
+    ASH_MCP_ALLOWED_CONFIG_ROOTS names, so it is a client's, and the module is
+    one of ASH's own that sends nothing off the host: the client config rules
+    deny ash_aws_plugins to a delivered config (it sends findings off the host,
+    plugin_module_trust.OFF_HOST_PLUGIN_SENDS), and the confinement keeps an
+    ash_builtin entry with no working directory."""
     import json
 
     from automated_security_helper.cli import mcp_tools
@@ -2967,7 +3009,7 @@ def test_validate_config_with_plugin_modules_and_no_working_directory(
         "project_name: named\n"
         + (
             "ash_plugin_modules:\n"
-            "  - automated_security_helper.plugin_modules.ash_aws_plugins\n"
+            "  - automated_security_helper.plugin_modules.ash_builtin\n"
             if modules == "with-plugin-modules"
             else ""
         ),

@@ -4108,6 +4108,11 @@ def _refuse_repository_config_in_a_workspace(
     a ``--config`` named, ``ASH_CONFIG``'s file rides as the base alone and is
     mounted marked instead.
     """
+    from automated_security_helper.config.confinement_remedy import (
+        KEEP_A_SETTING,
+        KEEP_A_SETTING_BESIDE_A_LOCATED_FILE,
+        KEEP_A_SETTING_WHEN_THE_WALK_STOPPED,
+    )
     from automated_security_helper.config.sandbox_grants import (
         confined_files,
         scanned_trees,
@@ -4145,12 +4150,23 @@ def _refuse_repository_config_in_a_workspace(
             "decided (resolving its name stopped before the walk finished), "
             "which is read as the repository's"
         )
+    # The cause is the repository's tier, so the message ends with the remedy the
+    # local warnings end with, chosen as resolve_config does
+    # (``_tier_two_source``): a file whose name walk stopped is not known to be in a
+    # checkout, so moving it out is no remedy for it, and the walk has to finish.
+    if not undecided:
+        remedy = KEEP_A_SETTING
+    elif located:
+        remedy = KEEP_A_SETTING_BESIDE_A_LOCATED_FILE
+    else:
+        remedy = KEEP_A_SETTING_WHEN_THE_WALK_STOPPED
     # Raw values, like the link refusal's: the sinks show the message once.
     raise ContainerInputError(
         f"The config file '{config}' is the scanned repository's: "
         f"{'; '.join(clauses)}. Container mode refuses it in workspace mode. "
         "Keep --config, "
-        "and every file it extends, outside the checkout around the workspace root."
+        "and every file it extends, outside the checkout around the workspace root. "
+        f"{remedy}"
     )
 
 
