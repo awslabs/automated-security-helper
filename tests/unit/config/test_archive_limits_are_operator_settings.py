@@ -109,7 +109,7 @@ LIMIT_CASES = [
     ),
 ]
 
-# The same cases without the archive: for the checks that stop at the config's
+# The same cases without the archive: for the checks that end at the config's
 # refusal and convert nothing.
 LIMIT_VALUE_CASES = [pytest.param(*case.values[:3], id=case.id) for case in LIMIT_CASES]
 
