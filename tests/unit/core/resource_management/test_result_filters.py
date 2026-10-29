@@ -311,11 +311,18 @@ class TestApplyContentFilters:
         assert stats["medium"] == 0
         assert stats["low"] == 0
 
-    def test_severity_filter_preserves_non_severity_stats(self, full_results):
+    def test_severity_filter_preserves_the_scanner_outcome_stats(self, full_results):
+        """The outcome counters are not per severity, so a severity filter
+        leaves them; the total follows the selected buckets (see
+        test_result_filters_summary_recount.py), which this used to pin the
+        other way."""
         result = apply_content_filters(full_results, severities="critical")
-        assert (
-            result["summary_stats"]["total"] == full_results["summary_stats"]["total"]
-        )
+        for counter in ("passed", "failed", "missing", "skipped"):
+            assert (
+                result["summary_stats"][counter]
+                == full_results["summary_stats"][counter]
+            )
+        assert result["summary_stats"]["total"] == 1
 
     def test_combined_scanner_and_severity_filter(self, full_results):
         result = apply_content_filters(

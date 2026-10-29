@@ -1,0 +1,245 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The summary a filtered view reports describes the view, not the whole scan.
+
+Four mechanisms, each pinned against the behavior it replaced:
+
+* ``filter_summary`` defaulted every count to 0 when the results carried no
+  ``summary_stats`` (the workspace unified results file has none), so such a
+  scan read exactly like a clean one.
+* ``filter_actionable_only`` on results whose SARIF was asked for and is null
+  returned an empty findings list with no error, beside a nonzero
+  ``summary_stats.actionable``.
+* A ``scanners`` filter narrowed ``scanner_results`` and the SARIF findings but
+  left ``summary_stats``, ``actionable_findings`` and ``total_scanners`` at
+  whole-scan values, so the summary reported the other scanners' findings.
+* A ``severities`` filter zeroed the unselected severity counts but left
+  ``summary_stats.total`` and ``actionable`` at whole-scan values.
+"""
+
+import pytest
+
+from automated_security_helper.core.resource_management.result_filters import (
+    add_findings_list,
+    apply_content_filters,
+    filter_actionable_only,
+    filter_summary,
+)
+
+pytestmark = pytest.mark.unit
+
+
+def _scanner(status, counts, actionable, suppressed=0):
+    return {
+        "status": status,
+        "finding_count": sum(counts.values()),
+        "actionable_finding_count": actionable,
+        "suppressed_finding_count": suppressed,
+        "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "suppressed": suppressed,
+            **counts,
+        },
+    }
+
+
+def _results(with_summary_stats=True):
+    scanner_results = {
+        "bandit": _scanner("PASSED", {"high": 1, "low": 2}, actionable=1),
+        "semgrep": _scanner("FAILED", {"critical": 1, "medium": 1}, actionable=2),
+        "grype": _scanner("MISSING", {}, actionable=0),
+    }
+    results = {
+        "success": True,
+        "scan_id": "abc",
+        "status": "completed",
+        "is_complete": True,
+        "actionable_findings": 3,
+        "total_scanners": 2,
+        "raw_results": {
+            "metadata": {"generated_at": "2024-01-01T00:00:00"},
+            "scanner_results": scanner_results,
+        },
+    }
+    if with_summary_stats:
+        results["summary_stats"] = {
+            "severity_counts": {
+                "critical": 1,
+                "high": 1,
+                "medium": 1,
+                "low": 2,
+                "info": 0,
+                "suppressed": 0,
+            },
+            "total": 5,
+            "actionable": 3,
+            "passed": 1,
+            "failed": 1,
+            "missing": 1,
+            "skipped": 0,
+            "error": 0,
+        }
+    return results
+
+
+class TestFilterSummaryWithoutSummaryStats:
+    def test_counts_are_derived_from_the_scanners(self):
+        summary = filter_summary(_results(with_summary_stats=False))
+
+        by_severity = summary["findings_summary"]["by_severity"]
+        assert by_severity["critical"] == 1
+        assert by_severity["high"] == 1
+        assert by_severity["medium"] == 1
+        assert by_severity["low"] == 2
+        assert by_severity["total"] == 5
+        assert by_severity["actionable"] == 3
+        scan_stats = summary["findings_summary"]["scan_stats"]
+        assert scan_stats == {"passed": 1, "failed": 1, "missing": 1, "skipped": 0}
+
+    def test_nothing_to_count_from_reads_as_unknown_not_zero(self):
+        results = _results(with_summary_stats=False)
+        results["raw_results"]["scanner_results"] = {}
+
+        summary = filter_summary(results)
+
+        by_severity = summary["findings_summary"]["by_severity"]
+        assert by_severity["critical"] is None
+        assert by_severity["total"] is None
+        assert summary["findings_summary"]["scan_stats"]["passed"] is None
+
+    def test_recorded_summary_stats_still_win(self):
+        results = _results()
+        results["summary_stats"]["total"] = 7
+
+        assert filter_summary(results)["findings_summary"]["by_severity"]["total"] == 7
+
+
+class TestActionableOnlyRefusesAnUnlistableCount:
+    def test_null_sarif_with_actionable_findings_is_refused(self):
+        results = _results()
+        results["raw_results"]["sarif"] = None
+
+        with pytest.raises(ValueError, match="no SARIF"):
+            filter_actionable_only(results)
+
+    def test_null_sarif_with_nothing_actionable_passes(self):
+        results = _results()
+        results["raw_results"]["sarif"] = None
+        results["summary_stats"]["actionable"] = 0
+
+        filtered = filter_actionable_only(results)
+
+        assert filtered["summary_stats"]["total"] == 0
+        listed = add_findings_list(filtered)
+        assert listed["findings"] == []
+        assert listed["findings_count"] == 0
+
+    def test_absent_sarif_is_the_summary_path_and_passes(self):
+        """The summary and minimal levels never load the SARIF."""
+        filtered = filter_actionable_only(_results())
+
+        assert filtered["summary_stats"]["total"] == 3
+
+
+class TestAScannersFilterRecountsTheSummary:
+    def test_the_summary_follows_the_kept_scanners(self):
+        filtered = apply_content_filters(_results(), scanners="bandit")
+
+        stats = filtered["summary_stats"]
+        assert stats["severity_counts"] == {
+            "critical": 0,
+            "high": 1,
+            "medium": 0,
+            "low": 2,
+            "info": 0,
+            "suppressed": 0,
+        }
+        assert stats["total"] == 3
+        assert stats["actionable"] == 1
+        assert stats["passed"] == 1
+        assert stats["failed"] == 0
+        assert stats["missing"] == 0
+        assert filtered["actionable_findings"] == 1
+        assert filtered["total_scanners"] == 1
+
+    def test_the_summary_view_of_the_filtered_results_agrees(self):
+        summary = filter_summary(apply_content_filters(_results(), scanners="semgrep"))
+
+        by_severity = summary["findings_summary"]["by_severity"]
+        assert by_severity["critical"] == 1
+        assert by_severity["high"] == 0
+        assert by_severity["total"] == 2
+        assert by_severity["actionable"] == 2
+        assert summary["scanner_summary"]["total_scanners"] == 1
+
+    def test_flat_summary_stats_are_recounted_too(self):
+        results = _results()
+        results["summary_stats"] = {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 2,
+            "total": 5,
+            "actionable": 3,
+        }
+
+        stats = apply_content_filters(results, scanners="bandit")["summary_stats"]
+
+        assert stats["critical"] == 0
+        assert stats["high"] == 1
+        assert stats["low"] == 2
+        assert stats["total"] == 3
+        assert stats["actionable"] == 1
+
+
+class TestASeveritiesFilterRecountsTheTotal:
+    def test_the_total_is_the_selected_buckets(self):
+        filtered = apply_content_filters(_results(), severities="critical,high")
+
+        stats = filtered["summary_stats"]
+        assert stats["severity_counts"]["critical"] == 1
+        assert stats["severity_counts"]["high"] == 1
+        assert stats["severity_counts"]["low"] == 0
+        assert stats["total"] == 2
+
+    def test_actionable_is_recounted_from_the_sarif_when_present(self):
+        def result(rule, severity, scanner="bandit"):
+            return {
+                "ruleId": rule,
+                "level": "note",
+                "properties": {"scanner_name": scanner, "issue_severity": severity},
+            }
+
+        results = _results()
+        results["raw_results"]["sarif"] = {
+            "runs": [
+                {
+                    "results": [
+                        result("B-HIGH", "HIGH"),
+                        result("B-LOW", "LOW"),
+                        result("S-CRIT", "CRITICAL", "semgrep"),
+                    ]
+                }
+            ]
+        }
+        results["raw_results"]["severity_thresholds"] = {"": "MEDIUM"}
+
+        filtered = apply_content_filters(results, severities="high,low")
+
+        # HIGH is at the threshold and kept; LOW is kept by the filter but is
+        # not actionable; the critical one is filtered out.
+        assert filtered["summary_stats"]["actionable"] == 1
+        assert filtered["actionable_findings"] == 1
+        assert filtered["summary_stats"]["total"] == 3
+
+    def test_actionable_stays_when_the_sarif_is_not_loaded(self):
+        """Without the SARIF the per-severity split of the actionable count is
+        not in the document; the recorded value is kept rather than guessed."""
+        filtered = apply_content_filters(_results(), severities="low")
+
+        assert filtered["summary_stats"]["actionable"] == 3

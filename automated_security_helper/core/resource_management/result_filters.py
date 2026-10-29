@@ -12,6 +12,55 @@ import copy
 from typing import Any, Dict, List, Optional
 from automated_security_helper.utils.severity_ladder import result_severity
 
+#: The per-severity buckets a summary carries, in the order the summary lists
+#: them. ``suppressed`` is a bucket of its own, as it is in SummaryStats.
+_SEVERITY_KEYS = ("critical", "high", "medium", "low", "info", "suppressed")
+
+#: ``scanner_results[*].status`` -> the SummaryStats outcome counter it lands in.
+_OUTCOME_COUNTERS = {
+    "PASSED": "passed",
+    "FAILED": "failed",
+    "MISSING": "missing",
+    "SKIPPED": "skipped",
+    "ERROR": "error",
+}
+
+
+def _count(value: Any) -> int:
+    """*value* as a count: an int that is not a bool, else 0."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
+    """The SummaryStats fields recomputed from the per-scanner entries.
+
+    What a results document's ``summary_stats`` would say for exactly these
+    scanners: per-severity counts and ``total``, ``actionable`` and
+    ``suppressed`` summed over them, and the outcome counters from their
+    statuses. The summary of a filtered view is derived from this rather than
+    copied from the whole scan's stats.
+    """
+    counts = dict.fromkeys(_SEVERITY_KEYS, 0)
+    stats: Dict[str, Any] = {
+        "total": 0,
+        "actionable": 0,
+        **dict.fromkeys(_OUTCOME_COUNTERS.values(), 0),
+    }
+    for data in scanner_results.values():
+        if not isinstance(data, dict):
+            continue
+        for severity, value in (data.get("severity_counts") or {}).items():
+            bucket = str(severity).lower()
+            if bucket in counts:
+                counts[bucket] += _count(value)
+        stats["total"] += _count(data.get("finding_count"))
+        stats["actionable"] += _count(data.get("actionable_finding_count"))
+        counter = _OUTCOME_COUNTERS.get(str(data.get("status") or "").upper())
+        if counter is not None:
+            stats[counter] += 1
+    stats["severity_counts"] = counts
+    return stats
+
 
 def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     """Filter results to return only summary information."""
@@ -42,13 +91,28 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     summary_stats = results.get("summary_stats") or {}
+    scanner_results = raw_results.get("scanner_results", {})
+    if not summary_stats and scanner_results:
+        # A results document with no summary_stats (the workspace unified
+        # results file) still carries every scanner's own counts, so the
+        # summary is derived from them. Defaulting each count to 0 instead
+        # reported such a scan as clean, indistinguishable from one that found
+        # nothing.
+        summary_stats = _stats_of_scanners(scanner_results)
     # SummaryStats serializes its per-severity tallies under "severity_counts"
     # (a ScannerSeverityCount), not at the top level. Reading the top level only
     # made every severity count zero for every real scan. The flat keys are
     # still honored as a fallback for a caller that hands in a flattened dict.
     severity_counts = summary_stats.get("severity_counts") or {}
 
-    def _severity(name: str) -> int:
+    def _stat(name: str) -> Optional[int]:
+        # None, not 0, when the document records nothing at all: a count the
+        # results do not carry is unknown, and a zero here reads as "none found".
+        return summary_stats.get(name, 0) if summary_stats else None
+
+    def _severity(name: str) -> Optional[int]:
+        if not summary_stats:
+            return None
         return severity_counts.get(name, summary_stats.get(name, 0))
 
     summary["findings_summary"] = {
@@ -59,18 +123,16 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
             "low": _severity("low"),
             "info": _severity("info"),
             "suppressed": _severity("suppressed"),
-            "total": summary_stats.get("total", 0),
-            "actionable": summary_stats.get("actionable", 0),
+            "total": _stat("total"),
+            "actionable": _stat("actionable"),
         },
         "scan_stats": {
-            "passed": summary_stats.get("passed", 0),
-            "failed": summary_stats.get("failed", 0),
-            "missing": summary_stats.get("missing", 0),
-            "skipped": summary_stats.get("skipped", 0),
+            "passed": _stat("passed"),
+            "failed": _stat("failed"),
+            "missing": _stat("missing"),
+            "skipped": _stat("skipped"),
         },
     }
-
-    scanner_results = raw_results.get("scanner_results", {})
     summary["scanner_summary"] = {
         "by_scanner": {},
         "total_scanners": len(scanner_results),
@@ -143,11 +205,24 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
             were judged by (``raw_results["severity_thresholds"]``, written by
             ``scan_tracking.get_scan_results(include_sarif=True)``). Without them
             the actionable set cannot be told apart, and keeping either too much
-            or nothing would read as an answer.
+            or nothing would read as an answer. Also when the SARIF was asked
+            for and the document has none (``raw_results["sarif"]`` is None)
+            while ``summary_stats.actionable`` is nonzero: the scan counted
+            actionable findings that cannot be listed, and an empty list beside
+            that count would read as "none".
     """
     filtered_results = copy.deepcopy(results)
 
-    if "raw_results" in filtered_results and "sarif" in filtered_results["raw_results"]:
+    raw = filtered_results.get("raw_results")
+    if isinstance(raw, dict) and "sarif" in raw and raw["sarif"] is None:
+        stats = filtered_results.get("summary_stats") or {}
+        if _count(stats.get("actionable")) > 0:
+            raise ValueError(
+                "The scan's results carry no SARIF, so its "
+                f"{stats.get('actionable')} actionable finding(s) cannot be listed"
+            )
+
+    if isinstance(raw, dict) and "sarif" in raw and isinstance(raw["sarif"], dict):
         sarif = filtered_results["raw_results"]["sarif"]
         thresholds = filtered_results["raw_results"].get("severity_thresholds")
         if "runs" in sarif:
@@ -323,13 +398,43 @@ def apply_content_filters(
             if name.lower() in scanner_list
         }
 
-    _severity_keys = {"critical", "high", "medium", "low", "info", "suppressed"}
+    _severity_keys = set(_SEVERITY_KEYS)
 
     def _zero_unselected(counts: Dict[str, Any], selected: List[str]) -> Dict[str, Any]:
         return {
             key: (value if key not in _severity_keys or key.lower() in selected else 0)
             for key, value in counts.items()
         }
+
+    # The summary follows the scanners kept. summary_stats, actionable_findings
+    # and total_scanners are whole-scan values in the producer's output; left as
+    # they were under a scanners filter, the summary reported other scanners'
+    # findings beside a scanner_results map that no longer held them.
+    if scanner_list and isinstance(filtered_results.get("summary_stats"), dict):
+        kept = (filtered_results.get("raw_results") or {}).get("scanner_results")
+        if isinstance(kept, dict):
+            recount = _stats_of_scanners(kept)
+            summary_stats = dict(filtered_results["summary_stats"])
+            for key, value in recount.items():
+                if key == "severity_counts":
+                    continue
+                if key in summary_stats:
+                    summary_stats[key] = value
+            if isinstance(summary_stats.get("severity_counts"), dict):
+                summary_stats["severity_counts"] = {
+                    **summary_stats["severity_counts"],
+                    **recount["severity_counts"],
+                }
+            for bucket, value in recount["severity_counts"].items():
+                if bucket in summary_stats:
+                    summary_stats[bucket] = value
+            filtered_results["summary_stats"] = summary_stats
+            if "actionable_findings" in filtered_results:
+                filtered_results["actionable_findings"] = recount["actionable"]
+            if "total_scanners" in filtered_results:
+                filtered_results["total_scanners"] = (
+                    recount["passed"] + recount["failed"]
+                )
 
     if severity_list and "summary_stats" in filtered_results:
         summary_stats = _zero_unselected(
@@ -341,6 +446,38 @@ def apply_content_filters(
             summary_stats["severity_counts"] = _zero_unselected(
                 summary_stats["severity_counts"], severity_list
             )
+        # The total is the findings in the selected buckets, not the whole
+        # scan's: a view that lists only critical and high findings and says
+        # "total 17" reports findings it does not show.
+        buckets = (
+            summary_stats["severity_counts"]
+            if isinstance(summary_stats.get("severity_counts"), dict)
+            else summary_stats
+        )
+        if "total" in summary_stats:
+            summary_stats["total"] = sum(
+                _count(buckets.get(bucket)) for bucket in _SEVERITY_KEYS
+            )
+        # actionable is recounted when the findings it counts are at hand: the
+        # SARIF results kept above, judged by the thresholds the scan recorded.
+        # Without the SARIF (the summary and minimal levels never load it) the
+        # per-severity split of the actionable count is not in the document,
+        # and the whole-scan value stays.
+        if "actionable" in summary_stats and isinstance(sarif, dict):
+            thresholds = (filtered_results.get("raw_results") or {}).get(
+                "severity_thresholds"
+            )
+            if isinstance(thresholds, dict):
+                summary_stats["actionable"] = sum(
+                    1
+                    for run in sarif.get("runs") or []
+                    for result in run.get("results") or []
+                    if _counts_toward_exit_2(result, _threshold_for(result, thresholds))
+                )
+                if "actionable_findings" in filtered_results:
+                    filtered_results["actionable_findings"] = summary_stats[
+                        "actionable"
+                    ]
         filtered_results["summary_stats"] = summary_stats
 
     filter_metadata: Dict[str, Any] = {}
@@ -410,8 +547,9 @@ def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
     """
     findings_list = []
 
-    # Extract findings from SARIF runs
-    sarif = results.get("raw_results", {}).get("sarif", {})
+    # Extract findings from SARIF runs. ``sarif`` is None for a document that
+    # was asked for its SARIF and has none (scan_tracking.get_scan_results).
+    sarif = results.get("raw_results", {}).get("sarif") or {}
     if "runs" in sarif:
         for run in sarif["runs"]:
             for result in run.get("results", []):
