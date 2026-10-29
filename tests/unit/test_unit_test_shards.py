@@ -2318,6 +2318,63 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
 
 
 @pytest.mark.unit
+class TestTheCombineCommandRequiresTheTier:
+    """``--marker`` names the tier whose artifacts the gate combines, and has no default.
+
+    The gate rebuilds the artifact name from its options; the tier segment is the one that
+    tells the unit tier's artifacts from another tier's. Before the option was required,
+    a command line that left it out rebuilt the untiered name (which no job uploads) and
+    combined whatever set it found under it, so a combine over an unmarked shard set
+    could run to a result without having read the unit tier at all.
+    """
+
+    def _main(self, monkeypatch, results: Path, *extra: str) -> int:
+        monkeypatch.setenv("RUNNER_ARCH", "X64")
+        return COMBINE.main(
+            [
+                "--results-dir",
+                str(results),
+                "--os",
+                "ubuntu-latest",
+                "--python-version",
+                COVERAGE_PYTHON,
+                "--fail-under",
+                "80",
+                *extra,
+            ]
+        )
+
+    def test_a_run_without_a_marker_is_a_usage_error_before_any_artifact_is_read(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Exit 64 and a line naming --marker; the planted untiered set is never opened.
+
+        At the old shape this call looked for the untiered name, found the planted
+        directory, and returned 1 for its missing data file: the set was read.
+        """
+        results = tmp_path / "results"
+        untiered = COMBINE.artifact_prefix("ubuntu-latest", COVERAGE_PYTHON, "X64")
+        (results / f"{untiered}-shard1of1").mkdir(parents=True)
+        assert self._main(monkeypatch, results) == 64
+        err = capsys.readouterr().err
+        assert "--marker" in err, err
+        assert "shard" not in err, err
+
+    def test_the_same_run_with_the_tier_named_reads_the_set(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The control: with --marker unit the gate gets as far as the unit tier's set."""
+        results = tmp_path / "results"
+        results.mkdir()
+        assert self._main(monkeypatch, results, "--marker", "unit") == 1
+        assert "no shard artifacts found" in capsys.readouterr().err
+
+    def test_the_self_test_still_needs_no_marker(self):
+        """Why the requirement is not argparse's required=True (which would refuse this)."""
+        assert COMBINE.main(["--self-test"]) == 0
+
+
+@pytest.mark.unit
 class TestTheUnitTestMatrixIsSplitByOs:
     """The three unit-test jobs are one test matrix cut by runner pool, and stay one.
 

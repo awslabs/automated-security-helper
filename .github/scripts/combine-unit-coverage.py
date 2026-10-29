@@ -26,7 +26,10 @@ The set is named by the artifact name up to the shard suffix, which the run-unit
 action builds from the operating system, the architecture, the Python version and the
 tier marker. This script rebuilds that name from ``--os``, ``--python-version``,
 ``--marker`` and the runner's own ``RUNNER_ARCH``, so it must run on the same kind of
-runner as the runs it combines. Without ``--marker`` the name has no tier segment.
+runner as the runs it combines. ``--marker`` is required, with no default: without it the
+name would have no tier segment, so a combine that named no tier would look for the
+untiered artifact name no job uploads, or combine whatever set it found under it, and a
+gate run over an unmarked shard set could pass without having read the unit tier at all.
 That is also what makes path remapping unnecessary: coverage data records absolute source
 paths, and a runner of the same image has the same workspace path, so the combine finds
 every source file where the shard recorded it. A path that did not match would make
@@ -226,8 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python-version", help="the Python version of the shards")
     parser.add_argument(
         "--marker",
-        default=None,
-        help="the tier marker in the artifact names, e.g. unit (default: none)",
+        help="the tier marker in the artifact names, e.g. unit (required, no default)",
     )
     parser.add_argument(
         "--fail-under", type=float, help="minimum total coverage, percent"
@@ -250,13 +252,16 @@ def main(argv: list[str] | None = None) -> int:
         not args.results_dir
         or not args.os
         or not args.python_version
+        or not args.marker
         or args.fail_under is None
     ):
-        # Not parser.error(): argparse exits 2 there, which is coverage's own status for
-        # a run below the threshold.
+        # Not parser.error(), and not argparse's required=True: argparse exits 2 there,
+        # which is coverage's own status for a run below the threshold, and a required
+        # option would also refuse --self-test. --marker is required here for the reason
+        # the module docstring gives: without a tier the gate reads no tier.
         print(
-            "combine-unit-coverage: --results-dir, --os, --python-version and "
-            "--fail-under are required",
+            "combine-unit-coverage: --results-dir, --os, --python-version, --marker "
+            "and --fail-under are required",
             file=sys.stderr,
         )
         return 64
