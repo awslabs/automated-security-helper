@@ -12,7 +12,7 @@ tests/unit/cli/inspect/test_finding_text_is_not_markup.py fails when a module he
 hands text to a markup-reading API any other way.
 """
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, BinaryIO, Callable, Dict, List, Optional
 
 import typer
@@ -59,6 +59,10 @@ from automated_security_helper.models.core import (
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.path_matching import (
+    PathNotExpressible,
+    literal_path_pattern,
+)
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -226,6 +230,29 @@ def _source_excerpt(finding: dict, scan_root: Optional[Path]) -> Optional[str]:
         f"{'→ ' if number == line_number else '  '}{number}: {text}\n"
         for number, text in enumerate(lines, start=first)
     )
+
+
+def _suppression_path(file_value: object) -> str:
+    """The suppression ``path`` that names the file of a finding, and no other.
+
+    The finding's file is the results' recorded URI, written as the scanner wrote
+    it: ``./src/x.py`` or ``src//x.py``. The scan matches a suppression against the
+    folded spelling (utils/sarif_utils.py's ``_matched_path_text``: ``.``
+    components and repeated separators folded, ``..`` kept), so the recorded
+    spelling is folded the same way here, or the saved entry never matched its
+    finding. A URI with a scheme and an authority is left as written, as the scan
+    leaves it.
+
+    Then written as a pattern that matches that one path
+    (``path_matching.literal_path_pattern``): ``[``, ``*`` and ``?`` in a file name
+    are glob syntax in a pattern, so ``x[1].py`` as a pattern matched ``x1.py``
+    and ``a*b.py`` matched every file between. A path holding a backslash has no
+    pattern of its own (``PathNotExpressible``, raised to the caller).
+    """
+    text = str(file_value)
+    if "://" not in text:
+        text = PurePosixPath(text).as_posix()
+    return literal_path_pattern(text)
 
 
 def _text(value: object) -> str:
@@ -478,10 +505,40 @@ class SuppressDialog(ModalScreen[Optional[str]]):
                     expiration_input.focus()
                     return
 
+            # A suppression is a rule at a path. A finding with no file was
+            # written with the path "*", and one with no rule id with no rule:
+            # an entry that never applied to the finding it was saved for and
+            # suppressed the rule in every file, or every rule at the path. The
+            # path is the file's own pattern (_suppression_path), so the entry
+            # matches that file as the scan spells it and no other.
+            if not self.finding.get("rule_id"):
+                problem = (
+                    "This finding reports no rule id, so no suppression names it: "
+                    "one saved without a rule would suppress every rule at this "
+                    "path. Suppress it in the scanner's own configuration instead."
+                )
+            elif not self.finding.get("file"):
+                problem = (
+                    "This finding reports no file, so no suppression names it: "
+                    "one saved without a path would suppress this rule in every "
+                    "file. Suppress it in the scanner's own configuration instead."
+                )
+            else:
+                problem = None
+                try:
+                    path = _suppression_path(self.finding["file"])
+                except PathNotExpressible as exc:
+                    problem = f"Could not save the suppression. {exc}"
+            if problem is not None:
+                error = self.query_one("#suppression-error", Static)
+                error.update(_shown(problem))
+                error.display = True
+                return
+
             try:
                 suppression = AshSuppression(
-                    rule_id=self.finding.get("rule_id"),
-                    path=self.finding.get("file") or "*",
+                    rule_id=self.finding["rule_id"],
+                    path=path,
                     reason=reason,
                     expiration=expiration,
                     line_start=int(self.finding["line"])
