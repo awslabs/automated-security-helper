@@ -53,7 +53,7 @@ import errno
 import os
 import re
 import stat
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable, Mapping, Optional
 
 from automated_security_helper.utils.get_scan_set import (
@@ -715,13 +715,19 @@ def _started_by_the_launcher(
 
     The image sets ASH_IN_CONTAINER whoever runs it, so that alone does not say
     the launcher did: the launcher always sets ASH_ACTUAL_SOURCE_DIR, and it and
-    the legacy wrappers mount the scanned directory at /src.
+    the legacy wrappers mount the scanned directory at /src. A directory below
+    /src counts as well: a workspace project, or a hand-written ``docker run`` of
+    the image scanning a subdirectory of the mount, is inside the same mount, and
+    git there sees only the mount, so its label would be the container's, not the
+    repository's.
     """
     if not _in_container(environ):
         return False
     if environ.get(_LAUNCHER_SOURCE_ENV):
         return True
-    return Path(source_dir).resolve().as_posix() == _CONTAINER_SOURCE_MOUNT
+    resolved = PurePosixPath(Path(source_dir).resolve().as_posix())
+    mount = PurePosixPath(_CONTAINER_SOURCE_MOUNT)
+    return resolved == mount or resolved.is_relative_to(mount)
 
 
 def _a_git_entry_may_exist(source_dir: Path | str, environ: Mapping[str, str]) -> bool:
