@@ -128,7 +128,18 @@ jobs:
   # ---------------------------------------------------------------------------
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    # The single-runner gate jobs (lint, actionlint, snapshot-trailers, required-checks)
+    # run on the arm64 Ubuntu label rather than ubuntu-latest. Nothing in them depends on
+    # the architecture: lint installs ASH with uv from the same dependency closure that
+    # ensure-cache already resolves on ubuntu-24.04-arm, and the other three run stdlib
+    # Python scripts. Measured once, 2026-10-29 19:24Z to 20:31Z on run 40939758029:
+    # the ubuntu-latest hosted pool queued jobs a median 4310 s (n=46) while
+    # ubuntu-24.04-arm queued them a median 21 s (n=76); at 13Z the same label had queued
+    # in 4 s, so this is the pool's variance, not the repository's. The label choice
+    # trades a 72-minute tail on a bad hour for a different pool; it is not a measured
+    # guarantee that the arm pool stays quiet. ensure-cache keeps its ubuntu-latest
+    # matrix entry because that entry writes the x86 caches every ubuntu-latest job reads.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -533,7 +544,8 @@ jobs:
   # there is no setup-python or uv step to fail on a registry round trip.
   snapshot-trailers:
     name: snapshot-trailers
-    runs-on: ubuntu-latest
+    # arm64 for the reason given on `lint`; the script is stdlib Python plus git.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2744,7 +2756,8 @@ jobs:
       - homebrew-macos
       - sandbox
       - sandbox-scanner-parity
-    runs-on: ubuntu-latest
+    # arm64 for the reason given on `lint`; the census script is stdlib Python.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     steps:
       # This job needed no checkout while its only input was the `needs` context. It needs one
