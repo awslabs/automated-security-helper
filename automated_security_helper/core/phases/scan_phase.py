@@ -351,19 +351,31 @@ class ScanPhase(EnginePhase):
             "name it is selected and reported by, and cannot be empty or end in "
             "'Scanner'."
         )
-        ASH_LOGGER.error(refusal)
+        return self._record_scanner_error(display_name, refusal, aggregated_results)
+
+    def _record_scanner_error(
+        self, display_name: str, error_text_: str, aggregated_results: Any
+    ) -> AshAggregatedResults:
+        """Record ERROR for a constructed scanner that did not run, with *error_text_*
+        as its one error, and leave it out of the run.
+
+        ERROR, not SKIPPED: the operator did not leave the scanner out, and the
+        completeness gate has to see it. ``dependencies_satisfied`` is True because
+        no dependency was checked (the construction-failure row says why False
+        would mislead).
+        """
+        ASH_LOGGER.error(error_text_)
         container = ScanResultsContainer(
             scanner_name=display_name,
             status=ScannerStatus.ERROR,
             duration=None,
-            errors=[refusal],
+            errors=[error_text_],
         )
         aggregated_results = self._process_results(
             results=container, aggregated_results=aggregated_results
         )
         aggregated_results.scanner_results[display_name] = ScannerTargetStatusInfo(
             status=ScannerStatus.ERROR,
-            # No dependency was checked; see the construction-failure row.
             dependencies_satisfied=True,
             excluded=False,
         )
@@ -1083,12 +1095,14 @@ class ScanPhase(EnginePhase):
                         # selected. The shared helper is asked without its dependency
                         # check, which ScanPhase makes itself below so that an absent
                         # tool is recorded MISSING rather than dropped.
+                        check_failures: Dict[int, str] = {}
                         passes_python_only = bool(
                             self.filter_enabled_plugins(
                                 plugin_instances=[plugin_instance],
                                 plugin_context=self.plugin_context,
                                 python_only=python_based_plugins_only,
                                 check_dependencies=False,
+                                failures=check_failures,
                             )
                         )
                         if python_based_plugins_only:
@@ -1096,6 +1110,20 @@ class ScanPhase(EnginePhase):
                                 f"Scanner {display_name}: Python-only check result: "
                                 f"{passes_python_only}"
                             )
+                        if id(plugin_instance) in check_failures:
+                            # The check RAISED: the filter dropped the scanner,
+                            # but a selected scanner whose own check failed is a
+                            # failure to record, not an exclusion. Recorded as
+                            # SKIPPED "not Python-only", the loss was invisible
+                            # to the completeness gate.
+                            aggregated_results = self._record_scanner_error(
+                                display_name,
+                                f"Scanner {display_name} was not run: its enabled or "
+                                f"Python-only check raised "
+                                f"({check_failures[id(plugin_instance)]})",
+                                aggregated_results,
+                            )
+                            continue
                         if not passes_python_only:
                             aggregated_results = self._record_scanner_not_selected(
                                 display_name,
@@ -1795,18 +1823,16 @@ class ScanPhase(EnginePhase):
 
             # A scanner busy in Python, not waiting on a child process, returns
             # after a cancel rather than stopping at it, and when it was the last
-            # to start no scanner start was left to check the cancel. Without
-            # this, a cancelled scan wrote ash_aggregated_results.json here, and
-            # with no previous results to put back nothing removed it. A no-op
+            # to start no scanner start was left to check the cancel. A no-op
             # outside a cancellable scan; see core/cancellation.py.
             raise_if_cancelled()
 
-            # Save AshAggregatedResults as JSON alongside results if output_dir is configured
-            if self.plugin_context.output_dir:
-                ASH_LOGGER.debug(
-                    f"Saving AshAggregatedResults to {self.plugin_context.output_dir}"
-                )
-                aggregated_results.save_model(self.plugin_context.output_dir)
+            # The results file is not written here. It used to be, and that was
+            # before the engine's changed-files narrowing, final suppression pass,
+            # metrics rebuild and report phase, while the MCP progress tracker
+            # reads the file's existence as the scan being complete. The
+            # orchestrator writes it once every phase has run
+            # (ASHScanOrchestrator._execute_scan), and the CLI rewrites it after.
 
             # The metrics consistency check is not run here: neither side of it is
             # final yet. See _validate_metrics_consistency.

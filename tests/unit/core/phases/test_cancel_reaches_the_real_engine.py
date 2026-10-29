@@ -1023,14 +1023,17 @@ def test_the_engine_starts_no_phase_after_a_cancel(tmp_path):
 def test_a_cancel_after_the_last_scanner_starts_writes_no_results_file(
     tmp_path, monkeypatch, cancelled
 ):
-    """The scan phase checks for a cancel before it writes the results file.
+    """A scan cancelled after its last scanner started writes no results file.
 
     A scanner busy in Python, rather than waiting on a child process, does not
     stop at a cancel: it returns. When it was the last to start, no scanner start
     was left to check the cancel, and the scan phase went on to write
     ash_aggregated_results.json for a scan the client had been told was
     cancelled. With no previous results to put back, nothing removed it. The
-    control, with no cancel, shows the phase does reach that write here.
+    scan phase now checks for the cancel at its end and writes nothing itself:
+    the orchestrator writes the results file once every phase has run, so the
+    scan is driven through it here. The control, with no cancel, shows the run
+    does reach that write.
 
     The scan phase checks each scanner's dependencies, which ran ``uv tool list``
     and ``uv tool run ... --version`` for bandit, checkov, detect-secrets and
@@ -1049,7 +1052,6 @@ def test_a_cancel_after_the_last_scanner_starts_writes_no_results_file(
         show_progress=False,
         show_summary=False,
     )
-    engine = orchestrator.execution_engine
     event = threading.Event()
 
     def the_last_scanner_returns(self, aggregated_results):
@@ -1064,14 +1066,14 @@ def test_a_cancel_after_the_last_scanner_starts_writes_no_results_file(
     ):
         ended = None
         try:
-            engine.execute_phases(phases=["scan"])
+            orchestrator.execute_scan(phases=["scan"])
         except BaseException as error:
             ended = error
 
     written = (output / "ash_aggregated_results.json").exists()
     if cancelled:
-        assert not written, "the scan phase wrote results after the cancel"
+        assert not written, "the scan wrote results after the cancel"
         assert isinstance(ended, ScanCancelled), repr(ended)
     else:
         assert ended is None, repr(ended)
-        assert written, "the control did not reach the scan phase's write"
+        assert written, "the control did not reach the results write"
