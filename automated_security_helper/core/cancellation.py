@@ -661,11 +661,6 @@ def stop_grace_in_progress() -> Iterator[None]:
             _GRACE_WAITS -= 1
 
 
-def grace_wait_in_progress() -> bool:
-    """Whether a stop is waiting out a tool's grace period on some thread."""
-    return _GRACE_WAITS > 0
-
-
 def shutdown_requested() -> bool:
     """Whether a shutdown signal has asked this process's registered scans to stop.
 

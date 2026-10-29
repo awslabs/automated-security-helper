@@ -285,13 +285,14 @@ def _unconstructed_scanner_name(plugin_config: Any, plugin_class: type) -> str:
 def _is_one_path_component(name: str) -> bool:
     """Whether *name* can only ever name one entry of one directory.
 
-    No path separator of either kind, not the current or parent directory,
-    no NUL. The check is on the characters, not the platform: a results tree
-    written on one platform is read on another.
+    No path separator of either kind, no colon (a Windows drive letter,
+    ``C:x``, would replace the ``scanners/`` base), not the current or parent
+    directory, no NUL. The check is on the characters, not the platform: a
+    results tree written on one platform is read on another.
     """
     if name in (".", "..") or "\x00" in name:
         return False
-    return "/" not in name and "\\" not in name
+    return "/" not in name and "\\" not in name and ":" not in name
 
 
 class ScanPhase(EnginePhase):

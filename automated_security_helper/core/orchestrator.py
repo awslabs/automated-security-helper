@@ -1061,6 +1061,42 @@ class ASHScanOrchestrator(BaseModel):
             else:
                 options.severity_threshold = tightened
 
+    def _writes_results_file(self, phases: List[str]) -> bool:
+        """Whether this run owns the results file: a scan ran (not a report over
+        existing results) and there is an output directory to write into."""
+        return bool(
+            "scan" in phases and self.existing_results_path is None and self.output_dir
+        )
+
+    def _write_results_after_failure(self, phases: List[str]) -> None:
+        """Write the results the engine holds when a later phase raised.
+
+        The scan phase used to write ash_aggregated_results.json at its own
+        end, so a report phase that raised still left the scan's results on
+        disk for a later --use-existing. The one write now sits after every
+        phase; this keeps that file on a failure after the scan phase, from
+        the model the engine built. Nothing is written when the engine holds
+        no model (the failure came before the scan phase) or when this run
+        does not own the file. A write that fails is logged, never raised: the
+        original failure is what the caller sees.
+        """
+        if not self._writes_results_file(phases):
+            return
+        engine = self.execution_engine
+        results = getattr(engine, "_asharp_model", None) if engine else None
+        if not isinstance(results, AshAggregatedResults):
+            return
+        try:
+            results.save_model(self.output_dir)
+            ASH_LOGGER.info(
+                f"Saved the scan's results to {self.output_dir} before the failure "
+                f"is reported"
+            )
+        except Exception as e:
+            ASH_LOGGER.warning(
+                f"Could not save the scan's results after the failure: {error_text(e)}"
+            )
+
     def _scanner_options(self) -> List[Tuple[str, Any]]:
         """Each configured scanner's ``options``: declared scanners and extra ones."""
         segment = getattr(self.config, "scanners", None)
@@ -1463,6 +1499,13 @@ class ASHScanOrchestrator(BaseModel):
                 ASH_LOGGER.debug("Scan execution completed successfully")
             except Exception as e:
                 ASH_LOGGER.error(f"Execution failed: {error_text(e, values)}")
+                # The scan phase used to write the results file at its own
+                # end, so a report phase that raised still left the scan's
+                # results for a later --use-existing. The write moved below
+                # this block; a failure after the scan phase keeps that file
+                # by writing what the engine holds. A cancel is not an
+                # Exception and still writes nothing.
+                self._write_results_after_failure(phases)
                 raise
 
             # Add config resolution warnings to validation checkpoints
@@ -1491,14 +1534,18 @@ class ASHScanOrchestrator(BaseModel):
             # returns; a direct caller of the orchestrator keeps this one as the
             # final file. Not for a report over existing results, which rewrites
             # nothing of the scan it reports on.
-            if (
-                "scan" in phases
-                and self.existing_results_path is None
-                and self.output_dir
-                and isinstance(asharp_model_results, AshAggregatedResults)
-            ):
-                ASH_LOGGER.debug(f"Saving AshAggregatedResults to {self.output_dir}")
-                asharp_model_results.save_model(self.output_dir)
+            if self._writes_results_file(phases):
+                if isinstance(asharp_model_results, AshAggregatedResults):
+                    ASH_LOGGER.debug(
+                        f"Saving AshAggregatedResults to {self.output_dir}"
+                    )
+                    asharp_model_results.save_model(self.output_dir)
+                else:
+                    ASH_LOGGER.warning(
+                        f"The engine returned {type(asharp_model_results).__name__}, "
+                        f"not AshAggregatedResults; no results file was written to "
+                        f"{self.output_dir}"
+                    )
 
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():

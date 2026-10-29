@@ -82,14 +82,14 @@ class TestAFirstCtrlCDuringAGraceWaitLatchesWithoutInterrupting:
         monkeypatch.setattr(cancellation, "_GRACE_WAITS", 0)
 
         with cancellation.stop_grace_in_progress():
-            assert cancellation.grace_wait_in_progress() is True
+            assert cancellation._GRACE_WAITS == 1
             cancellation._handle_sigint(signal.SIGINT, None)
 
         # Red at the base: the context manager did not exist; the handler
         # chained the default handler, which raises KeyboardInterrupt.
         assert chained == []
         assert cancellation._SIGINT_SEEN is True
-        assert cancellation.grace_wait_in_progress() is False
+        assert cancellation._GRACE_WAITS == 0
 
     def test_outside_a_grace_wait_the_first_ctrl_c_still_interrupts(self, monkeypatch):
         """The control: the interrupt arm of a command still runs."""

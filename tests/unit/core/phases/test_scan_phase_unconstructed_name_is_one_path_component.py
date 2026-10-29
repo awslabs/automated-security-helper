@@ -113,7 +113,8 @@ class _Boom:
 
 class TestTheNameOfAnUnconstructedScanner:
     @pytest.mark.parametrize(
-        "name", ["../escaped", "sub/dir", "back\\slash", "..", ".", "nul\x00name"]
+        "name",
+        ["../escaped", "sub/dir", "back\\slash", "..", ".", "nul\x00name", "C:x"],
     )
     def test_a_name_that_is_a_path_falls_back_to_the_class_key(self, name):
         # Red at the base: any non-empty string was returned as it was.
