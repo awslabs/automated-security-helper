@@ -2044,12 +2044,21 @@ def apply_aggregated_suppressions(
         # has no run ID and may run outside git, where git's answer is that
         # nothing is committed, so deciding again dropped a committed file every
         # shard kept. The merge keeps what the shards kept.
+        # The source directory's basename is not stripped off the URIs either.
+        # The pass strips it for offline opengrep, which writes URIs prefixed with
+        # the scanned directory's name; the merged URIs are already relative to
+        # each shard's scanned tree, and the merge's source directory is the
+        # collector's working directory, so the strip read ``src/a.py`` as
+        # ``a.py`` whenever the collector ran from a directory named ``src``, and
+        # every suppression, ignore path and finding id keyed on the path moved
+        # with it.
         if not plugin_context.ignore_suppressions:
             merged.sarif = apply_suppressions_to_sarif(
                 sarif_report=merged.sarif,
                 plugin_context=plugin_context,
                 used_suppressions=getattr(merged, "used_suppressions", None),
                 exclude_output_dir=False,
+                strip_source_dir_basename=False,
             )
         else:
             lift_ash_suppressions(merged.sarif)

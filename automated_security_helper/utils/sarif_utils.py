@@ -1045,9 +1045,20 @@ class _OutputDirExclusion:
     ``apply_suppressions_to_sarif`` and ``exclude_output_dir_results`` so both
     decide the same way, and ``normalize`` is the URI reading the rest of
     ``apply_suppressions_to_sarif`` uses too.
+
+    With ``strip_source_dir_basename`` False, ``normalize`` never strips the
+    source directory's basename off a relative URI. ``ash merge`` passes False:
+    every URI it reads is already relative to a shard's scanned tree, and the
+    merge's source directory is the collector's working directory, so the
+    offline-opengrep heuristic below would strip a real top-level directory
+    (``src/a.py`` read as ``a.py`` when the collector runs from a directory
+    named ``src``) and move every path-matched suppression, ignore path and
+    finding id with it.
     """
 
-    def __init__(self, plugin_context: PluginContext) -> None:
+    def __init__(
+        self, plugin_context: PluginContext, *, strip_source_dir_basename: bool = True
+    ) -> None:
         # Resolved once, outside the per-result loop (bug #46).
         self.output_dir = plugin_context.output_dir.resolve()
         self.work_dir = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
@@ -1067,7 +1078,11 @@ class _OutputDirExclusion:
         # scanner artifact. Example: source_dir="/src" with /src/src/ existing -> skip.
         self.source_dir_basename: PurePosixPath | None = None
         basename = self.source_dir.name
-        if basename and not (self.source_dir / basename).exists():
+        if (
+            strip_source_dir_basename
+            and basename
+            and not (self.source_dir / basename).exists()
+        ):
             self.source_dir_basename = PurePosixPath(basename)
         self._resolve_cache: dict[str, Path | None] = {}
         # Results removed, reported by ``report``. Counted because this can remove
@@ -1253,6 +1268,7 @@ def apply_suppressions_to_sarif(
     plugin_context: PluginContext,
     used_suppressions: set | None = None,
     exclude_output_dir: bool = True,
+    strip_source_dir_basename: bool = True,
 ) -> SarifReport:
     """Apply suppressions to a SARIF report based on global ignore paths and suppression rules.
 
@@ -1260,6 +1276,13 @@ def apply_suppressions_to_sarif(
     its work directory, is dropped unless the repository committed that file.
     ``ash merge`` passes False: each shard already made that decision with its
     own git answer and run ID, and the merge has neither.
+
+    With *strip_source_dir_basename*, a relative URI whose first component is
+    the source directory's basename loses it, which is how offline opengrep's
+    URIs are read on a scan (:class:`_OutputDirExclusion`). ``ash merge`` passes
+    False: its URIs are already shard-relative and its source directory is the
+    collector's working directory, so the strip would read ``src/a.py`` as
+    ``a.py`` whenever the collector runs from a directory named ``src``.
     """
     # KNOWN_IGNORE_PATHS (.venv/, venv/, node_modules/) are not applied here.
     # Applied, they would drop findings that matter: grype and npm-audit locate a
@@ -1304,7 +1327,9 @@ def apply_suppressions_to_sarif(
     if not sarif_report or not sarif_report.runs:
         return sarif_report
 
-    output_exclusion = _OutputDirExclusion(plugin_context)
+    output_exclusion = _OutputDirExclusion(
+        plugin_context, strip_source_dir_basename=strip_source_dir_basename
+    )
     _source_dir_prefix = output_exclusion.source_dir_prefix
     _source_dir_prefix_with_slash = output_exclusion.source_dir_prefix_with_slash
     _source_dir_prefix_no_drive = output_exclusion.source_dir_prefix_no_drive
