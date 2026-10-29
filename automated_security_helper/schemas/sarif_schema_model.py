@@ -2634,7 +2634,14 @@ class SarifReport(RecordModel):
         if self.runs:
             self_run = self.runs[0]
             if include_driver:
-                if (
+                if _same_tool_component(self_run.tool.driver, report_tool.driver):
+                    # The incoming tool is this run's own driver: the run was
+                    # adopted from an earlier report of the same tool. Its rules
+                    # are unioned into the driver and no extension is added, so a
+                    # tool merged twice into an empty aggregate is listed once.
+                    if include_rules:
+                        _union_rules(self_run.tool.driver, report_tool.driver.rules)
+                elif (
                     self_run.tool.extensions is None
                     or len(self_run.tool.extensions) == 0
                 ):
@@ -2645,30 +2652,14 @@ class SarifReport(RecordModel):
                         (
                             ext
                             for ext in self_run.tool.extensions
-                            if ext.name == report_tool.driver.name
-                            and ext.fullName == report_tool.driver.fullName
-                            and ext.organization == report_tool.driver.organization
+                            if _same_tool_component(ext, report_tool.driver)
                         ),
                         None,
                     )
                     if existing_extension is None:
                         self_run.tool.extensions.append(report_tool.driver)
                     elif include_rules:
-                        # Add the rules whose id the existing extension does not
-                        # carry yet. Its rules list may be None (cfn-lint writes
-                        # none for a clean or an all-failed target), so it is
-                        # materialized before anything is appended to it.
-                        incoming_rules = report_tool.driver.rules or []
-                        if incoming_rules:
-                            if existing_extension.rules is None:
-                                existing_extension.rules = []
-                            known_rule_ids = {
-                                rule.id for rule in existing_extension.rules
-                            }
-                            for rule in incoming_rules:
-                                if rule.id not in known_rule_ids:
-                                    existing_extension.rules.append(rule)
-                                    known_rule_ids.add(rule.id)
+                        _union_rules(existing_extension, report_tool.driver.rules)
         else:
             # Adopt the incoming run's tool, properties and the rest, with its
             # results and invocations left out: the common tail below adds them
@@ -2691,6 +2682,39 @@ class SarifReport(RecordModel):
             # told explicitly not to (default is to include)
             if include_invocation:
                 self_run.invocations.extend(report_invocations)
+
+
+def _same_tool_component(
+    existing: Optional["ToolComponent"], incoming: Optional["ToolComponent"]
+) -> bool:
+    """Whether two tool components name the same tool: name, fullName and organization."""
+    return (
+        existing is not None
+        and incoming is not None
+        and existing.name == incoming.name
+        and existing.fullName == incoming.fullName
+        and existing.organization == incoming.organization
+    )
+
+
+def _union_rules(
+    component: "ToolComponent", incoming_rules: Optional[List["ReportingDescriptor"]]
+) -> None:
+    """Add to *component* the rules whose id it does not carry yet.
+
+    The component's rules list may be None (cfn-lint writes none for a clean or
+    an all-failed target), so it is materialized before anything is appended.
+    """
+    incoming = incoming_rules or []
+    if not incoming:
+        return
+    if component.rules is None:
+        component.rules = []
+    known_rule_ids = {rule.id for rule in component.rules}
+    for rule in incoming:
+        if rule.id not in known_rule_ids:
+            component.rules.append(rule)
+            known_rule_ids.add(rule.id)
 
 
 Node.model_rebuild()

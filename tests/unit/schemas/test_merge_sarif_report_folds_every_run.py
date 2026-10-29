@@ -88,6 +88,28 @@ def test_an_empty_runs_list_adopts_the_incoming_run_once():
     assert len(aggregated.runs[0].invocations) == 1
 
 
+def test_the_same_tool_merged_twice_into_an_empty_aggregate_is_listed_once():
+    # The first merge adopts the run, so the tool becomes runs[0].tool.driver; the
+    # second must not list it again as an extension, and its rules union into
+    # the driver.
+    aggregated = SarifReport(runs=[])
+    first = SarifReport(
+        runs=[_run("scanner", [_finding("S-1")], [], rules=[{"id": "S-1"}])]
+    )
+    second = SarifReport(
+        runs=[_run("scanner", [_finding("S-2")], [], rules=[{"id": "S-2"}])]
+    )
+
+    aggregated.merge_sarif_report(first)
+    aggregated.merge_sarif_report(second)
+
+    run = aggregated.runs[0]
+    assert run.tool.driver.name == "scanner"
+    assert not run.tool.extensions, run.tool.extensions
+    assert [rule.id for rule in run.tool.driver.rules] == ["S-1", "S-2"]
+    assert _rule_ids(aggregated) == ["S-1", "S-2"]
+
+
 def test_rules_are_added_to_an_extension_that_had_none():
     aggregated = SarifReport(runs=[_run("aggregate", [], [])])
     aggregated.runs[0].tool.extensions = [ToolComponent(name="cfn-lint")]
