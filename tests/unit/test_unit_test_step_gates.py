@@ -1,27 +1,37 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What CI's unit-test step enforces that a contributor's default run does not.
+"""What CI's pytest step enforces that a contributor's default run does not.
 
 A fresh clone runs ``uv sync`` then ``uv run pytest``, and that has to be green: no
 optional extras are installed, so the tests that need the ``cdk`` extra skip. CI's
-unit-test step (``.github/actions/run-unit-tests/action.yml``, "Run PyTest") has to keep
+pytest step (``.github/actions/run-unit-tests/action.yml``, "Run PyTest") has to keep
 failing where it fails today, so the leniency the default run gets must not reach it.
 This file holds both sides:
 
 * The step installs both extras and sets ``ASH_REQUIRE_CDK_EXTRA`` and
   ``ASH_REQUIRE_SYMBOLS_EXTRA``, which turn a skip for a missing extra into a failure.
 * The cdk guard skips without the variable and fails with it.
-* Coverage and its 80% threshold are passed by the step, not by ``pytest.ini``. In
-  ``addopts`` they failed every run of one directory or one test on total coverage. The
-  step's own command is run here against a planted test, so the threshold is shown to
-  fail a run below it rather than read off the YAML.
+* The step runs one tier of the suite: ``-m <marker>``, with ``--run-integration
+  --run-slow --no-cov`` for the integration and e2e tiers and coverage measured, with
+  no threshold, for the unit tier. The step's own script is run here under bash with
+  ``uv`` replaced by a function that prints its arguments, so the argument list pinned
+  is the one the shell builds and not a substring of the YAML.
+* The 80% threshold is not the step's. It is passed by the ``unit-coverage`` job in
+  ``ash-unified-ci.yml`` to ``combine-unit-coverage.py``, and in no config file, since
+  in ``addopts`` it failed every run of one directory or one test on total coverage.
+  The unit run's own pytest arguments are run here against a planted test and the gate
+  is run on the data it leaves, so the threshold is shown to fail a run below it rather
+  than read off the YAML.
+* The cdk-nag integration file runs in the integration tier on every OS and Python
+  version, which is what the separate step this action used to have guaranteed.
 """
 
 from __future__ import annotations
 
 import configparser
 import importlib.machinery
+import importlib.util
 import os
 import re
 import shlex
@@ -45,11 +55,24 @@ from tests.utils.optional_extras import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_UNIT_TESTS = REPO_ROOT / ".github" / "actions" / "run-unit-tests" / "action.yml"
+UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
+COMBINE_SCRIPT = REPO_ROOT / ".github" / "scripts" / "combine-unit-coverage.py"
 PYTEST_INI = REPO_ROOT / "pytest.ini"
 COVERAGERC = REPO_ROOT / ".coveragerc"
+CDK_NAG_REAL_PACK = (
+    REPO_ROOT / "tests" / "integration" / "scanners" / "test_cdk_nag_real_pack.py"
+)
 
 #: The threshold CI enforces today. Lowering it is a change to this file, in the same diff.
 CI_COVERAGE_THRESHOLD = 80
+
+#: The three tiers, in the order the action validates them.
+TIERS = ("unit", "integration", "e2e")
+
+_REQUIRES_BASH = pytest.mark.skipif(
+    os.name == "nt" or shutil.which("bash") is None,
+    reason="the step is a bash step, as on ubuntu-latest; its logic is the same on every OS",
+)
 
 
 def _step(name: str) -> dict[str, Any]:
@@ -61,15 +84,34 @@ def _step(name: str) -> dict[str, Any]:
     return steps[0]
 
 
-def _ci_pytest_argv() -> list[str]:
-    """The "Run PyTest" command as argv, with the shell's line continuations joined."""
-    command = _step("Run PyTest")["run"].replace("\\\n", " ")
-    argv = shlex.split(command)
-    assert argv[:3] == ["uv", "run", "pytest"], argv
-    return argv
+def _bash(script: str, **env: str) -> subprocess.CompletedProcess:
+    """Run a step's script as the runner does: bash, errexit and pipefail on."""
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
+        env={"PATH": os.environ.get("PATH", ""), **env},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+def _pytest_argv(marker: str) -> list[str]:
+    """The arguments "Run PyTest" gives pytest for ``marker``, as the shell builds them.
+
+    ``uv`` is a function that prints each of its arguments on a line of its own, so the
+    script's array is expanded by bash itself; ``run pytest`` come first and are dropped.
+    """
+    script = str(_step("Run PyTest")["run"])
+    done = _bash('uv() { printf "%s\\n" "$@"; }\n' + script, MARKER=marker)
+    assert done.returncode == 0, done.stdout + done.stderr
+    argv = done.stdout.splitlines()
+    assert argv[:2] == ["run", "pytest"], argv
+    return argv[2:]
 
 
 class TestTheUnitTestStepCannotPassBySkipping:
+    @pytest.mark.unit
     def test_it_installs_both_extras(self):
         argv = shlex.split(_step("Install dependencies")["run"])
         assert argv[:2] == ["uv", "sync"], argv
@@ -78,6 +120,7 @@ class TestTheUnitTestStepCannotPassBySkipping:
                 a == "--extra" and b == extra for a, b in zip(argv, argv[1:])
             ), f"the unit-test step no longer installs the {extra} extra: {argv}"
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "variable", [REQUIRE_CDK_EXTRA_ENV, "ASH_REQUIRE_SYMBOLS_EXTRA"]
     )
@@ -100,6 +143,7 @@ class TestTheUnitTestStepCannotPassBySkipping:
             f"{sorted(env, key=str)}"
         )
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         ("step_env", "said"),
         [
@@ -152,6 +196,7 @@ class TestTheUnitTestStepCannotPassBySkipping:
         first_line = str(raised.value).split("\n", 1)[0]
         assert said in first_line
 
+    @pytest.mark.unit
     def test_a_missing_variable_is_reported_when_a_name_is_not_text(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -165,6 +210,7 @@ class TestTheUnitTestStepCannotPassBySkipping:
         assert "The step sets: ['OTHER', True]" in str(raised.value)
 
 
+@pytest.mark.unit
 class TestTheCdkGuard:
     @pytest.fixture
     def cdk_absent(self, monkeypatch):
@@ -270,7 +316,8 @@ class TestTheCdkGuard:
         )
 
 
-class TestCoverageIsGatedByTheCiStepOnly:
+@pytest.mark.unit
+class TestTheThresholdBelongsToTheUnitCoverageJob:
     def test_the_default_run_measures_no_coverage(self):
         """A run of one directory or one test must not fail on the whole suite's coverage."""
         parser = configparser.ConfigParser()
@@ -280,12 +327,12 @@ class TestCoverageIsGatedByTheCiStepOnly:
         coverage = [opt for opt in addopts if opt.startswith("--cov")]
         assert not coverage, (
             f"pytest.ini's addopts carry {coverage}, so every subset run measures coverage "
-            "and fails on a threshold meant for the full suite. Pass coverage options in "
-            ".github/actions/run-unit-tests/action.yml instead."
+            "and fails on a threshold meant for the whole unit tier. Pass coverage options "
+            "in .github/actions/run-unit-tests/action.yml instead."
         )
 
     def test_no_config_file_sets_a_coverage_threshold(self):
-        """The 80 lives on the CI command only.
+        """The 80 lives on the unit-coverage job's command only.
 
         A fail_under in .coveragerc (or in pyproject.toml's [tool.coverage.report])
         would gate every `pytest --cov` of a subset again, and would be a second place
@@ -295,53 +342,180 @@ class TestCoverageIsGatedByTheCiStepOnly:
         assert parser.read(COVERAGERC, encoding="utf-8"), f"could not read {COVERAGERC}"
         assert parser.has_section("report"), "read the wrong .coveragerc"
         assert not parser.has_option("report", "fail_under"), (
-            ".coveragerc sets fail_under again; pass --cov-fail-under from the CI step"
+            ".coveragerc sets fail_under again; pass --fail-under from the "
+            "unit-coverage job's combine command"
         )
         pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         assert "[tool.coverage" not in pyproject, (
             "pyproject.toml configures coverage, which .coveragerc is supposed to own"
         )
 
-    def test_the_ci_step_measures_the_package_with_the_threshold(self):
-        argv = _ci_pytest_argv()
-        assert "--cov=automated_security_helper" in argv, argv
-        assert f"--cov-fail-under={CI_COVERAGE_THRESHOLD}" in argv, (
-            f"'Run PyTest' does not pass --cov-fail-under={CI_COVERAGE_THRESHOLD}: {argv}"
-        )
+    def test_the_pytest_step_passes_no_threshold(self):
+        """The composite no longer gates: a leg of any tier runs one slice of the code."""
+        run = str(_step("Run PyTest")["run"])
+        assert "--cov-fail-under" not in run, run
+        assert "fail_under" not in run, run
 
-    def _run_ci_command(
-        self, tmp_path: Path, threshold: int
-    ) -> subprocess.CompletedProcess:
-        """Run the step's own pytest arguments over one planted test, outside the suite.
-
-        The run gets its own ini, rootdir and conftest cut-off, so none of this
-        repository's conftests or addopts load, and its own COVERAGE_FILE, so its data
-        files never mix with those of the run that is executing this test.
-        """
-        shutil.copy(COVERAGERC, tmp_path / ".coveragerc")
-        (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
-        planted = tmp_path / "test_planted.py"
-        planted.write_text(
-            "def test_imports_the_package():\n"
-            "    import automated_security_helper  # noqa: F401\n",
-            encoding="utf-8",
-        )
-        args = [
-            f"--cov-fail-under={threshold}" if a.startswith("--cov-fail-under=") else a
-            for a in _ci_pytest_argv()[3:]
+    def test_the_unit_coverage_job_applies_the_threshold_to_the_unit_tier(self):
+        job = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"][
+            "unit-coverage"
         ]
-        env = {
+        combine = [
+            s
+            for s in job["steps"]
+            if "combine-unit-coverage.py" in str(s.get("run", ""))
+        ]
+        assert len(combine) == 1, job["steps"]
+        words = shlex.split(str(combine[0]["run"]).replace("\\\n", " "))
+        assert "--self-test" in words, "the gate is not self-tested before it is used"
+        gate = words[words.index("--results-dir") - 1 :]
+        for option, value in (
+            ("--fail-under", str(CI_COVERAGE_THRESHOLD)),
+            ("--marker", "unit"),
+        ):
+            assert option in gate, f"the combine command does not pass {option}: {gate}"
+            assert gate[gate.index(option) + 1] == value, (option, gate)
+
+    def test_the_unit_run_keeps_its_coverage_data_for_the_upload(self):
+        step = _step("Keep the unit run's coverage data")
+        condition = str(step["if"])
+        assert "success()" in condition and "failure()" in condition
+        assert "inputs.marker == 'unit'" in condition
+        assert "cp .coverage test-results/coverage.data" in str(step["run"])
+        assert "coverage.data" in COMBINE_SCRIPT.read_text(encoding="utf-8")
+
+
+@pytest.mark.integration
+@_REQUIRES_BASH
+class TestTheStepBuildsTheRightArgumentsForEachTier:
+    """The step's script, run with ``uv`` stubbed, for each value of ``MARKER``."""
+
+    @pytest.mark.parametrize("marker", TIERS)
+    def test_it_selects_the_tier_and_writes_its_report(self, marker):
+        argv = _pytest_argv(marker)
+        assert argv[:2] == ["-m", marker], argv
+        assert "--junit-xml=test-results/pytest.junit.xml" in argv, argv
+
+    @pytest.mark.parametrize("marker", TIERS)
+    def test_it_names_no_test_path(self, marker):
+        """A path named there would skip pytest's ignore rules and its python_files match."""
+        argv = _pytest_argv(marker)
+        positional = [
+            arg
+            for index, arg in enumerate(argv)
+            if not arg.startswith("-") and argv[index - 1] != "-m"
+        ]
+        assert not positional, argv
+
+    def test_the_unit_tier_measures_the_package_and_gates_nothing(self):
+        argv = _pytest_argv("unit")
+        assert "--cov=automated_security_helper" in argv, argv
+        assert "--cov-config=.coveragerc" in argv, argv
+        assert "--cov-report=" in argv, "a report here would print what the gate reads"
+        assert not [a for a in argv if a.startswith("--cov-fail-under")], argv
+        assert "--no-cov" not in argv, argv
+        assert "--run-integration" not in argv and "--run-slow" not in argv, argv
+
+    @pytest.mark.parametrize("marker", ["integration", "e2e"])
+    def test_the_other_tiers_run_the_gated_tests_and_measure_no_coverage(self, marker):
+        argv = _pytest_argv(marker)
+        for flag in ("--run-integration", "--run-slow", "--no-cov"):
+            assert flag in argv, f"{marker}: {flag} is missing from {argv}"
+        assert not [a for a in argv if a.startswith("--cov") and a != "--no-cov"], argv
+
+
+@pytest.mark.integration
+@_REQUIRES_BASH
+class TestTheMarkerIsValidatedBeforeAnythingRuns:
+    def _validate(self, marker: str) -> subprocess.CompletedProcess:
+        step = _step("Validate the tier marker")
+        return _bash(str(step["run"]), MARKER=marker)
+
+    @pytest.mark.parametrize("marker", TIERS)
+    def test_each_tier_is_accepted(self, marker):
+        done = self._validate(marker)
+        assert done.returncode == 0, done.stdout + done.stderr
+
+    @pytest.mark.parametrize(
+        "marker",
+        ["", "Unit", "integration ", "unit or integration", "slow", "all", "e2e\n"],
+    )
+    def test_anything_else_fails_closed(self, marker):
+        done = self._validate(marker)
+        assert done.returncode != 0, (marker, done.stdout)
+        assert "::error::" in done.stdout, done.stdout
+
+    def test_the_error_does_not_print_the_value(self):
+        """A workflow command may only print a value that is neutralized or listed in
+        test_workflow_commands_print_no_unchecked_value.py, and this is the one value
+        the case did not recognize."""
+        done = self._validate("x\r::warning::from the value")
+        assert done.returncode != 0
+        assert "from the value" not in done.stdout, done.stdout
+
+    def test_it_runs_before_the_install_and_the_tests(self):
+        action = yaml.safe_load(RUN_UNIT_TESTS.read_text(encoding="utf-8"))
+        names = [step.get("name") for step in action["runs"]["steps"]]
+        validate = names.index("Validate the tier marker")
+        assert validate < names.index("Install dependencies"), names
+        assert validate < names.index("Run PyTest"), names
+
+
+@pytest.mark.integration
+@_REQUIRES_BASH
+class TestTheGateFailsAUnitRunBelowTheThreshold:
+    """The unit run's own pytest arguments over one planted test, then the real gate."""
+
+    PLANTED = (
+        "import pytest\n"
+        "\n"
+        "pytestmark = pytest.mark.unit\n"
+        "\n"
+        "\n"
+        "def test_imports_the_package():\n"
+        "    import automated_security_helper  # noqa: F401\n"
+    )
+
+    @staticmethod
+    def _combine() -> types.ModuleType:
+        spec = importlib.util.spec_from_file_location(
+            "_combine_unit_coverage", COMBINE_SCRIPT
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _clean_env(self) -> dict[str, str]:
+        return {
             k: v
             for k, v in os.environ.items()
             if not k.startswith(("PYTEST_", "COV_CORE_", "COVERAGE_"))
         }
+
+    def _run_unit_tier(self, tmp_path: Path) -> Path:
+        """Run the step's unit arguments over a planted test; return the results dir.
+
+        The run gets its own ini, rootdir and conftest cut-off, so none of this
+        repository's conftests or addopts load, and its own COVERAGE_FILE, so its data
+        files never mix with those of the run that is executing this test. The data is
+        then copied where the "Keep the unit run's coverage data" step puts it, under
+        the name the upload step gives the artifact of an unsharded unit run.
+        """
+        shutil.copy(COVERAGERC, tmp_path / ".coveragerc")
+        (tmp_path / "pytest.ini").write_text(
+            "[pytest]\nmarkers =\n    unit: the unit tier\n", encoding="utf-8"
+        )
+        planted = tmp_path / "test_planted.py"
+        planted.write_text(self.PLANTED, encoding="utf-8")
+        env = self._clean_env()
         env["COVERAGE_FILE"] = str(tmp_path / ".coverage")
-        return subprocess.run(
+        done = subprocess.run(
             [
                 sys.executable,
                 "-m",
                 "pytest",
-                *args,
+                *_pytest_argv("unit"),
                 str(planted),
                 "-c",
                 str(tmp_path / "pytest.ini"),
@@ -361,48 +535,50 @@ class TestCoverageIsGatedByTheCiStepOnly:
             text=True,
             timeout=600,
         )
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "1 passed" in done.stdout, done.stdout
+        prefix = self._combine().artifact_prefix("ubuntu-latest", "3.12", "X64", "unit")
+        artifact = tmp_path / "results" / f"{prefix}-shard1of1"
+        artifact.mkdir(parents=True)
+        shutil.copy(tmp_path / ".coverage", artifact / "coverage.data")
+        return tmp_path / "results"
 
-    def test_the_ci_command_fails_a_run_below_the_threshold(self, tmp_path):
-        """The measured half: one import of the package covers far less than 80%."""
-        result = self._run_ci_command(tmp_path, CI_COVERAGE_THRESHOLD)
-        output = result.stdout + result.stderr
-        assert result.returncode != 0, output
-        assert re.search(
-            rf"Required test coverage of {CI_COVERAGE_THRESHOLD}(\.0+)?% not reached",
-            output,
-        ), output
-        assert (tmp_path / "test-results" / "pytest.coverage.xml").is_file(), (
-            "the step's XML report went somewhere other than the path it names"
+    def _gate(self, tmp_path: Path, results: Path, threshold: int):
+        env = self._clean_env()
+        env["RUNNER_ARCH"] = "X64"
+        return subprocess.run(
+            [
+                sys.executable,
+                str(COMBINE_SCRIPT),
+                "--results-dir",
+                str(results),
+                "--os",
+                "ubuntu-latest",
+                "--python-version",
+                "3.12",
+                "--marker",
+                "unit",
+                "--fail-under",
+                str(threshold),
+            ],
+            cwd=tmp_path,
+            env=checkout_env(env),
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
 
-    def test_the_same_command_passes_with_no_threshold(self, tmp_path):
+    def test_the_gate_fails_a_run_below_the_threshold(self, tmp_path):
+        """The measured half: one import of the package covers far less than 80%."""
+        results = self._run_unit_tier(tmp_path)
+        done = self._gate(tmp_path, results, CI_COVERAGE_THRESHOLD)
+        assert done.returncode == 2, done.stdout + done.stderr
+
+    def test_the_same_gate_passes_with_no_threshold(self, tmp_path):
         """Positive control: the failure above is the threshold, not the harness."""
-        result = self._run_ci_command(tmp_path, 0)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "1 passed" in result.stdout, result.stdout
-
-
-def _pytest_steps() -> dict[str, list[str]]:
-    """Every step of the action that runs pytest, as argv."""
-    action = yaml.safe_load(RUN_UNIT_TESTS.read_text(encoding="utf-8"))
-    steps = {}
-    for step in action["runs"]["steps"]:
-        argv = shlex.split(str(step.get("run", "")).replace("\\\n", " "))
-        if argv[:3] == ["uv", "run", "pytest"]:
-            steps[step["name"]] = argv
-    return steps
-
-
-def _junit_path(argv: list[str]) -> str:
-    """Where a pytest run writes its JUnit report: its own flag, else pytest.ini's addopts."""
-    for i, arg in enumerate(argv):
-        if arg.startswith("--junit-xml="):
-            return arg.split("=", 1)[1]
-        if arg == "--junit-xml":
-            return argv[i + 1]
-    parser = configparser.ConfigParser()
-    parser.read(PYTEST_INI, encoding="utf-8")
-    return _junit_path(shlex.split(parser.get("pytest", "addopts")) + ["--junit-xml="])
+        results = self._run_unit_tier(tmp_path)
+        done = self._gate(tmp_path, results, 0)
+        assert done.returncode == 0, done.stdout + done.stderr
 
 
 def _glob_matches(pattern: str, path: str) -> bool:
@@ -411,37 +587,35 @@ def _glob_matches(pattern: str, path: str) -> bool:
     return re.fullmatch(regex, path) is not None
 
 
-class TestEveryPytestStepKeepsItsOwnReport:
-    """Each pytest step writes a junit report of its own.
+@pytest.mark.unit
+class TestThePytestStepKeepsItsReport:
+    """The action runs pytest once, and the report step publishes the file it writes.
 
-    pytest.ini's addopts carry ``--junit-xml=test-results/pytest.junit.xml``, and the
-    cdk-nag integration step runs after "Run PyTest", so it takes a path of its own:
-    on the shared one it would overwrite the full suite's report, and the published
-    check would show the 11 cdk-nag tests and nothing else.
+    A second pytest step would have to take a ``--junit-xml`` path of its own, because
+    pytest.ini's addopts carry ``--junit-xml=test-results/pytest.junit.xml`` and a later
+    run on the shared path would overwrite the earlier report. The cdk-nag step that
+    needed one is gone, so the action runs pytest in exactly one step.
     """
 
-    def test_each_pytest_step_writes_a_different_junit_file(self):
-        paths = {name: _junit_path(argv) for name, argv in _pytest_steps().items()}
-        assert {"Run PyTest", "Run cdk-nag integration tests"} <= paths.keys(), paths
-        assert all(paths.values()), paths
-        assert len(set(paths.values())) == len(paths), (
-            f"two pytest steps write the same JUnit file, so the later one replaces the "
-            f"earlier one's report: {paths}"
-        )
+    def test_exactly_one_step_runs_pytest(self):
+        action = yaml.safe_load(RUN_UNIT_TESTS.read_text(encoding="utf-8"))
+        running = [
+            step.get("name")
+            for step in action["runs"]["steps"]
+            if "uv run pytest" in str(step.get("run", ""))
+        ]
+        assert running == ["Run PyTest"], running
 
-    def test_the_report_step_publishes_every_junit_file(self):
-        reports = {name: _junit_path(argv) for name, argv in _pytest_steps().items()}
+    def test_the_step_writes_the_file_the_report_step_publishes(self):
+        run = str(_step("Run PyTest")["run"])
+        written = re.findall(r"--junit-xml=([^\s)]+)", run)
+        assert written == ["test-results/pytest.junit.xml"], written
         patterns = str(
             _step("Publish PyTest JUnit Test Report")["with"]["report_paths"]
         ).splitlines()
-        unpublished = {
-            name: path
-            for name, path in reports.items()
-            if not any(_glob_matches(p.strip(), path) for p in patterns if p.strip())
-        }
-        assert not unpublished, (
-            f"report_paths {patterns} does not match the reports of {unpublished}"
-        )
+        assert any(
+            _glob_matches(p.strip(), written[0]) for p in patterns if p.strip()
+        ), f"report_paths {patterns} does not match {written[0]}"
 
     def test_the_glob_helper_matches_like_actions_glob(self):
         assert _glob_matches("**/pytest.junit.xml", "test-results/pytest.junit.xml")
@@ -451,3 +625,66 @@ class TestEveryPytestStepKeepsItsOwnReport:
             "test-results/*.junit.xml", "test-results/x/a.junit.xml"
         )
         assert not _glob_matches("**/pytest.junit.xml", "test-results/cdk.junit.xml")
+
+
+@pytest.mark.unit
+class TestTheCdkNagPathRunsInTheIntegrationTier:
+    """The property the separate "Run cdk-nag integration tests" step guarded.
+
+    That step ran tests/integration/scanners/test_cdk_nag_real_pack.py once per OS and
+    Python version, because the default run skipped the integration directory and the
+    one integration job runs on one platform and one Python. The integration-test jobs
+    now run ``-m integration`` on every OS and Python version of the unit matrix, with
+    ASH_REQUIRE_CDK_EXTRA set by the action, and that file carries the integration
+    marker, so the tier job runs it everywhere without a second step.
+    """
+
+    INTEGRATION_JOB_IDS = (
+        "integration-test-linux",
+        "integration-test-macos",
+        "integration-test-windows",
+    )
+    UNIT_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
+
+    @staticmethod
+    def _jobs() -> dict[str, Any]:
+        return yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"]
+
+    def test_the_action_has_no_step_of_its_own_for_it(self):
+        action = yaml.safe_load(RUN_UNIT_TESTS.read_text(encoding="utf-8"))
+        for step in action["runs"]["steps"]:
+            assert "test_cdk_nag_real_pack" not in str(step.get("run", "")), step
+            assert "cdk-nag integration" not in str(step.get("name", "")), step
+
+    def test_the_file_carries_the_integration_marker(self):
+        text = CDK_NAG_REAL_PACK.read_text(encoding="utf-8")
+        assert re.search(r"pytest\.mark\.integration\b", text), (
+            f"{CDK_NAG_REAL_PACK.name} has no integration marker, so `-m integration` "
+            "would not select it and the cdk-nag path would run nowhere"
+        )
+        assert not re.search(r"pytest\.mark\.(unit|e2e)\b", text), (
+            f"{CDK_NAG_REAL_PACK.name} carries a second tier marker"
+        )
+
+    @pytest.mark.parametrize(
+        ("integration_id", "unit_id"), zip(INTEGRATION_JOB_IDS, UNIT_JOB_IDS)
+    )
+    def test_the_integration_job_covers_every_os_and_python_of_its_unit_job(
+        self, integration_id, unit_id
+    ):
+        jobs = self._jobs()
+        integration = jobs[integration_id]["strategy"]["matrix"]
+        unit = jobs[unit_id]["strategy"]["matrix"]
+        assert integration["os"] == unit["os"]
+        assert integration["python-version"] == unit["python-version"]
+        uses = [
+            step
+            for step in jobs[integration_id]["steps"]
+            if step.get("uses") == "./.github/actions/run-unit-tests"
+        ]
+        assert len(uses) == 1, jobs[integration_id]["steps"]
+        assert uses[0]["with"]["marker"] == "integration"
+        # No step-level condition, and the job's only condition keeps it running after a
+        # failed unit leg (it is skipped only by a cancelled run).
+        assert "if" not in uses[0]
+        assert jobs[integration_id]["if"] == "${{ !cancelled() }}"

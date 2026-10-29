@@ -1,27 +1,39 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The unit-test jobs' shards, and the pieces that must agree with them.
+"""The test-tier jobs, their shards, and the pieces that must agree with them.
 
 Why this file exists
 --------------------
 The whole suite is about 47,000 items, which a 4-worker runner cannot finish inside any
-sensible job timeout, so ash-unified-ci.yml splits each OS and Python combination of the
-unit-test matrix into shards. That matrix is three jobs, one per runner pool, so each
-pool carries its own ``max-parallel`` cap: ``unit-test-linux``, ``unit-test-macos`` and
-``unit-test-windows``. They are one test matrix cut in three, so the last class below
-holds them to the same Python versions, the same shards and the same steps. Four things
-have to agree for that to run every test exactly once and still gate coverage:
+sensible job timeout, so ash-unified-ci.yml selects tests by tier marker and splits the
+expensive tier. Every test carries one of ``unit``, ``integration`` or ``e2e``, and
+three families of jobs, one job per runner pool so that each pool carries its own
+``max-parallel`` cap, run one tier each:
 
-* the ``shard`` axis in each of the three jobs, one literal list whose entries each
-  carry the total they were cut for (``3of8``);
+* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit``, unsharded: the
+  in-process tests take minutes on one runner, so the tier has no shard axis;
+* ``integration-test-linux``, ``-macos`` and ``-windows`` run ``-m integration`` in
+  four shards per OS and Python version, because the tests that start real tools carry
+  about 6,300 serial seconds by the classification and the per-file medians of one run
+  of the earlier layout, which the hash split puts at about 16 minutes (ubuntu) and 19
+  (Windows) in the worst shard against the 30-minute timeout;
+* ``e2e-test-linux``, ``-macos`` and ``-windows`` run ``-m e2e`` once per runner image
+  on one Python version, unsharded.
+
+Four things have to agree for the integration tier to run every test exactly once:
+
+* the ``shard`` axis in each of the three integration jobs, one literal list whose
+  entries each carry the total they were cut for (``3of4``);
 * ``tests/utils/sharding.py``, a ``pytest_ignore_collect`` hook that ignores the test
   modules another shard owns, so pytest's own ``testpaths``, ``python_files`` and ignore
   rules still decide what is collected;
-* the ``run-unit-tests`` action, which runs the whole suite for ``1of1`` and one shard
-  otherwise, and uploads the shard's coverage data;
-* the ``unit-coverage`` job, which downloads the shards of one OS family and applies the
-  80% gate to their combined data, failing when a shard is missing or unreadable.
+* the ``run-unit-tests`` action, which runs the whole tier for an empty shard and one
+  shard otherwise, and names its artifact after the tier and the shard;
+* the ``unit-coverage`` job, which downloads the unit tier's artifacts of one OS family
+  and applies the 80% gate to their data, failing when a shard is missing or
+  unreadable. (The unit tier is one artifact, ``shard1of1``, a complete set of one; the
+  check still guards a set that was sharded.)
 
 A shard dropped from the axis would silently stop running its slice of the suite, and
 every remaining shard would still pass. The first test below is that guard. A split made
@@ -32,12 +44,14 @@ hold the hook to the unsharded run's collection.
 What it does not cover
 ----------------------
 It does not run the workflow. That a runner finishes a shard inside its timeout is a
-measurement the CI run makes.
+measurement the CI run makes, and so is whether any shard of ``-m integration`` collects
+nothing, which would make pytest exit 5 in that leg.
 """
 
 from __future__ import annotations
 
 import configparser
+import fnmatch
 import importlib.util
 import os
 import re
@@ -63,7 +77,7 @@ SCRIPTS = REPO_ROOT / ".github" / "scripts"
 
 #: The OS families the unit-coverage job gates, each with the runner.arch GitHub reports for
 #: it, and the Python version it gates. The action names its artifacts
-#: ``test-results-<os>-<arch label>-py<version>-shard<i>of<n>``.
+#: ``test-results-<os>-<arch label>-py<version>-<tier>-shard<i>of<n>``.
 COVERAGE_RUNNERS = [
     ("ubuntu-latest", "X64"),
     ("ubuntu-24.04-arm", "ARM64"),
@@ -73,8 +87,24 @@ COVERAGE_RUNNERS = [
 COVERAGE_PYTHON = "3.12"
 
 #: The unit-test matrix, split by OS family so each runner pool has its own max-parallel
-#: cap. Together the three jobs run what the single ``unit-test`` job ran.
+#: cap. Together the three jobs run the unit tier.
 UNIT_TEST_JOB_IDS = ("unit-test-linux", "unit-test-macos", "unit-test-windows")
+#: The integration tier, cut the same way, with a shard axis.
+INTEGRATION_TEST_JOB_IDS = (
+    "integration-test-linux",
+    "integration-test-macos",
+    "integration-test-windows",
+)
+#: The e2e tier, cut the same way, with neither a shard axis nor a Python axis.
+E2E_TEST_JOB_IDS = ("e2e-test-linux", "e2e-test-macos", "e2e-test-windows")
+#: The pool each job id belongs to, in the order the three families list them.
+POOLS = ("linux", "macos", "windows")
+
+#: The shard axis of the integration tier. Four is a reading from the real classification
+#: and the per-file medians of one run of the earlier layout (eight was the figure before
+#: the tests were classified), so the first run of the tier jobs is what may move it; the
+#: list is written out here so that moving it is a change to this file in the same diff.
+INTEGRATION_SHARDS = ["1of4", "2of4", "3of4", "4of4"]
 
 
 def _load_script(filename: str) -> ModuleType:
@@ -101,10 +131,14 @@ def _action_step(name: str) -> dict[str, Any]:
     return steps[0]
 
 
+def _action_inputs() -> dict[str, Any]:
+    return yaml.safe_load(RUN_UNIT_TESTS.read_text(encoding="utf-8"))["inputs"]
+
+
 def _shard_axes() -> dict[str, list[str]]:
-    """The ``shard`` axis of each unit-test job, by job id."""
+    """The ``shard`` axis of each integration-test job, by job id."""
     axes = {}
-    for job_id in UNIT_TEST_JOB_IDS:
+    for job_id in INTEGRATION_TEST_JOB_IDS:
         axis = _workflow_job(job_id)["strategy"]["matrix"]["shard"]
         assert isinstance(axis, list), (job_id, axis)
         axes[job_id] = [str(entry) for entry in axis]
@@ -112,13 +146,20 @@ def _shard_axes() -> dict[str, list[str]]:
 
 
 def _shard_axis() -> list[str]:
-    """The one shard axis the three unit-test jobs share; they must not differ."""
+    """The one shard axis the three integration-test jobs share; they must not differ."""
     axes = _shard_axes()
-    first = axes[UNIT_TEST_JOB_IDS[0]]
+    first = axes[INTEGRATION_TEST_JOB_IDS[0]]
     assert all(axis == first for axis in axes.values()), (
-        f"the unit-test jobs disagree on the shard axis: {axes}"
+        f"the integration-test jobs disagree on the shard axis: {axes}"
     )
     return first
+
+
+def _uses_the_action(job_id: str) -> dict[str, Any]:
+    steps = _workflow_job(job_id)["steps"]
+    uses = [s for s in steps if s.get("uses") == "./.github/actions/run-unit-tests"]
+    assert len(uses) == 1, steps
+    return uses[0]
 
 
 def _pytest_ini_patterns(key: str) -> list[str]:
@@ -139,8 +180,33 @@ def _clean_env(**extra: str) -> dict[str, str]:
     return env
 
 
+def _rendered_artifact_name(
+    os_name: str, label: str, python: str, marker: str, shard: str
+) -> str:
+    """The upload step's artifact name template with the runner's values put in.
+
+    ``shard`` is the input as the caller gives it, so an unsharded run is "".
+    """
+    template = str(_action_step("Upload test results")["with"]["name"])
+    values = {
+        "inputs.os": os_name,
+        "steps.runner-arch.outputs.label": label,
+        "inputs.python-version": python,
+        "inputs.marker": marker,
+    }
+
+    def expression(match: re.Match) -> str:
+        text = match.group(1).strip()
+        if text == "inputs.shard || '1of1'":
+            return shard or "1of1"
+        return values[text]
+
+    return re.sub(r"\$\{\{(.*?)\}\}", expression, template)
+
+
+@pytest.mark.unit
 class TestTheShardAxis:
-    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
+    @pytest.mark.parametrize("job_id", INTEGRATION_TEST_JOB_IDS)
     def test_it_lists_every_shard_of_one_total_once(self, job_id):
         """Dropping, repeating or renumbering an entry leaves part of the suite unrun."""
         axis = _shard_axes()[job_id]
@@ -154,19 +220,48 @@ class TestTheShardAxis:
             "the tests of the missing shard run nowhere"
         )
 
-    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
-    def test_the_job_hands_its_shard_to_the_action(self, job_id):
-        steps = _workflow_job(job_id)["steps"]
-        uses = [s for s in steps if s.get("uses") == "./.github/actions/run-unit-tests"]
-        assert len(uses) == 1, steps
-        assert uses[0]["with"]["shard"] == "${{ matrix.shard }}"
+    def test_the_axis_is_the_four_shards_the_timeout_arithmetic_assumes(self):
+        assert _shard_axis() == INTEGRATION_SHARDS
 
-    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
+    @pytest.mark.parametrize("job_id", INTEGRATION_TEST_JOB_IDS)
+    def test_the_job_hands_its_shard_and_its_tier_to_the_action(self, job_id):
+        uses = _uses_the_action(job_id)
+        assert uses["with"]["shard"] == "${{ matrix.shard }}"
+        assert uses["with"]["marker"] == "integration"
+
+    @pytest.mark.parametrize("job_id", INTEGRATION_TEST_JOB_IDS)
     def test_the_job_name_carries_the_shard(self, job_id):
         """Two legs with one name collide in the checks list and in artifacts."""
         assert "matrix.shard" in _workflow_job(job_id)["name"]
 
+    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
+    def test_the_unit_jobs_are_not_sharded(self, job_id):
+        """The unit tier fits one job per leg, so a shard axis would only repeat setup."""
+        job = _workflow_job(job_id)
+        assert "shard" not in job["strategy"]["matrix"]
+        assert "shard" not in job["name"]
+        uses = _uses_the_action(job_id)
+        assert "shard" not in uses["with"], uses
+        assert uses["with"]["marker"] == "unit"
 
+    @pytest.mark.parametrize("job_id", E2E_TEST_JOB_IDS)
+    def test_the_e2e_jobs_run_one_python_and_are_not_sharded(self, job_id):
+        job = _workflow_job(job_id)
+        assert sorted(job["strategy"]["matrix"]) == ["os"], job["strategy"]
+        assert "shard" not in job["name"]
+        uses = _uses_the_action(job_id)
+        assert uses["with"]["python-version"] == "3.12"
+        assert "shard" not in uses["with"], uses
+        assert uses["with"]["marker"] == "e2e"
+        setup = [
+            s
+            for s in job["steps"]
+            if str(s.get("uses", "")).startswith("./.github/actions/setup-ash")
+        ]
+        assert [s["with"]["python-version"] for s in setup] == ["3.12"], setup
+
+
+@pytest.mark.unit
 class TestTheShardFilter:
     def test_a_module_belongs_to_exactly_one_shard(self):
         count = sharding.parse_shard(_shard_axis()[0])[1]
@@ -241,6 +336,7 @@ class TestTheShardFilter:
         assert "sharding.configure(config)" in text
 
 
+@pytest.mark.integration
 class TestTheFilterInARealCollection:
     """pytest itself, on a planted tree, collects the same tests sharded and unsharded."""
 
@@ -333,6 +429,199 @@ class TestTheFilterInARealCollection:
         assert code != 0
 
 
+@pytest.mark.integration
+class TestAnEmptyShardOfATierRunInARealPytest:
+    """The exit status of pytest itself, on a planted tree with one module per tier."""
+
+    COUNT = 8
+    MODULES = {
+        "suite/test_only_unit.py": "unit",
+        "suite/test_only_integration.py": "integration",
+    }
+
+    def _plant(self, root: Path) -> None:
+        (root / "pytest.ini").write_text(
+            textwrap.dedent(
+                """\
+                [pytest]
+                testpaths = suite
+                python_files = test_*.py
+                markers =
+                    unit: the unit tier
+                    integration: the integration tier
+                """
+            ),
+            encoding="utf-8",
+        )
+        for relative, tier in self.MODULES.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                f"import pytest\n\npytestmark = pytest.mark.{tier}\n\n\n"
+                "def test_it():\n    pass\n",
+                encoding="utf-8",
+            )
+
+    def _owner(self, tier: str) -> int:
+        (relative,) = [m for m, t in self.MODULES.items() if t == tier]
+        return sharding.owner(relative, self.COUNT)
+
+    def _empty_shard(self) -> int:
+        """A shard that owns neither planted module, so it holds no test of any tier."""
+        taken = {self._owner("unit"), self._owner("integration")}
+        return next(i for i in range(1, self.COUNT + 1) if i not in taken)
+
+    def _run(self, root: Path, index: int, *extra: str):
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-c",
+                str(root / "pytest.ini"),
+                "--rootdir",
+                str(root),
+                "--confcutdir",
+                str(root),
+                "-p",
+                "tests.utils.sharding",
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+                *extra,
+            ],
+            cwd=root,
+            env=_clean_env(
+                PYTHONPATH=str(REPO_ROOT),
+                **{sharding.ENV_VAR: f"{index}of{self.COUNT}"},
+            ),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    def test_an_empty_shard_without_a_marker_expression_still_exits_5(self, tmp_path):
+        """Control: the status the admission replaces is the one pytest gives."""
+        self._plant(tmp_path)
+        done = self._run(tmp_path, self._empty_shard())
+        assert done.returncode == 5, done.stdout + done.stderr
+
+    def test_an_empty_shard_with_a_marker_expression_exits_0_and_says_so(
+        self, tmp_path
+    ):
+        self._plant(tmp_path)
+        index = self._empty_shard()
+        done = self._run(tmp_path, index, "-m", "integration")
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert f"shard {index}of{self.COUNT} holds no test selected by" in done.stdout
+
+    def test_the_shard_that_owns_the_tier_runs_it_and_says_nothing(self, tmp_path):
+        self._plant(tmp_path)
+        done = self._run(tmp_path, self._owner("integration"), "-m", "integration")
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "1 passed" in done.stdout, done.stdout
+        assert "admitted" not in done.stdout, done.stdout
+
+    def test_a_failing_test_still_fails_the_shard(self, tmp_path):
+        self._plant(tmp_path)
+        path = tmp_path / "suite" / "test_only_integration.py"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("pass", "assert False"),
+            encoding="utf-8",
+        )
+        done = self._run(tmp_path, self._owner("integration"), "-m", "integration")
+        assert done.returncode == 1, done.stdout + done.stderr
+
+
+@pytest.mark.unit
+class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
+    """A shard owns modules, not tiers, so with ``-m`` it can hold none of the tier.
+
+    Exit 5 there would fail a leg that has nothing to run while the tier's other shards
+    carry the rest. The admission needs a shard AND a ``-m`` expression, and acts only on
+    pytest's "no tests collected" status.
+    """
+
+    @staticmethod
+    def _session(text: str, expression: str, written: list[str]) -> SimpleNamespace:
+        stash = pytest.Stash()
+        stash[sharding._TEXT_KEY] = text
+        reporter = SimpleNamespace(write_line=written.append)
+        config = SimpleNamespace(
+            stash=stash,
+            getoption=lambda name, default="": expression,
+            pluginmanager=SimpleNamespace(get_plugin=lambda name: reporter),
+        )
+        return SimpleNamespace(config=config, exitstatus=5)
+
+    def test_it_turns_exit_5_into_success_and_says_which_shard(self):
+        written: list[str] = []
+        session = self._session("3of8", "integration", written)
+        assert sharding.admit_empty_shard(session, pytest.ExitCode.NO_TESTS_COLLECTED)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert len(written) == 1, written
+        assert "shard 3of8" in written[0] and "integration" in written[0], written
+
+    def test_a_run_without_a_marker_expression_keeps_exit_5(self):
+        written: list[str] = []
+        session = self._session("3of8", "", written)
+        assert not sharding.admit_empty_shard(
+            session, pytest.ExitCode.NO_TESTS_COLLECTED
+        )
+        assert session.exitstatus == 5 and not written
+
+    def test_a_run_without_a_shard_keeps_exit_5(self):
+        written: list[str] = []
+        session = self._session("", "integration", written)
+        assert not sharding.admit_empty_shard(
+            session, pytest.ExitCode.NO_TESTS_COLLECTED
+        )
+        assert session.exitstatus == 5 and not written
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            pytest.ExitCode.OK,
+            pytest.ExitCode.TESTS_FAILED,
+            pytest.ExitCode.INTERRUPTED,
+            pytest.ExitCode.INTERNAL_ERROR,
+            pytest.ExitCode.USAGE_ERROR,
+        ],
+    )
+    def test_no_other_status_is_touched(self, status):
+        written: list[str] = []
+        session = self._session("3of8", "integration", written)
+        session.exitstatus = status
+        assert not sharding.admit_empty_shard(session, status)
+        assert session.exitstatus == status and not written
+
+    def test_configure_registers_the_admission_once_for_a_run_with_a_shard(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv(sharding.ENV_VAR, "2of3")
+        registered: dict[str, object] = {}
+        plugins = SimpleNamespace(
+            has_plugin=lambda name: name in registered,
+            register=lambda plugin, name: registered.setdefault(name, plugin),
+        )
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=plugins)
+        sharding.configure(config)
+        sharding.configure(config)
+        assert list(registered) == ["ash-shard-empty-admitted"], registered
+
+    def test_configure_registers_nothing_for_a_whole_run(self, monkeypatch):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        registered: dict[str, object] = {}
+        plugins = SimpleNamespace(
+            has_plugin=lambda name: name in registered,
+            register=lambda plugin, name: registered.setdefault(name, plugin),
+        )
+        sharding.configure(SimpleNamespace(stash=pytest.Stash(), pluginmanager=plugins))
+        assert not registered
+
+
 class TestTheSettingStaysInTheRunThatWasGivenIt:
     """ASH_TEST_SHARD is read once and removed, so no child pytest inherits it.
 
@@ -383,6 +672,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
     def _config(**attributes: Any) -> SimpleNamespace:
         return SimpleNamespace(stash=pytest.Stash(), **attributes)
 
+    @pytest.mark.unit
     def test_configure_takes_the_setting_and_removes_it_from_the_environment(
         self, monkeypatch
     ):
@@ -392,6 +682,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         assert sharding.ENV_VAR not in os.environ
         assert config.stash[sharding._SHARD_KEY] == (2, 3)
 
+    @pytest.mark.unit
     def test_configure_twice_keeps_the_setting(self, monkeypatch):
         monkeypatch.setenv(sharding.ENV_VAR, "2of3")
         config = self._config()
@@ -399,6 +690,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         sharding.configure(config)
         assert config.stash[sharding._SHARD_KEY] == (2, 3)
 
+    @pytest.mark.unit
     def test_the_hook_reads_the_config_not_the_environment(self, monkeypatch):
         """Set after configure, in a child's environment, the variable changes nothing."""
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
@@ -411,6 +703,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
             path = Path("/rootdir") / "suite" / name
             assert sharding.pytest_ignore_collect(path, config) is None, name
 
+    @pytest.mark.unit
     def test_a_worker_takes_the_setting_from_its_workerinput(self, monkeypatch):
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
         controller = self._config()
@@ -425,6 +718,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         assert worker.stash[sharding._SHARD_KEY] == (2, 3)
         assert sharding.ENV_VAR not in os.environ
 
+    @pytest.mark.unit
     def test_a_malformed_setting_is_a_usage_error(self, monkeypatch):
         monkeypatch.setenv(sharding.ENV_VAR, "9of8")
         with pytest.raises(pytest.UsageError):
@@ -482,6 +776,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
             if sharding.owner(module, self.COUNT) == index
         )
 
+    @pytest.mark.integration
     def test_a_child_pytest_of_a_shard_sees_no_shard_and_collects_every_module(
         self, tmp_path
     ):
@@ -490,6 +785,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         _, passed = self._run(tmp_path, f"{index}of{self.COUNT}")
         assert passed == self._owned(index)
 
+    @pytest.mark.integration
     def test_the_same_holds_under_xdist_where_workers_get_the_setting_from_workerinput(
         self, tmp_path
     ):
@@ -503,72 +799,120 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         )
 
 
-class TestTheActionRunsAShard:
-    def test_the_default_shard_is_the_whole_suite(self):
+@pytest.mark.unit
+class TestTheActionRunsATier:
+    def test_the_marker_is_required_and_has_no_default(self):
+        marker = _action_inputs()["marker"]
+        assert marker["required"] is True
+        assert "default" not in marker
+
+    def test_the_default_shard_is_the_whole_tier(self):
+        shard = _action_inputs()["shard"]
+        assert shard["default"] == ""
+        assert shard["required"] is False
+        # The empty value is read as "no shard" by the code the action hands it to.
+        assert sharding.shard_from_env({sharding.ENV_VAR: shard["default"]}) is None
+
+    def test_one_pytest_step_always_runs(self):
         action = yaml.safe_load(RUN_UNIT_TESTS.read_text(encoding="utf-8"))
-        assert action["inputs"]["shard"]["default"] == "1of1"
+        names = [step.get("name") for step in action["runs"]["steps"]]
+        assert "Run PyTest shard" not in names, names
+        assert names.count("Run PyTest") == 1, names
+        assert "if" not in _action_step("Run PyTest"), (
+            "a condition on the one pytest step would let a leg pass by running nothing"
+        )
 
-    def test_the_two_pytest_steps_are_exclusive(self):
-        whole = _action_step("Run PyTest")
-        part = _action_step("Run PyTest shard")
-        assert whole["if"] == "inputs.shard == '1of1'"
-        assert part["if"] == "inputs.shard != '1of1'"
-
-    def test_a_shard_names_no_test_file_on_the_command_line(self):
-        """A file named there skips pytest's ignore rules and its python_files match."""
-        step = _action_step("Run PyTest shard")
-        argv = shlex.split(str(step["run"]).replace("\\\n", " "))
-        assert argv[:3] == ["uv", "run", "pytest"], argv
-        for arg in argv[3:]:
-            assert arg.startswith("-"), f"positional argument {arg!r} names a path"
+    def test_the_step_hands_the_shard_and_the_tier_to_pytest_through_env(self):
+        step = _action_step("Run PyTest")
         assert step["env"]["ASH_TEST_SHARD"] == "${{ inputs.shard }}"
-        assert step["env"]["ASH_TEST_SHARD"] and sharding.ENV_VAR == "ASH_TEST_SHARD"
+        assert sharding.ENV_VAR == "ASH_TEST_SHARD"
+        assert step["env"]["MARKER"] == "${{ inputs.marker }}"
+        assert '-m "$MARKER"' in str(step["run"])
 
-    def test_a_shard_measures_coverage_without_gating_it(self):
-        """A shard covers part of the package; the gate is the unit-coverage job's."""
-        step = _action_step("Run PyTest shard")
+    def test_the_step_names_no_test_file_on_the_command_line(self):
+        """A file named there skips pytest's ignore rules and its python_files match."""
+        run = str(_action_step("Run PyTest")["run"])
+        assert "tests/" not in run, run
+        assert ".py" not in run, run
+
+    def test_the_step_measures_coverage_without_gating_it(self):
+        """A run covers part of the package; the gate is the unit-coverage job's."""
+        step = _action_step("Run PyTest")
         run = str(step["run"])
         assert "--cov-fail-under" not in run
         assert "--cov=automated_security_helper" in run
         assert "COVERAGE_FILE" not in step["env"], (
             "COVERAGE_FILE reaches every process a test starts, and a nested run could "
-            "merge its data into the shard's"
+            "merge its data into the run's"
         )
 
-    def test_the_shards_data_is_kept_for_the_upload_even_after_a_red_run(self):
-        step = _action_step("Keep this shard's coverage data")
-        assert "failure()" in step["if"] and "success()" in step["if"]
-        assert "inputs.shard != '1of1'" in step["if"]
-        assert f"test-results/{COMBINE.DATA_FILE}" in str(step["run"])
+    def test_the_coverage_data_is_not_a_hidden_file(self):
         assert not COMBINE.DATA_FILE.startswith("."), (
             "upload-artifact leaves out hidden files, so the data would never arrive"
         )
 
-    def test_the_artifact_name_ends_with_the_shard(self):
+    def test_the_artifact_name_ends_with_the_shard_and_carries_the_tier_before_it(self):
         upload = _action_step("Upload test results")
-        assert upload["with"]["name"].endswith("-shard${{ inputs.shard }}")
+        name = str(upload["with"]["name"])
+        assert name.endswith("-shard${{ inputs.shard || '1of1' }}")
+        assert "-${{ inputs.marker }}-shard" in name
         assert upload["with"]["path"] == "test-results/"
 
+    def test_an_unsharded_run_uploads_as_a_complete_set_of_one(self):
+        name = _rendered_artifact_name("ubuntu-latest", "x86_64", "3.12", "unit", "")
+        assert name == "test-results-ubuntu-latest-x86_64-py3.12-unit-shard1of1"
+        prefix = COMBINE.artifact_prefix("ubuntu-latest", "3.12", "X64", "unit")
+        assert COMBINE.check_shards([name], prefix) == []
 
-class TestTheCoverageJobReadsWhatTheShardsUpload:
+    def test_a_sharded_run_names_its_shard(self):
+        name = _rendered_artifact_name(
+            "macos-14", "arm64", "3.10", "integration", "2of4"
+        )
+        assert name == "test-results-macos-14-arm64-py3.10-integration-shard2of4"
+
+    def test_the_check_name_is_distinct_per_leg(self):
+        report = _action_step("Publish PyTest JUnit Test Report")
+        name = str(report["with"]["check_name"])
+        assert "${{ inputs.marker }}" in name
+        assert "${{ inputs.shard || 'all' }}" in name
+
+
+@pytest.mark.unit
+class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
+    #: A set that was sharded, for the controls: the unit tier itself uploads one artifact.
+    SHARDED = ["1of3", "2of3", "3of3"]
+
     @staticmethod
-    def _shard_names(os_name: str, arch: str) -> list[str]:
-        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch)
-        return [f"{prefix}-shard{entry}" for entry in _shard_axis()]
+    def _names(os_name: str, arch: str, axis: list[str]) -> list[str]:
+        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch, "unit")
+        return [f"{prefix}-shard{entry}" for entry in axis]
 
     @pytest.mark.parametrize(("os_name", "arch"), COVERAGE_RUNNERS)
-    def test_it_accepts_every_shard_of_the_axis(self, os_name, arch):
-        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch)
-        assert COMBINE.check_shards(self._shard_names(os_name, arch), prefix) == []
+    def test_it_accepts_the_unit_tiers_one_artifact(self, os_name, arch):
+        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch, "unit")
+        assert COMBINE.check_shards(self._names(os_name, arch, ["1of1"]), prefix) == []
 
     @pytest.mark.parametrize(("os_name", "arch"), COVERAGE_RUNNERS)
-    def test_it_refuses_the_axis_with_any_one_shard_missing(self, os_name, arch):
+    def test_it_accepts_every_shard_of_a_sharded_set(self, os_name, arch):
+        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch, "unit")
+        names = self._names(os_name, arch, self.SHARDED)
+        assert COMBINE.check_shards(names, prefix) == []
+
+    @pytest.mark.parametrize(("os_name", "arch"), COVERAGE_RUNNERS)
+    def test_it_refuses_a_sharded_set_with_any_one_shard_missing(self, os_name, arch):
         """Positive control for the test above: the check can fail on this input."""
-        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch)
-        names = self._shard_names(os_name, arch)
+        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch, "unit")
+        names = self._names(os_name, arch, self.SHARDED)
         for missing in range(len(names)):
             kept = names[:missing] + names[missing + 1 :]
             assert COMBINE.check_shards(kept, prefix), f"dropped {names[missing]}"
+
+    @pytest.mark.parametrize(("os_name", "arch"), COVERAGE_RUNNERS)
+    def test_it_does_not_take_another_tiers_artifact_for_its_own(self, os_name, arch):
+        prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch, "unit")
+        other = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch, "integration")
+        names = self._names(os_name, arch, ["1of1"]) + [f"{other}-shard1of4"]
+        assert COMBINE.check_shards(names, prefix)
 
     def test_the_arch_labels_are_the_ones_the_action_puts_in_the_name(self):
         """The script rebuilds the artifact name; the action is where it is made."""
@@ -576,6 +920,29 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
         script = str(step["run"])
         for runner_arch, label in COMBINE.ARCH_LABELS.items():
             assert f"{runner_arch}) label={label} ;;" in script, (runner_arch, label)
+
+    @pytest.mark.parametrize(("os_name", "arch"), COVERAGE_RUNNERS)
+    def test_the_download_pattern_matches_what_the_unit_jobs_upload(
+        self, os_name, arch
+    ):
+        job = _workflow_job("unit-coverage")
+        download = [
+            s
+            for s in job["steps"]
+            if str(s.get("uses", "")).startswith("actions/download-artifact@")
+        ]
+        assert len(download) == 1, job["steps"]
+        pattern = str(download[0]["with"]["pattern"]).replace(
+            "${{ matrix.os }}", os_name
+        )
+        label = COMBINE.ARCH_LABELS[arch]
+        uploaded = _rendered_artifact_name(os_name, label, COVERAGE_PYTHON, "unit", "")
+        assert fnmatch.fnmatchcase(uploaded, pattern), (uploaded, pattern)
+        # The same leg's integration shards must not be pulled into the unit gate.
+        integration = _rendered_artifact_name(
+            os_name, label, COVERAGE_PYTHON, "integration", "1of4"
+        )
+        assert not fnmatch.fnmatchcase(integration, pattern), (integration, pattern)
 
     def test_it_gates_one_leg_per_os_family_the_matrix_runs(self):
         gated = _workflow_job("unit-coverage")["strategy"]["matrix"]["os"]
@@ -589,7 +956,7 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
         for job_id, tested in matrices.items():
             assert COVERAGE_PYTHON in tested["python-version"], job_id
 
-    def test_each_leg_runs_where_its_shards_ran(self):
+    def test_each_leg_runs_where_its_runs_ran(self):
         """Same runner image, same workspace path: the reason no remapping is needed."""
         job = _workflow_job("unit-coverage")
         assert job["runs-on"] == "${{ matrix.os }}"
@@ -602,12 +969,12 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
         # need it too, so it adds no wait.
         assert sorted(job["needs"]) == sorted([*UNIT_TEST_JOB_IDS, "ensure-cache"]), (
             "the coverage gate must wait for all three unit-test jobs, or it combines "
-            "the shards of an OS family that is still running"
+            "the runs of an OS family that is still running"
         )
         # Exactly: ${{ cancelled() }} would read the other way round.
         assert job["if"] == "${{ !cancelled() }}", (
-            "without !cancelled() a failed shard skips the job, and a skipped required "
-            "dependency reads as a pass"
+            "without !cancelled() a failed unit run skips the job, and a skipped "
+            "required dependency reads as a pass"
         )
         steps = job["steps"]
         downloads = [
@@ -618,7 +985,7 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
         assert len(downloads) == 1, steps
         assert (
             downloads[0]["with"]["pattern"]
-            == f"test-results-${{{{ matrix.os }}}}-*-py{COVERAGE_PYTHON}-shard*"
+            == f"test-results-${{{{ matrix.os }}}}-*-py{COVERAGE_PYTHON}-unit-shard*"
         )
         combine = [
             s for s in steps if "combine-unit-coverage.py" in str(s.get("run", ""))
@@ -628,18 +995,20 @@ class TestTheCoverageJobReadsWhatTheShardsUpload:
         assert combine[0]["env"]["MATRIX_OS"] == "${{ matrix.os }}"
         assert '--os "${MATRIX_OS}"' in run
         assert f"--python-version {COVERAGE_PYTHON}" in run
+        assert "--marker unit" in run
         assert "--fail-under 80" in run
 
     def test_the_gate_still_lists_it(self):
         assert "unit-coverage" in _workflow_job("required-checks")["needs"]
 
 
+@pytest.mark.unit
 class TestTheUnitTestMatrixIsSplitByOs:
     """The three unit-test jobs are one test matrix cut by runner pool, and stay one.
 
     Each job has its own ``max-parallel`` and its own runner images, which is the only
     reason there are three. Everything else has to match, or one OS family would run a
-    different suite from the others: other Python versions, a shard dropped from one job
+    different suite from the others: other Python versions, a shard added to one job
     only, or a step edited in one of three copies.
     """
 
@@ -689,14 +1058,15 @@ class TestTheUnitTestMatrixIsSplitByOs:
             f"twice under two caps and share a check name: {os_lists}"
         )
 
-    def test_the_jobs_agree_on_python_versions_and_shards(self):
+    def test_the_jobs_agree_on_python_versions(self):
         matrices = {
             job_id: job["strategy"]["matrix"] for job_id, job in self._jobs().items()
         }
-        for axis in ("python-version", "shard"):
-            values = {job_id: matrix[axis] for job_id, matrix in matrices.items()}
-            first = values[UNIT_TEST_JOB_IDS[0]]
-            assert all(value == first for value in values.values()), (axis, values)
+        values = {
+            job_id: matrix["python-version"] for job_id, matrix in matrices.items()
+        }
+        first = values[UNIT_TEST_JOB_IDS[0]]
+        assert all(value == first for value in values.values()), values
 
     def test_the_matrices_have_the_same_axes_and_no_include_or_exclude(self):
         keys = {
@@ -705,6 +1075,9 @@ class TestTheUnitTestMatrixIsSplitByOs:
         }
         first = keys[UNIT_TEST_JOB_IDS[0]]
         assert all(value == first for value in keys.values()), keys
+        assert first == ["os", "python-version"], (
+            "the unit tier is unsharded, so its matrix is the OS and Python axes only"
+        )
         assert not {"include", "exclude"} & set(first), (
             "an include or an exclude changes the leg count, and the job counts in the "
             f"workflow comments are checked against it: {keys}"
@@ -732,6 +1105,104 @@ class TestTheUnitTestMatrixIsSplitByOs:
             assert not differing, f"{job_id} differs from {first_id} in {differing}"
 
 
+@pytest.mark.unit
+class TestTheIntegrationAndE2eFamiliesFollowTheUnitFamily:
+    """Each tier family is the unit family's pool split, waiting for its own pool's unit job."""
+
+    @staticmethod
+    def _all() -> dict[str, dict[str, Any]]:
+        return yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"]
+
+    def test_each_family_has_one_job_per_pool_and_no_other(self):
+        jobs = self._all()
+        assert sorted(n for n in jobs if n.startswith("integration-test-")) == sorted(
+            INTEGRATION_TEST_JOB_IDS
+        )
+        assert sorted(n for n in jobs if n.startswith("e2e-test")) == sorted(
+            E2E_TEST_JOB_IDS
+        )
+
+    @pytest.mark.parametrize("pool", POOLS)
+    def test_each_job_waits_for_the_unit_job_of_its_pool(self, pool):
+        """The cheap tier runs first: a unit failure spares the expensive tiers."""
+        for family in ("integration-test", "e2e-test"):
+            needs = _workflow_job(f"{family}-{pool}")["needs"]
+            assert needs == ["ensure-cache", f"unit-test-{pool}"], (family, pool, needs)
+
+    @pytest.mark.parametrize("job_id", [*INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS])
+    def test_the_tier_jobs_run_even_when_a_unit_leg_failed(self, job_id):
+        """One flaky unit leg must not skip a whole OS family's integration and e2e
+        results; the gate sees the unit failure through its own needs."""
+        assert _workflow_job(job_id)["if"] == "${{ !cancelled() }}"
+
+    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
+    def test_the_unit_jobs_carry_no_condition(self, job_id):
+        """A unit job is skipped only behind a failed ensure-cache, which the gate reads."""
+        assert "if" not in _workflow_job(job_id)
+
+    @pytest.mark.parametrize("pool", POOLS)
+    def test_each_job_runs_on_the_runner_images_of_its_unit_job(self, pool):
+        unit = _workflow_job(f"unit-test-{pool}")
+        for family in ("integration-test", "e2e-test"):
+            job = _workflow_job(f"{family}-{pool}")
+            assert job["strategy"]["matrix"]["os"] == unit["strategy"]["matrix"]["os"]
+            assert job["runs-on"] == "${{ matrix.os }}"
+
+    @pytest.mark.parametrize("pool", POOLS)
+    def test_each_integration_job_covers_the_pythons_and_caps_of_its_unit_job(
+        self, pool
+    ):
+        unit = _workflow_job(f"unit-test-{pool}")
+        job = _workflow_job(f"integration-test-{pool}")
+        assert (
+            job["strategy"]["matrix"]["python-version"]
+            == unit["strategy"]["matrix"]["python-version"]
+        )
+        assert job["strategy"]["max-parallel"] == unit["strategy"]["max-parallel"]
+        assert job["strategy"]["fail-fast"] is False
+
+    def test_the_integration_jobs_differ_in_nothing_but_pool_specific_keys(self):
+        jobs = {job_id: _workflow_job(job_id) for job_id in INTEGRATION_TEST_JOB_IDS}
+        first_id, *others = INTEGRATION_TEST_JOB_IDS
+        base = TestTheUnitTestMatrixIsSplitByOs._comparable(jobs[first_id])
+        for job_id in others:
+            other = TestTheUnitTestMatrixIsSplitByOs._comparable(jobs[job_id])
+            differing = [
+                k for k in base.keys() | other.keys() if base.get(k) != other.get(k)
+            ]
+            # The pool's own unit job is the one thing each waits for.
+            assert sorted(differing) == ["needs"], f"{job_id}: {sorted(differing)}"
+
+    @pytest.mark.parametrize(
+        "job_id", [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
+    )
+    def test_every_tier_job_keeps_the_timeout_the_shard_arithmetic_assumes(
+        self, job_id
+    ):
+        job = _workflow_job(job_id)
+        assert job["timeout-minutes"] == 30
+        assert job["permissions"] == {
+            "contents": "read",
+            "pull-requests": "write",
+            "checks": "write",
+            "statuses": "write",
+        }
+
+    def test_every_tier_job_is_in_the_gate(self):
+        needs = _workflow_job("required-checks")["needs"]
+        missing = [
+            job_id
+            for job_id in [
+                *UNIT_TEST_JOB_IDS,
+                *INTEGRATION_TEST_JOB_IDS,
+                *E2E_TEST_JOB_IDS,
+            ]
+            if job_id not in needs
+        ]
+        assert not missing, missing
+
+
+@pytest.mark.integration
 class TestTheCombineGate:
     """The gate the unit-coverage job runs, on real coverage data planted in a temp dir."""
 
@@ -765,10 +1236,21 @@ class TestTheCombineGate:
         """
     )
 
-    def _shard(self, tmp_path: Path, results: Path, index: int, calls: list[str]):
-        """A shard artifact whose data came from running the named functions."""
-        prefix = COMBINE.artifact_prefix("ubuntu-latest", COVERAGE_PYTHON, "X64")
-        directory = results / f"{prefix}-shard{index}of2"
+    def _shard(
+        self,
+        tmp_path: Path,
+        results: Path,
+        index: int,
+        calls: list[str],
+        *,
+        marker: str | None = None,
+        count: int = 2,
+    ):
+        """An artifact whose data came from running the named functions."""
+        prefix = COMBINE.artifact_prefix(
+            "ubuntu-latest", COVERAGE_PYTHON, "X64", marker
+        )
+        directory = results / f"{prefix}-shard{index}of{count}"
         directory.mkdir(parents=True, exist_ok=True)
         src = tmp_path / "src"
         src.mkdir(exist_ok=True)
@@ -796,7 +1278,14 @@ class TestTheCombineGate:
         assert done.returncode == 0, done.stdout + done.stderr
         return directory
 
-    def _gate(self, tmp_path: Path, monkeypatch, results: Path) -> int:
+    def _gate(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+        results: Path,
+        *,
+        marker: str | None = None,
+    ) -> int:
         for name in list(os.environ):
             if name.startswith(("COV_CORE_", "COVERAGE_")):
                 monkeypatch.delenv(name)
@@ -810,6 +1299,7 @@ class TestTheCombineGate:
                 "ubuntu-latest",
                 "--python-version",
                 COVERAGE_PYTHON,
+                *(["--marker", marker] if marker else []),
                 "--fail-under",
                 "80",
             ]
@@ -846,3 +1336,26 @@ class TestTheCombineGate:
         broken = self._shard(tmp_path, results, 2, ["a"])
         (broken / COMBINE.DATA_FILE).write_bytes(b"not a coverage data file")
         assert self._gate(tmp_path, monkeypatch, results) == 1
+
+    def test_the_unit_tiers_one_artifact_is_a_complete_set(self, tmp_path, monkeypatch):
+        """An unsharded unit run uploads shard1of1, and the gate takes it as it is."""
+        results = tmp_path / "results"
+        self._shard(tmp_path, results, 1, ["a", "b", "c", "d"], marker="unit", count=1)
+        assert self._gate(tmp_path, monkeypatch, results, marker="unit") == 0
+
+    def test_the_unit_tiers_one_artifact_below_the_threshold_fails(
+        self, tmp_path, monkeypatch
+    ):
+        results = tmp_path / "results"
+        self._shard(tmp_path, results, 1, ["a"], marker="unit", count=1)
+        assert self._gate(tmp_path, monkeypatch, results, marker="unit") == 2
+
+    def test_another_tiers_artifact_is_not_the_unit_tiers_set(
+        self, tmp_path, monkeypatch
+    ):
+        """With --marker unit the gate looks only at the unit artifacts: none here."""
+        results = tmp_path / "results"
+        self._shard(
+            tmp_path, results, 1, ["a", "b", "c", "d"], marker="integration", count=1
+        )
+        assert self._gate(tmp_path, monkeypatch, results, marker="unit") == 1

@@ -53,6 +53,8 @@ from typing import Any
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
@@ -682,6 +684,31 @@ class TestTheGateActuallyRunsTheScript:
             "these gated jobs can be skipped without the run being cancelled, which "
             "the gate's condition cannot see:\n" + "\n".join(bad)
         )
+
+    def test_the_tier_jobs_that_wait_on_a_unit_job_run_under_a_status_function(self):
+        """The integration-test and e2e-test jobs wait for a unit-test job that waits for
+        ensure-cache, so they have `needs:` of their own below a job that has `needs:`.
+
+        The rule above lets such a job skip quietly unless it carries `!cancelled()` or
+        `always()`. They carry `!cancelled()` on purpose, which also keeps one failed
+        unit leg from skipping a whole OS family's integration and e2e signal: the gate
+        sees the unit failure through its own `needs`, and the tier jobs report theirs.
+        """
+        data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+        needs = _needs_of(UNIFIED_CI, GATE_JOB)
+        tier_jobs = [
+            name
+            for name in data["jobs"]
+            if name.startswith(("integration-test-", "e2e-test-"))
+        ]
+        assert len(tier_jobs) == 6, tier_jobs
+        for name in tier_jobs:
+            assert name in needs, f"{GATE_JOB} does not wait for {name}"
+            condition = re.sub(r"\s+", "", str(data["jobs"][name].get("if", "")))
+            assert condition in _STATUS_CONDITIONS, (
+                f"{name} has if: {condition!r}; a job below a unit-test job needs a "
+                "status function or the first failed unit leg skips it"
+            )
 
     def test_a_job_that_waits_on_an_always_running_gated_job_may_skip_with_it(self):
         jobs = {"base": {}, "leaf": {"needs": ["base"]}}
