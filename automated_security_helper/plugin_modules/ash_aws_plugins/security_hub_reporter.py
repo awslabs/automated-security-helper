@@ -495,9 +495,26 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 region_name=self.config.options.aws_region,
             )
 
-            # Test Security Hub connectivity
+            # Test Security Hub connectivity. DescribeHub needs
+            # securityhub:DescribeHub, a permission the import itself does not:
+            # a principal granted only BatchImportFindings (and GetFindings, to
+            # archive) imports with `ash report`, which skips this check, so a
+            # scan is not disabled on that one refusal. The refusal is named
+            # with its permission; the import's own errors say the rest.
             securityhub_client = session.client("securityhub")
-            securityhub_client.describe_hub()
+            try:
+                securityhub_client.describe_hub()
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "AccessDeniedException":
+                    raise
+                ASH_LOGGER.warning(
+                    "securityhub:DescribeHub was refused for the configured "
+                    "credentials, so whether Security Hub is enabled in the "
+                    "configured region was not checked; the import itself needs "
+                    "securityhub:BatchImportFindings (and securityhub:GetFindings "
+                    "when archive_resolved_findings is on) and reports its own "
+                    "refusal"
+                )
 
             # Get account ID if not provided
             if not self.config.options.account_id:
