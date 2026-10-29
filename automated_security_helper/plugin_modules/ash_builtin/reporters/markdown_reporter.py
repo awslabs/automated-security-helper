@@ -137,6 +137,24 @@ def coverage_markdown(summary: Dict[str, Any]) -> str:
             )
             + ". Review the scanner logs.\n"
         )
+    if summary.get("could_not_stop"):
+        parts.extend(
+            [
+                "### Scanner tools not stopped\n",
+                (
+                    "These tools could not be stopped and may still be writing, so this "
+                    "report may not be final. The scan fails for them whatever the "
+                    "severity gate says:\n"
+                ),
+            ]
+        )
+        parts.extend(
+            # The name and the reason come from the run's own record: shown on
+            # one line, then kept literal in Markdown.
+            f"- **{_text(shown_on_one_line(name))}**: {_text(shown_on_one_line(reason))}"
+            for name, reason in summary["could_not_stop"]
+        )
+        parts.append("")
     if summary["stale"]:
         parts.extend(
             [

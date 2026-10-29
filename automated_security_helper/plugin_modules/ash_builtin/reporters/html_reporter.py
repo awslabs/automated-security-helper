@@ -251,6 +251,21 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 '<div class="notice"><h3>Rules not evaluated</h3>'
                 f"<p>{rules}. These rules reached no verdict. Review the scanner logs before accepting this scan.</p></div>"
             )
+        if summary.get("could_not_stop"):
+            # The scanner's name and the reason (it names the process id) come
+            # from the run's own record: each is one shown line.
+            rows = "".join(
+                f"<li><strong>{html.escape(str(shown_on_one_line(name)))}</strong>: "
+                f"{html.escape(str(shown_on_one_line(reason)))}</li>"
+                for name, reason in summary["could_not_stop"]
+            )
+            notices.append(
+                '<div class="notice"><h3>Scanner tools not stopped</h3>'
+                "<p>These tools could not be stopped and may still be writing into the "
+                "output directory, so this report may not be final. The scan fails for them "
+                "whatever the severity gate says.</p>"
+                f"<ul>{rows}</ul></div>"
+            )
         if summary["stale"]:
             rows = "".join(
                 f"<li><strong>{html.escape(str(shown_on_one_line(record.name)))}</strong> "

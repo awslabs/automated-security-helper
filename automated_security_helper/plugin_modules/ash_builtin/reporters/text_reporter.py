@@ -154,6 +154,20 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                     "",
                 ]
             )
+        if summary.get("could_not_stop"):
+            text_parts.extend(
+                [
+                    "SCANNER TOOLS NOT STOPPED",
+                    "These tools could not be stopped and may still be writing, so this report may not be final.",
+                ]
+            )
+            text_parts.extend(
+                # The name and the reason come from the run's own record: one
+                # shown line each.
+                str(shown_on_one_line(f"- {name}: {reason}"))
+                for name, reason in summary["could_not_stop"]
+            )
+            text_parts.append("")
 
         # Add metadata section
         text_parts.append("SCAN METADATA")

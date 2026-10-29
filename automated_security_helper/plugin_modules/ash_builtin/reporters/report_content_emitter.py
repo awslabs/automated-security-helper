@@ -214,11 +214,27 @@ class ReportContentEmitter:
         # completed" and listed it as needing attention beside the notice that
         # already named it.
         ran_against_stale = scanners_in_error_for_a_stale_database(self.model)
+        shortfalls = coverage_shortfalls(self.model)
+        # A scanner that evaluated SOME of its targets (a partial loss, real
+        # counts, failed below attempted) ran. Its status can still read ERROR when
+        # one of its target reports errored, and the status alone then counted it
+        # as not completed and listed it as needing attention beside the
+        # "Incomplete coverage" row that already names it with its counts.
+        # Unknown-size and total-loss shortfalls stay as they were: nothing there
+        # says any target was evaluated.
+        partial_scanners = {
+            name
+            for name, attempted, failed in shortfalls
+            if attempted is not None and failed is not None and failed < attempted
+        }
 
         def ran(result: Dict[str, Any]) -> bool:
             return result["status"] in ("PASSED", "FAILED") or (
                 result["status"] == "ERROR"
-                and result["scanner_name"] in ran_against_stale
+                and (
+                    result["scanner_name"] in ran_against_stale
+                    or result["scanner_name"] in partial_scanners
+                )
             )
 
         counts = {
@@ -248,7 +264,6 @@ class ReportContentEmitter:
             for result in results
             if result["status"] != "SKIPPED" and not ran(result)
         ]
-        shortfalls = coverage_shortfalls(self.model)
         stale = stale_content_databases(self.model)
         # A project skipped as no-changes was examined: nothing under it changed,
         # which is a successful no-op the workspace exit code treats as clean. Only
@@ -257,13 +272,19 @@ class ReportContentEmitter:
             entry for entry in skipped_projects(self.model) if entry.reason.is_error
         ]
         coverage = scan_incompleteness(self.model, gate=True)
-        partial_scanners = {name for name, _, _ in shortfalls}
+        shortfall_scanners = {name for name, _, _ in shortfalls}
         unavailable.extend(
             name
             for name, _ in coverage.scanners
-            if name not in unavailable and name not in partial_scanners
+            if name not in unavailable and name not in shortfall_scanners
         )
         active = sum(counts.values())
+        # A tool ASH could not stop fails the run whatever the gate says, and it
+        # may still be writing into the output directory after this report is
+        # rendered, so the report is not final. The exit code reads it from the
+        # same ScanIncompleteness; a summary that ignored it read "No actionable
+        # findings" for a run that exits 1.
+        could_not_stop = list(coverage.could_not_stop)
         incomplete = bool(
             unavailable
             or shortfalls
@@ -271,6 +292,7 @@ class ReportContentEmitter:
             or coverage.converters
             or coverage.unevaluated_rules
             or coverage.no_scanner_ran
+            or could_not_stop
         )
         finding_label = "finding" if actionable == 1 else "findings"
 
@@ -280,6 +302,13 @@ class ReportContentEmitter:
             next_step = (
                 "Check scanner results and dependencies, then run the scan again."
             )
+        elif could_not_stop:
+            title, tone = "Scan incomplete", "warning"
+            description = (
+                f"{actionable} actionable {finding_label}. A scanner tool could not be "
+                "stopped and may still be writing, so this report may not be final."
+            )
+            next_step = "Stop the named tool, then run the scan again."
         elif incomplete:
             title, tone = "Scan incomplete", "warning"
             description = f"{actionable} actionable {finding_label}. Some inputs or scanners were not evaluated."
@@ -315,6 +344,8 @@ class ReportContentEmitter:
             "stale": stale,
             "converter_gaps": coverage.converters,
             "unevaluated_rules": coverage.unevaluated_rules,
+            # (scanner, reason) rows, the reason naming the process id.
+            "could_not_stop": could_not_stop,
         }
 
     def get_top_hotspots(self, limit: int = 10) -> List[Dict[str, Any]]:
