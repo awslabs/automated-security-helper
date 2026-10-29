@@ -84,6 +84,44 @@ _SEVERITY_TO_SECURITY_SEVERITY: Dict[str, str] = {
 }
 
 
+def _usable_security_severity(value: Any) -> Optional[str]:
+    """*value* as the security-severity string GitHub reads, or None.
+
+    GitHub's SARIF support documents the field as "a value that is greater than
+    0.0 up to 10.0" and says "a value of 0.0 or any other value outside the given
+    range is regarded as having no security severity". A scanner's rule can
+    carry 0 (an advisory with no CVSS score), a non-numeric string, or a score
+    out of range; passed through, that rule's alerts showed the SARIF level's
+    severity on GitHub where ASH graded them by its own ladder. Such a value is
+    treated as absent, so the gate-derived score is used instead.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    try:
+        score = float(text)
+    except ValueError:
+        return None
+    if not (0.0 < score <= 10.0):
+        return None
+    return text
+
+
+def _band(score: float) -> str:
+    """GitHub's severity bucket for *score*, in the gate's spelling.
+
+    Over 9.0 is critical, 7.0 to 8.9 high, 4.0 to 6.9 medium and 0.1 to 3.9
+    low; INFO lands in the low bucket, which has no finer division.
+    """
+    if score >= 9.0:
+        return "CRITICAL"
+    if score >= 7.0:
+        return "HIGH"
+    if score >= 4.0:
+        return "MEDIUM"
+    return "LOW"
+
+
 def _level_value(level: Any) -> str:
     """Render a SARIF level as its wire value.
 
@@ -233,9 +271,9 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                         continue
                     severity = result_severity(result)
                     current = rule_level_from_results.get(rule_id)
-                    if current is None or SEVERITIES.index(
-                        severity
-                    ) < SEVERITIES.index(current):
+                    if current is None or SEVERITIES.index(severity) < SEVERITIES.index(
+                        current
+                    ):
                         rule_level_from_results[rule_id] = severity
 
             # 3. Build slim results (excluding suppressed if configured). First,
@@ -305,11 +343,9 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             if rule.properties:
                 props = rule.properties.model_extra or {}
                 # Check both hyphenated (from native SARIF) and underscored (from ASH code)
-                security_severity = props.get(
-                    "security-severity", props.get("security_severity")
+                security_severity = _usable_security_severity(
+                    props.get("security-severity", props.get("security_severity"))
                 )
-                if security_severity is not None:
-                    security_severity = str(security_severity)
                 rule_tags = rule.properties.tags or []
 
             # Get the default level from the rule configuration
@@ -338,26 +374,46 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         """Resolve the security-severity for a rule.
 
         Priority:
-        1. Existing security-severity from the scanner (preserve as-is)
+        1. Existing security-severity from the scanner, when it is usable
+           (:func:`_usable_security_severity`) and lands in the same GitHub
+           bucket as the gate's grade of the rule's most severe emitted result
         2. The most severe of the rule's results, as the gate grades them
         3. Derived from rule's defaultConfiguration.level, the gate's way
         4. Default to "6.0" (Medium)
 
         The results come before the rule's default level because they carry
-        ``issue_severity``, which the gate reads first and a rule cannot.
+        ``issue_severity``, which the gate reads first and a rule cannot. A
+        scanner's own score is kept only when it agrees with the gate's bucket:
+        the scan fails a result at the gate's severity, and every other ASH
+        report shows that severity, so a rule the gate graded CRITICAL showing
+        as Low on GitHub because the scanner's rule-level score said 3.1 made
+        the one finding read two ways. Within the bucket the scanner's score is
+        the more precise statement and is preserved.
         """
         rule_info = rules_map.get(rule_id)
 
-        # 1. Already has security-severity from scanner
-        if rule_info and rule_info["security_severity"]:
-            return rule_info["security_severity"]
-
-        # 2. Derive from the rule's results. report() records severities here; a
-        #    level is read the gate's way, so a caller passing one gets the same.
+        # 2 first, because 1 is checked against it. report() records
+        #    severities here; a level is read the gate's way, so a caller passing
+        #    one gets the same.
         from_results = rule_level_from_results.get(rule_id)
+        if from_results and from_results not in _SEVERITY_TO_SECURITY_SEVERITY:
+            from_results = result_severity({"level": from_results})
+
+        # 1. The scanner's security-severity, if usable and in the gate's bucket
+        scanner_score = (
+            _usable_security_severity(rule_info["security_severity"])
+            if rule_info
+            else None
+        )
+        if scanner_score and (
+            not from_results
+            or _band(float(scanner_score))
+            == _band(float(_SEVERITY_TO_SECURITY_SEVERITY[from_results]))
+        ):
+            return scanner_score
+
+        # 2. Derive from the rule's results
         if from_results:
-            if from_results not in _SEVERITY_TO_SECURITY_SEVERITY:
-                from_results = result_severity({"level": from_results})
             return _SEVERITY_TO_SECURITY_SEVERITY[from_results]
 
         # 3. Derive from rule's defaultConfiguration.level

@@ -139,8 +139,6 @@ def test_a_single_directory_run_keeps_its_uris(reporter):
     (out,) = json.loads(reporter.report(model))["runs"]
 
     assert (
-        out["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"][
-            "uri"
-        ]
+        out["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
         == "src/app.py"
     )
