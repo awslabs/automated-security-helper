@@ -160,6 +160,16 @@ runs:
     #
     # Its own --junit-xml path, so it does not claim the file "Run PyTest" names. The
     # report step's glob matches both.
+    #
+    # --snapshot-warn-unused, here and nowhere else. syrupy counts a snapshot no test
+    # asserted as unused whenever every collected test was selected, and fails the session
+    # on it. A shard collects only the modules it owns (the hook above ignores the rest),
+    # so every other shard's snapshots read as unused by construction: in run 40901120718
+    # the shard 3of8 legs read 5056 passed, 0 failed, "398 snapshots unused", exit 1. The
+    # flag makes that report a warning in this step; "Run PyTest" above keeps the failing
+    # default, and tests/snapshot/test_snapshot_policy.py admits the flag in no other step
+    # or file. tests/unit/test_unit_test_shards.py fails if it is dropped here or added
+    # there.
     - name: Run PyTest shard
       if: inputs.shard != '1of1'
       shell: bash
@@ -173,6 +183,7 @@ runs:
           --cov=automated_security_helper \
           --cov-config=.coveragerc \
           --cov-report= \
+          --snapshot-warn-unused \
           --junit-xml=test-results/pytest-shard.junit.xml
 
     # The shard's coverage data, where the artifact upload below carries it to the

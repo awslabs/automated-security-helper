@@ -242,13 +242,18 @@ message, so the trailer survives the merge.
 CI never passes `pytest --snapshot-update`, and `tests/snapshot/conftest.py` refuses it when the
 `CI` or `GITHUB_ACTIONS` environment variable equals `true` (exactly that string, so
 `CI=1` does not trigger the refusal). `tests/snapshot/test_snapshot_policy.py` fails if
-any workflow, action, script or pytest configuration passes `pytest --snapshot-update`
-or `pytest --snapshot-warn-unused`. A missing snapshot fails.
+any workflow, action, script or pytest configuration passes `pytest --snapshot-update`,
+or passes `pytest --snapshot-warn-unused` anywhere but the sharded unit-test step of
+`.github/actions/run-unit-tests/action.yml`. That one step carries the flag because a
+shard collects only the test modules it owns, so syrupy reads every other shard's
+snapshots as unused and would fail a shard that has no failing test; the whole-suite
+step of the same action keeps syrupy's failing default. A missing snapshot fails.
 
 ### Orphaned snapshots
 
-A snapshot that no test asserts any more fails CI. syrupy reports an unused snapshot in a
-test module that still exists. If you delete or rename a test module, syrupy never opens
+A snapshot that no test asserts any more fails a whole-suite run (`uv run pytest` with no
+shard); the sharded CI legs warn instead, as described above. syrupy reports an unused
+snapshot in a test module that still exists. If you delete or rename a test module, syrupy never opens
 its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
 `test_snapshot_policy.py`) checks that every file under a `tests/**/__snapshots__/`
 directory belongs to a `<test_module>.py` next to that directory, and that no

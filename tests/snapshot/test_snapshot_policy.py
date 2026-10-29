@@ -7,7 +7,9 @@ Three properties, each with a negative control so a check that has stopped seein
 anything cannot pass by default:
 
 * nothing CI runs passes syrupy's update or warn-unused flags (either would turn a
-  failing snapshot into a rewritten or ignored one);
+  failing snapshot into a rewritten or ignored one), with one admitted exception: the
+  sharded unit-test step passes ``--snapshot-warn-unused``, because a shard collects
+  only the modules it owns and so reads every other shard's snapshots as unused;
 * every snapshot file maps to a test module that exists, which syrupy cannot check for a
   module that was deleted or renamed;
 * .github/scripts/check-snapshot-trailers.py rejects a golden change whose commit has no
@@ -26,6 +28,7 @@ from pathlib import Path, PurePosixPath
 from types import ModuleType
 
 import pytest
+import yaml
 
 from tests.utils.helpers import iter_repo_files
 
@@ -60,6 +63,48 @@ _COMMENT = re.compile(r"(?:^|\s)#.*$", re.MULTILINE)
 
 def banned_flags(text: str) -> list[str]:
     return _BANNED.findall(_COMMENT.sub("", text))
+
+
+# The one admitted use. syrupy reports the snapshots no test asserted as unused whenever
+# every collected item was selected (report.py, ``unused``), and fails the session on
+# them. A shard collects only the test modules it owns (tests/utils/sharding.py ignores
+# the rest at collection), so every other shard's snapshots read as unused by
+# construction: run 40901120718's shard 3of8 jobs read 5056 passed, 0 failed, "398
+# snapshots unused", exit 1. That step alone may pass --snapshot-warn-unused, once.
+# --snapshot-update stays banned there, and the whole-suite step of the same action keeps
+# syrupy's failing default, which tests/unit/test_unit_test_shards.py pins.
+_SHARD_ACTION = ".github/actions/run-unit-tests/action.yml"
+_SHARD_STEP = "Run PyTest shard"
+_WARN_UNUSED = "--snapshot-warn-unused"
+
+
+def _shard_step_run(action_text: str) -> str:
+    """The shard step's ``run`` script, or a failure when the step is not there.
+
+    A renamed or removed step must surface here, not widen the exemption to nothing
+    or to the whole file.
+    """
+    steps = yaml.safe_load(action_text)["runs"]["steps"]
+    found = [s for s in steps if s.get("name") == _SHARD_STEP]
+    assert len(found) == 1, f"expected one {_SHARD_STEP!r} step in {_SHARD_ACTION}"
+    return str(found[0]["run"])
+
+
+def banned_flags_in_ci_file(rel_path: str, text: str) -> list[str]:
+    """Every banned flag in one CI file, minus the shard step's one admitted flag.
+
+    The subtraction is by count, not by position: the shard step may hold exactly one
+    ``--snapshot-warn-unused`` and nothing else banned, and one such occurrence is then
+    taken off the file's list. A second occurrence anywhere in the file, or any
+    ``--snapshot-update`` in the shard step, stays an offender.
+    """
+    found = banned_flags(text)
+    if rel_path != _SHARD_ACTION:
+        return found
+    in_step = banned_flags(_shard_step_run(text))
+    if in_step == [_WARN_UNUSED]:
+        found.remove(_WARN_UNUSED)
+    return found
 
 
 # Everything CI executes or configures pytest from. .github/ is scanned whole (workflows,
@@ -99,6 +144,35 @@ def test_banned_flag_scanner_detects_an_invocation() -> None:
     assert not banned_flags("run: uv run pytest tests/snapshot")
 
 
+def test_the_shard_step_exemption_admits_one_flag_in_one_step() -> None:
+    """Negative controls on the exemption, through the real action file."""
+    text = (REPO_ROOT / _SHARD_ACTION).read_text(encoding="utf-8")
+    assert banned_flags_in_ci_file(_SHARD_ACTION, text) == []
+    assert banned_flags(_shard_step_run(text)) == [_WARN_UNUSED], (
+        "the control below plants over the shard step's flag; it has to be there"
+    )
+    # --snapshot-update in the shard step is still an offender. The anchor is the flag
+    # as the run script spells it, with its line continuation, so the replacement lands
+    # on the command and not on the comment above the step that names the flag.
+    run_flag = f"{_WARN_UNUSED} \\"
+    assert text.count(run_flag) == 1, "the shard step's flag line moved; re-anchor"
+    update_in_shard = text.replace(run_flag, "--snapshot-update \\", 1)
+    assert banned_flags_in_ci_file(_SHARD_ACTION, update_in_shard) == [
+        "--snapshot-update"
+    ]
+    # The warn flag on the whole-suite step is an offender. The anchor is that step's
+    # HTML coverage report, an option the shard step never carries and no comment names.
+    anchor = "--cov-report=html:test-results/coverage_html"
+    assert text.count(anchor) == 1, "the whole-suite step's options moved; re-anchor"
+    warn_in_whole = text.replace(anchor, f"{anchor} {_WARN_UNUSED}", 1)
+    assert banned_flags_in_ci_file(_SHARD_ACTION, warn_in_whole) == [_WARN_UNUSED]
+    # The exemption is by path: the same text under another name is scanned whole.
+    assert banned_flags_in_ci_file(".github/workflows/x.yml", text) == [_WARN_UNUSED]
+    # A missing shard step fails the scan rather than exempting the file.
+    with pytest.raises(AssertionError):
+        _shard_step_run(text.replace(_SHARD_STEP, "Run PyTest renamed", 1))
+
+
 def test_no_ci_file_passes_snapshot_update_or_warn_unused() -> None:
     files = _ci_files()
     assert any(p.name == "ash-unified-ci.yml" for p in files), "scanned the wrong tree"
@@ -108,7 +182,7 @@ def test_no_ci_file_passes_snapshot_update_or_warn_unused() -> None:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        found = banned_flags(text)
+        found = banned_flags_in_ci_file(path.relative_to(REPO_ROOT).as_posix(), text)
         if found:
             offenders[path.relative_to(REPO_ROOT).as_posix()] = found
     assert offenders == {}, (

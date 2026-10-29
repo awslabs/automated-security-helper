@@ -535,6 +535,25 @@ class TestTheActionRunsAShard:
             "merge its data into the shard's"
         )
 
+    def test_a_shard_warns_on_unused_snapshots_and_the_whole_suite_fails_on_them(self):
+        """A shard sees every other shard's snapshots as unused, so it must not fail on them.
+
+        syrupy (report.py, ``unused``) counts the snapshots no test asserted once every
+        collected item was selected, and the sharding hook ignores the other shards'
+        modules at collection, so that condition holds for every shard. Run 40901120718's
+        shard 3of8 jobs read 5056 passed, 0 failed, "398 snapshots unused" and exited 1.
+        The flag belongs to the shard step alone: the whole-suite step is the run where an
+        unused snapshot means something, and it keeps syrupy's failing default.
+        """
+        shard = str(_action_step("Run PyTest shard")["run"])
+        whole = str(_action_step("Run PyTest")["run"])
+        assert shard.count("--snapshot-warn-unused") == 1, shard
+        assert "--snapshot-update" not in shard
+        assert "--snapshot-warn-unused" not in whole, (
+            "the whole-suite run is the one place an unused snapshot is a real finding"
+        )
+        assert "--snapshot-update" not in whole
+
     def test_the_shards_data_is_kept_for_the_upload_even_after_a_red_run(self):
         step = _action_step("Keep this shard's coverage data")
         assert "failure()" in step["if"] and "success()" in step["if"]
