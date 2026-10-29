@@ -10,6 +10,10 @@ from rich.table import Table
 
 from automated_security_helper.utils.console import ash_console
 from automated_security_helper.utils.log import escape_markup
+from automated_security_helper.utils.sandbox.fs_guard import (
+    open_for_read,
+    open_for_write,
+)
 
 from automated_security_helper.utils.meta_analysis.reporting import (
     generate_html_report,
@@ -115,9 +119,12 @@ def get_scanner_name_from_path(file_path: str) -> str:
     """
     path_parts = Path(file_path).parts
 
-    # Check if the file is in the scanners directory
+    # The scanner is the directory under the LAST "scanners" component: ASH's
+    # layout is <output dir>/scanners/<scanner>/..., and an output directory that
+    # itself sits under an ancestor named "scanners" put every file, the
+    # aggregate included, under that ancestor's child's name.
     if "scanners" in path_parts:
-        scanners_index = path_parts.index("scanners")
+        scanners_index = len(path_parts) - 1 - path_parts[::-1].index("scanners")
         if len(path_parts) > scanners_index + 1:
             return path_parts[scanners_index + 1]
 
@@ -192,15 +199,24 @@ def analyze_sarif_fields(
 
     console.print(f"Found [bold green]{len(all_sarif_files)}[/bold green] SARIF files")
 
-    # Process files in the specified order
+    # Process files in the specified order. A file is sorted by the component
+    # directly under the searched directory, not by any component of its whole
+    # path: with an output directory under an ancestor named "scanners" or
+    # "reports", every file matched both lists.
+    def _relative_parts(file_path: str) -> tuple:
+        try:
+            return Path(file_path).relative_to(sarif_dir).parts
+        except ValueError:
+            return Path(file_path).parts
+
     sarif_files = []
 
     # First, process files in reports directory
-    reports_files = [f for f in all_sarif_files if "reports" in Path(f).parts]
+    reports_files = [f for f in all_sarif_files if _relative_parts(f)[0] == "reports"]
     sarif_files.extend(reports_files)
 
     # Then, process files in scanners directory
-    scanners_files = [f for f in all_sarif_files if "scanners" in Path(f).parts]
+    scanners_files = [f for f in all_sarif_files if _relative_parts(f)[0] == "scanners"]
     sarif_files.extend(scanners_files)
 
     # Process each SARIF file
@@ -208,13 +224,18 @@ def analyze_sarif_fields(
         for file_path in sarif_files:
             console.print(f"Analyzing [cyan]{escape_markup(file_path)}[/cyan]")
 
-            # Get scanner name from file path
-            scanner_name = get_scanner_name_from_path(file_path)
+            # Get scanner name from the file's path below the searched directory
+            scanner_name = get_scanner_name_from_path(
+                os.path.join(*_relative_parts(file_path))
+            )
 
             try:
-                # Load the SARIF file
-                with open(file_path, mode="r", encoding="utf-8") as f:
-                    sarif_data = json.load(f)
+                # Load the SARIF file. Read under the guard, as every read of a
+                # scanner's results directory is: a leftover process a sandboxed
+                # scanner started may have replaced a file there with a link to
+                # one of the host's files, or with a FIFO that blocks the open.
+                with open_for_read(file_path) as f:
+                    sarif_data = json.loads(f.read().decode("utf-8"))
 
                 # Flatten the SARIF results - now returns both included and excluded fields
                 included_fields, excluded_fields = flatten_sarif_results(sarif_data)
@@ -244,12 +265,12 @@ def analyze_sarif_fields(
                 )
 
     # The inspect phase writes these below the output directory: never through a
-    # link there (fs_guard).
-    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
-
+    # link there (fs_guard). The CLI registers no writable root, so each write
+    # names the directory it writes in; without that the guard was a plain open()
+    # and followed a link at the output path.
     # Write JSON output for included fields
     json_path = os.path.join(output_dir, "sarif_fields.json")
-    with open_for_write(json_path) as f:
+    with open_for_write(json_path, root=output_dir) as f:
         json.dump(results_dict, f, indent=2)
     console.print(
         f"Wrote included fields JSON to [cyan]{escape_markup(json_path)}[/cyan]"
@@ -257,7 +278,7 @@ def analyze_sarif_fields(
 
     # Write JSON output for excluded fields
     excluded_json_path = os.path.join(output_dir, "sarif_excluded_fields.json")
-    with open_for_write(excluded_json_path) as f:
+    with open_for_write(excluded_json_path, root=output_dir) as f:
         json.dump(excluded_dict, f, indent=2)
     console.print(
         "Wrote excluded fields JSON to "
@@ -268,7 +289,7 @@ def analyze_sarif_fields(
     csv_path = os.path.join(output_dir, "sarif_fields.csv")
     # UTF-8, as the JSON files are: a field name can hold any character, and the
     # locale's encoding (ASCII under the C locale) cannot write every one.
-    with open_for_write(csv_path, encoding="utf-8", newline="") as f:
+    with open_for_write(csv_path, encoding="utf-8", newline="", root=output_dir) as f:
         writer = csv.writer(f)
         writer.writerow(["field", "scanners"])
 
@@ -280,7 +301,9 @@ def analyze_sarif_fields(
 
     # Write CSV output for excluded fields
     excluded_csv_path = os.path.join(output_dir, "sarif_excluded_fields.csv")
-    with open_for_write(excluded_csv_path, encoding="utf-8", newline="") as f:
+    with open_for_write(
+        excluded_csv_path, encoding="utf-8", newline="", root=output_dir
+    ) as f:
         writer = csv.writer(f)
         writer.writerow(["field", "scanners", "reason"])
 
@@ -369,7 +392,9 @@ def analyze_sarif_fields(
 
     # Generate HTML report
     html_report_path = os.path.join(output_dir, "sarif_validation_report.html")
-    generate_html_report(validation_results, html_report_path, field_presence)
+    generate_html_report(
+        validation_results, html_report_path, field_presence, root=output_dir
+    )
     console.print(
         f"Wrote HTML report to [cyan]{escape_markup(html_report_path)}[/cyan]"
     )
