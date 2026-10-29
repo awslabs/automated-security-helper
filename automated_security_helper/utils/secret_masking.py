@@ -991,9 +991,11 @@ def _matched_values(result: Any) -> List[str]:
 
     semgrep and opengrep report a match by columns on its line: the key itself,
     or an assignment holding it, whose string literals are then the values. Only
-    a single-line region with both columns and a snippet starting at the line's
-    first column is read; a snippet too short to hold the columns (the matched
-    text alone, say) is not.
+    a single-line region with both columns is read, and only where the snippet
+    can be placed on the line: a snippet too short to hold the columns (the
+    matched text alone, say) is not, and one the contextRegion shows to start
+    after the line's first column is read at the matching offset
+    (``_snippet_column_offset``), since the columns are the file line's.
     """
     values: List[str] = []
     for physical in _physical_locations_of(result):
@@ -1017,15 +1019,53 @@ def _matched_values(result: Any) -> List[str]:
         # masking the results again then masked inside the masked line.
         if not lines or lines[0].strip() == MASKED_LINE:
             continue
+        offset = _snippet_column_offset(physical, start_line, lines[0])
+        if offset is None:
+            continue
+        first, last = start - 1 - offset, end - 1 - offset
         # The columns are the file line's. A snippet that does not reach the
         # region's end does not start at column 1, and slicing it at these
         # columns would read a fragment of the match.
-        if end - 1 > len(lines[0]):
+        if first < 0 or last > len(lines[0]):
             continue
-        match = lines[0][start - 1 : end - 1].strip()
+        match = lines[0][first:last].strip()
         literals = [found.group(2) for found in _STRING_LITERAL.finditer(match)]
         values.extend(literals or [match])
     return values
+
+
+def _snippet_column_offset(
+    physical: Any, line_number: Any, snippet_line: str
+) -> Optional[int]:
+    """How many columns of the file's line precede the region snippet's first line.
+
+    Read from the contextRegion when it places that line: 0 when its text is the
+    snippet's line, the difference in length when the snippet is its tail, and
+    None when the two disagree otherwise, since the snippet then cannot be placed
+    on the line and the columns would read a fragment. A contextRegion that does
+    not place the line gives 0: the snippet is taken to start at column 1, as
+    semgrep's and opengrep's do.
+    """
+    context = getattr(physical, "contextRegion", None)
+    context_start = getattr(context, "startLine", None)
+    text = getattr(getattr(context, "snippet", None), "text", None)
+    if (
+        not isinstance(context_start, int)
+        or not isinstance(line_number, int)
+        or not isinstance(text, str)
+        or _UNCOUNTED_LINE_BREAK.search(text)
+    ):
+        return 0
+    context_lines = _split_lines(text)
+    position = line_number - context_start
+    if not 0 <= position < len(context_lines):
+        return 0
+    full_line = context_lines[position]
+    if full_line == snippet_line:
+        return 0
+    if full_line.endswith(snippet_line):
+        return len(full_line) - len(snippet_line)
+    return None
 
 
 #: A quoted string literal in a line of source. The two alternatives inside it
@@ -1387,7 +1427,12 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
                 getattr(getattr(node, "location", None), "uri", None)
             )
             if placed is not None:
-                _mask_snippet(getattr(node, "contents", None), 1, None, placed)
+                # The contents run to the file's last line, wherever that is:
+                # base64 contents are dropped when any line of the file is
+                # reported, not only line 1.
+                _mask_snippet(
+                    getattr(node, "contents", None), 1, _TO_END_OF_FILE, placed
+                )
         names = list(fields)
         names.extend((node.__pydantic_extra__ or {}).keys())
         for name in names:
