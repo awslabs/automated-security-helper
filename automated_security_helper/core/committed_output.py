@@ -68,6 +68,7 @@ from typing import Collection, Iterable, List, NamedTuple, Optional, Sequence, T
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.exceptions import CommittedOutputFilesError
+from automated_security_helper.utils.inner_run_outcome import INNER_RUN_OUTCOME_FILE
 from automated_security_helper.utils.scan_output_dirs import (
     RESULTS_FILE_NAME,
     SCAN_SET_RUN_FILE_NAME,
@@ -91,11 +92,16 @@ LOG_FILE_NAMES: Tuple[str, ...] = ("ash.log", "ash.log.jsonl")
 #: The files at the root of the output directory that a scan starting fresh removes
 #: before it writes its own: ``ASHScanOrchestrator.initialize`` locally, and
 #: ``run_ash_scan._discard_prior_run_artifacts`` on the host before container and Nix
-#: mode start.
+#: mode start. The inner run's outcome record (``utils/inner_run_outcome.py``) is
+#: one of them: both removed it, but it was listed by neither this tuple nor
+#: ``scan_output_dirs.results_path_names``, so a committed one was deleted by every
+#: fresh scan without the refusal below (:func:`_found_in_the_way` covers the
+#: difference between the two lists).
 PREVIOUS_RUN_FILE_NAMES: Tuple[str, ...] = (
     RESULTS_FILE_NAME,
     *SCAN_START_FILE_NAMES,
     SCAN_SET_RUN_FILE_NAME,
+    INNER_RUN_OUTCOME_FILE,
 )
 
 #: What a workspace scan writes at the root of its output directory, besides the
@@ -216,12 +222,30 @@ def _scoped(
     return kept
 
 
+def _previous_run_files_outside_the_results_paths() -> Tuple[str, ...]:
+    """The previous-run files a fresh scan removes that ``results_path_names`` does
+    not list, compared as the filesystem compares names. Empty once the two
+    lists agree; until then the fresh-scan check looks for these on its own."""
+    root_files, _directories = results_path_names()
+    listed = {output_name_key(name) for name in root_files}
+    return tuple(
+        name for name in PREVIOUS_RUN_FILE_NAMES if output_name_key(name) not in listed
+    )
+
+
 def _found_in_the_way(
     output_dir: str | Path,
     files: Optional[Collection[str]],
     directories: Optional[Collection[str]],
     not_on_disk: Collection[str],
 ) -> _Found:
+    # A fresh scan (neither files nor directories given) also removes the
+    # previous-run files results_path_names does not list.
+    unlisted = (
+        _previous_run_files_outside_the_results_paths()
+        if files is None and directories is None
+        else ()
+    )
     try:
         committed = committed_files_at_results_paths(output_dir)
     except GitIndexUnavailable as unavailable:
@@ -230,13 +254,16 @@ def _found_in_the_way(
         base = _absolute(output_dir)
         on_disk = [
             path
-            for path in entries_on_disk(output_dir, root_files, cleared)
+            for path in entries_on_disk(output_dir, (*root_files, *unlisted), cleared)
             if not (path.parent == base and output_name_key(path.name) in skipped)
         ]
         return _Found(
             [], _scoped(output_dir, on_disk, files, directories), unavailable.answer
         )
-    return _Found(_scoped(output_dir, committed, files, directories), [], None)
+    found = _Found(_scoped(output_dir, committed, files, directories), [], None)
+    if unlisted:
+        found = _combined([found, _found_under(output_dir, unlisted)])
+    return found
 
 
 def _found_under(output_dir: str | Path, names: Collection[str]) -> _Found:

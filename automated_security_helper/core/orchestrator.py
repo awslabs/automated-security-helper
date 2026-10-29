@@ -71,7 +71,6 @@ from automated_security_helper.utils.get_scan_set import (
     scan_set,
 )
 from automated_security_helper.utils.inner_run_outcome import (
-    INNER_RUN_OUTCOME_FILE,
     ExistingResultsRefused,
     existing_results_problem,
     without_run_records,
@@ -1081,9 +1080,11 @@ class ASHScanOrchestrator(BaseModel):
         cannot be removed is left: the scan overwrites it. Not the log files: the
         logger truncates them when it opens them. run_ash_scan's
         _discard_prior_run_artifacts removes the same names. An earlier inner
-        run's refusal record too (utils/inner_run_outcome.py).
+        run's outcome record (utils/inner_run_outcome.py) is one of them, so
+        the committed-output refusal sees it where it used to be named here
+        alone.
         """
-        for name in (*PREVIOUS_RUN_FILE_NAMES, INNER_RUN_OUTCOME_FILE):
+        for name in PREVIOUS_RUN_FILE_NAMES:
             old_file = self.output_dir / name
             try:
                 old_file.unlink(missing_ok=True)
