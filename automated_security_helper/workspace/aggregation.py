@@ -545,6 +545,23 @@ ThresholdResolver = Callable[[Optional[str]], Optional[str]]
 UNATTRIBUTED_SCANNER = "unattributed"
 
 
+def result_is_suppressed(result: Mapping[str, Any]) -> bool:
+    """Whether *result* carries a suppression that is in effect.
+
+    The one reading every consumer makes (``utils.sarif_utils.suppressions_in_effect``):
+    a suppression whose ``state`` is ``rejected`` or ``underReview`` has not taken
+    effect (SARIF 3.35.4) and hides nothing; one whose state is ``accepted``, or
+    that states none, does. Read as any-suppression, a finding whose only
+    suppression awaited review was left out of a project's finding and actionable
+    counts while the flat finding, the OCSF record and the per-scanner counts kept
+    it. Imported inside the function because ``sarif_utils`` imports the results
+    model this module also imports, and the module-level order is not fixed.
+    """
+    from automated_security_helper.utils.sarif_utils import suppressions_in_effect
+
+    return bool(suppressions_in_effect(result.get("suppressions")))
+
+
 def actionable_results_by_scanner(
     results: Iterable[Mapping[str, Any]],
     threshold: Optional[str],
@@ -605,7 +622,7 @@ def actionable_results_by_scanner(
             issue_severity = str(properties.get("issue_severity") or "").upper()
         name = scanner or UNATTRIBUTED_SCANNER
         counts.setdefault(name, 0)
-        if result.get("suppressions"):
+        if result_is_suppressed(result):
             continue
         gate = effective(scanner)
         if not gate:
@@ -667,7 +684,7 @@ def has_finding_at_min_severity(
     for result in results:
         if not isinstance(result, Mapping):
             continue
-        if result.get("suppressions"):
+        if result_is_suppressed(result):
             continue
         # The resolver run_ash_scan._severity_filters_finding uses: the
         # declared issue_severity first, a missing level as
@@ -1096,7 +1113,7 @@ class WorkspaceAggregator:
             name = self._rollup_key(str(scanner) if scanner else UNATTRIBUTED_SCANNER)
             by_scanner.setdefault(name, []).append(result)
             self._scanner_status.setdefault(name, None)
-            if result.get("suppressions"):
+            if result_is_suppressed(result):
                 continue
             self._scanner_findings[name] = self._scanner_findings.get(name, 0) + 1
 

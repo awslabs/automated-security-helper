@@ -376,6 +376,7 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
     incomplete_converters_for_project,
     inputs_not_scanned_for_project,
+    result_is_suppressed,
     rewrite_workspace_block,
     stale_content_databases_for_project,
 )
@@ -1309,7 +1310,9 @@ def _scan_one_project(
     run = _extract_run(results)
     results_list = list(run.get("results") or []) if run else []
 
-    unsuppressed = [entry for entry in results_list if not entry.get("suppressions")]
+    # A suppression that has not taken effect (rejected, underReview) hides
+    # nothing: the same reading the per-scanner counts and the flat finding make.
+    unsuppressed = [entry for entry in results_list if not result_is_suppressed(entry)]
     policy_origin = [entry for entry in unsuppressed if _is_policy_origin(entry)]
 
     # What the verdict is allowed to see. Findings from a scanner only the policy
