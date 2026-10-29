@@ -11,7 +11,9 @@ members do name them (``aws-security-hub``, ``s3``, ``cloudwatch-logs``,
 ``bedrock-summary-reporter``), so an operator who enabled one and asked for its
 format by name got no upload, and the local report phase told them no reporter
 produces that format. A scan given the same request runs that reporter. The
-merge now splits the requested formats between its two report phases.
+merge now splits the requested formats between its two report phases, and a
+requested off-host format that neither phase runs (its reporter not enabled by
+the operator) keeps the line the local phase used to print for it.
 
 The stand-in is the off-host reporter of ``off_host_plugin_support`` named
 ``s3``: an ``ExportFormat`` member, so ``--output-formats`` accepts it, while the
@@ -51,11 +53,11 @@ def s3_site(tmp_path: Path) -> Path:
     )
 
 
-def _merge(tmp_path: Path, site: Path, requested: str):
+def _merge(tmp_path: Path, site: Path, requested: str, *, enabled: bool = True):
     return run_merge(
         tmp_path,
         site,
-        [f"reporters.{REPORTER}.enabled=true"],
+        [f"reporters.{REPORTER}.enabled=true"] if enabled else [],
         plugin=PLUGIN,
         reporter=REPORTER,
         extra_args=["--output-formats", requested],
@@ -86,3 +88,18 @@ def test_naming_only_a_local_format_leaves_the_off_host_reporter_out(tmp_path, s
     assert not any(NO_PRODUCER in warning for warning in result["warnings"]), result[
         "warnings"
     ]
+
+
+def test_naming_an_off_host_format_the_operator_did_not_enable_is_said(
+    tmp_path, s3_site
+):
+    # The operator's file enables the reporter, but for an off-host reporter only
+    # an override counts, so with none it does not run. Neither report phase then
+    # produces the requested format, and the operator is told so with the report
+    # phase's own line, as before the request was split between the phases.
+    result = _merge(tmp_path, s3_site, REPORTER, enabled=False)
+
+    assert reporter_texts(result) == [], result["reports"]
+    said = [w for w in result["warnings"] if NO_PRODUCER in w and f"'{REPORTER}'" in w]
+    assert len(said) == 1, result["warnings"]
+    assert f"reporters.{REPORTER}.enabled=true" in said[0], said

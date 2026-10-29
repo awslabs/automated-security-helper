@@ -3161,7 +3161,9 @@ def merge_command(
         # The local phase runs with the formats the local reporters produce; a
         # request that names only off-host formats runs no local reporter, and
         # tells the operator about no format a reporter of the other phase
-        # produces.
+        # produces. A requested off-host format whose reporter the operator did
+        # not enable is run by neither phase, so log_off_host_formats_not_run
+        # below says the report phase's line for it.
         if not parsed_formats or local_formats:
             merged = report_phase.execute(
                 report_dir=output_dir_path.joinpath("reports"),
@@ -3177,6 +3179,7 @@ def merge_command(
         # then; the None check states that to the type checker. Overrides alone
         # are enough to enable and aim one.
         off_host_to_run = off_host_reporters_to_run(off_host_reporters, operator_config)
+        log_off_host_formats_not_run(requested_off_host, off_host_to_run)
         if off_host_to_run and (not parsed_formats or requested_off_host):
             off_host_context = PluginContext(
                 source_dir=Path.cwd(),
@@ -3255,6 +3258,37 @@ def off_host_reporters_to_run(
         extra=NO_MARKUP,
     )
     return []
+
+
+def log_off_host_formats_not_run(
+    requested_off_host: Sequence[str],
+    off_host_to_run: Sequence[Type[ReporterPluginBase[Any]]],
+) -> List[str]:
+    """Say which requested off-host formats no report phase of the merge runs.
+
+    ``--output-formats`` can name an off-host reporter's format (``s3``, say). The
+    local report phase runs only with the formats the local reporters produce, so
+    it never sees such a name, and the off-host phase runs only the reporters the
+    operator enabled; a format naming one the operator did not enable would be
+    produced by neither phase and, without this, said by neither. The report
+    phase tells the operator about every requested format it will not produce
+    (``No report will be written for requested format ...``), so this says the
+    same line, at the same level, for the formats that fall between the two
+    phases, with the merge's own reason: only the operator's overrides turn an
+    off-host reporter on. Returns the formats named, in request order, once each.
+    """
+    running = {plugin_config_key(cls) for cls in off_host_to_run}
+    not_run = [fmt for fmt in dict.fromkeys(requested_off_host) if fmt not in running]
+    for fmt in not_run:
+        ASH_LOGGER.error(
+            f"No report will be written for requested format '{fmt}': its reporter "
+            f"sends findings off the host and the operator did not enable it for "
+            f"this merge. Only --config-overrides reporters.{fmt}.enabled=true turns "
+            f"such a reporter on (a --config file's 'enabled' is not read for it), "
+            f"so pass that override to get this report.",
+            extra=NO_MARKUP,
+        )
+    return not_run
 
 
 def select_merge_reporters(
