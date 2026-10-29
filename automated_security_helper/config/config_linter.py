@@ -29,6 +29,7 @@ from automated_security_helper.config.config_sources import (
     parse_config_text,
     read_config_file_literally,
     read_config_text,
+    refuse_unless_a_file,
     unparsed_config_reason,
     uses_env_references,
 )
@@ -507,7 +508,10 @@ class ConfigLinter:
         # with no changes rather than raising the parser's own error a second
         # time, after lint's result was printed.
         try:
-            config_data, raw_content = cls._load_config_and_text(config_path)
+            # With its line breaks as written: the text goes back to the file.
+            config_data, raw_content = cls._load_config_and_text(
+                config_path, keep_line_breaks=True
+            )
         except (OSError, ValueError, yaml.YAMLError, ASHConfigSourceError):
             # No content: there is no text this could hand back as the file's
             # own, and an empty string in its place would read as one.
@@ -869,10 +873,25 @@ class ConfigLinter:
         return cls._load_config_and_text(config_path)[0]
 
     @classmethod
-    def _load_config_and_text(cls, config_path: Path) -> Tuple[Dict[str, Any], str]:
+    def _load_config_and_text(
+        cls, config_path: Path, keep_line_breaks: bool = False
+    ) -> Tuple[Dict[str, Any], str]:
         """_load_config, and the text it was parsed from: one read, so what a
-        command rewrites and redacts with is the file it parsed."""
-        text = read_config_text(config_path)
+        command rewrites and redacts with is the file it parsed.
+
+        ``keep_line_breaks`` reads the file with its line breaks as they are
+        (``newline=""``). read_config_text opens the file in text mode, whose
+        universal newlines turn every break of a CRLF file into LF, so a fixer
+        that edits this text and writes it back would rewrite every line of a
+        Windows file. It is for a YAML file only: fix_unused_suppressions
+        refuses a TOML or JSON config before it reads.
+        """
+        if keep_line_breaks:
+            refuse_unless_a_file(config_path)
+            with open(config_path, mode="r", encoding="utf-8", newline="") as f:
+                text = f.read()
+        else:
+            text = read_config_text(config_path)
         return parse_config_text(config_path, text) or {}, text
 
     @classmethod

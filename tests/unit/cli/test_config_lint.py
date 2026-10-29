@@ -1133,7 +1133,8 @@ scanners:
         ]
         assert len(conflict_issues) == 1
         assert conflict_issues[0].severity == LintSeverity.WARNING
-        assert "a scan reads 'cdk-nag'" in conflict_issues[0].message
+        assert "a scan merges them key by key" in conflict_issues[0].message
+        assert "'cdk-nag' wins" in conflict_issues[0].message
         assert conflict_issues[0].fixable is False
         assert "cdk_nag" in conflict_issues[0].message
         assert "cdk-nag" in conflict_issues[0].message
@@ -1262,7 +1263,8 @@ class TestConfigLintCLI:
             ["lint", "--config", str(config_path), "--fix", "--non-interactive"],
         )
         assert result.exit_code == 0, result.output
-        assert "a scan reads 'npm-audit'" in result.output
+        assert "a scan merges them key by key" in result.output
+        assert "'npm-audit' wins" in result.output
         assert (
             "name" not in yaml.safe_load(config_path.read_text())["scanners"]["bandit"]
         )
