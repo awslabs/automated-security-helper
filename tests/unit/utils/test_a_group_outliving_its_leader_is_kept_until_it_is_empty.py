@@ -17,7 +17,10 @@ reap path with a reaped fake leader and the group calls recorded: the entry is
 kept while the group answers, dropped once it is gone, and kill_running_groups
 still SIGKILLs the group of a leader that was reaped before it ran. A group the
 kernel refuses to probe (EPERM: a member now runs as another user) exists, so
-the entry is kept and nothing is raised out of the spawn that ran the reap.
+the entry is kept and nothing is raised out of the spawn that ran the reap. The
+probe is the module's _group_survives, which reaps the zombie orphans this
+process inherited as PID 1 before asking, so a group left with nothing but
+zombies is forgotten rather than kept for as long as they sit.
 """
 
 from __future__ import annotations
@@ -142,6 +145,25 @@ def test_a_group_the_kernel_refuses_to_probe_is_kept_and_raises_nothing(
         "leaves its members with no entry"
     )
     assert _FAKE_PGID in cancellation._TOOL_GROUPS
+
+
+def test_the_reap_asks_whether_the_group_survives(monkeypatch, registered_leader):
+    """The probe is _group_survives, which reaps PID-1 zombie orphans first,
+    rather than a bare existence read that a zombie-only group satisfies."""
+    asked: List[int] = []
+
+    def survives(pgid: int) -> bool:
+        asked.append(pgid)
+        return True
+
+    monkeypatch.setattr(subprocess_utils, "_group_survives", survives)
+    with subprocess_utils._RUNNING_GROUPS_LOCK:
+        subprocess_utils._forget_exited_groups()
+    assert asked == [_FAKE_PGID], (
+        "the reap did not route its existence probe through _group_survives; "
+        f"asked: {asked}"
+    )
+    assert subprocess_utils._RUNNING_GROUPS.get(_FAKE_PGID) is registered_leader
 
 
 def test_kill_running_groups_signals_the_group_of_a_reaped_leader(
