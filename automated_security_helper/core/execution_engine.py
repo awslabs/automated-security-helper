@@ -9,6 +9,7 @@ from typing import List, Literal, Mapping, Optional, Set
 
 
 from automated_security_helper.base.plugin_config import (
+    declared_plugin_name,
     plugin_config_key,
     split_plugin_names,
 )
@@ -591,23 +592,63 @@ class ScanExecutionEngine:
             # An allowlist that names no registered scanner, refused here as well as
             # in ScanPhase: ASHScanOrchestrator builds the engine before it asks git
             # anything or clears the output directory, so a command line refused
-            # here starts no process and deletes nothing. The class keys are the
-            # names ScanPhase matches (plugin_config_key); the workspace
-            # pre-check (workspace.execution.refuse_unresolvable_scanner_selection)
-            # reads declared_plugin_name instead and, when any scanner in
-            # scope declares no name, defers the whole selection to this check.
+            # here starts no process and deletes nothing. The names compared are
+            # the ones each class declares (declared_plugin_name), which ScanPhase
+            # matches as config.name on the instance.
+            #
+            # Deferred to ScanPhase in the two shapes only the phase can judge.
+            # When any scanner class in scope declares no name, its selectable
+            # name is config.name on an instance the phase alone constructs, so a
+            # check keyed on the lowercased class name would refuse the configured
+            # name the phase accepts; the workspace pre-check
+            # (workspace.execution.refuse_unresolvable_scanner_selection) defers
+            # the same way. And when a requested name is a community scanner
+            # whose module this run did not load, the phase refuses with the
+            # module to add, where this check could only call it a misspelling.
             if self._init_enabled_scanners:
-                refuse_selection_matching_no_scanner(
-                    self._init_enabled_scanners,
-                    (
-                        plugin_config_key(plugin_class)
-                        for plugin_class in self.plugins.get("scanner", [])
-                    ),
-                    self._selection_origin,
-                )
+                scanner_classes = list(self.plugins.get("scanner", []))
+                declared_names = [
+                    declared_plugin_name(plugin_class)
+                    for plugin_class in scanner_classes
+                ]
+                if all(
+                    name is not None for name in declared_names
+                ) and not self._names_an_unloaded_community_scanner(scanner_classes):
+                    refuse_selection_matching_no_scanner(
+                        self._init_enabled_scanners,
+                        declared_names,
+                        self._selection_origin,
+                    )
 
             # Mark initialization complete
             self._initialized = True
+
+    def _names_an_unloaded_community_scanner(self, scanner_classes) -> bool:
+        """Whether the allowlist names a community scanner no class in scope provides.
+
+        ``core.community_scanners`` maps each in-tree community scanner's name to
+        its plugin module without importing it. A requested name that maps to a
+        module none of *scanner_classes* comes from is a scanner ASH ships but
+        this run did not load; ScanPhase refuses that shape naming the module to
+        add, so the construction-time refusal, which can only call the name a
+        misspelling, leaves it to the phase.
+        """
+        from automated_security_helper.core.community_scanners import (
+            community_module_for,
+        )
+
+        loaded_modules = {
+            str(getattr(plugin_class, "__module__", ""))
+            for plugin_class in scanner_classes
+        }
+        for name in self._init_enabled_scanners:
+            module = community_module_for(name)
+            if module and not any(
+                loaded == module or loaded.startswith(module + ".")
+                for loaded in loaded_modules
+            ):
+                return True
+        return False
 
     def restrict_to_changed_files(self, changed_files: Optional[Set[Path]]) -> None:
         """Set the changed-file filter after construction; ``None`` means none.
@@ -936,9 +977,16 @@ class ScanExecutionEngine:
                 minutes, seconds = divmod(int(scan_duration), 60)
                 hours, minutes = divmod(minutes, 60)
 
-                self._results.metadata.summary_stats.start = scan_start_time
-                self._results.metadata.summary_stats.end = scan_end_time
-                self._results.metadata.summary_stats.duration = scan_duration
+                # A run that scanned stamps its own timing. A report over
+                # existing results (--use-existing) describes a scan that already
+                # ran, whose timing the stored summary carries; stamping the
+                # report run's own clock over it lost the scan's start, end and
+                # duration when the CLI rewrote the aggregated results file.
+                stats = self._results.metadata.summary_stats
+                if "scan" in ordered_phases or stats.start is None:
+                    stats.start = scan_start_time
+                    stats.end = scan_end_time
+                    stats.duration = scan_duration
 
                 if not interrupted:
                     ash_plugin_manager.notify(
