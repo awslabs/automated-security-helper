@@ -732,20 +732,49 @@ class _SecretIndex:
         return (whole, lines) if matched else None
 
     def mask_values(self, text: str) -> str:
-        """``text`` with each value, and each token of a recorded shape, masked."""
+        """``text`` with each value, and each token of a recorded shape, masked.
+
+        A token of a shape is masked only when it could be a value the shape
+        stands for (``_mask_match``): every shape is of a value that
+        ``_propagates``, so a token that is letters alone, a placeholder or too
+        repetitive (``_looks_like_a_secret``) is an ordinary word, not that
+        value, and is kept. The hidden characters of a shape match ``password``
+        and ``provided`` as readily as the credential, and masking them rewrote
+        every message that held such a word, bandit's own label among them.
+        """
         if not self.values and not self.shapes:
             return text
         if self._pattern is None:
-            alternatives = [
-                _token_pattern(re.escape(value), value[0], value[-1])
-                for value in sorted(self.values, key=len, reverse=True)
-            ]
-            alternatives.extend(
-                _shape_pattern(shape)
-                for shape in sorted(self.shapes, key=_shape_key, reverse=True)
-            )
+            alternatives = []
+            if self.values:
+                alternatives.append(
+                    "(?P<value>"
+                    + "|".join(
+                        _token_pattern(re.escape(value), value[0], value[-1])
+                        for value in sorted(self.values, key=len, reverse=True)
+                    )
+                    + ")"
+                )
+            if self.shapes:
+                alternatives.append(
+                    "(?P<shape>"
+                    + "|".join(
+                        _shape_pattern(shape)
+                        for shape in sorted(self.shapes, key=_shape_key, reverse=True)
+                    )
+                    + ")"
+                )
             self._pattern = re.compile("|".join(alternatives))
-        return self._pattern.sub(lambda match: _mask_secret_value(match.group(0)), text)
+        return self._pattern.sub(_mask_match, text)
+
+
+def _mask_match(match: "re.Match[str]") -> str:
+    """The masked form of a matched value, or the token itself for a shape token
+    that is not a value (see ``_SecretIndex.mask_values``)."""
+    token = match.group(0)
+    if match.groupdict().get("value") is None and not _looks_like_a_secret(token):
+        return token
+    return _mask_secret_value(token)
 
 
 def _token_pattern(body: str, first: Optional[str], last: Optional[str]) -> str:
@@ -764,8 +793,9 @@ def _shape_pattern(shape: SecretValueShape) -> str:
     """A token of ``shape``: its prefix, the right number of characters, its suffix.
 
     The hidden characters may be any non-whitespace character, or any character
-    but a line break for a value that held whitespace. Every token of the shape is
-    masked, including ones that are not the value: over-masking is the accepted
+    but a line break for a value that held whitespace. Every token of the shape
+    that could be a propagating value is masked, including ones that are not the
+    value (``_mask_match`` keeps the ordinary words): over-masking is the accepted
     cost of masking a value no result set holds any more.
     """
     hidden = shape.length - len(shape.prefix) - len(shape.suffix)
