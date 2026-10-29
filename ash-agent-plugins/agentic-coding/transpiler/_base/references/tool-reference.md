@@ -94,6 +94,8 @@ Returns:
   "finished_scanners": int,
   "total_scanners": int,
   "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
+  "scanner_statuses": { "<scanner_name>": { "status": "PASSED | FAILED | ERROR | MISSING | SKIPPED", "excluded": bool, "dependencies_satisfied": bool } },
+  "skipped_scanners": [{ "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies | excluded_by_configuration | skipped" }],
   "total_findings": int,
   "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
   "scanners": {

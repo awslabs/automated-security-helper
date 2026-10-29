@@ -304,6 +304,8 @@ TOOL_NOTES: dict[str, dict] = {
   "finished_scanners": int,
   "total_scanners": int,
   "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
+  "scanner_statuses": { "<scanner_name>": { "status": "PASSED | FAILED | ERROR | MISSING | SKIPPED", "excluded": bool, "dependencies_satisfied": bool } },
+  "skipped_scanners": [{ "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies | excluded_by_configuration | skipped" }],
   "total_findings": int,
   "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
   "scanners": {
@@ -338,10 +340,13 @@ TOOL_NOTES: dict[str, dict] = {
                     'Show "initializing" or 0% when `total_scanners` is zero.'
                 ),
             },
-            (
-                "There is no top-level `duration` field; derive elapsed time from "
-                "`start_time` and `end_time` (or from current time while running)."
-            ),
+            {
+                "needs": ["start_time", "end_time"],
+                "text": (
+                    "There is no top-level `duration` field; derive elapsed time from "
+                    "`start_time` and `end_time` (or from current time while running)."
+                ),
+            },
             (
                 "**`is_complete` is `true` once the scan has ended**, whatever the ending: "
                 "`completed`, `incomplete`, `failed` or `cancelled`. It is decided by the "
@@ -356,21 +361,29 @@ TOOL_NOTES: dict[str, dict] = {
                 "this scan's. `get_scan_results` on that directory reads the previous scan's "
                 "results."
             ),
-            (
-                "**`incomplete` is terminal, with partial coverage.** The run finished and its "
-                "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
-                "targets), no scanner reached a verdict, a converter did not run or could "
-                "not convert some of its inputs, a rule "
-                "could not be evaluated, or a content database was past its declared age "
-                "bound. `incomplete_scanners` names each scanner and why, and "
-                "`stale_content_databases` each stale database. The "
-                "findings are real but partial, so read them, and do not report the target as "
-                "clean. `failed` means the run crashed, left no readable results, or "
-                "ran past the server's `scan_timeout_seconds`. "
-                "`coverage_complete` is `null` while running and for `failed` or `cancelled`; "
-                "with `fail_on_incomplete_scanners: false` a scan is `completed` with "
-                "`coverage_complete: false` when scanners did not run."
-            ),
+            {
+                # Printed while the response carries the keys the paragraph names.
+                "needs": [
+                    "incomplete_scanners",
+                    "stale_content_databases",
+                    "coverage_complete",
+                ],
+                "text": (
+                    "**`incomplete` is terminal, with partial coverage.** The run finished and its "
+                    "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
+                    "targets), no scanner reached a verdict, a converter did not run or could "
+                    "not convert some of its inputs, a rule "
+                    "could not be evaluated, or a content database was past its declared age "
+                    "bound. `incomplete_scanners` names each scanner and why, and "
+                    "`stale_content_databases` each stale database. The "
+                    "findings are real but partial, so read them, and do not report the target as "
+                    "clean. `failed` means the run crashed, left no readable results, or "
+                    "ran past the server's `scan_timeout_seconds`. "
+                    "`coverage_complete` is `null` while running and for `failed` or `cancelled`; "
+                    "with `fail_on_incomplete_scanners: false` a scan is `completed` with "
+                    "`coverage_complete: false` when scanners did not run."
+                ),
+            },
             (
                 "**Status enum:** the documented values are "
                 "`pending | running | completed | incomplete | failed | cancelled`. The registry uses "
@@ -925,7 +938,9 @@ def _conditional_caveat(
     * ``needs_types``: error types; all must be among the tool's, else nothing.
     * ``error_types``: (type, note) pairs, a paragraph naming those the tool
       returns, each followed by its note in parentheses; ``untyped`` is added after
-      it while none of ``untyped_unless`` is returned.
+      it while none of ``untyped_unless`` is returned. Without a contract every
+      type counts as returned, as every key does in ``_response_keys``, so the
+      paragraph never names a type and then calls it untyped.
     """
     if not all(key in have for key in caveat.get("needs", [])):
         return caveat.get("otherwise")
@@ -944,7 +959,8 @@ def _conditional_caveat(
         else:
             listed = named[0]
         text = f"{caveat['lead']} {listed}."
-        absent = types is None or not set(caveat.get("untyped_unless", [])) & types
+        unless = set(caveat.get("untyped_unless", []))
+        absent = not unless if types is None else not unless & types
         if caveat.get("untyped") and absent:
             text = f"{text} {caveat['untyped']}"
         return text
