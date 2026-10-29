@@ -163,6 +163,7 @@ class TestTheReports:
                 "limit": "max_member_bytes",
                 "scan_incomplete": True,
                 "unlisted_members": None,
+                "accepted": False,
             },
             {
                 "converter": "archive",
@@ -172,6 +173,7 @@ class TestTheReports:
                 "limit": None,
                 "scan_incomplete": False,
                 "unlisted_members": None,
+                "accepted": False,
             },
         ]
 

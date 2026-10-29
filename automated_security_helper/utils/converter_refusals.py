@@ -101,11 +101,23 @@ class ConverterRefusal:
     #: A ``failed_inputs`` record: an input the converter could not convert.
     failed: bool = False
     unlisted_members: Optional[int] = None
+    #: A failed input a ``global_settings.suppressions`` entry with rule_id
+    #: ``ash-unconverted-input`` accepted (``FailedInputInfo.accepted`` on an
+    #: input error; ``waives_gate``). The loss was reviewed: the completeness
+    #: gate leaves the record out, and so does ``scan_incomplete`` here.
+    accepted: bool = False
+    accepted_reason: Optional[str] = None
 
     @property
     def scan_incomplete(self) -> bool:
-        """Whether this record is counted by the completeness gate."""
-        return bool(self.limit) or self.failed
+        """Whether this record is counted by the completeness gate.
+
+        The gate's own reading (``incomplete_converters``): a refusal that names
+        an extraction limit, or a failed input no suppression accepted. A failed
+        input a suppression accepted is reported, as the record it is, and not
+        as an incomplete scan: the gate waives it, so the reports say so too.
+        """
+        return bool(self.limit) or (self.failed and not self.accepted)
 
     def subject(self) -> str:
         if self.unlisted_members is not None:
@@ -115,7 +127,10 @@ class ConverterRefusal:
         return f"'{self.path}'"
 
     def message(self) -> str:
-        return f"{self.converter}: {self.subject()} was not scanned: {self.reason}"
+        text = f"{self.converter}: {self.subject()} was not scanned: {self.reason}"
+        if self.accepted:
+            text += f" (accepted by a suppression: {self.accepted_reason})"
+        return text
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -126,6 +141,7 @@ class ConverterRefusal:
             "limit": self.limit,
             "scan_incomplete": self.scan_incomplete,
             "unlisted_members": self.unlisted_members,
+            "accepted": self.accepted,
         }
 
 
@@ -133,8 +149,12 @@ def converter_refusals(model: "AshAggregatedResults") -> List[ConverterRefusal]:
     """Every refused converter input in ``model``, those leaving the scan incomplete first.
 
     Read with ``getattr`` because a results file written by an older version carries
-    rows without ``refused_inputs`` or entries without ``limit``.
+    rows without ``refused_inputs`` or entries without ``limit``. A failed input is
+    marked accepted exactly when the completeness gate waives it (``waives_gate``:
+    accepted, and of kind "input"), so the reports and the gate agree.
     """
+    from automated_security_helper.models.asharp_model import waives_gate
+
     refusals: List[ConverterRefusal] = []
     for name, row in (getattr(model, "converter_results", None) or {}).items():
         for item in getattr(row, "refused_inputs", None) or []:
@@ -149,6 +169,8 @@ def converter_refusals(model: "AshAggregatedResults") -> List[ConverterRefusal]:
                 )
             )
         for item in getattr(row, "failed_inputs", None) or []:
+            accepted = waives_gate(item)
+            accepted_reason = getattr(item, "accepted_reason", None)
             refusals.append(
                 ConverterRefusal(
                     converter=str(name),
@@ -156,6 +178,12 @@ def converter_refusals(model: "AshAggregatedResults") -> List[ConverterRefusal]:
                     member=None,
                     reason=str(getattr(item, "reason", "") or ""),
                     failed=True,
+                    accepted=accepted,
+                    accepted_reason=(
+                        None
+                        if not accepted or accepted_reason is None
+                        else str(accepted_reason)
+                    ),
                 )
             )
     refusals.sort(
