@@ -24,7 +24,14 @@ dropped (``mark_sbom_components``).
 
 An entry is the operator's when the option's default has it, the trusted config
 has it, or a file of the chain that no client delivered has it. Those stay in
-the option and apply as before.
+the option and apply as before; a client entry that repeats an operator's path
+is replaced in the option by the operator's own entry, so the operator's reason
+and expiration govern it, never the client's copy. A client entry that has
+expired is neither applied nor recorded: the scanner would not have applied it,
+so there is nothing to mark. Only the section ``get_plugin_config`` reads for
+the scanner records exclusions; an entry a delivered file wrote under another
+spelling the scanner never reads (``bandit-scanner`` beside ``bandit``) is
+moved out, with a warning, and recorded as nothing, since it excluded nothing.
 
 opengrep, semgrep and trivy-repo are among the scanners whose whole section a
 client may not set (the always-denied floor in ``ash_config.ALWAYS_DENIED_PATHS``).
@@ -65,14 +72,20 @@ on a finding's path after the fact:
   expression found in, or a substring of, the absolute path of the file or of a
   directory above it (``checkov_skips``).
 * opengrep and semgrep ``exclude``, ferret-scan ``exclude_patterns``, syft
-  ``exclude``: a glob that excludes a file when it matches the file's path or
-  any directory or run of directories in it, as semgrep documents it. A leading
-  ``/`` anchors it at the scan root, and a leading ``./`` or ``**/`` is
-  optional.
+  ``exclude``: a glob read as those tools read it (gitignore syntax for the
+  grep family, doublestar globs for syft): ``*``, ``?`` and ``[...]`` match
+  within one path component and never cross ``/``, ``**`` matches any run of
+  components, a pattern with no ``/`` matches a file or directory of that name
+  at any depth, and a ``/`` inside the pattern, a leading ``/`` or a leading
+  ``./`` anchors it at the scan root, unless it starts with ``**/``. A match on
+  a directory excludes everything under it (``glob_excludes``).
 * trivy and trivy-repo ``ignore_file``: the file lists finding IDs. Each
   unexpired ID becomes an entry that matches a finding of that scanner with
   that rule ID (an ``AVD-`` prefix on either side is ignored); in a
-  ``.trivyignore.yaml`` an entry's ``paths`` limit it further. The file is read
+  ``.trivyignore.yaml`` an entry's ``paths`` limit it to the files those globs
+  name, matched whole from the scan root as trivy matches them
+  (``trivy_path_matches``), and an entry with ``purls`` is not applied at all,
+  since the packages it is limited to are not matched here. The file is read
   only when it is a regular file inside the tree being scanned, opened without
   following a link (``utils/scanned_tree.open_in_scanned_tree``). A file
   elsewhere, or a link to one, is not read, since its contents would then reach
@@ -109,12 +122,14 @@ Rejected alternatives
 from __future__ import annotations
 
 import fnmatch
+import functools
 import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import (
     Any,
+    Dict,
     Iterable,
     List,
     Literal,
@@ -191,11 +206,9 @@ class ClientScannerExclusion(BaseModel):
 
     def applies_to(self, scanner_name: Optional[str]) -> bool:
         """Whether a finding reported by ``scanner_name`` is this exclusion's scanner's."""
-        from automated_security_helper.config.ash_config import reduced_plugin_name
-
         if not scanner_name:
             return False
-        return reduced_plugin_name(scanner_name) == reduced_plugin_name(self.scanner)
+        return _reduced(scanner_name) == _reduced(self.scanner)
 
     def hides(self, *, relative: str, absolute: str, rule_id: Optional[str]) -> bool:
         """Whether the scanner would have left out a finding at this location."""
@@ -209,7 +222,7 @@ class ClientScannerExclusion(BaseModel):
             return False
         if not self.paths:
             return True
-        return any(glob_excludes(path, relative) for path in self.paths)
+        return any(trivy_path_matches(path, relative) for path in self.paths)
 
     def justification(self) -> str:
         what = (
@@ -221,6 +234,20 @@ class ClientScannerExclusion(BaseModel):
             f"(ASH, client-supplied config) Suppressing finding excluded by "
             f"{self.key} {what} with reason: {self.reason}"
         )
+
+
+@functools.lru_cache(maxsize=4096)
+def _reduced(name: str) -> str:
+    """``reduced_plugin_name``, remembered per name.
+
+    ``applies_to`` runs once per finding location per exclusion. A delivered
+    trivy ignore file of up to 1 MiB yields tens of thousands of entries, and
+    each reduction ran two regular expressions, so the suppression step of a
+    large result set ran for hours. Plugin names are a small set.
+    """
+    from automated_security_helper.config.ash_config import reduced_plugin_name
+
+    return reduced_plugin_name(name)
 
 
 def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
@@ -267,12 +294,7 @@ def checkov_skips(pattern: str, absolute: str, relative: str) -> bool:
     base = absolute[: len(absolute) - len("/".join(parts))].rstrip("/")
     for end in range(1, len(parts)):
         candidates.append(f"{base}/{'/'.join(parts[:end])}")
-    try:
-        compiled: Optional[re.Pattern[str]] = re.compile(
-            pattern.replace(".terraform", r"\.terraform")
-        )
-    except re.error:
-        compiled = None
+    compiled = _checkov_pattern(pattern)
     return any(
         (compiled is not None and compiled.search(candidate) is not None)
         or pattern in candidate
@@ -280,32 +302,102 @@ def checkov_skips(pattern: str, absolute: str, relative: str) -> bool:
     )
 
 
-def glob_excludes(pattern: str, relative: str) -> bool:
-    """Whether glob ``pattern`` excludes the file at ``relative`` (from the scan root).
+@functools.lru_cache(maxsize=1024)
+def _checkov_pattern(pattern: str) -> Optional[re.Pattern[str]]:
+    """``pattern`` compiled as checkov compiles a skip path, once per pattern.
 
-    True when it matches the path or any directory or run of directories in it.
-    A leading ``/`` anchors the pattern at the scan root; a leading ``./`` and a
-    leading ``**/`` are optional.
+    None when it is not a regular expression; it is then used as a substring
+    only, as checkov does. Compiled per candidate path before, for every
+    finding. The pattern is the client's and runs in ASH's own process with no
+    time bound, as it would in checkov's; what is bounded here is the compile.
+    """
+    try:
+        return re.compile(pattern.replace(".terraform", r"\.terraform"))
+    except re.error:
+        return None
+
+
+def _components_match(pattern_parts: Sequence[str], path_parts: Sequence[str]) -> bool:
+    """Whether glob components match path components end to end.
+
+    ``**`` takes any run of components, none included; every other component
+    matches exactly one path component with ``fnmatchcase``, so ``*`` and ``?``
+    never cross a ``/``.
+    """
+    if not pattern_parts:
+        return not path_parts
+    head, rest = pattern_parts[0], pattern_parts[1:]
+    if head == "**":
+        return any(
+            _components_match(rest, path_parts[skip:])
+            for skip in range(len(path_parts) + 1)
+        )
+    if not path_parts or not fnmatch.fnmatchcase(path_parts[0], head):
+        return False
+    return _components_match(rest, path_parts[1:])
+
+
+def trivy_path_matches(pattern: str, relative: str) -> bool:
+    """Whether a ``.trivyignore.yaml`` entry's ``paths`` glob names the file at ``relative``.
+
+    trivy matches each such glob against the file's path from the scan root,
+    whole and anchored, with doublestar semantics: ``vendor/**`` is everything
+    under the top-level ``vendor``, and ``requirements.txt`` is the top-level
+    file alone.
+    The any-depth glob of the grep family was used before, so an ID limited to
+    one path applied to that name at every depth.
     """
     candidate = pattern.strip().replace("\\", "/")
     while candidate.startswith("./"):
         candidate = candidate[2:]
-    anchored = candidate.startswith("/")
     candidate = candidate.strip("/")
     if not candidate:
         return False
-    variants = {candidate}
-    while candidate.startswith("**/"):
-        candidate = candidate[3:]
-        variants.add(candidate)
+    parts = [
+        part for part in relative.replace("\\", "/").split("/") if part not in ("", ".")
+    ]
+    return _components_match([part for part in candidate.split("/") if part], parts)
+
+
+def glob_excludes(pattern: str, relative: str) -> bool:
+    """Whether glob ``pattern`` excludes the file at ``relative`` (from the scan root).
+
+    Read as the tools read their excludes (semgrep and opengrep: gitignore
+    syntax; syft: doublestar globs from the root): ``*``, ``?`` and ``[...]``
+    match within one path component and never cross ``/``, and ``**`` matches
+    any run of components. A pattern with no ``/`` matches a file or directory
+    of that name at any depth. A ``/`` inside the pattern, a leading ``/`` or a
+    leading ``./`` anchors it at the scan root; a leading ``**/`` leaves it
+    unanchored. A trailing ``/`` names a directory. A match on a directory
+    excludes every file under it.
+
+    Before, ``fnmatch`` matched the pattern against every run of components, so
+    ``*`` crossed ``/`` (``src/*.py`` took ``src/a/b.py``) and a ``/`` inside the
+    pattern anchored nothing (``src/vendor`` took ``x/src/vendor/a.py``): findings
+    the tool had reported were suppressed as if it had excluded them.
+    """
+    candidate = pattern.strip().replace("\\", "/")
+    anchored = candidate.startswith("/")
+    while candidate.startswith("./"):
+        anchored = True
+        candidate = candidate[2:]
+    candidate = candidate.strip("/")
+    if candidate.startswith("**/"):
+        anchored = False
+        while candidate.startswith("**/"):
+            candidate = candidate[3:]
+    elif "/" in candidate:
+        anchored = True
+    if not candidate:
+        return False
+    pattern_parts = [part for part in candidate.split("/") if part]
     parts = [
         part for part in relative.replace("\\", "/").split("/") if part not in ("", ".")
     ]
     starts = range(1) if anchored else range(len(parts))
     for start in starts:
         for end in range(start + 1, len(parts) + 1):
-            joined = "/".join(parts[start:end])
-            if any(fnmatch.fnmatchcase(joined, variant) for variant in variants):
+            if _components_match(pattern_parts, parts[start:end]):
                 return True
     return False
 
@@ -432,7 +524,9 @@ def strip_client_scanner_exclusions(
 
     delivered = is_delivered or config_is_client_supplied
     operator_documents = [
-        document for path, document in documents.items() if not delivered(path)
+        (Path(path), document)
+        for path, document in documents.items()
+        if not delivered(path)
     ]
     # None with no root given and no working directory left: the one use of
     # the root, a delivered trivy ignore file, is then not read.
@@ -443,16 +537,31 @@ def strip_client_scanner_exclusions(
     )
     warnings: List[str] = list(getattr(config, "_resolution_warnings", None) or [])
     for spec in SCANNER_EXCLUSION_OPTIONS:
-        operators = _operator_patterns(spec, operator_documents, base)
-        for _, section in _scanner_sections(config, spec.scanner):
+        operator_entries = _operator_entries(spec, operator_documents, base)
+        sections = _scanner_sections(config, spec.scanner)
+        read_key = _section_the_scanner_reads(sections, spec.scanner)
+        for key, section in sections:
             options = _options_of(section)
             if options is None:
                 continue
             value = _get(options, spec.option)
+            # Only the section the scanner reads excluded anything; an entry a
+            # delivered file wrote under another spelling is still moved out,
+            # so no client value stays in the config, but it is recorded as
+            # nothing: it kept no file from the scanner.
+            is_read = key == read_key
             if spec.kind == "trivy-ignore-file":
-                if value and str(value) not in operators:
+                if value and not _names_an_operator_file(str(value), operator_entries):
                     trusted = _trusted_ignore_file(base, spec)
                     _set(options, spec.option, trusted)
+                    if not is_read:
+                        warnings.append(
+                            f"{spec.key}: {str(value)!r} came from a config an MCP "
+                            f"client delivered, under scanners.{key}, a section the "
+                            f"{spec.scanner} scanner does not read, so it excluded "
+                            "nothing and its entries are not applied."
+                        )
+                        continue
                     found, note = _trivy_ignore_exclusions(
                         str(value), spec, source_dir=source_dir, root=root
                     )
@@ -463,10 +572,26 @@ def strip_client_scanner_exclusions(
                 continue
             kept: List[Any] = []
             moved: List[ClientScannerExclusion] = []
+            expired: List[str] = []
+            unread: List[str] = []
             for entry in value:
-                pattern, reason = _pattern_of(entry)
-                if pattern is None or pattern in operators:
+                pattern, reason, expiration = _entry_fields(entry)
+                if pattern is None:
                     kept.append(entry)
+                    continue
+                if pattern in operator_entries:
+                    # The operator's own entry, with its reason and expiration,
+                    # not the client's copy of the path: a client could otherwise
+                    # revive an exclusion the operator let expire.
+                    kept.append(_spelled_like(entry, operator_entries[pattern]))
+                    continue
+                if _entry_expired(expiration):
+                    # The scanner would not apply it (active_ignore_paths), so
+                    # there is nothing to mark after the scan either.
+                    expired.append(pattern)
+                    continue
+                if not is_read:
+                    unread.append(pattern)
                     continue
                 moved.append(
                     ClientScannerExclusion(
@@ -477,18 +602,38 @@ def strip_client_scanner_exclusions(
                         reason=reason or "set by a config an MCP client delivered",
                     )
                 )
-            if not moved:
+            if not moved and not expired and not unread:
                 continue
             _set(options, spec.option, kept)
             recorded.extend(moved)
-            listed = ", ".join(repr(item.pattern) for item in moved)
-            warnings.append(
-                f"{spec.key}: {listed} came from a config an MCP client delivered and "
-                f"{'is' if len(moved) == 1 else 'are'} not applied as an exclusion. "
-                f"The files are scanned, and each {spec.scanner} finding "
-                f"{'it' if len(moved) == 1 else 'they'} would have left out is "
-                f"reported suppressed and marked client-supplied."
-            )
+            if moved:
+                listed = ", ".join(repr(item.pattern) for item in moved)
+                warnings.append(
+                    f"{spec.key}: {listed} came from a config an MCP client delivered "
+                    f"and {'is' if len(moved) == 1 else 'are'} not applied as an "
+                    f"exclusion. The files are scanned, and each {spec.scanner} "
+                    f"finding {'it' if len(moved) == 1 else 'they'} would have left "
+                    "out is reported suppressed and marked client-supplied."
+                )
+            if expired:
+                listed = ", ".join(repr(pattern) for pattern in expired)
+                warnings.append(
+                    f"{spec.key}: {listed} came from a config an MCP client delivered "
+                    f"and {'has' if len(expired) == 1 else 'have'} expired, so "
+                    f"{'it is' if len(expired) == 1 else 'they are'} not applied: "
+                    f"the {spec.scanner} scanner would not have applied "
+                    f"{'it' if len(expired) == 1 else 'them'}, and the files are "
+                    "scanned."
+                )
+            if unread:
+                listed = ", ".join(repr(pattern) for pattern in unread)
+                warnings.append(
+                    f"{spec.key}: {listed} came from a config an MCP client delivered "
+                    f"under scanners.{key}, a section the {spec.scanner} scanner "
+                    f"does not read, so {'it' if len(unread) == 1 else 'they'} "
+                    f"excluded nothing and {'is' if len(unread) == 1 else 'are'} "
+                    "not applied."
+                )
     config._client_scanner_exclusions = _unique(recorded)
     config._resolution_warnings = warnings
     return config
@@ -585,21 +730,151 @@ def _patterns_in(value: Any) -> Set[str]:
     return found
 
 
-def _operator_patterns(
-    spec: ScannerExclusionOption, operator_documents: List[Any], base: Any
-) -> Set[str]:
-    """The entries the operator supplied for ``spec``: defaults, the trusted config, operator files."""
+def _entry_fields(entry: Any) -> Tuple[Optional[str], Optional[str], Any]:
+    """An option entry's pattern, reason and expiration (a string, or a path-with-reason entry)."""
+    pattern, reason = _pattern_of(entry)
+    if isinstance(entry, dict):
+        return pattern, reason, entry.get("expiration")
+    if isinstance(entry, str):
+        return pattern, reason, None
+    return pattern, reason, getattr(entry, "expiration", None)
+
+
+def _entry_expired(expiration: Any) -> bool:
+    """Whether an entry with this ``expiration`` no longer applies, as the scanners read it.
+
+    The one rule of ``utils/suppression_matcher._has_expired``: a YYYY-MM-DD date
+    that has passed, by the host's local date, and a date that does not parse
+    counts as expired too (the entry is then not applied, which scans more).
+    """
+    if not expiration:
+        return False
+    from automated_security_helper.models.core import expiration_has_passed
+
+    try:
+        return expiration_has_passed(str(expiration)[:10])
+    except ValueError:
+        return True
+
+
+def _spelled_like(template: Any, source: Any) -> Any:
+    """The operator's entry ``source`` in the shape ``template`` has in the option.
+
+    The option holds strings, dicts or validated models; the operator's entry
+    comes as a string or a mapping from a document or the trusted config's dump.
+    When it cannot be given the template's shape, the client's own entry is
+    kept rather than leave the option with a value of another type.
+    """
+    if isinstance(template, BaseModel):
+        if isinstance(source, BaseModel):
+            return source
+        if isinstance(source, Mapping):
+            # A YAML date (an unquoted 2099-01-31) arrives as a date object; the
+            # model's expiration is the YYYY-MM-DD text.
+            fields = {
+                key: value.isoformat() if isinstance(value, date) else value
+                for key, value in source.items()
+            }
+            try:
+                return type(template).model_validate(fields)
+            except Exception:  # noqa: BLE001 -- keep the option well typed
+                return template
+        return template
+    if isinstance(template, dict):
+        if isinstance(source, Mapping):
+            return dict(source)
+        if isinstance(source, BaseModel):
+            return source.model_dump(exclude_unset=True)
+        return template
+    if isinstance(template, str) and isinstance(source, str):
+        return source
+    return template
+
+
+def _section_the_scanner_reads(
+    sections: List[Tuple[str, Any]], scanner: str
+) -> Optional[str]:
+    """The key of the one section ``get_plugin_config(scanner)`` reads among ``sections``.
+
+    As ``plugin_section_lookup`` chooses it: the scanner's own name when it is
+    a key, else the key spelled as its reduced name, else the first key that
+    claims it (``plugin_section_key``). Every other section of the scanner's
+    name is never read by the scanner, so an exclusion written there excluded
+    nothing.
+    """
+    from automated_security_helper.config.ash_config import (
+        plugin_section_key,
+        reduced_plugin_name,
+    )
+
+    keys = [key for key, _ in sections]
+    if scanner in keys:
+        return scanner
+    return plugin_section_key(keys, reduced_plugin_name(scanner))
+
+
+def _names_an_operator_file(value: str, operator_entries: Mapping[str, Any]) -> bool:
+    """Whether trivy ``ignore_file`` ``value`` is one the operator named.
+
+    The merged config holds the path as the loader anchored it (absolute, from
+    the config file's directory), while an operator document holds the text the
+    operator wrote, so the two are compared in every spelling: as written, as a
+    POSIX path, and resolved. ``operator_entries`` holds, for each operator
+    document's value, the text and its resolutions (``_operator_entries``).
+    """
+    spellings = {value, Path(value).as_posix()}
+    try:
+        spellings.add(Path(value).resolve().as_posix())
+    except (OSError, RuntimeError, ValueError):
+        pass
+    return any(candidate in spellings for candidate in operator_entries)
+
+
+def _operator_entries(
+    spec: ScannerExclusionOption,
+    operator_documents: List[Tuple[Path, Any]],
+    base: Any,
+) -> Dict[str, Any]:
+    """The entries the operator supplied for ``spec``, by pattern: defaults, the trusted config, operator files.
+
+    The first entry seen for a pattern is kept, in that order. For a trivy
+    ignore file the keys also hold each value resolved from its document's
+    directory, so a relative operator value compares with the anchored absolute
+    path the merged config holds.
+    """
     from automated_security_helper.config.ash_config import (
         plugin_key_lookup_names,
         reduced_plugin_name,
     )
 
-    found = set(spec.default)
+    found: Dict[str, Any] = {pattern: pattern for pattern in spec.default}
+
+    def take(value: Any, directory: Optional[Path]) -> None:
+        if spec.kind == "trivy-ignore-file":
+            if isinstance(value, str) and value:
+                found.setdefault(value, value)
+                found.setdefault(Path(value).as_posix(), value)
+                anchored = Path(value) if directory is None else directory / value
+                try:
+                    found.setdefault(anchored.resolve().as_posix(), value)
+                except (OSError, RuntimeError, ValueError):
+                    pass
+            return
+        if isinstance(value, str):
+            found.setdefault(value, value)
+            return
+        if not isinstance(value, list):
+            return
+        for entry in value:
+            pattern, _ = _pattern_of(entry)
+            if pattern is not None:
+                found.setdefault(pattern, entry)
+
     read = base.get_plugin_config("scanner", spec.scanner) if base is not None else None
     if isinstance(read, dict):
-        found |= _patterns_in(_get(read.get("options") or {}, spec.option))
+        take(_get(read.get("options") or {}, spec.option), None)
     wanted = reduced_plugin_name(spec.scanner)
-    for document in operator_documents:
+    for path, document in operator_documents:
         scanners = document.get("scanners") if isinstance(document, dict) else None
         if not isinstance(scanners, dict):
             continue
@@ -608,7 +883,7 @@ def _operator_patterns(
                 continue
             options = _options_of(section) if isinstance(section, dict) else None
             if isinstance(options, dict):
-                found |= _patterns_in(_get(options, spec.option))
+                take(_get(options, spec.option), Path(path).parent)
     return found
 
 
@@ -666,7 +941,9 @@ def _trivy_ignore_exclusions(
             f"{refused.reason}, and only a regular file inside the scanned tree is "
             f"read."
         )
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError: a NUL character in the value (os.open refuses an embedded
+        # null byte), which escaped as an uncaught error and ended resolution.
         return [], f"{lead} It could not be read, so no entries are applied."
     with handle:
         data = handle.read(_MAX_IGNORE_FILE_BYTES + 1)
@@ -730,12 +1007,29 @@ def parse_trivy_ignore_file(
         if not isinstance(document, dict):
             raise ValueError("the document is not a mapping")
         for section in ("vulnerabilities", "misconfigurations", "secrets", "licenses"):
-            for item in document.get(section) or []:
+            items = document.get(section)
+            if items is None:
+                continue
+            if not isinstance(items, list):
+                # A scalar here raised an uncaught TypeError during config
+                # resolution; the file is unparsable, as the caller reports it.
+                raise ValueError(f"the {section} section is not a list")
+            for item in items:
                 if not isinstance(item, dict) or not item.get("id"):
                     continue
                 if _expired(item.get("expired_at"), today):
                     continue
-                paths = item.get("paths") or []
+                if item.get("purls"):
+                    # trivy limits such an entry to the packages its purls name.
+                    # A finding's package is not matched here, so applying the
+                    # entry would suppress findings trivy reports for other
+                    # packages: it is left out, and those findings stay reported.
+                    continue
+                paths = item.get("paths")
+                if paths is None:
+                    paths = []
+                if not isinstance(paths, list):
+                    raise ValueError(f"an entry's paths in {section} is not a list")
                 found.append(
                     (
                         str(item["id"]),

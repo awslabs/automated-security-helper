@@ -946,7 +946,14 @@ def test_a_value_the_move_does_not_take_is_still_refused(
 def test_a_moved_exclusion_under_another_spelling_reaches_no_scanner(
     spelling: str,
 ) -> None:
-    """Every spelling the plugin lookup reads is moved, or the file is refused."""
+    """Every spelling the plugin lookup reads is moved, or the file is refused.
+
+    A spelling the loader folds onto the scanner's own section is the scanner's
+    and is recorded. One it leaves as an extra section the scanner never reads
+    (``get_plugin_config`` reads the section spelled with the scanner's own name
+    first) is still moved out, so no client value stays in the config, but is
+    recorded as nothing: it excluded nothing, so there is nothing to mark.
+    """
     from automated_security_helper.config.ash_config import AshConfig
 
     document = {"scanners": {spelling: {"options": {"exclude": ["client-dir"]}}}}
@@ -957,9 +964,11 @@ def test_a_moved_exclusion_under_another_spelling_reaches_no_scanner(
     if isinstance(outcome, AshConfig):
         scanners = json.dumps(outcome.model_dump(mode="json")["scanners"])
         assert "client-dir" not in scanners, scanners
+        unread = spelling in (outcome.scanners.__pydantic_extra__ or {})
+        expected = [] if unread else [("exclude", "client-dir")]
         assert [
             (item.option, item.pattern) for item in outcome._client_scanner_exclusions
-        ] == [("exclude", "client-dir")]
+        ] == expected
     else:
         assert isinstance(outcome, Exception), outcome
 
