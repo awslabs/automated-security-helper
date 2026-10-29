@@ -1859,10 +1859,22 @@ jobs:
   #
   # WHAT THIS RECOVERS, AND WHY IT IS NOT A COUNT OF FIXES
   #
-  # tests/conftest.py skips every item whose keywords contain "integration" unless
-  # --run-integration is passed. Nothing passed it except the single cdk-nag step in
-  # run-unit-tests, so the whole set was skipped in every run -- and a skipped suite exits 0,
-  # which is why nobody noticed. Measured on this tree at -n 0: with the flags off, 115
+  # THE FIGURES BELOW ARE A DATED MEASUREMENT UNDER THE GATE THAT PRECEDED THE TIERS. When
+  # this job was added, tests/conftest.py skipped every item whose keywords contained
+  # "integration" unless --run-integration was passed, and the counts here were taken
+  # under that keyword gate. The gate is the tier marker now: tests/conftest.py skips the
+  # items that carry the `integration` or `e2e` marker unless --run-integration is passed,
+  # whatever their names, and the `slow` marker is gated by --run-slow as before. So the
+  # set --run-integration un-skips today is the two marked tiers, e2e included, and it is
+  # not the 115 below; the integration-test-linux, -macos and -windows jobs select that
+  # population by marker across the whole tree. This job's own population is tests/
+  # integration/ by path (the command below), so its count is a property of that
+  # directory. Nothing below has been re-measured under the marker gate; the figures stay
+  # as the record of what the job recovered when it was added, and of how they reconcile.
+  #
+  # Nothing passed --run-integration except the single cdk-nag step in run-unit-tests, so
+  # the whole set was skipped in every run -- and a skipped suite exits 0, which is why
+  # nobody noticed. Measured on the tree of that day at -n 0: with the flags off, 115
   # skipped; with them on, 10 failed, 102 passed, 2 skipped, 1 xfailed, reconciling to the
   # same 115.
   #
@@ -1875,15 +1887,18 @@ jobs:
   # Every figure here is invocation-dependent and commit-dependent, so treat it as a
   # measurement with a date rather than a property of the suite. The same population was 104
   # items with 39 failures before the resource_management and MCP repairs landed on this
-  # branch; those deleted a duplicated test file and added MCP coverage, which is why it is
-  # now 115 items with 10 failures. Re-measure rather than adjusting these by arithmetic.
+  # branch; those deleted a duplicated test file and added MCP coverage, which is why it
+  # read 115 items with 10 failures when last counted, under the keyword gate. Re-measure
+  # under the marker gate rather than adjusting these by arithmetic.
   #
-  # POPULATIONS THAT RECONCILE, SO NONE OF THEM HAS TO BE TAKEN ON TRUST
+  # POPULATIONS THAT RECONCILED, SO NONE OF THEM HAD TO BE TAKEN ON TRUST
   #
-  # A census of what un-skips under --run-integration alone will not match the 115 above, and
-  # the difference is the two gates below rather than a disagreement:
+  # Under the keyword gate, a census of what un-skipped under --run-integration alone did not
+  # match the 115 above, and the difference was the two gates below rather than a
+  # disagreement (under the marker gate the un-skip set is the two marked tiers, so these
+  # three numbers describe the keyword-gate measurement only):
   #
-  #     115   items whose keywords contain "integration"
+  #     115   items whose keywords contained "integration"
   #     - 4   of those also carry @pytest.mark.slow, so --run-integration alone leaves them
   #           skipped; this job passes --run-slow as well, which is why it sees them
   #     - 2   unconditional @pytest.mark.skip in test_detect_secrets_scanner.py, which no
@@ -1898,10 +1913,11 @@ jobs:
   #
   # WHY THESE SELECTORS AND NOT THE OBVIOUS ONES
   #
-  # Both flags, not just --run-integration. Four of the 115 also carry @pytest.mark.slow,
-  # which conftest gates separately, so --run-integration alone leaves them skipped -- the
-  # same silent pass this job exists to remove. --run-slow costs nothing in scope: measured,
-  # there are exactly zero slow-marked items that are not also integration-marked.
+  # Both flags, not just --run-integration. Four of the 115 also carried @pytest.mark.slow,
+  # which conftest gates separately, so --run-integration alone left them skipped -- the
+  # same silent pass this job exists to remove. --run-slow costs nothing in scope: a `unit`
+  # test may not carry `slow` (tests/conftest.py refuses the pair at collection, since the
+  # unit tier runs without --run-slow), so every slow-marked item is integration or e2e.
   #
   # One path: this job runs the tests under tests/integration/, the source-delivery
   # end-to-end test included (tests/integration/cli/). Tests under tests/unit/ that carry
@@ -1912,12 +1928,12 @@ jobs:
   # keyed on the directory, not on the marker: a test there that starts a real scanner on
   # purpose still has to say so with `runs_real_tools` and be listed in REAL_TOOL_MODULES.
   #
-  # Not `-k integration`. It selects 126 rather than 115, because -k substring-matches node
-  # ids as well as keywords and picks up 11 tests that are not gated and already run in
-  # unit-test. That 11-test gap has held across both measurements of this suite while the
-  # absolute numbers moved, which is the reason to re-derive the real population with a
-  # collection pass asking pytest for `"integration" in item.keywords` rather than trusting
-  # any selector to mirror it.
+  # Not `-k integration`. Under the keyword gate it selected 126 rather than 115, because -k
+  # substring-matches node ids as well as keywords and picked up 11 tests that were not gated
+  # and already ran in unit-test. That 11-test gap held across both measurements of this
+  # suite while the absolute numbers moved, which is the reason to re-derive a population
+  # with a collection pass asking pytest for the marker (`item.get_closest_marker`, what the
+  # gate reads now) rather than trusting any name-based selector to mirror it.
   #
   # Its own job rather than a step in run-unit-tests, because these exercise scanner and MCP
   # integration, not Python-version behavior; when run-unit-tests ran the whole suite in 200
