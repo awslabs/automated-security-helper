@@ -528,6 +528,36 @@ def _non_negative_int_attr(obj: Any, name: str) -> int:
     return _target_count_attr(obj, name) or 0
 
 
+def _recorded_the_timed_out_target(
+    scanner_plugin: Any, kept: Tuple[str, str], raw_results: Any
+) -> bool:
+    """Whether a scan that kept a timeout flag already graded the timed-out run itself.
+
+    A scanner that runs its tool once per target (cfn-guard, once per template)
+    records a run that timed out in its own accounting: the target counts as
+    failed, the failure is named in its errors, and the scan goes on to the next
+    target and returns the merged report. The executor used to read the kept flag
+    alone and raise, which replaced that whole report with one failure record and
+    lost every other target's findings. The report is kept when all three hold:
+
+    - the kept flag is the timeout (a cancel, a rejected result or a signal says
+      nothing about the other targets' runs, and the raise stands);
+    - the scan returned a result (``None`` or ``False`` is nothing to keep);
+    - the plugin counts targets and recorded at least one failed target among
+      more attempted, so the failure is in its own accounting and the report
+      holds the other targets' results.
+
+    A plugin that counts no targets, or whose every attempted target failed,
+    produced nothing the row can grade, and the raise stands for it as before.
+    The row is still ERROR: the post-scan grading adds the timeout to it.
+    """
+    if kept[0] != "timed_out" or not raw_results:
+        return False
+    attempted = _target_count_attr(scanner_plugin, "targets_attempted")
+    failed = _non_negative_int_attr(scanner_plugin, "targets_failed")
+    return attempted is not None and failed >= 1 and attempted > failed
+
+
 def _tool_lines(
     lines: Any, values: Tuple[str, ...], *, tilde: bool = False
 ) -> List[Any]:
@@ -974,8 +1004,29 @@ class ScannerExecutor:
                                     # fails its record step too, and the reason raised
                                     # has to lead with the cause (the run did not
                                     # finish), not that consequence.
+                                    #
+                                    # Not raised for a per-target scanner that
+                                    # recorded the timed-out target itself and
+                                    # returned the other targets' merged report:
+                                    # the raise replaced that report with one
+                                    # failure record, so one template's timeout
+                                    # cost every other template its findings.
+                                    # The row is still graded ERROR below, with
+                                    # the timeout on it (_recorded_the_timed_out_target).
                                     kept = _kept_flag(scanner_plugin)
-                                    if kept is not None:
+                                    if (
+                                        kept is not None
+                                        and _recorded_the_timed_out_target(
+                                            scanner_plugin, kept, raw_results
+                                        )
+                                    ):
+                                        ASH_LOGGER.debug(
+                                            f"{scanner_config_name} recorded a timed-out "
+                                            f"target on {target_type} in its own "
+                                            "accounting; keeping its report",
+                                            extra=NO_MARKUP,
+                                        )
+                                    elif kept is not None:
                                         raise ScannerError(
                                             _unfinished_run_reason(
                                                 scanner_config_name,
