@@ -127,18 +127,24 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
     def _name_the_report_file_by_its_format(self) -> None:
         """Under ``output_format: markdown`` the report is markdown, so it is
-        written under MARKDOWN_EXTENSION, not the JSON one. An extension the
-        operator set is kept as set."""
+        written under MARKDOWN_EXTENSION, not the JSON one.
+
+        An extension the operator set is kept as set, whatever its value: the
+        test is whether the field was SET (``model_fields_set``), not whether
+        it equals the default. The change lands on a copy of the config, so
+        the object the caller handed in (the AshConfig's own reporter section,
+        say) is not changed under it.
+        """
         if isinstance(self.config, dict):
             self.config = UnusedSuppressionsReporterConfig.model_validate(self.config)
         output_format = getattr(
             getattr(self.config, "options", None), "output_format", "both"
         )
-        default_extension = UnusedSuppressionsReporterConfig.model_fields[
-            "extension"
-        ].default
-        if output_format == "markdown" and self.config.extension == default_extension:
-            self.config.extension = self.MARKDOWN_EXTENSION
+        fields_set = getattr(self.config, "model_fields_set", set())
+        if output_format == "markdown" and "extension" not in fields_set:
+            self.config = self.config.model_copy(
+                update={"extension": self.MARKDOWN_EXTENSION}
+            )
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The markdown copy, when ``output_format`` is ``both`` (the default)."""
@@ -170,8 +176,16 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
         # Under --ignore-suppressions nothing was matched, so the subtraction
         # below has no meaning: the report says so instead of listing every
-        # entry as unused (NOT_EVALUATED).
-        suppressions_ignored = bool(getattr(self.context, "ignore_suppressions", False))
+        # entry as unused (NOT_EVALUATED). The flag is read from this run's
+        # context and from the results' own metadata (`suppressions_ignored`,
+        # for a scan that recorded it), so a results file re-rendered by a
+        # later `ash report`, whose context carries no such flag, reads the
+        # same way once the scan records it.
+        suppressions_ignored = bool(
+            getattr(self.context, "ignore_suppressions", False)
+        ) or bool(
+            getattr(getattr(model, "metadata", None), "suppressions_ignored", False)
+        )
 
         # Get used suppressions from the model
         used_suppressions = getattr(model, "used_suppressions", set())

@@ -83,20 +83,6 @@ _INTERNAL_FIELD_SENTENCE = re.compile(
 )
 
 
-def _starts_list_item(stripped: str) -> bool:
-    """Whether a line, without its indent, starts a YAML block list entry.
-
-    That is `- ` followed by the entry, or a `-` alone on the line with the
-    entry's fields on the lines below it. `rstrip` takes a dash followed only
-    by blanks as alone too, a tab among them, which `- ` does not cover (a
-    CRLF file has no `\\r` left here: fix_unused reads it with read_text,
-    whose universal newlines drop them). The entries of the suppressions list
-    are located by YAML node position (_comment_out_suppressions), not by this
-    text test, which is a reading of one line on its own.
-    """
-    return stripped.startswith("- ") or stripped.rstrip() == "-"
-
-
 class LintSeverity(str, Enum):
     """Severity level for lint issues."""
 
@@ -148,6 +134,12 @@ class LintIssue:
     # True when the file could not be read at all (OSError), one of the
     # ignored_by_scan cases: the verdict then says read, not parse.
     could_not_read: bool = False
+    # For a suppression issue: the id (models/core.suppression_id) of the entry
+    # the issue is about, as the lint read it. A fixer addresses the entry by
+    # the index in ``path`` and checks this id against the entry now at that
+    # index, so an issue computed before a confirmation prompt never deletes or
+    # narrows an entry that moved into its place. Not shown, not compared.
+    entry_id: Optional[str] = field(default=None, repr=False, compare=False)
     # For an IGNORE_PATH_ISSUE: the path as the config holds it, before any value
     # read from the environment is shown, so _merge_path_duplicates tells apart
     # two paths whose messages both read `<value>`. Never shown, so not in the
@@ -422,17 +414,9 @@ class ConfigLinter:
         cls._refuse_to_rewrite_env_references(config_path)
         config_data, raw_content = cls._load_config_and_text(config_path)
 
-        # The suppression fixes address an entry by its index in the list the
-        # issue's lint read. The file is read again here, after the caller's
-        # confirmation prompt, so an issue computed earlier is applied only
-        # when this read still raises it: an entry removed or moved meanwhile
-        # would otherwise have the fix delete or narrow whichever entry now
-        # sits at that index.
-        fresh_issues = cls.lint(config_path).fixable_issues
         if issues is None:
-            issues = fresh_issues
-        else:
-            issues = [issue for issue in issues if issue in fresh_issues]
+            lint_result = cls.lint(config_path)
+            issues = lint_result.fixable_issues
 
         fixed_issues: List[LintIssue] = []
 
@@ -492,8 +476,12 @@ class ConfigLinter:
         cls,
         config_path: Path,
         output_dir: Optional[Path] = None,
-    ) -> Tuple[str, List[LintIssue], Optional[datetime]]:
+    ) -> Tuple[Optional[str], List[LintIssue], Optional[datetime]]:
         """Comment out unused suppressions in the config based on the unused suppressions report.
+
+        The content is None when the config could not be read or parsed (lint
+        reported that); every other return carries the file's text, changed
+        only where the returned issues say.
 
         Instead of removing unused suppressions entirely, this method comments them out
         with a note including the date and reason. This is safer because a suppression
@@ -521,7 +509,9 @@ class ConfigLinter:
         try:
             config_data, raw_content = cls._load_config_and_text(config_path)
         except (OSError, ValueError, yaml.YAMLError, ASHConfigSourceError):
-            return "", [], None
+            # No content: there is no text this could hand back as the file's
+            # own, and an empty string in its place would read as one.
+            return None, [], None
 
         # Find the unused suppressions report
         report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
@@ -684,6 +674,7 @@ class ConfigLinter:
             return raw_content, set()
         dash_column = dash_positions[0][1]
         indent = " " * dash_column
+        line_break = next((ending for _text, ending in lines if ending), "\n")
 
         commented: Set[int] = set()
         # The lines of entry i run from its dash line up to the next entry's
@@ -702,7 +693,11 @@ class ConfigLinter:
                 f"{indent}# [ash-lint {date_str}] Commented out: unused "
                 "suppression (not matched in last scan)"
             )
-            lines[dash_line] = (f"{note}{ending}{indent}# {text.lstrip()}", ending)
+            # A dash on the file's last line, with no line break after it,
+            # still gets one between the note and the entry (the file's own
+            # kind of break), or the two would share a line.
+            note_break = ending or line_break
+            lines[dash_line] = (f"{note}{note_break}{indent}# {text.lstrip()}", ending)
             for line_no in range(dash_line + 1, min(next_dash_line, len(lines))):
                 text, ending = lines[line_no]
                 stripped = text.lstrip()
@@ -774,8 +769,15 @@ class ConfigLinter:
             return None
         if not isinstance(root, yaml.MappingNode):
             return None
+        # A repeated key: the constructor keeps the last mapping, this walk
+        # would edit the first, and the two lists can hold the same count.
+        # Nothing is edited on a document whose list cannot be told apart.
+        if cls._key_count(root, "global_settings") != 1:
+            return None
         settings = cls._mapping_value(root, "global_settings")
         if not isinstance(settings, yaml.MappingNode):
+            return None
+        if cls._key_count(settings, "suppressions") != 1:
             return None
         key_node = None
         for key, _value in settings.value:
@@ -809,7 +811,10 @@ class ConfigLinter:
             # The tokens and the node disagree on the entry count; nothing is
             # edited on a reading this cannot check.
             return None
-        if end_line >= len(lines):
+        # A list that runs to the end of a text with no final line break ends
+        # ON the last line (the stream end sits there), not after it; the last
+        # entry's lines then run to the end of the text.
+        if sequence.end_mark.index >= len(raw_content) or end_line >= len(lines):
             end_line = len(lines)
         return key_line, dash_positions, end_line, key_node.start_mark.column
 
@@ -820,6 +825,15 @@ class ConfigLinter:
             if isinstance(key_node, yaml.ScalarNode) and key_node.value == key:
                 return value_node
         return None
+
+    @staticmethod
+    def _key_count(node: yaml.MappingNode, key: str) -> int:
+        """How many scalar keys of ``node`` read ``key``."""
+        return sum(
+            1
+            for key_node, _value in node.value
+            if isinstance(key_node, yaml.ScalarNode) and key_node.value == key
+        )
 
     @classmethod
     def get_unused_report_age(
@@ -1302,6 +1316,7 @@ class ConfigLinter:
                             f"Narrow the suppression to line {shown_line_start} "
                             f"alone by setting line_end = {shown_line_start}"
                         ),
+                        entry_id=cls._make_suppression_id(suppression),
                     )
                 )
 
@@ -1336,6 +1351,7 @@ class ConfigLinter:
                         path=path_prefix,
                         fixable=True,
                         fix_description="Collapse the reason onto a single line",
+                        entry_id=cls._make_suppression_id(suppression),
                     )
                 )
 
@@ -1346,6 +1362,7 @@ class ConfigLinter:
                 "Suppression",
                 result,
                 shown=shown.get("expiration", ENVIRONMENT_VALUE_SHOWN),
+                entry_id=cls._make_suppression_id(suppression),
             )
 
     # Ignore-path entries outside suppressions, by where they sit in the config.
@@ -1385,8 +1402,12 @@ class ConfigLinter:
         subject: str,
         result: LintResult,
         shown: Any = None,
+        entry_id: Optional[str] = None,
     ) -> None:
         """Report ``expiration`` by the rule a scan applies, ``expiration_has_passed``.
+
+        ``entry_id`` is the suppression entry's id (``LintIssue.entry_id``), which
+        the fixer checks before it removes the entry at the issue's index.
 
         A message quotes it as ``shown``, ``<value>`` when it was read from the
         environment; None quotes it as it is.
@@ -1421,6 +1442,7 @@ class ConfigLinter:
                     path=path_prefix,
                     fixable=True,
                     fix_description="Remove expired suppression",
+                    entry_id=entry_id,
                 )
             )
         else:
@@ -2118,21 +2140,50 @@ class ConfigLinter:
         cls, config_data: Dict[str, Any], issue: LintIssue
     ) -> bool:
         """Fix a suppression with line_start but missing line_end."""
-        # Parse the path: global_settings.suppressions[N]
-        idx = cls._parse_suppression_index(issue.path)
+        suppressions = cls._suppressions_of(config_data)
+        idx = cls._suppression_index_for(suppressions, issue)
         if idx is None:
             return False
-
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
-        if idx < len(suppressions):
-            suppression = suppressions[idx]
-            if (
-                isinstance(suppression, dict)
-                and suppression.get("line_start") is not None
-            ):
-                suppression["line_end"] = suppression["line_start"]
-                return True
+        suppression = suppressions[idx]
+        if isinstance(suppression, dict) and suppression.get("line_start") is not None:
+            suppression["line_end"] = suppression["line_start"]
+            return True
         return False
+
+    @classmethod
+    def _suppression_index_for(
+        cls, suppressions: List[Any], issue: LintIssue
+    ) -> Optional[int]:
+        """The index of the entry ``issue`` is about in ``suppressions``, the
+        list as the file reads now, or None when it cannot be found.
+
+        The issue's path names an index in the list its lint read, and the
+        file is read again before the fix, after the caller's confirmation
+        prompt. The entry at that index is used only when its id
+        (``LintIssue.entry_id``) is the one the lint recorded; an entry that
+        moved is found by that id when exactly one entry carries it; an entry
+        that is gone, or an id two entries share, means no fix. An issue made
+        without an id (a caller's own) is applied by index as before.
+        """
+        idx = cls._parse_suppression_index(issue.path)
+        if idx is None:
+            return None
+        if issue.entry_id is None:
+            return idx if idx < len(suppressions) else None
+        if idx < len(suppressions) and cls._entry_id_of(suppressions[idx]) == (
+            issue.entry_id
+        ):
+            return idx
+        matches = [
+            i
+            for i, entry in enumerate(suppressions)
+            if cls._entry_id_of(entry) == issue.entry_id
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    @classmethod
+    def _entry_id_of(cls, entry: Any) -> Optional[str]:
+        return cls._make_suppression_id(entry) if isinstance(entry, dict) else None
 
     @staticmethod
     def _collapse_reason_whitespace(reason: str) -> str:
@@ -2151,12 +2202,9 @@ class ConfigLinter:
         cls, config_data: Dict[str, Any], issue: LintIssue
     ) -> bool:
         """Collapse a multi-line suppression reason onto a single line."""
-        idx = cls._parse_suppression_index(issue.path)
+        suppressions = cls._suppressions_of(config_data)
+        idx = cls._suppression_index_for(suppressions, issue)
         if idx is None:
-            return False
-
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
-        if idx >= len(suppressions):
             return False
 
         suppression = suppressions[idx]
@@ -2181,15 +2229,12 @@ class ConfigLinter:
         cls, config_data: Dict[str, Any], issue: LintIssue
     ) -> bool:
         """Remove an expired suppression."""
-        idx = cls._parse_suppression_index(issue.path)
+        suppressions = cls._suppressions_of(config_data)
+        idx = cls._suppression_index_for(suppressions, issue)
         if idx is None:
             return False
-
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
-        if idx < len(suppressions):
-            suppressions.pop(idx)
-            return True
-        return False
+        suppressions.pop(idx)
+        return True
 
     @classmethod
     def _parse_suppression_index(cls, path: str) -> Optional[int]:

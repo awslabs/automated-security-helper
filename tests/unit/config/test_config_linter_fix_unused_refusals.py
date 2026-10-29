@@ -53,7 +53,8 @@ def test_a_config_that_does_not_parse_is_returned_unchanged(tmp_path):
 
     assert fixed_issues == []
     assert timestamp is None
-    assert fixed_content == ""
+    # No content, never an empty string a caller could write over the file.
+    assert fixed_content is None
 
 
 @pytest.mark.parametrize(

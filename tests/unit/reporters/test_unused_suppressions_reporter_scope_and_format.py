@@ -136,16 +136,28 @@ def test_markdown_output_format_names_the_report_file_as_markdown(tmp_path):
     assert reporter.report(model).startswith("# Unused Suppressions Report")
 
 
-def test_an_extension_the_operator_set_is_kept_under_markdown_format(tmp_path):
+@pytest.mark.parametrize("extension", ["unused.custom", "unused-suppressions.json"])
+def test_an_extension_the_operator_set_is_kept_under_markdown_format(
+    tmp_path, extension
+):
+    """Set is set, even to the default's own value."""
     context = _context(tmp_path)
-    reporter = UnusedSuppressionsReporter(
-        context=context,
-        config=UnusedSuppressionsReporterConfig(
-            extension="unused.custom", options={"output_format": "markdown"}
-        ),
+    config = UnusedSuppressionsReporterConfig(
+        extension=extension, options={"output_format": "markdown"}
     )
+    reporter = UnusedSuppressionsReporter(context=context, config=config)
 
-    assert reporter.config.extension == "unused.custom"
+    assert reporter.config.extension == extension
+
+
+def test_the_callers_config_object_is_not_changed(tmp_path):
+    """The rename lands on a copy; the object handed in keeps its extension."""
+    context = _context(tmp_path)
+    config = UnusedSuppressionsReporterConfig(options={"output_format": "markdown"})
+    reporter = UnusedSuppressionsReporter(context=context, config=config)
+
+    assert reporter.config.extension == "unused-suppressions.md"
+    assert config.extension == "unused-suppressions.json"
 
 
 @pytest.mark.parametrize("output_format", ["both", "json"])

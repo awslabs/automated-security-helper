@@ -182,6 +182,103 @@ def test_every_entry_commented_out_leaves_an_empty_list_in_a_crlf_file(tmp_path)
     assert data["global_settings"]["ignore_paths"] == [{"path": "vendor/**"}]
 
 
+@pytest.mark.parametrize(
+    "unused, kept_paths, all_commented",
+    [
+        pytest.param(
+            [{"path": "src/b.py", "rule_id": "B102", "reason": "two"}],
+            ["src/a.py"],
+            False,
+            id="last-entry-with-a-kept-one-before",
+        ),
+        pytest.param(
+            [
+                {"path": "src/a.py", "rule_id": "B101", "reason": "one"},
+                {"path": "src/b.py", "rule_id": "B102", "reason": "two"},
+            ],
+            [],
+            True,
+            id="every-entry",
+        ),
+    ],
+)
+def test_a_file_with_no_final_line_break_is_rewritten_whole(
+    tmp_path, unused, kept_paths, all_commented
+):
+    """Red at the base of this walker: with no final line break the stream
+    end sits on the last line, the last entry's range left that line out, and
+    `reason: two` stayed active under the comments (joining the kept entry as a
+    duplicate key, or orphaned under `suppressions: []`)."""
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: one\n"
+        "    - path: src/b.py\n"
+        "      rule_id: B102\n"
+        "      reason: two",
+        unused,
+    )
+
+    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert len(fixed_issues) == len(unused)
+    assert "# reason: two" in fixed_content
+    data = yaml.safe_load(fixed_content)
+    suppressions = data["global_settings"]["suppressions"]
+    assert [s["path"] for s in suppressions] == kept_paths
+    if kept_paths:
+        assert suppressions[0] == {
+            "path": "src/a.py",
+            "rule_id": "B101",
+            "reason": "one",
+        }
+    assert ("suppressions: []" in fixed_content) is all_commented
+
+
+def test_a_dash_on_the_files_last_line_gets_its_own_line(tmp_path):
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\nglobal_settings:\n  suppressions:\n    - {path: src/a.py, rule_id: B101, reason: one}",
+        [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
+    )
+
+    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert len(fixed_issues) == 1
+    assert "# [ash-lint" in fixed_content
+    assert "(not matched in last scan)    # - {path" not in fixed_content
+    assert yaml.safe_load(fixed_content)["global_settings"]["suppressions"] == []
+
+
+def test_a_repeated_suppressions_key_is_left_alone(tmp_path):
+    """The loader keeps the last list, a text walk would edit the first; the
+    file is left as it is and nothing is reported commented out."""
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/x.py\n"
+        "      rule_id: B101\n"
+        "      reason: shadowed\n"
+        "  suppressions:\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: one\n",
+        [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
+    )
+    before = config_path.read_text(encoding="utf-8")
+
+    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert fixed_issues == []
+    assert fixed_content == before
+
+
 def test_a_comment_between_entries_is_kept_as_it_is(tmp_path):
     config_path = _setup(
         tmp_path,

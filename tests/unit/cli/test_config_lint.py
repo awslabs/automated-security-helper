@@ -1621,26 +1621,6 @@ def test_fix_unused_does_not_count_a_dash_inside_a_reason_as_an_entry(
     assert kept.reason.splitlines() == ["first line", item, "last line"]
 
 
-@pytest.mark.parametrize(
-    "stripped, starts",
-    [
-        ("- path: a", True),
-        ("-", True),
-        # A dash with only blanks after it, a tab among them (which PyYAML
-        # refuses, and a loader that accepts it reads as `-`).
-        ("-\t", True),
-        ("-  ", True),
-        ("-x", False),
-        ("--", False),
-        ("# - path: a", False),
-    ],
-)
-def test_what_starts_a_list_item(stripped, starts):
-    from automated_security_helper.config.config_linter import _starts_list_item
-
-    assert _starts_list_item(stripped) is starts
-
-
 def test_fix_refuses_a_file_with_environment_references(tmp_path):
     """ConfigLinter.fix itself refuses, not only the command that calls it."""
     config_path = tmp_path / ".ash.yaml"

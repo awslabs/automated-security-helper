@@ -74,6 +74,21 @@ def test_an_ignored_run_says_the_suppressions_were_not_evaluated(tmp_path):
     assert "--ignore-suppressions" in report["not_evaluated"]
 
 
+def test_a_results_file_that_recorded_the_flag_reads_as_not_evaluated(tmp_path):
+    """`ash report` re-renders a results file under a context with no flag;
+    a scan that recorded `suppressions_ignored` in the results' metadata is
+    still read as not evaluated."""
+    context = _context(tmp_path, ignore_suppressions=False)
+    model = AshAggregatedResults()
+    model.used_suppressions = set()
+    model.metadata.suppressions_ignored = True
+
+    report = json.loads(UnusedSuppressionsReporter(context=context).report(model))
+
+    assert report["unused_suppressions"] == []
+    assert report["summary"]["evaluated"] is False
+
+
 def test_a_normal_run_keeps_the_subtraction(tmp_path):
     """The control: without the flag an empty used set means every entry is unused."""
     report = _report(_context(tmp_path, ignore_suppressions=False))

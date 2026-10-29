@@ -584,13 +584,17 @@ def find_inline_suppressions(
     """
     suppressions: List[InlineSuppression] = []
     try:
+        # Both paths read the bytes as they are, so the two number lines the
+        # same way (read_text's universal newlines would have folded CR and
+        # CRLF on one path only).
         if scan_root is None:
-            text = file_path.read_text(encoding="utf-8", errors="replace")
+            data = file_path.read_bytes()
         else:
             with open_in_scanned_tree(
                 file_path, scan_root, follow_links_inside=True
             ) as handle:
-                text = handle.read().decode("utf-8", errors="replace")
+                data = handle.read()
+        text = data.decode("utf-8", errors="replace")
     except TreeInputRefused as refused:
         ASH_LOGGER.warning(
             f"Inline suppressions in '{refused.path}' were not read: {refused.reason}"
@@ -605,13 +609,14 @@ def find_inline_suppressions(
         ASH_LOGGER.debug(f"Could not read {file_path} for inline suppressions: {exc}")
         return suppressions
 
-    # Lines are counted as the scanners count them, by line feed (a carriage
-    # return before it belongs to the line). str.splitlines also breaks a line
-    # at a form feed, a vertical tab, NEL, LINE SEPARATOR, PARAGRAPH SEPARATOR
-    # and the \x1c-\x1e separators, so after any of those every directive was
-    # attached to a line number the SARIF results never carry.
+    # Lines are counted as the scanners count them: LF, CRLF and a lone CR each
+    # end a line (Python's universal newlines, which the Python-based scanners
+    # read source through), and nothing else does. str.splitlines also breaks
+    # a line at a form feed, a vertical tab, NEL, LINE SEPARATOR, PARAGRAPH
+    # SEPARATOR and the \x1c-\x1e separators, so after any of those every
+    # directive was attached to a line number the SARIF results never carry.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     for line_num_0, line in enumerate(text.split("\n")):
-        line = line.rstrip("\r")
         line_num = line_num_0 + 1  # 1-based
 
         matched = False

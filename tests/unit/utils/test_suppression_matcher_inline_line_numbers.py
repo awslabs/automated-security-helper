@@ -58,10 +58,21 @@ def test_a_non_line_feed_separator_does_not_shift_the_line_number(tmp_path, sepa
     assert found == [InlineSuppression(line_number=2, rule_id="R1", reason="why")]
 
 
-def test_a_crlf_file_is_numbered_by_line_feed_and_the_reason_has_no_cr(tmp_path):
-    source = _write(tmp_path, "x = 1\r\n# ash-ignore-next-line: R2 known\r\ny = 2\r\n")
+@pytest.mark.parametrize("line_break", ["\r\n", "\r", "\n"], ids=["crlf", "cr", "lf"])
+@pytest.mark.parametrize("with_scan_root", [False, True], ids=["plain", "scan-root"])
+def test_every_line_break_kind_counts_once_on_both_read_paths(
+    tmp_path, line_break, with_scan_root
+):
+    """CRLF and a lone CR end a line as LF does, as Python's universal newlines
+    (which the Python-based scanners read source through) count them; the
+    reason carries no CR; and the bytes path given a scan root numbers the
+    same as the plain path."""
+    source = _write(
+        tmp_path,
+        f"x = 1{line_break}# ash-ignore-next-line: R2 known{line_break}y = 2{line_break}",
+    )
 
-    found = find_inline_suppressions(source)
+    found = find_inline_suppressions(source, tmp_path if with_scan_root else None)
 
     assert found == [InlineSuppression(line_number=3, rule_id="R2", reason="known")]
 
