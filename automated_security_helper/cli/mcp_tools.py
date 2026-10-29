@@ -4887,7 +4887,12 @@ def _answer_get_config(
             # directory or this session's delivered source sits.
             scanned_root = search
         else:
-            delivered = get_session_source_dir(session_id or DEFAULT_SESSION_ID)
+            # None is the stdio session; an empty string is a session of its
+            # own (profile_registry's reading), so it never borrows the stdio
+            # session's delivered tree as the target this answer is judged for.
+            delivered = get_session_source_dir(
+                DEFAULT_SESSION_ID if session_id is None else session_id
+            )
             scanned_root = (
                 delivered
                 if delivered is not None and delivered.is_dir()
