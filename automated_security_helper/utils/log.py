@@ -6,6 +6,7 @@ import platform
 import re
 import sys
 import threading
+import time
 import traceback
 import uuid
 from contextlib import contextmanager
@@ -78,6 +79,8 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
 
     def logForLevel(self, message, *args, **kwargs):
         if self.isEnabledFor(levelNum):
+            # The caller's frame, not this wrapper's (see ASHLogger.verbose).
+            kwargs["stacklevel"] = kwargs.get("stacklevel", 1) + 1
             self._log(levelNum, message, args, **kwargs)
 
     def logToRoot(message, *args, **kwargs):
@@ -111,12 +114,17 @@ class ASHLogger(logging.Logger):
     def __init__(self, name: str, level: int = logging.NOTSET):
         super().__init__(name=name, level=level)
 
+    # One frame more than the caller asked for, as logging's own info() and
+    # debug() are to _log: without it the record's file and line were this
+    # method's, not the caller's, on Python 3.11 and later.
     def verbose(self, msg, *args, **kws):
         if self.isEnabledFor(VERBOSE_LEVEL):
+            kws["stacklevel"] = kws.get("stacklevel", 1) + 1
             self._log(VERBOSE_LEVEL, msg, args, **kws)
 
     def trace(self, msg, *args, **kws):
         if self.isEnabledFor(TRACE_LEVEL):
+            kws["stacklevel"] = kws.get("stacklevel", 1) + 1
             self._log(TRACE_LEVEL, msg, args, **kws)
 
     def callHandlers(self, record: logging.LogRecord) -> None:
@@ -146,7 +154,10 @@ class ASHLogger(logging.Logger):
         current = _RUN_LOG_SCOPE.get()
         logger: Optional[logging.Logger] = self
         while logger is not None:
-            for handler in logger.handlers:
+            # A copy of the list: another run's setup or close removes handlers
+            # while this record walks them, and a removal from the live list
+            # under the walk skips the handler after it, this run's own included.
+            for handler in list(logger.handlers):
                 scope = getattr(handler, _RUN_SCOPE_ATTR, None)
                 if scope is None or _run_takes(scope, current):
                     homed = True
@@ -673,7 +684,27 @@ class WindowsSafeFilter(logging.Filter):
             if getattr(record, "markup", False):
                 safe = self._markup_in_ascii(record, safe)
             record.msg = safe
+        if self._active and record.args:
+            # The arguments are put into the message when the record is
+            # formatted, after this filter: one outside the stream's encoding
+            # failed that write and dropped the whole record from the file.
+            record.args = self._args_in_ascii(record.args)
         return True
+
+    def _arg_in_ascii(self, value: Any) -> Any:
+        if isinstance(value, ShownText):
+            return shown_in_ascii(value, self._emoji_map)
+        if isinstance(value, str):
+            return self._in_ascii(value)
+        return value
+
+    def _args_in_ascii(self, args: Any) -> Any:
+        """*args*, a record's, with each str in them in ASCII (``_in_ascii``)."""
+        if isinstance(args, tuple):
+            return tuple(self._arg_in_ascii(value) for value in args)
+        if isinstance(args, dict):
+            return {key: self._arg_in_ascii(value) for key, value in args.items()}
+        return args
 
     def _in_ascii(self, text: str) -> str:
         safe = _make_message_windows_safe(text, self._emoji_map)
@@ -817,6 +848,10 @@ class JsonFormatter(logging.Formatter):
         self.default_time_format = time_format
         self.default_msec_format = msec_format
         self.datefmt = None
+        # The default msec format ends the timestamp with "Z", UTC's designator,
+        # so the time it is put on is UTC: logging.Formatter's own converter is
+        # time.localtime, which wrote the local wall-clock time under that "Z".
+        self.converter = time.gmtime
 
     def usesTime(self) -> bool:
         """
@@ -1461,9 +1496,13 @@ class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
         # Not at the top: fs_guard imports this module. Do not hoist.
         from automated_security_helper.utils.sandbox import fs_guard
 
+        # UTF-8 unless the handler was given an encoding: FileHandler's default
+        # of None is the locale's encoding, under which a record holding a
+        # character outside the ANSI code page was dropped from the file on
+        # Windows. The files are read back as UTF-8.
         return fs_guard.open_for_write(
             self.baseFilename,
-            encoding=self.encoding,
+            encoding=self.encoding or "utf-8",
             errors=self.errors,
             append=True,
             root=Path(self.baseFilename).parent,
