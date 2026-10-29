@@ -28,6 +28,7 @@ the large sizes are declared, never present. See ``tests/utils/archive_builders.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import logging
@@ -217,6 +218,24 @@ def assert_extracted(converter, results, members: Dict[str, bytes]) -> None:
 
 def numbered(count: int, size: int = 16) -> Dict[str, bytes]:
     return {f"m{i}.py": incompressible(size, seed=i) for i in range(count)}
+
+
+def gnu_sparse_header_over_stored_data(name: str, stored: int, gz: bool) -> bytes:
+    """A tar of one old GNU sparse member whose header says ``stored`` bytes of
+    data follow while its real size and sparse map are zero.
+
+    tarfile reads such a header (``_proc_sparse``) by taking the member's size
+    from the real-size field, 0 here, and the next header's offset from the
+    stored size, so the member is reported as empty while ``stored`` zero bytes
+    sit between its header and the end-of-archive blocks. Zeros keep the gzip
+    form small; what the header pass decompresses to skip them is the point.
+    """
+    info = tarfile.TarInfo(name)
+    info.type = tarfile.GNUTYPE_SPARSE
+    info.size = stored
+    header = info.tobuf(tarfile.GNU_FORMAT, "utf-8", "surrogateescape")
+    body = header + bytes(stored) + b"\0" * (2 * tarfile.BLOCKSIZE)
+    return gzip.compress(body, mtime=0) if gz else body
 
 
 class TestMemberCount:
@@ -492,6 +511,29 @@ class TestDeclaredSizes:
         converter.convert()
 
         self.assert_within_limits(converter)
+
+    @pytest.mark.parametrize("gz", TAR_KINDS)
+    def test_a_member_is_admitted_for_the_stored_extent_its_header_pass_skips(
+        self, gz, tree, test_plugin_context, monkeypatch, ash_warnings
+    ):
+        """An old GNU sparse header declares a real size of 0 over 2 MiB of stored
+        data. tarfile reports the member as 0 bytes and seeks past the 2 MiB to
+        reach the next header, decompressing it for a tar.gz, so admitting the
+        reported size bounded none of that. The stored extent is admitted, and
+        it is over max_total_bytes."""
+        archive = tree / ("sparse.tar.gz" if gz else "sparse.tar")
+        archive.write_bytes(
+            gnu_sparse_header_over_stored_data("big.py", stored=2 * MEBIBYTE, gz=gz)
+        )
+        converter = converter_for(
+            test_plugin_context, monkeypatch, [archive], limits=self.LIMITS
+        )
+
+        results = converter.convert()
+
+        assert_refused(
+            converter, results, archive.name, ash_warnings, option="max_total_bytes"
+        )
 
     @pytest.mark.parametrize(
         "without_data_filter", [False, True], ids=["filter", "copy"]

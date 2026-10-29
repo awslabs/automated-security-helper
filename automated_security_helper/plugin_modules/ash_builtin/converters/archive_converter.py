@@ -598,6 +598,29 @@ def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
         yield _BoundedTarStream(inner)
 
 
+def _admitted_size(member: tarfile.TarInfo, tar_ref: Any) -> int:
+    """The bytes ``member`` is admitted to the extraction limits for.
+
+    Its declared size, as tarfile reports it once the member's pax or GNU sparse
+    header has been applied, or the extent of stored data tarfile skips past to
+    reach the next header where that is larger. For a sparse member the reported
+    size is its real size and the stored data is shorter, which the declared size
+    covers. A header that declares a small real size over a long stored extent
+    (an old GNU sparse header with its real-size field at 0) would be admitted at
+    the small size while the header pass seeks past the long extent, decompressing
+    it for a compressed tar, with no limit counting it; the extent counts then.
+    ``tar_ref.offset`` is the next header's position, set by tarfile as the member
+    is read; a ``tar_ref`` without one (a plain list) admits the declared size.
+    """
+    offset = getattr(tar_ref, "offset", None)
+    offset_data = getattr(member, "offset_data", None)
+    if not isinstance(offset, int) or not isinstance(offset_data, int):
+        return member.size
+    extent = offset - offset_data
+    occupied = -(-member.size // tarfile.BLOCKSIZE) * tarfile.BLOCKSIZE
+    return extent if extent > occupied else member.size
+
+
 def _tar_members_within(
     tar_ref: Any,
     budget: _ExtractionBudget,
@@ -616,7 +639,7 @@ def _tar_members_within(
     """
     members = []
     for member in tar_ref:
-        budget.admit(member.name, member.size)
+        budget.admit(member.name, _admitted_size(member, tar_ref))
         member.pax_headers = {}
         members.append(member)
         if stream is not None:
@@ -1701,10 +1724,14 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             # Every member is admitted against the extraction limits
                             # as its header is read; its extended header has been
                             # applied to it by then, so it is dropped rather than
-                            # kept for every member until extraction.
+                            # kept for every member until extraction. Admitted for
+                            # the stored extent the pass skips where that exceeds
+                            # the declared size (_admitted_size).
                             tar_members = []
                             for member in tar_ref:
-                                budget.admit(member.name, member.size)
+                                budget.admit(
+                                    member.name, _admitted_size(member, tar_ref)
+                                )
                                 member.pax_headers = {}
                                 tar_members.append(member)
                                 tar_stream.allow_another_member()
