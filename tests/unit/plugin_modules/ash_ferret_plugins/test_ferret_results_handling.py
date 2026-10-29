@@ -3,7 +3,7 @@
 
 """What the ferret-scan plugin makes of the SARIF ferret-scan wrote.
 
-Three readings that used to go wrong:
+Three readings that went wrong before:
 
 - ferret-scan 2.5.x writes each file's path as a relative ``uri`` under
   ``%SRCROOT%``, as a path and not as a URI reference, so resolving it against the

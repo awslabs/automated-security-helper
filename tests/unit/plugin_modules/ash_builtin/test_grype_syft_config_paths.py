@@ -3,7 +3,7 @@
 
 """Where grype and syft look for the operator's config file, and where grype writes.
 
-Three readings that used to go wrong:
+Three readings that went wrong before:
 
 - A ``config_file`` spelled ``~/...`` was joined as written under the scanned
   source directory, so the operator's home config was judged missing (an empty

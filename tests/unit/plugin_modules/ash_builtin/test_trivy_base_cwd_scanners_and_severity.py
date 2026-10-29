@@ -3,7 +3,7 @@
 
 """What the shared trivy base reads from the host, trivy's settings and trivy's SARIF.
 
-Three readings that used to go wrong, each shared by ``trivy`` and ``trivy-repo``:
+Three readings that went wrong before, each shared by ``trivy`` and ``trivy-repo``:
 
 - The working directory was read (``Path.cwd()``) whenever the trivy configuration
   was resolved, to anchor ``TRIVY_CONFIG``, ``TRIVY_IGNOREFILE`` and

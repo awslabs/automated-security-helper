@@ -4,7 +4,7 @@
 """snyk-code judges, copies and grades by the files snyk is given, not the tree.
 
 The source target is tested as a copy of the scan set, so what counts is what the
-copy holds. Six readings that used to go wrong:
+copy holds. Six readings that went wrong before:
 
 - With ``honor_ignore_files: false`` the ``.gitignore`` files copied into the
   snyk copy still made snyk skip the files they name, which ASH itself scans. A

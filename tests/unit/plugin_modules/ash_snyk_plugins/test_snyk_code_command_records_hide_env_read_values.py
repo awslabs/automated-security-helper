@@ -13,7 +13,7 @@ and is recorded whole.
 snyk-code's own options put no value of their own on the command line:
 ``severity_threshold`` is applied by ASH after the scan and is not passed as
 ``--severity-threshold`` (test_snyk_code_scanner_behavior.py), so the directory
-is the carrier here.
+name is the value that reaches the command line here.
 """
 
 import json
@@ -39,9 +39,9 @@ pytestmark = pytest.mark.unit
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()
 
-CARRIER_DIRECTORY = "marker-directory-carrier"
+MARKED_DIRECTORY = "marker-directory-value"
 # Holds a single quote: shlex.join writes it as several quoted segments.
-DIRECTORY_WITH_QUOTE = "marker-quote'carrier-value"
+DIRECTORY_WITH_QUOTE = "marker-quote'marked-value"
 SARIF_OUTPUT_FLAG = "--sarif-file-output="
 EMPTY_SARIF = json.dumps(
     {
@@ -162,17 +162,17 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
     tmp_path, monkeypatch, snyk_on_path
 ):
     report, running, argv = _scan(
-        tmp_path, monkeypatch, directory_name=CARRIER_DIRECTORY
+        tmp_path, monkeypatch, directory_name=MARKED_DIRECTORY
     )
 
     # snyk ran on a copy of the scan set; the records name the scanned directory.
     assert argv[0] == str(snyk_on_path) or argv[0] == "snyk", argv
     assert running, "the scan did not reach the Running command log call"
     invocation = report.runs[0].invocations[0]
-    assert CARRIER_DIRECTORY not in invocation.commandLine, invocation.commandLine
+    assert MARKED_DIRECTORY not in invocation.commandLine, invocation.commandLine
     assert "<value>" in invocation.commandLine, invocation.commandLine
-    assert not any(CARRIER_DIRECTORY in a for a in invocation.arguments)
-    assert CARRIER_DIRECTORY not in report.model_dump_json()
+    assert not any(MARKED_DIRECTORY in a for a in invocation.arguments)
+    assert MARKED_DIRECTORY not in report.model_dump_json()
 
 
 def test_a_directory_name_written_out_is_recorded_whole(
@@ -181,11 +181,11 @@ def test_a_directory_name_written_out_is_recorded_whole(
     report, running, _ = _scan(
         tmp_path,
         monkeypatch,
-        directory_name=CARRIER_DIRECTORY,
+        directory_name=MARKED_DIRECTORY,
         directory_is_environment_value=False,
     )
 
-    source = tmp_path / CARRIER_DIRECTORY / "src"
+    source = tmp_path / MARKED_DIRECTORY / "src"
     assert running, "the scan did not reach the Running command log call"
     invocation = report.runs[0].invocations[0]
     assert source.as_posix() in invocation.commandLine
@@ -200,7 +200,7 @@ def test_a_quote_holding_environment_value_is_hidden_in_the_command_line(
 
     invocation = report.runs[0].invocations[0]
     assert "marker-quote" not in invocation.commandLine, invocation.commandLine
-    assert "carrier-value" not in invocation.commandLine, invocation.commandLine
+    assert "marked-value" not in invocation.commandLine, invocation.commandLine
     assert "snyk code test" in invocation.commandLine
 
 

@@ -194,7 +194,7 @@ def trivy_severity(
         return None
     tags = getattr(rule.properties, "tags", None) or []
     found = [tag for tag in tags if tag in TRIVY_SEVERITIES]
-    # Exactly one, or no verdict: two severity tags would be a shape trivy
+    # Exactly one, or no rating: two severity tags would be a shape trivy
     # does not write, and guessing between them could under-rate a finding.
     if len(found) != 1:
         return None
