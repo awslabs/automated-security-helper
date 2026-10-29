@@ -100,7 +100,7 @@ def test_a_dot_bandit_file_is_the_only_ini(plugin_context, tmp_path) -> None:
     assert _after(argv, "--configfile") == []
 
 
-@pytest.mark.parametrize("name", ["bandit.yaml", "ops.bandit"])
+@pytest.mark.parametrize("name", ["bandit.yaml", "bandit.toml", "ops.bandit"])
 def test_another_file_is_a_configfile_beside_the_empty_ini(
     plugin_context, tmp_path, name: str
 ) -> None:
