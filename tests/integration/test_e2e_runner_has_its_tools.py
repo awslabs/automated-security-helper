@@ -13,10 +13,11 @@ fails the leg by name instead of thinning it out.
 What an e2e leg is provisioned with, from .github/workflows/ash-unified-ci.yml
 (``e2e-test-linux``, ``-macos``, ``-windows``) and the ``setup-ash`` and
 ``run-unit-tests`` actions: uv and a Python from ``setup-ash`` with ``install-ash`` off,
-then ``uv sync --extra cdk --extra symbols`` and ``uv run pytest -m e2e``. That puts
-three console scripts in the environment's own scripts directory: ``ash``,
-``cfn-lint`` and ``detect-secrets``. The runner image supplies ``git``, ``bash`` and
-``node``, and ``setup-ash`` supplies ``uv``.
+then ``uv sync --extra cdk --extra symbols``, the action's "Install the scanners the e2e
+tier runs for real" step (``ash dependencies install`` for eight scanners, two on
+Windows), and ``uv run pytest -m e2e``. The sync puts three console scripts in the
+environment's own scripts directory: ``ash``, ``cfn-lint`` and ``detect-secrets``. The
+runner image supplies ``git``, ``bash`` and ``node``, and ``setup-ash`` supplies ``uv``.
 
 The console scripts are looked up in the running interpreter's scripts directory and
 not on PATH, so the check does not depend on how the leg's PATH was built. The system
@@ -25,17 +26,23 @@ script counts only if it was found in the scripts directory itself, because on W
 ``shutil.which`` also reads the current directory, where the checkout's own ``ash`` file
 would answer for a missing ``ash.exe``.
 
-Not asserted here: the third-party scanner binaries (grype, trivy, syft, semgrep,
-opengrep, checkov, bandit, gitleaks, actionlint, zizmor, cfn-guard, ferret-scan and the
-rest) and the container runtimes. No step of the e2e jobs installs them today, and the
-e2e tests that need one skip when it is absent (``_why_it_cannot_run`` in
+The installed scanners are looked up where ``ash dependencies install`` puts them, in
+ASH's bin directory (pinned binaries) and uv's tool bin directory (uv tools), as
+``ash_tool_dirs`` in tests/integration/docs/docs_runner.py resolves them for the user
+who ran the install: the test session has moved HOME, so the product's own constants
+would name an empty directory here. The lists below are the action's, and the two are
+kept in step by hand.
+
+Not asserted here: the scanner binaries the step does not install (grype, trivy, syft,
+opengrep, ferret-scan and the rest) and the container runtimes. The e2e tests that need
+one skip when it is absent (``_why_it_cannot_run`` in
 tests/integration/scanners/test_links_leaving_the_tree_reach_no_output.py is the
-nearest thing to a shared skip; there is no fixture shared by all e2e modules).
-Provisioning them is a separate CI change. Until it lands, the executed-test floor in
-tests/utils/sharding.py (``fail_a_tier_run_that_executed_no_test``) is what makes an
-e2e leg that ran nothing fail. This test carries the ``leg_assertion`` marker for that
-reason: it passes on every leg that has its tools, so counted as an executed test it
-would keep the floor from ever firing on an e2e leg whose real tests all skipped.
+nearest thing to a shared skip; there is no fixture shared by all e2e modules). The
+executed-test floor in tests/utils/sharding.py
+(``fail_a_tier_run_that_executed_no_test``) is what makes an e2e leg that ran nothing
+fail. This test carries the ``leg_assertion`` marker for that reason: it passes on
+every leg that has its tools, so counted as an executed test it would keep the floor
+from ever firing on an e2e leg whose real tests all skipped.
 
 The check applies to a CI tier run only, as ``sharding.is_ci_tier_run`` in
 tests/utils/sharding.py defines it, the same test the executed-test floor uses. On a
@@ -44,6 +51,7 @@ developer's machine it skips and names the tools.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import sys
@@ -64,6 +72,48 @@ pytestmark = [pytest.mark.e2e, pytest.mark.leg_assertion]
 ENVIRONMENT_SCRIPTS = ("ash", "cfn-lint", "detect-secrets")
 #: Programs the runner image or ``setup-ash`` puts on PATH.
 SYSTEM_TOOLS = ("git", "bash", "node", "uv")
+#: The scanners the run-unit-tests action's "Install the scanners the e2e tier runs for
+#: real" step installs, by executable name. Keep this and ``INSTALLED_SCANNERS_WINDOWS``
+#: equal to that step's two ``--tool`` lists.
+INSTALLED_SCANNERS = (
+    "bandit",
+    "actionlint",
+    "cfn-lint",
+    "cfn-guard",
+    "gitleaks",
+    "checkov",
+    "semgrep",
+    "zizmor",
+)
+#: What the same step installs on Windows: semgrep publishes no Windows build.
+INSTALLED_SCANNERS_WINDOWS = ("bandit", "checkov")
+
+#: The docs runner, which resolves the directories ``ash dependencies install`` writes to
+#: for the user who ran it. It is loaded by path, as test_docs_examples.py does, because
+#: tests/integration/docs is not a package.
+_DOCS_RUNNER = Path(__file__).resolve().parent / "docs" / "docs_runner.py"
+
+
+def _install_directories() -> list[str]:
+    """Where ``ash dependencies install`` put the scanners: ASH's bin directory and uv's
+    tool bin directory, for the invoking user. Only those that exist."""
+    name = "_ash_docs_runner"
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(name, _DOCS_RUNNER)
+        assert spec and spec.loader, f"cannot load {_DOCS_RUNNER}"
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return [str(directory) for directory in module.ash_tool_dirs()]
+
+
+def _not_installed(names: Sequence[str], directories: Sequence[str]) -> list[str]:
+    """The names found in none of ``directories`` (each by ``_not_in_directory``)."""
+    absent = list(names)
+    for directory in directories:
+        absent = _not_in_directory(absent, directory)
+    return absent
 
 
 def _missing(names: Sequence[str], search_path: Optional[str]) -> list[str]:
@@ -105,8 +155,18 @@ def test_the_e2e_runner_has_the_tools_its_tests_drive(request, monkeypatch, tmp_
         "no-such-tool-7c41e2"
     ]
     assert _missing(["no-such-tool-7c41e2"], None) == ["no-such-tool-7c41e2"]
+    # The same two controls for the install-directory lookup, which is a different
+    # function over a list of directories.
+    assert _not_installed([interpreter.name], [str(interpreter.parent)]) == []
+    assert _not_installed(["no-such-tool-7c41e2"], [str(interpreter.parent)]) == [
+        "no-such-tool-7c41e2"
+    ]
+    assert _not_installed([interpreter.name], []) == [interpreter.name]
 
-    wanted = ", ".join((*ENVIRONMENT_SCRIPTS, *SYSTEM_TOOLS))
+    scanners = (
+        INSTALLED_SCANNERS_WINDOWS if sys.platform == "win32" else INSTALLED_SCANNERS
+    )
+    wanted = ", ".join((*ENVIRONMENT_SCRIPTS, *SYSTEM_TOOLS, *scanners))
     if not sharding.is_ci_tier_run(request.config):
         pytest.skip(
             "not a CI tier run (sharding.is_ci_tier_run is false); "
@@ -114,12 +174,17 @@ def test_the_e2e_runner_has_the_tools_its_tests_drive(request, monkeypatch, tmp_
         )
 
     scripts_directory = sysconfig.get_path("scripts")
+    install_directories = _install_directories()
     missing_scripts = _not_in_directory(ENVIRONMENT_SCRIPTS, scripts_directory)
     missing_system = _missing(SYSTEM_TOOLS, None)
-    assert not (missing_scripts or missing_system), (
+    missing_scanners = _not_installed(scanners, install_directories)
+    assert not (missing_scripts or missing_system or missing_scanners), (
         "this e2e leg lacks tools its tests drive. "
         f"Missing from the environment's scripts directory ({scripts_directory}): "
         f"{', '.join(missing_scripts) or 'none'}. "
         f"Missing from PATH: {', '.join(missing_system) or 'none'}. "
+        "Missing from the directories `ash dependencies install` writes to "
+        f"({', '.join(install_directories) or 'none exist'}): "
+        f"{', '.join(missing_scanners) or 'none'}. "
         f"All required: {wanted}"
     )
