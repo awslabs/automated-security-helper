@@ -772,6 +772,44 @@ class ScanRegistry:
             self._apply_status(scan_id, entry, status, error_message)
             return True
 
+    def record_cancel_outcome(
+        self, scan_id: str, could_not_stop: Iterable[Tuple[str, int]]
+    ) -> bool:
+        """Attach to a cancelled scan the scanner tools its stop could not end.
+
+        ``cancel_scan`` closes the entry as CANCELLED at once, and the runner
+        learns only afterwards, from ``ScanCancelled.could_not_stop``, which
+        tools kept running past the stop. ``finish_scan`` leaves a closed entry
+        alone by design, so that outcome had nowhere to go and a cancel whose
+        tool was still running read back as a clean one. This is the one way to
+        add it: a warning on the CANCELLED entry, naming each tool and its
+        process id as the CLI's exit line does, so a client polling the entry is
+        told the output directory may still be written to.
+
+        Nothing is attached to an entry that is not CANCELLED: a scan the
+        timeout closed as FAILED carries its reason already, and a scan that
+        finished has no stop to report on.
+
+        Returns:
+            True if a warning was attached, False if there was nothing to
+            attach, the entry is missing, or it is not a cancelled scan.
+        """
+        records = tuple(could_not_stop)
+        if not records:
+            return False
+        with self._registry_lock:
+            entry = self._registry.get(scan_id)
+            if entry is None or entry.status != MCScanStatus.CANCELLED:
+                return False
+            named = ", ".join(f"{tool} (pid {pid})" for tool, pid in records)
+            entry.add_warning(
+                f"{len(records)} scanner tool(s) could not be stopped and may still "
+                f"be running: {named}. A tool still running can write into the "
+                "output directory after the cancel; end the listed process(es) "
+                "before reading or reusing it."
+            )
+            return True
+
     def list_scans(
         self,
         active_only: bool = False,

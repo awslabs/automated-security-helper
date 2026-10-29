@@ -3134,7 +3134,7 @@ async def _run_scan(
         )
         _logger.info(f"Scan {scan_id} completed successfully")
 
-    except ScanCancelled:
+    except ScanCancelled as cancelled:
         # cancel_scan set the entry's cancel event and the scan stopped at its next
         # check: before a phase or a scanner, or while waiting on a scanner's child
         # process, which was stopped. Nothing after that point ran, so no reports and
@@ -3142,6 +3142,15 @@ async def _run_scan(
         # closed entry alone, which keeps that status. Not re-raised: the scan
         # ended the way the client asked, and this task has nothing left to do.
         registry.finish_scan(scan_id, MCScanStatus.CANCELLED)
+        # A tool the stop could not end is still running, and may write into the
+        # output directory after the cancel. The exception carries which ones
+        # (core/cancellation.py); only the registry can tell the client, through
+        # the entry's warnings, because the closed entry takes no other change.
+        if registry.record_cancel_outcome(scan_id, cancelled.could_not_stop):
+            _logger.warning(
+                f"Scan {scan_id} was cancelled, but {len(cancelled.could_not_stop)} "
+                "scanner tool(s) could not be stopped and may still be running"
+            )
         _logger.info(f"Scan {scan_id} stopped after it was cancelled")
 
     except ScanIncompleteExit as e:
