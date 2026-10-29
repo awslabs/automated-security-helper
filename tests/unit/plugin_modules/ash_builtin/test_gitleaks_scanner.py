@@ -331,8 +331,19 @@ def test_a_gitleaks_config_in_the_scanned_tree_is_not_read(
 @pytest.mark.parametrize("variable", ["GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"])
 @pytest.mark.unit
 def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, variable):
-    """The operator's environment, not the tree: gitleaks resolves it."""
-    monkeypatch.setenv(variable, "anything")
+    """The operator's environment, not the tree: gitleaks resolves it.
+
+    An absolute ``GITLEAKS_CONFIG``, or ``GITLEAKS_CONFIG_TOML`` (the config's
+    text), needs nothing from ASH. A RELATIVE ``GITLEAKS_CONFIG`` is the one
+    value gitleaks would resolve against its working directory, the scanned
+    tree, so ASH anchors that one where the operator set it and passes it as
+    ``--config`` (the test below)."""
+    value = (
+        str(tmp_path / "operator.toml")
+        if variable == "GITLEAKS_CONFIG"
+        else 'title = "inline"\n'
+    )
+    monkeypatch.setenv(variable, value)
     scanner = _scanner(tmp_path)
     (scanner.context.source_dir / ".gitleaks.toml").write_text("")
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
@@ -1339,22 +1350,34 @@ def test_the_copies_are_private_to_their_owner(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
-def test_a_relative_gitleaks_config_variable_is_resolved_from_the_source(
+def test_a_relative_gitleaks_config_variable_is_anchored_where_the_operator_set_it(
     tmp_path, monkeypatch
 ):
-    """The first run resolves it from the source directory, its working
-    directory; the re-scan runs from the copies, so it is given the same file."""
+    """gitleaks resolves a relative GITLEAKS_CONFIG against its working directory,
+    the scanned source directory, so the repository would supply the file the
+    operator named in ASH's own directory. The scanner anchors the value to the
+    directory ASH runs in and passes it as ``--config`` to the first run and the
+    re-scans alike; the scanned tree's file of the same name is never read."""
+    operator_dir = tmp_path / "operator"
+    (operator_dir / "rules").mkdir(parents=True)
+    (operator_dir / "rules" / "gl.toml").write_text('title = "operator"\n')
+    monkeypatch.chdir(operator_dir)
     monkeypatch.setenv("GITLEAKS_CONFIG", "rules/gl.toml")
     monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
+    _write(source, "rules/gl.toml", 'title = "repo"\n')
     (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\n")
     _add_back(scanner, source, _report(), tmp_path)
-    assert not any(a.startswith("--config=") for a in calls[0]["argv"])
-    assert calls[0]["env"]["GITLEAKS_CONFIG"] == (
-        (source / "rules" / "gl.toml").absolute().as_posix()
-    )
+    anchored = (operator_dir / "rules" / "gl.toml").resolve().as_posix()
+    assert f"--config={anchored}" in calls[0]["argv"]
+    repo_copy = (source / "rules" / "gl.toml").absolute().as_posix()
+    for call in calls:
+        assert not any(repo_copy in a for a in call["argv"])
+        assert (
+            not (call["env"] or {}).get("GITLEAKS_CONFIG", "").startswith(str(source))
+        )
 
 
 # --------------------------------------------------------------------------- #

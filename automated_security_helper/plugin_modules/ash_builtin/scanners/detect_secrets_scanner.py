@@ -761,6 +761,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             id(item) for item in self.config.options.scan_settings.filters_used
         }
         loaded_from_baseline: set = set()
+        # The settings as configured, put back whole if the baseline turns out
+        # malformed partway through the load below: a baseline whose plugins
+        # parsed but whose filters did not had already replaced the configured
+        # plugins, so the fallback ran the baseline's plugins with none of its
+        # filters, not the default settings the warning names.
+        settings_before = (
+            list(self.config.options.scan_settings.plugins_used),
+            list(self.config.options.scan_settings.filters_used),
+        )
         if self._baseline_in_use() and self._baseline_real is not None:
             try:
                 # Read once, bound to the resolved path the gate checked
@@ -815,8 +824,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # or filter entry that is not a mapping. Each used to escape
                 # the constructor, or leave a document behind that failed
                 # every scan. The scan runs with no baseline, as it does for
-                # a missing file.
+                # a missing file, and with the settings as configured.
                 self._baseline_document = None
+                self.config.options.scan_settings.plugins_used = settings_before[0]
+                self.config.options.scan_settings.filters_used = settings_before[1]
+                loaded_from_baseline.clear()
                 ASH_LOGGER.warning(
                     text_without_values(
                         f"Failed to read baseline file settings: {error_text(e)}. "

@@ -1227,9 +1227,12 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     def _rescan_env(self, final_args: List[str]) -> Optional[Dict[str, str]]:
         """The re-scan's environment: a relative ``GITLEAKS_CONFIG`` made absolute.
 
-        The first run resolves it from the source directory, its working
-        directory; the re-scan runs from the copies. Only when no ``--config`` is
-        passed, which is the only case gitleaks reads the variable in.
+        Only when no ``--config`` is passed, which is the only case gitleaks reads
+        the variable in. ``_resolve_config_file`` now anchors a relative
+        ``GITLEAKS_CONFIG`` to the directory ASH runs in and passes it as
+        ``--config``, so this branch is not reached for it; it stays for a run
+        that reaches gitleaks with the variable alone, where the re-scan from the
+        copies must still read the same file as the first run.
         """
         if any(arg.startswith("--config=") for arg in final_args):
             return None
