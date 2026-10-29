@@ -113,6 +113,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -208,6 +209,47 @@ class ProjectPolicy:
 
 def _refuse(message: str) -> WorkspaceDefinitionError:
     return WorkspaceDefinitionError(message)
+
+
+def _as_named(path: PathLike) -> Path:
+    """*path* made absolute as it was named: no link followed, no ``..`` collapsed.
+
+    Not ``os.path.abspath``, which collapses ``..`` as text. With ``L`` a link to
+    a directory elsewhere, ``ws/L/../pol.yaml`` names ``<L's target>/../pol.yaml``
+    to the filesystem, while the collapsed ``ws/pol.yaml`` is another file: the
+    file whose existence was checked and the file then read would differ. The
+    name is kept as written, and ``resolve()`` on it reaches the file it names.
+    """
+    named = Path(path)
+    return named if named.is_absolute() else Path(os.getcwd()) / named
+
+
+def _refuse_unless_a_file(candidate: Path) -> None:
+    """Refuse a policy candidate that exists as an entry but is not a regular file.
+
+    A dangling link, a link loop and a directory at a policy file name used to
+    read as "no policy", and the workspace then ran with no ceiling, no
+    suppressions and no required scanners: the fail-open outcome the module
+    docstring refuses. Each is named for what it is, so the operator knows what
+    to remove or replace.
+    """
+    label = f"workspace policy file '{candidate.as_posix()}'"
+    try:
+        mode = os.stat(candidate).st_mode
+    except FileNotFoundError as exc:
+        raise _refuse(
+            f"{label} is a link to a file that is not there; a policy file that "
+            f"cannot be read is not treated as no policy"
+        ) from exc
+    except OSError as exc:
+        raise _refuse(
+            f"{label} could not be examined ({exc.strerror or type(exc).__name__}); "
+            f"a policy file that cannot be read is not treated as no policy"
+        ) from exc
+    if stat.S_ISDIR(mode):
+        raise _refuse(f"{label} is a directory, not a file")
+    if not stat.S_ISREG(mode):
+        raise _refuse(f"{label} is not a regular file")
 
 
 def ceiling_unreachable_counts(
@@ -392,7 +434,7 @@ def load_workspace_policy(
             workspace may have several config files and "validation error" alone
             does not say which to open.
     """
-    named = Path(os.path.abspath(path))
+    named = _as_named(path)
     return _load_policy(named.resolve(), named, quote_values)
 
 
@@ -520,14 +562,24 @@ def discover_workspace_policy_file(
             raise _policy_not_permitted(parent, directory)
         for name in WORKSPACE_POLICY_FILE_NAMES:
             candidate = parent / name
-            if (
-                permit is not None
-                and os.path.lexists(candidate)
-                and not permit(candidate)
-            ):
+            # The entry itself, link or not, with the error kept: Path.is_file()
+            # raised a bare PermissionError for an unsearchable .ash on Python
+            # 3.10-3.13 and read it as no policy on 3.14, and lexists() reads
+            # every failure as absence.
+            try:
+                os.lstat(candidate)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except OSError as exc:
+                raise _refuse(
+                    f"workspace policy file '{candidate.as_posix()}' could not be "
+                    f"examined ({exc.strerror or type(exc).__name__}); a policy "
+                    f"file that cannot be read is not treated as no policy"
+                ) from exc
+            if permit is not None and not permit(candidate):
                 raise _policy_not_permitted(candidate, directory)
-            if candidate.is_file():
-                candidates.append(candidate)
+            _refuse_unless_a_file(candidate)
+            candidates.append(candidate)
 
     if not candidates:
         return None
@@ -540,7 +592,7 @@ def discover_workspace_policy_file(
             [candidate.as_posix() for candidate in sorted(candidates)],
         )
 
-    return Path(os.path.abspath(candidates[0]))
+    return _as_named(candidates[0])
 
 
 def named_workspace_policy_path(
@@ -668,7 +720,7 @@ def resolve_workspace_policy(
             return None, None
         policy_path = discovered
 
-    named = Path(os.path.abspath(policy_path))
+    named = _as_named(policy_path)
     target = named.resolve()
     if permit_base is not None and not permit_base(target):
         raise ASHConfigInputNotPermittedError(
@@ -712,9 +764,29 @@ def _push_down(
             ) from exc
         if rewritten is None:
             continue
+        update: dict[str, Any] = {"path": rewritten}
+        # A suppression's package_path is matched against the project-relative
+        # install path of a finding's package (AshSuppression._package_matches),
+        # so it is in workspace coordinates here and has to be rewritten like the
+        # path. One that names a copy in another project drops the entry for
+        # this project; one with no sound rewrite is refused like a path.
+        package_path = getattr(entry, "package_path", None)
+        if package_path is not None:
+            try:
+                rewritten_package = to_project_pattern(
+                    package_path, project_prefix, kind=SUPPRESSION
+                )
+            except WorkspacePatternError as exc:
+                raise _refuse(
+                    f"workspace policy package_path '{package_path}' cannot be "
+                    f"applied to project '{Path(project_prefix).as_posix()}': {exc}"
+                ) from exc
+            if rewritten_package is None:
+                continue
+            update["package_path"] = rewritten_package
         # model_copy rather than reconstruction, so every field the model gains
         # later is carried over without this call site needing to learn about it.
-        pushed.append(entry.model_copy(update={"path": rewritten}))
+        pushed.append(entry.model_copy(update=update))
     return tuple(pushed)
 
 
