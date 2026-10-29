@@ -1,0 +1,273 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Which packages npm-audit selects, and which lockfiles it records offline.
+
+Three shapes of the selection:
+
+- ``scan()`` discarded the ``global_ignore_paths`` it was handed and recomputed
+  its own list from the config, so ``--ignore-suppressions`` (which lifts every
+  ignore path) and the client-supplied carve-out (whose entries are left to the
+  SARIF step) did not reach npm-audit's file selection.
+- Offline, the not-scanned record looked for yarn.lock, pnpm-lock.yaml and
+  package-lock.json only, so a package with npm-shrinkwrap.json alone recorded
+  nothing and the scan returned a clean, empty report instead of MISSING.
+- The scan set was taken without the workspace's output directory, which every
+  other reader of the scan set leaves out like the project's own.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    npm_audit_scanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
+    NpmAuditScanner,
+    NpmAuditScannerConfig,
+)
+from tests.utils.aws_isolation import isolate_from_aws
+from tests.utils.npm_audit_reports import NPM_CLEAN
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def online(monkeypatch, tmp_path):
+    isolate_from_aws(monkeypatch, tmp_path)
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setattr(
+        npm_audit_scanner, "find_executable", lambda name: f"/usr/local/bin/{name}"
+    )
+    monkeypatch.setattr(
+        NpmAuditScanner, "validate_plugin_dependencies", lambda self: True
+    )
+    return monkeypatch
+
+
+def _context(tmp_path: Path, **extra) -> PluginContext:
+    context = PluginContext(
+        source_dir=tmp_path / "repo",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+        **extra,
+    )
+    for directory in (context.source_dir, context.output_dir, context.work_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    return context
+
+
+def _scanner(context: PluginContext) -> NpmAuditScanner:
+    scanner = NpmAuditScanner(context=context, config=NpmAuditScannerConfig())
+    scanner.dependencies_satisfied = True
+    return scanner
+
+
+def _package(root: Path, lockfile: str = "package-lock.json") -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "package.json").write_text(json.dumps({"name": root.name}))
+    (root / lockfile).write_text("{}\n", encoding="utf-8")
+    return root
+
+
+def _audited(monkeypatch) -> list:
+    """The package directories npm-audit started an audit in."""
+    started = []
+
+    def fake_run(self, command, **kwargs):
+        if "--version" in command:
+            return {"stdout": "10.9.4\n", "returncode": 0}
+        started.append(Path(kwargs["cwd"]))
+        return {"stdout": NPM_CLEAN, "returncode": 0}
+
+    monkeypatch.setattr(NpmAuditScanner, "_run_subprocess", fake_run)
+    return started
+
+
+def _names(started) -> list:
+    """The copied package's manifest names, read from each audit's directory."""
+    names = []
+    for cwd in started:
+        names.append(json.loads((cwd / "package.json").read_text())["name"])
+    return sorted(names)
+
+
+class TestTheHandedIgnoreList:
+    def test_the_list_scan_is_given_decides_the_selection(self, online, tmp_path):
+        """The config names no ignore path; the orchestrator's list does. The
+        package under it is not audited."""
+        context = _context(tmp_path)
+        _package(context.source_dir / "app")
+        _package(context.source_dir / "vendor")
+        started = _audited(online)
+
+        _scanner(context).scan(
+            target=context.source_dir,
+            target_type="source",
+            global_ignore_paths=[
+                IgnorePathWithReason(path="vendor/", reason="vendored")
+            ],
+        )
+
+        assert _names(started) == ["app"]
+
+    def test_an_empty_list_lifts_the_config_s_ignore_paths(self, online, tmp_path):
+        """Under --ignore-suppressions the orchestrator hands an empty list: the
+        config's ignore paths no longer keep a package out of the audit."""
+        context = _context(tmp_path, ignore_suppressions=True)
+        context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/", reason="vendored")
+        ]
+        _package(context.source_dir / "app")
+        _package(context.source_dir / "vendor")
+        started = _audited(online)
+
+        _scanner(context).scan(
+            target=context.source_dir, target_type="source", global_ignore_paths=[]
+        )
+
+        assert _names(started) == ["app", "vendor"]
+
+    def test_without_a_list_the_config_s_paths_apply_as_the_orchestrator_applies_them(
+        self, online, tmp_path
+    ):
+        """Called with no list (a direct caller), the selection computes the
+        orchestrator's list from the config: the operator's entry keeps its
+        package out, a client-supplied entry does not (its findings are left to
+        the SARIF step), and under --ignore-suppressions none applies."""
+        context = _context(tmp_path)
+        context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/", reason="vendored"),
+            IgnorePathWithReason(
+                path="client/", reason="the delivered config", client_supplied=True
+            ),
+        ]
+        _package(context.source_dir / "app")
+        _package(context.source_dir / "vendor")
+        _package(context.source_dir / "client")
+        started = _audited(online)
+
+        _scanner(context).scan(target=context.source_dir, target_type="source")
+
+        assert _names(started) == ["app", "client"]
+
+    def test_without_a_list_ignore_suppressions_lifts_the_config_s_paths(
+        self, online, tmp_path
+    ):
+        context = _context(tmp_path, ignore_suppressions=True)
+        context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/", reason="vendored")
+        ]
+        _package(context.source_dir / "app")
+        _package(context.source_dir / "vendor")
+        started = _audited(online)
+
+        _scanner(context).scan(target=context.source_dir, target_type="source")
+
+        assert _names(started) == ["app", "vendor"]
+
+
+class TestOfflineShrinkwrap:
+    def test_a_shrinkwrap_only_package_is_recorded_as_not_audited(
+        self, tmp_path, monkeypatch
+    ):
+        """Offline, the lockfile npm would audit (npm-shrinkwrap.json) is named in
+        inputs_not_scanned and scan() returns False, as for the other lockfiles,
+        instead of an empty report that read as a clean audit."""
+        monkeypatch.setenv("ASH_OFFLINE", "true")
+        context = _context(tmp_path)
+        _package(context.source_dir / "app", "npm-shrinkwrap.json")
+        scanner = _scanner(context)
+        monkeypatch.setattr(
+            npm_audit_scanner, "find_executable", lambda name: f"/usr/local/bin/{name}"
+        )
+
+        with (
+            patch.object(scanner, "_pre_scan", return_value=True),
+            patch.object(NpmAuditScanner, "_run_subprocess", autospec=True) as run,
+        ):
+            result = scanner.scan(target=context.source_dir, target_type="source")
+
+        assert run.call_count == 0
+        assert result is False
+        assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+            "app/npm-shrinkwrap.json"
+        ]
+
+    def test_a_shrinkwrap_beside_a_package_lock_is_the_one_recorded(
+        self, tmp_path, monkeypatch
+    ):
+        """npm reads npm-shrinkwrap.json ahead of package-lock.json, and scan()
+        audits by that order (LOCKFILE_NAMES); the offline record names the same
+        file scan() would have audited."""
+        monkeypatch.setenv("ASH_OFFLINE", "true")
+        context = _context(tmp_path)
+        app = _package(context.source_dir / "app", "npm-shrinkwrap.json")
+        (app / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        scanner = _scanner(context)
+
+        with (
+            patch.object(scanner, "_pre_scan", return_value=True),
+            patch.object(NpmAuditScanner, "_run_subprocess", autospec=True),
+        ):
+            result = scanner.scan(target=context.source_dir, target_type="source")
+
+        assert result is False
+        assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+            "app/npm-shrinkwrap.json"
+        ]
+
+
+class TestWorkspaceOutputDirectory:
+    def test_the_workspace_output_directory_is_passed_to_the_scan_set(
+        self, online, tmp_path
+    ):
+        """In a workspace scan the scan set is read with the workspace's output
+        directory, so it is left out of the walk like the project's own and every
+        reader of the scan set agrees on the set."""
+        workspace_output = tmp_path / "workspace-out"
+        workspace_output.mkdir()
+        context = _context(tmp_path, workspace_output_dir=workspace_output)
+        _package(context.source_dir / "app")
+        _audited(online)
+        calls = []
+        real = npm_audit_scanner.scan_set
+
+        def recorder(*args, **kwargs):
+            calls.append(kwargs)
+            return real(*args, **kwargs)
+
+        online.setattr(npm_audit_scanner, "scan_set", recorder)
+
+        _scanner(context).scan(target=context.source_dir, target_type="source")
+
+        assert calls, "scan_set was not called"
+        assert all(
+            call.get("workspace_output_dir") == str(workspace_output) for call in calls
+        ), calls
+
+    def test_no_workspace_passes_none(self, online, tmp_path):
+        context = _context(tmp_path)
+        _package(context.source_dir / "app")
+        _audited(online)
+        calls = []
+        real = npm_audit_scanner.scan_set
+
+        def recorder(*args, **kwargs):
+            calls.append(kwargs)
+            return real(*args, **kwargs)
+
+        online.setattr(npm_audit_scanner, "scan_set", recorder)
+
+        _scanner(context).scan(target=context.source_dir, target_type="source")
+
+        assert calls and all(call.get("workspace_output_dir") is None for call in calls)

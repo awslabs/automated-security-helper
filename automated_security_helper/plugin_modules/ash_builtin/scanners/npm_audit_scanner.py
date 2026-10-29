@@ -16,6 +16,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
+    ignore_paths_that_skip_scanning,
 )
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -301,7 +302,28 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         "package-lock.json",
     )
 
-    def _package_manifests(self, target_type: str) -> List[str]:
+    def _scan_ignore_paths(self) -> List[IgnorePathWithReason]:
+        """The ignore paths that keep a package out of this scan, computed as the
+        orchestrator computes the list it hands ``scan()``: the entries that have
+        not expired, less those the delivered tree's own config supplied
+        (``client_supplied``, left to the SARIF step so their findings show as
+        suppressed), and none under ``--ignore-suppressions``, which lifts every
+        suppression (``models.core.ignore_paths_that_skip_scanning``)."""
+        global_settings = getattr(
+            getattr(self.context, "config", None), "global_settings", None
+        )
+        return ignore_paths_that_skip_scanning(
+            active_ignore_paths(getattr(global_settings, "ignore_paths", None) or []),
+            ignore_suppressions=bool(
+                getattr(self.context, "ignore_suppressions", False)
+            ),
+        )
+
+    def _package_manifests(
+        self,
+        target_type: str,
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
+    ) -> List[str]:
         """Every package.json in one tree: the scan set, or the work directory.
 
         The scan set leaves out a link whose target is outside the tree, so a
@@ -311,14 +333,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         list left out, once per directory; scan() then refuses it. A lockfile with no
         package.json beside it is not a package.
 
-        The scan set is taken without the files the global ignore paths ignore, the
-        entries that have not expired (the list the scanners are given), matched as
+        The scan set is taken without the files the ignore paths ignore, matched as
         ASH matches them when it drops findings (``link_exclusions.drop_ignored``):
-        npm-audit read an ignored package's lockfile, and its results held it.
+        npm-audit read an ignored package's lockfile, and its results held it. The
+        list is ``global_ignore_paths`` when ``scan()`` is handed one (the
+        orchestrator's, which honors ``--ignore-suppressions`` and leaves the
+        client-supplied entries to the SARIF step); otherwise it is computed from
+        the config the same way (``_scan_ignore_paths``). Recomputing it from the
+        config alone discarded the list scan() was given, so the flag and the
+        carve-out did not reach npm-audit's file selection.
+
+        In a workspace scan the workspace's output directory is left out of the
+        walk like the project's own (``workspace_output_dir``), as the other
+        readers of the scan set leave it out.
         """
-        global_settings = getattr(
-            getattr(self.context, "config", None), "global_settings", None
+        ignore_paths = (
+            self._scan_ignore_paths()
+            if global_ignore_paths is None
+            else list(global_ignore_paths)
         )
+        workspace_output = getattr(self.context, "workspace_output_dir", None)
         orig_scannable = (
             list(self.context.work_dir.glob("**/*.*"))
             if target_type == "converted"
@@ -330,11 +364,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         getattr(self.context, "config", None)
                     ),
                     run_id=getattr(self.context, "run_id", None),
+                    workspace_output_dir=(
+                        str(workspace_output) if workspace_output else None
+                    ),
                 ),
                 self.context.source_dir,
-                active_ignore_paths(
-                    getattr(global_settings, "ignore_paths", None) or []
-                ),
+                ignore_paths,
             )
         )
         manifests = [Path(f) for f in orig_scannable if Path(f).name == "package.json"]
@@ -1647,10 +1682,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             f"{self.__class__.__name__} overrides scan() directly."
         )
 
-    #: The lockfiles that make a directory a package npm-audit audits, in the order
-    #: scan() looks for them.
-    _AUDITED_LOCKFILE_NAMES = ("yarn.lock", "pnpm-lock.yaml", "package-lock.json")
-
     #: Why npm-audit audits nothing offline. Recorded with every lockfile it skips.
     _OFFLINE_REASON = (
         "npm, pnpm and yarn audit dependencies only against the package registry's "
@@ -1676,13 +1707,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         """
         skipped = []
         for item in package_files:
-            package_dir = Path(item).parent
-            for name in ("yarn.lock", "pnpm-lock.yaml", "package-lock.json"):
-                lock_file = package_dir / name
-                if lock_file.exists():
-                    shown = self._shown_path(lock_file, target_type)
-                    skipped.append({"path": shown, "reason": self._OFFLINE_REASON})
-                    break
+            # The one lockfile selection scan() audits by (LOCKFILE_NAMES, so
+            # npm-shrinkwrap.json counts): a shrinkwrap-only package used to
+            # record nothing here and read as a clean, empty report offline.
+            lock_file = self._lockfile_beside(item)
+            if lock_file is not None:
+                shown = self._shown_path(lock_file, target_type)
+                skipped.append({"path": shown, "reason": self._OFFLINE_REASON})
         self.inputs_not_scanned = skipped
         if not skipped:
             # None elsewhere: no claim (scanner_executor._target_count_attr).
@@ -1717,8 +1748,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
+        # global_ignore_paths stays None when the caller gave none: the package
+        # selection then computes the list from the config as the orchestrator
+        # does (_package_manifests); an empty list given is an empty list.
         # Per call, above every return, as in cfn_nag_scanner: each lockfile audited
         # counts as a target, so a tree with none to audit reads as SKIPPED rather
         # than as a clean audit. exit_code is None until an audit runs, so a scan that
@@ -1786,7 +1818,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # scanned, with the reason and the warning, so the results and the
                 # summaries name them; False is what records the row MISSING.
                 self._skip_offline(
-                    self._package_manifests(target_type), target, target_type
+                    self._package_manifests(target_type, global_ignore_paths),
+                    target,
+                    target_type,
                 )
             self._post_scan(
                 target=target,
@@ -1801,7 +1835,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Find all files to scan from the scan set. Shared with
             # nothing_to_scan_reason, which answers from this same selection.
-            scannable = self._package_manifests(target_type)
+            scannable = self._package_manifests(target_type, global_ignore_paths)
             joined_files = "\n- ".join(scannable)
             # Logged directly with markup off rather than through _plugin_log, whose
             # prefix is markup: escaping the paths instead would write "\[" into
