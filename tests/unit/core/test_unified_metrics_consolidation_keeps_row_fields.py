@@ -13,6 +13,8 @@ The row is now built from the original, with only the fields the metrics compute
 replaced.
 """
 
+import pytest
+
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerStatusInfo,
@@ -25,6 +27,8 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _report(container: ScanResultsContainer) -> dict:

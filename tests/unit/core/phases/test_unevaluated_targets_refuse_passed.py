@@ -42,6 +42,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
 )
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
+pytestmark = pytest.mark.unit
+
 RENDERS_TEMPLATE = """Resources:
   MyRole:
     Type: AWS::IAM::Role

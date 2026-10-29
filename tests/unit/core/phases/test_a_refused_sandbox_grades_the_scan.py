@@ -49,6 +49,8 @@ from automated_security_helper.utils.sandbox.scope import (
     clear_backend_cache,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

@@ -20,6 +20,8 @@ from automated_security_helper.models.scanner_validation import (
     ScannerValidationManager,
 )
 
+pytestmark = pytest.mark.unit
+
 # Pydantic forward references need explicit rebuild for models with deferred refs
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

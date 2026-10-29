@@ -13,6 +13,8 @@ and so are the working directory, exit code and duration.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from automated_security_helper.config import resolve_config as resolve_config_module
 from automated_security_helper.core.phases.scan_result_processor import (
     ScanResultProcessor,
@@ -20,6 +22,8 @@ from automated_security_helper.core.phases.scan_result_processor import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+pytestmark = pytest.mark.unit
 
 FROM_ENVIRONMENT = "marker-secret-config-value"
 WRITTEN_OUT = "marker-literal-flag-value"

@@ -16,10 +16,14 @@ stand-in ScanPhase that returns findings in a changed and an unchanged file.
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.execution_engine import ScanExecutionEngine
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+pytestmark = pytest.mark.unit
 
 
 class _ScanPhaseReturningTwoFindings:

@@ -19,6 +19,8 @@ from pydantic import ValidationError
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
+pytestmark = pytest.mark.unit
+
 
 def _dirs(tmp_path):
     src = tmp_path / "src"

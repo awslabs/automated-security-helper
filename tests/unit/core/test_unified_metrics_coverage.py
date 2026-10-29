@@ -1,11 +1,15 @@
 """Tests for core/unified_metrics.py — covers metric functions."""
 
+import pytest
+
 from automated_security_helper.core.unified_metrics import (
     ScannerMetrics,
     format_duration,
     get_unified_scanner_metrics,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 AshAggregatedResults.model_rebuild()
 

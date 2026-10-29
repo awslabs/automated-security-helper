@@ -60,6 +60,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 
 # --------------------------------------------------------------------------- #
 # Real converter plugins rather than mocks.

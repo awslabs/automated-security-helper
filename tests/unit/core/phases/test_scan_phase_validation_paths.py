@@ -38,6 +38,8 @@ from automated_security_helper.models.scanner_validation import (
     ValidationCheckpoint,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

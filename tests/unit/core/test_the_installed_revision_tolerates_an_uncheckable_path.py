@@ -22,6 +22,8 @@ import pytest
 
 from automated_security_helper.core.constants import _installed_revision
 
+pytestmark = pytest.mark.unit
+
 
 def test_an_uncheckable_path_reads_as_unknown_commit(tmp_path):
     if os.name != "posix":

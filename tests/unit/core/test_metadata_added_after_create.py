@@ -29,6 +29,8 @@ from automated_security_helper.core.enums import ExecutionPhase, ExportFormat
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 #: Stands for "the saved set does not have this key at all".
 _ABSENT = object()
 

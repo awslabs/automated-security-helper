@@ -43,6 +43,8 @@ from automated_security_helper.utils.report_path_links import (
     refuse_colliding_report_names,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _reporter(
     name: str,

@@ -79,6 +79,7 @@ def _by_name(entries: List[Dict]) -> Dict[str, Dict]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_scans_dependency_check_reaches_the_installer(sandbox, tmp_path):
     """Without this, the tests below could pass by never reaching an install path."""
     from automated_security_helper.base.plugin_context import PluginContext
@@ -97,6 +98,7 @@ def test_a_scans_dependency_check_reaches_the_installer(sandbox, tmp_path):
 
 
 @pytest.mark.parametrize("name", GUARDED)
+@pytest.mark.integration
 def test_a_refusing_stand_in_is_seen_when_started(sandbox, name):
     """The planted positive for the refusing stand-ins (pip, docker, npm and the
     rest): each one, started inside the sandbox the way an install would start
@@ -126,6 +128,7 @@ def test_a_refusing_stand_in_is_seen_when_started(sandbox, name):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_list_scanners_installs_nothing(sandbox, monkeypatch):
     from automated_security_helper.cli import mcp_tools
 
@@ -137,6 +140,7 @@ def test_list_scanners_installs_nothing(sandbox, monkeypatch):
     assert sorted(_by_name(entries)) == UV_TOOL_NAMES
 
 
+@pytest.mark.integration
 def test_the_list_scanners_tool_installs_nothing(sandbox, monkeypatch):
     from automated_security_helper.cli import mcp_server, mcp_tools
 
@@ -149,6 +153,7 @@ def test_the_list_scanners_tool_installs_nothing(sandbox, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_check_installation_installs_nothing(sandbox, monkeypatch):
     from automated_security_helper.cli import mcp_tools
 
@@ -160,6 +165,7 @@ async def test_check_installation_installs_nothing(sandbox, monkeypatch):
     assert sandbox.installs() == [], sandbox.calls()
 
 
+@pytest.mark.integration
 def test_a_check_only_probe_is_not_remembered_for_the_scan(sandbox, monkeypatch):
     """The offline probe's miss must not stand in for the scan's online probe."""
     from automated_security_helper.cli import mcp_tools
@@ -182,6 +188,7 @@ def test_a_check_only_probe_is_not_remembered_for_the_scan(sandbox, monkeypatch)
     )
 
 
+@pytest.mark.integration
 def test_a_check_only_version_probe_is_not_remembered_either(sandbox, monkeypatch):
     """The other half of the test above: the version cache, not the command cache.
 
@@ -214,6 +221,7 @@ def test_a_check_only_version_probe_is_not_remembered_either(sandbox, monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_fresh_install_reports_what_the_first_scan_installs(
     sandbox, monkeypatch
 ):
@@ -233,6 +241,7 @@ async def test_a_fresh_install_reports_what_the_first_scan_installs(
     assert sandbox.installs() == [], sandbox.calls()
 
 
+@pytest.mark.integration
 def test_list_scanners_says_which_tools_the_first_scan_installs(sandbox, monkeypatch):
     from automated_security_helper.cli import mcp_tools
 
@@ -246,6 +255,7 @@ def test_list_scanners_says_which_tools_the_first_scan_installs(sandbox, monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_offline_the_first_scan_installs_nothing_so_they_are_missing(
     sandbox, monkeypatch
 ):
@@ -263,6 +273,7 @@ async def test_offline_the_first_scan_installs_nothing_so_they_are_missing(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_without_uv_the_first_scan_installs_nothing_so_they_are_missing(
     sandbox, monkeypatch
 ):
@@ -279,6 +290,7 @@ async def test_without_uv_the_first_scan_installs_nothing_so_they_are_missing(
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_machines_fixed_dir_uv_does_not_defeat_without_uv(
     sandbox, monkeypatch, tmp_path_factory
 ):
@@ -305,6 +317,7 @@ async def test_a_machines_fixed_dir_uv_does_not_defeat_without_uv(
     assert sandbox.installs() == [], sandbox.calls()
 
 
+@pytest.mark.unit
 def test_a_planted_fixed_dir_uv_is_findable_and_then_hidden(
     sandbox, monkeypatch, tmp_path_factory
 ):
@@ -344,6 +357,7 @@ def test_a_planted_fixed_dir_uv_is_findable_and_then_hidden(
     assert sandbox.installs() == [], sandbox.calls()
 
 
+@pytest.mark.integration
 def test_an_installed_tool_is_satisfied_and_installs_nothing(sandbox, monkeypatch):
     """A tool on PATH is reported as present, not as one the first scan installs."""
     from automated_security_helper.cli import mcp_tools
@@ -363,6 +377,7 @@ def test_an_installed_tool_is_satisfied_and_installs_nothing(sandbox, monkeypatc
     assert sandbox.installs() == [], sandbox.calls()
 
 
+@pytest.mark.unit
 def test_the_sandbox_reaches_nothing_real():
     """The stand-ins' environment never leaked out of a test."""
     assert "ASH_TEST_STAND_IN_LOG" not in environ_names()

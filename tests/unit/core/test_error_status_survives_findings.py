@@ -68,6 +68,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _sarif_for(scanner: str, count: int) -> SarifReport:
     """*count* HIGH findings attributed to *scanner*.

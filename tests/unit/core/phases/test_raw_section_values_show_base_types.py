@@ -21,11 +21,15 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
+import pytest
+
 from automated_security_helper.core.phases.report_phase import (
     _warn_if_configured_but_not_enabled,
 )
 from automated_security_helper.core.scanner_inventory import describe_scanner
 from automated_security_helper.utils.redacted_model import env_resolved_scalar
+
+pytestmark = pytest.mark.unit
 
 CANARY = "ash-canary-zq9"
 VARIABLE = "ASH_ENABLED_CANARY"

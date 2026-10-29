@@ -26,6 +26,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestScanRegistryEntry:
     """Tests for the ScanRegistryEntry class."""

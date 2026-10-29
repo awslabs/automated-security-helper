@@ -32,6 +32,8 @@ from automated_security_helper.core.scanner_inventory import (
     list_scanner_inventory,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _assert_the_process_clock_still_runs() -> None:
     """The probe's clock is patched, and ``time.monotonic`` is not.

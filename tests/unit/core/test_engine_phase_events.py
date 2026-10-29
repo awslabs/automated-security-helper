@@ -2,10 +2,14 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins.events import AshEventType
+
+pytestmark = pytest.mark.unit
 
 
 class FakePhase(EnginePhase):

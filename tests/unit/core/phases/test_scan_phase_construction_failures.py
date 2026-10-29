@@ -52,6 +52,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 BOOM = "offline rule cache absent, refused during _process_config_options"
 
 

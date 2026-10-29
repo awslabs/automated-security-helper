@@ -29,6 +29,8 @@ from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.inner_run_outcome import ExistingResultsRefused
 
+pytestmark = pytest.mark.unit
+
 #: One scanner's entry, which is what a scan phase records for every scanner it
 #: considered, skipped ones included.
 SCANNED = {"bandit": {"source": {"scanner_name": "bandit", "status": "PASSED"}}}

@@ -29,6 +29,8 @@ from automated_security_helper.core.unified_metrics import ScannerMetrics
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 NARROW_WIDTH = 80
 WIDE_WIDTH = 140
 

@@ -28,6 +28,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
 
+pytestmark = pytest.mark.unit
+
 SECRET = "a-value-read-from-the-environment"
 
 
