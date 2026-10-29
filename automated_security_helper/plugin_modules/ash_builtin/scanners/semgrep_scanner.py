@@ -173,8 +173,30 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         """
         env = {_VERSION_CHECK_ENV: _VERSION_CHECK_OFF}
         if self._scanner_offline() and "SEMGREP_RULES_CACHE_DIR" in os.environ:
-            env["SEMGREP_RULES"] = f"{os.environ['SEMGREP_RULES_CACHE_DIR']}/*"
+            # Absolute, as the --config the base passes: semgrep runs in the
+            # source directory, where a relative cache path names another place.
+            cache_dir = os.path.abspath(os.environ["SEMGREP_RULES_CACHE_DIR"])
+            env["SEMGREP_RULES"] = f"{cache_dir}/*"
         return env
+
+    def _direct_or_uv_command_found(self) -> bool:
+        """Whether ``get_uv_tool_command`` found a way to run semgrep, and set
+        ``use_uv_tool`` to how it found it.
+
+        The resolver answers with ``["uv", "tool", "run", "semgrep"]`` when uv runs
+        the tool, and with the path of a semgrep binary on PATH otherwise. Both
+        used to be read as "the binary is on PATH", which turned uv off and made
+        the scan exec a semgrep that is not there when uv was the only route.
+        """
+        command = get_uv_tool_command(self.command)
+        if command is None:
+            return False
+        if isinstance(command, list) and command[:3] == ["uv", "tool", "run"]:
+            self.use_uv_tool = True
+        else:
+            self.use_uv_tool = False
+        self.dependencies_satisfied = True
+        return True
 
     def _get_uv_tool_version(
         self, tool_name: str, package_name: Optional[str] = None
@@ -244,10 +266,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
 
         if not self._validate_uv_tool_availability():
             # UV missing — defer to consolidated resolver: if the tool is on
-            # PATH directly we can still run it.
-            if get_uv_tool_command(self.command) is not None:
-                self.use_uv_tool = False
-                self.dependencies_satisfied = True
+            # PATH directly (or uv answers its probe after all) we can still run it.
+            if self._direct_or_uv_command_found():
                 return True
             self._plugin_log(
                 "UV tool validation failed - UV is not available but required",
@@ -275,10 +295,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 self.dependencies_satisfied = True
                 return True
             # Last resort — consolidated resolver handles the
-            # "uv missing → direct binary → None" fallback.
-            if get_uv_tool_command(self.command) is not None:
-                self.use_uv_tool = False
-                self.dependencies_satisfied = True
+            # "uv run → direct binary → None" fallback, and says which it found.
+            if self._direct_or_uv_command_found():
                 return True
             self._plugin_log(
                 "Direct executable detection also failed for semgrep",
