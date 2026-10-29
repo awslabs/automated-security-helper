@@ -857,11 +857,15 @@ jobs:
   # job of its pool. A wait on the unit job would only add the slowest unit leg (about 8
   # minutes on ubuntu, 10 on Windows, plus queueing) to the critical path, and it would
   # save no runner time, because a failed unit leg must not skip the other tiers' signal.
-  # The condition `!cancelled() && needs.ensure-cache.result == 'success'` keeps the one
-  # skip that does save runners: when a leg of ensure-cache fails, the unit jobs are
-  # skipped, and so are these. Without the second term these jobs would run all 105 legs of
-  # a run that is already red, and a re-run of failed jobs would pay for them twice. The
-  # gate sees that skip through ensure-cache, which is in its own `needs`. The per-job
+  # Like the unit jobs, these carry no job-level `if:`. `needs` alone gives the one skip
+  # that does save runners: a job that needs ensure-cache and carries no status function
+  # is skipped when a leg of ensure-cache fails (GitHub applies `success()` to a job whose
+  # `if:` names no status function, and to a job with none), so a run that is already red
+  # does not pay for these 105 legs, and a re-run of failed jobs does not pay for them
+  # twice. The gate sees that skip through ensure-cache, which is in its own `needs`. An
+  # `if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}` used to spell the
+  # same rule out and was dropped: it added no case the default lacks, and it taught the
+  # census test a longer spelling of the default. The per-job
   # `max-parallel` caps below stay per job, so the macOS pool can now see up to 22 legs
   # at once (10 unit, 10 integration, 2 e2e) where it saw at most 12; the caps were chosen
   # per job and the repository's macOS concurrency limit is not read from here, so extra
@@ -874,7 +878,6 @@ jobs:
   integration-test-linux:
     name: "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
-    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -909,7 +912,6 @@ jobs:
   integration-test-macos:
     name: "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
-    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -944,7 +946,6 @@ jobs:
   integration-test-windows:
     name: "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
-    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -988,7 +989,6 @@ jobs:
   e2e-test-linux:
     name: "e2e-test (${{ matrix.os }})"
     needs: [ensure-cache]
-    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -1017,7 +1017,6 @@ jobs:
   e2e-test-macos:
     name: "e2e-test (${{ matrix.os }})"
     needs: [ensure-cache]
-    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -1046,7 +1045,6 @@ jobs:
   e2e-test-windows:
     name: "e2e-test (${{ matrix.os }})"
     needs: [ensure-cache]
-    if: ${{ !cancelled() && needs.ensure-cache.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -2668,13 +2666,14 @@ jobs:
   # was cancelled or any dependency failed or was cancelled. A dependency can be skipped only
   # when the run is cancelled, or when ensure-cache failed: the jobs that need it and carry no
   # `if:` are skipped then, and ensure-cache's own failure is in `needs`, so the `failure` term
-  # covers it. The other job-level conditions among the dependencies are `if: ${{ !cancelled() }}`
-  # on scan-validation and unit-coverage, and `if: ${{ !cancelled() && needs.ensure-cache.result
-  # == 'success' }}` on the six integration-test and e2e-test jobs (they wait only for
-  # ensure-cache, and are skipped when it fails, a skip the `failure` term above covers). The
-  # rule in tests/unit/test_required_checks_census.py is that every gated job with `needs`
-  # carries `!cancelled()` or `always()`, or else waits only for jobs that always run and have
-  # no `needs` of their own. So `cancelled()` and `failure` between them cover skipped too.
+  # covers it. The only other job-level condition among the dependencies is
+  # `if: ${{ !cancelled() }}`, on scan-validation and unit-coverage. The six integration-test
+  # and e2e-test jobs carry none, like the unit jobs: they wait only for ensure-cache and are
+  # skipped when it fails, a skip the `failure` term above covers. The rule in
+  # tests/unit/test_required_checks_census.py is that every gated job with `needs` carries
+  # `!cancelled()` or `always()`, or else carries no `if:` at all and waits only for jobs that
+  # always run and have no `needs` of their own. So `cancelled()` and `failure` between them
+  # cover skipped too.
   #
   # The condition used to name `skipped` directly, and that term had to go. With
   # warm-image-layers skipped upstream of scan-validation, `contains(needs.*.result, 'skipped')`
