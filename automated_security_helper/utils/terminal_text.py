@@ -126,8 +126,8 @@ def _reads_as_written_escape(after: str) -> bool:
     try:
         character = chr(int(match.group()[1:], 16))
     except (ValueError, OverflowError):
-        # Beyond U+10FFFF; eight hex digits from 80000000 up overflow chr()'s C
-        # int on some Python versions and raise OverflowError, not ValueError.
+        # Beyond U+10FFFF; eight hex digits whose value does not fit a C int
+        # make chr() raise OverflowError, not ValueError, on some Python versions.
         return False
     # Compared with the letter lowercased on both sides: escape_for writes the
     # letter of an eight-digit escape as "U", and the hex digits in lower case.
@@ -428,8 +428,8 @@ def as_written(text: str) -> str:
         try:
             return backslashes + chr(int(escape[1:], 16))
         except (ValueError, OverflowError):
-            # Beyond U+10FFFF, which no escaper writes; from 80000000 up some
-            # Python versions raise OverflowError for chr() instead.
+            # Beyond U+10FFFF, which no escaper writes; for a value that does
+            # not fit a C int some Python versions raise OverflowError instead.
             return match.group()
 
     return _RUN_BEFORE_ESCAPE.sub(written, str(text))

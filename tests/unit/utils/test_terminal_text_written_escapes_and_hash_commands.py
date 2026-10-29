@@ -6,9 +6,9 @@ commands_broken takes time linear in a backslash run.
 
 ``ash report`` on a terminal doubles a backslash run only before the text of an
 escape terminal_text itself writes. Two readings of that text went wrong: a
-backslash followed by ``U`` and eight hex digits from 80000000 up made chr()
-raise OverflowError on some Python versions, which only ValueError was caught
-for, so the report failed; and the text of an eight-digit escape was lowercased
+backslash followed by ``U`` and eight hex digits whose value does not fit a C
+int made chr() raise OverflowError on some Python versions, which only
+ValueError was caught for, so the report failed; and the text of an eight-digit escape was lowercased
 before it was compared with escape_for's ``U``, so a run before ``\\U000e0001``
 was never doubled and read back as the character.
 
@@ -39,8 +39,8 @@ BACKSLASH = chr(0x5C)
 LANGUAGE_TAG = chr(0xE0001)
 
 
-#: Eight hex digits from 80000000 up (assembled, so the source holds no long
-#: hex run): the smallest overflowing value, the largest, and one just below.
+#: Eight hex digits (assembled, so the source holds no long hex run): the
+#: smallest value that does not fit a C int, the largest, and one just below.
 EIGHT_DIGITS = ["8" + "0" * 7, "f" * 8, "7" + "f" * 7]
 
 
