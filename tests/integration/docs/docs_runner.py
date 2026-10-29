@@ -207,6 +207,28 @@ def invoking_user_environment() -> dict[str, str]:
     return env
 
 
+def _uv_tool_bin_dir(user_env: dict[str, str], home: Path) -> Path:
+    """uv's tool bin directory for ``user_env``, resolved the way ``uv tool dir --bin``
+    resolves it: UV_TOOL_BIN_DIR, else XDG_BIN_HOME, else ``home``/.local/bin.
+
+    Read from the environment, not from uv, so the directory is known where the
+    pytest process cannot run uv at all: a runner that installs the tools with a uv
+    on its own PATH and then runs pytest from a virtual environment that has no uv
+    beside its interpreter and no uv on the process's PATH.
+    """
+    for name in ("UV_TOOL_BIN_DIR", "XDG_BIN_HOME"):
+        value = user_env.get(name)
+        if value:
+            return Path(value)
+    return home / ".local" / "bin"
+
+
+def _uv_executable() -> str | None:
+    """uv beside this interpreter, else uv on PATH; None when neither is there."""
+    beside = shutil.which("uv", path=str(Path(sys.executable).parent))
+    return beside or shutil.which("uv")
+
+
 def ash_tool_dirs() -> list[Path]:
     """The directories ASH installs scanner tools into for the invoking user, that exist.
 
@@ -219,13 +241,18 @@ def ash_tool_dirs() -> list[Path]:
     finds any tool on PATH. "The invoking user's" means the home the user had before
     the test session moved it (invoking_user_environment): in the pytest process
     Path.home() is the session's private home, where nothing is installed.
+
+    uv's directory is resolved from that environment first (_uv_tool_bin_dir), so it
+    is found with no uv reachable from this process; when uv is reachable it is also
+    asked, as a further source, since a uv configured through its own settings files
+    can answer another directory. Duplicates are dropped, in first-seen order.
     """
     user_env = invoking_user_environment()
     from_env = user_env.get("ASH_BIN_PATH")
     home = Path(user_env["HOME"]) if user_env.get("HOME") else Path.home()
     dirs = [Path(from_env) if from_env else home / ".ash" / "bin"]
-    uv = Path(sys.executable).parent / "uv"
-    uv_path = str(uv) if uv.is_file() else shutil.which("uv")
+    dirs.append(_uv_tool_bin_dir(user_env, home))
+    uv_path = _uv_executable()
     if uv_path:
         try:
             answer = subprocess.run(
