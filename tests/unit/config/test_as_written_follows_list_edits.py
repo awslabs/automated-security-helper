@@ -47,10 +47,22 @@ def environment(tmp_path, monkeypatch):
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    return tmp_path
+    yield tmp_path
+    from automated_security_helper.cli.mcp import profile_registry
+
+    profile_registry.clear_profile_registry()
+    profile_registry.clear_all_session_state()
 
 
 def _select(tmp_path: Path, entries: list, ops: list) -> dict:
+    """select_profile for a profile, as a client calls it, and the session
+    config's path when it was written.
+
+    The session stays bound until the test ends, as it does for a client: a
+    patched copy holds each reference as quoted text, and it is read against
+    the operator's copy (``resolve_session_trusted_config_path``), which the
+    binding records.
+    """
     from automated_security_helper.cli.mcp import profile_registry
     from automated_security_helper.cli.mcp_tools import mcp_select_profile
 
@@ -61,16 +73,22 @@ def _select(tmp_path: Path, entries: list, ops: list) -> dict:
     profile_registry.set_profile_registry(
         profile_registry.register_profiles([f"op={profile}"])
     )
-    try:
-        result = mcp_select_profile("op", patch_ops=ops, session_id="session-a")
-        if result["success"]:
-            result["path"] = Path(
-                profile_registry.resolve_session_config_path("session-a")
-            )
-        return result
-    finally:
-        profile_registry.clear_profile_registry()
-        profile_registry.clear_all_session_state()
+    result = mcp_select_profile("op", patch_ops=ops, session_id="session-a")
+    if result["success"]:
+        result["path"] = Path(profile_registry.resolve_session_config_path("session-a"))
+    return result
+
+
+def _read(path: Path):
+    """The session config as a scan resolves it: against the operator's copy."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        resolve_session_trusted_config_path,
+    )
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    return resolve_config(
+        path, trusted_config_path=resolve_session_trusted_config_path("session-a")
+    )
 
 
 @pytest.mark.parametrize(
@@ -103,8 +121,6 @@ def _select(tmp_path: Path, entries: list, ops: list) -> dict:
     ],
 )
 def test_the_reference_follows_its_entry(environment, entries, op, expected):
-    from automated_security_helper.config.resolve_config import resolve_config
-
     result = _select(environment, entries, [op])
     assert result["success"] is True, result.get("error")
     text = result["path"].read_text(encoding="utf-8")
@@ -113,13 +129,11 @@ def test_the_reference_follows_its_entry(environment, entries, op, expected):
     assert written, "the session config holds the value"
     kept = text.count("${ASH_PN}") == 1
     assert kept, "the reference was not kept"
-    read = resolve_config(result["path"]).external_reports_to_include == expected
+    read = _read(result["path"]).external_reports_to_include == expected
     assert read, "the reference does not read the value at its entry"
 
 
 def test_removing_the_entry_removes_its_reference(environment):
-    from automated_security_helper.config.resolve_config import resolve_config
-
     result = _select(
         environment,
         ["${ASH_PN}", "other.sarif"],
@@ -129,7 +143,7 @@ def test_removing_the_entry_removes_its_reference(environment):
     text = result["path"].read_text(encoding="utf-8")
     gone = CANARY not in text and "${ASH_PN}" not in text
     assert gone, "the removed entry is still written"
-    read = resolve_config(result["path"]).external_reports_to_include == ["other.sarif"]
+    read = _read(result["path"]).external_reports_to_include == ["other.sarif"]
     assert read, "the remaining entry changed"
 
 
