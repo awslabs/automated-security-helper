@@ -385,13 +385,18 @@ def test_the_tools_ash_installed_are_on_the_session_path(tmp_path, monkeypatch):
     empty copies of both; the invoking user's are on the session's PATH instead,
     resolved as ASH and uv resolve them. Each is planted here in a directory named
     by the variable that moves it, beside a tool on the host PATH that must stay
-    out of reach.
+    out of reach. The test session removes UV_TOOL_BIN_DIR from the process, so uv's
+    directory is named in the record tests/conftest.py exports, not in the process.
     """
     ash_tool = _planted_tool(tmp_path / "ash-bin", "ash-docs-ash-bin-tool")
     uv_tool = _planted_tool(tmp_path / "uv-tool-bin", "ash-docs-uv-tool")
     host_tool = _planted_tool(tmp_path / "host-bin", "ash-docs-host-only-tool")
     monkeypatch.setenv("ASH_BIN_PATH", str(ash_tool.parent))
-    monkeypatch.setenv("UV_TOOL_BIN_DIR", str(uv_tool.parent))
+    monkeypatch.delenv("UV_TOOL_BIN_DIR", raising=False)
+    monkeypatch.setenv(
+        "ASH_TEST_DEVELOPER_HOME",
+        json.dumps({"env": {"UV_TOOL_BIN_DIR": str(uv_tool.parent)}, "home": ""}),
+    )
     monkeypatch.setenv(
         "PATH", f"{host_tool.parent}{os.pathsep}{os.environ.get('PATH', '')}"
     )
