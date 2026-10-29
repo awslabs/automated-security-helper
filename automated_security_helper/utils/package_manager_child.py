@@ -24,7 +24,14 @@ names in place of itself, ``yarn --version`` included.
   finds a workspace's members through their manifests. Unsandboxed it starts in a
   copy outside the scanned tree of the lockfile and every ``package.json`` below the
   package, so the repository's files are on no path it reads and the operator's
-  still are (measured). ``--no-default-rc`` would also drop the operator's files,
+  still are (measured). The copy's ancestors decide which other settings files it
+  reads, so the copy goes under the scan's own output directory when that is
+  outside the tree (where npm's and pnpm's copies go), else under the operator's
+  cache directory (``$XDG_CACHE_HOME/ash``, or ``~/.cache/ash``), and never under
+  the system temporary directory: on a shared host its ancestors (``/tmp``) are
+  writable by every user, and a ``.npmrc`` or ``.yarnrc`` planted there would
+  redirect the audit (``_yarn_copy_parent``). ``--no-default-rc`` would also drop
+  the operator's files,
   ``~/.npmrc`` with no way to add it back (measured: it ignores
   ``npm_config_userconfig``).
 * Under a sandbox the tool's home is private, so the operator's files were never
@@ -130,6 +137,43 @@ def _within(path: Path, root: Optional[Path]) -> bool:
         return False
     real, real_root = os.path.realpath(path), os.path.realpath(root)
     return real == real_root or real.startswith(real_root.rstrip(os.sep) + os.sep)
+
+
+def _operator_cache_dir() -> Optional[Path]:
+    """``$XDG_CACHE_HOME/ash``, else ``~/.cache/ash``; None with no home."""
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        return Path(xdg).expanduser() / "ash"
+    try:
+        return Path.home() / ".cache" / "ash"
+    except (KeyError, RuntimeError):
+        return None
+
+
+def _yarn_copy_parent(parent: Path, scan_root: Optional[Path]) -> Optional[Path]:
+    """Where yarn's unsandboxed copy goes, or None when no directory will do.
+
+    yarn reads ``.yarnrc``, ``.npmrc`` and ``.yarnrc.yml`` from the copy's
+    directory and every parent, so the copy's ancestors decide which settings
+    files it reads besides the operator's own. The scan's output directory
+    (``parent``, where npm's and pnpm's copies go) is first, when it is outside
+    the scanned tree: its ancestors are the operator's. When it is inside the
+    tree (the default output directory is) the operator's cache directory is
+    used instead. The system temporary directory is never used: on a shared
+    host its ancestors (``/tmp``) are writable by every user, and a ``.npmrc``
+    planted there would redirect the audit and its dependency list. None when
+    both are inside the tree or cannot be made: yarn then runs in place with
+    every settings file dropped.
+    """
+    for candidate in (Path(parent), _operator_cache_dir()):
+        if candidate is None or _within(candidate, scan_root):
+            continue
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        return candidate
+    return None
 
 
 def _write_copy(target: Path, data: bytes, private: Path) -> None:
@@ -305,9 +349,9 @@ def package_manager_child(
     Args:
         parent: Where a private directory may go that a sandboxed tool can see (the
             scanner's results directory).
-        scan_root: The scanned tree. yarn's unsandboxed copy is made outside it;
-            when the system temporary directory is inside it, yarn falls back to
-            the sandbox's flags.
+        scan_root: The scanned tree. yarn's unsandboxed copy is made outside it
+            (``_yarn_copy_parent``); when no directory outside it can hold the
+            copy, yarn falls back to the sandbox's flags.
         skip: Directories not to copy manifests from (ASH's output directory).
         roots: The trees a copied file has to resolve inside (``input_refusal``);
             ``scan_root`` when not given, else the package directory.
@@ -330,9 +374,10 @@ def package_manager_child(
         # none has this name. ``--no-default-rc`` is left out: yarn 2+ would not
         # accept it.
         env["YARN_RC_FILENAME"] = no_yarnrc_name()
-    in_place_yarn = binary == "yarn" and (
-        sandboxed or _within(Path(tempfile.gettempdir()), scan_root)
-    )
+    copy_parent: Optional[Path] = None
+    if binary == "yarn" and not sandboxed:
+        copy_parent = _yarn_copy_parent(Path(parent), scan_root)
+    in_place_yarn = binary == "yarn" and (sandboxed or copy_parent is None)
     if in_place_yarn:
         # Every settings file is dropped: the operator's are not visible under a
         # sandbox anyway, and outside one this is only when no copy can be made
@@ -344,7 +389,7 @@ def package_manager_child(
         )
         yield PackageManagerChild(leading_args=leading, cwd=package_dir, env=env)
         return
-    where = None if binary == "yarn" else str(parent)
+    where = str(copy_parent) if binary == "yarn" else str(parent)
     directory = Path(tempfile.mkdtemp(prefix=f"ash-{binary}-", dir=where)).absolute()
     try:
         project = directory / "project"

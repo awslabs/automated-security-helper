@@ -118,11 +118,19 @@ def online(monkeypatch, tmp_path):
     return monkeypatch
 
 
-def _scanner(tmp_path: Path, *, ignore_suppressions: bool = False) -> NpmAuditScanner:
+def _scanner(
+    tmp_path: Path,
+    *,
+    ignore_suppressions: bool = False,
+    output_dir: Path | None = None,
+) -> NpmAuditScanner:
+    """A scanner over tmp_path/repo; its output beside the repository unless
+    ``output_dir`` says otherwise (the default output directory is inside it)."""
+    output = output_dir if output_dir is not None else tmp_path / "out"
     context = PluginContext(
         source_dir=tmp_path / "repo",
-        output_dir=tmp_path / "out",
-        work_dir=tmp_path / "out" / "converted",
+        output_dir=output,
+        work_dir=output / "converted",
         config=get_default_config(),
         ignore_suppressions=ignore_suppressions,
     )
@@ -345,19 +353,17 @@ def test_sandboxed_version_probe_reads_no_settings_file(online, tmp_path, versio
         ),
     ],
 )
-def test_yarn_runs_in_place_when_the_system_tmpdir_is_inside_the_scanned_tree(
+def test_yarn_runs_in_place_when_no_directory_outside_the_tree_can_hold_the_copy(
     online, tmp_path, version, expected_command, rc_filename
 ):
-    """No copy can be made outside the tree, so the probe and the audit run in the
-    package directory with the repository's settings files dropped."""
-    import tempfile
-
+    """The output directory and the operator's cache directory are both inside the
+    scanned tree, so no copy can be made outside it: the probe and the audit run
+    in the package directory with the repository's settings files dropped."""
     spawns = _record(online, yarn_version=version)
-    scanner = _scanner(tmp_path)
+    repo = tmp_path / "repo"
+    scanner = _scanner(tmp_path, output_dir=repo / ".ash" / "ash_output")
     package = _repository(scanner.context.source_dir, "yarn.lock")
-    inside = scanner.context.source_dir / ".tmp-inside"
-    inside.mkdir()
-    online.setattr(tempfile, "gettempdir", lambda: str(inside))
+    online.setenv("XDG_CACHE_HOME", str(repo / ".cache-inside"))
 
     scanner.scan(target=scanner.context.source_dir, target_type="source")
 
@@ -374,6 +380,73 @@ def test_yarn_runs_in_place_when_the_system_tmpdir_is_inside_the_scanned_tree(
         assert is_no_yarnrc_name(audit_rc), audit_rc
     else:
         assert audit_rc is None
+
+
+def test_unsandboxed_yarn_copy_is_made_under_the_scan_s_output_directory(
+    online, tmp_path
+):
+    """yarn reads .yarnrc, .npmrc and .yarnrc.yml from its directory and every
+    parent. The copy used to be made under the system temporary directory, whose
+    ancestors on a shared host (/tmp) every user can write to, so a settings file
+    planted there would have redirected the audit. With the output directory
+    outside the scanned tree the copy goes there, as npm's and pnpm's do, and the
+    temporary directory is not on yarn's path."""
+    import tempfile
+
+    spawns = _record(online, yarn_version="1.22.22")
+    scanner = _scanner(tmp_path)
+    _repository(scanner.context.source_dir, "yarn.lock")
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    online.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
+
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    for spawn in _probes(spawns) + _audits(spawns):
+        cwd = spawn["cwd"]
+        assert cwd.is_relative_to(scanner.context.output_dir), cwd
+        assert not cwd.is_relative_to(system_tmp), cwd
+        assert not cwd.is_relative_to(scanner.context.source_dir), cwd
+    (audit,) = _audits(spawns)
+    assert audit["command"] == ["yarn", "audit", "--json"]
+    assert "YARN_RC_FILENAME" not in audit["env"]
+    _assert_operator_settings_untouched(audit["env"])
+
+
+def test_unsandboxed_yarn_copy_uses_the_operator_s_cache_when_the_output_is_inside(
+    online, tmp_path
+):
+    """The default output directory is inside the scanned tree, where a copy would
+    put the repository's own settings files on yarn's path. The copy then goes
+    under the operator's cache directory ($XDG_CACHE_HOME/ash), whose ancestors
+    are the operator's own, not under the system temporary directory, and yarn
+    still reads the operator's settings (no --no-default-rc, no YARN_RC_FILENAME
+    on the audit)."""
+    import tempfile
+
+    spawns = _record(online, yarn_version="1.22.22")
+    repo = tmp_path / "repo"
+    scanner = _scanner(tmp_path, output_dir=repo / ".ash" / "ash_output")
+    _repository(scanner.context.source_dir, "yarn.lock")
+    cache_home = tmp_path / "cache-home"
+    online.setenv("XDG_CACHE_HOME", str(cache_home))
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    online.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
+
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    for spawn in _probes(spawns) + _audits(spawns):
+        cwd = spawn["cwd"]
+        assert cwd.is_relative_to(cache_home / "ash"), cwd
+        assert not cwd.is_relative_to(system_tmp), cwd
+        assert not cwd.is_relative_to(repo), cwd
+    (audit,) = _audits(spawns)
+    assert audit["command"] == ["yarn", "audit", "--json"]
+    assert "YARN_RC_FILENAME" not in audit["env"]
+    assert sorted(audit["files"]) == ["package.json", "yarn.lock"]
+    # The copy is removed when the child's block ends.
+    assert not any(p.is_dir() for p in (cache_home / "ash").glob("ash-yarn-*"))
 
 
 def test_the_settings_file_yarn_is_told_to_read_is_never_one_the_package_holds(
