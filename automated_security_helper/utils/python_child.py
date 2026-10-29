@@ -147,6 +147,81 @@ _UV_OPTIONS_WITH_A_VALUE = frozenset(
     }
 )
 
+#: ``uv run`` options that take a value (uv 0.12), on top of the global ones: what
+#: the scan of ``uv run``'s own options has to step over to find where the program
+#: it runs begins.
+_UV_RUN_OPTIONS_WITH_A_VALUE = _UV_OPTIONS_WITH_A_VALUE | frozenset(
+    {
+        "--env-file",
+        "--exclude-newer",
+        "--extra",
+        "--extra-index-url",
+        "--find-links",
+        "--group",
+        "--index",
+        "--index-strategy",
+        "--index-url",
+        "--keyring-provider",
+        "--link-mode",
+        "--no-group",
+        "--only-group",
+        "--package",
+        "--python",
+        "-p",
+        "--resolution",
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+    }
+)
+
+#: The spellings a uv launcher goes by: the binary, and Windows' shims for it.
+_UV_PROGRAM_NAMES = frozenset({"uv", "uv.exe", "uv.cmd", "uv.bat"})
+
+
+def _uv_arguments(argv: Sequence[str]) -> Optional[List[str]]:
+    """The arguments after the uv program in ``argv``, or None when it is not uv.
+
+    uv is the binary by any of its names, or ASH's own interpreter running the
+    ``uv`` module (``<python> -m uv ...``), which reads the same settings.
+    """
+    if not argv:
+        return None
+    name = re.split(r"[\\/]", argv[0])[-1].lower()
+    if name in _UV_PROGRAM_NAMES:
+        return list(argv[1:])
+    if runs_module_or_code(argv):
+        options = list(argv[1:])
+        for index, arg in enumerate(options):
+            if arg == "-m":
+                if options[index + 1 : index + 2] == ["uv"]:
+                    return options[index + 2 :]
+                return None
+            if arg == "-c":
+                return None
+    return None
+
+
+def _uv_own_options(subcommand: str, rest: Sequence[str], start: int) -> List[str]:
+    """The arguments of ``rest`` from ``start`` that are uv's own, not the program's.
+
+    For ``uv run`` the program begins at the first positional argument after the
+    subcommand's own options (or at ``--``), and what follows belongs to that
+    program: its ``-p`` or ``--system`` says nothing about uv's interpreter. The
+    other subcommands run no program, so every argument is uv's.
+    """
+    if subcommand != "run":
+        return list(rest[start:])
+    own: List[str] = []
+    index = start
+    while index < len(rest):
+        arg = rest[index]
+        if arg == "--" or not arg.startswith("-"):
+            break
+        own.append(arg)
+        index += 2 if arg in _UV_RUN_OPTIONS_WITH_A_VALUE else 1
+    return own
+
 
 def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
     """The environment a uv command needs to find no project or ``.venv`` near it.
@@ -166,12 +241,9 @@ def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
     interpreter there would change which Python the tool's environment is built on.
     Neither does ``UV_NO_CONFIG`` help, which only stops uv reading ``uv.toml``.
     """
-    if not argv:
+    rest = _uv_arguments(argv)
+    if rest is None:
         return {}
-    name = re.split(r"[\\/]", argv[0])[-1].lower().removesuffix(".exe")
-    if name != "uv":
-        return {}
-    rest = list(argv[1:])
     subcommand = None
     index = 0
     while index < len(rest):
@@ -185,11 +257,14 @@ def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
         index += 1
     if subcommand in (None, "tool"):
         return {}
+    # uv's own arguments: the global options before the subcommand and the
+    # subcommand's own, never the arguments of a program ``uv run`` starts.
+    own = rest[:index] + _uv_own_options(subcommand, rest, index + 1)
     overrides: Dict[str, str] = {}
-    if not any(a == "--project" or a.startswith("--project=") for a in rest):
+    if not any(a == "--project" or a.startswith("--project=") for a in own):
         overrides["UV_NO_PROJECT"] = "1"
     names_interpreter = any(
-        a in ("--python", "-p", "--system") or a.startswith("--python=") for a in rest
+        a in ("--python", "-p", "--system") or a.startswith("--python=") for a in own
     )
     operator_chose = os.environ.get("UV_PYTHON") or os.environ.get("UV_SYSTEM_PYTHON")
     if not names_interpreter and not operator_chose:
