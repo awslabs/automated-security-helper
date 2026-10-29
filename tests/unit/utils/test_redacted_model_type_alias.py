@@ -10,7 +10,7 @@ matched the unwrapper's isinstance check on neither version. Unread, an alias
 over a number admitted a reference that pydantic then typed silently, an alias
 over a container hid its item slots, and an alias over a section was not seen
 to reach one, so the section was handed a downcast copy and its own validator
-never saw the marker. Python 3.14 re-exports typing's class, so these cells
+never saw the marker. Python 3.14 re-exports typing's class, so these tests
 pass there on the old bytes; 3.10 and 3.11 have no typing.TypeAliasType and
 skip.
 """
