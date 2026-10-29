@@ -194,6 +194,7 @@ class ReportContentEmitter:
         """
         from automated_security_helper.core.unified_metrics import coverage_shortfalls
         from automated_security_helper.utils.content_db_staleness import (
+            scanners_in_error_for_a_stale_database,
             stale_content_databases,
         )
         from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
@@ -204,6 +205,22 @@ class ReportContentEmitter:
         )
 
         results = self.get_scanner_results()
+        # A scanner recorded ERROR only because a content database the policy
+        # rejects gave a clean result did run and reach a verdict; that ERROR is
+        # the stale database, reported under its own heading with its refresh
+        # advice. The exit code and the console count such a scanner as having
+        # run (scan_incompleteness drops its row), so the summary does too:
+        # otherwise a run whose one scanner was stale read "No scanners
+        # completed" and listed it as needing attention beside the notice that
+        # already named it.
+        ran_against_stale = scanners_in_error_for_a_stale_database(self.model)
+
+        def ran(result: Dict[str, Any]) -> bool:
+            return result["status"] in ("PASSED", "FAILED") or (
+                result["status"] == "ERROR"
+                and result["scanner_name"] in ran_against_stale
+            )
+
         counts = {
             level: sum(result[level] for result in results)
             for level in ("critical", "high", "medium", "low", "info")
@@ -224,16 +241,21 @@ class ReportContentEmitter:
                 self.is_finding_actionable(vuln) for vuln in self.flat_vulns
             )
             suppressed = sum(vuln.is_suppressed for vuln in self.flat_vulns)
-        completed = sum(result["status"] in ("PASSED", "FAILED") for result in results)
+        completed = sum(ran(result) for result in results)
         skipped = sum(result["status"] == "SKIPPED" for result in results)
         unavailable = [
             result["scanner_name"]
             for result in results
-            if result["status"] not in ("PASSED", "FAILED", "SKIPPED")
+            if result["status"] != "SKIPPED" and not ran(result)
         ]
         shortfalls = coverage_shortfalls(self.model)
         stale = stale_content_databases(self.model)
-        skipped_workspace = skipped_projects(self.model)
+        # A project skipped as no-changes was examined: nothing under it changed,
+        # which is a successful no-op the workspace exit code treats as clean. Only
+        # a project skipped by an error is coverage the scan did not have.
+        skipped_workspace = [
+            entry for entry in skipped_projects(self.model) if entry.reason.is_error
+        ]
         coverage = scan_incompleteness(self.model, gate=True)
         partial_scanners = {name for name, _, _ in shortfalls}
         unavailable.extend(
@@ -320,13 +342,25 @@ class ReportContentEmitter:
         if vuln.is_suppressed:
             return False
 
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+            workspace_project_threshold,
+        )
+
         # Get scanner name
         scanner_name = vuln.scanner or "Unknown"
 
-        # Get threshold for this scanner
-        threshold, _ = ScannerStatisticsCalculator.get_scanner_threshold_info(
-            self.model, scanner_name
-        )
+        # The gate the finding's own verdict used. In a workspace the merged
+        # results carry no ash_config, so the scanner resolver answers ASH's
+        # default for every project; each project's record carries the gate
+        # threshold its verdict was judged against, and a finding attributed to
+        # a project is graded by that, as the project's verdict and the exit
+        # code graded it. A single-directory scan reads the scanner's threshold
+        # from the recorded configuration, as before.
+        threshold = workspace_project_threshold(self.model, vuln.workspace_project)
+        if threshold is None:
+            threshold, _ = ScannerStatisticsCalculator.get_scanner_threshold_info(
+                self.model, scanner_name
+            )
 
         # Get the severity of the finding
         severity = vuln.severity or "UNKNOWN"
@@ -335,22 +369,16 @@ class ReportContentEmitter:
         return self._is_severity_actionable(severity, threshold)
 
     def _is_severity_actionable(self, severity: str, threshold: str) -> bool:
-        """Helper method to determine if a severity level is actionable based on threshold."""
-        # Use the centralized calculator to determine if the finding is actionable
-        # Map the severity to counts for the calculator
-        critical = 1 if severity == "CRITICAL" else 0
-        high = 1 if severity == "HIGH" else 0
-        medium = 1 if severity == "MEDIUM" else 0
-        low = 1 if severity == "LOW" else 0
-        info = 1 if severity in ["INFO", "UNKNOWN"] else 0
+        """Whether a finding of *severity* is actionable under *threshold*.
 
-        # Use the centralized calculator
-        return (
-            ScannerStatisticsCalculator.calculate_actionable_count(
-                critical, high, medium, low, info, threshold
-            )
-            > 0
-        )
+        The gate's own comparison (``utils.severity_ladder``), which fails
+        closed on a severity it does not recognise: such a finding fails every
+        configured threshold. This method used to map an unrecognised severity
+        (and ``UNKNOWN``) onto the INFO count, or onto nothing, so a finding the
+        exit code failed the scan for was labelled "Below threshold" and hidden
+        by the default view of the HTML report.
+        """
+        return severity_fails_threshold(severity, threshold)
 
     def get_findings_overview(self) -> List[Dict[str, Any]]:
         """Get overview of all findings."""
@@ -416,8 +444,16 @@ class ReportContentEmitter:
             "code_snippet": code_snippet,
         }
 
-    def _extract_code_snippet(self, vuln: FlatVulnerability) -> str:
-        """Extract code snippet from a vulnerability."""
+    def _extract_code_snippet(self, vuln: FlatVulnerability) -> str | None:
+        """Extract code snippet from a vulnerability.
+
+        Returns text or None, never another type: the raw data is a scanner's
+        own report, and a ``snippet`` there can be an object (SARIF's
+        ``artifactContent``, with ``text`` inside) or anything else the scanner
+        wrote. The Markdown renderer passes the snippet to the shown-text
+        helpers, which take a string, so a non-string snippet raised TypeError
+        and lost the whole report.
+        """
         # Use the code_snippet field if available
         if vuln.code_snippet:
             return vuln.code_snippet
@@ -433,7 +469,7 @@ class ReportContentEmitter:
 
             # Try to find snippet in common locations
             if "snippet" in raw_data:
-                return raw_data["snippet"]
+                return _snippet_text(raw_data["snippet"])
 
             # Check in code flows
             if "codeFlows" in raw_data and raw_data["codeFlows"]:
@@ -443,12 +479,12 @@ class ReportContentEmitter:
                             if "locations" in thread and thread["locations"]:
                                 for loc in thread["locations"]:
                                     if "snippet" in loc:
-                                        return loc["snippet"]["text"]
+                                        return _snippet_text(loc["snippet"])
 
             # Check in message
             if "message" in raw_data and "text" in raw_data["message"]:
                 message_text = raw_data["message"]["text"]
-                if "```" in message_text:
+                if isinstance(message_text, str) and "```" in message_text:
                     parts = message_text.split("```")
                     if len(parts) >= 3:  # Has at least one code block
                         return parts[1]
@@ -458,3 +494,14 @@ class ReportContentEmitter:
             pass
 
         return None
+
+
+def _snippet_text(snippet: Any) -> str | None:
+    """The text of a raw ``snippet`` value: a string as it is, an object's
+    ``text`` when that is a string, otherwise None."""
+    if isinstance(snippet, str):
+        return snippet
+    if isinstance(snippet, dict):
+        text = snippet.get("text")
+        return text if isinstance(text, str) else None
+    return None
