@@ -14,6 +14,7 @@ Usage:
 import fnmatch
 import re
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -122,12 +123,32 @@ def load_community_suppressions():
     return suppressions
 
 
+def suppression_has_expired(expiration) -> bool:
+    """ASH's rule for an entry's ``expiration``: YYYY-MM-DD, expired from the
+    start of that day. A date ASH cannot read counts as expired too, because ASH
+    refuses such an entry and never applies it.
+
+    ``expiration`` was parsed from the config and never consulted, so this
+    validator kept treating a suppression as active after ASH had stopped
+    applying it, and a push went green that the CI scan then failed.
+    """
+    if not expiration:
+        return False
+    try:
+        return datetime.strptime(str(expiration), "%Y-%m-%d").date() <= date.today()
+    except ValueError:
+        return True
+
+
 def suppression_covers(suppression, rel_path, line_num, rule_id):
     """Check if one suppression entry covers a file:line:rule combo.
 
     An entry without line_start covers every line of the files its path matches.
+    An expired entry covers nothing, as it covers nothing in ASH.
     """
     if suppression.get("rule_id", "") != rule_id:
+        return False
+    if suppression_has_expired(suppression.get("expiration")):
         return False
     if not fnmatch.fnmatch(str(rel_path), suppression.get("path", "")):
         return False
