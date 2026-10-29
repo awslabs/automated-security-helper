@@ -103,6 +103,70 @@ NESTED_ARCHIVE_SUFFIXES = (
     "rpm",
 )
 
+#: Member names with no extension that scanners read, so KNOWN_SCANNABLE_EXTENSIONS,
+#: which admits members by their extension, cannot name them: container and build
+#: files (checkov, semgrep, opengrep), dependency manifests (grype, syft) and
+#: private keys (detect-secrets). Compared against the member's base name as read
+#: through ``_base_name``; a Dockerfile or Containerfile with a stage suffix
+#: (``Dockerfile.prod``) is admitted by its stem.
+SCANNABLE_MEMBER_NAMES = frozenset(
+    {
+        "Dockerfile",
+        "Containerfile",
+        "Jenkinsfile",
+        "Makefile",
+        "Pipfile",
+        "Gemfile",
+        "Rakefile",
+        "Vagrantfile",
+        "Procfile",
+        "Brewfile",
+        "Podfile",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+    }
+)
+_SCANNABLE_MEMBER_STEMS = frozenset({"Dockerfile", "Containerfile"})
+
+#: Extensions scanners read that KNOWN_SCANNABLE_EXTENSIONS leaves out: ES module
+#: and TypeScript module spellings and component files (semgrep, opengrep), C++
+#: spellings beside .cpp and .h, key and certificate material, credential and
+#: registry settings files, and dependency lockfiles and Go module files (grype,
+#: syft, the npm and pnpm audits). Compared lowercased, through _archive_suffix.
+SCANNABLE_MEMBER_SUFFIXES = frozenset(
+    {
+        "mjs",
+        "cjs",
+        "mts",
+        "cts",
+        "vue",
+        "svelte",
+        "cc",
+        "cxx",
+        "hh",
+        "hxx",
+        "pem",
+        "key",
+        "crt",
+        "cer",
+        "pub",
+        "p12",
+        "pfx",
+        "jks",
+        "npmrc",
+        "yarnrc",
+        "netrc",
+        "pypirc",
+        "lock",
+        "mod",
+        "sum",
+        "dockerfile",
+        "containerfile",
+    }
+)
+
 #: The options of ArchiveConverterConfigOptions that bound what extracting an archive
 #: can write. A config file inside the scanned tree can lower them but not raise
 #: them; see config/archive_limits.py.
@@ -693,6 +757,22 @@ def _archive_suffix(name: str) -> str:
     return base.rsplit(".", 1)[-1].lower() if "." in base else ""
 
 
+def _member_is_scannable(member_name: str) -> bool:
+    """Whether some scanner reads an archive member of this name, so extracting it
+    puts it before one: by its extension (KNOWN_SCANNABLE_EXTENSIONS and
+    SCANNABLE_MEMBER_SUFFIXES), or by its name where it has no extension
+    (SCANNABLE_MEMBER_NAMES, and a Dockerfile or Containerfile with a stage
+    suffix). Names are read through ``_base_name`` and ``_archive_suffix``, the
+    spelling authorities."""
+    suffix = _archive_suffix(member_name)
+    if suffix in KNOWN_SCANNABLE_EXTENSIONS or suffix in SCANNABLE_MEMBER_SUFFIXES:
+        return True
+    base = _base_name(member_name)
+    if base in SCANNABLE_MEMBER_NAMES:
+        return True
+    return base.split(".", 1)[0] in _SCANNABLE_MEMBER_STEMS
+
+
 def _is_archive_name(name: str) -> bool:
     """Whether a name marks a file as an archive or compressed file."""
     return _archive_suffix(name) in NESTED_ARCHIVE_SUFFIXES
@@ -791,6 +871,10 @@ _MEMBER_NOT_REGULAR = "it is not a regular file"
 _MEMBER_SPARSE_BEYOND_SIZE = (
     "it is a sparse file whose map places data beyond the size it declares, or "
     "writes the same bytes twice"
+)
+_MEMBER_SAME_PATH = (
+    "an earlier member of the archive is extracted to the same path, so one would "
+    "overwrite the other; the earlier member's content is the one scanned"
 )
 _NOT_EXTRACTED = (
     "it is an archive or compressed file of a format that is not extracted (the "
@@ -970,13 +1054,24 @@ def member_source_path(
     written for the file there, or a tree pattern such as ``vendor/**``, would
     silently leave a different file inside the archive out of the scan.
     """
+    return f"{archive}/{_member_written_path(member_name, kind)}"
+
+
+def _member_written_path(
+    member_name: str, kind: Optional[Literal["zip", "tar"]] = None
+) -> str:
+    """The path below the extraction directory that a member of this name is
+    written to, with ``/`` separators: the member's name split where the
+    extractor splits it, less its empty and ``.`` parts, a leading ``/``, and for a
+    zip its ``..`` parts, as zipfile drops them. See member_source_path. Two
+    members whose names read the same here are written to one file.
+    """
     separators = {"/", os.sep} | ({os.altsep} if os.altsep else set())
     parts = [member_name]
     for separator in separators:
         parts = [piece for part in parts for piece in part.split(separator)]
     dropped = {"", ".", ".."} if kind == "zip" else {"", "."}
-    member = "/".join(part for part in parts if part not in dropped)
-    return f"{archive}/{member}"
+    return "/".join(part for part in parts if part not in dropped)
 
 
 def _member_name_problem(member_name: str) -> Optional[str]:
@@ -1237,13 +1332,20 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         A member named as an archive or compressed file (a suffix in
         ``NESTED_ARCHIVE_SUFFIXES``, in any case) is refused as well: extraction is
         one level deep, and the refusal is what reports its contents as not scanned.
-        Members without a scannable extension are left out
+        Members no scanner reads (_member_is_scannable: not by their extension,
+        and not by their name where they have none) are left out
         without a refusal, so a refusal is only reported for a member that would
         otherwise have been extracted; each one no ignore path names is added to
         ``unscannable``, when it is given, since its archive was then not extracted
-        whole. A member an ignore path names in the scanned tree's terms
-        (member_source_path) is left out too: it is never extracted, so no scanner
-        reads it, snyk-code included, which would upload it.
+        whole. A notebook member is extracted as it is and added there too: the
+        jupyter converter reads the scan set, not this converter's output, so its
+        code cells reach no scanner as code. A member an ignore path names in the
+        scanned tree's terms (member_source_path) is left out too: it is never
+        extracted, so no scanner reads it, snyk-code included, which would upload
+        it. A member written to the same path as an earlier member of the archive
+        (``vendor//m.js`` after ``vendor/m.js``, or a tar's repeated name) is
+        refused, so neither silently overwrites the other and the archive is not
+        recorded as extracted whole.
 
         Args:
             members: The archive's members.
@@ -1261,6 +1363,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # Refusals by reason: how many were listed, and how many more were not.
         listed: Dict[str, int] = {}
         unlisted: Dict[str, int] = {}
+        # The path each admitted member is written to, as the host compares
+        # names (os.path.normcase), so a later member bound for the same file
+        # is refused rather than written over the earlier one.
+        written: Dict[str, str] = {}
         for member in members:
             kind: Optional[Literal["zip", "tar"]] = None
             if isinstance(member, tarfile.TarInfo):
@@ -1300,10 +1406,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             # Through _archive_suffix (the spelling authority), so a member's
             # trailing dot or case does not hide a scannable file.
             member_ext = _archive_suffix(member_name)
-            if not nested and member_ext not in KNOWN_SCANNABLE_EXTENSIONS:
+            if not nested and not _member_is_scannable(member_name):
                 if ignored_by is None and unscannable is not None:
                     unscannable.append(member_name)
                 continue
+            if member_ext == "ipynb" and ignored_by is None and unscannable is not None:
+                # Extracted below as it is, but not converted: the jupyter
+                # converter reads the scan set, so no scanner reads this
+                # notebook's code as code, and the archive is not whole.
+                unscannable.append(member_name)
 
             if ignored_by is not None:
                 ASH_LOGGER.debug(
@@ -1329,6 +1440,12 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 problem = content_problem
             if problem is None and nested:
                 problem = _MEMBER_NESTED_ARCHIVE
+            if problem is None:
+                destination = os.path.normcase(_member_written_path(member_name, kind))
+                if destination in written:
+                    problem = _MEMBER_SAME_PATH
+                else:
+                    written[destination] = member_name
             if problem is not None:
                 if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:
                     listed[problem] = listed.get(problem, 0) + 1
@@ -1339,9 +1456,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
             # The member's name, not the member object: its str is the repr,
             # which spells the name tar's or zip's own way beside an address.
-            ASH_LOGGER.verbose(
-                shown_on_one_line(f"Found .{member_ext} file: {member_name}")
-            )
+            label = f".{member_ext} file" if member_ext else "file"
+            ASH_LOGGER.verbose(shown_on_one_line(f"Found {label}: {member_name}"))
             filtered_members.append(member)
         for problem, count in unlisted.items():
             if archive is None:
@@ -1663,8 +1779,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     ASH_LOGGER.debug(
                         shown_on_one_line(
                             f"{archive_display} not extracted whole: no scanner "
-                            f"reads {len(unscannable)} of its members by their "
-                            "extension"
+                            f"reads {len(unscannable)} of its members as they are"
                         )
                     )
                 if (
