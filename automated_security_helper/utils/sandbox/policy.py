@@ -1138,6 +1138,12 @@ def refuse_symlinked_output_dir(source_dir: Path, output_dir: Path) -> None:
         )
 
 
+def _under_home(path: Path) -> bool:
+    """Whether ``path`` is the user's home directory or sits under it."""
+    home = Path.home()
+    return path == home or home in path.parents
+
+
 def build_scanner_policy(
     scanner_name: str,
     requirements: SandboxRequirements,
@@ -1217,7 +1223,7 @@ def build_scanner_policy(
     scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
     ash_paths, ash_import_entries = _ash_paths()
     read_only = _existing(
-        [Path(p) for p in SYSTEM_READ_PATHS]
+        [p for p in (Path(p) for p in SYSTEM_READ_PATHS) if not _under_home(p)]
         + _path_directories([source_dir, output_dir])
         + _uv_directories()
         + ash_paths
