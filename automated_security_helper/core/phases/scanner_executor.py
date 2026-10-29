@@ -567,6 +567,23 @@ def _cancel_scan_on_interrupt(executor: ThreadPoolExecutor) -> Iterator[None]:
         raise
 
 
+class ResultsProcessingFailed(Exception):
+    """One target's results could not be merged; the others were.
+
+    Raised by ``ScannerExecutor._process_each`` after every container of a
+    scanner has been offered to the processor, naming the first target whose
+    processing raised. The scanner-level handlers catch it as they catch any
+    failure and file the failure under ``target_type``, so the record lands on
+    the target that failed and never replaces a merged target's file.
+    """
+
+    def __init__(self, target_type: Optional[str], error: BaseException) -> None:
+        self.target_type = target_type
+        super().__init__(
+            f"could not process its results on {target_type}: {error_text(error)}"
+        )
+
+
 class ScannerExecutor:
     """Runs scanner tasks in parallel or sequential mode.
 
@@ -661,40 +678,36 @@ class ScannerExecutor:
         scanner_plugin: Any,
         results_list: List[ScanResultsContainer],
         aggregated_results: AshAggregatedResults,
-    ) -> Tuple[AshAggregatedResults, bool]:
-        """Process every container of one scanner; False when one could not be.
+    ) -> AshAggregatedResults:
+        """Process every container of one scanner, then raise for one that could not be.
 
-        Each container is processed on its own, so a raise while merging one
-        target's results (a report the processor cannot read) leaves the
-        scanner's other targets' containers processed. Before this the raise
-        left the loop, dropped the remaining containers, and the scanner-level
-        handler then filed one failure container with no target, whose
-        per-target results file is written under "source" and so replaced the
-        source target's. The failure is logged here; the caller keeps the
-        scanner out of completed_scanners, so the completeness check records
-        it, and nothing overwrites a target's file.
+        Each container is offered to the processor on its own, so a raise while
+        merging one target's results (a report the processor cannot read)
+        leaves the scanner's other targets' containers merged. Before this the
+        raise left the loop, dropped the remaining containers, and the
+        scanner-level handler then filed one failure container with no target,
+        whose per-target results file is written under "source" and so replaced
+        the source target's. The first failure is re-raised after the loop as
+        :class:`ResultsProcessingFailed`, which names its target: the
+        scanner-level handler logs it as it logs any failure and files the
+        failure under that target, so nothing overwrites a merged target's file
+        and the scanner stays out of completed_scanners.
         """
-        all_processed = True
+        failed: Optional[ResultsProcessingFailed] = None
         for container in results_list:
             try:
                 aggregated_results = self._process_results_fn(
                     container, aggregated_results
                 )
             except Exception as process_error:
-                all_processed = False
-                environment_values = self._plugin_environment_values(scanner_plugin)
-                ASH_LOGGER.error(
-                    f"Failed to process {scanner_name}'s results on "
-                    f"{container.target_type}: "
-                    f"{error_text(process_error, environment_values)}",
-                    extra=NO_MARKUP,
-                )
-                ASH_LOGGER.debug(
-                    f"Stack trace for {scanner_name} results processing failure:\n"
-                    f"{traceback_text(values=environment_values)}",
-                    extra=NO_MARKUP,
-                )
-        return aggregated_results, all_processed
+                if failed is None:
+                    failed = ResultsProcessingFailed(
+                        getattr(container, "target_type", None), process_error
+                    )
+                    failed.__cause__ = process_error
+        if failed is not None:
+            raise failed
+        return aggregated_results
 
     def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> list:
         """Hold the scanner's content databases to their declared age bounds.
@@ -1872,17 +1885,13 @@ class ScannerExecutor:
                         description=f"[red]({escape_markup(scanner_name)}) Failed: returned None results",
                     )
                 else:
-                    aggregated_results, all_processed = self._process_each(
+                    aggregated_results = self._process_each(
                         scanner_name, scanner_plugin, results_list, aggregated_results
                     )
 
-                    if (
-                        scanner_succeeded
-                        and all_processed
-                        and all(
-                            getattr(c, "status", None) != ScannerStatus.ERROR
-                            for c in results_list
-                        )
+                    if scanner_succeeded and all(
+                        getattr(c, "status", None) != ScannerStatus.ERROR
+                        for c in results_list
                     ):
                         ASH_LOGGER.debug(
                             f"Appending {scanner_plugin.__class__.__name__} to completed_scanners"
@@ -1955,6 +1964,11 @@ class ScannerExecutor:
                     exception=e,
                     values=environment_values,
                 )
+                # A results-processing failure names its target, so its record
+                # lands there and never replaces a merged target's file.
+                failed_target = getattr(e, "target_type", None)
+                if failed_target is not None:
+                    failure_container.target_type = failed_target
                 failure_container.raw_results = {
                     "errors": [
                         home_as_tilde(f"Scanner {scanner_name} failed: {described}")
@@ -2142,17 +2156,13 @@ class ScannerExecutor:
                             (t[1] for t in self.scanner_tasks if t[0] == scanner_name),
                             None,
                         )
-                        aggregated_results, all_processed = self._process_each(
+                        aggregated_results = self._process_each(
                             scanner_name, plugin_inst, results_list, aggregated_results
                         )
 
-                        if (
-                            scanner_succeeded
-                            and all_processed
-                            and all(
-                                getattr(c, "status", None) != ScannerStatus.ERROR
-                                for c in results_list
-                            )
+                        if scanner_succeeded and all(
+                            getattr(c, "status", None) != ScannerStatus.ERROR
+                            for c in results_list
                         ):
                             if plugin_inst is not None:
                                 ASH_LOGGER.debug(
@@ -2245,6 +2255,11 @@ class ScannerExecutor:
                         exception=e,
                         values=environment_values,
                     )
+                    # See run_sequential: a results-processing failure names
+                    # its target, so its record lands there.
+                    failed_target = getattr(e, "target_type", None)
+                    if failed_target is not None:
+                        failure_container.target_type = failed_target
                     failure_container.raw_results = {
                         "errors": [
                             home_as_tilde(
