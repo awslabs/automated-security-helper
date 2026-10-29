@@ -77,7 +77,10 @@ Failure modes and known limitations
   ``must_exist=False`` usable, but it means containment for a nonexistent path
   is decided lexically after resolution rather than against real directories.
 * Errors are returned, not raised. Callers are expected to turn them into exit
-  code 2 and should not assume a raised exception on rejection.
+  code 2 and should not assume a raised exception on rejection. That includes a
+  path ``resolve()`` cannot follow: a symlink loop in an intermediate component
+  raises ``RuntimeError`` on CPython 3.10-3.12, which is returned as a
+  ``SYMLINK`` rejection rather than propagated.
 """
 
 from __future__ import annotations
@@ -206,7 +209,20 @@ def validate_contained_path(
             "the root must be expressed without traversing upward",
         )
 
-    resolved_root = Path(root).resolve()
+    # resolve() raises RuntimeError on CPython 3.10-3.12 when a component on the
+    # way is a symlink loop (and OSError for a few other unreadable shapes). The
+    # module promises a returned rejection, never a raised one: the workspace
+    # resolver catches only OSError and ValueError around this call.
+    try:
+        resolved_root = Path(root).resolve()
+    except (RuntimeError, OSError):
+        return _reject(
+            PathContainmentViolation.SYMLINK,
+            root,
+            root,
+            f"root '{_display(root)}' cannot be resolved: a component on the way "
+            "to it is a symlink loop or cannot be read",
+        )
 
     # Joining handles relative and absolute candidates without a branch: an
     # absolute candidate discards the root and is then held to the same
@@ -235,7 +251,16 @@ def validate_contained_path(
             "project directories must be real directories",
         )
 
-    resolved = joined.resolve()
+    try:
+        resolved = joined.resolve()
+    except (RuntimeError, OSError):
+        return _reject(
+            PathContainmentViolation.SYMLINK,
+            candidate,
+            root,
+            f"'{_display(candidate)}' cannot be resolved: a component on the way "
+            "to it is a symlink loop or cannot be read",
+        )
 
     if not resolved.is_relative_to(resolved_root):
         return _reject(
