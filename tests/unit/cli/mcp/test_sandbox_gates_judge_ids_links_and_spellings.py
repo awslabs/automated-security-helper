@@ -37,6 +37,7 @@ from automated_security_helper.cli.mcp.sandbox import (
     validate_config_input,
     validate_scan_target_in_sandbox,
 )
+from automated_security_helper.cli.mcp.session_paths import hidden_deleting_name
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
@@ -86,7 +87,7 @@ class TestSessionSandboxRefusesTheIdsEveryOtherBuilderRefuses:
             "tab\there",
             "x" * 300,
             "has space",
-            ".gone.deleting-123e4567-e89b-42d3-a456-426614174000",
+            hidden_deleting_name("gone"),
         ],
         ids=["control-char", "too-long", "space", "hidden-delete-shape"],
     )
