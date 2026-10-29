@@ -357,7 +357,7 @@ class TestTheBashEntrypoint:
 
         assert "--build-context" not in argv, argv
         assert not any(a.startswith("BASE_IMAGE=") for a in argv), argv
-        assert "local store" in proc.stdout, proc.stdout
+        assert "local store" in proc.stderr, proc.stderr
 
     def test_unset_changes_nothing(self, tmp_path):
         proc, argv = _ash_build(tmp_path, "nerdctl", None)

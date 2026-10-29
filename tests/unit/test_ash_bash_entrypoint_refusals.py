@@ -955,7 +955,7 @@ def test_operator_values_in_progress_lines_are_shown_not_obeyed(
         return
     assert calls, output
     if case == "layout-runner-name":
-        assert "Base image expected in $'ok\\E[31mrunner'" in result.stdout, output
+        assert "Base image expected in $'ok\\E[31mrunner'" in result.stderr, output
 
 
 def test_a_printable_value_is_shown_as_typed(run_ash, bare_path):
