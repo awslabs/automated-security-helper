@@ -43,6 +43,8 @@ from automated_security_helper.core.resource_management.scan_tracking import (
     get_scan_results,
 )
 
+pytestmark = pytest.mark.integration
+
 # The buckets extract_findings_summary counts into; anything else is dropped.
 SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "info", "suppressed")
 

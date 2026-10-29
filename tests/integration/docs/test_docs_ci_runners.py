@@ -48,7 +48,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.ci_runner
+pytestmark = [pytest.mark.e2e, pytest.mark.ci_runner]
 
 HERE = Path(__file__).resolve().parent
 PACKAGE = "_ash_ci_runners"

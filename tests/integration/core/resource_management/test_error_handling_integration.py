@@ -35,6 +35,8 @@ from automated_security_helper.core.resource_management.error_handling import (
     create_error_response,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def test_directory(tmp_path):

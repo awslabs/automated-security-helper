@@ -213,7 +213,7 @@ def delivered_source_server(tmp_path_factory) -> Iterator[Dict[str, Any]]:
     assert not errors, f"Server thread raised: {errors!r}"
 
 
-@pytest.mark.integration
+@pytest.mark.e2e
 @pytest.mark.slow
 def test_uploaded_source_is_scanned_and_reports_its_own_findings(
     delivered_source_server,

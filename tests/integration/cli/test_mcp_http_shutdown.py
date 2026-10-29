@@ -70,7 +70,10 @@ from automated_security_helper.core.previous_results import (
 from tests.utils.helpers import checkout_env
 from tests.utils.processes import process_running
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals"),
+]
 
 #: SIGHUP where the platform has one. Windows has none, and a bare
 #: ``signal.SIGHUP`` at module level raised AttributeError at collection there,

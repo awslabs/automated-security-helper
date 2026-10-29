@@ -60,6 +60,8 @@ import pytest
 
 from tests.utils.helpers import checkout_env
 
+pytestmark = pytest.mark.e2e
+
 # Long enough for a cold import of ASH under a wide parallel run.
 STARTUP_TIMEOUT_SECONDS = 180
 # A cancelled scanner's child gets SANDBOX_STOP_GRACE_SECONDS (10s) after SIGTERM.

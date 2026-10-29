@@ -9,6 +9,8 @@ import json
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.core.enums import ExecutionStrategy
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def temp_source_dir():
