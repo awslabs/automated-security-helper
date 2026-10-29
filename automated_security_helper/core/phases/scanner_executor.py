@@ -70,7 +70,10 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
 )
 from automated_security_helper.utils.tool_config_dir import tool_config_scope
-from automated_security_helper.utils.severity_ladder import resolve_scanner_threshold
+from automated_security_helper.utils.severity_ladder import (
+    resolve_missing_levels,
+    resolve_scanner_threshold,
+)
 
 _ResultsFn = Callable[
     [ScanResultsContainer, AshAggregatedResults], AshAggregatedResults
@@ -1186,6 +1189,16 @@ class ScannerExecutor:
                                     f"{target_type} that holds no SARIF run, so there is "
                                     "nothing to grade",
                                 )
+                            # A result that states no level is read at the level
+                            # SARIF gives it (the rule's default, else warning)
+                            # before this row's counts and status are graded.
+                            # ScanResultProcessor resolves the same levels when
+                            # the report enters the results, so the per-target
+                            # row and the summary read one severity for one
+                            # finding; counted first, a level-less result read as
+                            # info here and as MEDIUM in ash.sarif. Idempotent: a
+                            # result with a level keeps it.
+                            resolve_missing_levels(raw_results)
                             raw_results = sanitize_sarif_paths(
                                 raw_results, self.plugin_context.source_dir
                             )
