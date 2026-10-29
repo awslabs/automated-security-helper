@@ -1551,12 +1551,15 @@ class TestThePowerShellEntrypoint:
     def test_a_checkout_that_is_itself_a_link_is_not_a_link_in_the_tree(
         self, pwsh, tmp_path
     ):
-        """The twin of the ./ash cell of the same name: the operator works in a link to
-        the checkout, with a shared config beside the checkout. The ".." after the
-        checkout's own link leaves the checkout, so the file is mounted, neither
-        refused nor marked as the repository's. ./ash tests the link's parent against
-        the trees and this wrapper tests the link's own path for a place strictly
-        below one; the two answer alike."""
+        """The twin of two ./ash tests in
+        tests/unit/test_the_container_wrappers_carry_the_operators_config.py,
+        test_a_checkout_that_is_itself_a_link_is_not_refused_as_a_link_in_the_tree
+        and test_a_checkout_that_is_itself_a_link_does_not_mark_a_file_beside_it_as_the_repositorys:
+        the operator works in a link to the checkout, with a shared config beside the
+        checkout. The ".." after the checkout's own link leaves the checkout, so the
+        file is mounted, neither refused nor marked as the repository's. ./ash tests
+        the link's parent against the trees and this wrapper tests the link's own path
+        for a place strictly below one; the two answer alike."""
         if os.name == "nt":
             pytest.skip("creating a symbolic link needs a privilege on Windows")
         root = tmp_path / "set"
@@ -2195,14 +2198,18 @@ class TestThePowerShellConfigCarryAsText:
         # Each add sits directly inside the block of the condition on the mark: the
         # exact flattened sequence, so an add in an else arm, or after the closing
         # brace, does not match.
-        assert (
-            "if ($envConfigMarked) { $envConfigGroups.Add("
-            "@('--config-file-from-scanned-repository', $envConfigInner)) }"
-        ) in text
-        assert (
-            "if ($envConfigMarked) { $envConfigGroups.Add("
-            "@('--config-from-scanned-repository')) }"
-        ) in text
+        host_add = (
+            "$envConfigGroups.Add(@('--config-file-from-scanned-repository', "
+            "$envConfigInner))"
+        )
+        config_add = "$envConfigGroups.Add(@('--config-from-scanned-repository'))"
+        assert f"if ($envConfigMarked) {{ {host_add} }}" in text
+        assert f"if ($envConfigMarked) {{ {config_add} }}" in text
+        # And each add appears once in the whole text: the guarded copy. A second,
+        # unguarded copy placed before it would keep the order above and the guarded
+        # sequence intact while marking every file given without -Config.
+        assert text.count(host_add) == 1, "the host mark is added more than once"
+        assert text.count(config_add) == 1, "the config mark is added more than once"
 
     def test_a_name_the_path_functions_throw_on_is_refused_as_a_missing_file(self):
         """Windows PowerShell 5.1 throws from the path functions on a quote or a
