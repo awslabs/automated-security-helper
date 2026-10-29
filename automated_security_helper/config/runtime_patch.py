@@ -245,37 +245,48 @@ def _match_segments(pattern_segs: List[str], path_segs: List[str]) -> bool:
       * `*` alone matches exactly one whole segment.
       * Otherwise the segment is fnmatch'd (so `aws_*` matches `aws_region`).
     """
-    # Standard glob match with `**` support, implemented as a small DP.
-    # Use a recursive matcher with memoization on (i, j) indices.
-    cache: Dict[tuple, bool] = {}
+    # Standard glob match with `**` support, as a forward pass over the
+    # pattern: `positions` is every index of `path_segs` the pattern's
+    # segments so far can have consumed up to. Iterative on purpose: the
+    # recursive matcher this replaces ran one frame per segment and raised
+    # RecursionError for a pointer with thousands of segments, which fits in
+    # the 64 KiB a client may send, escaping the RuntimePatchDeniedError
+    # contract with an uncaught exception.
+    return _glob_positions(pattern_segs, path_segs, stop_at_end=False)
 
-    def helper(i: int, j: int) -> bool:
-        if (i, j) in cache:
-            return cache[(i, j)]
-        if i == len(pattern_segs):
-            result = j == len(path_segs)
-        elif pattern_segs[i] == "**":
-            # zero or more segments
-            if helper(i + 1, j):
-                result = True
-            elif j < len(path_segs) and helper(i, j + 1):
-                result = True
-            else:
-                result = False
-        elif j == len(path_segs):
-            result = False
-        elif pattern_segs[i] == "*":
-            result = helper(i + 1, j + 1)
+
+def _glob_positions(
+    pattern_segs: List[str], path_segs: List[str], stop_at_end: bool
+) -> bool:
+    """The forward glob pass shared by `_match_segments` and
+    `_pattern_reaches_into`.
+
+    With `stop_at_end` False the pattern must consume exactly the path: True
+    when, after every pattern segment, the path's end is a reachable position.
+    With it True the pattern may run past the path: True as soon as the path's
+    end is reachable, however many pattern segments are left (the pattern
+    names the location or one beneath it).
+    """
+    end = len(path_segs)
+    positions = {0}
+    for segment in pattern_segs:
+        if stop_at_end and end in positions:
+            return True
+        if segment == "**":
+            # zero or more segments: every position at or after one reached.
+            positions = set(range(min(positions), end + 1))
+        elif segment == "*":
+            positions = {j + 1 for j in positions if j < end}
         else:
             # Use fnmatch to support partial-segment globs like `aws_*`.
-            if fnmatch.fnmatchcase(path_segs[j], pattern_segs[i]):
-                result = helper(i + 1, j + 1)
-            else:
-                result = False
-        cache[(i, j)] = result
-        return result
-
-    return helper(0, 0)
+            positions = {
+                j + 1
+                for j in positions
+                if j < end and fnmatch.fnmatchcase(path_segs[j], segment)
+            }
+        if not positions:
+            return False
+    return end in positions
 
 
 def _pattern_reaches_into(pattern_segs: List[str], subtree_segs: List[str]) -> bool:
@@ -287,38 +298,14 @@ def _pattern_reaches_into(pattern_segs: List[str], subtree_segs: List[str]) -> b
     so an entry naming a descendant never fired for a write at an ancestor.
 
     `subtree_segs` is a concrete path, not a pattern; only `pattern_segs` is
-    globbed. The two base cases are the whole difference from
-    `_match_segments`.
+    globbed. The one difference from `_match_segments` is the end condition:
+    once the pattern has consumed every segment of the concrete path it names
+    this location or one beneath it, either way a location the write at
+    `subtree_segs` reaches, however many pattern segments are left; a pattern
+    exhausted while the path continues names a strict ancestor, outside the
+    path's subtree. Iterative like `_match_segments`, and for the same reason.
     """
-    cache: Dict[tuple, bool] = {}
-
-    def helper(i: int, j: int) -> bool:
-        if j == len(subtree_segs):
-            # The pattern consumed every segment of the concrete path, so it
-            # names this location or one beneath it. Either way it names a
-            # location the write at `subtree_segs` reaches.
-            return True
-        if (i, j) in cache:
-            return cache[(i, j)]
-        if i == len(pattern_segs):
-            # Pattern exhausted while the path continues: the pattern names a
-            # strict ancestor of the path, which is outside the path's subtree.
-            result = False
-        elif pattern_segs[i] == "**":
-            # zero or more segments
-            result = helper(i + 1, j) or helper(i, j + 1)
-        elif pattern_segs[i] == "*":
-            result = helper(i + 1, j + 1)
-        else:
-            # Use fnmatch to support partial-segment globs like `aws_*`.
-            if fnmatch.fnmatchcase(subtree_segs[j], pattern_segs[i]):
-                result = helper(i + 1, j + 1)
-            else:
-                result = False
-        cache[(i, j)] = result
-        return result
-
-    return helper(0, 0)
+    return _glob_positions(pattern_segs, subtree_segs, stop_at_end=True)
 
 
 def _path_matches(pattern: str, path: str) -> bool:
