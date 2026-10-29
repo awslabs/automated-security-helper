@@ -931,7 +931,13 @@ class ScannerExecutor:
                         ASH_LOGGER.warning(
                             f"{scanner_config_name} is not enabled!", extra=NO_MARKUP
                         )
-                except Exception as e:
+                # SystemExit too: a scanner's in-process code that calls sys.exit
+                # (a tool run as a library, a plugin's own guard) is that scanner's
+                # failure, graded like any other raise. Left to escape, it ended
+                # the whole scan with no scanner recorded and the process exiting
+                # with the plugin's code. A cancel (ScanCancelled) and a keyboard
+                # interrupt are not Exceptions and still end the scan.
+                except (Exception, SystemExit) as e:
                     # Redacted with the config's environment values and the
                     # plugin's own: the exception can name an option either read
                     # from the environment, and this text goes to ash.log, the
@@ -1638,7 +1644,12 @@ class ScannerExecutor:
         except ScanCancelled:
             self._cancel_seen.set()
             raise
-        except Exception as e:
+        # SystemExit for the reason the per-target handler gives: a plugin that
+        # calls sys.exit is one scanner's failure, not the end of the scan. In
+        # parallel mode an escaping SystemExit made the pool run every queued
+        # scanner to completion and then exit the process with the plugin's code,
+        # recording none of their results.
+        except (Exception, SystemExit) as e:
             # Redacted as the per-target handler redacts: see
             # _plugin_environment_values.
             environment_values = self._plugin_environment_values(scanner_plugin)
