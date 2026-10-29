@@ -347,9 +347,12 @@ _TOOL_ASH_PATTERN = re.compile(
 )
 # A bare `[tool]` table header, and an `ash` key (`ash = {...}` or `ash.x = ...`)
 # on a line of its own; the key counts only between a [tool] header and the next
-# header, where TOML puts it under tool.
+# header, where TOML puts it under tool. The text is decoded with no newline
+# translation, so a CRLF file's header line ends in a carriage return before
+# the `$`; the trailing class admits it, where the other two patterns need no
+# such care because they do not anchor at the line's end.
 _TOOL_TABLE_HEADER = re.compile(
-    r"^[ \t]*\[[ \t]*tool[ \t]*\][ \t]*(?:#.*)?$", re.MULTILINE
+    r"^[ \t]*\[[ \t]*tool[ \t]*\][ \t]*(?:#.*)?[ \t\r]*$", re.MULTILINE
 )
 _ANY_TABLE_HEADER = re.compile(r"^[ \t]*\[", re.MULTILINE)
 _ASH_KEY_LINE = re.compile(r"^[ \t]*ash[ \t]*[.=]", re.MULTILINE)

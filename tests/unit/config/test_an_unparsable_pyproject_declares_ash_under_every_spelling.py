@@ -31,14 +31,21 @@ pytestmark = pytest.mark.unit
 
 ARRAY_OF_TABLES = '[[tool.ash.scanners]]\nname = "bandit"\nbroken = \n'
 UNDER_TOOL_TABLE = '[tool]\nash = { severity_threshold = "HIGH"\n'
+# The same file as a Windows editor writes it: the text is decoded with no
+# newline translation, so each line ends in a carriage return before the
+# line feed, the header line included.
+UNDER_TOOL_TABLE_CRLF = UNDER_TOOL_TABLE.replace("\n", "\r\n")
 
 
 @pytest.mark.parametrize(
-    "text", [ARRAY_OF_TABLES, UNDER_TOOL_TABLE], ids=["array-of-tables", "tool-table"]
+    "text",
+    [ARRAY_OF_TABLES, UNDER_TOOL_TABLE, UNDER_TOOL_TABLE_CRLF],
+    ids=["array-of-tables", "tool-table", "tool-table-crlf"],
 )
 def test_an_unparsable_declaration_is_refused(tmp_path: Path, text: str) -> None:
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(text, encoding="utf-8")
+    # Bytes, so the test's own line endings reach the file as written.
+    pyproject.write_bytes(text.encode("utf-8"))
 
     with pytest.raises(ASHConfigUnparsedError, match="could not be parsed"):
         pyproject_has_ash_table(pyproject)
