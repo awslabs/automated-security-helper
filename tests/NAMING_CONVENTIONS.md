@@ -105,6 +105,17 @@ prints a `::error` annotation with the same text. The published JUnit report lis
 failed test for such a run, because pytest has no public hook for a plugin to add one:
 the step log and the annotation are the record.
 
+A test module that a test writes out and runs in a child pytest carries a tier marker
+when the suite's own `tests/conftest.py` loads it, because the collection hook refuses
+it otherwise; put the marker in the module's source with a one-line comment. A child
+that runs under its own rootdir and conftest is never seen by the hook and needs no
+marker. A child run both ways keeps the marker and has its own conftest register it
+with `config.addinivalue_line("markers", ...)`, as `pytest.ini` does for the suite, so
+nothing has to suppress an unknown-mark warning. See
+`tests/unit/test_environment_assertions_print_no_values.py` for a child run both ways and
+`tests/unit/test_a_leaked_run_scope_fails_its_test.py` for children the suite's conftest
+loads.
+
 There is no directory default. A test with no tier marker, or with more than one (a
 module-level `integration` and a function-level `unit` count as two), makes collection
 refuse the whole session with a usage error that lists the first offenders, so nothing
