@@ -275,11 +275,17 @@ def _anchored_path_option(value: Any, base_dir: Path) -> Any:
 
 
 def _anchored_file_entry(value: Any, base_dir: Path) -> Any:
-    """A ``file://<path>[::<function>]`` entry with a relative path made absolute."""
+    """A ``file://<path>[::<function>]`` entry with a relative path made absolute.
+
+    detect-secrets reads the path as written, so a ``$`` in it is a character
+    of the file's name and the path is anchored like a scanner's path option;
+    left as written, a relative path would be read from the tool's working
+    directory, the scanned tree.
+    """
     if not isinstance(value, str) or not value.startswith(_FILE_SCHEME):
         return value
     file_part, separator, function = value[len(_FILE_SCHEME) :].partition("::")
-    anchored = anchored_path(file_part, base_dir)
+    anchored = anchored_path(file_part, base_dir, expands_variables=False)
     if anchored == file_part:
         return value
     return f"{_FILE_SCHEME}{anchored}{separator}{function}"

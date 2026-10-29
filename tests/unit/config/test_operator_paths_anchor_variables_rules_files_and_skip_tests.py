@@ -44,6 +44,34 @@ def test_a_scanner_path_option_holding_a_dollar_is_anchored(tmp_path):
     )
 
 
+def test_a_detect_secrets_file_entry_holding_a_dollar_is_anchored(tmp_path):
+    """detect-secrets reads a ``file://<path>`` plugin entry as written, so a
+    ``$`` in the path is a character of the file's name, and the relative path
+    is anchored like a scanner's path option; left as written it would be read
+    from the tool's working directory, the scanned tree. The ``::function``
+    suffix rides along unchanged."""
+    document = {
+        "scanners": {
+            "detect-secrets": {
+                "options": {
+                    "scan_settings": {
+                        "plugins_used": [
+                            {"name": "custom", "path": "file://plugins/$X/p.py::f"}
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    anchored = anchor_relative_paths(document, tmp_path)
+
+    entry = anchored["scanners"]["detect-secrets"]["options"]["scan_settings"][
+        "plugins_used"
+    ][0]
+    assert entry["path"] == f"file://{_anchored(tmp_path, 'plugins/$X/p.py')}::f"
+
+
 def test_a_sandbox_read_path_holding_a_dollar_is_left_for_the_sandbox(tmp_path):
     document = {"sandbox": {"extra_read_paths": ["$HOME/ops"]}}
 
