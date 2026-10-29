@@ -27,8 +27,10 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    checkov_scanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-    _IGNORE_SKIP_PATH_CHAR_BUDGET,
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
@@ -100,7 +102,10 @@ def test_ignored_files_are_compiled_once_and_bounded(tmp_path):
     output.mkdir(parents=True)
     source.mkdir()
     many = [f"^{source.as_posix()}/gen/file-{i:05d}[.]tf$" for i in range(3000)]
-    assert sum(len(v) + 13 for v in many) > _IGNORE_SKIP_PATH_CHAR_BUDGET
+    # Read through the module so a base without the budget fails this test alone
+    # instead of failing the whole file's collection.
+    budget = checkov_scanner._IGNORE_SKIP_PATH_CHAR_BUDGET
+    assert sum(len(v) + 13 for v in many) > budget
     compiles: list = []
     real = _module_finder_compiles
 
@@ -121,7 +126,7 @@ def test_ignored_files_are_compiled_once_and_bounded(tmp_path):
 
     passed = [v for v in _skip_values(argv) if "/gen/file-" in v]
     assert 0 < len(passed) < len(many), len(passed)
-    assert sum(len(v) + 13 for v in passed) <= _IGNORE_SKIP_PATH_CHAR_BUDGET
+    assert sum(len(v) + 13 for v in passed) <= budget
     assert len(compiles) <= 2, f"{len(compiles)} compiles for {len(many)} values"
     assert passed == many[: len(passed)]
 

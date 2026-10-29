@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import pytest
 
+from automated_security_helper.utils import cfn_template_model
 from automated_security_helper.utils.cfn_template_model import (
-    MERGED_MAPPING_PAIRS_BOUND,
     TemplateConstructorError,
     _could_be_a_template,
     get_model_from_template_text,
@@ -65,7 +65,9 @@ def test_a_merge_within_the_bound_is_still_merged():
     model = get_model_from_template_text(text, "merged.yaml")
     assert model is not None
     assert model.Resources["B"].Type == "AWS::S3::Bucket"
-    assert MERGED_MAPPING_PAIRS_BOUND >= 10_000
+    # Read through the module so a base without the bound fails this test alone
+    # instead of failing the whole file's collection.
+    assert cfn_template_model.MERGED_MAPPING_PAIRS_BOUND >= 10_000
 
 
 def test_a_bom_json_template_indented_with_tabs_is_modeled():

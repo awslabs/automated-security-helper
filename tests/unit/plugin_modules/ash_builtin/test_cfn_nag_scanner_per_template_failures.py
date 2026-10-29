@@ -35,8 +35,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScanner,
     CfnNagScannerConfig,
     _as_cfn_nag_renders,
-    _cfn_nag_sarif_text,
-    _rule_exception_lines,
 )
 
 pytestmark = pytest.mark.unit
@@ -128,10 +126,10 @@ def subprocess_double():
 
 
 def test_a_diagnostic_line_before_the_sarif_document_is_dropped():
-    text, dropped = _cfn_nag_sarif_text(SPCM_DIAGNOSTIC + _sarif())
+    text, dropped = cfn_nag_scanner._cfn_nag_sarif_text(SPCM_DIAGNOSTIC + _sarif())
     assert dropped == 1
     assert json.loads(text)["version"] == "2.1.0"
-    assert _cfn_nag_sarif_text(_sarif()) == (_sarif(), 0)
+    assert cfn_nag_scanner._cfn_nag_sarif_text(_sarif()) == (_sarif(), 0)
 
 
 def test_findings_survive_a_diagnostic_line_on_stdout(
@@ -151,9 +149,12 @@ def test_findings_survive_a_diagnostic_line_on_stdout(
 
 
 def test_rule_exception_lines_name_a_ruby_exception():
-    assert len(_rule_exception_lines(ISOLATED_RULE_STDERR)) == 2
-    assert _rule_exception_lines("warning: constant ::Fixnum is deprecated\n") == []
-    assert _rule_exception_lines("") == []
+    # Read through the module so a base without the helper fails this test alone
+    # instead of failing the whole file's collection.
+    lines = cfn_nag_scanner._rule_exception_lines
+    assert len(lines(ISOLATED_RULE_STDERR)) == 2
+    assert lines("warning: constant ::Fixnum is deprecated\n") == []
+    assert lines("") == []
 
 
 def test_a_rule_that_raised_marks_the_template_unevaluated_and_keeps_findings(
@@ -224,10 +225,16 @@ def test_a_template_that_cannot_be_decoded_is_named_not_dropped(
 
 
 def test_errors_are_reset_for_each_scan_call(scanner, deps_available):
+    """A line recorded by an earlier scan() call is not carried into the next.
+
+    The empty work directory makes the second scan record its own "Target directory
+    ... is empty" line (the base class appends it to errors), so the assertion is
+    that the stale line is gone, not that the list is empty.
+    """
     scanner.errors = ["the source target's line"]
     empty = scanner.context.work_dir
     scanner.scan(target=empty, target_type="converted")
-    assert scanner.errors == []
+    assert "the source target's line" not in scanner.errors, scanner.errors
 
 
 @pytest.mark.skipif(os.name != "posix", reason="symbolic links on POSIX")

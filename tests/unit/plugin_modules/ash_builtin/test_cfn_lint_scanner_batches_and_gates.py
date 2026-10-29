@@ -36,7 +36,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scan
     CfnLintScanner,
     CfnLintScannerConfig,
     CfnLintScannerConfigOptions,
-    _one_template_can_fail_the_run,
 )
 from automated_security_helper.utils.config_trust import record_provenance
 
@@ -141,10 +140,13 @@ def _run(scanner: CfnLintScanner, fake, repo: Path):
 
 
 def test_one_template_can_fail_the_run_is_false_for_timeouts_and_unstarted():
-    assert _one_template_can_fail_the_run({"returncode": 32}) is True
-    assert _one_template_can_fail_the_run({"timed_out": True}) is False
-    assert _one_template_can_fail_the_run({"error": "no such file"}) is False
-    assert _one_template_can_fail_the_run({}) is False
+    # Read through the module so a base without the helper fails this test alone
+    # instead of failing the whole file's collection.
+    can_fail = cfn_lint_scanner._one_template_can_fail_the_run
+    assert can_fail({"returncode": 32}) is True
+    assert can_fail({"timed_out": True}) is False
+    assert can_fail({"error": "no such file"}) is False
+    assert can_fail({}) is False
 
 
 def test_a_batch_failed_by_one_template_is_rerun_one_template_at_a_time(
@@ -180,7 +182,15 @@ def test_a_timeout_stops_the_remaining_invocations(ash_temp_path):
     assert len(calls) == 1, "every batch after the timeout was still started"
     assert scanner.targets_attempted == 3
     assert scanner.targets_failed == 3
-    assert sum("not started" in e for e in scanner.errors) == 2
+    # Each failure is recorded twice: once as "<templates>: <reason>" and once by
+    # the ERROR log line (the base class appends ERROR logs to self.errors), so the
+    # templates are read from the first form.
+    not_started = {
+        e.split(":", 1)[0].rsplit("/", 1)[-1]
+        for e in scanner.errors
+        if "not started" in e and not e.startswith("(cfn-lint)")
+    }
+    assert not_started == {"b.yaml", "c.yaml"}, scanner.errors
 
 
 def test_honored_template_ignores_merge_with_the_operators_ignore_checks(
@@ -209,14 +219,16 @@ def test_an_operators_cfnlintrc_ash_cannot_read_stops_the_scan(ash_temp_path, tm
 
 
 def test_errors_are_reset_for_each_scan_call(ash_temp_path):
-    repo = ash_temp_path / "repo"
-    repo.mkdir()
+    """A line recorded by an earlier scan() call is not carried into the next.
+
+    The second scan has a template and a clean cfn-lint run, so the only lines it
+    may record are its own; the stale one must be gone.
+    """
+    repo = _repo(ash_temp_path, "a.yaml")
     scanner = _scanner(repo)
     scanner.errors = ["the source target's line"]
-    with patch.object(CfnLintScanner, "_run_subprocess") as run:
-        scanner.scan(target=repo, target_type="source")
-    run.assert_not_called()
-    assert scanner.errors == []
+    _run(scanner, RegionFaultCfnLint("no-such-template"), repo)
+    assert "the source target's line" not in scanner.errors, scanner.errors
 
 
 def test_an_already_missing_dependency_sends_no_version_probe(ash_temp_path):

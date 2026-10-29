@@ -19,10 +19,12 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    checkov_scanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
     CheckovScannerConfig,
-    _known_ignore_skip_pattern,
     _module_finder_compiles,
 )
 
@@ -84,7 +86,7 @@ def test_the_known_directories_themselves_are_still_skipped(test_plugin_context,
 
 def test_every_known_ignore_path_is_anchored_to_a_path_component():
     for entry in KNOWN_IGNORE_PATHS:
-        value = _known_ignore_skip_pattern(entry)
+        value = checkov_scanner._known_ignore_skip_pattern(entry)
         assert value.startswith("(^|/)"), value
         assert value.endswith("/"), value
         assert "\\." not in value, f"{value!r}: a dot is written [.], never \\."
@@ -92,7 +94,10 @@ def test_every_known_ignore_path_is_anchored_to_a_path_component():
 
 def test_the_anchored_values_compile_in_checkovs_module_finder_regex():
     """checkov joins every value into one regex a character at a time."""
-    values = [_known_ignore_skip_pattern(entry) for entry in KNOWN_IGNORE_PATHS]
+    values = [
+        checkov_scanner._known_ignore_skip_pattern(entry)
+        for entry in KNOWN_IGNORE_PATHS
+    ]
     assert _module_finder_compiles(values)
     assert _module_finder_compiles([*values, "^/repo/x[.]tf$", "^/repo/out/"])
 
@@ -116,7 +121,8 @@ def test_the_output_dir_value_skips_no_deeper_path_holding_the_same_text(tmp_pat
     scanner = CheckovScanner(context=context, config=CheckovScannerConfig())
     argv, _, _ = scanner._execute_scan(source, "source", [])
     values = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "--skip-path"]
-    output_values = [v for v in values if "ash-out" in v]
+    # The value is an escaped regex, so the hyphen is written "\-" (re.escape).
+    output_values = [v for v in values if re.escape("ash-out") in v]
     assert output_values, values
     assert all(v.startswith("^") for v in output_values), output_values
 
