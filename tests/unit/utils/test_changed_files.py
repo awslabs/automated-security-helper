@@ -6,6 +6,7 @@
 import logging
 import os
 import subprocess  # nosec B404
+import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -17,6 +18,7 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.changed_files import (
     filter_results_to_changed_files,
 )
+from automated_security_helper.utils.finding_identity import CONVERTED_PATH_PROPERTY
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -24,6 +26,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Message1,
     PhysicalLocation,
     PhysicalLocation2,
+    PropertyBag,
     Region,
     Result,
     Run,
@@ -46,10 +49,11 @@ def _resolved_git(monkeypatch):
 
 
 def _diff_argv(base_ref: str) -> list[str]:
-    """The diff get_changed_files runs: NUL-separated names, none quoted, with
-    git_argv's options ahead of it and a trailing "--" so git reads the range
-    only as revisions (a working-tree file named like the range is not taken
-    in its place when the base ref is missing)."""
+    """The diff get_changed_files runs: NUL-separated names, none quoted, named
+    from the repository root whatever diff.relative says, with git_argv's options
+    ahead of it and a trailing "--" so git reads the range only as revisions (a
+    working-tree file named like the range is not taken in its place when the
+    base ref is missing)."""
     return [
         "git",
         "-c",
@@ -58,6 +62,8 @@ def _diff_argv(base_ref: str) -> list[str]:
         "core.hooksPath=/dev/null",
         "-c",
         "core.quotepath=false",
+        "-c",
+        "diff.relative=false",
         "diff",
         "--name-only",
         "-z",
@@ -446,3 +452,134 @@ class TestFilterResultsToChangedFiles:
     def test_none_results_returns_none(self):
         out = filter_results_to_changed_files(None, set(), Path("/tmp"))  # nosec B108
         assert out is None
+
+
+def _converted_result(uri: str, converted_path: str) -> Result:
+    """A result a scanner reported in a converted file, marked as the scanner
+    executor marks it (``mark_converted_results``): the ``converted_path`` property
+    holds the file's path relative to the converted root."""
+    result = _make_result(uri)
+    result.properties = PropertyBag()
+    setattr(result.properties, CONVERTED_PATH_PROPERTY, converted_path)
+    return result
+
+
+@pytest.mark.unit
+class TestFindingsInConvertedFiles:
+    """A finding in a converted file is placed by the source the converter read.
+
+    The converted file sits in the output directory, so its own path is never in
+    the changed set; before this every such finding was dropped, including those
+    from a notebook or archive that was in the diff, and nothing said so.
+    """
+
+    def test_a_converted_finding_whose_source_changed_is_kept(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "nb" / "analysis.ipynb").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        results = _make_results_with_sarif(
+            [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+        )
+
+        filtered = filter_results_to_changed_files(
+            results,
+            changed,
+            source_dir,
+            converted_sources={"jupyter/analysis-converted.py": "nb/analysis.ipynb"},
+        )
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_a_converted_finding_whose_source_did_not_change_is_dropped(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        results = _make_results_with_sarif(
+            [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+        )
+
+        filtered = filter_results_to_changed_files(
+            results,
+            changed,
+            source_dir,
+            converted_sources={"jupyter/analysis-converted.py": "nb/analysis.ipynb"},
+        )
+
+        assert filtered.sarif.runs[0].results == []
+
+    def test_a_converted_finding_with_no_known_source_is_kept_and_said(
+        self, tmp_path, ash_warnings
+    ):
+        """Dropping it hid a finding whose notebook may have been in the diff."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        results = _make_results_with_sarif(
+            [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+        assert any(
+            "1 finding(s) located in converted files" in message
+            for message in ash_warnings()
+        ), ash_warnings()
+
+
+@pytest.mark.unit
+class TestLocationReadings:
+    """A URI is read as written and percent-decoded, and one that names no file
+    places the finding nowhere rather than failing the scan."""
+
+    def test_a_percent_encoded_uri_matches_the_file_it_names(self, tmp_path):
+        """checkov writes ``out(1)/x.tf`` as ``out%281%29/x.tf``."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "out(1)" / "x.tf").resolve()}
+        results = _make_results_with_sarif([_make_result("out%281%29/x.tf")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_a_uri_spelled_with_a_literal_percent_still_matches(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "100%25" / "x.tf").resolve()}
+        results = _make_results_with_sarif([_make_result("100%25/x.tf")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="a Windows file name can hold a lone surrogate, so it resolves",
+    )
+    def test_a_uri_the_filesystem_cannot_name_keeps_the_finding(self, tmp_path):
+        """A record-form ``\\ud800`` reads back as a surrogate no POSIX name holds:
+        resolving it raised UnicodeEncodeError out of the filter and failed the
+        scanner whose SARIF named it."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        results = _make_results_with_sarif([_make_result("odd\\ud800name.py")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_a_uri_holding_an_encoded_nul_keeps_the_finding(self, tmp_path):
+        """``%00`` decodes to a NUL no path holds; the literal reading is a name."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "a%00b.py").resolve()}
+        results = _make_results_with_sarif([_make_result("a%00b.py")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1

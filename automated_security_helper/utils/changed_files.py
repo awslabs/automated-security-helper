@@ -14,39 +14,91 @@ out the same findings.
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Set
+from typing import TYPE_CHECKING, List, Mapping, Optional, Set
+from urllib.parse import unquote
 
+from automated_security_helper.utils.finding_identity import CONVERTED_PATH_PROPERTY
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
-    undecodable_of_text,
+    resolve_uri_reading,
 )
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 
+def _location_readings(uri: str) -> List[str]:
+    """The texts a location ``uri`` may name a file as: literal, and percent-decoded.
+
+    A relative URI is a URI reference, and a tool may percent-encode it: checkov
+    writes ``out(1)/x.tf`` as ``out%281%29/x.tf``, which ``sanitize_sarif_paths``
+    leaves encoded. Read literally, that text names no file, so a finding in such a
+    directory was dropped from a ``--changed-files-only`` report whether or not
+    its file had changed. Both readings are tried; the decoded one is left out
+    when it is the same text.
+    """
+    if uri.startswith("file://"):
+        uri = uri[7:]
+        if uri.startswith("///"):
+            uri = uri[2:]
+    readings = [uri]
+    decoded = unquote(uri)
+    if decoded != uri:
+        readings.append(decoded)
+    return readings
+
+
+def _converted_path(result) -> Optional[str]:
+    """The ``converted_path`` property of a result located in a converted file.
+
+    Set by ``utils.scan_output_dirs.mark_converted_results`` on every result a
+    scanner reported in a file a converter wrote (a notebook's Python, an archive
+    member): the path relative to the converted root, ``/``-separated.
+    """
+    properties = getattr(result, "properties", None)
+    if properties is None:
+        return None
+    value = getattr(properties, CONVERTED_PATH_PROPERTY, None)
+    return value if isinstance(value, str) and value else None
+
+
 def filter_results_to_changed_files(
     results: "AshAggregatedResults",
     changed_files: Set[Path],
     source_dir: Path,
+    converted_sources: Optional[Mapping[str, str]] = None,
 ) -> "AshAggregatedResults":
     """Remove SARIF results whose primary location is not in *changed_files*.
 
     *changed_files* holds resolved absolute paths; a result's location is
     resolved against *source_dir* to compare. A result with no location is kept,
-    since it cannot be placed outside the changed files. Mutates and returns
-    *results*.
+    since it cannot be placed outside the changed files; so is one whose location
+    cannot be resolved to a path at all (:func:`resolve_uri_reading`), rather
+    than that one location raising out of the filter and failing the scan.
+    Mutates and returns *results*.
+
+    A result located in a converted file (its ``converted_path`` property is
+    set) is placed by the source file the converter read, not by the converted
+    file, which sits in the output directory and so is never in the changed set.
+    *converted_sources* maps each ``converted_path`` to that source, relative to
+    *source_dir* or absolute. A converted result whose source the mapping does
+    not name is kept, and the run says once how many were: before this, every
+    finding in a converted file was dropped from a ``--changed-files-only``
+    report, including those from a notebook or archive that was in the diff, and
+    nothing said so.
 
     A URI holds a file name that is not UTF-8 in its record form, each lone surrogate
     as ``\\udcNN`` (utils/undecodable_text.py), and git's names hold the surrogate.
     The URI is resolved by the name the file has on disk, and the two sides are
-    compared in the record form.
+    compared in the record form. Each URI is read literally and percent-decoded
+    (:func:`_location_readings`); either reading in the changed set keeps the result.
     """
     if not results or not results.sarif or not results.sarif.runs:
         return results
     recorded_changed = {path_in_record_form(path) for path in changed_files}
     discarded = 0
+    unplaced_converted = 0
     for run in results.sarif.runs:
         if not run.results:
             continue
@@ -62,16 +114,39 @@ def filter_results_to_changed_files(
             ):
                 filtered.append(result)
                 continue
-            uri = loc.physicalLocation.root.artifactLocation.uri or ""
-            if uri.startswith("file://"):
-                uri = uri[7:]
-                if uri.startswith("///"):
-                    uri = uri[2:]
-            resolved = Path(source_dir).joinpath(undecodable_of_text(uri)).resolve()
-            if path_in_record_form(resolved) in recorded_changed:
+            converted = _converted_path(result)
+            if converted is not None:
+                source = (converted_sources or {}).get(converted)
+                if source is None:
+                    unplaced_converted += 1
+                    filtered.append(result)
+                    continue
+                readings = [source]
+            else:
+                readings = _location_readings(
+                    loc.physicalLocation.root.artifactLocation.uri or ""
+                )
+            placed = [
+                path_in_record_form(resolved)
+                for resolved in (
+                    resolve_uri_reading(reading, base=Path(source_dir))
+                    for reading in readings
+                )
+                if resolved is not None
+            ]
+            if not placed or any(path in recorded_changed for path in placed):
                 filtered.append(result)
         discarded += len(run.results) - len(filtered)
         run.results = filtered
+
+    if unplaced_converted:
+        ASH_LOGGER.warning(
+            "Kept %d finding(s) located in converted files (notebooks, archive "
+            "members): the changed-file filter has no record of the source file "
+            "each was converted from, so it cannot tell whether that source "
+            "changed. They are reported rather than dropped.",
+            unplaced_converted,
+        )
 
     # An empty *changed_files* is a filter that matches nothing, so it discards
     # every located result and the run reports zero findings at exit 0 --
