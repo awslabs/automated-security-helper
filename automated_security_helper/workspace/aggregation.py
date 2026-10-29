@@ -904,6 +904,17 @@ def workspace_ignore_file_exclusions(
     return aggregate
 
 
+def _fold_scanner_name(name: str) -> str:
+    """The form two spellings of one scanner name are compared in.
+
+    ``cli/merge`` documents that one results file records "Bandit" where another
+    records "bandit", and compares every scanner name stripped and lowered for that
+    reason. The rollup joins projects' rows by the same fold, so one scanner is
+    one row however each project's config spelled it.
+    """
+    return name.strip().lower()
+
+
 def _larger_code(first: Optional[int], second: Optional[int]) -> Optional[int]:
     """The larger of two rolled-up codes, where null (no code) is below any code."""
     if first is None:
@@ -938,10 +949,21 @@ class WorkspaceAggregator:
         self.spool_dir = self.output_dir / SPOOL_DIR_NAME
         self._outcomes: Dict[str, WorkspaceProjectResult] = {}
         self._spooled: Dict[str, Path] = {}
+        # Every per-scanner map below is keyed by the folded name (_rollup_key):
+        # cli/merge documents that one shard records "Bandit" where another
+        # records "bandit", and a project's config is written by the same hands.
+        # Keyed by the raw name, one scanner split into two rows. The spelling
+        # the first project used is what the published row is named.
+        self._scanner_display: Dict[str, str] = {}
         self._scanner_findings: Dict[str, int] = {}
         self._scanner_actionable: Dict[str, int] = {}
         self._scanner_status: Dict[str, Optional[str]] = {}
         self._scanner_exit_code: Dict[str, Optional[int]] = {}
+        # The rollup's two flags, from the rows that carried them: excluded only
+        # when every project that recorded the scanner excluded it, and
+        # dependencies satisfied only when every one of them had its tool.
+        self._scanner_excluded: Dict[str, bool] = {}
+        self._scanner_dependencies: Dict[str, bool] = {}
         self._unconvertible = 0
 
     def add(
@@ -965,9 +987,11 @@ class WorkspaceAggregator:
         """
         self._outcomes[outcome.project] = outcome
 
-        for scanner, status in (outcome.scanners or {}).items():
+        flags = outcome.carried_scanner_flags
+        for raw_name, status in (outcome.scanners or {}).items():
+            scanner = self._rollup_key(raw_name)
             code = outcome.carried_scanner_exit_codes.get(
-                scanner, SCANNER_EXIT_CODE_UNRECORDED
+                raw_name, SCANNER_EXIT_CODE_UNRECORDED
             )
             held = self._scanner_status.get(scanner)
             worse = _worse_status(held, status)
@@ -984,6 +1008,14 @@ class WorkspaceAggregator:
             self._scanner_status[scanner] = worse
             self._scanner_findings.setdefault(scanner, 0)
             self._scanner_actionable.setdefault(scanner, 0)
+            if raw_name in flags:
+                excluded, satisfied = flags[raw_name]
+                self._scanner_excluded[scanner] = (
+                    self._scanner_excluded.get(scanner, True) and excluded
+                )
+                self._scanner_dependencies[scanner] = (
+                    self._scanner_dependencies.get(scanner, True) and satisfied
+                )
 
         if run is None:
             return
@@ -1001,7 +1033,7 @@ class WorkspaceAggregator:
             scanner = None
             if isinstance(properties, Mapping):
                 scanner = properties.get("scanner_name")
-            name = str(scanner) if scanner else UNATTRIBUTED_SCANNER
+            name = self._rollup_key(str(scanner) if scanner else UNATTRIBUTED_SCANNER)
             by_scanner.setdefault(name, []).append(result)
             self._scanner_status.setdefault(name, None)
             if result.get("suppressions"):
@@ -1027,7 +1059,8 @@ class WorkspaceAggregator:
         carried = outcome.carried_scanner_actionable_counts
         if carried is not None:
             if outcome.actionable_finding_count:
-                for name, actionable in carried.items():
+                for raw_name, actionable in carried.items():
+                    name = self._rollup_key(raw_name)
                     self._scanner_actionable[name] = (
                         self._scanner_actionable.get(name, 0) + actionable
                     )
@@ -1045,8 +1078,15 @@ class WorkspaceAggregator:
 
         self._make_spool_dir()
         # The project key is a path-derived value with separators already
-        # replaced by dashes, so it is safe as a filename by construction.
-        spool_path = self.spool_dir / f"{outcome.project}.run.json"
+        # replaced by dashes, so it is safe as a filename by construction. Two
+        # keys that differ only in letter case are two projects on the filesystem
+        # the workspace was read from, but one file name on a case-insensitive
+        # output volume, where the second spool replaced the first project's run.
+        # An ordinal prefix keeps the names apart; write() reads the paths it
+        # recorded, never the names.
+        spool_path = (
+            self.spool_dir / f"{len(self._spooled):04d}-{outcome.project}.run.json"
+        )
         from automated_security_helper.utils.sandbox.fs_guard import (
             open_for_atomic_write,
         )
@@ -1058,6 +1098,12 @@ class WorkspaceAggregator:
         with open_for_atomic_write(spool_path, root=self.output_dir) as handle:
             json.dump(rebased, handle)
         self._spooled[outcome.project] = spool_path
+
+    def _rollup_key(self, name: str) -> str:
+        """The key *name*'s rows roll up under, remembering its first spelling."""
+        key = _fold_scanner_name(name)
+        self._scanner_display.setdefault(key, name)
+        return key
 
     def _make_spool_dir(self) -> None:
         """Create the spool directory, replacing anything else at its name.
@@ -1136,25 +1182,33 @@ class WorkspaceAggregator:
                 "status": status,
                 "finding_count": self._scanner_findings.get(scanner, 0),
                 "actionable_finding_count": self._scanner_actionable.get(scanner, 0),
-                "dependencies_satisfied": status != "MISSING",
-                "excluded": status == "SKIPPED",
+                # From the rows that carried the flags; a scanner known only from
+                # its findings (no row recorded it) keeps the status-derived answer.
+                "dependencies_satisfied": self._scanner_dependencies.get(
+                    scanner, status != "MISSING"
+                ),
+                "excluded": self._scanner_excluded.get(scanner, status == "SKIPPED"),
                 "exit_code": self._scanner_exit_code.get(
                     scanner, SCANNER_EXIT_CODE_UNRECORDED
                 ),
             }
             if status in ("SKIPPED", "MISSING"):
-                named = [
-                    f"{outcome.project}: {outcome.scanner_reasons[scanner]}"
-                    for outcome in outcomes
-                    if (outcome.scanners or {}).get(scanner) == status
-                    and (outcome.scanner_reasons or {}).get(scanner)
-                ]
+                named = []
+                for outcome in outcomes:
+                    for raw_name, raw_status in (outcome.scanners or {}).items():
+                        if _fold_scanner_name(raw_name) != scanner:
+                            continue
+                        if raw_status != status:
+                            continue
+                        reason = (outcome.scanner_reasons or {}).get(raw_name)
+                        if reason:
+                            named.append(f"{outcome.project}: {reason}")
                 if named:
                     field = (
                         "skipped_reason" if status == "SKIPPED" else "missing_reason"
                     )
                     row[field] = "; ".join(named)
-            payload[scanner] = row
+            payload[self._scanner_display.get(scanner, scanner)] = row
         return payload
 
     def results_payload(

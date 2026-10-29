@@ -158,7 +158,7 @@ skipped, and does affect the status.
 from __future__ import annotations
 
 from enum import Enum, IntEnum
-from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional
+from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tuple
 
 from pydantic import Field, PrivateAttr, computed_field
 
@@ -704,6 +704,22 @@ class WorkspaceProjectResult(RecordModel):
     def carried_scanner_actionable_counts(self) -> Optional[Dict[str, int]]:
         """The split :meth:`carry_scanner_actionable_counts` recorded; None when none was."""
         return self._scanner_actionable_counts
+
+    # Carried the same way: each scanner row's (excluded, dependencies_satisfied)
+    # pair, for the rollup's own two flags. Derived from the rolled-up status
+    # instead, an operator-excluded scanner whose tool was also absent read
+    # MISSING and not excluded, and a scanner that merely had nothing to scan
+    # read excluded.
+    _scanner_flags: Dict[str, Tuple[bool, bool]] = PrivateAttr(default_factory=dict)
+
+    def carry_scanner_flags(self, flags: Dict[str, Tuple[bool, bool]]) -> None:
+        """Record each scanner row's ``(excluded, dependencies_satisfied)`` for this project."""
+        self._scanner_flags = dict(flags)
+
+    @property
+    def carried_scanner_flags(self) -> Dict[str, Tuple[bool, bool]]:
+        """The pairs :meth:`carry_scanner_flags` recorded; empty when none were."""
+        return self._scanner_flags
 
 
 class WorkspaceResults(RecordModel):

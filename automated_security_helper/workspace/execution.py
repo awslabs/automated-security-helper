@@ -1465,6 +1465,7 @@ def _scan_one_project(
     )
     outcome.carry_scanner_exit_codes(_scanner_exit_codes(results))
     outcome.carry_scanner_actionable_counts(actionable_by_scanner)
+    outcome.carry_scanner_flags(_scanner_flags(results))
     return _ProjectRun(
         outcome=outcome,
         run=run,
@@ -1861,6 +1862,24 @@ def _warn_on_policy_scanners_that_never_ran(
             f"spelling in the policy's additional_scanners, and that any plugin "
             f"providing it is listed in ash_plugin_modules."
         )
+
+
+def _scanner_flags(results: Any) -> Dict[str, Tuple[bool, bool]]:
+    """Per scanner, the row's ``(excluded, dependencies_satisfied)``, as plain bools.
+
+    Read from the same rows the statuses come from, for the rollup's two flags
+    of the same names. Deriving them from the rolled-up status read an
+    operator-excluded scanner whose tool was also absent (a MISSING row with
+    ``excluded`` set) as not excluded, and a scanner that had nothing to scan (a
+    SKIPPED row with ``excluded`` unset) as excluded.
+    """
+    flags: Dict[str, Tuple[bool, bool]] = {}
+    for name, info in (getattr(results, "scanner_results", None) or {}).items():
+        flags[str(name)] = (
+            bool(getattr(info, "excluded", False)),
+            bool(getattr(info, "dependencies_satisfied", True)),
+        )
+    return flags
 
 
 def _extract_run(results: Any) -> Optional[Dict[str, Any]]:
