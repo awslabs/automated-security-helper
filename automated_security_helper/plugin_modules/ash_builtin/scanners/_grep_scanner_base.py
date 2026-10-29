@@ -386,6 +386,16 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 ToolExtraArg(key="--metrics", value=self.metrics_value_offline())
             )
 
+        # Patterns mode (opengrep) searches for the configured patterns and drops
+        # every --config from its command, so it reads no rules and needs no rule
+        # cache; declining for a missing cache recorded it MISSING for nothing.
+        if getattr(self.config.options, "patterns", None):  # type: ignore[union-attr]
+            ASH_LOGGER.info(
+                f"{self.cache_dir_name()} offline mode: patterns mode reads no rule "
+                "configuration, so no rule cache is needed"
+            )
+            return
+
         local_rules = self._local_rules_configured()
         if local_rules is not None:
             # The operator's own rules, as online. The registry cache is not
