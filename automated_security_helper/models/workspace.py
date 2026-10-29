@@ -139,13 +139,14 @@ When nothing was attempted, the skip reason decides
 A workspace where every project was skipped is not one situation but two, and
 they need opposite answers:
 
-* At least one ``NO_CHANGES`` skip -- ASH asked git what changed and git said
-  nothing. Exit 0. This is the ordinary outcome of a precommit hook in a
-  monorepo when the edit landed outside every project directory, and
+* Every skip a ``NO_CHANGES`` skip -- ASH asked git what changed in each project
+  and git said nothing. Exit 0. This is the ordinary outcome of a precommit hook
+  in a monorepo when the edit landed outside every project directory, and
   single-project mode exits 0 for exactly that case. Returning 4 here would fail
   a clean no-op hook run and make the optimisation worse than not having it.
-* Every skip an ``ERROR`` -- nothing was looked at, whatever tolerated it. Exit
-  4, because exiting 0 would report a clean result for code nothing examined.
+* Any skip an ``ERROR`` -- that project was never looked at, whatever tolerated
+  it. Exit 4, because exiting 0 would report a clean result for code nothing
+  examined; an unchanged project beside it excuses nothing about it.
 
 A skip recorded by *resolution* alongside projects that did run -- a missing
 project tolerated under ``--allow-missing-projects``, or a project with no

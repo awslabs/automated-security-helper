@@ -71,10 +71,13 @@ real file: ``/ws/api/src/app.py`` became ``api/ws/api/src/app.py``, naming
 nothing, and without being counted as a failure.
 
 So every URI passes through :func:`project_relative_uri` first, which reduces an
-absolute path to its remainder inside the project or refuses it. checkov's shape
-makes this more than a leading-separator test: it emits
-``ws/api/src/insecure_bucket.tf``, absolute with the separator already stripped
-upstream, so an unrooted URI is also tried with a separator restored.
+absolute path to its remainder inside the project or refuses it. The leading
+character decides: rooted text is absolute, and an unrooted URI is the
+project-relative path it is. checkov's separator-stripped absolute shape
+(``ws/api/src/insecure_bucket.tf``) is not tried as absolute: in workspace mode
+the project is scanned with its own path as ``source_dir`` and the URI reaches
+the aggregator already relativized, while a src-layout project's ordinary
+relative URI spells its own absolute path and was being relocated.
 
 These shapes are the default in workspace mode rather than an edge case.
 ``scripts/verify_external_target_scan.py`` records three of them from one healthy
@@ -358,8 +361,9 @@ def to_workspace_uri(
 
     Args:
         uri: A SARIF artifact URI as a scanner emitted it. May carry a
-            ``file://`` scheme, may use backslashes, may be rooted, may be
-            absolute with its leading separator already stripped.
+            ``file://`` scheme, may use backslashes, may be rooted. An unrooted
+            URI is read as project-relative, never as an absolute path with its
+            leading separator stripped (see :func:`project_relative_uri`).
         project_relative_path: The project's path below the workspace root.
         project_path: The project's absolute path. Optional only so that callers
             with no absolute path can still convert an already-relative URI;

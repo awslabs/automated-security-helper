@@ -242,9 +242,12 @@ FIXTURE_RELATIVE_PATH = "src/insecure.py"
 #: ``source_dir`` and has already relativized the path by the time the aggregator
 #: sees it, so both scanners hand over ``src/...``. The absolute shapes recorded
 #: in ``verify_external_target_scan.py`` are therefore not reachable through this
-#: fixture, and the coverage for that handling is the parametrised unit tests in
-#: ``tests/unit/workspace/test_aggregation.py::TestAbsoluteScannerUris``, not this
-#: gate. Stated here so nobody reads a green gate as proof of it.
+#: fixture. That measurement is also why ``project_relative_uri`` reads every
+#: unrooted URI as project-relative and never tries the separator-stripped
+#: shape as absolute (a src-layout project's own relative URIs spell its
+#: absolute path); the coverage for the rooted shapes is the parametrised unit
+#: tests in ``tests/unit/workspace/test_aggregation.py::TestAbsoluteScannerUris``,
+#: not this gate. Stated here so nobody reads a green gate as proof of it.
 FIXTURE_TERRAFORM_RELATIVE_PATH = "src/insecure_bucket.tf"
 
 # ---------------------------------------------------------------------------

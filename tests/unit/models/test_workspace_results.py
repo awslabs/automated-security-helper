@@ -202,8 +202,12 @@ class TestWorkspaceExitCode:
             == WorkspaceExitCode.WORKSPACE_ERROR
         )
 
-    def test_a_mix_of_unchanged_and_tolerated_errors_is_success(self):
-        """At least one project was examined and had nothing to do."""
+    def test_a_mix_of_unchanged_and_tolerated_errors_is_a_workspace_error(self):
+        """One project was examined and had nothing to do; the other was never looked at.
+
+        Reading SUCCESS here reported a clean result for code nothing examined:
+        the unchanged skip excuses nothing about the project skipped by ERROR.
+        """
         assert (
             workspace_exit_code(
                 [
@@ -211,7 +215,7 @@ class TestWorkspaceExitCode:
                     _skipped("b", SkippedProjectReason.ERROR),
                 ]
             )
-            == WorkspaceExitCode.SUCCESS
+            == WorkspaceExitCode.WORKSPACE_ERROR
         )
 
 

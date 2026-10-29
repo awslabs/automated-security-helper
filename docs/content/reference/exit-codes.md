@@ -141,7 +141,7 @@ Each shard computes the verdict for its own scanners, so a shard with findings e
 
 ### Workspace mode {#workspace}
 
-With `--workspace`, ASH scans each project and combines their verdicts. The highest of these wins: 3 (a project's config is invalid), then 2 (a project has actionable findings at or above its threshold), then 1 (a project failed, is incomplete, or has a stale database), then 0. Codes 4 and 5 are not part of that ranking: ASH gives them when it refuses the workspace before any project runs.
+With `--workspace`, ASH scans each project and combines their verdicts. The first of these that applies wins: 3 (a project's config is invalid), then 1 (a project failed, is incomplete, or has a stale database), then 2 (a project has actionable findings at or above its threshold), then 0. Codes 4 and 5 are not part of that ranking: ASH gives them when it refuses the workspace before any project runs.
 
 | Code | Condition |
 |---|---|
@@ -150,7 +150,7 @@ With `--workspace`, ASH scans each project and combines their verdicts. The high
 | 5 | A usage error, including a `--scanners` selection that matches no scanner or that `--exclude-scanners` cancels. ASH refuses it once, before it scans any project. |
 | 0 | `--dry-run`; or nothing was scanned because every project was skipped as unchanged |
 
-Because the combination puts 2 above 1, a project with findings and a MISSING scanner makes the workspace exit 2, where the same project scanned alone exits 1. Workspace mode does not check for rules that could not be evaluated.
+A project that is incomplete exits 1 even when it also has findings, as the same project scanned alone does. Workspace mode checks the same unconditional causes as a single scan: a rule a scanner could not evaluate, a scanner tool ASH could not stop, and a stale content database under a `fail` policy each fail the project whatever `fail_on_incomplete_scanners` says.
 
 ## `ash merge` {#merge}
 
