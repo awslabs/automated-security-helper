@@ -21,6 +21,8 @@ import pytest
 
 from automated_security_helper.schemas.sarif_schema_model import Run, SarifReport
 
+pytestmark = pytest.mark.unit
+
 FINDING = {
     "ruleId": "RULE-1",
     "message": {"text": "an earlier finding"},
