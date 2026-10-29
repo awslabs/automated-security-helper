@@ -160,14 +160,23 @@ def test_a_short_value_with_a_command_is_double_quoted_as_yaml_dump_quotes_it(
     command, place
 ):
     """Control for the one-line rule: a value too short to fold is written as a
-    plain double-quoted dump writes it. After a quote or a backslash a command
-    cannot start a line of a plain value, so those are written as yaml.dump
-    writes them."""
+    plain double-quoted dump writes it. After a quote or a backslash a "::"
+    command cannot start a line of a plain value, so those are written as
+    yaml.dump writes them. A "##name[" form is read by its runner anywhere in a
+    line, so it is double-quoted wherever it sits, with its first "#" written as
+    YAML's escape ``\\x23`` (test_report_yaml_breaks_named_hash_commands_anywhere)."""
     value = PLACES[place](command)
     plain = place in ("after-a-quote", "after-a-backslash")
+    named_hash = command.startswith("##")
 
     for data in (value, [value], [[value]]):
         for options in OPTIONS:
-            assert report_yaml(data, **options) == yaml.dump(
-                data, Dumper=yaml.Dumper if plain else _DoubleQuoted, **options
-            )
+            if named_hash:
+                expected = yaml.dump(data, Dumper=_DoubleQuoted, **options).replace(
+                    "##", "\\x23#", 1
+                )
+            else:
+                expected = yaml.dump(
+                    data, Dumper=yaml.Dumper if plain else _DoubleQuoted, **options
+                )
+            assert report_yaml(data, **options) == expected
