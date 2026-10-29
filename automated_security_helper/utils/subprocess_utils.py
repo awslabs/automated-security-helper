@@ -2535,9 +2535,11 @@ def _run_plain(
     The runner of a spawn outside a sandbox and outside a cancel scope (_runner).
     It does what subprocess.run does, case by case: ``input`` (taken from kwargs,
     since the name is a builtin's) and ``capture_output`` set the pipes; a timeout
-    kills the child, reaps it and raises the TimeoutExpired communicate raised,
-    with the output read so far; any other error, KeyboardInterrupt included,
-    kills the child and is raised as it is; ``check`` raises CalledProcessError.
+    kills the child and every process it started (the child leads a process
+    group of its own, _start_in_own_group, stopped with _stop_tree), reaps it
+    and raises the TimeoutExpired communicate raised, with the output read so
+    far; any other error, KeyboardInterrupt included, kills the child's group
+    the same way and is raised as it is; ``check`` raises CalledProcessError.
     The pipes are closed and the child is waited for on the way out, as ``with
     Popen`` does, but for at most _REAP_SECONDS (_reap): a child the kill did not
     end, in uninterruptible sleep say, is left running and named, never waited
@@ -2548,6 +2550,11 @@ def _run_plain(
     """
     input_data = kwargs.pop("input", None)
     _pipes_for(kwargs, input_data, capture_output)
+    # The child leads a process group of its own, as every unsandboxed spawn in
+    # a cancel scope does, so the kill at a timeout reaches what it started: a
+    # tool run through uv is uv's child, and killing uv alone left the tool
+    # running while the TimeoutExpired said the stop had worked.
+    _start_in_own_group(kwargs)
     process = subprocess.Popen(*popenargs, **kwargs)  # nosec B603 - callers pass list argv
     started: Optional[_StartedChild] = None
     try:
@@ -2558,7 +2565,9 @@ def _run_plain(
             started = _note_start(process)
             stdout, stderr = process.communicate(input_data, timeout=timeout)
         except subprocess.TimeoutExpired as expired:
-            _send_stop(process, process.kill)
+            # SIGKILL at once to the whole group, as subprocess.run kills its
+            # child at once; a refused stop is logged and recorded (_stop_child).
+            _stop_child(_argv_of(process), process, _stop_tree, 0.0, None)
             # On POSIX communicate already put what it read in the exception;
             # Windows reads the pipes in threads joined at the timeout, so what
             # they read is collected after the kill.
@@ -2568,7 +2577,7 @@ def _run_plain(
             if started is None:
                 started = _claim_started(process)
             was_running = process.poll() is None
-            _send_stop(process, process.kill)
+            _stop_child(_argv_of(process), process, _stop_tree, 0.0, None)
             _note_failed_wait(started, process, was_running, error)
             raise
         # communicate() waited for the child, so this returns its code at once.
