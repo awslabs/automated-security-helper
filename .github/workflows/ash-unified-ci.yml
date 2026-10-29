@@ -628,8 +628,8 @@ jobs:
     # - ASH_CI_SELF_HOSTED_LINUX set to `true`: the leg asks for one custom runner label,
     #   `ash-ci-linux-x64` for ubuntu-latest or `ash-ci-linux-arm64` for ubuntu-24.04-arm.
     #   The label encodes the architecture, and .github/actions/run-unit-tests refuses a
-    #   self-hosted runner whose `runner.arch` is not the one its image label implies, as
-    #   its first step. Without that refusal a wrong-architecture host would mostly pass
+    #   self-hosted runner whose `runner.arch` is not the one its image label implies, right
+    #   after it reads the architecture. Without that refusal a wrong-architecture host would mostly pass
     #   unnoticed: the artifact name carries `inputs.os` (= matrix.os) and the arch the
     #   runner reports, so an arm64 host running the ubuntu-latest legs would upload under
     #   a unique name of its own, and only the py3.12 unit leg would fail later, when
