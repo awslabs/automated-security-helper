@@ -22,6 +22,7 @@ builds them, because the rule-synthesis code reads
 
 import json
 import logging
+import os
 from pathlib import Path
 from unittest.mock import create_autospec, patch
 
@@ -901,6 +902,38 @@ def test_source_target_type_scans_the_source_tree(
     assert "should-not-be-scanned.yaml" not in scanned, (
         f"a work_dir template leaked into a source scan: {scanned}"
     )
+
+
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_a_hard_linked_template_reaches_the_wrapper(
+    scanner, cdk_available, wrapper_double, tmp_path
+):
+    """The pre-check asks under the rule the template read applies.
+
+    It asked under the stricter default, which refuses a file with a second hard
+    link, so a hard-linked template was skipped before it was counted: no finding,
+    no failed target, and a repository that hard-links its templates read as
+    clean. A hard link to a regular file is the tree's own bytes under a second
+    name, so the pre-check admits it, as the template read does.
+    """
+    elsewhere = tmp_path / "elsewhere" / "bucket.yaml"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(CFN_TEMPLATE, encoding="utf-8")
+    linked = scanner.context.work_dir / "bucket.yaml"
+    try:
+        os.link(elsewhere, linked)
+    except OSError as exc:  # pragma: no cover - filesystem without hard links
+        pytest.skip(f"cannot create a hard link here: {exc}")
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": [nag_result()]}
+    )
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    scanned = [call.kwargs["template_path"] for call in wrapper_double.call_args_list]
+    assert scanned == [linked], f"the hard-linked template was skipped: {scanned}"
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
+    assert [r.ruleId for r in report.runs[0].results] == ["AwsSolutions-S1"]
 
 
 # ---------------------------------------------------------------------------

@@ -859,6 +859,37 @@ def test_a_template_the_model_rejects_is_counted_as_a_failed_target(
     assert _status_for(scanner)[0] == ScannerStatus.ERROR
 
 
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_a_hard_linked_template_is_scanned(
+    scanner, deps_available, subprocess_double, tmp_path
+):
+    """A template whose other name is outside the tree is still the tree's bytes.
+
+    The scanned-tree rule refused a file with a second hard link, and this scanner
+    took the refusal as the not-CloudFormation skip: no finding, no error, no
+    failed target, so a repository that hard-links its templates was reported
+    clean. The template read now admits a hard-linked regular file (a symlink
+    stays refused), and the template is checked and scanned like any other.
+    """
+    elsewhere = tmp_path / "elsewhere" / "role.yaml"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(CFN_TEMPLATE)
+    try:
+        os.link(elsewhere, scanner.context.work_dir / "role.yaml")
+    except OSError as exc:  # pragma: no cover - filesystem without hard links
+        pytest.skip(f"cannot create a hard link here: {exc}")
+    subprocess_double.side_effect = stdout_sequence(
+        cfn_nag_sarif(rule_id="F38", uri="role.yaml")
+    )
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1, "the hard-linked template was skipped"
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
+    assert not any("Skipped" in err for err in scanner.errors), scanner.errors
+
+
 def test_a_non_zero_exit_with_no_results_is_a_failed_target(
     scanner, deps_available, subprocess_double, caplog
 ):

@@ -383,7 +383,8 @@ def get_model_from_template(
     classify that case for themselves.
 
     With ``scan_root``, the template is read under the scanned-tree rule
-    (``utils/scanned_tree.py``) and a file that breaks it raises
+    (``utils/scanned_tree.py``, through :func:`read_template_text`, which admits a
+    hard-linked regular file) and a file that breaks it raises
     :class:`~automated_security_helper.utils.scanned_tree.TreeInputRefused` before
     anything is read. Both scanners that call this pass the root they scan.
     """
@@ -405,13 +406,25 @@ def read_template_text(template_path: Path | str, scan_root: Path | str) -> str:
     its lines and synthesizes it): reading once and reusing the text means every use
     sees the file that was checked.
 
+    A regular file with more than one hard link is read. Every caller of this
+    function reads a file the scan set already lists to decide whether cfn-nag or
+    cdk-nag evaluates it, and a hard link to a regular file inside the tree is that
+    file's own bytes under a second name: the read follows no link to a path outside
+    the tree, which is what the scanned-tree rule's link-count check exists to prevent.
+    Refusing it skipped a hard-linked template silently, so a repository that
+    hard-links its templates (a build that links generated templates into place,
+    a content-addressed checkout) reported clean. What stays refused is unchanged:
+    a symlink at the file or at a parent, a path that resolves outside the tree, a
+    ``..`` component and a non-regular file.
+
     Raises:
         TreeInputRefused: The template breaks the rule; nothing was read.
     """
     # TextIOWrapper rather than bytes.decode, so newlines are translated exactly as a
     # text-mode open() translates them.
     with io.TextIOWrapper(
-        open_in_scanned_tree(template_path, scan_root), encoding="utf-8"
+        open_in_scanned_tree(template_path, scan_root, allow_hardlinks=True),
+        encoding="utf-8",
     ) as f:
         return f.read()
 

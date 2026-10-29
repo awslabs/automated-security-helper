@@ -1171,8 +1171,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 # Refused before it is counted or read: a symlink, or a file outside the
                 # tree, is not known to be CloudFormation, so it is the same expected
                 # skip as a file that is not, and it is said out loud in the error
-                # stream rather than left to a debug line.
-                refused = refusal_reason(cfn_file, scan_root)
+                # stream rather than left to a debug line. The question is asked under
+                # the rule the template reader applies (read_template_text admits a
+                # hard-linked regular file); asked under the stricter default, this
+                # pre-check skipped a hard-linked template the worker would have read.
+                refused = refusal_reason(cfn_file, scan_root, allow_hardlinks=True)
                 if refused is not None:
                     self._plugin_log(
                         f"Skipped {relative_display(cfn_file, scan_root)}: {refused}",

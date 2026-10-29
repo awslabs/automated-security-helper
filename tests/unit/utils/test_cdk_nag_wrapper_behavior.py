@@ -46,6 +46,7 @@ rather than just its plumbing:
 
 import base64
 import json
+import os
 import re
 import sys
 import types
@@ -2327,6 +2328,38 @@ def test_with_a_scan_root_a_symlinked_template_is_refused_before_it_is_read(
     for path in outdir.rglob("*"):
         if path.is_file():
             assert SCANNED_TREE_MARKER.lower() not in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_with_a_scan_root_a_hard_linked_template_is_read(
+    cdk_doubles, include_contents, tmp_path, outdir
+):
+    """A hard-linked regular file is the tree's own bytes under a second name.
+
+    The read refused it as it refuses a symlink, and the scanner took the refusal
+    as a skip, so a repository that hard-links its templates was reported clean.
+    The read now admits it: the template is modeled, synthesized from the checked
+    text, and its findings come back.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "t.yaml").write_text(TEMPLATE_YAML, encoding="utf-8")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    try:
+        os.link(elsewhere / "t.yaml", tree / "t.yaml")
+    except OSError as exc:  # pragma: no cover - filesystem without hard links
+        pytest.skip(f"cannot create a hard link here: {exc}")
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(
+        tree / "t.yaml", outdir, nag_packs=["AwsSolutionsChecks"], scan_root=tree
+    )
+
+    assert response is not None
+    assert response.failure is None
+    assert len(response.results["AwsSolutions"]) == 1
+    assert include_contents == [TEMPLATE_YAML]
 
 
 def test_the_debug_log_does_not_dump_the_template(cdk_doubles, template_file, outdir):
