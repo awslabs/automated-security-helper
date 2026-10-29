@@ -1153,6 +1153,64 @@ class TestConfigFileResolution:
         )
         assert _resolve_config_fail_on_incomplete_scanners(opts) is False
 
+    def test_the_host_refuses_the_twin_chain_the_scan_refuses(
+        self, tmp_path, monkeypatch
+    ):
+        """The other order of the chain above: the root extends the
+        operator's base first and the repository's twin last, so ``extends``
+        joins the two spellings under the repository's, which the operator's
+        files never wrote. The pointer fold then finds no key of the
+        operator's, and the scan's own resolve refuses the patch as a path
+        that does not fit the document
+        (test_a_repository_twin_neither_blocks_nor_captures_the_operators_patch,
+        own-first). The host's read loads the file as the scan loads it, so
+        its config refusal raises the same error before a container starts,
+        and the exit-code reader answers None rather than a value read from
+        a config the scan refuses. A host read without the repository
+        settings folded the patch over every key, loaded the chain, and let
+        container mode start a scan that then refused it."""
+        from automated_security_helper.core.exceptions import ASHConfigSourceError
+        from automated_security_helper.interactions.run_ash_scan import (
+            _outer_mode_config_refusal,
+            _resolve_config_fail_on_incomplete_scanners,
+        )
+        from tests.utils.helpers import mark_git_checkout
+
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        source = tmp_path / "src"
+        mark_git_checkout(source)
+        repository = source / ".ash" / ".ash.yaml"
+        repository.parent.mkdir(parents=True, exist_ok=True)
+        repository.write_text(
+            "project_name: repository\nreporters:\n  AwsSecurityHub:\n"
+            "    enabled: false\n",
+            encoding="utf-8",
+        )
+        own = tmp_path / "own.yaml"
+        own.write_text(
+            "reporters:\n  aws-security-hub:\n    enabled: true\n"
+            "    options:\n      aws_region: us-east-1\n",
+            encoding="utf-8",
+        )
+        root = tmp_path / "operator.yaml"
+        root.write_text(
+            f"extends:\n  - {own.as_posix()}\n  - {repository.as_posix()}\n"
+            "fail_on_incomplete_scanners: false\n"
+            "patch:\n"
+            "  - op: replace\n"
+            "    path: /reporters/AWS_Security_Hub/options/aws_region\n"
+            "    value: us-west-2\n",
+            encoding="utf-8",
+        )
+
+        opts = ScanOptions(
+            source_dir=source, output_dir=tmp_path / "out", config=str(root)
+        )
+        refusal = _outer_mode_config_refusal(opts)
+        assert isinstance(refusal, ASHConfigSourceError), refusal
+        assert "does not fit the document" in str(refusal), refusal
+        assert _resolve_config_fail_on_incomplete_scanners(opts) is None
+
     def test_absent_field_resolves_to_the_models_default(self, tmp_path):
         from automated_security_helper.interactions.run_ash_scan import (
             _resolve_config_fail_on_incomplete_scanners,
