@@ -1204,6 +1204,36 @@ def test_a_workflow_link_that_resolves_to_no_file_is_skipped_with_a_warning(
     assert "Not linting .github/workflows/broken.yml" in caplog.text
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX named pipes")
+@pytest.mark.unit
+def test_a_named_pipe_named_like_a_workflow_is_skipped_without_blocking(repo, caplog):
+    """Reading a FIFO blocks until a writer appears, outside any scan timeout.
+    Only a regular file is a workflow. The writer thread makes a read that does
+    happen return "on: push" instead of hanging the test: a tree that reads the
+    pipe then lists it as a workflow, which the assertion catches."""
+    import threading
+
+    pipe = repo / ".github" / "workflows" / "pipe.yml"
+    os.mkfifo(pipe)
+
+    def feed():
+        with open(pipe, "w") as writer:
+            writer.write("on: push\n")
+
+    threading.Thread(target=feed, daemon=True).start()
+    scanner = _scanner(repo)
+
+    with caplog.at_level(logging.WARNING):
+        workflows = scanner._workflow_files(repo, "source", [])
+
+    assert workflows == [
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+    ]
+    assert "Not linting .github/workflows/pipe.yml" in caplog.text
+    assert "not a regular file" in caplog.text
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
 @pytest.mark.unit
 def test_a_non_executable_integration_path_is_missing(

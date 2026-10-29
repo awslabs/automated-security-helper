@@ -902,6 +902,16 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                         level=logging.WARNING,
                     )
                 continue
+            # A FIFO or a device named like a workflow is not one: opening it to
+            # read its local references would block ASH itself, outside any scan
+            # timeout, and actionlint could not lint it either.
+            if not path.is_file():
+                if report:
+                    self._plugin_log(
+                        f"Not linting {rel}: it is not a regular file.",
+                        level=logging.WARNING,
+                    )
+                continue
             # A symlinked workflow is followed by actionlint, which copies the
             # target's lines into the SARIF snippet. Only pass files whose real
             # path is inside the real scan root.
