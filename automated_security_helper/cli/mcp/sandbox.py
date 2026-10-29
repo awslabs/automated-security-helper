@@ -804,7 +804,8 @@ def _refusal(
 def _sibling_refusal(
     sandbox: SessionSandbox, path: object, resolved: Path
 ) -> Optional[MCPResourceError]:
-    """Refuse a path inside the shared workspace root but not inside this sandbox.
+    """Refuse a path inside the shared workspace root but not inside this sandbox,
+    and a path the shared workspace root is inside.
 
     Checked before anything that could allow, and independent of both the
     operator grant and the transport. That independence is the point: the
@@ -825,6 +826,25 @@ def _sibling_refusal(
     shared = shared_workspace_root()
     if shared is None:
         return None
+    if _is_or_below(shared, resolved) and not _is_or_below(resolved, shared):
+        # The target is an ancestor of the shared root: its parent, the home
+        # directory, a granted tree above it. A scan of it walks every
+        # session's delivered source, which is the same disclosure as scanning
+        # a sibling directly, so it is refused on the same footing, before
+        # any grant is consulted. The path shown is the caller's own, which
+        # names no other session.
+        return _refusal(
+            "Target",
+            path,
+            resolved,
+            remedy=(
+                "It contains the MCP session workspace area, so a scan of it "
+                "would read every session's delivered source. Scan a tree this "
+                "session delivered, or a directory the operator granted with "
+                f"{ASH_MCP_ALLOWED_ROOTS_ENV} that does not contain the "
+                "workspace area."
+            ),
+        )
     inside_shared = _is_or_below(resolved, shared)
     if not inside_shared or sandbox.owns(resolved):
         return None
