@@ -245,23 +245,25 @@ def test_custom_rule_exceptions_are_isolated(scanner):
     )
 
 
-@pytest.mark.parametrize(
-    "level, verbose_expected",
-    [(logging.DEBUG, True), (logging.INFO, False), (logging.WARNING, False)],
-)
-def test_verbose_flag_is_added_only_at_debug_level(
-    plugin_context, monkeypatch, level, verbose_expected
-):
-    """``--verbose`` is passed to cfn_nag only when ASH itself is at DEBUG."""
+@pytest.mark.parametrize("level", [logging.DEBUG, logging.INFO, logging.WARNING])
+def test_no_log_level_flag_is_passed_to_cfn_nag(plugin_context, monkeypatch, level):
+    """No ``--verbose`` (or ``--debug``) at any ASH log level, DEBUG included.
+
+    cfn_nag_scan defines no ``--verbose`` option, so passing it at DEBUG made
+    every invocation exit 255 with no stdout and the whole scan fail as "no
+    output". Its ``--debug`` writes to stdout, which is parsed as SARIF, so it
+    is not passed either.
+    """
     monkeypatch.setattr(ASH_LOGGER, "level", level)
 
     scanner = CfnNagScanner(context=plugin_context, config=CfnNagScannerConfig())
     keys = [arg.key for arg in scanner.args.extra_args]
 
-    assert ("--verbose" in keys) is verbose_expected, (
-        f"at level {logging.getLevelName(level)} expected verbose="
-        f"{verbose_expected}; extra_args keys were {keys}"
+    assert "--verbose" not in keys, (
+        f"at level {logging.getLevelName(level)} cfn_nag_scan would be given "
+        f"--verbose, which it does not define; extra_args keys were {keys}"
     )
+    assert "--debug" not in keys, keys
 
 
 def test_config_defaults_are_applied_when_config_is_none(plugin_context):

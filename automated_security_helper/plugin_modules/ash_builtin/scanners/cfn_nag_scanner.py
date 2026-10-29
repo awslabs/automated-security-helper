@@ -227,13 +227,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 value=self.rule_directory.as_posix(),
             ),
         ]
-        if ASH_LOGGER.level == logging.DEBUG:
-            extra_args.append(
-                ToolExtraArg(
-                    key="--verbose",
-                    value=None,
-                )
-            )
+        # No flag follows ASH's own log level. cfn_nag_scan defines no --verbose
+        # option (its debug switch is --debug), so passing one at DEBUG made every
+        # invocation exit 255 with no stdout, and the whole cfn-nag scan then
+        # failed as "no output". Its --debug is not passed either: that output
+        # goes to stdout, which is parsed as the SARIF document.
         self.args = ToolArgs(
             format_arg="--output-format",
             format_arg_value="sarif",
