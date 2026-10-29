@@ -7,8 +7,8 @@ A project's label is ``project_name`` from that project's own config file. The
 Markdown table escaped only ``|`` in it and the text table nothing, so a newline
 started a line of its own (a heading, a CI command) and markup rendered instead
 of reading, unlike every other repository-controlled value those reporters
-print. Each cell is now one shown line, and the Markdown cells are kept literal
-the way the Markdown reporter keeps every other cell.
+print. Each table value is now one shown line, and the Markdown values are kept
+literal the way the Markdown reporter keeps every other table entry.
 
 ``workspace_project_rows`` also built a per-project ``detail`` (the error text,
 the scanners that did not complete, a conversion gap, a stale database) that no

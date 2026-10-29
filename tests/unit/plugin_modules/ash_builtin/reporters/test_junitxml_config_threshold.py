@@ -417,7 +417,7 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
         """SARIF ``notApplicable`` says the rule was NOT evaluated.
 
         cdk-nag writes it, with level ``none``, for a rule that raised instead
-        of reaching a verdict, and the exit code fails the scan for that rule
+        of reaching an answer, and the exit code fails the scan for that rule
         through the run-level notification. The reporter used to render the
         result as a bare passing test case, so the JUnit artefact said the rule
         passed while the process status said it was never evaluated. Skipped is

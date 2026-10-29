@@ -4,14 +4,14 @@
 """The human reports' summary grades findings and coverage the way the gate does.
 
 Five readings the content emitter made on its own, each disagreeing with the
-exit code or the project verdict for the same results:
+exit code or the project outcome for the same results:
 
 * a finding whose severity is not one of the five ladder names was mapped onto
   INFO (or onto nothing) and labelled "Below threshold", while the ladder fails
   such a finding closed;
 * a workspace finding was graded against the scanner resolver's answer, which
   with the merged file's missing ash_config is ASH's default, while each
-  project's verdict used the project's own recorded gate;
+  project's outcome used the project's own recorded gate;
 * a project skipped as no-changes made the whole run "Scan incomplete", while the
   workspace exit code treats that skip as a clean no-op;
 * a scanner recorded ERROR only because its content database was stale counted

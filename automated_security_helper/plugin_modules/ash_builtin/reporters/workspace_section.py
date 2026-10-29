@@ -78,7 +78,7 @@ COLUMNS = ("Project", "Status", "Findings", "Actionable", "Threshold", "Result")
 def workspace_project_threshold(
     model: "AshAggregatedResults", project_key: Optional[str]
 ) -> Optional[str]:
-    """The threshold *project_key*'s verdict was judged against, or None.
+    """The threshold *project_key*'s outcome was judged against, or None.
 
     Read off ``model.workspace.projects`` -- the per-project record carries the
     gate threshold its own scan used (``WorkspaceProjectResult.severity_threshold``
@@ -86,7 +86,7 @@ def workspace_project_threshold(
     The merged results file carries no ``ash_config``, so a reporter grading a
     finding attributed to a project has no other source for the project's gate;
     reading ASH's default there made the merged JUnit and HTML reports grade
-    every project against one threshold while each project's verdict and the
+    every project against one threshold while each project's outcome and the
     exit code used its own.
 
     None for a single-directory scan, an unattributed finding, a project the
@@ -229,10 +229,10 @@ def _notes(rows: List[Dict[str, Any]]) -> List[tuple[str, str]]:
     ]
 
 
-#: Markdown's syntax characters, and the table's cell separator: each is kept
+#: Markdown's syntax characters, and the table's column separator: each is kept
 #: literal with a backslash, after ``<``, ``>`` and ``&`` become entities. The
 #: same escaping the Markdown reporter applies to every other scanner-controlled
-#: cell (its ``_text``), which the table could not import without a cycle.
+#: value (its ``_text``), which the table could not import without a cycle.
 _MARKDOWN_SYNTAX = re.compile(r"([\\`*_\[\]{}#|~])")
 
 
@@ -263,7 +263,7 @@ def markdown_workspace_section(model: "AshAggregatedResults") -> List[str]:
         # would otherwise split the row into extra columns and silently shift
         # every value after it, and markup in it would render instead of read.
         lines.append(
-            "| " + " | ".join(_markdown_cell(cell) for cell in _cells(row)) + " |"
+            "| " + " | ".join(_markdown_cell(value) for value in _cells(row)) + " |"
         )
     lines.append("")
     notes = _notes(rows)

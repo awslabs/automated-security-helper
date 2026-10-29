@@ -385,7 +385,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         #
                         # After it, the most specific recorded gate: the project's
                         # (a merged workspace file carries no ash_config, and each
-                        # project's verdict was judged against its own recorded
+                        # project's outcome was judged against its own recorded
                         # gate threshold, so grading every project against ASH's
                         # default here contradicted the per-project verdicts and
                         # the exit code); then the scanner's own
@@ -456,7 +456,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         elif result.kind == "notApplicable":
                             # SARIF 2.1.0 3.27.9: "the rule specified by ruleId was
                             # not evaluated". cdk-nag writes this for a rule that
-                            # raised instead of reaching a verdict, and the exit
+                            # raised instead of reaching an answer, and the exit
                             # code fails the scan for that rule through the
                             # run-level notification. A bare test case says the
                             # rule passed, which it did not; JUnit's own word for

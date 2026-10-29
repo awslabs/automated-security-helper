@@ -5,11 +5,11 @@
 
 A workspace's unified results file carries no ``ash_config``: each project ran
 under its own configuration, and the merged model records only each project's
-outcome, with the threshold its verdict was judged against
+outcome, with the threshold that outcome was judged against
 (``WorkspaceProjectResult.severity_threshold``, written from the project's
 ``gate_threshold``). The reporter read the scan-level threshold, which with no
 config is ASH's default, so every project's findings were graded against one
-gate while each project's verdict and the exit code used its own.
+gate while each project's outcome and the exit code used its own.
 
 The two projects below are configured so that no single threshold grades both
 the way their own gates do: a reporter reading one scan-level value fails at

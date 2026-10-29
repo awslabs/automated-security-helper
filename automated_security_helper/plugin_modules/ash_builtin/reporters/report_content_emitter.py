@@ -206,7 +206,7 @@ class ReportContentEmitter:
 
         results = self.get_scanner_results()
         # A scanner recorded ERROR only because a content database the policy
-        # rejects gave a clean result did run and reach a verdict; that ERROR is
+        # rejects gave a clean result did run and reach an answer; that ERROR is
         # the stale database, reported under its own heading with its refresh
         # advice. The exit code and the console count such a scanner as having
         # run (scan_incompleteness drops its row), so the summary does too:
@@ -349,11 +349,11 @@ class ReportContentEmitter:
         # Get scanner name
         scanner_name = vuln.scanner or "Unknown"
 
-        # The gate the finding's own verdict used. In a workspace the merged
+        # The gate the finding's own outcome used. In a workspace the merged
         # results carry no ash_config, so the scanner resolver answers ASH's
         # default for every project; each project's record carries the gate
-        # threshold its verdict was judged against, and a finding attributed to
-        # a project is graded by that, as the project's verdict and the exit
+        # threshold its outcome was judged against, and a finding attributed to
+        # a project is graded by that, as the project's outcome and the exit
         # code graded it. A single-directory scan reads the scanner's threshold
         # from the recorded configuration, as before.
         threshold = workspace_project_threshold(self.model, vuln.workspace_project)
