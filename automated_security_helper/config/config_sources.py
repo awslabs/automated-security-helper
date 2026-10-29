@@ -336,13 +336,46 @@ SOURCE_KIND_PYPROJECT = "pyproject"
 
 _PATCH_OPS = {"add", "remove", "replace", "test"}
 _URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
-# A [tool.ash] or [tool.ash.*] header, or a top-level dotted `tool.ash...` key.
-# Only consulted for a pyproject.toml that failed to parse, to decide whether it
-# was meant to configure ASH, and to report the table's line.
+# A [tool.ash] or [tool.ash.*] header, a [[tool.ash.*]] array-of-tables header,
+# or a top-level dotted `tool.ash...` key. Only consulted for a pyproject.toml
+# that failed to parse, to decide whether it was meant to configure ASH, and to
+# report the table's line (_tool_ash_declared, which also reads the other
+# spelling: an `ash` key under a [tool] table).
 _TOOL_ASH_PATTERN = re.compile(
-    r"^[ \t]*(\[[ \t]*tool[ \t]*\.[ \t]*ash[ \t]*[\].]|tool[ \t]*\.[ \t]*ash[ \t]*[.=])",
+    r"^[ \t]*(\[\[?[ \t]*tool[ \t]*\.[ \t]*ash[ \t]*[\].]|tool[ \t]*\.[ \t]*ash[ \t]*[.=])",
     re.MULTILINE,
 )
+# A bare `[tool]` table header, and an `ash` key (`ash = {...}` or `ash.x = ...`)
+# on a line of its own; the key counts only between a [tool] header and the next
+# header, where TOML puts it under tool.
+_TOOL_TABLE_HEADER = re.compile(
+    r"^[ \t]*\[[ \t]*tool[ \t]*\][ \t]*(?:#.*)?$", re.MULTILINE
+)
+_ANY_TABLE_HEADER = re.compile(r"^[ \t]*\[", re.MULTILINE)
+_ASH_KEY_LINE = re.compile(r"^[ \t]*ash[ \t]*[.=]", re.MULTILINE)
+
+
+def _tool_ash_declared(text: str) -> Optional[int]:
+    """The offset in ``text``, a pyproject.toml's text, where it declares ASH
+    settings, or None when it declares none.
+
+    Read by the lines alone, for a text that did not parse: a ``[tool.ash]`` or
+    ``[tool.ash.*]`` table header, a ``[[tool.ash.*]]`` array-of-tables header, a
+    top-level dotted ``tool.ash...`` key, or an ``ash`` key under a bare ``[tool]``
+    table. The last two spellings went unread, so an unparsable pyproject written
+    either way was skipped as holding no ASH settings and the scan ran with the
+    defaults while its configuration sat unread.
+    """
+    match = _TOOL_ASH_PATTERN.search(text)
+    if match is not None:
+        return match.start()
+    for header in _TOOL_TABLE_HEADER.finditer(text):
+        following = _ANY_TABLE_HEADER.search(text, header.end())
+        table_end = following.start() if following is not None else len(text)
+        key = _ASH_KEY_LINE.search(text, header.end(), table_end)
+        if key is not None:
+            return key.start()
+    return None
 
 
 def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
@@ -829,10 +862,10 @@ def _tool_ash_line(path: Path) -> Optional[int]:
         text = _read_toml_text(path)
     except (OSError, UnicodeDecodeError, ASHConfigSourceError):
         return None
-    match = _TOOL_ASH_PATTERN.search(text)
-    if match is None:
+    declared = _tool_ash_declared(text)
+    if declared is None:
         return None
-    return text.count("\n", 0, match.start()) + 1
+    return text.count("\n", 0, declared) + 1
 
 
 #: The name prefix of a scan's server-written copy of a session profile. The
@@ -1216,8 +1249,9 @@ def pyproject_has_ash_table(path: Path) -> bool:
         text = _read_toml_text(path, expect=seen)
     except UnicodeDecodeError as exc:
         # Latin-1 decodes any byte string, which is all the pattern needs.
-        if not _TOOL_ASH_PATTERN.search(
-            read_config_bytes(path, expect=seen).decode("latin-1")
+        if (
+            _tool_ash_declared(read_config_bytes(path, expect=seen).decode("latin-1"))
+            is None
         ):
             return False
         # The decoder's message is not repeated (unparsed_config_reason);
@@ -1237,7 +1271,7 @@ def pyproject_has_ash_table(path: Path) -> bool:
         # TOMLDecodeError is a ValueError; so is the one int() raises for a
         # number longer than the interpreter's digit limit, which tomllib lets
         # through undressed. Either is this file not parsing.
-        if not _TOOL_ASH_PATTERN.search(text):
+        if _tool_ash_declared(text) is None:
             ASH_LOGGER.debug(
                 f"Skipping {Path(path).as_posix()} as a config source: it has no "
                 f"[tool.ash] table, and it does not parse {parse_error_kind(exc)}"
