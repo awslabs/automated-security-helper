@@ -867,9 +867,17 @@ def _sweep_env_dirs() -> List[str]:
         # directory with no record and no sweep.
         unlisted: set[str] = set()
         for parent in _env_dir_parents():
+            # Listed through the parent's real path: TMPDIR naming a link, or the
+            # macOS /tmp -> /private/tmp link, is where tempfile made the
+            # directory, and O_NOFOLLOW on the spelled path refused to list it,
+            # so a directory stranded there was never swept. The real path's
+            # last component is no link, so O_NOFOLLOW still refuses a path
+            # swapped for a link between the resolution and the open; the
+            # record is matched by the spelled parent, as it was recorded.
             try:
                 parent_fd = os.open(
-                    parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                    os.path.realpath(parent),
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                 )
             except OSError:
                 unlisted.add(parent)

@@ -308,10 +308,12 @@ def test_a_recorded_directory_under_a_tmpdir_with_a_trailing_separator_is_swept(
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="the host key is the Linux key"
 )
-def test_a_record_under_a_parent_that_cannot_be_listed_is_kept(monkeypatch, tmp_path):
-    """A symlinked TMPDIR is refused with O_NOFOLLOW, so its directories cannot
-    be listed. Its records say nothing about whether a directory is gone and
-    are kept; dropping them left a stranded directory with no record."""
+def test_a_stranded_directory_under_a_symlinked_tmpdir_is_swept(monkeypatch, tmp_path):
+    """TMPDIR naming a link (macOS's /tmp is one): tempfile made the directory
+    through the link and the record spells it through the link. O_NOFOLLOW on
+    the spelled parent refused to list it, so the directory was never swept and
+    its record was dropped as "gone"; the parent is listed through its real
+    path now and the record is matched by its spelling."""
     real = tmp_path / "real-tmp"
     real.mkdir()
     link = tmp_path / "linked-tmp"
@@ -326,9 +328,31 @@ def test_a_record_under_a_parent_that_cannot_be_listed_is_kept(monkeypatch, tmp_
 
     removed = container_leftovers.sweep_env_dirs()
 
+    assert removed == [stranded.name]
+    assert not stranded.exists()
+    assert not record.exists()
+
+
+def test_a_record_under_a_parent_that_cannot_be_listed_is_kept(monkeypatch, tmp_path):
+    """A parent that cannot be opened (TMPDIR naming a directory that is not
+    there) says nothing about whether a record's directory is gone, so the
+    record is kept; dropping it as "gone" left a directory with no record."""
+    missing = tmp_path / "not-mounted-yet"
+    monkeypatch.setenv("TMPDIR", str(missing))
+    monkeypatch.setattr(container_leftovers, "_ENV_DIR_PARENTS", ())
+    monkeypatch.setenv(container_leftovers.STATE_DIR_ENV, str(tmp_path / "state"))
+    if container_leftovers.host_key() is None:
+        pytest.skip("this host has no key")
+    record = _env_dir_record(
+        tmp_path / "state", missing / "ash-container-env-unlisted01", _GONE_PID
+    )
+
+    removed = container_leftovers.sweep_env_dirs()
+
     assert removed == []
-    assert stranded.exists()
-    assert record.exists(), "the record was dropped while its directory still exists"
+    assert record.exists(), (
+        "the record was dropped although its parent could not be read"
+    )
 
 
 @pytest.mark.skipif(

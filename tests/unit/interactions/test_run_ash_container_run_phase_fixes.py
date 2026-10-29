@@ -317,3 +317,79 @@ def test_an_image_named_by_the_environment_wins_over_the_custom_default(
     assert result.returncode == 0, result.stderr
     run = _run_command(commands)
     assert run[run.index("ash") - 1] == "registry.example/ash:pinned"
+
+
+# ---------------------------------------------------------------------------
+# --min-severity reaches a workspace scan inside the container
+# ---------------------------------------------------------------------------
+
+
+def _assembled(tmp_path, **extra):
+    from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
+
+    (tmp_path / "src").mkdir(exist_ok=True)
+    (tmp_path / "out").mkdir(exist_ok=True)
+    kwargs = {
+        "oci_command_prefix": [],
+        "resolved_oci_runner": "docker",
+        "image_name": "ash:test",
+        "source_dir": (tmp_path / "src").resolve(),
+        "output_dir": (tmp_path / "out").resolve(),
+        "offline": False,
+        "debug": False,
+        "color": False,
+        "quiet": True,
+        "progress": False,
+        "verbose": False,
+        "simple": True,
+        "python_based_plugins_only": False,
+        "cleanup": False,
+        "inspect": False,
+        "fail_on_findings": None,
+        "phases": [ExecutionPhase.SCAN],
+        "scanners": [],
+        "exclude_scanners": [],
+        "output_formats": [],
+        "config": None,
+        "config_overrides": [],
+        "existing_results": None,
+        "ash_plugin_modules": [],
+        "strategy": ExecutionStrategy.PARALLEL,
+        "ctx": None,
+    }
+    kwargs.update(extra)
+    return rac._assemble_run_command(**kwargs)
+
+
+def test_a_workspace_scan_inside_the_container_is_given_the_minimum_severity(
+    tmp_path, monkeypatch
+):
+    """The host returns a workspace scan's exit code as the container computed
+    it, so a minimum the container never saw was applied nowhere."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+    cmd = _assembled(
+        tmp_path, workspace_relative_file="dev.code-workspace", min_severity="high"
+    )
+
+    assert cmd[cmd.index("--min-severity") + 1] == "high"
+
+
+def test_a_one_directory_scan_inside_the_container_is_not(tmp_path, monkeypatch):
+    """Control: the host recomputes a one-directory exit code and applies the
+    minimum itself, so the container is not told."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+    cmd = _assembled(tmp_path, min_severity="high")
+
+    assert "--min-severity" not in cmd
+
+
+def test_the_default_minimum_is_not_forwarded(tmp_path, monkeypatch):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+    cmd = _assembled(
+        tmp_path, workspace_relative_file="dev.code-workspace", min_severity="low"
+    )
+
+    assert "--min-severity" not in cmd

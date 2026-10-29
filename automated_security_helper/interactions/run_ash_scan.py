@@ -5099,6 +5099,10 @@ def _run_container_mode(
         allow_missing_projects=opts.allow_missing_projects,
         shard_index=opts.shard_index,
         shard_count=opts.shard_count,
+        # Applied inside only in workspace mode, whose exit code the host
+        # returns as the container computed it (below); a one-directory scan's
+        # exit code is recomputed on the host, where --min-severity is applied.
+        min_severity=opts.min_severity,
         # The policy the host resolved into the plan, mounted for the workspace
         # scan inside as --config is (_host_file_in_container).
         workspace_config=workspace_config,
@@ -5786,7 +5790,8 @@ def _run_local_mode(
         # code 3" and the fields named only in the server log.
         if opts.client_config_policy is not None:
             raise
-        print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
+        # The shared printer escapes the text, which names fields and a path.
+        _print_invalid_config(e)
         sys.exit(3)
     except ASHConfigValidationError as e:
         _printed_config_refusal(3, e)

@@ -122,6 +122,34 @@ def test_the_shared_printer_shows_a_markup_shaped_message_as_text(capsys):
     assert "[/x]" in out, out
 
 
+def test_a_denied_field_refusal_whose_text_reads_as_markup_still_exits(
+    tmp_path, monkeypatch
+):
+    """The third handler, in local mode: a client-delivered config's denied
+    field names the field and a path; printed raw inside markup, a closing tag
+    in it raised MarkupError instead of exiting 3."""
+    from automated_security_helper.core import orchestrator
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    def refuse(**kwargs):
+        raise ASHConfigFieldDeniedError("field sandbox.[/x] is denied by the policy")
+
+    monkeypatch.setattr(orchestrator.ASHScanOrchestrator, "create", refuse)
+    src = tmp_path / "src"
+    src.mkdir()
+    opts = ras.ScanOptions(
+        source_dir=src,
+        output_dir=tmp_path / "out",
+        progress=False,
+        show_summary=False,
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        ras._run_local_mode(opts, MagicMock())
+
+    assert exited.value.code == 3
+
+
 # ---------------------------------------------------------------------------
 # --min-severity counts only actionable findings as qualifying
 # ---------------------------------------------------------------------------

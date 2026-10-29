@@ -4363,6 +4363,7 @@ def _assemble_run_command(
     fail_on_incomplete_scanners: bool | None = None,
     workspace_config: str | None = None,
     ignore_suppressions: bool = False,
+    min_severity: str | None = None,
     log_level: AshLogLevel | str | None = None,
     outer_run_id: str | None = None,
     environment_names: List[str] | None = None,
@@ -4662,6 +4663,17 @@ def _assemble_run_command(
         ash_args.append("--no-fail-on-incomplete-scanners")
     if ignore_suppressions:
         ash_args.append("--ignore-suppressions")
+    # Forwarded in workspace mode only. The host returns a workspace scan's
+    # exit code as the container computed it, so a minimum it never saw was
+    # applied nowhere; a one-directory scan's exit code is recomputed on the
+    # host, where --min-severity is applied, and forwarding it there would
+    # have the container print a clean summary the host then judges again.
+    if (
+        workspace_relative_file is not None
+        and min_severity
+        and str(min_severity).lower() != "low"
+    ):
+        ash_args.extend(["--min-severity", str(min_severity)])
 
     for phase in phases:
         ash_args.extend(
@@ -4907,6 +4919,7 @@ def run_ash_container(
     shard_count: int | None = None,
     workspace_config: str | None = None,
     ignore_suppressions: bool = False,
+    min_severity: str | None = None,
     outer_run_id: str | None = None,
     reads: OperatorConfigReads | None = None,
 ):
@@ -5397,6 +5410,7 @@ def run_ash_container(
                     shard_count=shard_count,
                     workspace_config=workspace_config,
                     ignore_suppressions=ignore_suppressions,
+                    min_severity=min_severity,
                     log_level=log_level,
                     outer_run_id=outer_run_id,
                     environment_names=environment_names,
