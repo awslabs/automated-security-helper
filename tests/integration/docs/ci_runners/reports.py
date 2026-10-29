@@ -24,12 +24,12 @@
 
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import re
 import shutil
 import struct
-import time
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable, Mapping
@@ -775,20 +775,23 @@ def results_to_judge(
 
 
 #: The zip "extended timestamp" extra field, which carries a member's mtime to the
-#: second in UTC where the zip's own date_time is local time rounded to 2 seconds.
+#: second as a POSIX time. Without it a member has only the zip's own date_time: a
+#: calendar time with 2-second resolution and no zone, which upload-artifact's zip
+#: writer (the archiver stack of @actions/artifact) records as UTC and without this
+#: field (the reviewer's reading of that stack, not measured on a stored zip here).
 _EXTENDED_TIMESTAMP = 0x5455
 
 
 def _zip_mtime(info: zipfile.ZipInfo) -> float:
     """A zip member's mtime as a POSIX time: the extended timestamp when the entry
-    carries one, else its date_time read as local time, as the writer wrote it."""
+    carries one, else its date_time read as UTC, whatever the reader's own zone."""
     extra = info.extra
     while len(extra) >= 4:
         tag, size = struct.unpack("<HH", extra[:4])
         data, extra = extra[4 : 4 + size], extra[4 + size :]
         if tag == _EXTENDED_TIMESTAMP and len(data) >= 5 and data[0] & 1:
             return float(struct.unpack("<i", data[1:5])[0])
-    return time.mktime((*info.date_time, 0, 0, -1))
+    return float(calendar.timegm((*info.date_time, 0, 0, 0)))
 
 
 def unpack_artifact(results: ArtifactResults, target: Path) -> Path:

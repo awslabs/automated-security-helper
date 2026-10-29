@@ -23,6 +23,7 @@ the directory named by DOCTEST_STUB_RECORDS, which only the runner tests set.
 
 from __future__ import annotations
 
+import calendar
 import hashlib
 import importlib
 import importlib.util
@@ -522,10 +523,10 @@ def test_the_merged_output_is_marked_by_the_word_in_its_name(name, merged):
     assert _api("reports", "is_merged_artifact")(name) is merged
 
 
-#: 2026-10-12T20:30:00Z as a zip entry's local date_time on a host whose clock is UTC,
-#: and the same instant as a POSIX time.
+#: 2026-10-12T20:30:00Z as a zip entry's date_time, which the harness reads as UTC
+#: whatever the reader's zone, and the same instant as a POSIX time.
 WRITTEN_AT_DOS = (2026, 10, 12, 20, 30, 0)
-WRITTEN_AT = time.mktime((*WRITTEN_AT_DOS, 0, 0, -1))
+WRITTEN_AT = float(calendar.timegm((*WRITTEN_AT_DOS, 0, 0, 0)))
 
 
 def _zip_member(archive: zipfile.ZipFile, name: str, data: bytes, mtime: float | None):
@@ -565,7 +566,7 @@ def test_a_zipped_artifact_is_unpacked_with_its_members_own_mtimes(tmp_path):
         "members outside the results file's directory are not unpacked"
     )
     assert aggregated.stat().st_mtime == pytest.approx(WRITTEN_AT), (
-        "the zip's date_time, read as local time, when there is no extended timestamp"
+        "the zip's date_time, read as UTC, when there is no extended timestamp"
     )
     assert sarif.stat().st_mtime == pytest.approx(STORED_AT), (
         "the extended timestamp wins over the date_time"
@@ -607,6 +608,50 @@ def test_a_directory_artifact_is_unpacked_with_its_files_mtimes(tmp_path):
     )
     assert not (output / "reports" / "link.txt").exists(), "links are left behind"
     assert not (output / "reports" / "link.txt").is_symlink()
+
+
+@pytest.mark.unit
+def test_a_zip_entry_s_date_time_is_read_as_utc_in_any_zone(monkeypatch):
+    if not hasattr(time, "tzset"):
+        pytest.skip("the zone pin needs time.tzset (POSIX)")
+    read_mtime = _api("reports", "_zip_mtime")
+    info = zipfile.ZipInfo("ash_aggregated_results.json", date_time=WRITTEN_AT_DOS)
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    try:
+        local = time.mktime((*WRITTEN_AT_DOS, 0, 0, -1))
+        assert local != WRITTEN_AT, "the control: the zone moved local time"
+        assert read_mtime(info) == WRITTEN_AT, "the reader's zone does not reach it"
+        # With the extended timestamp present, that wins, as in any zone.
+        info.extra = struct.pack("<HHBi", 0x5455, 5, 1, int(STORED_AT))
+        assert read_mtime(info) == STORED_AT
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
+
+
+@pytest.mark.unit
+def test_the_written_after_checks_allow_the_zip_s_two_second_rounding(tmp_path):
+    written_after = _api("verdict", "written_after_problems")
+    merged_sarif = _api("verdict", "merged_sarif_problems")
+    slack = _api("verdict", "DOS_TIME_SLACK_S")
+    assert slack == 2.0
+    path = tmp_path / "ash_aggregated_results.json"
+    path.write_text("{}", encoding="utf-8")
+    os.utime(path, (STORED_AT, STORED_AT))
+    assert written_after(path, started=STORED_AT + 1.5) == [], "within the rounding"
+    assert written_after(path, started=STORED_AT + 2.0) == [], "at the rounding"
+    problems = written_after(path, started=STORED_AT + 2.5)
+    assert problems and "before the step" in problems[0], "the control"
+    sarif = tmp_path / "ash.ghas.sarif"
+    sarif.write_bytes(SARIF_BYTES)
+    os.utime(sarif, (STORED_AT, STORED_AT))
+    record = tmp_path / "upload-sarif-1.json"
+    digest = hashlib.sha256(SARIF_BYTES).hexdigest()
+    record.write_text(json.dumps({"sha256": digest}), encoding="utf-8")
+    assert merged_sarif(sarif, merge_started=STORED_AT + 1.5, stub_record=record) == []
+    problems = merged_sarif(sarif, merge_started=STORED_AT + 2.5, stub_record=record)
+    assert problems and "before the merge step" in problems[0]
 
 
 # ---------------------------------------------------------------------------

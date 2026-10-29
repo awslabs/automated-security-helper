@@ -602,8 +602,16 @@ def stub_sarif_problems(sarif: Path, stub_record: Path) -> list[str]:
     return []
 
 
+#: The slack a file's mtime gets against a step's start: a file unpacked from an
+#: artifact zip carries its zip entry's date_time, which has 2-second resolution and
+#: rounds down, so a file written within 2 s after the step started can read up to
+#: 2 s before it.
+DOS_TIME_SLACK_S = 2.0
+
+
 def written_after_problems(path: Path, *, started: float) -> list[str]:
-    """``path`` must exist and have been written at or after ``started``, a POSIX time.
+    """``path`` must exist and have been written at or after ``started``, a POSIX time,
+    within ``DOS_TIME_SLACK_S``.
 
     In act's host mode every job shares one working directory, so a file an earlier
     job wrote is still there when a later one runs; only one written after the later
@@ -612,7 +620,7 @@ def written_after_problems(path: Path, *, started: float) -> list[str]:
     path = Path(path)
     if path.is_symlink() or not path.is_file():
         return [f"{path} is missing"]
-    if path.stat().st_mtime < started:
+    if path.stat().st_mtime < started - DOS_TIME_SLACK_S:
         return [
             (
                 f"{path} was last written before the step that writes it started, so "
@@ -633,7 +641,7 @@ def merged_sarif_problems(
     """
     sarif = Path(sarif)
     problems = []
-    if sarif.is_file() and sarif.stat().st_mtime < merge_started:
+    if sarif.is_file() and sarif.stat().st_mtime < merge_started - DOS_TIME_SLACK_S:
         problems.append(
             f"{sarif} was last written before the merge step started, so it is not "
             "the merge's output"
