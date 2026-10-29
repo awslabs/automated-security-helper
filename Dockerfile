@@ -771,9 +771,6 @@ RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
 # The rules bundle a scan trusts is still root's after every change above.
 RUN install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"
 
-# The rules bundle a scan trusts is still root's after every change above.
-RUN install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"
-
 USER ${UID}:${GID}
 
 #
