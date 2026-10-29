@@ -543,18 +543,19 @@ def test_an_error_that_names_two_files_is_described_with_both() -> None:
 
 
 @pytest.mark.unit
-def test_ending_the_default_session_does_not_open_the_scan_presence_registry(
-    root,
-) -> None:
-    """The reserved ``__default__`` never has a presence entry, so there is
-    nothing for the guard to protect and no lock file to create."""
+def test_ending_the_default_session_reads_the_scan_presence_registry(root) -> None:
+    """Every stdio server of one user shares ``__default__``, so a scan of it in
+    a sibling server holds a presence entry like a replica's scan of a session,
+    and ending it reads the registry as for any session. With no scan held, the
+    workspace goes and no entry of its own is left behind."""
     default = mark_session_workspace(root / profile_registry.DEFAULT_SESSION_ID)
     (default / "source").mkdir()
 
     assert sessions.end_session(profile_registry.DEFAULT_SESSION_ID) is True
 
     assert not default.exists()
-    assert not (root / sessions.SCAN_PRESENCE_DIR).exists()
+    holder = root / sessions.SCAN_PRESENCE_DIR / profile_registry.DEFAULT_SESSION_ID
+    assert not holder.exists()
 
 
 @pytest.mark.unit

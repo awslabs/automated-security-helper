@@ -781,9 +781,13 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
     are dropped with the workspace, as the TTL sweep does.
 
     A session with no workspace directory has nothing a scan could be reading, and
-    no registry is opened for it. A reserved id (stdio's ``__default__``) never has
-    a presence entry, so it is removed without opening the registry: ending it
-    creates nothing under ``.ash-mcp-scans``. Only ``ValueError`` and
+    no registry is opened for it. A reserved name other than the stdio session's
+    (the unidentified sentinel, the two registries) never has a presence entry, so
+    it is removed without opening the registry. The stdio session is shared by
+    every stdio server of one user, and a scan of it in a sibling server holds a
+    presence entry like a replica's scan of a session
+    (:func:`_publishes_scan_presence`), so ending it reads the registry as for
+    any session. Only ``ValueError`` and
     ``RuntimeError`` (an id that names no directory, no workspace root) mean there
     is no workspace: an ``OSError`` from the stat of the directory says nothing
     about whether it exists, so that case takes the guarded path like a session
@@ -801,6 +805,11 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
     registry entry) is cleared now, so such a root does not build up state for
     the life of the process.
 
+    The stdio session is the exception to a refused lock: its workspace is removed
+    as it was before the registry covered it. Nothing registers a scan on a root
+    whose registry is refused, and the TTL sweep never collects the stdio
+    workspace (a reserved name), so a tree left for it would stay for good.
+
     An ``OSError`` after the lock was taken (the check for a scan, the removal) is
     logged with one warning and ends the call as a refused lock does.
 
@@ -809,10 +818,6 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
         scan, None when the lock could not be taken or the check or removal
         failed, and only the in-memory state was cleared.
     """
-    from automated_security_helper.cli.mcp.session_identity import (
-        is_reserved_session_id,
-    )
-
     try:
         root = _workspace_root()
         sandbox = session_directory(root, session_id)
@@ -827,7 +832,7 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
         # instead of answering False. The workspace may exist, so the removal
         # takes the guarded path below, as ``ScanPresence`` registers for it.
         has_workspace = True
-    if not has_workspace or is_reserved_session_id(session_id):
+    if not has_workspace or not _publishes_scan_presence(session_id):
         _remove_session_state(session_id)
         return True
     holder = root / SCAN_PRESENCE_DIR / session_id
@@ -836,6 +841,13 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
             try:
                 stack.enter_context(_scan_presence_guard(root))
             except OSError as exc:
+                if _is_the_stdio_session(session_id):
+                    # Nothing registers a scan on a root whose registry is
+                    # refused, and the TTL sweep never collects the stdio
+                    # workspace, so a tree left for it would stay for good:
+                    # it is removed as before the registry covered it.
+                    _remove_session_state(session_id)
+                    return True
                 _forget_session_in_memory(session_id)
                 _warn_guard_refused_once(root, exc, f"ending session {session_id!r}")
                 return None
@@ -916,6 +928,26 @@ def _is_the_stdio_session(session_id: str) -> bool:
     )
 
     return session_id == DEFAULT_SESSION_ID
+
+
+def _publishes_scan_presence(session_id: Optional[str]) -> bool:
+    """Whether a scan of ``session_id`` is marked for the other servers sharing the root.
+
+    Every session with a workspace is, the stdio session included: every stdio
+    server of one user resolves the same ``<root>/__default__``, so a scan of it
+    in one server is as invisible to a sibling server's change as a replica's
+    scan of a session is to another replica's, and the sibling would replace or
+    remove the tree under it. The other reserved names (the unidentified
+    sentinel, the two registries; ``session_identity.is_reserved_session_id``)
+    name no session and never have a workspace.
+    """
+    from automated_security_helper.cli.mcp.session_identity import (
+        is_reserved_session_id,
+    )
+
+    if not session_id:
+        return False
+    return _is_the_stdio_session(session_id) or not is_reserved_session_id(session_id)
 
 
 #: ``error_type`` the MCP tools return for :class:`SessionWorkspaceBusyError`.
@@ -1402,8 +1434,12 @@ class ScanPresence:
     under one lock file, so a scan that starts while a sweep removes its
     session's workspace either is seen by it or finds the workspace gone.
 
-    Nothing is registered, and nothing is reported, for a session with no
-    workspace on disk or no resolvable workspace root: nothing of the session's
+    The stdio session registers like any other: every stdio server of one user
+    shares its workspace, so a sibling server's change has to see a scan of it
+    (:func:`_publishes_scan_presence`), and the busy gate of a change reads the
+    registry (:func:`a_scan_in_another_server_holds`). Nothing is registered,
+    and nothing is reported, for a session with no workspace on disk or no
+    resolvable workspace root: nothing of the session's
     is there to protect, and a scan of a directory the operator granted creates
     nothing under the root. A root whose registry can't be used leaves the scan
     unregistered rather than failing it, with a warning: a refused guard shares
@@ -1423,12 +1459,8 @@ class ScanPresence:
     def __enter__(self) -> Self:
         import uuid
 
-        from automated_security_helper.cli.mcp.session_identity import (
-            is_reserved_session_id,
-        )
-
         session_id = self._session_id
-        if not session_id or is_reserved_session_id(session_id):
+        if not _publishes_scan_presence(session_id):
             return self
         try:
             root = _workspace_root()
@@ -1569,6 +1601,61 @@ def scan_presence_held(session_id: str) -> bool:
         with _scan_presence_guard(root):
             return _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id)
     except OSError:
+        return False
+
+
+def a_scan_in_another_server_holds(session_id: str) -> bool:
+    """True while a scan of ``session_id`` in another server sharing the root holds its presence.
+
+    For the busy gate of a change to the session's tree
+    (``source_delivery._no_scan_running``), which holds the session's change when
+    it asks: that excludes every scan of this process, and a scan of this process
+    holds its presence entry only while it holds the session, so a live entry
+    under ``<root>/.ash-mcp-scans/<session id>/`` is another server's. A replica
+    behind a load balancer and a sibling stdio server of the same user are the
+    two: the stdio session is shared by every stdio server of one user, and a
+    scan of it registers like any other (:func:`_publishes_scan_presence`).
+    Entries of scans whose server died are dropped on the way, as everywhere the
+    registry is read.
+
+    No guard is taken for a session with no workspace on disk: no scan of it can
+    be registered (:class:`ScanPresence` registers a session with a workspace
+    only), and the first delivery into a fresh root creates the workspace itself,
+    under a root that may not exist yet.
+
+    Fails open, with one warning: when the guard can't be taken (``OSError``) the
+    answer is False. A root whose registry is refused is one where
+    :class:`ScanPresence` runs unregistered too, so there is nothing there to
+    read, and the change goes on as it did before the registry existed; the
+    process-wide latch (:func:`_warn_guard_refused_once`) reports the refusal
+    once. As :func:`scan_presence_held` says, False is "no scan is known to
+    hold", not permission; what holds the session for the change is the
+    session's change.
+    """
+    try:
+        root = _workspace_root()
+        sandbox = session_directory(root, session_id)
+        has_workspace = sandbox.is_dir()
+    except (RuntimeError, ValueError):
+        # No workspace root, or an id that names no directory under it: no
+        # scan of it registered anything.
+        return False
+    except OSError:
+        # ``Path.is_dir()`` re-raises EACCES, EIO and ESTALE on Python <= 3.13
+        # instead of answering False. The workspace may exist, so the registry
+        # is read.
+        has_workspace = True
+    if not has_workspace:
+        return False
+    try:
+        with _scan_presence_guard(root):
+            return _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id)
+    except OSError as exc:
+        _warn_guard_refused_once(
+            root,
+            exc,
+            f"checking for a scan of session {session_id!r} in another server",
+        )
         return False
 
 

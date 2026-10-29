@@ -205,6 +205,15 @@ def _no_scan_running(
     behind it. A session that ended while the change held the lock is removed
     once it is released.
 
+    The session's change excludes the scans of this process. A scan of the same
+    session in another server sharing the workspace root (a replica behind a
+    load balancer, or a sibling stdio server of the same user on the stdio
+    session, which every stdio server of that user shares) holds a locked
+    presence entry instead (``sessions.ScanPresence``), read once the change is
+    held (``sessions.a_scan_in_another_server_holds``): a tree replaced or
+    removed under it would make its result one of code it never examined, as
+    under a scan of this process. Refused the same way, naming the other server.
+
     ``removes_workspace`` is True for a change that deletes the session's whole
     directory (``clear_source``). Such a change also excludes writes
     (``MCPSession.try_begin_write``): it is refused while a chunk or a profile
@@ -224,6 +233,7 @@ def _no_scan_running(
     from automated_security_helper.cli.mcp.sessions import (
         CHANGE_REFUSED_BY_CHANGE,
         CHANGE_REFUSED_BY_WRITE,
+        a_scan_in_another_server_holds,
         finish_ended_session,
         get_default_registry,
     )
@@ -251,6 +261,13 @@ def _no_scan_running(
             "after it finishes"
         )
     try:
+        # Inside the try: a refusal here releases the change in the finally.
+        if a_scan_in_another_server_holds(session_id):
+            raise SourceDeliveryBusyError(
+                "a scan of this session is running in another server sharing "
+                "the workspace root; change the delivered source after it "
+                "finishes"
+            )
         yield
     finally:
         session.end_change()
