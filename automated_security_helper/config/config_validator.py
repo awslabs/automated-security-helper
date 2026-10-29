@@ -507,6 +507,49 @@ def make_module_form_needle(
     return needle
 
 
+class CaseInsensitiveNeedle(str):
+    """A value matched ignoring case inside a redact_values call whose other
+    values are matched as written (``whole_words`` without ``ignore_case``).
+
+    The text is the value, so every str-typed carrier transports it unchanged
+    and a consumer that sees only the str treats it as the plain value. The one
+    extra REFINES the literal treatment: ``ignore_case`` widens the match of
+    this value's forms to any case, where the call's own flags would match
+    them as written. Stripped back to str by a transform that rebuilds strings,
+    behavior degrades to the literal's, never past it.
+
+    Built for ``redact_refused_input``: the inputs a validator's own message
+    quotes are matched ignoring case (a validator upper-cases its input), the
+    inputs pydantic's own messages quote only as written (such a message lists
+    the values a field accepts, which an ignore-case match would take out).
+    Before this needle the two sets were replaced in two passes, and two
+    overlapping values, one in each set, left part of a value behind, the
+    defect ``redact_values`` closes for ONE pass ("foo/bar" and "bar/baz-long"
+    in "foo/bar/baz-long"). With the needle both sets go through one pass.
+
+    A module-form needle (ModuleFormNeedle) is never case-insensitive, and this
+    needle carries none of its slots: a value that needs both treatments has
+    no caller today, and _replace_values reads each needle's own slots alone.
+    """
+
+    # Plain construction plus slot assignment (make_case_insensitive_needle
+    # below), never a custom constructor, for the reason ModuleFormNeedle gives.
+    ignore_case: bool
+    __slots__ = ("ignore_case",)
+
+    def __getnewargs__(self) -> Tuple[str]:
+        # Pickle and deepcopy rebuild from the text; the slot rides along in
+        # the state dict.
+        return (str(self),)
+
+
+def make_case_insensitive_needle(value: str) -> CaseInsensitiveNeedle:
+    """A :class:`CaseInsensitiveNeedle` for *value*, matched ignoring case."""
+    needle = CaseInsensitiveNeedle(value)
+    needle.ignore_case = True
+    return needle
+
+
 #: The look-arounds that keep a form to whole components: no ASCII letter,
 #: digit or "_" beside it. ASCII on purpose: a module name is an identifier,
 #: and a neighbor outside that set (".", "/", "\\", a quote, a space, a
@@ -1526,12 +1569,18 @@ def _replace_values(
     # length, and a form any other value also yields is matched the strict way.
     component_sources: Set[str] = set()
     other_sources: Set[str] = set()
+    # The forms of a value marked ignore_case (CaseInsensitiveNeedle): matched
+    # in any case even when the call's own flags match as written. A form
+    # such a value shares with a plain value is matched the wider way, as the
+    # two passes the needle replaces (redact_refused_input) matched it.
+    insensitive_sources: Set[str] = set()
     variant_patterns: List[Tuple[Pattern[str], str, bool]] = []
     for value, label in labelled:
         if not value or (whole_words and len(value) < min_length):
             continue
         value_exempt = bool(getattr(value, "frame_exempt", False))
         value_component = bool(getattr(value, "whole_component", False))
+        value_insensitive = bool(getattr(value, "ignore_case", False))
         variant = getattr(value, "pattern", None)
         if variant is not None:
             variant_patterns.append((variant, label, value_exempt))
@@ -1543,6 +1592,8 @@ def _replace_values(
             (component_sources if value_component else other_sources).add(
                 form.casefold()
             )
+            if value_insensitive:
+                insensitive_sources.add(form.casefold())
             if whole_words:
                 continue
             if _is_anywhere_form(form):
@@ -1584,6 +1635,14 @@ def _replace_values(
         return folded_forms.get(matched.casefold(), first_label)
 
     flags = re.IGNORECASE if ignore_case or not whole_words else 0
+    # The case-insensitive needles' forms, when the call's flags match as
+    # written: their patterns run under the flags plus IGNORECASE. Under flags
+    # that already ignore case every form is matched that way, and the set is
+    # left empty so no form takes a second pattern.
+    insensitive_flags = flags | re.IGNORECASE
+    insensitive_folded: Set[str] = (
+        set() if flags & re.IGNORECASE else insensitive_sources
+    )
     marked = [m.span() for m in markers.finditer(text)]
 
     def unmarked(start: int, end: int) -> bool:
@@ -1629,23 +1688,38 @@ def _replace_values(
     # longest match per position, so an exempt form sharing a position with
     # a shorter plain form would otherwise shadow the plain match and then
     # drop it with the exemption.
+    # The case-insensitive needles' forms are matched by their own pattern
+    # too, under flags that ignore case; a frame-exempt or component form
+    # keeps its own treatment (no needle carries both).
     alternatives = []
     exempt_alternatives: List[str] = []
+    insensitive_alternatives: List[str] = []
     long_forms: List[str] = []
     exempt_long_forms: List[str] = []
+    insensitive_long_forms: List[str] = []
     component_long_forms: List[str] = []
     exempt_component_long_forms: List[str] = []
     for form in sorted(forms, key=len, reverse=True):
         form_exempt = form.casefold() in frame_exempt_folded
+        form_insensitive = not form_exempt and form.casefold() in insensitive_folded
         if len(form) > _LONG_FORM_LENGTH and form not in quoted_only:
             if form in component_forms:
                 (
                     exempt_component_long_forms if form_exempt else component_long_forms
                 ).append(form)
+            elif form_exempt:
+                exempt_long_forms.append(form)
+            elif form_insensitive:
+                insensitive_long_forms.append(form)
             else:
-                (exempt_long_forms if form_exempt else long_forms).append(form)
+                long_forms.append(form)
             continue
-        target = exempt_alternatives if form_exempt else alternatives
+        if form_exempt:
+            target = exempt_alternatives
+        elif form_insensitive and form not in component_forms:
+            target = insensitive_alternatives
+        else:
+            target = alternatives
         if form in component_forms:
             target.append(_component_pattern(form))
             continue
@@ -1690,6 +1764,15 @@ def _replace_values(
             start, end = match.span(1)
             if unmarked(start, end):
                 spans.append((start, end, label_of(match.group(1))))
+    # The case-insensitive needles' forms, with the same rules, in any case.
+    if insensitive_alternatives:
+        pattern = re.compile(
+            f"(?=({'|'.join(insensitive_alternatives)}))", insensitive_flags
+        )
+        for match in pattern.finditer(text):
+            start, end = match.span(1)
+            if unmarked(start, end):
+                spans.append((start, end, label_of(match.group(1))))
     # The frame-exempt forms, with the same rules, except inside ASH's and
     # the import machinery's own frame lines, where they keep the text.
     if exempt_alternatives:
@@ -1712,6 +1795,11 @@ def _replace_values(
         if unmarked(start, end) and not frame_exempt_span(start, end):
             spans.append((start, end, label_of(text[start:end])))
     for start, end in _long_form_spans(text, long_forms, flags, whole_words):
+        if unmarked(start, end):
+            spans.append((start, end, label_of(text[start:end])))
+    for start, end in _long_form_spans(
+        text, insensitive_long_forms, insensitive_flags, whole_words
+    ):
         if unmarked(start, end):
             spans.append((start, end, label_of(text[start:end])))
     # The component forms past that length: found the same way, between
@@ -2244,6 +2332,12 @@ def redact_refused_input(
     input of an error a validator wrote is replaced ignoring case as well, and
     only that input is looked for in a changed form: the message is the
     validator's, and pydantic's own messages never quote the input.
+
+    Both sets go through ONE redact_values pass, the validator-written inputs
+    as case-insensitive needles (CaseInsensitiveNeedle): two passes replaced
+    the exact inputs first and the written ones over the result, so an input
+    of each set that overlapped the other left part of a value behind, the
+    shape the one-pass merge in redact_values exists to close.
     """
     errors = list(errors)
     exact: List[str] = []
@@ -2253,8 +2347,11 @@ def redact_refused_input(
         (written if _validator_wrote(error) else exact).extend(leaves)
     # Whole words: an input is the file's text, matched against the message's
     # own wording.
-    text = redact_values(text, exact, whole_words=True)
-    text = redact_values(text, written, ignore_case=True, whole_words=True)
+    needles: List[str] = [
+        *exact,
+        *(make_case_insensitive_needle(leaf) for leaf in written),
+    ]
+    text = redact_values(text, needles, whole_words=True)
     return text, shows_a_changed_input(text, written)
 
 
