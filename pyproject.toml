@@ -320,6 +320,16 @@ version = "3.7.1"
 # the contract test discovers the pins itself, so a new template or example that
 # is missing from this list fails it.
 #
+# The tests/unit/ entries are fixtures, not install instructions: each file
+# spells an install command with the real repository URL (a docs page a check is
+# given, a reusable-workflow call, the install forms a hint checker must
+# recognize), so the install-ref walk in tests/unit/test_agent_plugin_ash_version.py
+# reads them as pins and compares them with `version` above. The 3.7.1 bump left
+# them at 3.7.0, and the walk was red at the release commit; listed here, a bump
+# moves them with everything else. The regex entries keep the bump off the lines
+# that name a version on purpose: a docstring's historical release, and the
+# docs-site versions a link check is handed.
+#
 # On pattern choice: commitizen matches each regex per line, then replaces the
 # bare current version within the matching lines. `ash_version` is used rather
 # than `version` because manifest.json also carries the plugin's own unrelated
@@ -366,6 +376,11 @@ version_files = [
     "deploy/terraform/modules/fargate/examples/basic/main.tf:^\\s+ash_version\\s+=",
     "examples/AWSCodeBuild/buildspec.yml:RELEASE_TAG:",
     "examples/AWSCodeBuild/README.md:^\\| `RELEASE_TAG`",
+    "tests/unit/test_docs_checks_can_fail.py:automated-security-helper.git@",
+    "tests/unit/test_docs_checks_can_fail.py:rev: v",
+    "tests/unit/test_no_bare_name_install_hints.py",
+    "tests/unit/test_reusable_workflow_defaults.py:CHECKED_ASH_VERSION",
+    "tests/unit/test_reusable_workflow_defaults.py:automated-security-helper@v",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-

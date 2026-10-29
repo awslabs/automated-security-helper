@@ -229,7 +229,7 @@ BARE_NAME_INSTALLS = {
         "or install the library directly with `pip install detect-secrets`."
     ),
     "pipx": "pipx install automated-security-helper",
-    "python-m-pip-pinned": "python3 -m pip install --upgrade automated-security-helper==3.7.0",
+    "python-m-pip-pinned": "python3 -m pip install --upgrade automated-security-helper==3.7.1",
     "uv-pip-underscore-spelling": "uv pip install automated_security_helper",
     "pip-mixed-case": "pip install Automated-Security-Helper",
     "pip-extra-and-specifier": "pip install 'automated-security-helper[cdk]>=3'",
@@ -247,7 +247,7 @@ BARE_NAME_INSTALLS = {
     "uvx-with-bare-extra": "uvx --with automated-security-helper[cdk] cdk synth",
     "uvx-from-bare-name": "uvx --from automated-security-helper ash",
     "pipx-run-spec-bare-name": "pipx run --spec automated-security-helper ash",
-    "requirements-line": "automated-security-helper==3.7.0",
+    "requirements-line": "automated-security-helper==3.7.1",
     "pipenv-install-ash": "pipenv install ash",
     "pipenv-install-distribution-name": "pipenv install automated-security-helper",
     "pipenv-install-extra": "pipenv install 'automated-security-helper[symbols]'",
@@ -303,7 +303,7 @@ BARE_NAME_INSTALLS = {
     "pipx-run-pip-args": "pipx run --pip-args='--pre' ash",
     "requirements-bare-name": "automated-security-helper",
     "requirements-compatible-release": "automated-security-helper ~= 3.7",
-    "requirements-hash": "automated-security-helper==3.7.0 --hash=sha256:abc",
+    "requirements-hash": "automated-security-helper==3.7.1 --hash=sha256:abc",
     "requirements-comment": "automated-security-helper  # ASH",
     "pyproject-dependency": 'dependencies = ["automated-security-helper"]',
     "pyproject-optional-dependency": 'ash = ["automated-security-helper>=3"]',
@@ -354,22 +354,22 @@ BARE_NAME_INSTALLS = {
 # Install forms that resolve to ASH, and text that only looks similar. Several
 # are the fixed hints and the documented install commands.
 RESOLVING_OR_UNRELATED = {
-    "pip-git-url": f"pip install git+{GIT_URL}@v3.7.0",
-    "pipx-git-url": f"pipx install git+{GIT_URL}@v3.7.0",
-    "uvx-git-url": f"uvx git+{GIT_URL}@v3.7.0 --mode local",
-    "direct-reference-quoted": f'pip install "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.0"',
-    "direct-reference-unquoted": f"pip install automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.0",
-    "direct-reference-unspaced": f"pip install automated-security-helper[symbols]@git+{GIT_URL}@v3.7.0",
-    "prose-direct-reference": f"Install automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.0",
-    "uvx-from-equals-git": "uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp",
-    "uvx-from-git": f"uvx --from git+{GIT_URL}@v3.7.0 ash --help",
-    "uvx-with-direct-reference": f'uvx --with "automated-security-helper[cdk] @ git+{GIT_URL}@v3.7.0" cdk synth',
+    "pip-git-url": f"pip install git+{GIT_URL}@v3.7.1",
+    "pipx-git-url": f"pipx install git+{GIT_URL}@v3.7.1",
+    "uvx-git-url": f"uvx git+{GIT_URL}@v3.7.1 --mode local",
+    "direct-reference-quoted": f'pip install "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.1"',
+    "direct-reference-unquoted": f"pip install automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.1",
+    "direct-reference-unspaced": f"pip install automated-security-helper[symbols]@git+{GIT_URL}@v3.7.1",
+    "prose-direct-reference": f"Install automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.1",
+    "uvx-from-equals-git": "uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.1 ash mcp",
+    "uvx-from-git": f"uvx --from git+{GIT_URL}@v3.7.1 ash --help",
+    "uvx-with-direct-reference": f'uvx --with "automated-security-helper[cdk] @ git+{GIT_URL}@v3.7.1" cdk synth',
     "uvx-from-local-checkout": "uvx --directory=/path/to/automated-security-helper --from=. ash mcp",
     "mcp-cli-reinstall-hint": f"pip install --force-reinstall 'git+{GIT_URL}'",
     "cdk-dependencies-hint": "Install them with: ash dependencies install",
     "extra-packages-by-name": "pip install tree-sitter tree-sitter-python",
     "pipx-upgrade-reuses-recorded-spec": "pipx upgrade automated-security-helper",
-    "ash-runs-after-install": f"uv tool install git+{GIT_URL}@v3.7.0 && ash --mode local",
+    "ash-runs-after-install": f"uv tool install git+{GIT_URL}@v3.7.1 && ash --mode local",
     "separate-code-spans": "Run `pip install -e .` and then `ash --help`.",
     "uv-run-project-script": "uv run ash scan",
     "editable-local-extra": "pip install -e '.[symbols]'",
@@ -378,18 +378,18 @@ RESOLVING_OR_UNRELATED = {
     "image-tag": "docker build --tag automated-security-helper:ci --target ci .",
     "cd-into-clone": "cd automated-security-helper",
     "names-that-contain-ash": "pip install hash flash ashlar ash-plugin-example",
-    "spdx-creator": "Tool: automated-security-helper-3.7.0",
+    "spdx-creator": "Tool: automated-security-helper-3.7.1",
     "skills-add": "npx skills add awslabs/automated-security-helper",
     "module-run": "python -m automated_security_helper.cli scan",
-    "nix-flake-ref": 'export ASH_NIX_FLAKE_REF="github:awslabs/automated-security-helper/v3.7.0"',
+    "nix-flake-ref": 'export ASH_NIX_FLAKE_REF="github:awslabs/automated-security-helper/v3.7.1"',
     "workflow-direct-reference": (
         "ASH_UVX_SOURCE: automated-security-helper[cdk] @ "
         "git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}"
     ),
-    "requirements-direct-reference": f"automated-security-helper[cdk] @ git+{GIT_URL}@v3.7.0",
-    "poetry-git-table": f'automated-security-helper = {{git = "{GIT_URL}", tag = "v3.7.0"}}',
+    "requirements-direct-reference": f"automated-security-helper[cdk] @ git+{GIT_URL}@v3.7.1",
+    "poetry-git-table": f'automated-security-helper = {{git = "{GIT_URL}", tag = "v3.7.1"}}',
     "poetry-path-table": 'automated-security-helper = {path = "../../", develop = true}',
-    "json-name-value": '{"name": "automated-security-helper", "versionInfo": "3.7.0"}',
+    "json-name-value": '{"name": "automated-security-helper", "versionInfo": "3.7.1"}',
     "json-analyzer-id": '    "id": "automated-security-helper",',
     "entry-point": 'automated-security-helper = "automated_security_helper.cli.entrypoint:main"',
     "build-include-list": 'include = [ "automated_security_helper", "/Dockerfile",]',
@@ -397,39 +397,39 @@ RESOLVING_OR_UNRELATED = {
     "ruby-assertion-argument": '    assert_match "automated-security-helper", shell_output("ash --version")',
     "prose-naming-the-project": "automated-security-helper is a security scanner",
     "pipx-inject-into-ash": "pipx inject automated-security-helper tree-sitter-python",
-    "pdm-add-direct-reference": f"pdm add 'automated-security-helper @ git+{GIT_URL}@v3.7.0'",
-    "dockerfile-exec-form-git": f'RUN ["pip", "install", "git+{GIT_URL}@v3.7.0"]',
-    "html-code-git": f"<code>pip install git+{GIT_URL}@v3.7.0</code>",
-    "uvx-link-mode-from-git": f"uvx --link-mode copy --from git+{GIT_URL}@v3.7.0 ash mcp",
+    "pdm-add-direct-reference": f"pdm add 'automated-security-helper @ git+{GIT_URL}@v3.7.1'",
+    "dockerfile-exec-form-git": f'RUN ["pip", "install", "git+{GIT_URL}@v3.7.1"]',
+    "html-code-git": f"<code>pip install git+{GIT_URL}@v3.7.1</code>",
+    "uvx-link-mode-from-git": f"uvx --link-mode copy --from git+{GIT_URL}@v3.7.1 ash mcp",
     "mcp-json-env-between-from-git": (
         '{"command": "uvx", "env": {}, "args": '
-        '["--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0", "ash", "mcp"]}'
+        '["--from=git+https://github.com/awslabs/automated-security-helper@v3.7.1", "ash", "mcp"]}'
     ),
     "pipenv-run-project-script": "pipenv run ash scan",
-    "pipenv-install-editable-git": f"pipenv install -e git+{GIT_URL}@v3.7.0#egg=automated-security-helper",
-    "pipenv-install-direct-reference": f'pipenv install "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.0"',
+    "pipenv-install-editable-git": f"pipenv install -e git+{GIT_URL}@v3.7.1#egg=automated-security-helper",
+    "pipenv-install-direct-reference": f'pipenv install "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.1"',
     "pipenv-install-local-checkout": "pipenv install -e .",
     "pipenv-install-requirements-file": "pipenv install -r requirements.txt",
-    "uv-add-direct-reference": f'uv add "automated-security-helper @ git+{GIT_URL}@v3.7.0"',
-    "uv-add-git-url": f"uv add git+{GIT_URL} --tag v3.7.0",
+    "uv-add-direct-reference": f'uv add "automated-security-helper @ git+{GIT_URL}@v3.7.1"',
+    "uv-add-git-url": f"uv add git+{GIT_URL} --tag v3.7.1",
     "uv-add-requirements-file": "uv add -r requirements.txt",
-    "rye-add-git": f"rye add automated-security-helper --git {GIT_URL} --tag v3.7.0",
+    "rye-add-git": f"rye add automated-security-helper --git {GIT_URL} --tag v3.7.1",
     "rye-add-git-equals": f"rye add automated-security-helper --git={GIT_URL}",
     "rye-add-path": "rye add automated-security-helper --path ../automated-security-helper",
-    "rye-install-url": "rye install ash --url https://example.invalid/ash-3.7.0.tar.gz",
+    "rye-install-url": "rye install ash --url https://example.invalid/ash-3.7.1.tar.gz",
     "rye-run-script": "rye run ash scan",
     "conda-install-other": "conda install -c conda-forge python=3.12 nodejs",
-    "pip-download-git": f"pip download git+{GIT_URL}@v3.7.0",
-    "alias-uvx-git": f'alias ash="uvx git+{GIT_URL}@v3.7.0"',
+    "pip-download-git": f"pip download git+{GIT_URL}@v3.7.1",
+    "alias-uvx-git": f'alias ash="uvx git+{GIT_URL}@v3.7.1"',
     "alias-uvx-from-direct-reference": (
         f"alias ash=\"uvx --from 'automated-security-helper[symbols] @ "
-        f"git+{GIT_URL}@v3.7.0' ash\""
+        f"git+{GIT_URL}@v3.7.1' ash\""
     ),
     "uv-pip-reinstall-hint": (
         "/opt/ash/bin/python -m uv pip install --python /opt/ash/bin/python "
         f"--reinstall-package automated-security-helper git+{GIT_URL}@0123abcd"
     ),
-    "uv-pip-upgrade-package-short": f"uv pip install -P ash git+{GIT_URL}@v3.7.0",
+    "uv-pip-upgrade-package-short": f"uv pip install -P ash git+{GIT_URL}@v3.7.1",
     "mcp-json-uv-run-project": '{"command": "uv", "args": ["run", "--project=/src/ash", "ash", "mcp"]}',
     "mcp-json-from-git": textwrap.dedent(
         """\
@@ -438,7 +438,7 @@ RESOLVING_OR_UNRELATED = {
             "ash": {
               "command": "uvx",
               "args": [
-                "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+                "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.1",
                 "ash",
                 "mcp"
               ]
@@ -545,7 +545,7 @@ PYTHON_RESOLVING_OR_UNRELATED = {
             return f"{ASH_DISTRIBUTION_NAME}[{extra}] @ {source}"
         """,
     "direct-reference-concatenated": f"""
-        REQ = "automated-security-helper[symbols]" + " @ git+{GIT_URL}@v3.7.0"
+        REQ = "automated-security-helper[symbols]" + " @ git+{GIT_URL}@v3.7.1"
         """,
     "argv-from-metadata": """
         import sys
@@ -614,7 +614,7 @@ def test_a_planted_tree_is_reported_line_by_line(tmp_path):
 
             ```bash
             pip install "automated-security-helper[symbols]"
-            pip install "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.0"
+            pip install "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.1"
             ```
 
             ```json
@@ -644,10 +644,10 @@ def test_a_planted_tree_is_reported_line_by_line(tmp_path):
                 f"Symbol suppressions need the optional '{{EXTRA}}' extra. Install "
                 f"automated-security-helper[{{EXTRA}}]"
             )
-            FIXED = "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.0"
+            FIXED = "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.1"
             # A bare requirement literal is reported even though HINT completes it.
             REQUIREMENT = f"automated-security-helper[{{EXTRA}}]"
-            HINT = f"Install it with: pip install '{{REQUIREMENT}} @ git+{GIT_URL}@v3.7.0'"
+            HINT = f"Install it with: pip install '{{REQUIREMENT}} @ git+{GIT_URL}@v3.7.1'"
             '''
         ),
         encoding="utf-8",
@@ -683,14 +683,14 @@ def test_planted_lines_for_other_installers_are_reported(tmp_path):
             ```bash
             pipenv install ash
             pipenv run ash scan
-            pipenv install -e git+{GIT_URL}@v3.7.0#egg=automated-security-helper
+            pipenv install -e git+{GIT_URL}@v3.7.1#egg=automated-security-helper
             rye add automated-security-helper
-            rye add automated-security-helper --git {GIT_URL} --tag v3.7.0
+            rye add automated-security-helper --git {GIT_URL} --tag v3.7.1
             uv add --dev ash
-            uv add "automated-security-helper @ git+{GIT_URL}@v3.7.0"
+            uv add "automated-security-helper @ git+{GIT_URL}@v3.7.1"
             conda install -c conda-forge ash
             alias ash="uvx automated-security-helper"
-            alias ash="uvx git+{GIT_URL}@v3.7.0"
+            alias ash="uvx git+{GIT_URL}@v3.7.1"
             ```
             """
         ),
