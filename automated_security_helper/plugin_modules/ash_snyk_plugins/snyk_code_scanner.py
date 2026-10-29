@@ -8,7 +8,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Set
+from typing import Annotated, Any, ClassVar, Iterable, List, Literal, Set
 
 import yaml
 from pydantic import Field
@@ -18,9 +18,6 @@ from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.models.core import ToolArgs
-from automated_security_helper.models.core import (
-    ToolExtraArg,
-)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     redacted_command_record,
@@ -34,7 +31,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.display_text import escape_controls
-from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
+from automated_security_helper.utils.get_scan_set import (
+    file_links_leaving_tree,
+    honors_ignore_files,
+)
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -68,14 +68,19 @@ _MAX_EXCLUSION_FILE_BYTES = 1024 * 1024
 _REFUSAL_FILES_SHOWN = 10
 
 
-def tree_exclusion_files(target: Path) -> List[Path]:
+def tree_exclusion_files(
+    target: Path, *, gitignore_excludes: bool = False
+) -> List[Path]:
     """The files under ``target`` that would make snyk code test leave files out.
 
     A ``.snyk`` policy counts when its ``exclude.code`` or ``exclude.global`` has
     an entry, and an ignore file when it has a rule. One that is not a regular
     file inside the tree (snyk reads a link's target), cannot be read, or cannot
     be parsed counts too. ``.git`` is walked as well, as snyk's native filter
-    walks it.
+    walks it. A file named exactly ``.gitignore`` counts only with
+    ``gitignore_excludes``: the scan set honors it too unless
+    ``honor_ignore_files`` is false, and then the files it names are in the scan
+    set while snyk would still leave them out.
 
     A link to a directory is not followed, and nothing behind it counts, because
     snyk does not follow one either. Its native filter lists files with Go's
@@ -90,17 +95,19 @@ def tree_exclusion_files(target: Path) -> List[Path]:
     found: List[Path] = []
     for directory, _subdirectories, names in os.walk(target):
         for name in names:
-            if _is_exclusion_name(name):
+            if _is_exclusion_name(name, gitignore_excludes=gitignore_excludes):
                 path = Path(directory) / name
                 if _excludes(path, Path(target)):
                     found.append(path)
     return sorted(found)
 
 
-def _is_exclusion_name(name: str) -> bool:
+def _is_exclusion_name(name: str, *, gitignore_excludes: bool = False) -> bool:
     if name.endswith(_POLICY_SUFFIX):
         return True
-    return name != ".gitignore" and name.endswith(_IGNORE_SUFFIXES)
+    if name == ".gitignore":
+        return gitignore_excludes
+    return name.endswith(_IGNORE_SUFFIXES)
 
 
 def _excludes(path: Path, root: Path) -> bool:
@@ -182,7 +189,9 @@ def _hold(directory: Path) -> int | None:
     return fd
 
 
-def _sweep_abandoned_copies(temp_root: Path, older_than: float) -> None:
+def _sweep_abandoned_copies(
+    temp_root: Path, older_than: float, *, keep: Iterable[Path] = ()
+) -> None:
     """Remove the copies a killed run left in ``temp_root``.
 
     The finally that removes a copy does not run when the process is killed (SIGKILL,
@@ -191,17 +200,26 @@ def _sweep_abandoned_copies(temp_root: Path, older_than: float) -> None:
     last modified more than ``older_than`` seconds ago, and no process holds its lock
     (``_hold``). Age alone would not do: a run copying a large tree, then testing it
     for up to the scan timeout, keeps a copy longer than either.
+
+    A directory in ``keep``, or one holding a directory in ``keep``, is never removed
+    whatever its name: the scan's own source and output directories can sit under
+    TMPDIR with a name that starts like a copy's, and the name alone does not make
+    them one.
     """
     try:
         import fcntl
     except ImportError:
         return
+    kept = [Path(os.path.realpath(path)) for path in keep]
     now = time.time()
     try:
         entries = [e for e in os.scandir(temp_root) if e.name.startswith(_COPY_PREFIX)]
     except OSError:
         return
     for entry in entries:
+        real = Path(os.path.realpath(entry.path))
+        if any(real == held or real in held.parents for held in kept):
+            continue
         try:
             fd = os.open(entry.path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         except OSError:
@@ -329,27 +347,11 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         return True
 
     def _process_config_options(self):
-        # Called at construction and again from _resolve_arguments, so the flag is
-        # replaced rather than appended; otherwise every argv carried it twice.
-        self.args.extra_args = [
-            arg for arg in self.args.extra_args if arg.key != "--severity-threshold"
-        ]
-        if not (
-            self.config.options.severity_threshold == "ALL"
-            or self.config.options.severity_threshold is None
-        ):
-            snyk_severity = (
-                str(self.config.options.severity_threshold).lower()
-                if self.config.options.severity_threshold != "CRITICAL"
-                else "high"
-            )
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--severity-threshold",
-                    value=snyk_severity,
-                )
-            )
-
+        # severity_threshold is not passed as --severity-threshold: snyk would drop
+        # the findings below it before ASH saw them, so they would be neither
+        # reported nor counted. ASH applies it after the scan, as for every
+        # scanner, to the severity snyk gave each finding; the option says which
+        # findings count as failures, not which are reported.
         return super()._process_config_options()
 
     def _resolve_arguments(
@@ -582,8 +584,18 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             )
             return False
 
-        if not self.config.options.honor_tree_exclusions:
-            excluding = tree_exclusion_files(Path(target))
+        honor_gitignore = honors_ignore_files(getattr(self.context, "config", None))
+        if not self.config.options.honor_tree_exclusions and target_type != "source":
+            # The converted target is tested where ASH wrote it, so the exclusion
+            # files there are the ones snyk reads. The source target is tested as
+            # a copy of the scan set and is checked once the copy exists (below):
+            # a file outside the scan set (.git, an ignored directory, ASH's
+            # output) never reaches snyk, so it excludes nothing. A .gitignore
+            # counts when the scan set does not honor it, since then the files it
+            # names are tested by ASH and would be left out by snyk.
+            excluding = tree_exclusion_files(
+                Path(target), gitignore_excludes=not honor_gitignore
+            )
             if excluding:
                 raise ScannerError(self._exclusion_refusal(excluding, Path(target)))
 
@@ -610,9 +622,19 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 staged = self._stage_source(target, global_ignore_paths or [], cleanup)
                 if staged is None:
                     # _stage_source has said why: every file is left out, or there
-                    # is none.
+                    # is none. Nothing was evaluated, so the row grades SKIPPED,
+                    # not PASSED with exit code 0 for a tool that never ran.
+                    self.targets_attempted = 0
                     self._post_scan(target=target, target_type=target_type)
                     return True
+                if not self.config.options.honor_tree_exclusions:
+                    # The copy holds exactly the files snyk is given, so an
+                    # exclusion file counts here only when it reaches snyk. A
+                    # .gitignore in the copy was honored by the scan set already
+                    # (when it is not honored, _stage_source leaves it out).
+                    excluding = tree_exclusion_files(staged)
+                    if excluding:
+                        raise ScannerError(self._exclusion_refusal(excluding, staged))
                 tested = staged
 
             final_args = self._resolve_arguments(
@@ -821,10 +843,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         import dataclasses
         import tempfile
 
-        from automated_security_helper.utils.get_scan_set import (
-            honors_ignore_files,
-            scan_set,
-        )
+        from automated_security_helper.utils.get_scan_set import scan_set
         from automated_security_helper.utils.sandbox.fs_guard import (
             open_for_write_bytes,
         )
@@ -857,6 +876,8 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         _sweep_abandoned_copies(
             temp_root,
             older_than=self._effective_scan_timeout() or _UNBOUNDED_SWEEP_AGE_SECONDS,
+            # Never the scan's own directories, whatever they are named.
+            keep=(root, Path(self.context.output_dir)),
         )
         staged = Path(tempfile.mkdtemp(prefix=_COPY_PREFIX))
         # Registered first, so it is released last: the copy is removed while the
@@ -872,21 +893,28 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # under the output directory, as a test here that left out every file
         # under the output directory let it do.
         copied = ignored = refused = 0
+        honor_gitignore = honors_ignore_files(getattr(self.context, "config", None))
 
         def _not_copied(shown: object, why: object) -> None:
+            # Logged, and recorded: snyk never evaluates a file left out here, so
+            # a run that goes on grades ERROR naming it, not PASSED over it
+            # (PluginBase.unevaluated_targets).
             self._plugin_log(
                 f"{shown} not copied for Snyk: {why}",
                 target_type="source",
                 level=logging.DEBUG,
             )
+            self.record_unevaluated_target(shown)
 
+        # The same rules the run's own scan set was built under, so a copy built
+        # when the run's list is not read back leaves out what that list left out:
+        # the ignore files as the config says, and the workspace's output directory.
         for name in scan_set(
             source=str(root),
             output=str(self.context.output_dir),
-            honor_ignore_files=honors_ignore_files(
-                getattr(self.context, "config", None)
-            ),
+            honor_ignore_files=honor_gitignore,
             run_id=getattr(self.context, "run_id", None),
+            workspace_output_dir=getattr(self.context, "workspace_output_dir", None),
         ):
             # Only the line ending a cached list leaves: "a.js " is its own file.
             path = Path(name.rstrip("\n"))
@@ -901,6 +929,18 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 for entry in ignore_paths
             ):
                 ignored += 1
+                continue
+            if not honor_gitignore and path.name == ".gitignore":
+                # snyk applies a .gitignore it finds in the copy and has no option
+                # not to. The scan set does not honor it here, so the files it
+                # names are in the copy and are to be tested; the file itself is
+                # not something snyk code test reads.
+                self._plugin_log(
+                    f"{relative.as_posix()} not copied for Snyk: honor_ignore_files "
+                    "is false, and snyk would apply it to the copy",
+                    target_type="source",
+                    level=logging.DEBUG,
+                )
                 continue
             # Reading the source may fail for one file (refused, unreadable), which
             # skips it. Writing the copy may not: a write that fails, a full disk

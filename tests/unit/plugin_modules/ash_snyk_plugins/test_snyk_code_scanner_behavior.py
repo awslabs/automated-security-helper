@@ -292,97 +292,31 @@ def test_existing_configstore_credentials_suppress_the_warning(
 
 
 # ---------------------------------------------------------------------------
-# Severity threshold translation
+# Severity threshold
 # ---------------------------------------------------------------------------
-
-# Snyk's --severity-threshold accepts low/medium/high and has no "critical"
-# level, so ASH's CRITICAL is mapped down to high. HIGH and CRITICAL therefore
-# share an outcome on purpose; test_severity_ladder_is_not_vacuous pins that
-# the rest of the ladder does not collapse with them.
-SEVERITY_LADDER = {
-    None: None,
-    "ALL": None,
-    "LOW": "low",
-    "MEDIUM": "medium",
-    "HIGH": "high",
-    "CRITICAL": "high",
-}
 
 
 @pytest.mark.parametrize(
-    "threshold, expected", sorted(SEVERITY_LADDER.items(), key=lambda kv: str(kv[0]))
+    "threshold", [None, "ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 )
 @pytest.mark.unit
-def test_severity_threshold_translates_to_the_snyk_flag(
-    plugin_context, threshold, expected
-):
-    """Each ASH threshold maps to the snyk value, or to no flag at all.
-
-    The assertion is on the distinct values emitted. That the flag appears once is
-    test_the_severity_flag_is_sent_once's to check.
-    """
+def test_severity_threshold_is_not_passed_to_snyk(plugin_context, tmp_path, threshold):
+    """``severity_threshold`` says which findings count as failures, and ASH applies
+    it after the scan. Passed as ``--severity-threshold``, snyk dropped the findings
+    below it before ASH saw them, so they were neither reported nor counted."""
     scanner = SnykCodeScanner(
         context=plugin_context,
         config=SnykCodeScannerConfig(
             options=SnykCodeScannerConfigOptions(severity_threshold=threshold)
         ),
     )
-
-    values = {
-        arg.value
-        for arg in scanner.args.extra_args
-        if arg.key == "--severity-threshold"
-    }
-    if expected is None:
-        assert values == set(), (
-            f"threshold {threshold!r} must not emit --severity-threshold; got {values}"
-        )
-    else:
-        assert values == {expected}, (
-            f"threshold {threshold!r} should map to {expected!r}; got {values}"
-        )
-
-
-@pytest.mark.unit
-def test_the_severity_flag_is_sent_once(plugin_context, tmp_path):
-    """One --severity-threshold in the argv, however often the options are processed.
-
-    ScannerPluginBase.model_post_init calls _process_config_options once and
-    _resolve_arguments calls it again; the flag is added once, not on each call.
-    """
-    scanner = SnykCodeScanner(
-        context=plugin_context,
-        config=SnykCodeScannerConfig(
-            options=SnykCodeScannerConfigOptions(severity_threshold="MEDIUM")
-        ),
-    )
     target = tmp_path / "scan-me"
     target.mkdir()
 
-    for _ in range(2):
-        args = scanner._resolve_arguments(target=target, results_file=None)
-        positions = [i for i, a in enumerate(args) if a == "--severity-threshold"]
-        assert len(positions) == 1, args
-        assert args[positions[0] + 1] == "medium"
-    assert [a.key for a in scanner.args.extra_args] == ["--severity-threshold"]
+    args = scanner._resolve_arguments(target=target, results_file=None)
 
-
-@pytest.mark.unit
-def test_severity_ladder_is_not_vacuous():
-    """The ladder must not collapse to a single outcome.
-
-    A parametrized threshold table where every position expects the same thing
-    tests one case N times while looking exhaustive. Four distinct outcomes
-    across six positions is the intended shape: ALL/None both suppress the
-    flag, and HIGH/CRITICAL both map to high because snyk has no critical.
-    """
-    outcomes = list(SEVERITY_LADDER.values())
-    assert len(set(outcomes)) == 4, (
-        f"expected 4 distinct outcomes across the ladder, got {sorted(set(map(str, outcomes)))}"
-    )
-    assert SEVERITY_LADDER["HIGH"] == SEVERITY_LADDER["CRITICAL"] == "high"
-    assert SEVERITY_LADDER["LOW"] != SEVERITY_LADDER["MEDIUM"]
-    assert SEVERITY_LADDER[None] is SEVERITY_LADDER["ALL"] is None
+    assert "--severity-threshold" not in args, args
+    assert all(arg.key != "--severity-threshold" for arg in scanner.args.extra_args)
 
 
 # ---------------------------------------------------------------------------

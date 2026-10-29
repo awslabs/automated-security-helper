@@ -1,14 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""snyk code's recorded command line hides a value its option read from the environment.
+"""snyk code's recorded command line hides a value its configuration read from the environment.
 
-``severity_threshold`` written ``${VAR}`` in the configuration file is part of
-the configuration's redaction set, and snyk is given it as ``--severity-threshold
-<lower case value>``. The command is recorded in a verbose log record, in the
+``project_name`` written ``!ENV ${VAR}`` in the configuration file is part of the
+configuration's redaction set, and the scanned directory, an argument of the
+command, carries that name. The command is recorded in a verbose log record, in the
 SARIF invocation fields and in the scanner details attached to the results; the
-value shows as ``<value>`` in each. A threshold written out literally is operator
-text and is recorded whole.
+value shows as ``<value>`` in each. A name written out literally is operator text
+and is recorded whole.
+
+snyk-code's own options put no value of their own on the command line:
+``severity_threshold`` is applied by ASH after the scan and is not passed as
+``--severity-threshold`` (test_snyk_code_scanner_behavior.py), so the directory
+is the carrier here.
 """
 
 import json
@@ -34,6 +39,7 @@ pytestmark = pytest.mark.unit
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()
 
+CARRIER_DIRECTORY = "marker-directory-carrier"
 # Holds a single quote: shlex.join writes it as several quoted segments.
 DIRECTORY_WITH_QUOTE = "marker-quote'carrier-value"
 SARIF_OUTPUT_FLAG = "--sarif-file-output="
@@ -75,13 +81,12 @@ def snyk_on_path(monkeypatch, tmp_path):
 def _scan(
     tmp_path,
     monkeypatch,
-    threshold_line,
     *,
     directory_name=None,
     directory_is_environment_value=True,
     values_hook=None,
 ):
-    """Scan with a fake snyk, ``severity_threshold`` written as ``threshold_line``.
+    """Scan with a fake snyk.
 
     With ``directory_name``, the scanned directory sits in a directory of that
     name, which is an argument of the command. ``project_name`` reads the name
@@ -89,7 +94,6 @@ def _scan(
     ``directory_is_environment_value`` is false. ``values_hook`` replaces the
     scanner's ``_values_to_redact`` for the scan.
     """
-    monkeypatch.setenv("ASH_TEST_SNYK_THRESHOLD", "MEDIUM")
     monkeypatch.setenv("ASH_TEST_SNYK_DIRECTORY", directory_name or "unused")
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     config_file = tmp_path / "operator" / ".ash.yaml"
@@ -105,7 +109,7 @@ def _scan(
         "  snyk-code:\n"
         "    enabled: true\n"
         "    options:\n"
-        f"      severity_threshold: {threshold_line}\n",
+        "      severity_threshold: MEDIUM\n",
         encoding="utf-8",
     )
     _, config = resolve_config_module.load_config_file_for_run(config_file)
@@ -154,41 +158,50 @@ def _scan(
     return report, running, argv
 
 
-def test_a_threshold_read_from_the_environment_is_hidden_in_command_records(
+def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records(
     tmp_path, monkeypatch, snyk_on_path
 ):
     report, running, argv = _scan(
-        tmp_path, monkeypatch, "!ENV ${ASH_TEST_SNYK_THRESHOLD}"
+        tmp_path, monkeypatch, directory_name=CARRIER_DIRECTORY
     )
 
-    assert argv[argv.index("--severity-threshold") + 1] == "medium", argv
+    # snyk ran on a copy of the scan set; the records name the scanned directory.
+    assert argv[0] == str(snyk_on_path) or argv[0] == "snyk", argv
     assert running, "the scan did not reach the Running command log call"
-    assert not any("medium" in m.lower() for m in running), running
-    assert "medium" not in report.model_dump_json().lower()
-
-
-def test_a_threshold_written_out_is_recorded_whole(tmp_path, monkeypatch, snyk_on_path):
-    report, running, argv = _scan(tmp_path, monkeypatch, "HIGH")
-
-    assert argv[argv.index("--severity-threshold") + 1] == "high", argv
-    assert running, "the scan did not reach the Running command log call"
-    assert any("--severity-threshold high" in m for m in running), running
     invocation = report.runs[0].invocations[0]
-    assert "--severity-threshold high" in invocation.commandLine
-    assert "high" in invocation.arguments
+    assert CARRIER_DIRECTORY not in invocation.commandLine, invocation.commandLine
+    assert "<value>" in invocation.commandLine, invocation.commandLine
+    assert not any(CARRIER_DIRECTORY in a for a in invocation.arguments)
+    assert CARRIER_DIRECTORY not in report.model_dump_json()
+
+
+def test_a_directory_name_written_out_is_recorded_whole(
+    tmp_path, monkeypatch, snyk_on_path
+):
+    report, running, _ = _scan(
+        tmp_path,
+        monkeypatch,
+        directory_name=CARRIER_DIRECTORY,
+        directory_is_environment_value=False,
+    )
+
+    source = tmp_path / CARRIER_DIRECTORY / "src"
+    assert running, "the scan did not reach the Running command log call"
+    invocation = report.runs[0].invocations[0]
+    assert source.as_posix() in invocation.commandLine
+    assert source.as_posix() in invocation.arguments
+    assert "<value>" not in invocation.commandLine
 
 
 def test_a_quote_holding_environment_value_is_hidden_in_the_command_line(
     tmp_path, monkeypatch, snyk_on_path
 ):
-    report, _, _ = _scan(
-        tmp_path, monkeypatch, "HIGH", directory_name=DIRECTORY_WITH_QUOTE
-    )
+    report, _, _ = _scan(tmp_path, monkeypatch, directory_name=DIRECTORY_WITH_QUOTE)
 
     invocation = report.runs[0].invocations[0]
     assert "marker-quote" not in invocation.commandLine, invocation.commandLine
     assert "carrier-value" not in invocation.commandLine, invocation.commandLine
-    assert "--severity-threshold high" in invocation.commandLine
+    assert "snyk code test" in invocation.commandLine
 
 
 def test_a_quote_holding_directory_name_not_in_the_set_is_recorded_in_its_quoted_form(
@@ -197,7 +210,6 @@ def test_a_quote_holding_directory_name_not_in_the_set_is_recorded_in_its_quoted
     report, _, _ = _scan(
         tmp_path,
         monkeypatch,
-        "HIGH",
         directory_name=DIRECTORY_WITH_QUOTE,
         directory_is_environment_value=False,
     )
@@ -208,21 +220,18 @@ def test_a_quote_holding_directory_name_not_in_the_set_is_recorded_in_its_quoted
     assert source.as_posix() in invocation.arguments
 
 
-SPLIT_ACROSS_ARGUMENTS = "--severity-threshold high"
+#: The two subcommands, which are two arguments of the command.
+SPLIT_ACROSS_ARGUMENTS = "code test"
 
 
 def test_a_value_split_across_two_arguments_leaves_no_piece_in_either_record(
     tmp_path, monkeypatch, snyk_on_path
 ):
     report, running, argv = _scan(
-        tmp_path,
-        monkeypatch,
-        "HIGH",
-        values_hook=lambda _self: (SPLIT_ACROSS_ARGUMENTS,),
+        tmp_path, monkeypatch, values_hook=lambda _self: (SPLIT_ACROSS_ARGUMENTS,)
     )
 
-    position = argv.index("high")
-    assert argv[position - 1] == "--severity-threshold", argv
+    assert argv[1:3] == ["code", "test"], argv
     invocation = report.runs[0].invocations[0]
     details = report.runs[0].tool.driver.properties.scanner_details["tool_invocation"]
     pieces = set(SPLIT_ACROSS_ARGUMENTS.split())
@@ -232,28 +241,26 @@ def test_a_value_split_across_two_arguments_leaves_no_piece_in_either_record(
     for command_line in (invocation.commandLine, details["command_line"]):
         assert not pieces.intersection(command_line.split()), command_line
         assert "<value>" in command_line, command_line
-    assert not any("--severity-threshold" in m for m in running), running
+    assert not any(SPLIT_ACROSS_ARGUMENTS in m for m in running), running
 
 
 def test_a_unique_token_split_across_two_arguments_is_absent_from_both_records(
     tmp_path, monkeypatch, snyk_on_path
 ):
     token = f"{tmp_path.as_posix()}/src"
-    value = f"high {token}"
-    report, _, argv = _scan(
-        tmp_path, monkeypatch, "HIGH", values_hook=lambda _self: (value,)
-    )
+    value = f"test {token}"
+    report, _, argv = _scan(tmp_path, monkeypatch, values_hook=lambda _self: (value,))
 
     # The command runs on a staged copy; the records name the scanned directory
-    # in its place, right after the threshold.
-    assert "high" in argv, argv
+    # in its place, right after the subcommands.
+    assert "test" in argv, argv
     invocation = report.runs[0].invocations[0]
     details = report.runs[0].tool.driver.properties.scanner_details["tool_invocation"]
     for arguments in (invocation.arguments, details["arguments"]):
-        assert "high" not in arguments, arguments
+        assert "test" not in arguments, arguments
         assert not any(token in a for a in arguments), arguments
     for command_line in (invocation.commandLine, details["command_line"]):
-        assert "high" not in command_line.split(), command_line
+        assert "test" not in command_line.split(), command_line
         assert token not in command_line, command_line
 
 
@@ -271,7 +278,7 @@ def _none_hook(_self):
 def test_a_failing_values_hook_leaves_the_command_records_holding_only_the_command(
     tmp_path, monkeypatch, snyk_on_path, hook
 ):
-    report, running, argv = _scan(tmp_path, monkeypatch, "HIGH", values_hook=hook)
+    report, running, argv = _scan(tmp_path, monkeypatch, values_hook=hook)
 
     assert hasattr(report, "runs"), type(report)
     command = argv[0]
@@ -282,17 +289,15 @@ def test_a_failing_values_hook_leaves_the_command_records_holding_only_the_comma
     assert details["command_line"] == command, details["command_line"]
     assert details["arguments"] == []
     assert running, "the scan did not reach the Running command log call"
-    assert not any("--severity-threshold" in m for m in running), running
+    assert not any("code test" in m for m in running), running
     assert all(command in m for m in running), running
 
 
 def test_a_values_answer_that_hides_nothing_keeps_the_whole_command_records(
     tmp_path, monkeypatch, snyk_on_path
 ):
-    report, running, _ = _scan(
-        tmp_path, monkeypatch, "HIGH", values_hook=lambda _self: ()
-    )
+    report, running, _ = _scan(tmp_path, monkeypatch, values_hook=lambda _self: ())
 
     invocation = report.runs[0].invocations[0]
-    assert "--severity-threshold high" in invocation.commandLine
-    assert any("--severity-threshold high" in m for m in running), running
+    assert "snyk code test" in invocation.commandLine
+    assert any("snyk code test" in m for m in running), running
