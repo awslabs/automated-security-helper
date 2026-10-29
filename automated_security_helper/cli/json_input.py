@@ -27,9 +27,12 @@ type before the command runs, so ``"strategy": "sideways"`` fails the same
 Choice check ``--strategy sideways`` does, and the error names the JSON key.
 The only checks added here are structural ones that argv makes impossible and
 JSON does not: an array or object where one value is expected, a bare value
-where a list is expected, and a JSON boolean for a parameter that is not a
+where a list is expected, a JSON boolean for a parameter that is not a
 boolean (``int(True)`` is 1, so ``"shard_index": true`` would otherwise be
-shard 1).
+shard 1), a JSON number for a boolean parameter (click reads a boolean from
+text, so ``"verbose": 2`` would otherwise be an internal error, not a refusal),
+and a JSON number with a fraction or an exponent for an integer parameter
+(``int(1.9)`` is 1, so ``"shard_index": 1.9`` would otherwise be shard 1).
 
 Security: the document is parsed with ``json`` and nothing else. No value is
 evaluated, and no environment-variable or ``~`` expansion is applied to it,
@@ -61,11 +64,11 @@ from automated_security_helper.utils.terminal_text import (
 
 # Typer 0.27 vendors click as ``typer._click``, and Typer's commands and
 # contexts are instances of that copy, not of the ``click`` distribution.
-# ``UsageError``, ``ParameterSource`` and the base ``Parameter`` class are not
-# re-exported on Typer's public surface, so they are taken from
-# the vendored package directly. pyproject.toml pins ``typer<0.28``; a release
-# that moves these names fails tests/unit/cli/test_cli_json_input.py at import.
-from typer._click.core import Context, Parameter, ParameterSource
+# ``UsageError`` and the base ``Parameter`` class are not re-exported on
+# Typer's public surface, so they are taken from the vendored package directly.
+# pyproject.toml pins ``typer<0.28``; a release that moves these names fails
+# tests/unit/cli/test_cli_json_input.py at import.
+from typer._click.core import Context, Parameter
 from typer._click.exceptions import BadParameter, MissingParameter, UsageError
 from typer._click.types import (
     BoolParamType,
@@ -349,6 +352,22 @@ def _check_shape(param: Parameter, value: Any) -> str | None:
             return "expected a string, number or boolean"
         if isinstance(item, bool) and not isinstance(param.type, BoolParamType):
             return "a JSON boolean is only accepted for a true/false parameter"
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            # click reads a boolean from text (``"yes"``, ``"1"``), so a number
+            # reached its text handling and raised an AttributeError, which
+            # is an internal error, not a refusal naming the key.
+            if isinstance(param.type, BoolParamType):
+                return (
+                    "expected a JSON boolean (true or false) for a true/false "
+                    "parameter, not a number"
+                )
+            # click's integer type is ``int(value)``, which truncates a float:
+            # 1.9 was accepted as 1, and 1e2 as 100.
+            if isinstance(param.type, IntParamType) and not isinstance(item, int):
+                return (
+                    "expected a JSON integer for this parameter, not a number "
+                    "with a fraction or an exponent"
+                )
     return None
 
 
@@ -460,17 +479,32 @@ class CliJsonInputCommand(TyperCommand):
                 # line did not set, which is rule 1 of the precedence.
                 ctx.default_map = {**(ctx.default_map or {}), **supplied}
 
-        remaining = super().parse_args(ctx, args)
-
-        # click ranks an environment variable above default_map. Re-process
-        # those parameters from the document so that it ranks above the
-        # environment (rule 2 over rule 3).
-        for name, value in supplied.items():
-            if ctx.get_parameter_source(name) is ParameterSource.ENVIRONMENT:
-                param = next(p for p in self.get_params(ctx) if p.name == name)
-                ctx.params[name] = param.process_value(ctx, value)
-                ctx.set_parameter_source(name, ParameterSource.DEFAULT_MAP)
-        return remaining
+        # click ranks an environment variable above default_map, and converts
+        # each parameter's value as it consumes it. Re-processing the document's
+        # parameters after the parse put the document above the environment only
+        # when the variable's value converted: one the type refused (an
+        # ASH_SHARD_INDEX of "nine") was a usage error before the re-processing
+        # ran, with the document's valid value never read. So for the parameters
+        # the document sets, the environment is not read at all (rule 2 over
+        # rule 3): their variables are suspended for the parse and put back
+        # after it, because the parameter objects are the command's and outlive
+        # this invocation.
+        suspended: list[tuple[Parameter, Any, bool | None]] = []
+        for param in self.get_params(ctx):
+            if param.name not in supplied:
+                continue
+            auto = param.allow_from_autoenv if isinstance(param, TyperOption) else None
+            suspended.append((param, param.envvar, auto))
+            param.envvar = None
+            if isinstance(param, TyperOption):
+                param.allow_from_autoenv = False
+        try:
+            return super().parse_args(ctx, args)
+        finally:
+            for param, envvar, auto in suspended:
+                param.envvar = envvar
+                if auto is not None:
+                    param.allow_from_autoenv = auto
 
 
 __all__ = [
