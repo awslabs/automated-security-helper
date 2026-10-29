@@ -1138,10 +1138,16 @@ def refuse_symlinked_output_dir(source_dir: Path, output_dir: Path) -> None:
         )
 
 
-def _under_home(path: Path) -> bool:
-    """Whether ``path`` is the user's home directory or sits under it."""
-    home = Path.home()
-    return path == home or home in path.parents
+def _under_home(path: Path, homes: Sequence[Path]) -> bool:
+    """Whether ``path``, resolved, is one of ``homes`` or sits under one.
+
+    ``homes`` is _homes()'s set: HOME's and the passwd entry's, resolved, with "/"
+    left out, so a HOME of "/" (a container's) names no home and drops nothing. An
+    entry that contains a home (``/opt`` with a HOME of ``/opt/app/home``) is not
+    under it and is kept: dropping it would take away a tool's installation prefix.
+    """
+    real = Path(os.path.realpath(path))
+    return any(real == home or home in real.parents for home in homes)
 
 
 def build_scanner_policy(
@@ -1222,8 +1228,9 @@ def build_scanner_policy(
     )
     scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
     ash_paths, ash_import_entries = _ash_paths()
+    homes = _homes()
     read_only = _existing(
-        [p for p in (Path(p) for p in SYSTEM_READ_PATHS) if not _under_home(p)]
+        [p for p in (Path(p) for p in SYSTEM_READ_PATHS) if not _under_home(p, homes)]
         + _path_directories([source_dir, output_dir])
         + _uv_directories()
         + ash_paths
