@@ -1478,6 +1478,24 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
                         _mask_lines(snippet, first, whole, lines),
                     )
                     break
+        elif ("tool" in fields or "driver" in fields) and "results" in fields:
+            # A run (or an external property set): its tool components are rule
+            # metadata and are skipped (_METADATA_FIELDS), but the scanner
+            # details ASH writes on them carry the tool's invocation (command
+            # line, arguments), which is text a value can be in.
+            tool = getattr(node, "tool", None)
+            components = [getattr(tool, "driver", None)]
+            components.extend(getattr(tool, "extensions", None) or [])
+            components.append(getattr(node, "driver", None))
+            components.extend(getattr(node, "extensions", None) or [])
+            for component in components:
+                properties = getattr(component, "properties", None)
+                details = _extra_of(properties).get("scanner_details")
+                if details is None:
+                    continue
+                masked = _mask_tree(details, index, seen)
+                if isinstance(details, str) and masked != details:
+                    _set_extra(properties, "scanner_details", masked)
         elif "contents" in fields and "location" in fields:
             # An artifact whose contents a tool embedded: line 1 is the file's first.
             placed = index.lines_for(
@@ -1803,6 +1821,11 @@ def mask_secret_values_in_tree(
 _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: value,
     lambda value: json.dumps(value)[1:-1],
+    # pydantic's JSON: non-ASCII characters as they are, only the control and
+    # quote characters escaped.
+    lambda value: json.dumps(value, ensure_ascii=False)[1:-1],
+    # A JSON document inside a JSON string (GitLab SAST's raw_data).
+    lambda value: json.dumps(json.dumps(value)[1:-1])[1:-1],
     lambda value: html.escape(value, quote=True),
     lambda value: html.escape(value, quote=False),
     lambda value: value.replace('"', '""'),
