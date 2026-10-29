@@ -852,8 +852,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
         ``report`` False leaves out the warnings for the workflows it skips.
         """
+        target_abs = Path(target).absolute()
+        target_real = Path(target).resolve()
         if target_type == "converted":
-            candidates = [str(p) for p in target.rglob("*") if p.is_file()]
+            candidates = [str(p) for p in target_abs.rglob("*") if p.is_file()]
         else:
             candidates = scan_set(
                 source=str(self._source_dir()),
@@ -864,15 +866,15 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 run_id=getattr(self.context, "run_id", None),
             )
 
-        target_abs = Path(target).absolute()
-        target_real = Path(target).resolve()
         output_abs = self._output_dir().absolute()
         relative: List[str] = []
         for item in candidates:
-            path = Path(item)
-            if not path.is_absolute():
-                path = target_abs / path
-            path = path.absolute()
+            # The scan set spells each path from the source directory as it was
+            # given, so a relative source directory yields paths relative to the
+            # working directory, not to the target: absolute() reads them from
+            # there, as zizmor does, where joining them to the target named files
+            # that do not exist.
+            path = Path(item).absolute()
             if not path.is_relative_to(target_abs):
                 continue
             if target_type != "converted" and path.is_relative_to(output_abs):

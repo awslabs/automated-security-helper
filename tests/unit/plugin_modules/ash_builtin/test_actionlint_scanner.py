@@ -1234,6 +1234,32 @@ def _converted_target(output: Path, workflow: Path | None) -> Path:
     return work_dir
 
 
+@pytest.mark.parametrize("target_type", ["source", "converted"])
+@pytest.mark.unit
+def test_a_relative_source_or_work_directory_names_existing_workflows(
+    repo, tmp_path, monkeypatch, target_type
+):
+    """ASH is often run with relative directories. The scan set spells its paths
+    from the source directory as given, so joining them to the target a second
+    time named workflows that do not exist, and actionlint was handed those."""
+    output = repo.parent / "ash_output"
+    work_dir = _converted_target(output, repo / ".github" / "workflows" / "clean.yml")
+    monkeypatch.chdir(tmp_path)
+    scanner = _scanner(Path("repo"), output=Path("ash_output"))
+    target = Path("repo") if target_type == "source" else Path("ash_output/converted")
+
+    workflows = scanner._workflow_files(target, target_type, [])
+
+    expected = (
+        [".github/workflows/clean.yml", ".github/workflows/vulnerable.yml"]
+        if target_type == "source"
+        else ["archive.zip/.github/workflows/clean.yml"]
+    )
+    assert workflows == expected
+    assert all((target / relative).is_file() for relative in workflows)
+    assert work_dir.is_dir()
+
+
 @pytest.mark.parametrize("converted_has_workflows", [True, False])
 @pytest.mark.unit
 def test_each_target_starts_from_a_clean_exit_code(
