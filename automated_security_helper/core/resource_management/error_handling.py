@@ -127,7 +127,6 @@ def safe_read_json_file(
             return None, error
         try:
             data = json.loads(text)
-            return data, None
         except json.JSONDecodeError as e:
             error = MCPResourceError(
                 f"Invalid JSON format in file {path_obj}: {str(e)}",
@@ -141,6 +140,24 @@ def safe_read_json_file(
                 },
             )
             return None, error
+
+        # The callers read the result as a mapping (``data.get``, ``data.keys``),
+        # which is what the return type says. A file that parses to a list, a
+        # string or a number is valid JSON and not a JSON object, so it is a
+        # format error here rather than an AttributeError in the caller.
+        if not isinstance(data, dict):
+            error = MCPResourceError(
+                f"Expected a JSON object in file {path_obj}, found "
+                f"{type(data).__name__}",
+                context={
+                    "cwd": str(Path.cwd()),
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_FORMAT.value,
+                    "found_type": type(data).__name__,
+                },
+            )
+            return None, error
+        return data, None
 
     except Exception as e:
         error = MCPResourceError(
@@ -214,8 +231,14 @@ def safe_write_json_file(
         from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
         try:
+            # Serialized in full before the file is opened: ``json.dump`` streams
+            # into an already truncated file, so a value that cannot be
+            # serialized partway through left the previous content gone and a
+            # partial document in its place. A serialization error now leaves
+            # the file as it was.
+            text = json.dumps(data, indent=2)
             with open_for_write(path_obj) as f:
-                json.dump(data, f, indent=2)
+                f.write(text)
             return None
         except PermissionError:
             return MCPResourceError(
@@ -226,7 +249,9 @@ def safe_write_json_file(
                     "error_category": ErrorCategory.PERMISSION_DENIED.value,
                 },
             )
-        except TypeError as e:
+        except (TypeError, ValueError) as e:
+            # TypeError for a value json cannot encode; ValueError for a
+            # structure that refers to itself.
             return MCPResourceError(
                 f"Invalid data format for JSON serialization: {str(e)}",
                 context={
@@ -526,8 +551,12 @@ def validate_config_path(
                 },
             )
 
-        # Validate file extension
-        valid_extensions = [".yaml", ".yml", ".json"]
+        # Validate file extension. The set is what the config loader reads:
+        # YAML, JSON, and TOML (an ``.ashrc.toml`` or a ``pyproject.toml`` whose
+        # ``[tool.ash]`` table configures ASH). Discovery hands a workspace
+        # project's TOML source to register_scan as its config_path, so a set
+        # without ``.toml`` refused every project configured that way.
+        valid_extensions = [".yaml", ".yml", ".json", ".toml"]
         if not any(str(path_obj).lower().endswith(ext) for ext in valid_extensions):
             return MCPResourceError(
                 f"Invalid configuration file extension: {path_obj}. Supported extensions: {', '.join(valid_extensions)}",
@@ -689,20 +718,42 @@ def create_error_response(
     }
 
 
-def _strings_shown(value: Any) -> Any:
+def _strings_shown(value: Any, _on_path: Optional[set] = None) -> Any:
     """*value* with each string in it, in nested dicts, lists and tuples too,
     written for a client that may display it: on one line, each control as its
     escape (utils/terminal_text.py's raw_controls_on_one_line). Anything else is
-    returned as it is."""
+    returned as it is.
+
+    This runs inside the error handler, so it must not raise on what a context
+    can hold. A namedtuple is rebuilt through ``_make`` (its constructor takes
+    fields, not an iterable), any other tuple subclass that refuses the rebuilt
+    items comes back as a plain tuple, and a container that refers to itself is
+    cut at the second visit with a marker instead of recursing until the
+    interpreter stops it.
+    """
     from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
     if isinstance(value, str):
         return raw_controls_on_one_line(value)
-    if isinstance(value, dict):
-        return {key: _strings_shown(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return type(value)(_strings_shown(item) for item in value)
-    return value
+    if not isinstance(value, (dict, list, tuple)):
+        return value
+
+    on_path = set() if _on_path is None else _on_path
+    if id(value) in on_path:
+        return "<recursive>"
+    on_path.add(id(value))
+    try:
+        if isinstance(value, dict):
+            return {key: _strings_shown(item, on_path) for key, item in value.items()}
+        items = [_strings_shown(item, on_path) for item in value]
+        if hasattr(type(value), "_make"):
+            return type(value)._make(items)
+        try:
+            return type(value)(items)
+        except TypeError:
+            return list(items) if isinstance(value, list) else tuple(items)
+    finally:
+        on_path.discard(id(value))
 
 
 #: The one wording for the plugin-module refusal's suggestions: the MCP
