@@ -52,6 +52,7 @@ import contextlib
 import contextvars
 import enum
 import errno
+import gc
 import locale
 import logging
 import ntpath
@@ -5194,9 +5195,32 @@ def create_process_with_pipes(
             errors=errors,
         )
         if sandbox_plan is not None:
-            # The caller owns the process, so the plan's temporary files go when it does.
-            weakref.finalize(process, sandbox_plan.run_cleanup)
+            # The caller owns the process, so the plan's temporary files go when it
+            # does; off the finalizer's own thread, see _run_cleanup_off_the_finalizer.
+            weakref.finalize(process, _run_cleanup_off_the_finalizer, sandbox_plan)
         return process
     except Exception as e:
         ASH_LOGGER.error(f"Error creating process with pipes: {e}", extra=NO_MARKUP)
         raise
+
+
+def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
+    """Run *plan*'s cleanup from a Popen's finalizer without this thread's locks.
+
+    The cleanup releases the registration of the spawn's writable roots
+    (fs_guard.release_writable_root), which takes the registry's lock, and that
+    lock is not re-entrant. A garbage-collection finalizer runs inside whatever
+    allocation triggered the collection, which can be one this thread made
+    while holding that lock inside the registry: the release then waited on the
+    very thread it ran in. So the cleanup runs on a thread of its own, which
+    waits for the lock like any other caller. With the collector disabled
+    (weakref.finalize's own exit pass runs that way, with no registry call in
+    progress) no finalizer can interrupt an allocation, and the cleanup runs
+    inline so the temporary files are gone before the interpreter is.
+    """
+    if not gc.isenabled():
+        plan.run_cleanup()
+        return
+    threading.Thread(
+        target=plan.run_cleanup, name="ash-sandbox-plan-cleanup", daemon=False
+    ).start()
