@@ -865,13 +865,20 @@ def load_config_file_for_run(
     # Each value and key the chain read from the environment, at its place in
     # the merged configuration (config/environment_record.py): what a message
     # or a view of the config shows as `<value>` or `<from ${VAR}>`. Set before
-    # resolve_config's confinement steps, whose warnings name the entries.
-    config._environment_references = tuple(document.environment_references)
+    # resolve_config's confinement steps, whose warnings name the entries. The
+    # references the fill read are among them: the client's copy holds each as
+    # text, so no file of the chain wrote them, and a view that leaves them out
+    # shows the value.
+    config._environment_references = (
+        *filled,
+        *document.environment_references,
+    )
     # The ones the merged document still shows at their places: what a view of
     # the config writes back as the file wrote it (`ash config get`, the MCP
-    # get_config tool).
-    config._displayed_environment_references = tuple(
-        document.displayed_environment_references
+    # get_config tool). The filled ones stand at the places the fill put them.
+    config._displayed_environment_references = (
+        *filled,
+        *document.displayed_environment_references,
     )
     # The references above are the file's own document's, and the config's
     # overrides were applied before they were attached: an override that
