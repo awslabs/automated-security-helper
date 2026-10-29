@@ -94,10 +94,17 @@ def _discover_external_scanner_plugin_packages() -> list:
         # either way.
         pkg_dist = {}
 
+    # A distribution whose metadata carries no readable Name appears here as
+    # None (importlib.metadata records what the metadata says), and a str method
+    # on it raised AttributeError outside the try above, failing the whole
+    # inventory for one unrelated broken install. Such an entry names nothing.
     return [
         f"automated_security_helper.plugin_modules.{top_level}"
         for top_level, dists in pkg_dist.items()
-        if any(d.startswith("ash_") and d.endswith("_plugins") for d in dists)
+        if any(
+            isinstance(d, str) and d.startswith("ash_") and d.endswith("_plugins")
+            for d in dists
+        )
     ]
 
 
@@ -454,6 +461,30 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
     return None
 
 
+def _configured_enabled(default_config, name: str, enabled_default: Any) -> Any:
+    """``enabled`` for scanner *name*: the operator's default configuration, else the default.
+
+    The deployment's own section for the scanner wins over what the scanner's
+    config declares, whether the scanner was constructed (the default is the
+    instance's config value) or not (the default is its config class's). An
+    external plugin's section is a dict the segment models keep as an extra and
+    never validate: a value the file read from the environment is still the
+    resolver's marker, and the entry is data a tool answer carries. The marker's
+    TEXT came from the environment, so it is reported as its reference spelling,
+    never by value; the downcast view (without_env_scalars) strips only the type
+    and would keep the text.
+    """
+    found_cfg = default_config.get_plugin_config("scanner", name)
+    if found_cfg is None:
+        return enabled_default
+    if isinstance(found_cfg, dict):
+        raw_enabled = found_cfg.get("enabled", enabled_default)
+        if isinstance(raw_enabled, EnvResolvedScalar):
+            return "${" + raw_enabled.variable + "}"
+        return without_env_scalars(raw_enabled)
+    return getattr(found_cfg, "enabled", enabled_default)
+
+
 def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
     """Describe one scanner by instantiating it and asking it about itself.
 
@@ -511,7 +542,14 @@ def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
                 # A config class that cannot be built either tells us nothing, so the
                 # optimistic default stands rather than being replaced by a guess.
                 return entry
-            entry["enabled"] = getattr(declared, "enabled", True)
+            # The operator's default configuration overrides the class's declared
+            # default here as it does for a constructed scanner below: the entry
+            # answers whether this deployment has the scanner on, and a scanner
+            # the operator switched off read as enabled when its construction
+            # failed.
+            entry["enabled"] = _configured_enabled(
+                default_config, entry["name"], getattr(declared, "enabled", True)
+            )
         return entry
 
     config = getattr(plugin, "config", None)
@@ -529,25 +567,9 @@ def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
     # The name is still taken from the class in that case (set when the entry was built), so
     # the config lookup below has a key to search on either way.
     if config is not None:
-        enabled_default = getattr(config, "enabled", True)
-        found_cfg = default_config.get_plugin_config("scanner", entry["name"])
-        if found_cfg is None:
-            entry["enabled"] = enabled_default
-        elif isinstance(found_cfg, dict):
-            # An external plugin's section, which the segment models keep as
-            # an extra and never validate: a value the file read from the
-            # environment is still the resolver's marker, and the entry is
-            # data a tool answer carries. The marker's TEXT came from the
-            # environment, so it is reported as its reference spelling, never
-            # by value; the downcast view (without_env_scalars) strips only
-            # the type and would keep the text.
-            raw_enabled = found_cfg.get("enabled", enabled_default)
-            if isinstance(raw_enabled, EnvResolvedScalar):
-                entry["enabled"] = "${" + raw_enabled.variable + "}"
-            else:
-                entry["enabled"] = without_env_scalars(raw_enabled)
-        else:
-            entry["enabled"] = getattr(found_cfg, "enabled", enabled_default)
+        entry["enabled"] = _configured_enabled(
+            default_config, entry["name"], getattr(config, "enabled", True)
+        )
 
     try:
         entry["dependencies_satisfied"] = bool(plugin.validate_plugin_dependencies())
