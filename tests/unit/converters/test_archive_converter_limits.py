@@ -520,7 +520,7 @@ class TestDeclaredSizes:
         data. tarfile reports the member as 0 bytes and seeks past the 2 MiB to
         reach the next header, decompressing it for a tar.gz, so admitting the
         reported size bounded none of that. The stored extent is admitted, and
-        it is over max_total_bytes."""
+        it is over max_member_bytes."""
         archive = tree / ("sparse.tar.gz" if gz else "sparse.tar")
         archive.write_bytes(
             gnu_sparse_header_over_stored_data("big.py", stored=2 * MEBIBYTE, gz=gz)
@@ -532,7 +532,7 @@ class TestDeclaredSizes:
         results = converter.convert()
 
         assert_refused(
-            converter, results, archive.name, ash_warnings, option="max_total_bytes"
+            converter, results, archive.name, ash_warnings, option="max_member_bytes"
         )
 
     @pytest.mark.parametrize(
@@ -546,6 +546,8 @@ class TestDeclaredSizes:
 
         tarfile truncates the file to its declared size after copying the map, so the
         bytes copied are counted at tarfile.copyfileobj, which copies every entry.
+        The limits sit above the 2 MiB the member stores, so the header pass admits
+        it for that extent and the sparse-map check is what refuses it.
         """
         archive = tree / ("sparse.tar.gz" if gz else "sparse.tar")
         archive.write_bytes(
@@ -566,7 +568,7 @@ class TestDeclaredSizes:
             monkeypatch,
             [archive],
             without_data_filter=without_data_filter,
-            limits=self.LIMITS,
+            limits={"max_member_bytes": 4 * MEBIBYTE, "max_total_bytes": 8 * MEBIBYTE},
         )
 
         converter.convert()
