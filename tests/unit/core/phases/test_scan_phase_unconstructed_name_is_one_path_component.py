@@ -127,6 +127,17 @@ class TestTheNameOfAnUnconstructedScanner:
         """The control: a name that is one entry of one directory is the record's."""
         assert _unconstructed_scanner_name({"name": name}, _Boom) == name
 
+    def test_a_path_shaped_declared_key_falls_back_to_the_class_name(self, monkeypatch):
+        """Even the class's own declared key is held to one path component."""
+        import automated_security_helper.core.phases.scan_phase as scan_phase_module
+
+        monkeypatch.setattr(
+            scan_phase_module, "plugin_config_key", lambda cls: "../declared"
+        )
+
+        # Red at the previous tip: the declared key was returned unchecked.
+        assert _unconstructed_scanner_name({"name": "../escaped"}, _Boom) == "_boom"
+
 
 class TestTheRowOfAnUnconstructedScannerIsUnderAPlainKey:
     def test_the_row_is_keyed_by_the_class_not_the_path(

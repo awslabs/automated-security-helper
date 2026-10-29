@@ -278,9 +278,23 @@ def _unconstructed_scanner_name(plugin_config: Any, plugin_class: type) -> str:
         ASH_LOGGER.warning(
             f"Scanner section name {name!r} is not a plain name and is not used "
             f"for the record of its construction failure; recorded as "
-            f"{plugin_config_key(plugin_class)!r}"
+            f"{_unconstructed_scanner_fallback_name(plugin_class)!r}"
         )
-    return plugin_config_key(plugin_class)
+    return _unconstructed_scanner_fallback_name(plugin_class)
+
+
+def _unconstructed_scanner_fallback_name(plugin_class: type) -> str:
+    """The class's key, or the lowercased class name when even that is a path.
+
+    plugin_config_key reads the name the class declares in its config model's
+    ``name`` default; a declared default is a literal in the code and never a
+    path in practice, but the record name must be one path component whatever
+    a class declares, and a class name is an identifier.
+    """
+    key = plugin_config_key(plugin_class)
+    if _is_one_path_component(key):
+        return key
+    return getattr(plugin_class, "__name__", "unknown").lower()
 
 
 def _is_one_path_component(name: str) -> bool:
