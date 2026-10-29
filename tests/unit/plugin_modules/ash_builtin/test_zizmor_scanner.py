@@ -505,6 +505,31 @@ def test_gitignored_and_output_dir_files_are_not_inputs(repo):
     ]
 
 
+def test_the_workspace_output_directory_is_named_to_the_scan_set(repo, monkeypatch):
+    """In a workspace scan the workspace's output directory holds every project's
+    output. The scan set leaves it out only when it is named; a project at the
+    workspace root otherwise audits other projects' output as its own source."""
+    seen: list = []
+    monkeypatch.setattr(
+        zizmor_module, "scan_set", lambda **kwargs: seen.append(kwargs) or []
+    )
+    workspace_output = repo.parent / "workspace-out"
+    scanner = ZizmorScanner(
+        context=PluginContext(
+            source_dir=repo,
+            output_dir=workspace_output / "src",
+            work_dir=workspace_output / "src" / "converted",
+            workspace_output_dir=workspace_output,
+            config=get_default_config(),
+        ),
+        config=ZizmorScannerConfig(),
+    )
+
+    scanner._collect_inputs(repo, "source", [])
+
+    assert [call["workspace_output_dir"] for call in seen] == [str(workspace_output)]
+
+
 def test_an_action_git_tracks_under_the_output_directory_is_an_input(repo, monkeypatch):
     """The scan set leaves ASH's output directory out but keeps the files git
     tracks there, since a repository can commit a composite action at that
@@ -572,7 +597,14 @@ def test_default_argv_is_offline_sarif_with_inputs_after_double_dash(repo):
 #: read from the scanner, so a name dropped from its list fails these tests.
 TOKEN_VARIABLES = ["GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_GITHUB_TOKEN"]
 #: The variables that change zizmor's behavior, removed whatever online_audits is.
-BEHAVIOR_VARIABLES = ["ZIZMOR_CONFIG", "ZIZMOR_OFFLINE", "ZIZMOR_NO_ONLINE_AUDITS"]
+#: RUST_LOG is zizmor's log filter: one from the caller's shell that hides WARN
+#: lines hides the rejected-input warnings the per-target counters are read from.
+BEHAVIOR_VARIABLES = [
+    "ZIZMOR_CONFIG",
+    "ZIZMOR_OFFLINE",
+    "ZIZMOR_NO_ONLINE_AUDITS",
+    "RUST_LOG",
+]
 
 
 def test_the_scanner_strips_exactly_the_documented_variables():

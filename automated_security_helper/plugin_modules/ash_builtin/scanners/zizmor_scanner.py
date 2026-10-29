@@ -43,9 +43,11 @@ logs the token value, and never puts it on the command line. ASH's own offline
 mode (``ASH_OFFLINE``) and the scanner's own ``options.offline: true`` each
 override ``online_audits``.
 
-``ZIZMOR_CONFIG``, ``ZIZMOR_OFFLINE`` and ``ZIZMOR_NO_ONLINE_AUDITS`` are
-removed too, so the result of a scan depends on the repository and the ASH
-config, not on stray variables in the caller's shell.
+``ZIZMOR_CONFIG``, ``ZIZMOR_OFFLINE``, ``ZIZMOR_NO_ONLINE_AUDITS`` and
+``RUST_LOG`` (zizmor's log filter, which could hide the rejected-input warnings
+the per-target counters are read from) are removed too, so the result of a scan
+depends on the repository and the ASH config, not on stray variables in the
+caller's shell.
 
 Configuration
 -------------
@@ -183,11 +185,15 @@ GITHUB_TOKEN_ENV_VARS: Tuple[str, ...] = (
 )
 
 #: Variables that change what zizmor reports without appearing in ASH's config.
-#: Always removed from the child environment.
+#: Always removed from the child environment. RUST_LOG is zizmor's log filter: a
+#: filter from the caller's shell that hides WARN lines hides the rejected-input
+#: warnings the per-target counters are read from, so failed workflows would go
+#: uncounted.
 ZIZMOR_BEHAVIOR_ENV_VARS: Tuple[str, ...] = (
     "ZIZMOR_CONFIG",
     "ZIZMOR_OFFLINE",
     "ZIZMOR_NO_ONLINE_AUDITS",
+    "RUST_LOG",
 )
 
 #: zizmor's exit status when collection yielded nothing it could audit.
@@ -813,6 +819,13 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         if target_type == "converted":
             candidates = [p for p in target_abs.rglob("*") if p.is_file()]
         else:
+            # In a workspace scan the workspace's output directory holds every
+            # project's output; a project at the workspace root holds it, and
+            # without naming it the walk would audit other projects' output
+            # (converted archives included) as this project's source.
+            workspace_output = getattr(
+                self._plugin_context, "workspace_output_dir", None
+            )
             candidates = [
                 Path(item).absolute()
                 for item in scan_set(
@@ -820,6 +833,9 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     output=str(self._plugin_context.output_dir),
                     honor_ignore_files=honors_ignore_files(self._plugin_context.config),
                     run_id=getattr(self._plugin_context, "run_id", None),
+                    workspace_output_dir=(
+                        str(workspace_output) if workspace_output is not None else None
+                    ),
                 )
             ]
         source_abs = Path(self._plugin_context.source_dir).absolute()

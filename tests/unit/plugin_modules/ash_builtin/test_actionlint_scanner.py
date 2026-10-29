@@ -590,6 +590,32 @@ def test_non_workflow_yaml_and_ash_output_are_not_passed(repo, monkeypatch, on_p
 
 
 @pytest.mark.unit
+def test_the_workspace_output_directory_is_named_to_the_scan_set(
+    repo, monkeypatch, on_path
+):
+    """In a workspace scan the workspace's output directory holds every project's
+    output. The scan set leaves it out only when it is named; a project at the
+    workspace root otherwise lints other projects' output as its own source."""
+    seen: list = []
+    monkeypatch.setattr(module, "scan_set", lambda **kwargs: seen.append(kwargs) or [])
+    workspace_output = repo.parent / "workspace-out"
+    scanner = ActionlintScanner(
+        context=PluginContext(
+            source_dir=repo,
+            output_dir=workspace_output / "repo",
+            work_dir=workspace_output / "repo" / "converted",
+            workspace_output_dir=workspace_output,
+            config=get_default_config(),
+        ),
+        config=ActionlintScannerConfig(),
+    )
+
+    scanner._workflow_files(repo, "source", [])
+
+    assert [call["workspace_output_dir"] for call in seen] == [str(workspace_output)]
+
+
+@pytest.mark.unit
 def test_a_workflow_git_tracks_under_the_output_directory_is_linted(
     repo, monkeypatch, on_path
 ):

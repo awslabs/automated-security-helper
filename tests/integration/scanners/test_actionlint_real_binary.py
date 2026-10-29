@@ -122,6 +122,54 @@ def test_the_real_binary_reports_the_fixture_findings(repo, tmp_path):
     assert report.runs[0].tool.driver.version.startswith("1.")
 
 
+@pytest.mark.parametrize("shape", ["malformed", "linked-out"])
+def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
+    repo, tmp_path, shape
+):
+    """ASH passes -config-file on every run, so the repository's own
+    .github/actionlint.yaml must not be read: not for its ignore patterns, and
+    not during project discovery for local references either. A malformed one
+    must not turn the run into exit 3, and one that is a link out of the tree
+    must not have the outside file quoted into actionlint's stderr. Measured
+    with the real binary; the unit tests replace the subprocess."""
+    _require_actionlint()
+    config = repo / ".github" / "actionlint.yaml"
+    if shape == "malformed":
+        config.write_text("paths: [\n")
+    else:
+        if sys.platform == "win32":
+            pytest.skip("symlinks")
+        outside = tmp_path / "outside.yaml"
+        outside.write_text("self-hosted-runner:\n  labels: [OUTSIDE-MARKER-LABEL]\n")
+        config.symlink_to(outside)
+    output = tmp_path / "out"
+    scanner = ActionlintScanner(
+        context=PluginContext(
+            source_dir=repo, output_dir=output, config=get_default_config()
+        ),
+        config=ActionlintScannerConfig(enabled=True),
+    )
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    rows = [
+        (
+            r.ruleId,
+            getattr(r.level, "value", r.level),
+            r.properties.issue_severity,
+            r.locations[0].physicalLocation.root.region.startLine,
+        )
+        for r in report.runs[0].results
+    ]
+    assert rows == EXPECTED
+    assert scanner.exit_code == 1
+    stderr_log = Path(scanner.results_dir) / "source" / "ActionlintScanner.stderr.log"
+    if stderr_log.exists():
+        assert "OUTSIDE-MARKER-LABEL" not in stderr_log.read_text(
+            encoding="utf-8", errors="replace"
+        )
+
+
 def test_a_full_scan_with_actionlint_selected(repo, tmp_path):
     """``--scanners actionlint`` runs it, offline, and fails on the HIGH findings."""
     _require_actionlint()

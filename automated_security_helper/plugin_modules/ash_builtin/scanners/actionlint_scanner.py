@@ -890,6 +890,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         if target_type == "converted":
             candidates = [str(p) for p in target_abs.rglob("*") if p.is_file()]
         else:
+            # In a workspace scan the workspace's output directory holds every
+            # project's output, converted archives included; a project at the
+            # workspace root holds it, and without naming it the walk would lint
+            # other projects' output as this project's source.
+            workspace_output = getattr(self.context, "workspace_output_dir", None)
             candidates = scan_set(
                 source=str(self._source_dir()),
                 output=str(self._output_dir()),
@@ -897,6 +902,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     getattr(self.context, "config", None)
                 ),
                 run_id=getattr(self.context, "run_id", None),
+                workspace_output_dir=(
+                    str(workspace_output) if workspace_output is not None else None
+                ),
             )
 
         relative: List[str] = []
