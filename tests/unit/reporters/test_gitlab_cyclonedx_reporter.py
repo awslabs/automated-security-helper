@@ -152,6 +152,14 @@ def test_normalize_input_file_path():
         == "yarn.lock"
     )
     assert _normalize_input_file_path("/app/go.sum") == "app/go.sum"
+    # A directory that merely contains a vendored name is the repository's own.
+    assert (
+        _normalize_input_file_path("/src/myvendor/package-lock.json")
+        == "src/myvendor/package-lock.json"
+    )
+    assert _normalize_input_file_path("/src/vendor/package-lock.json") == (
+        "package-lock.json"
+    )
     assert _normalize_input_file_path(None) is None
     assert _normalize_input_file_path("") is None
 

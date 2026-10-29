@@ -175,3 +175,51 @@ class TestVendoredComponentsDoNotVote:
         props = _props(json.loads(_reporter(tmp_path).report(model)))
 
         assert props["gitlab:dependency_scanning:package_manager:name"] == "npm"
+
+    @pytest.mark.parametrize(
+        "location",
+        [
+            "/src/myvendor/package-lock.json",
+            "/src/myvenv/package-lock.json",
+            "/tools/vendored/package-lock.json",
+            "/vendor",
+        ],
+    )
+    def test_a_directory_that_only_contains_a_vendored_name_votes(
+        self, tmp_path, location
+    ):
+        """``vendor/`` names a directory, not a substring: ``src/myvendor/`` is
+        the repository's own code and keeps its vote; a file named ``vendor``
+        at the root is not inside a vendored tree either."""
+        declared_under_a_lookalike = dict(self.VENDORED_HEAVY)
+        declared_under_a_lookalike["components"] = [
+            _component("left-pad", "pkg:npm/left-pad@1.3.0", location),
+            _component("lodash", "pkg:npm/lodash@4.17.21", location),
+            _component("requests", "pkg:pypi/requests@2.32.3", "/requirements.txt"),
+        ]
+        model = AshAggregatedResults()
+        model.cyclonedx = CycloneDXReport.model_validate(declared_under_a_lookalike)
+
+        props = _props(json.loads(_reporter(tmp_path).report(model)))
+
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "npm"
+
+    @pytest.mark.parametrize(
+        "location",
+        ["/vendor/package-lock.json", "/src/vendor/deep/package-lock.json"],
+    )
+    def test_a_real_vendor_directory_at_any_depth_does_not_vote(
+        self, tmp_path, location
+    ):
+        vendored = dict(self.VENDORED_HEAVY)
+        vendored["components"] = [
+            _component("left-pad", "pkg:npm/left-pad@1.3.0", location),
+            _component("lodash", "pkg:npm/lodash@4.17.21", location),
+            _component("requests", "pkg:pypi/requests@2.32.3", "/requirements.txt"),
+        ]
+        model = AshAggregatedResults()
+        model.cyclonedx = CycloneDXReport.model_validate(vendored)
+
+        props = _props(json.loads(_reporter(tmp_path).report(model)))
+
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "pip"

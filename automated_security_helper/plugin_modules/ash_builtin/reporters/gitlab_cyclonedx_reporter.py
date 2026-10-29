@@ -200,13 +200,23 @@ _VENDORED_SEGMENTS = (
 )
 
 
+_VENDORED_DIRECTORY_NAMES = frozenset(
+    segment.rstrip("/") for segment in _VENDORED_SEGMENTS
+)
+
+
 def _is_vendored(component_dict: dict) -> bool:
-    """Whether the component's recorded location lies inside a vendored tree."""
+    """Whether the component's recorded location lies inside a vendored tree.
+
+    The test is on whole directory names along the path, so ``vendor/`` marks
+    ``/vendor/x.lock`` and ``/src/vendor/x.lock`` but not ``/src/myvendor/x.lock``;
+    a plain substring test matched the latter.
+    """
     raw_path = _get_component_property(component_dict, "syft:location:0:path")
     if not raw_path:
         return False
-    path = raw_path.lstrip("/")
-    return any(segment in path for segment in _VENDORED_SEGMENTS)
+    directories = raw_path.strip("/").split("/")[:-1]
+    return any(directory in _VENDORED_DIRECTORY_NAMES for directory in directories)
 
 
 def _declared_components(components: list[dict]) -> list[dict]:
@@ -240,17 +250,15 @@ def _normalize_input_file_path(raw_path: str | None) -> str | None:
     # Strip leading slash
     path = raw_path.lstrip("/")
 
-    # If the path contains common virtual-env or site-packages segments,
-    # extract just the filename (the lockfile/manifest).
+    # If a directory on the path is a virtual-env, site-packages, node_modules
+    # or vendor directory, show just the filename (the lockfile/manifest).
     # This is a heuristic — better than showing a container-internal path.
-    for segment in _VENDORED_SEGMENTS:
-        idx = path.find(segment)
-        if idx != -1:
-            # Find the last path component that looks like a manifest
-            # e.g. "yarn.lock", "package-lock.json", "go.sum", "requirements.txt"
-            parts = path.split("/")
-            # Return the last component (the actual file)
-            return parts[-1] if parts else None
+    # The test is on whole directory names, the same as _is_vendored: a
+    # repository's own "src/myvendor/" keeps its path.
+    parts = path.split("/")
+    if any(directory in _VENDORED_DIRECTORY_NAMES for directory in parts[:-1]):
+        # e.g. "yarn.lock", "package-lock.json", "go.sum", "requirements.txt"
+        return parts[-1] or None
 
     return path
 
