@@ -2998,6 +2998,15 @@ def _stop_tree(
         _wait_after_kill(process)
         return
     pgid = process.pid
+    if process.returncode is not None and _pid_names_a_live_process(pgid):
+        # The child was reaped, and a live process holds its pid. POSIX keeps a
+        # pid from reuse only while it names a live group, so the child's own
+        # group (its orphans) was gone before that process got the id, and the
+        # group the id names now is a stranger's. An own_group spawn reaches
+        # here with the child reaped when the wait ended after communicate
+        # returned; signalling the group then would have hit whoever took the
+        # id next. Nothing of ours is left to stop.
+        return
     if not _group_exists(pgid):
         if process.poll() is None:
             _stop(process, grace, prompt)
@@ -3297,6 +3306,22 @@ def _group_exists(pgid: int) -> bool:
         return _signal_group(pgid, 0)
     except OSError:
         return True
+
+
+def _pid_names_a_live_process(pid: int) -> bool:
+    """Whether some process, zombie included, holds *pid* now. POSIX only.
+
+    ``kill(pid, 0)`` fails with ESRCH only when no process has the pid; a
+    refusal (EPERM) means one does, another user's. For a child this process
+    has reaped, True means the pid has been reused.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def _this_process_is_init() -> bool:
