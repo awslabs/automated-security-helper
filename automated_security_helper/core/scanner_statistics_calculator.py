@@ -49,6 +49,10 @@ from automated_security_helper.utils.severity_ladder import (
     severity_fails_threshold,
 )
 
+#: The levels a target report can record it was graded against
+#: (``ScanResultsContainer.scanner_severity_threshold``, written by the executor).
+_RECORDED_LEVELS = frozenset({"ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"})
+
 
 class ScannerStatisticsCalculator:
     """Centralized calculator for scanner statistics from SARIF data.
@@ -791,6 +795,58 @@ class ScannerStatisticsCalculator:
                 ash_conf, ("global_settings", "severity_threshold")
             )
             threshold_from_env = shown_threshold is not None
+        # A results file read back: the configuration record keeps a threshold
+        # the scan read from the environment as the reference its file wrote,
+        # never the level. The record's own read is then the reference text (an
+        # external plugin's section, never validated) or the field's default (a
+        # typed section, with the field listed as unreadable), and neither is
+        # the level the scan graded with: the first graded CRITICAL only, the
+        # second the default. The executor records the graded level on each
+        # target report (ScanResultsContainer.scanner_severity_threshold), so
+        # the read-back grades from that record, and never re-reads its own
+        # environment, which can differ from the scan's. The shown form stays
+        # the reference. A literal threshold the record can hold is read as
+        # before, whatever the reports say.
+        recorded_level = ScannerStatisticsCalculator._recorded_graded_level(
+            asharp_model, scanner_name
+        )
+        if recorded_level is not None:
+            from automated_security_helper.config.environment_record import (
+                referenced_name,
+            )
+
+            own_path = ("scanners", scanner_name, "options", "severity_threshold")
+            global_path = ("global_settings", "severity_threshold")
+            reference_name = referenced_name(evaluation_threshold)
+            if reference_name is not None:
+                # An external section's threshold, read back as its reference.
+                shown_threshold = "${" + reference_name + "}"
+                evaluation_threshold = recorded_level
+                threshold_from_env = True
+            elif (
+                unreadable := ScannerStatisticsCalculator._unreadable_reference_shown(
+                    ash_conf, own_path
+                )
+            ) is not None:
+                # A typed section's threshold, listed unreadable and read as
+                # its default, which sent the resolution to the global one.
+                shown_threshold = unreadable
+                evaluation_threshold = recorded_level
+                scanner_threshold_def = "config"
+                threshold_from_env = True
+            elif (
+                scanner_threshold_def == "global"
+                and (
+                    unreadable
+                    := ScannerStatisticsCalculator._unreadable_reference_shown(
+                        ash_conf, global_path
+                    )
+                )
+                is not None
+            ):
+                shown_threshold = unreadable
+                evaluation_threshold = recorded_level
+                threshold_from_env = True
         if shown_threshold is None:
             shown_threshold = evaluation_threshold
         return (
@@ -812,42 +868,109 @@ class ScannerStatisticsCalculator:
         re-inserts references from); nothing here changes what is recorded or
         its shape. The shown spelling matches the external branch above: the
         variable alone, never a written default's text."""
-        from automated_security_helper.config.ash_config import reduced_plugin_name
         from automated_security_helper.config.environment_record import (
             referenced_name,
         )
 
-        def _same_path(recorded: Tuple[Any, ...], wanted: Tuple[Any, ...]) -> bool:
-            # The scanner's section is matched as get_plugin_config matches it:
-            # the file can spell a built-in scanner's key with another case or
-            # with "_" for "-", and the load records the path as written. Read by
-            # exact equality, such a section's env-read threshold showed its
-            # resolved value with threshold_from_env False.
-            if len(recorded) != len(wanted):
-                return False
-            for position, (left, right) in enumerate(zip(recorded, wanted)):
-                if left == right:
-                    continue
-                if (
-                    position == 1
-                    and wanted[0] == "scanners"
-                    and isinstance(left, str)
-                    and isinstance(right, str)
-                    and reduced_plugin_name(left) == reduced_plugin_name(right)
-                ):
-                    continue
-                return False
-            return True
-
         for reference in getattr(ash_conf, "_environment_references", ()) or ():
             if getattr(reference, "key", False):
                 continue
-            if not _same_path(tuple(getattr(reference, "path", ())), tuple(path)):
+            if not ScannerStatisticsCalculator._same_recorded_path(
+                tuple(getattr(reference, "path", ())), tuple(path)
+            ):
                 continue
             name = referenced_name(getattr(reference, "written", ""))
             if name:
                 return "${" + name + "}"
         return None
+
+    @staticmethod
+    def _same_recorded_path(recorded: Tuple[Any, ...], wanted: Tuple[Any, ...]) -> bool:
+        """Whether a recorded config path names *wanted*'s field.
+
+        The scanner's section is matched as get_plugin_config matches it: the
+        file can spell a built-in scanner's key with another case or with "_"
+        for "-", and the load records the path as written. Read by exact
+        equality, such a section's env-read threshold showed its resolved value
+        with threshold_from_env False.
+        """
+        from automated_security_helper.config.ash_config import reduced_plugin_name
+
+        if len(recorded) != len(wanted):
+            return False
+        for position, (left, right) in enumerate(zip(recorded, wanted)):
+            if left == right:
+                continue
+            if (
+                position == 1
+                and wanted[0] == "scanners"
+                and isinstance(left, str)
+                and isinstance(right, str)
+                and reduced_plugin_name(left) == reduced_plugin_name(right)
+            ):
+                continue
+            return False
+        return True
+
+    @staticmethod
+    def _unreadable_reference_shown(
+        ash_conf: Any, path: Tuple[Any, ...]
+    ) -> Optional[str]:
+        """The bare ``${NAME}`` of the reference a read-back configuration lists
+        as unreadable at *path*, or None.
+
+        A results file's record keeps a reference where its file wrote one, and
+        a field that cannot hold the text is read with its default and listed
+        (``recorded_config.without_unreadable_references``, the list
+        ``AshAggregatedResults.validate_ash_config`` attaches). That list is the
+        only trace a read-back configuration keeps of the reference: the record
+        re-validated holds no environment references of its own.
+        """
+        from automated_security_helper.config.environment_record import (
+            referenced_name,
+        )
+        from automated_security_helper.config.recorded_config import (
+            unreadable_references,
+        )
+
+        for field, reference in unreadable_references(ash_conf):
+            recorded = tuple(str(field).split("."))
+            if not ScannerStatisticsCalculator._same_recorded_path(
+                recorded, tuple(path)
+            ):
+                continue
+            name = referenced_name(str(reference))
+            if name:
+                return "${" + name + "}"
+        return None
+
+    @staticmethod
+    def _recorded_graded_level(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> Optional[str]:
+        """The level *scanner_name*'s target reports record it was graded against.
+
+        The executor writes the level it graded each target against on the
+        report (``ScanResultsContainer.scanner_severity_threshold``). One level
+        over every report of the scanner that carries one; None when none does
+        (a results file from an ASH that recorded none, a report written by hand)
+        or when two targets were graded against different levels, since then the
+        reports carry no one answer and the record's own read stands.
+        """
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            return None
+        levels = set()
+        for report in reports.values():
+            if (
+                not isinstance(report, dict)
+                or report.get("scanner_name") != scanner_name
+            ):
+                continue
+            level = report.get("scanner_severity_threshold")
+            if isinstance(level, str) and level in _RECORDED_LEVELS:
+                levels.add(level)
+        return levels.pop() if len(levels) == 1 else None
 
     @staticmethod
     def _status_info_from_report(report: Dict[str, Any]) -> Tuple[bool, bool, bool]:

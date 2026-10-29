@@ -134,6 +134,12 @@ def _completed_result_status(status: Any) -> bool:
 #: The fields of ScannerSeverityCount a returned dict's ``severity_counts`` can set.
 _SEVERITY_COUNT_FIELDS = ("suppressed", "critical", "high", "medium", "low", "info")
 
+#: The levels a target report can record it was graded against
+#: (``ScanResultsContainer.scanner_severity_threshold``). An unrecognised
+#: threshold (an external section's number, say) grades CRITICAL only and is not
+#: a level the report can carry, so the row keeps the value it was built with.
+_GRADED_LEVELS = frozenset({"ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"})
+
 
 def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:
     """``raw_counts``, a scanner's own ``severity_counts``, as a ScannerSeverityCount.
@@ -1646,6 +1652,18 @@ class ScannerExecutor:
                             scanner_config.options.severity_threshold,
                             getattr(self.plugin_context, "config", None),
                         )
+                        # The level this row is graded against, recorded on the
+                        # report beside its counts. A reader of the results file
+                        # (ash report, ash merge, --existing-results) grades
+                        # from it: the configuration record keeps a threshold
+                        # the scan read from the environment as the reference
+                        # its file wrote, never the level, so re-deriving the
+                        # threshold from that record gave the reader the
+                        # reference text or the field's default, and re-reading
+                        # the reader's own environment could grade a report
+                        # differently from the scan, silently.
+                        if threshold in _GRADED_LEVELS:
+                            container.scanner_severity_threshold = str(threshold)
                         container.status = container.determine_status(threshold)
                         # A clean result from a database the policy rejects is not a
                         # clean result: under content_db_staleness: fail the scan fails
