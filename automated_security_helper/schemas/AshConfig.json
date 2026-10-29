@@ -1331,7 +1331,7 @@
       "properties": {
         "additional_formats": {
           "default": [],
-          "description": "Additional output formats to generate (e.g., html, csv, xml)",
+          "description": "Additional output formats (e.g., html, csv, xml). bandit writes one format per run through a single --format option, and ASH needs that run's output to be SARIF, so these formats are not produced: a value here is accepted and logged as a warning. Convert the SARIF results with ASH's reporters instead.",
           "items": {
             "type": "string"
           },

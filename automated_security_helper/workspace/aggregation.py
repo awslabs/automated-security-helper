@@ -137,6 +137,7 @@ from automated_security_helper.models.asharp_model import new_report_id
 from automated_security_helper.models.core import merged_honoring
 from automated_security_helper.models.workspace import (
     SCANNER_EXIT_CODE_UNRECORDED,
+    ProjectConverterRefusal,
     ProjectInputNotScanned,
     WorkspaceProjectResult,
     WorkspaceResults,
@@ -849,6 +850,61 @@ def inputs_not_scanned_for_project(
             ProjectInputNotScanned(scanner=scanner, path=shown, reason=reason)
         )
     return entries
+
+
+def converter_refusals_for_project(
+    results: Any, relative_path: str
+) -> List[ProjectConverterRefusal]:
+    """This project's refused and failed converter inputs, workspace-relative.
+
+    Read through ``utils.converter_refusals.converter_refusals``, the reader the
+    single-directory summaries, the flat JSON report and the SARIF invocations
+    use, so a workspace lists the same records a single scan does. The path is
+    rebased as :func:`inputs_not_scanned_for_project` rebases a scanner's: a path
+    recorded relative to the project gets the project's ``relative_path`` in
+    front, one recorded absolute is kept as it is. ``incomplete_converters``
+    carries the converter-level verdict; this carries the inputs behind it.
+
+    Imported inside the function because ``converter_refusals`` imports the
+    results model, which imports this package's models.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+        relative_path: The project's workspace-relative path.
+
+    Returns:
+        The records, in the reader's order (those leaving the scan incomplete
+        first); empty for ``None`` and for a project whose converters refused
+        nothing.
+    """
+    from automated_security_helper.utils.converter_refusals import (
+        converter_refusals,
+    )
+
+    if results is None:
+        return []
+    records = []
+    for refusal in converter_refusals(results):
+        recorded = PurePosixPath(refusal.path)
+        shown = (
+            refusal.path
+            if not refusal.path or recorded.is_absolute()
+            else (PurePosixPath(relative_path) / recorded).as_posix()
+        )
+        records.append(
+            ProjectConverterRefusal(
+                converter=refusal.converter,
+                path=shown,
+                member=refusal.member,
+                reason=refusal.reason,
+                limit=refusal.limit,
+                failed=refusal.failed,
+                accepted=refusal.accepted,
+                scan_incomplete=refusal.scan_incomplete,
+                unlisted_members=refusal.unlisted_members,
+            )
+        )
+    return records
 
 
 def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:

@@ -2737,7 +2737,7 @@
       "properties": {
         "additional_formats": {
           "default": [],
-          "description": "Additional output formats to generate (e.g., html, csv, xml)",
+          "description": "Additional output formats (e.g., html, csv, xml). bandit writes one format per run through a single --format option, and ASH needs that run's output to be SARIF, so these formats are not produced: a value here is accepted and logged as a warning. Convert the SARIF results with ASH's reporters instead.",
           "items": {
             "type": "string"
           },
@@ -14312,6 +14312,92 @@
       "title": "Primitive",
       "type": "string"
     },
+    "ProjectConverterRefusal": {
+      "description": "One input a project's converter did not read or could not convert, and why.\n\nThe record ``utils/converter_refusals.py`` builds from a single scan's\n``converter_results`` rows, carried into the workspace results with the input's\npath made workspace-relative. The unified file holds no per-project converter\nrows (its ``converter_results`` is empty by design, because two projects run\nconverters of the same name over paths relative to their own trees), so without\nthis list the merged summaries could say that a project's conversion was\nincomplete and never which input went unconverted. ``scan_incomplete`` is the\ncompleteness gate's own reading of the record: an archive refused over an\nextraction limit, or a failed input no suppression accepted.",
+      "properties": {
+        "accepted": {
+          "default": false,
+          "description": "Whether a suppression accepted this failed input, so the completeness gate waives it.",
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "converter": {
+          "description": "The converter.",
+          "minLength": 1,
+          "title": "Converter",
+          "type": "string"
+        },
+        "failed": {
+          "default": false,
+          "description": "Whether this is a failed_inputs record (an input the converter could not convert) rather than a refused_inputs one.",
+          "title": "Failed",
+          "type": "boolean"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The extraction limit an archive was refused over, when one was.",
+          "title": "Limit"
+        },
+        "member": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The archive member refused, when one was.",
+          "title": "Member"
+        },
+        "path": {
+          "description": "The input's workspace-relative path, '/' separated: the project's relative_path joined to the path the converter recorded, or the recorded path itself when the converter could only record it as absolute.",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why the converter did not read it.",
+          "title": "Reason",
+          "type": "string"
+        },
+        "scan_incomplete": {
+          "default": false,
+          "description": "Whether the completeness gate counts this record: an archive refused over an extraction limit, or a failed input no suppression accepted.",
+          "title": "Scan Incomplete",
+          "type": "boolean"
+        },
+        "unlisted_members": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many more members of the archive the record stands for.",
+          "title": "Unlisted Members"
+        }
+      },
+      "required": [
+        "converter",
+        "path",
+        "reason"
+      ],
+      "title": "ProjectConverterRefusal",
+      "type": "object"
+    },
     "ProjectInputNotScanned": {
       "description": "One input a project's scanner found and did not scan, and why.",
       "properties": {
@@ -24045,6 +24131,14 @@
           "title": "Ceiling Unreachable Findings",
           "type": "object"
         },
+        "converter_refusals": {
+          "description": "Every input one of this project's converters did not read or could not convert, as the project's own converter_results rows record them (refused_inputs and failed_inputs), with the input's path made workspace-relative. incomplete_converters names the converter and a summary reason; this names each input, so the merged summaries and the workspace table can say what went unconverted. Empty in a workspace file written before the field existed.",
+          "items": {
+            "$ref": "#/$defs/ProjectConverterRefusal"
+          },
+          "title": "Converter Refusals",
+          "type": "array"
+        },
         "display_label": {
           "description": "What a human reads. Not unique.",
           "minLength": 1,
@@ -24161,6 +24255,12 @@
           "title": "Policy Origin Finding Count",
           "type": "integer"
         },
+        "policy_scanners_gate": {
+          "default": false,
+          "description": "Whether findings from scanners only `workspace.additional_scanners` asked for decided this project's verdict (the policy's policy_scanners_gate, as the plan applied it). False means a policy-origin finding is reported and excluded from actionable_finding_count; a reader that regrades findings (the merged JUnit report, the MCP result filters) reads this to grade such a finding as the verdict did instead of as a failure. False in a workspace file written before the field existed.",
+          "title": "Policy Scanners Gate",
+          "type": "boolean"
+        },
         "project": {
           "description": "The project key -- its workspace-relative path with separators replaced by dashes. Every other attribution in the results joins on this.",
           "minLength": 1,
@@ -24189,7 +24289,7 @@
         },
         "scan_incomplete": {
           "default": false,
-          "description": "Whether the completeness facts above fail this project -- the incomplete scanners or converters it names, or having run no scanner at all. Stored rather than derived from them for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes.",
+          "description": "Whether the completeness facts above fail this project -- the incomplete scanners or converters it names, or having run no scanner at all. Stored rather than derived from them for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes. Always true for a stale content database under a fail policy, an unevaluated rule or a tool ASH could not stop: no setting silences those in `ash --source-dir P` either.",
           "title": "Scan Incomplete",
           "type": "boolean"
         },
@@ -24199,6 +24299,14 @@
           },
           "description": "Why each SKIPPED, MISSING or ERROR scanner gave no result, for this project alone: a SKIPPED or MISSING row's skipped_reason or missing_reason, and the first error an ERROR scanner's reports recorded, such as a constructor that raised. A scanner that ran, or that recorded no reason, is not listed. Empty in a workspace file written before the field existed.",
           "title": "Scanner Reasons",
+          "type": "object"
+        },
+        "scanner_thresholds": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Per scanner name (as properties.scanner_name records it), the threshold the verdict graded that scanner's findings by when it is the scanner's own options.severity_threshold, with the workspace ceiling folded in; a scanner not listed was graded by severity_threshold. The unified results carry no ash_config, so a reader that regrades a finding (the merged reporters, the MCP result filters) has no other source for the scanner's gate and judged every project at ASH's default. Empty in a workspace file written before the field existed.",
+          "title": "Scanner Thresholds",
           "type": "object"
         },
         "scanners": {
@@ -24259,6 +24367,22 @@
         "status": {
           "$ref": "#/$defs/ProjectRunStatus",
           "description": "Whether the project completed, was skipped, or failed."
+        },
+        "unevaluated_rules": {
+          "description": "Rules a scanner reported, at run level, that it could not evaluate, as the single-scan payload's unevaluated_rules lists them. A rule here fails the project (scan_incomplete) whatever fail_on_incomplete_scanners says: `ash --source-dir P` exits 1 on it, because the scan reports nothing about compliance with that rule. Empty in a workspace file written before the field existed.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unevaluated Rules",
+          "type": "array"
+        },
+        "unstoppable_tools": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Scanner name to reason, for each scanner whose run ended with a tool ASH could not stop, as the single-scan payload's could_not_stop rows record it. Such a tool may still write into the project's output after the verdict read it, so the project fails (scan_incomplete) whatever fail_on_incomplete_scanners says, as `ash --source-dir P` does. Empty in a workspace file written before the field existed.",
+          "title": "Unstoppable Tools",
+          "type": "object"
         }
       },
       "required": [

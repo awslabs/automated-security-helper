@@ -294,6 +294,86 @@ class ProjectInputNotScanned(RecordModel):
     reason: Annotated[str, Field(..., description="Why the scanner did not scan it.")]
 
 
+class ProjectConverterRefusal(RecordModel):
+    """One input a project's converter did not read or could not convert, and why.
+
+    The record ``utils/converter_refusals.py`` builds from a single scan's
+    ``converter_results`` rows, carried into the workspace results with the input's
+    path made workspace-relative. The unified file holds no per-project converter
+    rows (its ``converter_results`` is empty by design, because two projects run
+    converters of the same name over paths relative to their own trees), so without
+    this list the merged summaries could say that a project's conversion was
+    incomplete and never which input went unconverted. ``scan_incomplete`` is the
+    completeness gate's own reading of the record: an archive refused over an
+    extraction limit, or a failed input no suppression accepted.
+    """
+
+    converter: Annotated[str, Field(..., min_length=1, description="The converter.")]
+    path: Annotated[
+        str,
+        Field(
+            ...,
+            description=(
+                "The input's workspace-relative path, '/' separated: the project's "
+                "relative_path joined to the path the converter recorded, or the "
+                "recorded path itself when the converter could only record it as "
+                "absolute."
+            ),
+        ),
+    ]
+    member: Annotated[
+        Optional[str],
+        Field(None, description="The archive member refused, when one was."),
+    ] = None
+    reason: Annotated[str, Field(..., description="Why the converter did not read it.")]
+    limit: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description="The extraction limit an archive was refused over, when one was.",
+        ),
+    ] = None
+    failed: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether this is a failed_inputs record (an input the converter "
+                "could not convert) rather than a refused_inputs one."
+            ),
+        ),
+    ] = False
+    accepted: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether a suppression accepted this failed input, so the "
+                "completeness gate waives it."
+            ),
+        ),
+    ] = False
+    scan_incomplete: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether the completeness gate counts this record: an archive "
+                "refused over an extraction limit, or a failed input no suppression "
+                "accepted."
+            ),
+        ),
+    ] = False
+    unlisted_members: Annotated[
+        Optional[int],
+        Field(
+            None,
+            ge=0,
+            description="How many more members of the archive the record stands for.",
+        ),
+    ] = None
+
+
 #: The code a scanner's rolled-up entry reads when its project's row recorded none and
 #: the scanner did not complete: it produced no target report, so ``exit_code`` was
 #: never set on the row. ASH's own stand-in for a run that did not complete (the
@@ -353,6 +433,23 @@ class WorkspaceProjectResult(RecordModel):
             ),
         ),
     ] = None
+    scanner_thresholds: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "Per scanner name (as properties.scanner_name records it), the "
+                "threshold the verdict graded that scanner's findings by when it "
+                "is the scanner's own options.severity_threshold, with the "
+                "workspace ceiling folded in; a scanner not listed was graded by "
+                "severity_threshold. The unified results carry no ash_config, so "
+                "a reader that regrades a finding (the merged reporters, the MCP "
+                "result filters) has no other source for the scanner's gate and "
+                "judged every project at ASH's default. Empty in a workspace file "
+                "written before the field existed."
+            ),
+        ),
+    ]
     finding_count: Annotated[
         int,
         Field(0, ge=0, description="Unsuppressed findings reported for the project."),
@@ -386,6 +483,22 @@ class WorkspaceProjectResult(RecordModel):
             ),
         ),
     ] = 0
+    policy_scanners_gate: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether findings from scanners only `workspace.additional_scanners` "
+                "asked for decided this project's verdict (the policy's "
+                "policy_scanners_gate, as the plan applied it). False means a "
+                "policy-origin finding is reported and excluded from "
+                "actionable_finding_count; a reader that regrades findings (the "
+                "merged JUnit report, the MCP result filters) reads this to grade "
+                "such a finding as the verdict did instead of as a failure. False "
+                "in a workspace file written before the field existed."
+            ),
+        ),
+    ] = False
     exceeds_threshold: Annotated[
         bool,
         Field(
@@ -579,6 +692,22 @@ class WorkspaceProjectResult(RecordModel):
             ),
         ),
     ]
+    converter_refusals: Annotated[
+        List[ProjectConverterRefusal],
+        Field(
+            default_factory=list,
+            description=(
+                "Every input one of this project's converters did not read or "
+                "could not convert, as the project's own converter_results rows "
+                "record them (refused_inputs and failed_inputs), with the input's "
+                "path made workspace-relative. incomplete_converters names the "
+                "converter and a summary reason; this names each input, so the "
+                "merged summaries and the workspace table can say what went "
+                "unconverted. Empty in a workspace file written before the field "
+                "existed."
+            ),
+        ),
+    ]
     scan_incomplete: Annotated[
         bool,
         Field(
@@ -650,6 +779,21 @@ class WorkspaceProjectResult(RecordModel):
             ),
         ),
     ] = False
+
+    def threshold_for_scanner(self, scanner: Optional[str]) -> Optional[str]:
+        """The threshold this project's verdict graded *scanner*'s findings by.
+
+        The scanner's own entry in ``scanner_thresholds`` when it has one, else
+        ``severity_threshold``: the same resolution the verdict made per finding
+        (``aggregation.actionable_results_by_scanner`` with the project's scanner
+        resolver). ``None`` for a project that never ran. Readers that regrade a
+        finding attributed to this project call this instead of reading one of
+        the two fields, so they cannot pick the project gate for a scanner the
+        verdict judged by its own.
+        """
+        if scanner and scanner in self.scanner_thresholds:
+            return self.scanner_thresholds[scanner]
+        return self.severity_threshold
 
     def as_skipped_project(self) -> Optional[SkippedProject]:
         """This project as a ``skipped_projects`` payload entry, or None."""

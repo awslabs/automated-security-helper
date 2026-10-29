@@ -304,6 +304,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Sequence,
     Set,
     Tuple,
 )
@@ -371,6 +372,7 @@ from automated_security_helper.workspace.aggregation import (
     ThresholdResolver,
     WorkspaceAggregator,
     actionable_results_by_scanner,
+    converter_refusals_for_project,
     has_finding_at_min_severity,
     incomplete_converters_for_project,
     inputs_not_scanned_for_project,
@@ -1076,6 +1078,40 @@ def _scanner_threshold_resolver(
     return resolve
 
 
+def _recorded_scanner_thresholds(
+    resolve: ThresholdResolver,
+    statuses: Mapping[str, str],
+    results: Sequence[Mapping[str, Any]],
+) -> Dict[str, str]:
+    """Per scanner, the threshold the verdict graded it by when it is the scanner's own.
+
+    The scanners asked are the ones the project recorded a status for and the
+    ones its findings name, so a scanner that ran and found nothing is recorded
+    too (a reader grading a later finding of its kind needs it) and a finding from
+    a scanner no row recorded is not left out. *resolve* is the project's
+    :func:`_scanner_threshold_resolver`, whose answer is already upper-cased and
+    has the workspace ceiling folded in; its ``None`` means "the project's
+    threshold", which ``severity_threshold`` already records, so that scanner is
+    left out of the map.
+    """
+    names = set(statuses)
+    for result in results:
+        if not isinstance(result, Mapping):
+            continue
+        properties = result.get("properties")
+        if not isinstance(properties, Mapping):
+            continue
+        name = properties.get("scanner_name")
+        if isinstance(name, str) and name:
+            names.add(name)
+    recorded: Dict[str, str] = {}
+    for name in sorted(names):
+        own = resolve(name)
+        if own:
+            recorded[name] = own
+    return recorded
+
+
 def _coverage_fields(results: Any) -> Dict[str, Any]:
     """The six ``WorkspaceProjectResult`` coverage fields, from one read of *results*.
 
@@ -1297,10 +1333,11 @@ def _scan_one_project(
     # the project's threshold. Judging every finding against the one project
     # threshold gave a project a workspace verdict that differed from
     # `ash --source-dir P` the moment its config tightened or relaxed one scanner.
+    scanner_threshold = _scanner_threshold_resolver(results, project)
     actionable_by_scanner = actionable_results_by_scanner(
         gating_results,
         threshold,
-        threshold_for=_scanner_threshold_resolver(results, project),
+        threshold_for=scanner_threshold,
     )
     actionable = sum(actionable_by_scanner.values())
     if actionable and not has_finding_at_min_severity(
@@ -1422,9 +1459,19 @@ def _scan_one_project(
         display_label=project.display_label,
         status=ProjectRunStatus.COMPLETED,
         severity_threshold=threshold,
+        # The gates a reader needs to regrade this project's findings as the
+        # verdict did: each scanner's own threshold where it has one, and whether
+        # a policy scanner's findings decided anything. The unified file carries
+        # no ash_config, so without these the merged reporters and the MCP
+        # result filters graded every project at ASH's default and reported a
+        # non-gating policy finding as a failure.
+        scanner_thresholds=_recorded_scanner_thresholds(
+            scanner_threshold, statuses, results_list
+        ),
         finding_count=len(unsuppressed),
         actionable_finding_count=actionable,
         policy_origin_finding_count=len(policy_origin),
+        policy_scanners_gate=bool(project.policy_scanners_gate),
         exceeds_threshold=bool(actionable) and fail_on_findings,
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
@@ -1439,6 +1486,13 @@ def _scan_one_project(
             results, project.relative_path
         ),
         incomplete_converters=incomplete_conversions,
+        # The inputs behind incomplete_converters, and the refusals that leave the
+        # scan complete, each at its workspace-relative path: the unified file
+        # holds no per-project converter rows, so this is the only place the
+        # merged summaries can read which input went unconverted.
+        converter_refusals=converter_refusals_for_project(
+            results, project.relative_path
+        ),
         stale_content_databases=stale,
         # A stale content database under `content_db_staleness: fail` fails the project
         # whatever fail_on_incomplete says, matching _compute_exit_code's own arm for it:
