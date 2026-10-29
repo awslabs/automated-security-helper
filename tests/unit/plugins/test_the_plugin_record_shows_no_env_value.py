@@ -28,6 +28,8 @@ from automated_security_helper.plugins.loader import (
     load_plugins,
 )
 
+pytestmark = pytest.mark.unit
+
 SENTINEL = "recsentinel_ash_plugins"
 #: The env-read value: a module that does not exist, so the error quotes it.
 VALUE = "recval_ash_plugins"

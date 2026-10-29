@@ -33,6 +33,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 #: A value the config reads from the environment for an ignore path's reason,
 #: which the handlers quote. Nothing else in these runs prints it.
 QUOTED = "zzhandler-secret-6604"

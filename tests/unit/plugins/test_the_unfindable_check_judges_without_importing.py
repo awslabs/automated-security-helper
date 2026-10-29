@@ -27,6 +27,8 @@ from automated_security_helper.plugins.loader import (
     refuse_unfindable_plugin_imports,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _package(root: Path, name: str, init: str = "") -> Path:
     directory = root / name

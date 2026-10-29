@@ -40,6 +40,8 @@ from automated_security_helper.plugins.plugin_manager import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 MASK = "<value>"
 RAISES_FROM_FILE = (
     "import pathlib\n"

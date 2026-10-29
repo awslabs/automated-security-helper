@@ -171,6 +171,7 @@ def scan(tmp_path_factory, installed_example):
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the stand-in uv is a POSIX shell script"
 )
+@pytest.mark.integration
 def test_the_scan_asks_uv_about_no_tool(scan):
     """No unselected scanner probes its tool; the example scanner has none."""
     _, output, _ = scan
@@ -183,6 +184,7 @@ def test_the_scan_asks_uv_about_no_tool(scan):
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the stand-in uv is a POSIX shell script"
 )
+@pytest.mark.integration
 def test_the_stand_in_uv_records_a_probe_under_the_scan_environment(tmp_path):
     """Control: a probing scanner, in the scan's environment, lands in the log.
 
@@ -200,6 +202,7 @@ def _sarif_results(output: Path) -> list:
     return [result for run in sarif["runs"] for result in run.get("results") or []]
 
 
+@pytest.mark.integration
 def test_the_scan_exits_0(scan):
     """The example's findings are LOW, under the default threshold, so nothing fails."""
     _, output, completed = scan
@@ -210,6 +213,7 @@ def test_the_scan_exits_0(scan):
     assert "required positional argument" not in log
 
 
+@pytest.mark.integration
 def test_the_converter_runs_and_writes_its_output(scan):
     _, output, _ = scan
     results = json.loads(
@@ -222,6 +226,7 @@ def test_the_converter_runs_and_writes_its_output(scan):
     assert MARKER in converted.read_text(encoding="utf-8")
 
 
+@pytest.mark.integration
 def test_the_scanner_findings_reach_the_sarif_report(scan):
     """Source findings by relative path, plus the one in the converted file."""
     _, output, _ = scan
@@ -239,6 +244,7 @@ def test_the_scanner_findings_reach_the_sarif_report(scan):
     assert len(found) == 3, found
 
 
+@pytest.mark.integration
 def test_the_reporter_writes_its_report_where_the_config_says(scan):
     _, output, _ = scan
     report = (output / "reports" / "ash.example.md").read_text(encoding="utf-8")
@@ -249,6 +255,7 @@ def test_the_reporter_writes_its_report_where_the_config_says(scan):
     assert not (output / "example_report.txt").exists()
 
 
+@pytest.mark.integration
 def test_the_event_handlers_run(scan):
     _, _, completed = scan
     assert "Example plugin: scanner 'my-example-scanner' started" in completed.stdout
@@ -302,6 +309,7 @@ def _context(tmp_path, **global_settings):
     return PluginContext(source_dir=source, output_dir=tmp_path / "out", config=config)
 
 
+@pytest.mark.unit
 def test_the_converter_skips_a_template_under_an_ignore_path(tmp_path, example_module):
     context = _context(
         tmp_path, ignore_paths=[{"path": "vendor/**", "reason": "third-party"}]
@@ -326,6 +334,7 @@ def test_the_converter_skips_a_template_under_an_ignore_path(tmp_path, example_m
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
 @pytest.mark.parametrize("target_type", ["source", "converted"])
+@pytest.mark.unit
 def test_the_scanner_does_not_read_through_a_symlink(
     tmp_path, example_module, target_type
 ):
@@ -354,6 +363,7 @@ def test_the_scanner_does_not_read_through_a_symlink(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_a_template_linked_outside_the_tree_never_reaches_the_converter(
     tmp_path, example_module
 ):
@@ -389,6 +399,7 @@ def test_a_template_linked_outside_the_tree_never_reaches_the_converter(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_the_converter_refuses_a_template_linked_inside_the_tree(
     tmp_path, example_module
 ):
@@ -414,6 +425,7 @@ def test_the_converter_refuses_a_template_linked_inside_the_tree(
     sys.platform == "win32", reason="creating hard links needs privileges on Windows"
 )
 @pytest.mark.parametrize("target_type", ["source", "converted"])
+@pytest.mark.unit
 def test_the_scanner_does_not_read_a_hard_linked_file(
     tmp_path, example_module, target_type
 ):

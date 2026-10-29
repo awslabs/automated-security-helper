@@ -11,6 +11,8 @@ from unittest.mock import patch
 from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.plugins.loader import load_plugins
 
+pytestmark = pytest.mark.unit
+
 
 def test_discover_plugins():
     """Test that external plugins can be discovered.

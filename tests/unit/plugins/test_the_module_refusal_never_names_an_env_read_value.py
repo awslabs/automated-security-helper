@@ -26,6 +26,8 @@ from automated_security_helper.plugins.loader import (
     load_plugins,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The variable's value: outside the namespace, so the refusal fires on it, and
 #: a name nothing else in the message would contain, so finding it is the leak.
 VALUE = "env_named_module"

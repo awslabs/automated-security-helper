@@ -25,6 +25,8 @@ from typing import Dict
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 MASK = "<value>"
 RAISES_FROM_FILE = (
     "import pathlib\n"

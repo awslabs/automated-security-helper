@@ -140,6 +140,7 @@ def _plan(tmp_path: Path, modules: List[str]) -> WorkspacePlan:
     )
 
 
+@pytest.mark.unit
 class TestDiscoveryHonorsTheNamespace:
     @pytest.mark.parametrize("name", REFUSED_SPELLINGS)
     def test_discover_plugins_does_not_import_a_name_outside_the_namespace(
@@ -158,6 +159,7 @@ class TestDiscoveryHonorsTheNamespace:
         assert ACCEPTED in sys.modules
 
 
+@pytest.mark.unit
 class TestWorkspacePrewarmHonorsTheNamespace:
     @pytest.mark.parametrize("source", ["project", "cli"])
     def test_prewarm_does_not_import_a_name_outside_the_namespace(
@@ -380,6 +382,7 @@ def _assert_refused(run: _Run, completed: subprocess.CompletedProcess) -> None:
     )
 
 
+@pytest.mark.integration
 class TestARefusedModuleRefusesTheScan:
     def test_the_ash_plugin_modules_flag(self, tmp_path):
         run = _Run(tmp_path)
@@ -537,6 +540,7 @@ def _assert_both_imported(run: _Run, completed: subprocess.CompletedProcess) -> 
     assert completed.returncode == 0, _tail(completed)
 
 
+@pytest.mark.integration
 class TestEveryEntryPointSplitsCommaJoinedNames:
     """Each source splits an entry on commas and strips spaces, as a config file does."""
 
@@ -629,6 +633,7 @@ def _assert_import_refused(
     )
 
 
+@pytest.mark.integration
 class TestANamedModuleThatDoesNotImportRefusesTheScan:
     """The operator named it, so a missing or broken package is a configuration error."""
 
