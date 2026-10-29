@@ -121,7 +121,10 @@ def load_npm_lock_entries(
             f"{refused.reason}"
         )
         return None
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
+        # RecursionError: json.loads recurses per nesting level, so a lockfile
+        # nested past the interpreter's limit raises it; the contract here is
+        # None for a lockfile that cannot be read, not a failed scanner run.
         ASH_LOGGER.debug(f"Could not read npm lockfile {lockfile}: {exc}")
         return None
     packages = data.get("packages") if isinstance(data, dict) else None
@@ -135,8 +138,13 @@ def load_npm_lock_entries(
     # bare package names, which could collide with a workspace key such as
     # "lib", but never with a node_modules path. The first occurrence wins,
     # because the packages map precedes the legacy v2 "dependencies" section.
+    # Lines are counted as the scanners count them, at "\n" only: str.splitlines
+    # also breaks on U+2028, U+2029, U+0085 and a lone CR, so a string value
+    # holding one of those shifted every later key's line and attributed a
+    # location to the wrong entry. A trailing CR stays on its line, where the
+    # key pattern does not reach it.
     key_lines: Dict[str, int] = {}
-    for number, line in enumerate(text.splitlines(), start=1):
+    for number, line in enumerate(text.split("\n"), start=1):
         match = _JSON_KEY_LINE.match(line)
         if not match:
             continue
