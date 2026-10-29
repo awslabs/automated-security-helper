@@ -89,6 +89,7 @@ from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
     EXPLICIT_ENV_TAG,
     config_env_var_is_interpolatable,
+    reduced_plugin_name,
     resolve_env_references,
 )
 
@@ -280,14 +281,32 @@ def _resolved_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
 
     A reference the loader resolves comes to its value; any other key came to
     its own text.
+
+    The resolved document was folded to each known plugin's declared spelling
+    before the two views are paired (``fold_known_plugin_sections`` in
+    ``config_sources._file_references``), so a value in another spelling of a
+    known plugin (``Bandit``, ``cdk_nag``) came to the folded key: that key is
+    answered when the value itself is not one. A key the loader never resolves
+    (a TOML key, a quoted YAML key) came to its own text, whatever its value
+    resolves to; an exact lookup of the value alone answered none for it, and
+    every environment read beneath the key went unrecorded.
     """
     name = referenced_name(written_key)
     if name is not None and config_env_var_is_interpolatable(name):
         try:
             key = resolve_env_references(_without_tag(written_key))
         except Exception:  # noqa: BLE001 - a key that does not resolve came to none
-            return _UNRESOLVED
-        return key if key in resolved else _UNRESOLVED
+            key = _UNRESOLVED
+        if key is not _UNRESOLVED and key in resolved:
+            return key
+        if isinstance(key, str):
+            folded = reduced_plugin_name(key)
+            for candidate in resolved:
+                if (
+                    isinstance(candidate, str)
+                    and reduced_plugin_name(candidate) == folded
+                ):
+                    return candidate
     for key in (written_key, _without_tag(written_key)):
         if key in resolved:
             return key
@@ -308,26 +327,33 @@ def environment_references(
     from the environment that resolves to another key of its mapping merges the
     two; pairing by position would then compare every later value with the
     wrong one. The key's own read is recorded whether or not its entry is the
-    one the merge keeps; only the kept entry's value is paired.
+    one the merge keeps; only the kept entry's value is paired. The kept entry
+    is the one written LAST under the name, whether that name was written as
+    text or came from a reference: the loader keeps the last. Pairing the plain
+    key's value whenever it was present compared it with the value a later
+    referenced key wrote over it, recording a reference the file never made
+    there and missing the one the kept entry read.
     """
     found: List[EnvironmentReference] = []
     if isinstance(written, dict) and isinstance(resolved, dict):
-        plain = [(k, v) for k, v in written.items() if not _has_reference(k)]
-        referenced = [(k, v) for k, v in written.items() if _has_reference(k)]
-        plain_keys = {k for k, _ in plain}
-        for key, value in plain:
-            if key in resolved:
-                found += environment_references(value, resolved[key], (*path, str(key)))
-        names = [(k, v, _resolved_key(k, resolved)) for k, v in referenced]
+        entries = list(written.items())
+        names = [
+            _resolved_key(key, resolved) if _has_reference(key) else key
+            for key, _ in entries
+        ]
         # The loader keeps the last entry written under a name.
-        last = {name: index for index, (_, _, name) in enumerate(names)}
-        for index, (written_key, written_value, name) in enumerate(names):
+        last = {
+            name: index for index, name in enumerate(names) if name is not _UNRESOLVED
+        }
+        for index, (written_key, written_value) in enumerate(entries):
+            name = names[index]
             if name is _UNRESOLVED:
                 continue
-            read = _reference(written_key, name, path, key=True)
-            if read is not None:
-                found.append(read)
-            if name not in plain_keys and last[name] == index:
+            if _has_reference(written_key):
+                read = _reference(written_key, name, path, key=True)
+                if read is not None:
+                    found.append(read)
+            if last[name] == index and name in resolved:
                 found += environment_references(
                     written_value, resolved[name], (*path, str(name))
                 )
