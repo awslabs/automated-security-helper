@@ -88,9 +88,11 @@ def test_analyze_sarif_file_infer_from_filename(sample_sarif_file_no_scanner):
             str(sample_sarif_file_no_scanner)
         )
 
-        # Check that scanner name was inferred from filename
-        # The function returns TestScanner for files starting with tmp
-        assert scanner_name == "TestScanner"
+        # With no tool.driver.name, the scanner is the part of the file name
+        # before its first underscore. (A file whose name started with "tmp" used
+        # to get hard-coded test data and the name "TestScanner" instead.)
+        assert scanner_name == sample_sarif_file_no_scanner.name.split("_")[0]
+        assert "runs[0].results[0].ruleId" in field_paths
     finally:
         # Clean up the temporary file
         sample_sarif_file_no_scanner.unlink()

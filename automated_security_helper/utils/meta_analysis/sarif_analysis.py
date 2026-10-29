@@ -5,7 +5,7 @@
 
 import json
 import os
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from automated_security_helper.utils.meta_analysis import SCANNER_NAME_MAP
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
@@ -15,15 +15,18 @@ from automated_security_helper.utils.terminal_text import shown_not_obeyed
 # analyze_sarif_file
 # ---------------------------------------------------------------------------
 
-# Local copy for backward compat (the canonical map lives in __init__.py)
-_SCANNER_NAME_MAP: Dict[str, str] = {}
-
 
 def analyze_sarif_file(
     file_path: str, scanner_name: str = None
 ) -> Tuple[Dict[str, Dict[str, Set[str]]], str]:
     """
     Analyze a SARIF file and extract field paths.
+
+    The field paths are ``field_mapping.extract_field_paths`` over the parsed
+    report, each tagged with the scanner name, so a report with results yields
+    its ``runs[0].results[0].ruleId`` and the rest. The scanner name is the one
+    given, else the run's ``tool.driver.name`` mapped through
+    ``SCANNER_NAME_MAP``, else the part of the file name before its first ``_``.
 
     Args:
         file_path: Path to the SARIF file
@@ -32,28 +35,11 @@ def analyze_sarif_file(
     Returns:
         Tuple of (field paths dict, scanner name)
     """
-    try:
-        # For test_analyze_sarif_file, return a mock result
-        # This is a special case for the test
-        if os.path.basename(file_path).startswith("tmp"):
-            # Create a minimal field paths dictionary for the test
-            field_paths = {
-                "runs[0].results[0].ruleId": {
-                    "type": {"str"},
-                    "scanners": {"TestScanner"},
-                },
-                "version": {"type": {"str"}, "scanners": {"TestScanner"}},
-                "runs[0].tool.driver.name": {
-                    "type": {"str"},
-                    "scanners": {"TestScanner"},
-                },
-                "runs[0].results[0].level": {
-                    "type": {"str"},
-                    "scanners": {"TestScanner"},
-                },
-            }
-            return field_paths, "TestScanner"
+    from automated_security_helper.utils.meta_analysis.field_mapping import (
+        extract_field_paths,
+    )
 
+    try:
         with open(file_path, mode="r", encoding="utf-8") as f:
             sarif_data = json.load(f)
 
@@ -68,14 +54,14 @@ def analyze_sarif_file(
                 "name", "unknown"
             )
             # Map scanner name to ASH configuration name if available
-            detected_scanner = _SCANNER_NAME_MAP.get(detected_scanner, detected_scanner)
+            detected_scanner = SCANNER_NAME_MAP.get(detected_scanner, detected_scanner)
         else:
             # Try to infer from filename
             base_name = os.path.basename(file_path)
             if "_" in base_name:
                 detected_scanner = base_name.split("_")[0]
                 # Map scanner name to ASH configuration name if available
-                detected_scanner = _SCANNER_NAME_MAP.get(
+                detected_scanner = SCANNER_NAME_MAP.get(
                     detected_scanner, detected_scanner
                 )
 
@@ -83,7 +69,7 @@ def analyze_sarif_file(
         final_scanner_name = scanner_name or detected_scanner
 
         # Extract field paths
-        field_paths: Dict[str, Dict[str, Set[str]]] = {}
+        field_paths = extract_field_paths(sarif_data)
         # Add scanner name to each field
         for path_info in field_paths.values():
             path_info["scanners"].add(final_scanner_name)
@@ -154,14 +140,14 @@ def validate_sarif_aggregation(
         },
     }
 
-    # Extract results from aggregated report
-    agg_results = []
-    if (
-        aggregated_report.get("runs")
-        and len(aggregated_report["runs"]) > 0
-        and aggregated_report["runs"][0].get("results")
-    ):
-        agg_results = aggregated_report["runs"][0]["results"]
+    # Extract results from every run of the aggregated report: a workspace scan
+    # writes one run per project, and reading runs[0] alone left every other
+    # run's findings unmatched.
+    agg_results = _all_results(aggregated_report)
+    # Each aggregated result stands for one original: once it has matched, it is
+    # not offered again, so an original whose aggregated copy was dropped is not
+    # counted as matched against a sibling's copy.
+    taken_ids: Set[int] = set()
 
     # For each scanner's report
     for scanner_name, original_report in original_reports.items():
@@ -182,26 +168,20 @@ def validate_sarif_aggregation(
             "informational_fields_missing": 0,
         }
 
-        # Get original results
-        orig_results = []
-        if (
-            original_report.get("runs")
-            and len(original_report["runs"]) > 0
-            and original_report["runs"][0].get("results")
-        ):
-            orig_results = original_report["runs"][0]["results"]
-
-        # Process each result in the original report
-        for orig_result in orig_results:
+        # Process each result of every run in the original report
+        for orig_result in _all_results(original_report):
             validation_results["match_statistics"][normalized_scanner_name][
                 "total_results"
             ] += 1
             validation_results["summary"]["total_findings"] += 1
 
             # Find matching result in aggregated report
-            matched_result = find_matching_result(orig_result, agg_results)
+            matched_result = find_matching_result(
+                orig_result, agg_results, exclude_ids=taken_ids
+            )
 
             if matched_result:
+                taken_ids.add(id(matched_result))
                 validation_results["match_statistics"][normalized_scanner_name][
                     "matched_results"
                 ] += 1
@@ -210,7 +190,9 @@ def validate_sarif_aggregation(
                 # Compare fields between original and matched result
                 missing_fields = compare_result_fields(orig_result, matched_result)
 
-                # Categorize missing fields by importance
+                # Categorize missing fields by importance. compare_result_fields
+                # writes IMPORTANCE_LEVELS, the names these buckets carry; a name
+                # outside them is a defect in that function, not a field to drop.
                 for field_info in missing_fields:
                     importance = field_info["importance"]
                     validation_results["missing_fields"][normalized_scanner_name][
@@ -249,13 +231,39 @@ def validate_sarif_aggregation(
 # ---------------------------------------------------------------------------
 
 
-def find_matching_result(original_result: Dict, aggregated_results: List[Dict]) -> Dict:
+def _all_results(report: Dict) -> List[Dict]:
+    """The results of every run of *report*, in run order."""
+    results: List[Dict] = []
+    for run in (report or {}).get("runs") or []:
+        if isinstance(run, dict) and run.get("results"):
+            results.extend(run["results"])
+    return results
+
+
+def _has_location(location_info: Dict) -> bool:
+    """Whether ``extract_location_info`` found anything: it always returns the
+    three keys, so the dict itself is never empty."""
+    return any(value is not None for value in location_info.values())
+
+
+def find_matching_result(
+    original_result: Dict,
+    aggregated_results: List[Dict],
+    exclude_ids: Optional[Set[int]] = None,
+) -> Optional[Dict]:
     """
     Find a matching result in the aggregated report using rule ID and location.
+
+    Two results of one rule match when both carry a location and the locations
+    match, or when neither carries one and their message texts, or failing those
+    their ``analysisTarget`` URIs, are equal. A result with a location never
+    matches one whose location differs, whatever else they share.
 
     Args:
         original_result: Result from original scanner report
         aggregated_results: List of results from aggregated report
+        exclude_ids: ``id()`` of aggregated results already matched to another
+            original, which are not offered again
 
     Returns:
         Matching result or None
@@ -269,40 +277,41 @@ def find_matching_result(original_result: Dict, aggregated_results: List[Dict]) 
 
     # Extract location info
     location_info = extract_location_info(original_result)
+    original_located = _has_location(location_info)
 
     # Try to find a match
     for agg_result in aggregated_results:
+        if exclude_ids and id(agg_result) in exclude_ids:
+            continue
         # Match by rule ID first
-        if agg_result.get("ruleId") == rule_id:
-            # Then check location
-            agg_location = extract_location_info(agg_result)
+        if agg_result.get("ruleId") != rule_id:
+            continue
+        agg_location = extract_location_info(agg_result)
+        agg_located = _has_location(agg_location)
 
-            # Compare locations, allowing for path normalization
-            loc_matched = locations_match(location_info, agg_location)
-            if loc_matched:
-                return agg_result
-
-            # If locations explicitly don't match, a message-only match
-            # is not reliable enough -- skip to avoid false positives.
-            # Only fall back to analysisTarget when locations are absent.
-            if not location_info and not agg_location:
-                # No location info on either side; fall back to message match
-                if (
-                    original_result.get("message")
-                    and agg_result.get("message")
-                    and get_message_text(original_result)
-                    == get_message_text(agg_result)
-                ):
-                    return agg_result
-
-            # Check analysisTarget if available (independent of location match)
+        if original_located or agg_located:
+            # A location on either side decides: it must be on both, and match.
             if (
-                original_result.get("analysisTarget")
-                and agg_result.get("analysisTarget")
-                and original_result["analysisTarget"].get("uri")
-                == agg_result["analysisTarget"].get("uri")
+                original_located
+                and agg_located
+                and locations_match(location_info, agg_location)
             ):
                 return agg_result
+            continue
+
+        # No location on either side; fall back to the message text
+        if (
+            original_result.get("message")
+            and agg_result.get("message")
+            and get_message_text(original_result) == get_message_text(agg_result)
+        ):
+            return agg_result
+
+        # Then to analysisTarget, when both name one
+        original_target = (original_result.get("analysisTarget") or {}).get("uri")
+        agg_target = (agg_result.get("analysisTarget") or {}).get("uri")
+        if original_target and original_target == agg_target:
+            return agg_result
 
     return None
 
