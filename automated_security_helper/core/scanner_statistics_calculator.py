@@ -978,6 +978,15 @@ class ScannerStatisticsCalculator:
             return False
 
         counts = report.get("severity_counts")
+        # A ScannerSeverityCount instance is read through its own dump: a report
+        # that is still a live container's dict (or a test's) can carry one, and
+        # read as "not a dict" it was replaced by empty counts, so the grade below
+        # ran on zeros and a partial loss whose findings fail the gate (FAILED,
+        # not a partial-loss ERROR) was flagged as one. The dump re-validates, so
+        # an instance mutated after construction into a shape the model refuses is
+        # refused here too (a ValidationError is a ValueError).
+        if isinstance(counts, ScannerSeverityCount):
+            counts = counts.model_dump()
         try:
             severity_counts = (
                 ScannerSeverityCount.model_validate(counts)
