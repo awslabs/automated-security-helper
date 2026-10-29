@@ -203,7 +203,7 @@ def value_at(config: Any, key: str) -> Any:
 def _comparable(value: Any) -> Any:
     if isinstance(value, os.PathLike):
         value = os.fspath(value)
-    return value.strip() if isinstance(value, str) else value
+    return value
 
 
 def _same_value(expected: Any, value: Any) -> bool:
@@ -212,7 +212,11 @@ def _same_value(expected: Any, value: Any) -> bool:
     A scanner holds a path option as a ``Path`` where the config holds the string,
     so when either side is a path both are compared as paths: on Windows
     ``str(Path("/x/rc"))`` is ``\\x\\rc``, which no string comparison matches
-    with ``/x/rc``. Two strings are compared as strings.
+    with ``/x/rc``. Two strings are compared as strings, exactly as written:
+    ``operator_path`` resolves ``value`` as given, so a value that differs from
+    the operator's by a leading or trailing character (whitespace, or one of the
+    separators ``str.strip`` also removes that the config model keeps) names a
+    different path and is not the operator's.
     """
     as_paths = isinstance(expected, os.PathLike) or isinstance(value, os.PathLike)
     expected, value = _comparable(expected), _comparable(value)
