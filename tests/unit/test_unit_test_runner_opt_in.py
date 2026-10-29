@@ -84,9 +84,14 @@ def _one_line(expression: str) -> str:
 
 
 class TestTheHostedJobsKeepTheLiteral:
-    def test_the_hosted_set_is_the_six_other_tier_jobs_and_the_coverage_gate(self):
-        """Positive control on the list itself: seven jobs, none of them switched."""
-        assert len(HOSTED_JOB_IDS) == 7, HOSTED_JOB_IDS
+    def test_the_hosted_set_is_the_seven_other_tier_jobs_and_the_coverage_gate(self):
+        """Positive control on the list itself: eight jobs, none of them switched.
+
+        Nine tier jobs less the two switched Linux jobs is seven (the macOS and Windows
+        jobs of the unit and integration tiers, and all three e2e jobs, the Linux one
+        included), plus the coverage gate.
+        """
+        assert len(HOSTED_JOB_IDS) == 8, HOSTED_JOB_IDS
         assert not set(HOSTED_JOB_IDS) & set(SWITCHED_JOB_IDS)
 
     @pytest.mark.parametrize("job_id", HOSTED_JOB_IDS)
