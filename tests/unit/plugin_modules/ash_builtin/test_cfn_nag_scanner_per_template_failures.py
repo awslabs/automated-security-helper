@@ -1,0 +1,226 @@
+"""cfn-nag: one template's trouble costs that template, and nothing is hidden.
+
+Pinned here, each against ``CfnNagScanner`` with only its dependency probe and
+subprocess boundary faked, as ``test_cfn_nag_scanner_behavior.py`` does:
+
+* a diagnostic line cfn_nag prints to stdout before its SARIF document (its SPCM
+  rule does, on a policy shape it cannot read) no longer discards the template's
+  findings;
+* a rule that raised under ``--isolate-custom-rule-exceptions`` leaves only a
+  stderr line and exit 0; the template is now a failed, unevaluated target while
+  the other rules' findings are kept;
+* a results directory that cannot be created fails that template, not the scan;
+* ``self.errors`` is reset per ``scan()`` call, so the converted target's record
+  does not carry the source target's lines;
+* a finding's URI is made relative to the source directory as given, so a source
+  directory reached through a symbolic link does not give ``../``-escaping URIs;
+* the sandbox read path for user gems is ``~/.gem/ruby``, not the whole ``~/.gem``
+  that also holds the RubyGems credentials file.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from unittest.mock import patch
+
+import pytest
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    cfn_nag_scanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
+    CfnNagScanner,
+    CfnNagScannerConfig,
+    _as_cfn_nag_renders,
+    _cfn_nag_sarif_text,
+    _rule_exception_lines,
+)
+
+pytestmark = pytest.mark.unit
+
+CFN_TEMPLATE = """Resources:
+  MyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: placeholder-role
+"""
+
+SPCM_DIAGNOSTIC = (
+    "Unable to parse policy. Please verify the policy document is valid: AccessDenied\n"
+)
+
+ISOLATED_RULE_STDERR = (
+    "#<ArgumentError: wrong number of arguments (given 1, expected 2)>\n"
+    "#<ArgumentError: wrong number of arguments (given 1, expected 2)>\n"
+)
+
+
+def _sarif(rule_id="F38", uri="template.yaml") -> str:
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "cfn_nag",
+                            "rules": [
+                                {"id": rule_id, "shortDescription": {"text": "a rule"}}
+                            ],
+                        }
+                    },
+                    "results": [
+                        {
+                            "ruleId": rule_id,
+                            "level": "error",
+                            "message": {"text": f"{rule_id} triggered"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": uri},
+                                        "region": {"startLine": 3},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+@pytest.fixture
+def plugin_context(tmp_path):
+    context = PluginContext(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "work",
+        config=get_default_config(),
+    )
+    context.source_dir.mkdir(parents=True)
+    context.output_dir.mkdir(parents=True)
+    context.work_dir.mkdir(parents=True)
+    return context
+
+
+@pytest.fixture
+def scanner(plugin_context):
+    return CfnNagScanner(context=plugin_context, config=CfnNagScannerConfig())
+
+
+@pytest.fixture
+def deps_available():
+    with patch.object(
+        CfnNagScanner, "validate_plugin_dependencies", autospec=True, return_value=True
+    ) as probe:
+        yield probe
+
+
+@pytest.fixture
+def subprocess_double():
+    with patch.object(CfnNagScanner, "_run_subprocess", autospec=True) as double:
+        double.return_value = {"stdout": _sarif(), "stderr": "", "returncode": 0}
+        yield double
+
+
+def test_a_diagnostic_line_before_the_sarif_document_is_dropped():
+    text, dropped = _cfn_nag_sarif_text(SPCM_DIAGNOSTIC + _sarif())
+    assert dropped == 1
+    assert json.loads(text)["version"] == "2.1.0"
+    assert _cfn_nag_sarif_text(_sarif()) == (_sarif(), 0)
+
+
+def test_findings_survive_a_diagnostic_line_on_stdout(
+    scanner, deps_available, subprocess_double
+):
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    subprocess_double.return_value = {
+        "stdout": SPCM_DIAGNOSTIC + _sarif(),
+        "stderr": "",
+        "returncode": 0,
+    }
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_failed == 0
+
+
+def test_rule_exception_lines_name_a_ruby_exception():
+    assert len(_rule_exception_lines(ISOLATED_RULE_STDERR)) == 2
+    assert _rule_exception_lines("warning: constant ::Fixnum is deprecated\n") == []
+    assert _rule_exception_lines("") == []
+
+
+def test_a_rule_that_raised_marks_the_template_unevaluated_and_keeps_findings(
+    scanner, deps_available, subprocess_double
+):
+    """Exit 0 and a complete document read as evaluated at the base."""
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    subprocess_double.return_value = {
+        "stdout": _sarif(),
+        "stderr": ISOLATED_RULE_STDERR,
+        "returncode": 0,
+    }
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1
+    assert any("raised" in line for line in scanner.errors), scanner.errors
+    assert scanner.unevaluated_targets, "the template is not recorded as unevaluated"
+
+
+def test_an_unwritable_results_directory_fails_only_that_template(
+    scanner, deps_available, subprocess_double
+):
+    (scanner.context.work_dir / "a.yaml").write_text(CFN_TEMPLATE)
+    (scanner.context.work_dir / "b.yaml").write_text(CFN_TEMPLATE)
+    real_stage = cfn_nag_scanner._stage_cfn_nag_input
+    failed_once = []
+
+    def failing_stage(results_file_dir, cfn_file, text):
+        if not failed_once:
+            failed_once.append(cfn_file)
+            raise PermissionError(13, "Permission denied", str(results_file_dir))
+        return real_stage(results_file_dir, cfn_file, text)
+
+    with patch.object(cfn_nag_scanner, "_stage_cfn_nag_input", failing_stage):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert failed_once, "the fault was never injected"
+    assert subprocess_double.call_count == 1
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 2
+    assert scanner.targets_failed == 1
+    assert any("could not be written" in line for line in scanner.errors)
+
+
+def test_errors_are_reset_for_each_scan_call(scanner, deps_available):
+    scanner.errors = ["the source target's line"]
+    empty = scanner.context.work_dir
+    scanner.scan(target=empty, target_type="converted")
+    assert scanner.errors == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="symbolic links on POSIX")
+def test_a_source_directory_behind_a_symlink_gives_a_relative_uri(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    template = link / "stacks" / "template.yaml"
+    assert _as_cfn_nag_renders(str(template), link) == "stacks/template.yaml"
+    assert _as_cfn_nag_renders(str(real / "x.yaml"), link) == "x.yaml"
+    assert _as_cfn_nag_renders("stacks/template.yaml", link) == "stacks/template.yaml"
+
+
+def test_the_gem_read_path_does_not_cover_the_rubygems_credentials():
+    read_paths = CfnNagScanner.sandbox_requirements.read_paths
+    assert "~/.gem" not in read_paths, read_paths
+    assert "~/.gem/ruby" in read_paths, read_paths

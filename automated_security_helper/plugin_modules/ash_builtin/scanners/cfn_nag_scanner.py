@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import platform
+import re
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
@@ -54,6 +55,7 @@ from automated_security_helper.utils.download_utils import (
     refusing_install_command,
 )
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
@@ -103,13 +105,73 @@ def _as_cfn_nag_renders(path: str | Path, run_dir: str | Path) -> str:
     cfn_nag's SARIF view (``result_view/sarif_results.rb``, ``relative_path``) keeps a
     relative path as given and renders an absolute one relative to ``Pathname.pwd``,
     which is the working directory's real path.
+
+    The template path comes from the scan set as given, not resolved, so it is
+    made relative to ``run_dir`` as given first and to its real path only when
+    that escapes: with a source directory reached through a symbolic link, the
+    real path alone gave a ``../``-escaping URI for every finding.
     """
     if not Path(path).is_absolute():
         return Path(path).as_posix()
-    try:
-        return Path(os.path.relpath(path, os.path.realpath(run_dir))).as_posix()
-    except ValueError:  # another drive, on Windows
-        return Path(path).as_posix()
+    relative = None
+    for base in (os.path.abspath(run_dir), os.path.realpath(run_dir)):
+        try:
+            relative = os.path.relpath(path, base)
+        except ValueError:  # another drive, on Windows
+            return Path(path).as_posix()
+        if not _escapes(relative):
+            break
+    return Path(relative).as_posix()
+
+
+def _escapes(relative: str) -> bool:
+    """Whether a relative path leaves the directory it is relative to."""
+    return relative == ".." or relative.startswith(".." + os.sep)
+
+
+def _cfn_nag_sarif_text(stdout: str) -> tuple[str, int]:
+    """cfn_nag_scan's stdout from the line that opens its SARIF document.
+
+    cfn_nag's SPCM rule prints a diagnostic line to stdout when it cannot read a
+    policy, before the SARIF document, so the whole stream did not parse and every
+    finding for the template was discarded. The lines before the first one that
+    starts with ``{`` are dropped; the second value is how many.
+    """
+    lines = stdout.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("{"):
+            return "".join(lines[index:]), index
+    return stdout, 0
+
+
+#: What a rule that raised under --isolate-custom-rule-exceptions leaves on stderr:
+#: cfn_nag prints the exception and goes on, so the template exits 0 with no record
+#: of the rule that did not run. A Ruby exception class name is the marker.
+_RUBY_EXCEPTION = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Error|Exception)\b")
+
+
+def _rule_exception_lines(stderr: str) -> List[str]:
+    """The stderr lines naming a Ruby exception, which is a rule that raised."""
+    return [line for line in stderr.splitlines() if _RUBY_EXCEPTION.search(line)]
+
+
+def _ruby_headers_present() -> bool:
+    """Whether ``ruby.h`` is installed beside the ``ruby`` on PATH.
+
+    Linux distributions split the headers into a development package, and psych's
+    native extension needs them; ``gem`` and a C compiler alone pass the probe
+    and the build then fails on the missing header. Found under the interpreter's
+    prefix (``<prefix>/include/ruby-<version>/ruby.h``) or the system include
+    directory. True when no ``ruby`` is on PATH: the RubyGems probe reports that.
+    """
+    ruby = find_executable("ruby")
+    if ruby is None:
+        return True
+    prefix = Path(os.path.realpath(ruby)).parent.parent
+    for include in (prefix / "include", Path("/usr/include")):
+        if any(include.glob("ruby-*/ruby.h")):
+            return True
+    return False
 
 
 def _restore_cfn_nag_uris(
@@ -157,8 +219,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     #: cfn_nag is a Ruby gem. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False
 
+    # ~/.gem/ruby, not ~/.gem: the gems live under ~/.gem/ruby/<version>, and
+    # ~/.gem itself also holds the RubyGems credentials file, which cfn_nag has
+    # no reason to read.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
-        read_paths=("~/.local/share/gem", "~/.gem", "$GEM_HOME"),
+        read_paths=("~/.local/share/gem", "~/.gem/ruby", "$GEM_HOME"),
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
@@ -312,6 +377,16 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             missing.append(
                 "no C compiler (cc, gcc or clang) is on PATH, and cfn-nag's `psych` "
                 "dependency has to build from source"
+            )
+        elif platform.system() == "Linux" and not _ruby_headers_present():
+            # Linux only: distributions ship the headers as a separate package
+            # (ruby-dev, ruby-devel), and a host with ruby and gcc but no headers
+            # passed the probe and then failed the whole dependency install on
+            # psych's build. Elsewhere the headers come with the interpreter.
+            missing.append(
+                "Ruby's development headers (ruby.h) are not installed beside the "
+                "ruby on PATH, and cfn-nag's `psych` dependency has to build "
+                "against them"
             )
         return missing
 
@@ -496,6 +571,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         # this target's cfn_nag_scan runs.
         self.targets_attempted = 0
         self.targets_failed = 0
+        # self.errors too, as cdk_nag_scanner resets it: the executor runs this
+        # instance over the source and then the converted target, and the error
+        # lines of the first were reported again as the second's.
+        self.errors = []
         self.exit_code = None
         self._nothing_scanned_reason = None
         self.clear_unevaluated_targets()
@@ -733,10 +812,25 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 self.targets_attempted += 1
                 normalized_filename = get_normalized_filename(str_to_normalize=cfn_file)
                 results_file_dir = target_results_dir.joinpath(normalized_filename)
-                results_file_dir.mkdir(exist_ok=True, parents=True)
-                staged_input = _stage_cfn_nag_input(
-                    results_file_dir, cfn_file, template_text
-                )
+                try:
+                    results_file_dir.mkdir(exist_ok=True, parents=True)
+                    staged_input = _stage_cfn_nag_input(
+                        results_file_dir, cfn_file, template_text
+                    )
+                except OSError as e:
+                    # One template's results directory or staged copy could not
+                    # be written. A failed target, named, and the loop goes on:
+                    # escaping here aborted the whole scan and discarded every
+                    # other template's findings.
+                    reason = (
+                        "the template's results directory or staged copy could "
+                        f"not be written: {type(e).__name__}"
+                    )
+                    ASH_LOGGER.error(f"CFN Nag did not evaluate {cfn_file}: {reason}")
+                    self.targets_failed += 1
+                    self.errors.append(f"{cfn_file}: {reason}")
+                    self.record_unevaluated_target(cfn_file)
+                    continue
                 try:
                     final_args = self._resolve_arguments(
                         target=staged_input, results_file=results_file_dir
@@ -766,11 +860,37 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         self.errors.append(f"{cfn_file}: {reason}")
                         unrendered.append(cfn_file)
                         continue
-                    file_sarif = SarifReport.model_validate_json(json_data=stdout)
+                    sarif_text, dropped_lines = _cfn_nag_sarif_text(stdout)
+                    if dropped_lines:
+                        # Their text can quote the template, so only the count.
+                        ASH_LOGGER.warning(
+                            f"cfn_nag wrote {dropped_lines} line(s) to stdout before "
+                            f"its SARIF document for {cfn_file}; they are not part "
+                            "of the report and were left out of the parse."
+                        )
+                    file_sarif = SarifReport.model_validate_json(json_data=sarif_text)
                     parsed_sarif += 1
                     _restore_cfn_nag_uris(
                         file_sarif, staged_input, cfn_file, self.context.source_dir
                     )
+                    raised = _rule_exception_lines(proc_resp.get("stderr") or "")
+                    if raised:
+                        # A rule that raised under --isolate-custom-rule-exceptions:
+                        # cfn_nag prints the exception to stderr, exits 0 and
+                        # renders the other rules' verdicts, so the template read
+                        # as fully evaluated. Its findings are kept; the template
+                        # is a failed target the executor will not grade clean.
+                        reason = (
+                            f"{len(raised)} cfn_nag rule(s) raised and were isolated, "
+                            "so not every rule was evaluated against this template: "
+                            f"{tool_output_excerpt(raised[0], 200)}"
+                        )
+                        ASH_LOGGER.error(
+                            f"CFN Nag did not evaluate {cfn_file}: {reason}"
+                        )
+                        self.targets_failed += 1
+                        self.errors.append(f"{cfn_file}: {reason}")
+                        self.record_unevaluated_target(cfn_file)
                     if self._evaluated_no_rule(file_sarif, proc_resp.get("returncode")):
                         reason = (
                             "cfn_nag reported a failure it could not render "
