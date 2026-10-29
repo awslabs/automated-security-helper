@@ -48,8 +48,13 @@ measurement the CI run makes. An empty shard is handled in code: a shard that ow
 modules but holds no test of the tier is admitted (pytest would exit 5; the hook turns
 that into 0 and says so), while a shard that collects nothing at all keeps exit 5. Both
 cases are run in a real pytest below. Whether the whole tier is empty is not checked by
-any one leg; the tier's other legs and the unit and e2e tiers would still exit 5 on
-their own.
+any one leg, and the other tiers do not catch it either: every integration leg deselects
+the unit modules and is admitted, so a tier empty as a whole would read green across
+its legs (tests/utils/sharding.py says the same). What guards against it is the
+collection hook in tests/conftest.py, which refuses a session where any test carries
+no tier marker or two (pinned by tests/unit/test_every_test_carries_one_tier_marker.py),
+and tests/unit/test_unit_test_step_gates.py, which pins that the action's pytest step
+selects each tier of the contract with ``-m <marker>``.
 """
 
 from __future__ import annotations
