@@ -292,7 +292,9 @@ else:
     "summary_stats": {
       "total": 156,
       "actionable": 61,
-      "suppressed": 95
+      "severity_counts": {
+        "suppressed": 95
+      }
     }
   }
 }
@@ -411,8 +413,8 @@ summary = data["metadata"]["summary_stats"]
 del data  # Free memory
 
 print(f"Actionable: {summary['actionable']}")
-# A severity count that is zero can be left out of the file, so read it with a default
-print(f"Critical: {summary.get('critical', 0)}")
+# The per-severity counts are nested under severity_counts, not flat keys
+print(f"Critical: {summary['severity_counts']['critical']}")
 ```
 
 #### Strategy 4: Use Simpler Formats
@@ -445,19 +447,24 @@ for finding in findings:
     "project_name": "my-service",
     "tool_version": "3.2.2",
     "summary_stats": {
+      "severity_counts": {
+        "suppressed": 95,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 61,
+        "info": 0
+      },
+      "start": "2026-02-28T15:09:25+00:00",
+      "end": "2026-02-28T15:10:46+00:00",
+      "duration": 80.615062,
       "total": 156,
       "actionable": 61,
-      "suppressed": 95,
-      "critical": 0,
-      "high": 0,
-      "medium": 0,
-      "low": 61,
-      "info": 0,
       "passed": 9,
       "failed": 0,
       "missing": 1,
       "skipped": 0,
-      "duration": 80.615062
+      "error": 0
     }
   },
   "ash_config": { /* Configuration used for scan */ },
@@ -473,10 +480,11 @@ for finding in findings:
 #### metadata.summary_stats
 - `total`: Total findings detected
 - `actionable`: Findings that fail the scan: not suppressed, and at or above the severity threshold
-- `suppressed`: Findings marked as false positives/accepted risks
-- `critical`, `high`, `medium`, `low`, `info`: Counts by severity
+- `severity_counts.suppressed`: Findings marked as false positives/accepted risks
+- `severity_counts.critical`, `.high`, `.medium`, `.low`, `.info`: Counts by severity. The file has no flat `critical` or `suppressed` key at the `summary_stats` level; read them under `severity_counts`
 - `passed`: Scanners that completed successfully
-- `failed`: Scanners that encountered errors
+- `failed`: Scanners that found something at or above their threshold
+- `missing`, `skipped`, `error`: Scanners that did not run, were skipped, or started and failed
 - `duration`: Scan duration in seconds
 
 #### scanner_results
@@ -1093,7 +1101,7 @@ suppressions:
 5. **Confirm Suppression Applied**:
    <!-- doctest: illustrative reason="reads the results of the full scan above" -->
    ```bash
-   jq '.metadata.summary_stats.suppressed' .ash/ash_output/ash_aggregated_results.json
+   jq '.metadata.summary_stats.severity_counts.suppressed' .ash/ash_output/ash_aggregated_results.json
    ```
 
 ## Common Pitfalls and Known Issues
@@ -1163,16 +1171,17 @@ with open(".ash/ash_output/ash_aggregated_results.json") as f:
     results = json.load(f)
 
 stats = results["metadata"]["summary_stats"]
+# The per-severity counts are nested under severity_counts, not flat keys
+counts = stats["severity_counts"]
 
 # Fail on actionable critical/high findings
-# Note: Use actionable count to exclude suppressed findings (false positives).
-# A severity count that is zero can be left out of the file, so read it with a default.
-if stats.get("critical", 0) > 0:
-    print(f"FAILED: {stats['critical']} critical actionable findings")
+# Note: Use actionable count to exclude suppressed findings (false positives)
+if counts["critical"] > 0:
+    print(f"FAILED: {counts['critical']} critical actionable findings")
     sys.exit(1)
 
-if stats.get("high", 0) > 5:
-    print(f"FAILED: {stats['high']} high actionable findings (threshold: 5)")
+if counts["high"] > 5:
+    print(f"FAILED: {counts['high']} high actionable findings (threshold: 5)")
     sys.exit(1)
 
 print(f"PASSED: {stats['actionable']} actionable findings (within threshold)")
