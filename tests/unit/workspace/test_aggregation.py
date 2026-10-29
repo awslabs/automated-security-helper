@@ -812,6 +812,8 @@ class TestCompletenessParityWithComputeExitCode:
             "incomplete_scanner_details": {},
             "partial_coverage_scanners": [],
             "no_scanner_ran": False,
+            "unevaluated_rules": [],
+            "unstoppable_tools": {},
         }
 
     @pytest.mark.parametrize(
@@ -882,7 +884,13 @@ class TestCompletenessParityWithComputeExitCode:
             "incomplete_scanner_details",
             "partial_coverage_scanners",
             "no_scanner_ran",
+            "unevaluated_rules",
+            "unstoppable_tools",
         }
+        # The two exit-1 arms the gate does not govern ride in the same read and
+        # are empty in every case here, so the gated arms alone decide the verdict.
+        assert fields["unevaluated_rules"] == []
+        assert fields["unstoppable_tools"] == {}
         assert (standalone == 1) == bool(
             fields["incomplete_scanners"] or fields["no_scanner_ran"]
         )
@@ -1031,7 +1039,9 @@ class TestAggregatorOutput:
         spool = tmp_path / "out" / ".workspace-spool"
         spool.mkdir(parents=True)
         victim = tmp_path / "victim.json"
-        (spool / "api.run.json").symlink_to(victim)
+        # The first spool written carries ordinal 0000; the name is the one add()
+        # will write, so the link sits exactly where the write would land.
+        (spool / "0000-api.run.json").symlink_to(victim)
         aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
 
         with pytest.raises(OutputDirLinkRefused):
@@ -1098,7 +1108,9 @@ class TestAggregatorOutput:
 
         plan = _plan(tmp_path, "api")
         aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
-        spool = aggregator.spool_dir / "api.run.json"
+        # Spool names carry an ordinal prefix so two keys that differ only in case
+        # stay two files on a case-insensitive volume; the first add() writes 0000.
+        spool = aggregator.spool_dir / "0000-api.run.json"
         present_while_written = []
         dump = json.dump
 
