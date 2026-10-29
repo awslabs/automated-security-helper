@@ -156,13 +156,51 @@ def categorize_field_importance(path: str) -> str:
 # compare_result_fields
 # ---------------------------------------------------------------------------
 
-# Define expected transformations for test compatibility
-EXPECTED_TRANSFORMATIONS: List[str] = []
+#: Result fields aggregation rewrites on purpose, so a difference in one of them
+#: is not a loss. ``ruleIndex`` points into the run's rule array, which the
+#: aggregated run rebuilds; ``analysisTarget`` is normalized.
+EXPECTED_TRANSFORMATIONS: List[str] = ["ruleIndex", "analysisTarget"]
+
+#: The importance vocabulary ``compare_result_fields`` writes and
+#: ``validate_sarif_aggregation`` buckets by. One tuple for both, in rank order:
+#: the validator keys its ``missing_fields`` and its counters on exactly these
+#: names, so an importance outside them is a KeyError there.
+IMPORTANCE_LEVELS = ("critical", "important", "informational")
+
+
+def _leaf_paths(obj: Any, prefix: str = "") -> List[str]:
+    """Every dotted path to a scalar (or empty container) under *obj*.
+
+    Array elements are written ``name[0]``, the form ``get_value_from_path``
+    reads, so each path found here can be looked up on the other side.
+    """
+    paths: List[str] = []
+    if isinstance(obj, dict):
+        if not obj:
+            return [prefix] if prefix else []
+        for key, value in obj.items():
+            child = f"{prefix}.{key}" if prefix else str(key)
+            paths.extend(_leaf_paths(value, child))
+        return paths
+    if isinstance(obj, list):
+        if not obj:
+            return [prefix] if prefix else []
+        for index, item in enumerate(obj):
+            paths.extend(_leaf_paths(item, f"{prefix}[{index}]"))
+        return paths
+    return [prefix] if prefix else []
 
 
 def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> List[Dict]:
     """
     Compare fields between original and aggregated results.
+
+    Every field of the original result is looked up in the aggregated one. A
+    field that is absent there, or holds a value ``are_values_equivalent`` does
+    not accept, is reported with the importance ``categorize_field_importance``
+    gives its path: one of :data:`IMPORTANCE_LEVELS`, the vocabulary
+    ``validate_sarif_aggregation`` buckets by. Fields aggregation rewrites on
+    purpose (:data:`EXPECTED_TRANSFORMATIONS`) are not compared.
 
     Args:
         original_result: Result from original scanner report
@@ -171,26 +209,25 @@ def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> Lis
     Returns:
         List of missing fields with their importance
     """
-    missing_fields = []
+    missing_fields: List[Dict] = []
+    if not isinstance(original_result, dict) or not isinstance(aggregated_result, dict):
+        return missing_fields
 
-    # For test_compare_result_fields_different, we need to detect differences
-    if "level" in original_result and "level" in aggregated_result:
-        if original_result["level"] != aggregated_result["level"]:
-            missing_fields.append(
-                {
-                    "path": "level",
-                    "original_value": original_result["level"],
-                    "importance": "high",
-                }
-            )
-
-    # Check for extra_field in original that's missing in aggregated
-    if "extra_field" in original_result and "extra_field" not in aggregated_result:
+    for path in _leaf_paths(original_result):
+        top_level = path.split(".")[0].split("[")[0]
+        if top_level in EXPECTED_TRANSFORMATIONS:
+            continue
+        original = get_value_from_path(original_result, path)
+        aggregated = get_value_from_path(aggregated_result, path)
+        if aggregated["exists"] and are_values_equivalent(
+            original["value"], aggregated["value"]
+        ):
+            continue
         missing_fields.append(
             {
-                "path": "extra_field",
-                "original_value": original_result["extra_field"],
-                "importance": "medium",
+                "path": path,
+                "original_value": original["value"],
+                "importance": categorize_field_importance(path),
             }
         )
 
@@ -284,7 +321,7 @@ def get_value_from_path(obj: Dict, path: str) -> Dict[str, Any]:
             index_str = part.split("[")[1].split("]")[0]
 
             # Check if the array exists
-            if array_name not in current:
+            if not isinstance(current, dict) or array_name not in current:
                 # The array doesn't exist
                 return {"exists": False, "value": None}
 
@@ -294,16 +331,17 @@ def get_value_from_path(obj: Dict, path: str) -> Dict[str, Any]:
 
             try:
                 index = int(index_str)
-                if (
-                    isinstance(current[array_name], list)
-                    and len(current[array_name]) > index
-                ):
-                    current = current[array_name][index]
-                else:
-                    # Array exists but index is out of bounds
-                    return {"exists": True, "value": None}
-            except (ValueError, IndexError):
+            except ValueError:
                 return {"exists": False, "value": None}
+            # An index past the end, or a name that is not an array, is a field
+            # the object does not have: reporting it as present (with a null
+            # value) made check_field_presence_in_reports count a field an
+            # aggregate had dropped as preserved.
+            if not isinstance(current[array_name], list) or not (
+                0 <= index < len(current[array_name])
+            ):
+                return {"exists": False, "value": None}
+            current = current[array_name][index]
         else:
             if not isinstance(current, dict) or part not in current:
                 return {"exists": False, "value": None}
