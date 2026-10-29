@@ -201,7 +201,8 @@ def test_an_option_without_its_value(run_ash, bare_path, option):
         OCI_RUNNER=str(bare_path / "recording-runner"),
     )
 
-    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    # A value option with no value is the usage error the CLI exits 5 for.
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
     assert f"{option} needs a value" in result.stderr
     assert calls == []
 
@@ -235,7 +236,8 @@ def test_an_option_given_an_empty_value(run_ash, bare_path, option):
         OCI_RUNNER=str(bare_path / "recording-runner"),
     )
 
-    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    # A value option with no value is the usage error the CLI exits 5 for.
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
     assert f"{option} needs a value" in result.stderr
     assert calls == []
 
@@ -355,7 +357,8 @@ def test_an_option_given_only_whitespace(run_ash, bare_path, option, blank):
         OCI_RUNNER=str(bare_path / "recording-runner"),
     )
 
-    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    # A value option with no value is the usage error the CLI exits 5 for.
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
     assert f"{option} needs a value" in result.stderr
     assert calls == []
 
@@ -1476,13 +1479,14 @@ _WORKSPACE_MESSAGE = "./ash scans one directory and cannot run a workspace scan"
 #: names no runner or names the guard runner, so a refusal that did not happen shows
 #: as a runner call and exit 99.
 _ASH_SITES = {
-    "option-without-value": (["--oci-runner"], {}, {}, 3, "--oci-runner needs a value"),
-    "option-empty": (["--output-dir", ""], {}, {}, 3, "--output-dir needs a value"),
+    # A value option with no value is a usage error, 5, as the CLI's own is.
+    "option-without-value": (["--oci-runner"], {}, {}, 5, "--oci-runner needs a value"),
+    "option-empty": (["--output-dir", ""], {}, {}, 5, "--output-dir needs a value"),
     "option-blank": (
         ["--build-target", " "],
         {},
         {},
-        3,
+        5,
         "--build-target needs a value",
     ),
     "mount-path-with-a-comma": (

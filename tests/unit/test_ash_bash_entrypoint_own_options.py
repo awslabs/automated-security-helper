@@ -250,7 +250,8 @@ def test_an_equals_spelling_with_no_value_is_refused(runner, tmp_path, word, opt
         runner,
         ["--no-build", "--source-dir", str(source), "--output-dir", str(out), word],
     )
-    assert result.returncode == 3, result.stdout + result.stderr
+    # The usage error the CLI exits 5 for: an option that requires an argument.
+    assert result.returncode == 5, result.stdout + result.stderr
     assert f"ERROR: {option} needs a value." in result.stderr, result.stderr
     assert calls == []
 

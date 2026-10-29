@@ -61,7 +61,7 @@
 # ---
 # name: test_option_without_its_value
   dict({
-    'exit_code': 3,
+    'exit_code': 5,
     'runner_calls': list([
     ]),
     'stderr': '''

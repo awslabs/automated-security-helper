@@ -33,10 +33,12 @@ INSTALL_ASH_REVISION="LOCAL"
 # A refusal is this script declining its own arguments or environment, before anything
 # is built or run. Every wrapper (this one, utils/ash_helpers.sh and Invoke-ASH) exits 3
 # for one, except the usage errors `ash` itself refuses with 5, which exit 5 with its
-# text: an explicit --sandbox (refuse_sandbox_unless_off below), a --source-dir that
-# names no directory to scan, and an --output-dir that is a file, cannot be made,
-# cannot be entered or cannot be written (refuse_usage). A failed build or run is not
-# a refusal: it keeps its own status.
+# text: an explicit --sandbox (refuse_sandbox_unless_off below), one of this script's
+# own value options given with no value (require_value; the CLI exits 5 for an option
+# that requires an argument and got none), a --source-dir that names no directory to
+# scan, and an --output-dir that is a file, cannot be made, cannot be entered or
+# cannot be written (refuse_usage). A failed build or run is not a refusal: it keeps
+# its own status.
 WRAPPER_REFUSAL_EXIT=3
 USAGE_ERROR_EXIT=5
 refuse() {
@@ -118,7 +120,7 @@ has_format_character() (
 # option included, and $3 the value.
 require_value() {
   if [[ "$2" -lt 2 || -z "${3//[[:space:]]/}" ]]; then
-    refuse "$1 needs a value."
+    refuse_usage "$1 needs a value."
   fi
 }
 
