@@ -40,7 +40,8 @@ offline: a token in the environment of a CI job that runs ASH is not consent to
 send it anywhere. With ``online_audits: true`` they are passed through
 unchanged and zizmor may contact the GitHub API. ASH never reads, copies or
 logs the token value, and never puts it on the command line. ASH's own offline
-mode (``ASH_OFFLINE``) overrides ``online_audits``.
+mode (``ASH_OFFLINE``) and the scanner's own ``options.offline: true`` each
+override ``online_audits``.
 
 ``ZIZMOR_CONFIG``, ``ZIZMOR_OFFLINE`` and ``ZIZMOR_NO_ONLINE_AUDITS`` are
 removed too, so the result of a scan depends on the repository and the ASH
@@ -104,12 +105,14 @@ Exit codes and per-target accounting
 ``--no-exit-codes`` stops zizmor encoding findings in its exit status, so 0 is
 a completed audit. zizmor warns and skips an input it cannot load, and ASH
 reads those warnings into the per-target counters cfn-nag and cdk-nag also
-report: a file named ``action.yml`` that is not a GitHub Actions definition is
-not applicable and is not counted, while a YAML syntax error or an invalid
-workflow is a target that failed (``--fail-on-incomplete-scanners`` reports
-it). 3 means zizmor collected no auditable input at all; that is zero findings,
-and the counters make it SKIPPED or ERROR. Any other exit status is a tool
-failure and the scan reports ERROR.
+report: a file named ``action.yml`` outside ``.github/workflows`` that is not a
+GitHub Actions definition is not applicable and is not counted, while a YAML
+syntax error, an invalid workflow, or a file in ``.github/workflows`` zizmor
+rejected under any wording is a target that failed
+(``--fail-on-incomplete-scanners`` reports it). 3 means zizmor collected no
+auditable input at all; that is zero findings, every input not dropped as
+inapplicable counts as failed, and the counters make it SKIPPED or ERROR. Any
+other exit status is a tool failure and the scan reports ERROR.
 """
 
 from __future__ import annotations
@@ -208,9 +211,23 @@ _VERSION_PATTERN = re.compile(r"zizmor\s+v?(\d+(?:\.\d+)*)")
 #: stop being counted, which is the behavior of a scanner that does not track
 #: targets -- never a false ERROR.
 _REJECTED_INPUT_PATTERN = re.compile(r"collect_inputs:[^\n]*?(failed to [^\n]*)")
+#: The path is whatever zizmor quotes, spaces included, up to the words that
+#: follow it; ``\S+`` cut a path with a space and let the line count as failed.
 _NOT_AN_ACTION_PATTERN = re.compile(
-    r"failed to validate \S+ as action\b", re.IGNORECASE
+    r"failed to validate (.+?) as action\b", re.IGNORECASE
 )
+
+
+def _names_a_workflow(path_text: str) -> bool:
+    """Whether the input zizmor quotes sits directly in a ``.github/workflows``.
+
+    A file there is a workflow GitHub runs, whatever its name: one named
+    ``action.yml`` is handed to zizmor as a composite action and rejected as "not
+    an action", but it is a target ASH meant to audit, not an inapplicable file.
+    """
+    parts = PurePath(path_text.removeprefix("file://").replace("\\", "/")).parts
+    return len(parts) >= 3 and parts[-3] == ".github" and parts[-2] == "workflows"
+
 
 _BASE_SEVERITY: Dict[str, str] = {
     "high": "HIGH",
@@ -600,10 +617,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         3. If neither works, MISSING, with the reason logged and recorded in
            ``dependency_unavailable_reason``.
         """
-        self.resolve_deferred_tool_version()
-        if self.dependency_unavailable_reason:
-            return False
-
         constraint = self._get_tool_version_constraint()
         executable = find_executable(self.command or "zizmor")
         rejected_detail = None
@@ -619,6 +632,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 self.use_uv_tool = False
                 self.tool_version = version
                 self.dependencies_satisfied = True
+                # The binary on PATH is the one that runs, so the uv probe the
+                # construction deferred is not owed: run later by the SARIF step
+                # or the inventory, it would start uv for nothing and overwrite
+                # this version with its answer.
+                self._deferred_tool_version_probe = None
                 return True
             rejected_detail = (
                 f"zizmor at {executable} reports version {version!r}, which "
@@ -629,6 +647,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 )
             )
             self._plugin_log(rejected_detail, level=logging.INFO)
+
+        # No usable zizmor on PATH: the uv route, which starts with the version
+        # probe the construction deferred (step 2 of the docstring).
+        self.resolve_deferred_tool_version()
+        if self.dependency_unavailable_reason:
+            return False
 
         if self._resolve_through_uv():
             return True
@@ -695,10 +719,13 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     level=logging.WARNING,
                 )
             return False
-        if self._is_offline_mode():
+        # ASH's own offline mode, or this scanner's options.offline (read by the
+        # base class as every scanner's is): either keeps zizmor offline.
+        if self._scanner_offline():
             self._plugin_log(
-                "scanners.zizmor.options.online_audits is true but ASH is in "
-                "offline mode; running zizmor with --offline.",
+                "scanners.zizmor.options.online_audits is true but ASH, or this "
+                "scanner's own offline option, is offline; running zizmor with "
+                "--offline and without the GitHub token variables.",
                 level=logging.WARNING,
             )
             return False
@@ -771,9 +798,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     ) -> List[Path]:
         """Workflows and composite actions under ``target``, after ASH's exclusions.
 
-        Source files come from the scan set (``.gitignore``, ``.ignore``),
-        minus anything under ASH's output directory, as detect-secrets does.
-        Converted files are everything under ``work_dir``. Both then drop
+        Source files come from the scan set (``.gitignore``, ``.ignore``), which
+        leaves ASH's output directory out while keeping the files git tracks
+        there (a repository can commit a composite action at that path); no
+        second filter here, or those are never audited. Converted files are
+        everything under ``work_dir``. Both then drop
         ``KNOWN_IGNORE_PATHS`` (``node_modules/`` and virtualenvs, which hold
         vendored actions the repository does not own) and the global
         ``ignore_paths``. Sorted so the command line is deterministic.
@@ -793,15 +822,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     run_id=getattr(self._plugin_context, "run_id", None),
                 )
             ]
-        output_abs = Path(self._plugin_context.output_dir).absolute()
         source_abs = Path(self._plugin_context.source_dir).absolute()
         known_ignored = {item.strip("/") for item in KNOWN_IGNORE_PATHS}
 
         selected = []
         for candidate in candidates:
             if not candidate.is_relative_to(target_abs):
-                continue
-            if target_type == "source" and candidate.is_relative_to(output_abs):
                 continue
             relative = candidate.relative_to(target_abs)
             if not is_zizmor_input(relative, scan_root=target_abs):
@@ -946,6 +972,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # how ASH reports "nothing here to evaluate" (SKIPPED, not PASSED).
         self.targets_attempted = 0
         self.targets_failed = 0
+        # Each target is one invocation. The base class keeps the worst exit code
+        # across runs, and a target with nothing to audit never reaches
+        # _execute_scan's own reset, so without this the converted target read
+        # the source target's exit code as its own.
+        self.exit_code = 0
         if target.exists() and any(target.iterdir()):
             self._inputs = self._collect_inputs(
                 target, target_type, global_ignore_paths
@@ -1048,20 +1079,23 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         zizmor warns and carries on when an input will not load. ASH reads those
         warnings so the per-target counters say what was really audited:
 
-        * "failed to validate <file> as action": a file named ``action.yml`` that
-          is not a GitHub Actions definition (other tools use the name too). Not
-          applicable, so it is dropped from ``targets_attempted``.
-        * any other "failed to ..." line -- a YAML syntax error, or a file in
-          ``.github/workflows`` that is not a valid workflow: a target ASH meant
-          to audit and could not, so ``targets_failed`` counts it. That is what
-          makes ``--fail-on-incomplete-scanners`` notice, and what turns a scan
-          where every input failed into ERROR.
+        * "failed to validate <file> as action" for a file outside
+          ``.github/workflows``: a file named ``action.yml`` that is not a GitHub
+          Actions definition (other tools use the name too). Not applicable, so
+          it is dropped from ``targets_attempted``.
+        * any other "failed to ..." line -- a YAML syntax error, a file in
+          ``.github/workflows`` that is not a valid workflow, or one there named
+          ``action.yml`` that zizmor read as a composite action and rejected: a
+          target ASH meant to audit and could not, so ``targets_failed`` counts
+          it. That is what makes ``--fail-on-incomplete-scanners`` notice, and
+          what turns a scan where every input failed into ERROR.
 
         Returns the warning lines, for the log.
         """
         rejected = _REJECTED_INPUT_PATTERN.findall(stderr)
         for line in rejected:
-            if _NOT_AN_ACTION_PATTERN.search(line):
+            not_an_action = _NOT_AN_ACTION_PATTERN.search(line)
+            if not_an_action and not _names_a_workflow(not_an_action.group(1)):
                 self.targets_attempted = max(0, self.targets_attempted - 1)
             else:
                 self.targets_failed += 1
@@ -1071,11 +1105,14 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
         """Account for rejected inputs, then read zizmor's SARIF.
 
-        Exit 3 with no stdout means zizmor rejected every input. That is zero
-        findings, with the counters deciding the status: SKIPPED when every
-        rejected file was not an action at all, ERROR when real inputs failed to
-        load. Any other missing stdout still raises, so a zizmor that died is
-        ERROR rather than a clean result.
+        Exit 3 with no stdout means zizmor audited nothing: every input was
+        rejected. That is zero findings, with the counters deciding the status:
+        SKIPPED when every rejected file was not an action at all, ERROR when
+        real inputs failed to load. Every input the rejection warnings did not
+        drop as inapplicable counts as failed then, so a rejection zizmor words in
+        a way the parser does not read never grades PASSED with full coverage.
+        Any other missing stdout still raises, so a zizmor that died is ERROR
+        rather than a clean result.
         """
         stderr_log = results_file.with_name(f"{self.__class__.__name__}.stderr.log")
         try:
@@ -1093,6 +1130,9 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             and not results_file.exists()
             and "no inputs collected" in stderr
         ):
+            # Nothing was audited: whatever is still counted as attempted was
+            # not, whether or not a warning line said so in words we read.
+            self.targets_failed = self.targets_attempted
             return self._empty_report().model_dump(by_alias=True, exclude_none=True)
         return super()._read_results_file(results_file)
 

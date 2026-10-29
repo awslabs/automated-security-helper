@@ -505,6 +505,25 @@ def test_gitignored_and_output_dir_files_are_not_inputs(repo):
     ]
 
 
+def test_an_action_git_tracks_under_the_output_directory_is_an_input(repo, monkeypatch):
+    """The scan set leaves ASH's output directory out but keeps the files git
+    tracks there, since a repository can commit a composite action at that
+    path. The scanner must not drop them a second time."""
+    committed = repo / ".ash" / "ash_output" / "sample" / "action.yml"
+    committed.parent.mkdir(parents=True)
+    committed.write_text((repo / "actions/greet/action.yml").read_text())
+    kept_by_the_scan_set = [str(repo / "actions/greet/action.yml"), str(committed)]
+    monkeypatch.setattr(
+        zizmor_module, "scan_set", lambda **_: list(kept_by_the_scan_set)
+    )
+    scanner = _scanner(repo)
+    inputs = scanner._collect_inputs(repo, "source", [])
+    assert _relative(inputs, repo) == [
+        ".ash/ash_output/sample/action.yml",
+        "actions/greet/action.yml",
+    ]
+
+
 @pytest.mark.parametrize("honor", [True, False])
 def test_the_gitignore_applies_as_the_config_says(repo, honor):
     """A scan set zizmor computes itself follows ``honor_ignore_files``."""
@@ -649,6 +668,17 @@ def test_ash_offline_mode_overrides_online_audits(repo, monkeypatch):
     )
     assert "--offline" in final_args
     assert "GITHUB_TOKEN" not in env
+
+
+def test_the_scanners_own_offline_option_keeps_zizmor_offline(repo, monkeypatch):
+    """options.offline is the per-scanner switch every scanner honors through the
+    base class. zizmor consulted only ASH's global mode, so an operator who set
+    online_audits and offline on this scanner got online audits and the token."""
+    monkeypatch.setenv("GH_TOKEN", "token-value")
+    scanner = _scanner(repo, operator=True, online_audits=True, offline=True)
+    final_args, _, env = _argv_and_env(scanner, repo)
+    assert "--offline" in final_args
+    assert "GH_TOKEN" not in env
 
 
 def test_an_operator_config_file_is_passed_resolved_and_a_missing_one_fails(repo):
@@ -995,6 +1025,53 @@ def test_exit_3_with_only_non_actions_attempts_nothing(tmp_path):
     assert scanner.targets_attempted == 0
 
 
+def test_a_non_action_whose_path_holds_a_space_is_not_counted(repo):
+    """zizmor quotes the path as given; a space in it must not turn an
+    inapplicable file into a failed target."""
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        "file://my tools/other/action.yml as action: input does not match "
+        "expected validation schema\n"
+    )
+    scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS) - 1
+    assert scanner.targets_failed == 0
+
+
+@pytest.mark.parametrize(
+    "quoted",
+    [".github/workflows/action.yml", "file://sub/.github/workflows/action.yaml"],
+)
+def test_a_workflow_rejected_as_not_an_action_is_a_failed_target(repo, quoted):
+    """A file directly in .github/workflows is a workflow GitHub runs whatever its
+    name. One named action.yml is handed to zizmor as a composite action and
+    rejected as not an action: that is a target ASH meant to audit and could
+    not, never an inapplicable file to drop from the counts."""
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        f"{quoted} as action: input does not match expected validation schema\n"
+    )
+    scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == 1
+
+
+def test_exit_3_counts_every_remaining_input_as_failed(repo):
+    """Exit 3 says zizmor audited nothing. When its rejection lines use words the
+    parser does not read, the inputs must still count as not audited, never as
+    audited with zero findings."""
+    unread_wording = (
+        " WARN collect_inputs: zizmor::registry::input: skipping x.yml: not a "
+        "workflow\n"
+    )
+    scanner, report = _scan_with_output(
+        repo, None, returncode=3, stderr=unread_wording + NO_INPUTS
+    )
+    assert report.runs[0].results == []
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == scanner.targets_attempted
+
+
 @pytest.mark.parametrize("returncode", [1, 2, 3])
 def test_a_tool_failure_without_output_is_an_error_not_a_clean_scan(repo, returncode):
     """The error names the code the tool exited with. Whether the tool's own text
@@ -1084,6 +1161,28 @@ def test_each_target_starts_from_a_clean_exit_code(repo):
         scanner.scan(repo, "source", [])
 
 
+def test_a_target_with_nothing_to_audit_does_not_inherit_the_previous_exit_code(
+    tmp_path,
+):
+    """The converted target follows the source target on one instance. When it
+    holds nothing zizmor audits, scan() returns before _execute_scan resets the
+    exit code, so the source target's code read as the converted target's."""
+    converted = tmp_path / "converted"
+    (converted / "archive.zip").mkdir(parents=True)
+    (converted / "archive.zip" / "app.py").write_text("print(1)\n")
+    source = tmp_path / "src"
+    source.mkdir()
+    scanner = _scanner(source)
+    _fake_run(scanner, stdout="never read")
+    scanner.exit_code = 3
+
+    report = scanner.scan(converted, "converted", [])
+
+    assert report.runs[0].results == []
+    assert scanner.targets_attempted == 0
+    assert scanner.exit_code == 0
+
+
 # --------------------------------------------------------------------------- #
 # Dependency resolution
 # --------------------------------------------------------------------------- #
@@ -1116,6 +1215,50 @@ def test_a_satisfying_binary_on_path_runs_directly(repo, monkeypatch):
     assert scanner.tool_version == "1.29.0"
     assert seen[0][0] == ["/opt/bin/zizmor", "--version"]
     assert "GH_TOKEN" not in seen[0][1]
+
+
+def test_a_satisfying_binary_on_path_is_checked_before_the_uv_probe(repo, monkeypatch):
+    """The docstring's order: a zizmor on PATH that satisfies the constraint runs
+    directly, and the uv probe the construction deferred is not owed then. Sent
+    first, the probe started uv for nothing, and a probe that is refused or
+    fails could decide the check before PATH was ever looked at."""
+    _with_executable(monkeypatch, "zizmor 1.29.0\n")
+
+    def must_not_run(self, *_):
+        raise AssertionError("the uv probe ran although PATH satisfies")
+
+    monkeypatch.setattr(ZizmorScanner, "_get_uv_tool_version", must_not_run)
+    scanner = _scanner(repo)
+    assert scanner._deferred_tool_version_probe is not None
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.tool_version == "1.29.0"
+    assert scanner._deferred_tool_version_probe is None
+    # Nothing left for the SARIF step or the inventory to run, so the version the
+    # binary reported stands.
+    scanner.resolve_deferred_tool_version()
+    assert scanner.tool_version == "1.29.0"
+
+
+def test_without_a_binary_on_path_the_deferred_probe_runs_for_the_uv_route(
+    repo, monkeypatch
+):
+    monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
+    probed = []
+    monkeypatch.setattr(
+        ZizmorScanner,
+        "_get_uv_tool_version",
+        lambda self, *args: probed.append(args) or "1.30.1",
+    )
+    scanner = _scanner(repo)
+    object.__setattr__(scanner, "_resolve_through_uv", lambda: True)
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert len(probed) == 1
+    assert scanner.tool_version == "1.30.1"
+    assert scanner._deferred_tool_version_probe is None
 
 
 @pytest.mark.parametrize("output", ["zizmor 1.28.0\n", "zizmor 2.0.0\n", "garbage\n"])
