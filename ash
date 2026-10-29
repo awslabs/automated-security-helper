@@ -2,8 +2,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Resolve the absolute path of the parent of the script directory (ASH repo root)
-export ASH_ROOT_DIR="$(cd -- "$(dirname -- "$0")"; pwd)"
+# Resolve the absolute path of the parent of the script directory (ASH repo root).
+# CDPATH is unset for the cd: with one exported, cd searches its entries first and
+# prints the directory it went to, so a relative script directory such as "." went
+# to the CDPATH entry's "." and ASH_ROOT_DIR held that path twice, on two lines.
+export ASH_ROOT_DIR="$(CDPATH="" cd -- "$(dirname -- "$0")"; pwd)"
 export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 
 # Set local variables
@@ -114,6 +117,26 @@ has_format_character() (
 require_value() {
   if [[ "$2" -lt 2 || -z "${3//[[:space:]]/}" ]]; then
     refuse "$1 needs a value."
+  fi
+}
+
+# The value of one of this script's own value options, in OWN_VALUE, from either
+# spelling: `--opt=value`, the value after the first "=", or `--opt value`, the next
+# word. OWN_SHIFT is how many words past the option the caller shifts: 0 for the
+# first spelling, 1 for the second. $1 is the word as typed, $2 the count of arguments
+# left, the option included, and $3 the next word. Before this, only the spaced form
+# was this script's: `--source-dir=X`, `--oci-runner=X`, `--build-target=ci` and the
+# others fell through to the scan inside the container, which took the directory or
+# ignored the option, while this script built and ran with its defaults.
+own_value() {
+  if [[ "$1" == *=* ]]; then
+    OWN_VALUE="${1#*=}"
+    OWN_SHIFT=0
+    require_value "${1%%=*}" 2 "${OWN_VALUE}"
+  else
+    require_value "$1" "$2" "$3"
+    OWN_VALUE="$3"
+    OWN_SHIFT=1
   fi
 }
 
@@ -866,24 +889,27 @@ CONFIG_PATH=""
 CONFIG_INLINE="NO"
 INNER_VALUE_PENDING="NO"
 while (("$#")); do
+  # Each of this script's own value options takes both spellings, `--opt value` and
+  # `--opt=value`, as the CLI inside does; --oci and --runner are the CLI's own
+  # aliases of --oci-runner, so they name this script's runner too.
   case $1 in
-    --source-dir)
-      require_value "$1" "$#" "${2-}"
-      shift
-      SOURCE_DIR="$1"
+    --source-dir | --source-dir=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      SOURCE_DIR="${OWN_VALUE}"
       ;;
-    --output-dir)
-      require_value "$1" "$#" "${2-}"
-      shift
-      OUTPUT_DIR="$1"
+    --output-dir | --output-dir=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      OUTPUT_DIR="${OWN_VALUE}"
       ;;
     --offline)
       OFFLINE="YES"
       ;;
-    --offline-semgrep-rulesets)
-      require_value "$1" "$#" "${2-}"
-      shift
-      OFFLINE_SEMGREP_RULESETS="$1"
+    --offline-semgrep-rulesets | --offline-semgrep-rulesets=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      OFFLINE_SEMGREP_RULESETS="${OWN_VALUE}"
       OFFLINE="YES"
       ;;
     --force)
@@ -893,22 +919,22 @@ while (("$#")); do
       DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} -q"
       QUIET_ARG="--quiet"
       ;;
-    --oci-runner | -o)
-      require_value "$1" "$#" "${2-}"
-      shift
-      OCI_RUNNER="$1"
+    --oci-runner | --oci-runner=* | --oci | --oci=* | --runner | --runner=* | -o)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      OCI_RUNNER="${OWN_VALUE}"
       ;;
-    --container-uid | -u)
-      require_value "$1" "$#" "${2-}"
-      shift
+    --container-uid | --container-uid=* | -u)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
       CONTAINER_UID_SPECIFIED="YES"
-      CONTAINER_UID="$1"
+      CONTAINER_UID="${OWN_VALUE}"
       ;;
-    --container-gid | -g)
-      require_value "$1" "$#" "${2-}"
-      shift
+    --container-gid | --container-gid=* | -g)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
       CONTAINER_GID_SPECIFIED="YES"
-      CONTAINER_GID="$1"
+      CONTAINER_GID="${OWN_VALUE}"
       ;;
     --no-build)
       NO_BUILD="YES"
@@ -919,22 +945,31 @@ while (("$#")); do
     --debug|-d)
       DEBUG="YES"
       ;;
-    --build-target)
-      require_value "$1" "$#" "${2-}"
-      shift
-      TARGET_STAGE="$1"
+    --build-target | --build-target=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      TARGET_STAGE="${OWN_VALUE}"
       ;;
-    --ash-revision | -rev)
-      require_value "$1" "$#" "${2-}"
-      shift
-      INSTALL_ASH_REVISION="$1"
+    --ash-revision | --ash-revision=* | -rev)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      INSTALL_ASH_REVISION="${OWN_VALUE}"
       ;;
+    # --help and --version run the CLI on the host from this script's own directory,
+    # not the caller's: `python -m` puts the working directory first on sys.path, so
+    # run from a scanned checkout it would import that checkout's package under the
+    # CLI's name. From ASH_ROOT_DIR the module is this repository's own.
+    #
+    # -v is not this script's --version: the CLI inside, whose help --help prints,
+    # defines -v as --verbose on ash, scan and report, so `./ash scan -v` printed a
+    # version and exited without scanning. It is forwarded to the scan like any other
+    # word of ash's.
     --help | -h)
-      python -m automated_security_helper.cli.main --help
+      (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --help)
       exit 0
       ;;
-    --version | -v)
-      python -m automated_security_helper.cli.main --version
+    --version)
+      (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --version)
       exit 0
       ;;
     --no-color | -c)
@@ -1582,6 +1617,16 @@ else
       fi
       if [[ "${COLOR_OUTPUT}" = "true" ]] && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
+      fi
+      # The container's stdin is kept open (-i) when the caller's stdin is not a
+      # terminal (a pipe or a file: an MCP client driving `./ash mcp` on its default
+      # stdio transport, or input redirected into the scan) and when the caller sits at
+      # a terminal that is also stdout (`./ash inspect`, the Textual app, reads keys
+      # from it). Without -i the container got no input at all. The one case left out
+      # is a terminal stdin with stdout redirected: there -i would make the runner read
+      # the terminal, and in a background job that stops the job.
+      if [ ! -t 0 ] || [ -t 1 ]; then
+        DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -i"
       fi
       # --quiet and --no-color are this script's options as well as ash's, and they
       # are handed on to ash in front of its arguments. ash passes an option given
