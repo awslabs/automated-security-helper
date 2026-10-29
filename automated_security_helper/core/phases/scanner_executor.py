@@ -63,6 +63,7 @@ from automated_security_helper.utils.subprocess_utils import (
     COULD_NOT_STOP_ENDING,
     SPAWN_FAILURE_RETURNCODE,
     WAS_KILLED_ENDING,
+    could_not_stop_sentence,
 )
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
@@ -271,6 +272,46 @@ def _could_not_stop(scanner_plugin: Any) -> str | None:
     or None. Coerced like ``_spawn_failure``: only a real string counts."""
     value = getattr(scanner_plugin, "scan_could_not_stop", None)
     return value if isinstance(value, str) and value else None
+
+
+#: How a timeout headline ends when the scanner's run recorded a tool ASH could
+#: not stop, but the run that did not finish most recently is not the timeout: a
+#: later run's tool may still be running, and the timed-out tool is not said to be
+#: killed either. Built from the shared sentence, like the two endings in
+#: subprocess_utils, so no site words its own.
+UNSTOPPED_LATER_RUN_ENDING = (
+    f", and {could_not_stop_sentence('a later run of its tool')}"
+)
+
+
+def _timeout_ending(scanner_plugin: Any) -> str:
+    """How this plugin's timeout headline ends.
+
+    ``scan_could_not_stop`` is one record for the whole plugin, set by any run
+    whose stop failed (a timeout's, a cancel's) and kept across the launches of
+    one ``scan()``, so by itself it cannot say WHICH run ASH could not stop. Read
+    alone, a scan whose first launch timed out and was killed and whose second
+    launch was cancelled and could not be stopped said the timed-out tool "may
+    still be running": the wrong tool. The kept flag names the most recent run
+    that did not finish, and settles what the record can and cannot say:
+
+    - no could-not-stop recorded: " and was killed", as before;
+    - recorded, and the most recent unfinished run is the timeout (or no flag is
+      readable): the timeout's own could-not-stop ending, as before;
+    - recorded, but the most recent unfinished run carries another flag: the
+      later run's tool may still be running, and the timed-out tool is not
+      said to be killed, because one record cannot tell whether both stops
+      failed.
+
+    Exact attribution needs a could-not-stop record per run on the plugin
+    (``plugin_base``); this reads what the plugin records today.
+    """
+    if _could_not_stop(scanner_plugin) is None:
+        return WAS_KILLED_ENDING
+    kept = _kept_flag(scanner_plugin)
+    if kept is None or kept[0] == "timed_out":
+        return COULD_NOT_STOP_ENDING
+    return UNSTOPPED_LATER_RUN_ENDING
 
 
 def _unfinished_run_reason(
@@ -1007,13 +1048,10 @@ class ScannerExecutor:
                         # the line redacted whole. "Was killed" only when the
                         # stop worked: a timeout whose stop failed left the
                         # tool running, and the one thing this line must not
-                        # tell the operator is that it is gone.
+                        # tell the operator is that it is gone. Which run the
+                        # could-not-stop record belongs to: _timeout_ending.
                         limit = timeout_limit_token(timed_out_after, environment_values)
-                        ending = (
-                            COULD_NOT_STOP_ENDING
-                            if _could_not_stop(scanner_plugin) is not None
-                            else WAS_KILLED_ENDING
-                        )
+                        ending = _timeout_ending(scanner_plugin)
                         err_str = text_without_values(
                             f"{scanner_config_name} timed out after "
                             f"{limit} on {target_type}{ending}: {described}",
@@ -1582,12 +1620,10 @@ class ScannerExecutor:
                             )
                             # The same was-killed contract as the failed-scan
                             # lead above: a stop that failed left the tool
-                            # running, so this line must not say it is gone.
-                            ending = (
-                                COULD_NOT_STOP_ENDING
-                                if _could_not_stop(scanner_plugin) is not None
-                                else WAS_KILLED_ENDING
-                            )
+                            # running, so this line must not say it is gone,
+                            # and the record is attributed as _timeout_ending
+                            # reads it.
+                            ending = _timeout_ending(scanner_plugin)
                             container.add_error(
                                 text_without_values(
                                     f"{scanner_config_name} timed out after "
