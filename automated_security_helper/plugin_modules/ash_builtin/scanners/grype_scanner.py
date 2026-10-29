@@ -433,6 +433,12 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # in the configured path changes the resolved spelling, and redaction
         # can only find the spelling the config (and _environment_values) carry.
         configured_config: Path | None = None
+        # The operator's config as the database refresh may read it: set below
+        # only for an accepted config that lies outside the scanned tree. The
+        # refresh runs outside the sandbox (utils/content_db_refresh.py,
+        # "Isolation"), so a file the scanned repository could have written is
+        # never handed to it; such a config still reaches the scan.
+        self._content_db_operator_config = None
         # A config the scan derived from the repository being scanned (under
         # the output or work directory) is not handed to grype unless the
         # operator's own configuration names it; see config/path_trust.py. The
@@ -445,6 +451,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         )
         from automated_security_helper.config.path_trust import (
             derived_roots,
+            in_scanned_tree,
             refused_derived_product,
             resolved_path,
         )
@@ -511,6 +518,19 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 self._warn_if_config_moves_the_database(candidate)
                 resolved_config = candidate
                 configured_config = Path(conf_path)
+                # A database mirror or CA the operator's config names applies to
+                # the update as it does to the scan, when the file is the
+                # operator's own and outside the scanned tree. One inside it
+                # (the checkout's own grype config, accepted for the scan) is
+                # not: the update runs unsandboxed and reads what the config
+                # says, so it keeps the empty config ASH writes.
+                if in_scanned_tree(candidate, source_dir):
+                    ASH_LOGGER.debug(
+                        "The grype config is inside the scanned tree, so the "
+                        "database update runs with an empty config instead of it"
+                    )
+                else:
+                    self._content_db_operator_config = candidate
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config",
@@ -659,6 +679,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 results_dir=self.results_dir or results_file.parent,
                 config=getattr(self.context, "config", None),
                 scan_id=scan_id_for(self.context),
+                # The operator's config, outside the scanned tree, when there is
+                # one (_process_config_options): its database settings reach the
+                # update as they reach the scan. None keeps the empty config.
+                config_file=getattr(self, "_content_db_operator_config", None),
                 values=self._values_to_redact(),
             )
             scan_env.update(GRYPE_PREPARED_ENV)
