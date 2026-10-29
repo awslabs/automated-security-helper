@@ -368,9 +368,21 @@ def resolve_scanner_threshold(
     of which a validated config holds) is read as no config at all: it cannot reach
     the ladder as an unrecognised value, and None, which turns the gate off, is
     never returned.
+
+    The scanner's own value is free text from an external plugin's section, so it
+    is normalized once here, at the edge (:func:`normalize_threshold`): ``"high"``
+    grades as ``HIGH`` rather than as an unrecognised value that fails only
+    CRITICAL, and a blank value, which would turn the gate off, falls through to
+    the global threshold as an unset one does. A non-blank value off the ladder is
+    returned as written: the summary row shows it, and the ladder grades it at
+    its unrecognised rank.
     """
     if scanner_threshold is not None:
-        return scanner_threshold, "config"
+        normalized = normalize_threshold(scanner_threshold)
+        if normalized is not None:
+            return normalized, "config"
+        if str(scanner_threshold).strip():
+            return scanner_threshold, "config"
     global_settings = getattr(ash_config, "global_settings", None)
     if global_settings is not None and hasattr(global_settings, "severity_threshold"):
         configured = global_settings.severity_threshold

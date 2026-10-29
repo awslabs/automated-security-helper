@@ -299,8 +299,8 @@ class TestResolveScannerThreshold:
 
         assert resolve_scanner_threshold("HIGH", config) == ("HIGH", "config")
 
-    @pytest.mark.parametrize("value", ["${ASH_X}", "bogus", ""])
-    def test_a_scanner_threshold_comes_back_as_given_whatever_it_reads_as(self, value):
+    @pytest.mark.parametrize("value", ["${ASH_X}", "bogus"])
+    def test_a_scanner_threshold_off_the_ladder_comes_back_as_given(self, value):
         """The summary row pairs a scanner's own threshold, as written, with the
         source answered here (ScannerStatisticsCalculator._threshold_resolution
         guards the pairing); a value off the ladder is returned, never replaced."""
@@ -309,6 +309,26 @@ class TestResolveScannerThreshold:
         )
 
         assert resolve_scanner_threshold(value, config) == (value, "config")
+
+    @pytest.mark.parametrize("value", ["high", " High ", "HIGH"])
+    def test_a_scanner_threshold_on_the_ladder_is_normalized(self, value):
+        """An external plugin's section is free text: ``"high"`` graded as an
+        unrecognised value, which fails CRITICAL only, not as HIGH."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold(value, config) == ("HIGH", "config")
+
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_a_blank_scanner_threshold_falls_through_to_the_global_one(self, value):
+        """An empty threshold turns the gate off; a blank value in a scanner's
+        section is an unset one, not a request for no gate."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold(value, config) == ("LOW", "global")
 
     def test_the_global_threshold_is_the_fallback(self):
         config = SimpleNamespace(
