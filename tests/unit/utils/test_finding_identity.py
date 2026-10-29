@@ -204,6 +204,24 @@ def test_fingerprinted_findings_at_one_location_get_no_occurrence():
         assert not {"occurrence", "ordinal", "startLine"} & set(key), key
 
 
+def test_one_fingerprint_at_one_location_twice_gets_occurrences_and_ordinals():
+    """Two results of one scanner and rule carrying the same fingerprint value at
+    the same lines and column: the value is shared only across locations, so it
+    stayed the key of both and they had one finding id and one Security Hub Id."""
+    keys = identity_keys(
+        [
+            _fingerprinted("abc", 10, column=3, message="one"),
+            _fingerprinted("abc", 10, column=3, message="two"),
+            _fingerprinted("abc", 10, column=3, message="two"),
+        ]
+    )
+
+    assert all("fingerprints" in key for key in keys)
+    assert len({canonical(key) for key in keys}) == 3
+    assert [key.get("ordinal") for key in keys] == [None, None, 1]
+    assert keys[0]["occurrence"] != keys[1]["occurrence"]
+
+
 def test_one_fingerprint_at_two_columns_of_a_line_counts_as_absent():
     """A location is the file, the lines and the column."""
     keys = identity_keys(

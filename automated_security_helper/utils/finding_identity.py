@@ -321,7 +321,11 @@ def identity_keys(
                 break
         else:
             key["startLine"], key["endLine"] = identity.lines
-            by_location[canonical(key)].append(index)
+        # Every key, fingerprinted or not: two results of one scanner and rule
+        # that carry the same fingerprint value at the same lines and column are
+        # not told apart by the value (it is shared only across locations), so
+        # without this they got one key, one finding id and one Security Hub Id.
+        by_location[canonical(key)].append(index)
         keys.append(key)
     for members in by_location.values():
         if len(members) < 2:
