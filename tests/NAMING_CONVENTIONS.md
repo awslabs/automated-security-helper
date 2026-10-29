@@ -128,8 +128,8 @@ there and run in no tier, and collection refuses it the same way. Mark such a te
 is on, so a marker has to be registered in `pytest.ini` or in a `conftest.py` before a
 test can use it.
 
-CI selects its jobs by tier: `-m unit` runs unsharded for each operating system and
-Python version, `-m integration` runs sharded, and `-m e2e` runs unsharded. Locally,
+CI selects its jobs by tier: `-m unit` and `-m integration` run in four shards for each
+operating system and Python version, and `-m e2e` runs unsharded. Locally,
 integration and e2e tests are skipped unless `pytest --run-integration` is given:
 
 <!-- doctest: illustrative reason="selects this repository's own test tiers, which the docs runner's sample project does not have" -->

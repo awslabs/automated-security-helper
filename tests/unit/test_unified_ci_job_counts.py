@@ -205,14 +205,14 @@ class TestTheExpansion:
 
     def test_an_axis_product_less_its_excludes(self):
         # 25 OS and Python combinations, cut into three jobs by OS: 2 Linux and 2 macOS
-        # images and 1 Windows image, each on 5 Python versions. The unit tier is not
-        # sharded; the integration tier splits each combination into 4 shards
+        # images and 1 Windows image, each on 5 Python versions. The unit and the
+        # integration tier split each combination into 4 shards
         # (tests/unit/test_unit_test_shards.py holds that axis itself to one list of
         # four); the e2e tier runs once per image, on one Python version.
-        assert LEGS["unit-test-linux"] == 2 * 5
-        assert LEGS["unit-test-macos"] == 2 * 5
-        assert LEGS["unit-test-windows"] == 1 * 5
-        assert UNIT_TEST_LEGS == 25
+        assert LEGS["unit-test-linux"] == 2 * 5 * 4
+        assert LEGS["unit-test-macos"] == 2 * 5 * 4
+        assert LEGS["unit-test-windows"] == 1 * 5 * 4
+        assert UNIT_TEST_LEGS == 100
         assert LEGS["integration-test-linux"] == 2 * 5 * 4
         assert LEGS["integration-test-macos"] == 2 * 5 * 4
         assert LEGS["integration-test-windows"] == 1 * 5 * 4
@@ -224,7 +224,7 @@ class TestTheExpansion:
         assert sorted(PYTEST_JOB_IDS) == sorted(
             [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
         ), PYTEST_JOB_IDS
-        assert PYTEST_CHECK_RUNS == 25 + 100 + 5
+        assert PYTEST_CHECK_RUNS == 100 + 100 + 5
 
     def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
         """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
@@ -324,10 +324,10 @@ class TestThePullRequestCover:
         }
 
     def test_the_pull_request_tiers_add_up(self):
-        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == 3 * 3
+        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == 3 * 3 * 4
         assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == 3 * 3 * 4
         assert [PR_LEGS[n] for n in E2E_TEST_JOB_IDS] == [1, 1, 1]
-        assert PR_PYTEST_CHECK_RUNS == 9 + 36 + 3
+        assert PR_PYTEST_CHECK_RUNS == 36 + 36 + 3
 
     def test_ensure_cache_runs_on_the_two_labels_with_headroom_on_a_pull_request(self):
         """The fan-out waits for this job, so on a pull request it must not touch a saturated label."""
@@ -494,6 +494,10 @@ class TestTheCommentsMatchTheWorkflow:
             "214 on a pull request",
             "contributes 344 check",
             "344 is this",
+            # Before the unit tier was cut into four shards.
+            "expands to 216 jobs",
+            "contributes 158 check",
+            "158 is this",
         ):
             assert stale not in COMMENTS
 

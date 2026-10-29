@@ -30,23 +30,24 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 216 jobs on a push
-  # to main, 214 on a merge-queue run, where warm-image-layers does not run, and 110 on a
+  # Sized off a count rather than a guess: this workflow expands to 291 jobs on a push
+  # to main, 289 on a merge-queue run, where warm-image-layers does not run, and 137 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
   # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
-  # ~442 runner jobs instead of ~220. The duplicate result on a queued merge is the
+  # ~592 runner jobs instead of ~295. The duplicate result on a queued merge is the
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 25 cells + uvx x 5 OS = 105 legs in place of the 25 bundled cells (uvx ran on 3.12
   # only) -- it would be ~590 against ~294, so running them as one leg per combination nearly
-  # halves what this deliberate duplication costs. Most of the 216 is the unit-test and
-  # integration-test families, which are 130 legs since the suite was split by tier: the
-  # unit tier is 25 legs (5 operating systems x 5 Python versions, unsharded), the
-  # integration tier is 100 (those 25 x 4 shards) and the e2e tier is 5 (one per runner
+  # halves what this deliberate duplication costs. Most of the 291 is the unit-test and
+  # integration-test families, which are 205 legs since the suite was split by tier: the
+  # unit tier is 100 legs (5 operating systems x 5 Python versions x 4 shards), the
+  # integration tier is 100 (the same 25 x 4 shards) and the e2e tier is 5 (one per runner
   # label, Python 3.12 only; see the notes on those jobs). The unit family was 200 legs
-  # when every OS and Python version ran eight shards of the whole suite, so the total
-  # moved by -70. Each shard repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 216-job push figure is
+  # when every OS and Python version ran eight shards of the whole suite, 25 when the tier
+  # ran unsharded and timed out, and 100 since it was cut into four shards. Each shard
+  # repeats the checkout and dependency install, so the job
+  # count rises faster than the test time does. The 291-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -627,10 +628,26 @@ jobs:
   # (every OS and Python version running eight shards of the whole suite, 200 legs).
   # Summing each test file's serial seconds by tier: the files that run in process, which
   # is the unit tier, took 1,079 serial seconds per pass. On one 4-worker ubuntu runner
-  # that is 7.6 minutes of wall time, and 9.5 minutes on Windows. That fits one job per OS
-  # and Python version with nothing to spare in the 30-minute timeout, so the unit tier
-  # runs unsharded: one job per leg of the matrix, 25 legs, with the setup repeated 25
-  # times instead of 200.
+  # that is 7.6 minutes of wall time, and 9.5 minutes on Windows. That read as fitting one
+  # job per OS and Python version inside the 30-minute timeout, so the unit tier first ran
+  # unsharded: one job per leg of the matrix, 25 legs, with the setup repeated 25 times
+  # instead of 200.
+  #
+  # The first tiered run of main (40939758029, 2026-10-29) measured that reading wrong. The
+  # unsharded unit legs ran 1837 to 1972 s of wall on ubuntu-latest, macos-14 and
+  # windows-latest and 13 of those 20 legs were cancelled at the 30-minute timeout with
+  # "Run PyTest" still running (the x86_64 py3.12 leg at 1798 s of pytest when it was cut);
+  # only the arm64 legs finished, in 838 to 1710 s. The sums of the earlier eight-shard
+  # layout per OS and Python version were 2955 to 6953 s, so no unsharded leg of this suite
+  # fits 30 minutes on a hosted x86_64, Windows or macOS runner. The unit tier is therefore
+  # cut into four shards per OS and Python version, the integration tier's shape: by those
+  # walls two shards would read about 950 s on x86_64 and 860 s on arm64, four about 480 s,
+  # and four leaves the margin the macOS and Windows legs need, whose unsharded walls were
+  # still running at the cut. The cost is 75 more legs per push or merge-queue run (25 to
+  # 100) and 27 more on a pull request; under the per-pool `max-parallel` caps the tier's
+  # wall is about the same at two or four shards, so the extra legs buy margin against the
+  # timeout, not speed. A raised timeout would have kept a 30-minute-plus leg on the
+  # critical path of every run and was not taken.
   #
   # A first estimate summed the serial seconds of the files that start real processes, call
   # real tools or talk to a service in one run of the earlier layout (22,195 on ubuntu,
@@ -659,10 +676,10 @@ jobs:
   # pytest's "no tests collected" exit status into success for that shard and says so.
   # Each entry of a shard axis is its own literal and carries the total it was cut for
   # (`3of4`), so no second number has to agree with the list. A shard dropped from the
-  # list is caught by tests/unit/test_unit_test_shards.py, which holds the three
-  # integration jobs to one axis and to one another. The unit jobs pass no shard, which the
-  # action reads as the whole tier. GitHub rejects a matrix of more than 256 jobs; the
-  # largest matrix here is 40 legs, and test_unified_ci_job_counts.py fails before the
+  # list is caught by tests/unit/test_unit_test_shards.py, which holds the three unit and
+  # the three integration jobs to one axis and to one another. The e2e jobs pass no shard,
+  # which the action reads as the whole tier. GitHub rejects a matrix of more than 256 jobs;
+  # the largest matrix here is 40 legs, and test_unified_ci_job_counts.py fails before the
   # workflow does.
   #
   # The 80% total-coverage gate is the `unit-coverage` job's, once per OS family on the
@@ -672,7 +689,7 @@ jobs:
   # split.
   # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   unit-test-linux:
-    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -688,6 +705,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Four shards per OS and Python version, the integration tier's shape (the note
+        # above this job on why the unsharded tier did not fit its timeout).
+        shard: [1of4, 2of4, 3of4, 4of4]
         # The pull-request cover (the note on ensure-cache): on a pull_request event these
         # drop the x86_64 image and Python 3.11 and 3.13; on every other event they match
         # nothing and the full matrix runs.
@@ -743,10 +763,11 @@ jobs:
           os: ${{ matrix.os }}
           python-version: ${{ matrix.python-version }}
           marker: unit
+          shard: ${{ matrix.shard }}
 
   # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   unit-test-macos:
-    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -762,6 +783,8 @@ jobs:
       matrix:
         os: [macos-latest, macos-14]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Four shards, as on unit-test-linux.
+        shard: [1of4, 2of4, 3of4, 4of4]
         # The pull-request cover (the note on ensure-cache): macos-14 and Python 3.11 and
         # 3.13 drop out on a pull_request event only.
         exclude:
@@ -781,10 +804,11 @@ jobs:
           os: ${{ matrix.os }}
           python-version: ${{ matrix.python-version }}
           marker: unit
+          shard: ${{ matrix.shard }}
 
   # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   unit-test-windows:
-    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -800,6 +824,8 @@ jobs:
       matrix:
         os: [windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Four shards, as on unit-test-linux.
+        shard: [1of4, 2of4, 3of4, 4of4]
         # The pull-request cover (the note on ensure-cache): Python 3.11 and 3.13 drop out
         # on a pull_request event only. One image, so no os entry.
         exclude:
@@ -818,28 +844,31 @@ jobs:
           os: ${{ matrix.os }}
           python-version: ${{ matrix.python-version }}
           marker: unit
+          shard: ${{ matrix.shard }}
 
   # Applies the 80% total-coverage gate to the unit tier's coverage, once per OS family.
   #
-  # Each leg combines the unit artifacts of one runner type on Python 3.12 (one artifact,
-  # `shard1of1`, because the unit tier is unsharded; the combine script still checks that
-  # the set is complete) and fails below 80%. The gate applies to the UNIT tier only: the
+  # Each leg combines the unit artifacts of one runner type on Python 3.12 (four artifacts,
+  # `shard1of4` to `shard4of4`; the combine script checks that the set is complete and
+  # refuses a partial one) and fails below 80%. The gate applies to the UNIT tier only: the
   # base gated the coverage of the whole suite, and the integration and e2e tiers measure
   # no coverage. The 95% core target and a coverage configuration per tier are follow-up
   # work, not part of this change. The gate is kept for each OS family at one Python
   # version, which is where the platform specific code paths differ. The other Python
   # versions' unit coverage is measured and uploaded by their legs and gated nowhere.
   #
-  # WHY A COMBINE JOB FOR A TIER THAT IS ONE ARTIFACT. The unit tier is unsharded, so each
-  # leg could apply `--cov-fail-under` itself and this job could be dropped (four small jobs, one
-  # artifact round trip and the `--marker` plumbing). It stays for two reasons. The
-  # threshold then lives in one place that does not care whether the tier is sharded, so
-  # re-sharding the unit tier later changes no gate. And the run-unit-tests action gates
-  # nothing, whatever tier it runs, which keeps "tests failed" and "coverage fell" two
-  # separate signals: this job runs under `!cancelled()` and reports the coverage even when
-  # a test failed. The cost is the extra jobs and a second render of the coverage table
-  # (the action renders one on its ubuntu-latest, Python 3.12 leg); the first run decides
-  # whether that is worth removing.
+  # WHY A COMBINE JOB. While the unit tier ran unsharded, each leg could have applied
+  # `--cov-fail-under` itself and this job could have been dropped (four small jobs, one
+  # artifact round trip and the `--marker` plumbing). It stayed for two reasons, and the
+  # first one has since paid off: the threshold lives in one place that does not care
+  # whether the tier is sharded, so cutting the unit tier into four shards changed no gate
+  # (no shard of a split run can meet the threshold on its own, so this combine is now the
+  # only place the number can be read). And the run-unit-tests action gates nothing,
+  # whatever tier it runs, which keeps "tests failed" and "coverage fell" two separate
+  # signals: this job runs under `!cancelled()` and reports the coverage even when a test
+  # failed. The cost is the extra jobs and the per-shard tables the action renders on its
+  # ubuntu-latest, Python 3.12 legs (each from one shard's data; this job's table is the
+  # whole tier's).
   #
   # Each leg runs on the same kind of runner as the runs it combines. Coverage data
   # records absolute source paths, and a runner of one image has one workspace path
@@ -2686,8 +2715,8 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 158 check
-  # runs to a pull request (344 to a merge-queue run, which runs the full matrices) and few of
+  # Most jobs above name themselves from their matrix, so this workflow contributes 212 check
+  # runs to a pull request (494 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` and the integration and e2e families means enumerating all 130 of their names -- and then any matrix edit either orphans
@@ -2703,10 +2732,10 @@ jobs:
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 158 is this workflow's own contribution to a pull request: the 110 jobs that run there,
-  # plus the 48 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
+  # 212 is this workflow's own contribution to a pull request: the 137 jobs that run there,
+  # plus the 75 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
-  # the full matrices, is 344: the 214 jobs that run there plus 130 check runs.
+  # the full matrices, is 494: the 289 jobs that run there plus 205 check runs.
   # warm-image-layers runs only on a push to main and is in neither; whether GitHub still
   # lists it as skipped on a pull request was not checked. The check runs are not jobs and
   # land in a separate check suite, so a job census alone undercounts what this file puts on
@@ -2736,15 +2765,17 @@ jobs:
   # 216 on a push and 214 on a merge-queue run. (At eight integration shards, the round-two
   # figure before the tests were classified, these were 316 and 314.) A pull request then
   # ran the merge-queue shape; with the pull-request cover (the note on ensure-cache) it
-  # runs 110, derived by the same test from the overlay rather than counted.
+  # ran 110, derived by the same test from the overlay rather than counted. Then the unit
+  # tier was cut into four shards (25 legs to 100, +75): 291 on a push, 289 on a merge-queue
+  # run and 137 on a pull request.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
-  # these figures can drift from GitHub's census but not from this file. The 130 `PyTest - ...`
+  # these figures can drift from GitHub's census but not from this file. The 205 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
   # one-per-leg rule #602 measured at 20 legs, not counted again, and the collapse does not
   # touch them.
   #
-  # Where 216 comes from, per job, on a push to main: lint 1, ensure-cache 5, actionlint 1,
-  # snapshot-trailers 1, unit-test 25, unit-coverage 4,
+  # Where 291 comes from, per job, on a push to main: lint 1, ensure-cache 5, actionlint 1,
+  # snapshot-trailers 1, unit-test 100, unit-coverage 4,
   # integration-test-linux 40, integration-test-macos 40, integration-test-windows 20,
   # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, warm-image-layers 2,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
@@ -2752,8 +2783,8 @@ jobs:
   # integration-test 1, build-docs 1, converter-integration 2, install-validation 32, homebrew-macos 1,
   # required-checks 1.
   #
-  # Where 110 comes from, per job, on a pull request (the pull-request cover, the note on
-  # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 9,
+  # Where 137 comes from, per job, on a pull request (the pull-request cover, the note on
+  # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 36,
   # unit-coverage 3, integration-test-linux 12, integration-test-macos 12,
   # integration-test-windows 12, e2e-test-linux 1, e2e-test-macos 1, e2e-test-windows 1,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
@@ -2805,7 +2836,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the unit-test shards and the jobs added after
-  # it; the 344 above is the current merge-queue figure and 158 the pull-request one. That
+  # it; the 494 above is the current merge-queue figure and 212 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #

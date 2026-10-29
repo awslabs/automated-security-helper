@@ -660,8 +660,9 @@ class TestUnitTestArchIsDerived:
             product = 1
             for values in axes.values():
                 product *= len(values)
-            # The unit tier has no shard axis, so the smallest job (windows) is one
-            # runner image by five Python versions.
+            # The smallest job (windows) is one runner image by five Python versions
+            # by four shards; the bound stays at the pre-shard five so a job that lost
+            # its shard axis is still measured.
             assert product >= 5, (
                 f"{job_id}'s axis product is {product}, too small for this comparison "
                 "to mean anything -- the matrix has been gutted."

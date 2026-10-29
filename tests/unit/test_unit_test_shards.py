@@ -11,8 +11,11 @@ expensive tier. Every test carries one of ``unit``, ``integration`` or ``e2e``, 
 three families of jobs, one job per runner pool so that each pool carries its own
 ``max-parallel`` cap, run one tier each:
 
-* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit``, unsharded: the
-  in-process tests take minutes on one runner, so the tier has no shard axis;
+* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit`` in four shards per OS
+  and Python version: the tier first ran unsharded on the reading that its in-process
+  tests take minutes on one runner, and the first tiered run of main measured the
+  unsharded legs at 1837 to 1972 s with 13 of the 20 non-arm legs cancelled at the
+  30-minute timeout, so it took the integration tier's shard axis;
 * ``integration-test-linux``, ``-macos`` and ``-windows`` run ``-m integration`` in
   four shards per OS and Python version, because the tests that start real tools carry
   about 6,300 serial seconds by the classification and the per-file medians of one run
@@ -21,7 +24,8 @@ three families of jobs, one job per runner pool so that each pool carries its ow
 * ``e2e-test-linux``, ``-macos`` and ``-windows`` run ``-m e2e`` once per runner image
   on one Python version, unsharded.
 
-Four things have to agree for the integration tier to run every test exactly once:
+Four things have to agree for the unit and integration tiers to run every test exactly
+once:
 
 * the ``shard`` axis in each of the three integration jobs, one literal list whose
   entries each carry the total they were cut for (``3of4``);
@@ -32,8 +36,9 @@ Four things have to agree for the integration tier to run every test exactly onc
   shard otherwise, and names its artifact after the tier and the shard;
 * the ``unit-coverage`` job, which downloads the unit tier's artifacts of one OS family
   and applies the 80% gate to their data, failing when a shard is missing or
-  unreadable. (The unit tier is one artifact, ``shard1of1``, a complete set of one; the
-  check still guards a set that was sharded.)
+  unreadable. (The unit tier is four artifacts, ``shard1of4`` to ``shard4of4``; a set
+  of one, ``shard1of1``, is still admitted as complete, which is what an unsharded run
+  uploads.)
 
 A shard dropped from the axis would silently stop running its slice of the suite, and
 every remaining shard would still pass. The first test below is that guard. A split made
@@ -132,11 +137,15 @@ def _assert_only_the_pull_request_cover(job_id: str, matrix: dict[str, Any]) -> 
             )
 
 
-#: The shard axis of the integration tier. Four is a reading from the real classification
-#: and the per-file medians of one run of the earlier layout (eight was the figure before
-#: the tests were classified), so the first run of the tier jobs is what may move it; the
-#: list is written out here so that moving it is a change to this file in the same diff.
+#: The shard axis of the unit and integration tiers. For the integration tier four is a
+#: reading from the real classification and the per-file medians of one run of the earlier
+#: layout (eight was the figure before the tests were classified); for the unit tier it is
+#: the measured cure for the unsharded legs that timed out on the first tiered run of main
+#: (two shards would have read about 950 s on x86_64, four about 480 s). The list is
+#: written out here so that moving it is a change to this file in the same diff.
 INTEGRATION_SHARDS = ["1of4", "2of4", "3of4", "4of4"]
+#: The six jobs that carry the shard axis: the three unit and the three integration jobs.
+SHARDED_TIER_JOB_IDS = (*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS)
 
 
 def _load_script(filename: str) -> ModuleType:
@@ -168,9 +177,9 @@ def _action_inputs() -> dict[str, Any]:
 
 
 def _shard_axes() -> dict[str, list[str]]:
-    """The ``shard`` axis of each integration-test job, by job id."""
+    """The ``shard`` axis of each unit-test and integration-test job, by job id."""
     axes = {}
-    for job_id in INTEGRATION_TEST_JOB_IDS:
+    for job_id in SHARDED_TIER_JOB_IDS:
         axis = _workflow_job(job_id)["strategy"]["matrix"]["shard"]
         assert isinstance(axis, list), (job_id, axis)
         axes[job_id] = [str(entry) for entry in axis]
@@ -178,11 +187,11 @@ def _shard_axes() -> dict[str, list[str]]:
 
 
 def _shard_axis() -> list[str]:
-    """The one shard axis the three integration-test jobs share; they must not differ."""
+    """The one shard axis the six sharded tier jobs share; they must not differ."""
     axes = _shard_axes()
-    first = axes[INTEGRATION_TEST_JOB_IDS[0]]
+    first = axes[SHARDED_TIER_JOB_IDS[0]]
     assert all(axis == first for axis in axes.values()), (
-        f"the integration-test jobs disagree on the shard axis: {axes}"
+        f"the unit-test and integration-test jobs disagree on the shard axis: {axes}"
     )
     return first
 
@@ -238,7 +247,7 @@ def _rendered_artifact_name(
 
 @pytest.mark.unit
 class TestTheShardAxis:
-    @pytest.mark.parametrize("job_id", INTEGRATION_TEST_JOB_IDS)
+    @pytest.mark.parametrize("job_id", SHARDED_TIER_JOB_IDS)
     def test_it_lists_every_shard_of_one_total_once(self, job_id):
         """Dropping, repeating or renumbering an entry leaves part of the suite unrun."""
         axis = _shard_axes()[job_id]
@@ -261,19 +270,23 @@ class TestTheShardAxis:
         assert uses["with"]["shard"] == "${{ matrix.shard }}"
         assert uses["with"]["marker"] == "integration"
 
-    @pytest.mark.parametrize("job_id", INTEGRATION_TEST_JOB_IDS)
+    @pytest.mark.parametrize("job_id", SHARDED_TIER_JOB_IDS)
     def test_the_job_name_carries_the_shard(self, job_id):
         """Two legs with one name collide in the checks list and in artifacts."""
         assert "matrix.shard" in _workflow_job(job_id)["name"]
 
     @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
-    def test_the_unit_jobs_are_not_sharded(self, job_id):
-        """The unit tier fits one job per leg, so a shard axis would only repeat setup."""
+    def test_the_unit_jobs_hand_their_shard_and_their_tier_to_the_action(self, job_id):
+        """The unit tier is sharded like the integration tier (the module docstring).
+
+        An unsharded unit leg did not fit the 30-minute timeout on the hosted x86_64,
+        macOS and Windows runners, so each unit job carries the shard axis and hands its
+        shard to the action; a job that dropped the axis would run the whole tier again.
+        """
         job = _workflow_job(job_id)
-        assert "shard" not in job["strategy"]["matrix"]
-        assert "shard" not in job["name"]
+        assert job["strategy"]["matrix"]["shard"] == INTEGRATION_SHARDS, job["strategy"]
         uses = _uses_the_action(job_id)
-        assert "shard" not in uses["with"], uses
+        assert uses["with"]["shard"] == "${{ matrix.shard }}"
         assert uses["with"]["marker"] == "unit"
 
     @pytest.mark.parametrize("job_id", E2E_TEST_JOB_IDS)
@@ -2377,8 +2390,8 @@ class TestTheUnitTestMatrixIsSplitByOs:
         }
         first = keys[UNIT_TEST_JOB_IDS[0]]
         assert all(value == first for value in keys.values()), keys
-        assert first == ["os", "python-version"], (
-            "the unit tier is unsharded, so its matrix is the OS and Python axes only"
+        assert first == ["os", "python-version", "shard"], (
+            "the unit tier is the OS, Python and shard axes, the integration tier's shape"
         )
         for job_id, job in self._jobs().items():
             matrix = job["strategy"]["matrix"]
