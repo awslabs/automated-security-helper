@@ -305,7 +305,9 @@ SCANNER_EXIT_CODE_UNRECORDED = 125
 class WorkspaceProjectResult(RecordModel):
     """One project's outcome, as it appears in the aggregated results."""
 
-    model_config = {"extra": "allow"}
+    # A refused value is not quoted in the error's text, as for the aggregated
+    # results' other models (asharp_model.py).
+    model_config = {"extra": "allow", "hide_input_in_errors": True}
 
     project: Annotated[
         str,
