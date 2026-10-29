@@ -2460,30 +2460,44 @@ def _decoded(captured: Any, process: subprocess.Popen) -> Any:
     encoding = getattr(process.stdout, "encoding", None) or getattr(
         process.stderr, "encoding", None
     )
-    return _as_text_mode_reads(captured, encoding or "utf-8")
+    # The error handler the stream wrappers carry is the one communicate's own
+    # decode used. "strict" (TextIOWrapper's default when the caller named none)
+    # is not kept: a late read that raised UnicodeDecodeError would replace the
+    # wait's failure, which is what this read reports, with its own.
+    errors = getattr(process.stdout, "errors", None) or getattr(
+        process.stderr, "errors", None
+    )
+    if errors in (None, "strict"):
+        errors = "replace"
+    return _as_text_mode_reads(captured, encoding or "utf-8", errors)
 
 
-def _late_decoded(captured: Any, encoding: Optional[str]) -> Any:
+def _late_decoded(
+    captured: Any, encoding: Optional[str], errors: str = "replace"
+) -> Any:
     """Partial bytes a failed wait carried, decoded as the finished run's
     streams would have been: the caller's encoding, or when the caller named
     none the locale encoding Popen's text mode resolves to (under UTF-8 mode
-    the locale read answers utf-8, keeping the two in step). A decode pinned
-    to UTF-8 disagreed with the finished run on a non-UTF-8 locale.
+    the locale read answers utf-8, keeping the two in step), and the caller's
+    error handler (every runner's default is replace). A decode pinned to
+    UTF-8 disagreed with the finished run on a non-UTF-8 locale.
     TimeoutExpired carries the partial output undecoded, text mode or not."""
     if not isinstance(captured, bytes):
         return captured
-    return _as_text_mode_reads(captured, encoding or locale.getpreferredencoding(False))
+    return _as_text_mode_reads(
+        captured, encoding or locale.getpreferredencoding(False), errors
+    )
 
 
-def _as_text_mode_reads(captured: bytes, encoding: str) -> str:
-    """*captured* as Popen's text mode would have read it: decoded with
-    replacement, then with universal newlines (``\\r\\n`` and a lone ``\\r``
-    become ``\\n``), the translation communicate's own text-mode decode applies.
-    A late or partial read decoded without it kept the ``\\r`` a finished run
-    would have dropped, so the same bytes read differently by the way the wait
-    ended."""
+def _as_text_mode_reads(captured: bytes, encoding: str, errors: str = "replace") -> str:
+    """*captured* as Popen's text mode would have read it: decoded with the
+    run's error handler, then with universal newlines (``\\r\\n`` and a lone
+    ``\\r`` become ``\\n``), the translation communicate's own text-mode decode
+    applies. A late or partial read decoded without it kept the ``\\r`` a
+    finished run would have dropped, so the same bytes read differently by the
+    way the wait ended."""
     return (
-        captured.decode(encoding, errors="replace")
+        captured.decode(encoding, errors=errors)
         .replace("\r\n", "\n")
         .replace("\r", "\n")
     )
@@ -4215,8 +4229,8 @@ def run_command(
         # caller bytes; decoded as the finished run's streams would have been.
         partial_stdout, partial_stderr = e.stdout, e.stderr
         if text:
-            partial_stdout = _late_decoded(partial_stdout, encoding)
-            partial_stderr = _late_decoded(partial_stderr, encoding)
+            partial_stdout = _late_decoded(partial_stdout, encoding, errors)
+            partial_stderr = _late_decoded(partial_stderr, encoding, errors)
         # -1 rather than TIMEOUT_RETURNCODE because callers and tests already pin
         # it; the type carries the timeout so nothing has to infer it from the code.
         timed_out_result = TimedOutProcess(
@@ -4699,8 +4713,8 @@ def run_command_with_output_handling(
                 continue
             # Decoded as the finished run's streams are (_late_decoded): the
             # caller's encoding, or the locale encoding text mode resolves to
-            # when the caller named none.
-            partial[stream_name] = _late_decoded(captured, encoding)
+            # when the caller named none, and the caller's error handler.
+            partial[stream_name] = _late_decoded(captured, encoding, errors)
         # Written where a completed run's output goes. What a tool printed
         # before it was killed is usually the only clue to why it hung, and
         # returning it was not enough: scanners default to "write", so the
