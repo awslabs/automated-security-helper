@@ -11,6 +11,7 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 import logging
 import os
 import platform
+from pathlib import Path
 from typing import Annotated, List, Literal, ClassVar, Optional
 
 from pydantic import Field
@@ -35,6 +36,17 @@ from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 #: reads. "0" is off.
 _VERSION_CHECK_ENV = "SEMGREP_ENABLE_VERSION_CHECK"
 _VERSION_CHECK_OFF = "0"
+
+
+def _is_uv_form(command: List[str]) -> bool:
+    """Whether a resolver answer runs the tool through uv.
+
+    Told by the first word's file name, so ``["uv", ...]`` and
+    ``["/usr/local/bin/uv", ...]`` both count; a comparison of the first three
+    words with ``["uv", "tool", "run"]`` read a uv named by its path as a
+    semgrep binary, which is the mistake this reading replaces.
+    """
+    return bool(command) and Path(command[0]).name in ("uv", "uv.exe")
 
 
 class SemgrepScannerConfigOptions(ScannerOptionsBase):
@@ -179,22 +191,34 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             env["SEMGREP_RULES"] = f"{cache_dir}/*"
         return env
 
-    def _direct_or_uv_command_found(self) -> bool:
+    def _direct_or_uv_command_found(self, *, direct_only: bool = False) -> bool:
         """Whether ``get_uv_tool_command`` found a way to run semgrep, and set
         ``use_uv_tool`` to how it found it.
 
         The resolver answers with ``["uv", "tool", "run", "semgrep"]`` when uv runs
         the tool, and with the path of a semgrep binary on PATH otherwise. Both
         used to be read as "the binary is on PATH", which turned uv off and made
-        the scan exec a semgrep that is not there when uv was the only route.
+        the scan exec a semgrep that is not there when uv was the only route. The
+        uv form is told by the first word's file name (``_is_uv_form``), so a uv
+        named by its full path counts as uv too.
+
+        With ``direct_only`` the uv form is not an answer: after uv's own install
+        of the tool failed, ``uv tool run`` would repeat that install at scan time
+        (offline, it fails again), so only a semgrep binary on PATH satisfies the
+        dependency, and the check reports MISSING otherwise.
         """
         command = get_uv_tool_command(self.command)
         if command is None:
             return False
-        if isinstance(command, list) and command[:3] == ["uv", "tool", "run"]:
-            self.use_uv_tool = True
-        else:
-            self.use_uv_tool = False
+        uses_uv = _is_uv_form(command)
+        if uses_uv and direct_only:
+            self._plugin_log(
+                "uv tool run is the only route to semgrep, and uv's install of it "
+                "failed; the scan would repeat that install, so semgrep is missing.",
+                level=logging.WARNING,
+            )
+            return False
+        self.use_uv_tool = uses_uv
         self.dependencies_satisfied = True
         return True
 
@@ -294,9 +318,10 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 self._plugin_log("Successfully installed semgrep via UV tool")
                 self.dependencies_satisfied = True
                 return True
-            # Last resort — consolidated resolver handles the
-            # "uv run → direct binary → None" fallback, and says which it found.
-            if self._direct_or_uv_command_found():
+            # Last resort: a semgrep binary on PATH. The resolver's uv form is not
+            # an answer here, because uv's install of the tool has just failed and
+            # `uv tool run` would repeat it at scan time.
+            if self._direct_or_uv_command_found(direct_only=True):
                 return True
             self._plugin_log(
                 "Direct executable detection also failed for semgrep",

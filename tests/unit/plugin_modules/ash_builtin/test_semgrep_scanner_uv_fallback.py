@@ -6,9 +6,12 @@
 ``get_uv_tool_command`` answers ``["uv", "tool", "run", "semgrep"]`` when uv runs the
 tool and the path of a semgrep binary on PATH otherwise. Both fallback sites in
 ``_validate_tool_dependencies`` read any non-None answer as "the binary is on PATH"
-and turned ``use_uv_tool`` off, so when uv was the only route (the explicit install
-failed, or the runner reported uv unavailable while the probe answered) the scan
-went on to exec a semgrep that is not on PATH.
+and turned ``use_uv_tool`` off, so when uv was the only route (the runner reported
+uv unavailable while the probe answered) the scan went on to exec a semgrep that is
+not on PATH. The uv form is told by the first word's file name, so a uv named by its
+full path counts as uv. After uv's own install of the tool failed, the uv form is
+not an answer at all: ``uv tool run`` would repeat the failed install at scan time,
+so only a semgrep binary on PATH satisfies the dependency there.
 
 The resolver and the install steps are stood in for; no process starts here.
 """
@@ -30,6 +33,7 @@ pytestmark = pytest.mark.unit
 
 
 UV_FORM = ["uv", "tool", "run", "semgrep"]
+UV_BY_PATH = ["/usr/local/bin/uv", "tool", "run", "semgrep"]
 DIRECT_FORM = ["/opt/tools/bin/semgrep"]
 
 
@@ -60,31 +64,56 @@ def _install_fails(monkeypatch):
     )
 
 
+def test_the_install_fallback_runs_a_semgrep_binary_on_path(
+    test_plugin_context, monkeypatch
+):
+    """After uv's install of semgrep failed, a semgrep binary on PATH is the
+    fallback, run directly.
+
+    Fails at the base: the binary was found, and ``use_uv_tool`` stayed as it
+    was, so the scan went through uv to a tool uv had just failed to install.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    _install_fails(monkeypatch)
+    monkeypatch.setattr(
+        semgrep_module, "get_uv_tool_command", lambda name: list(DIRECT_FORM)
+    )
+
+    assert scanner._validate_tool_dependencies() is True
+    assert scanner.dependencies_satisfied is True
+    assert scanner.use_uv_tool is False
+
+
 @pytest.mark.parametrize(
-    ("found", "uses_uv"),
+    "found",
     [
-        pytest.param(UV_FORM, True, id="uv-runs-it"),
-        pytest.param(DIRECT_FORM, False, id="binary"),
+        pytest.param(UV_FORM, id="uv-runs-it"),
+        pytest.param(UV_BY_PATH, id="uv-named-by-path"),
     ],
 )
-def test_the_install_fallback_runs_the_tool_as_the_resolver_found_it(
-    test_plugin_context, monkeypatch, found, uses_uv
+def test_the_install_fallback_does_not_accept_the_uv_form(
+    test_plugin_context, monkeypatch, found
 ):
-    """Fails at the base for the uv form: ``use_uv_tool`` was set False for any
-    non-None answer, and the scan would exec a semgrep that is not on PATH."""
+    """After the explicit install failed, ``uv tool run semgrep`` is no answer: the
+    scan would repeat the install that just failed (offline, it fails again). The
+    dependency is MISSING, as it was before the resolver fallback existed.
+
+    Fails at the base: the uv form was accepted and the scanner recorded the
+    dependency as satisfied.
+    """
     scanner = _scanner(test_plugin_context, monkeypatch)
     _install_fails(monkeypatch)
     monkeypatch.setattr(semgrep_module, "get_uv_tool_command", lambda name: list(found))
 
-    assert scanner._validate_tool_dependencies() is True
-    assert scanner.dependencies_satisfied is True
-    assert scanner.use_uv_tool is uses_uv
+    assert scanner._validate_tool_dependencies() is False
+    assert scanner.dependencies_satisfied is not True
 
 
 @pytest.mark.parametrize(
     ("found", "uses_uv"),
     [
         pytest.param(UV_FORM, True, id="uv-runs-it"),
+        pytest.param(UV_BY_PATH, True, id="uv-named-by-path"),
         pytest.param(DIRECT_FORM, False, id="binary"),
     ],
 )
