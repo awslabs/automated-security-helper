@@ -1017,6 +1017,29 @@ def _scan_target_refusal(
 
     sandbox = _sandbox_for_gate(session_id)
 
+    remedy = (
+        f"Set {ASH_MCP_ALLOWED_ROOTS_ENV} to the directories the MCP server may "
+        f"scan, or deliver the tree with set_source_git or "
+        f"set_source_zip_finalize so it lands in this session's sandbox."
+    )
+    if _is_filesystem_root(resolved):
+        # Reached most often by omitting the directory entirely: the tool falls
+        # back to the process working directory, and a server launched by an
+        # editor or agent frequently has "/" for a cwd. Telling that caller to
+        # configure an allowlist points at the wrong lever first. Judged before
+        # the gates below, so the root keeps this remedy whatever they would say
+        # of a directory that contains everything.
+        return _refusal(
+            "Scan target",
+            directory_path,
+            resolved,
+            (
+                "Pass the directory to scan explicitly; the default is the "
+                "server's working directory, which here is the filesystem root. "
+                f"{remedy}"
+            ),
+        )
+
     sibling = _sibling_refusal(sandbox, directory_path, resolved)
     if sibling is not None:
         return sibling
@@ -1031,20 +1054,6 @@ def _scan_target_refusal(
     if sandbox.fall_back_to_denylist:
         return _legacy_denylist_refusal(directory_path, resolved)
 
-    remedy = (
-        f"Set {ASH_MCP_ALLOWED_ROOTS_ENV} to the directories the MCP server may "
-        f"scan, or deliver the tree with set_source_git or "
-        f"set_source_zip_finalize so it lands in this session's sandbox."
-    )
-    if _is_filesystem_root(resolved):
-        # Reached most often by omitting the directory entirely: the tool falls
-        # back to the process working directory, and a server launched by an
-        # editor or agent frequently has "/" for a cwd. Telling that caller to
-        # configure an allowlist points at the wrong lever first.
-        remedy = (
-            "Pass the directory to scan explicitly; the default is the server's "
-            f"working directory, which here is the filesystem root. {remedy}"
-        )
     return _refusal("Scan target", directory_path, resolved, remedy)
 
 
