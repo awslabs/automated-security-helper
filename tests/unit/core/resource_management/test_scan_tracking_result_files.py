@@ -1,0 +1,187 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""What the file-based progress view reads, and what it counts.
+
+Four mechanisms, each pinned against the behavior it replaced:
+
+* ``find_scanner_result_files`` confined the scanner and target directories to
+  the output directory but took the ``ASH.ScanResults.json`` entry itself on
+  ``exists()``. A link at that name was followed into another tree, and a FIFO
+  there blocked the progress poll, which runs under the registry lock, until
+  something wrote to it.
+* A scanner was listed, and so counted as completed, as soon as its directory
+  existed, before it had written any result file.
+* ``get_scan_progress_info`` listed every ``scanner_results`` entry as a
+  completed scanner, MISSING, SKIPPED and ERROR included.
+* The per-target file ASH writes carries ``finding_count`` and
+  ``severity_counts`` and no findings array, so the file-based view reported 0
+  findings and all-zero severity counts for every finished scanner while a scan
+  ran.
+"""
+
+import json
+import os
+
+import pytest
+
+from automated_security_helper.core.resource_management.scan_tracking import (
+    create_scan_progress_from_files,
+    find_scanner_result_files,
+    get_completed_scanners,
+    get_scan_progress_info,
+    is_regular_result_file,
+)
+
+pytestmark = pytest.mark.unit
+
+_RESULTS_FILE = "ASH.ScanResults.json"
+
+
+def _target_dir(output_dir, scanner, target):
+    path = output_dir / "scanners" / scanner / target
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _write_result(output_dir, scanner, target, document):
+    path = _target_dir(output_dir, scanner, target) / _RESULTS_FILE
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+class TestOnlyARegularResultFileIsRead:
+    def test_a_regular_file_is_read(self, tmp_path):
+        out = tmp_path / "ash_output"
+        path = _write_result(out, "bandit", "source", {"status": "PASSED"})
+
+        assert is_regular_result_file(path) is True
+        assert find_scanner_result_files(out) == {"bandit": {"source": path}}
+
+    def test_a_link_at_the_results_name_is_not_followed(self, tmp_path):
+        if not hasattr(os, "symlink"):
+            pytest.skip("symlinks are not available on this platform")
+        out = tmp_path / "ash_output"
+        other = tmp_path / "other-tree.json"
+        other.write_text(json.dumps({"status": "FAILED"}), encoding="utf-8")
+        link = _target_dir(out, "bandit", "source") / _RESULTS_FILE
+        link.symlink_to(other)
+
+        assert is_regular_result_file(link) is False
+        assert find_scanner_result_files(out) == {}
+        assert get_completed_scanners(out) == set()
+
+    def test_a_fifo_at_the_results_name_is_not_opened(self, tmp_path):
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("FIFOs are not available on this platform")
+        out = tmp_path / "ash_output"
+        fifo = _target_dir(out, "bandit", "source") / _RESULTS_FILE
+        os.mkfifo(fifo)
+
+        # Reading a FIFO with no writer blocks; a progress view that opened it
+        # would never return, so this returning at all is the assertion.
+        assert is_regular_result_file(fifo) is False
+        assert find_scanner_result_files(out) == {}
+        progress = create_scan_progress_from_files("scan-1", out)
+        assert progress.total_scanners == 0
+
+    def test_a_missing_file_is_not_regular(self, tmp_path):
+        assert is_regular_result_file(tmp_path / "absent.json") is False
+
+
+class TestAScannerCountsOnceItHasWrittenAResult:
+    def test_a_scanner_directory_with_no_result_file_is_not_listed(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _target_dir(out, "semgrep", "source")
+        _write_result(out, "bandit", "source", {"status": "PASSED"})
+
+        assert set(find_scanner_result_files(out)) == {"bandit"}
+        assert get_completed_scanners(out) == {"bandit"}
+
+    def test_a_scanner_with_one_of_two_targets_written_is_listed_once(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _target_dir(out, "bandit", "converted")
+        _write_result(out, "bandit", "source", {"status": "PASSED"})
+
+        assert set(find_scanner_result_files(out)["bandit"]) == {"source"}
+
+
+class TestCompletedScannersAreTheOnesThatRan:
+    def test_missing_skipped_and_error_scanners_are_not_completed(self, tmp_path):
+        out = tmp_path / "ash_output"
+        out.mkdir()
+        (out / "ash_aggregated_results.json").write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        "bandit": {"status": "PASSED"},
+                        "semgrep": {"status": "FAILED"},
+                        "grype": {"status": "MISSING"},
+                        "checkov": {"status": "SKIPPED"},
+                        "trivy": {"status": "ERROR"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "completed"
+        assert info["scanners_completed"] == ["bandit", "semgrep"]
+        assert info["total_scanners"] == 2
+
+
+class TestTheFileBasedViewCountsWhatTheScannerRecorded:
+    def test_a_metadata_only_file_yields_its_recorded_counts(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_result(
+            out,
+            "detect-secrets",
+            "source",
+            {
+                "scanner_name": "detect-secrets",
+                "target_type": "source",
+                "finding_count": 3,
+                "severity_counts": {"critical": 1, "HIGH": 2},
+                "status": "FAILED",
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        scanner = progress.scanners["detect-secrets"]["source"]
+        assert scanner.finding_count == 3
+        assert scanner.severity_counts["critical"] == 1
+        assert scanner.severity_counts["high"] == 2
+        assert progress.total_findings == 3
+        assert progress.severity_counts["critical"] == 1
+        assert progress.severity_counts["high"] == 2
+        assert scanner.status.value == "failed"
+
+    def test_a_findings_array_still_decides_when_present(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_result(
+            out,
+            "bandit",
+            "source",
+            {
+                "findings": [{"severity": "LOW"}],
+                "finding_count": 9,
+                "severity_counts": {"high": 9},
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.total_findings == 1
+        assert progress.severity_counts["low"] == 1
+        assert progress.severity_counts["high"] == 0
+
+    def test_a_file_with_neither_counts_nor_findings_reads_as_zero(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_result(out, "bandit", "source", {"scanner_name": "bandit"})
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.total_findings == 0
