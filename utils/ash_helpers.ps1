@@ -65,7 +65,7 @@ function Invoke-ASH {
     .PARAMETER OutputDir
     The output directory for ASH results to be stored in.
 
-    Defaults to `.ash/ash_output` within the current working directory, as with `./ash`.
+    Defaults to `.ash/ash_output` inside -SourceDir, where `./ash` and `ash scan` default it.
     Created when it does not exist. Refused with 5, as `ash scan` refuses it, when a
     file is at the path, when a directory cannot be created there (a file on the way
     to it, for one), and when it is there but cannot be entered or written (a file is
@@ -252,8 +252,13 @@ function Invoke-ASH {
         $SourceDir = (Get-Location).Path,
         [parameter()]
         [string]
-        # Two Join-Paths: one with a third path binds only from PowerShell 6.
-        $OutputDir = $(Join-Path (Join-Path (Get-Location).Path '.ash') 'ash_output'),
+        # Inside -SourceDir, where ./ash and `ash scan` default it. Taken from the
+        # working directory, as it was, `Invoke-ASH -SourceDir sub` from a checkout
+        # root wrote its reports beside the working directory, and a `.ash` link the
+        # repository commits at that root took them wherever it pointed. A default
+        # may read a parameter declared before it, bound or defaulted. Two
+        # Join-Paths: one with a third path binds only from PowerShell 6.
+        $OutputDir = $(Join-Path (Join-Path $SourceDir '.ash') 'ash_output'),
         [parameter()]
         [string]
         $Config,

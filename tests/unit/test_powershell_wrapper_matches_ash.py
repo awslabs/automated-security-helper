@@ -24,6 +24,9 @@ could not see without reading the command it built:
 * With no runner it called ``exit 1``, which ends the caller's PowerShell session.
 * It passed ``--source-dir /src --output-dir /out`` before the caller's arguments,
   so ``-AshArgs 'report'`` put options in front of a subcommand.
+* Its default output directory was ``.ash/ash_output`` under the working directory,
+  where ``./ash`` and ``ash scan`` default it inside the scanned directory, so
+  ``-SourceDir sub`` from a checkout root wrote the reports beside the checkout.
 
 The tests stand in a PowerShell function for each of finch, docker, nerdctl,
 and podman. ``Get-Command`` finds a function before any program on PATH, so a stand-in
@@ -491,7 +494,7 @@ def test_windows_powershell_refuses_what_its_quoting_would_break(
 def test_windows_powershell_takes_the_default_output_directory(tmp_path):
     # The default was `Join-Path <cwd> '.ash' 'ash_output'`, and Join-Path takes a
     # third path only from PowerShell 6, so on 5.1 every call without -OutputDir
-    # failed to bind.
+    # failed to bind. The default is inside -SourceDir now, built the same way.
     windows_powershell = shutil.which("powershell.exe")
     if windows_powershell is None:
         pytest.skip("powershell.exe is not on PATH")
@@ -501,8 +504,30 @@ def test_windows_powershell_takes_the_default_output_directory(tmp_path):
         interpreter=windows_powershell,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / ".ash" / "ash_output").is_dir()
+    assert (tmp_path / "src" / ".ash" / "ash_output").is_dir()
     assert _run_call(result, calls)
+
+
+@pytest.mark.integration
+def test_the_default_output_directory_is_inside_the_source_directory(tmp_path):
+    """Without -OutputDir the reports land in ``.ash/ash_output`` inside -SourceDir.
+
+    The default was ``.ash/ash_output`` under the working directory, where ``./ash``
+    and ``ash scan`` default it inside the scanned directory
+    (tests/unit/test_ash_bash_entrypoint_output_paths.py pins the launcher's rule).
+    Run from a checkout root with ``-SourceDir sub``, the wrapper wrote its reports
+    beside the working directory, and a ``.ash`` link the repository commits at that
+    root took them wherever it pointed. The directory the container is given, the
+    one it mounts at /out, and the one made on disk are all the source's own.
+    """
+    result, calls = _invoke(tmp_path, "Invoke-ASH -NoBuild -SourceDir src")
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    expected = tmp_path / "src" / ".ash" / "ash_output"
+    assert _run_env(run)["ASH_ACTUAL_OUTPUT_DIR"] == str(expected), run
+    assert f"type=bind,source={expected},destination=/out" in run, run
+    assert expected.is_dir()
+    assert not (tmp_path / ".ash").exists()
 
 
 @pytest.mark.integration
@@ -2600,7 +2625,8 @@ def test_quiet_and_no_color_are_dropped_without_a_warning(tmp_path):
 # .ash/ash_output, or .ash, as a link would get the scan's output, and the
 # in-container cleanup of the previous run's analysis, reports, scanners, and
 # converted directories, sent wherever the link points. Since the image is built for
-# the caller's IDs those writes succeed.
+# the caller's IDs those writes succeed. The default output directory is inside
+# -SourceDir, so the committed links below sit in the scanned directory, src.
 
 
 def _refused(tmp_path, invocation: str):
@@ -2646,16 +2672,16 @@ def test_an_output_directory_reached_through_a_link_is_refused(tmp_path, linked)
     (tmp_path / "src").mkdir()
     output = ".ash/ash_output"
     if linked == ".ash/ash_output":
-        (tmp_path / ".ash").mkdir()
-        _link_dir(tmp_path / ".ash" / "ash_output", target)
-        component = tmp_path / ".ash" / "ash_output"
+        (tmp_path / "src" / ".ash").mkdir()
+        _link_dir(tmp_path / "src" / ".ash" / "ash_output", target)
+        component = tmp_path / "src" / ".ash" / "ash_output"
     elif linked == ".ash":
-        _link_dir(tmp_path / ".ash", target)
-        component = tmp_path / ".ash"
+        _link_dir(tmp_path / "src" / ".ash", target)
+        component = tmp_path / "src" / ".ash"
     elif linked == ".ash/ash_output (dangling)":
-        (tmp_path / ".ash").mkdir()
-        _link_dir(tmp_path / ".ash" / "ash_output", target / "not-yet")
-        component = tmp_path / ".ash" / "ash_output"
+        (tmp_path / "src" / ".ash").mkdir()
+        _link_dir(tmp_path / "src" / ".ash" / "ash_output", target / "not-yet")
+        component = tmp_path / "src" / ".ash" / "ash_output"
     elif linked == "src/out":
         _link_dir(tmp_path / "src" / "out", target)
         output = "src/out"
@@ -2727,7 +2753,7 @@ def test_a_link_is_found_when_the_output_directory_is_typed_in_another_case(tmp_
 def test_an_output_directory_without_links_is_created(tmp_path):
     result, calls = _invoke(tmp_path, "Invoke-ASH -NoBuild -SourceDir src")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / ".ash" / "ash_output").is_dir()
+    assert (tmp_path / "src" / ".ash" / "ash_output").is_dir()
     assert _run_call(result, calls)
 
 
