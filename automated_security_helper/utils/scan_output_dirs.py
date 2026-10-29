@@ -1551,11 +1551,17 @@ def drop_results_in_ash_output_dirs(
     work = path_in_record_form(_work_dir_of(context))
 
     def in_output(result: Any) -> bool:
+        # Decided by the first location that names a file: SARIF's first
+        # location is the one the result is about. A result whose first location
+        # is a file of the scanned tree is a finding about the tree, whatever a
+        # later (related) location points at, and was dropped when that later
+        # location sat in an output directory.
         for candidate in _result_paths(result, source):
             if candidate.is_relative_to(work):
                 return False
             if any(candidate.is_relative_to(d) for d in resolved_dirs):
                 return candidate not in committed
+            return False
         return False
 
     removed = 0
