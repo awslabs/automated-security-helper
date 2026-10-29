@@ -113,8 +113,13 @@ class VersionTemplateManager:
         if re.search(branch_pattern, content):
             patterns.append((branch_pattern, branch_replacement))
 
-        # Pattern 3: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)")
-        at_version_pattern = rf"(@v){semver}"
+        # Pattern 3: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)"),
+        # and `<owner>/automated-security-helper@v3.x.y` as a `uses:` step names
+        # it. Bare means not glued to a preceding path or name: unanchored, the
+        # pattern also templatized third-party pins such as a
+        # `uses: actions/checkout@v4.1.2` line in a CI example, and `generate`
+        # then stamped ASH's version into another project's reference.
+        at_version_pattern = rf"((?<![\w./-])@v|{_REPO_NAME}(?:\.git)?@v){semver}"
         at_version_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(at_version_pattern, content):
             patterns.append((at_version_pattern, at_version_replacement))
