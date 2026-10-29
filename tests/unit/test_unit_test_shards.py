@@ -781,10 +781,10 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         manager = pytest.PytestPluginManager()
         config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
         sharding.configure(config)
-        first = manager.get_plugin("ash-shard-empty-admitted")
+        first = manager.get_plugin("ash-tier-run-outcome")
         assert first is not None
         sharding.configure(config)
-        assert manager.get_plugin("ash-shard-empty-admitted") is first
+        assert manager.get_plugin("ash-tier-run-outcome") is first
 
     def test_configure_registers_nothing_for_a_whole_run(self, monkeypatch):
         """No shard and not under GitHub Actions: a developer's plain ``pytest``."""
@@ -792,10 +792,10 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         monkeypatch.delenv(sharding.CI_ENV_VAR, raising=False)
         manager = pytest.PytestPluginManager()
         sharding.configure(SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager))
-        assert manager.get_plugin("ash-shard-empty-admitted") is None
+        assert manager.get_plugin("ash-tier-run-outcome") is None
 
     def test_the_plugin_counts_what_the_run_and_its_workers_deselected(self):
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         plugin.pytest_deselected([object(), object()])
         plugin.pytest_deselected([object()])
         finished = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: 3})
@@ -808,7 +808,7 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         written: list[str] = []
         session = self._session("3of8", "integration", written)
         session.config.workeroutput = {}
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         plugin.pytest_deselected([object(), object()])
         plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
         assert session.config.workeroutput == {sharding.WORKEROUTPUT_KEY: 2}
@@ -817,7 +817,7 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
     def test_the_controller_admits_on_the_sum_of_its_workers_counts(self):
         written: list[str] = []
         session = self._session("3of8", "integration", written)
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         for count in (1, 1):
             node = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: count})
             plugin.pytest_testnodedown(node, None)
@@ -891,7 +891,7 @@ class TestATierRunThatExecutedNoTestFails:
             collected=0,
             status=pytest.ExitCode.NO_TESTS_COLLECTED,
         )
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         plugin.pytest_deselected([object()] * 4)
         plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
         assert session.exitstatus == pytest.ExitCode.OK
@@ -963,7 +963,7 @@ class TestATierRunThatExecutedNoTestFails:
         )
 
     def test_the_plugin_counts_executed_and_skipped_tests_from_their_reports(self):
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         reports = [
             # passed: setup, call, teardown
             self._report("setup", "passed"),
@@ -988,7 +988,7 @@ class TestATierRunThatExecutedNoTestFails:
         """The workers' own counts are not summed too: that would count each test twice."""
         written: list[str] = []
         session = self._session(written)
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         for _ in range(3):
             plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
         node = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: 0})
@@ -1001,7 +1001,7 @@ class TestATierRunThatExecutedNoTestFails:
         written: list[str] = []
         session = self._session(written)
         session.config.workeroutput = {}
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.OK and not written
 
@@ -1013,7 +1013,7 @@ class TestATierRunThatExecutedNoTestFails:
         manager = pytest.PytestPluginManager()
         config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
         sharding.configure(config)
-        assert manager.get_plugin("ash-shard-empty-admitted") is not None
+        assert manager.get_plugin("ash-tier-run-outcome") is not None
         assert config.stash[sharding._CI_KEY] is True
 
     @pytest.mark.parametrize("value", ["false", "1", ""])
@@ -1023,7 +1023,7 @@ class TestATierRunThatExecutedNoTestFails:
         manager = pytest.PytestPluginManager()
         config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
         sharding.configure(config)
-        assert manager.get_plugin("ash-shard-empty-admitted") is None
+        assert manager.get_plugin("ash-tier-run-outcome") is None
         assert config.stash[sharding._CI_KEY] is False
 
 

@@ -185,7 +185,7 @@ def configure(config: pytest.Config) -> None:
     # GitHub Actions needs it for the executed-test floor, sharded or not.
     plugins = getattr(config, "pluginmanager", None)
     if (shard is not None or under_ci) and plugins is not None:
-        plugins.register(_AdmitAnEmptyShard(), _EMPTY_SHARD_PLUGIN)
+        plugins.register(_TierRunOutcome(), _TIER_RUN_PLUGIN)
 
 
 def admit_empty_shard(session: Any, exitstatus: Any, deselected: int) -> bool:
@@ -276,10 +276,10 @@ def fail_a_tier_run_that_executed_no_test(
 WORKEROUTPUT_KEY = "ash_shard_deselected"
 
 
-class _AdmitAnEmptyShard:
-    """The plugin object ``configure`` registers for a run with a shard or under CI.
+class _TierRunOutcome:
+    """The outcome of a tier run: the empty-shard admission and the executed-test floor.
 
-    A class because tests/conftest.py already defines the module-level
+    ``configure`` registers it for a run with a shard or under CI. A class because tests/conftest.py already defines the module-level
     ``pytest_sessionfinish`` that a hook imported by name would have to share, and
     because it holds the counts of the run: the items it deselected, and the tests it
     executed and skipped.
@@ -332,7 +332,7 @@ class _AdmitAnEmptyShard:
 
 
 #: The name the plugin object is registered under, once per config.
-_EMPTY_SHARD_PLUGIN = "ash-shard-empty-admitted"
+_TIER_RUN_PLUGIN = "ash-tier-run-outcome"
 
 
 def pytest_configure(config: pytest.Config) -> None:
