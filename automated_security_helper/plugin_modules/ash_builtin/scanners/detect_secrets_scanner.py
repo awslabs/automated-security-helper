@@ -282,6 +282,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     # gate has passed a chosen baseline.
     _baseline_real: Optional[Path] = PrivateAttr(default=None)
 
+    # The chosen baseline as it was named, anchored to the source directory but
+    # with no link resolved: the path whose location decides whose settings the
+    # baseline carries (_untrusted_baseline_reason) and whether an MCP client
+    # delivered it (_baseline_refusal). A ``.secrets.baseline`` inside the tree
+    # that is a link to a file outside it is judged where it sits, not where it
+    # points. None until a baseline is chosen.
+    _baseline_named: Optional[Path] = PrivateAttr(default=None)
+
     # Whether the settings, as configured, may verify secrets with their issuers.
     # Decided once from where each setting came from (_apply_settings_trust); the scan
     # checks it again, so a verification filter added afterwards does not run.
@@ -493,6 +501,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         self._configured_baseline_missing = False
         self._configured_baseline_refused = False
         self._chosen_baseline = None
+        self._baseline_named = None
         possible_baseline_paths = [
             (item, from_option)
             for item, from_option in [
@@ -524,22 +533,33 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             refused_derived_product,
             resolved_path,
         )
+        from automated_security_helper.config.sandbox_grants import is_within
 
         context_config = getattr(self.context, "config", None)
         source_dir = Path(getattr(self.context, "source_dir", None) or ".")
+        source_real = Path(os.path.realpath(source_dir))
 
         # Look through each baseline file path to see if it exists and configure
         # the scan settings according to the first baseline file found. Each
         # candidate is resolved once, from the scanned tree as the gate does,
-        # and that one path is what is checked for existence, judged, stored
-        # and later opened, so the file judged is the file read whatever
-        # directory the process runs in. The as-given spelling is kept only
-        # for the redacted text and for the operator-written comparison.
+        # and that one path is what is checked for existence, stored and later
+        # opened, so the file read is the file the gate checked whatever
+        # directory the process runs in. The candidate is JUDGED by the path
+        # as named, anchored to the source directory with no link resolved
+        # (``named``): a ``.secrets.baseline`` in the tree that is a link to a
+        # file outside it was judged by its target's location, which made the
+        # repository's settings, its verification filter included, read as the
+        # operator's. The as-given spelling is kept for the redacted text and
+        # for the operator-written comparison.
         chosen = None
+        chosen_named = None
         option_refused = False
         option_missing = None
         for baseline_path, from_option in possible_baseline_paths:
             resolved_baseline = resolved_path(baseline_path, source_dir)
+            named = Path(os.path.expanduser(str(baseline_path)))
+            if not named.is_absolute():
+                named = source_dir / named
             ASH_LOGGER.debug(
                 text_without_values(
                     f"Checking for detect-secrets config @ {baseline_path}",
@@ -547,6 +567,25 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
             )
             if resolved_baseline.exists():
+                if not from_option and not is_within(resolved_baseline, source_real):
+                    # A baseline found in the tree is the repository's file,
+                    # and the repository cannot need it to point outside its
+                    # own checkout. Reading the target would read a file the
+                    # repository chose anywhere on the scanning host, under
+                    # the repository's own settings. The operator names such
+                    # a file with baseline_file.
+                    ASH_LOGGER.warning(
+                        text_without_values(
+                            f"Not reading the detect-secrets baseline "
+                            f"{named.as_posix()} found in the scanned tree: it is "
+                            "a link to a file outside the scanned directory. "
+                            "Name the file with "
+                            "scanners.detect-secrets.options.baseline_file to "
+                            "use it.",
+                            values,
+                        )
+                    )
+                    continue
                 if refused_derived_product(
                     baseline_path,
                     source_dir=source_dir,
@@ -580,6 +619,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
 
                 chosen = resolved_baseline
+                chosen_named = named
                 break
             elif from_option:
                 # A missing configured baseline takes no checkout candidate in
@@ -590,9 +630,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # The gate: whether ASH may read the chosen baseline at all (an MCP
             # client delivered it; a sandboxed scan may read it only inside the
             # source tree or a granted extra_read_paths entry). The resolved
-            # path checked here is the one _read_baseline opens and binds to.
+            # path checked here is the one _read_baseline opens and binds to;
+            # the named path is what an MCP client's delivered-tree test sees.
             real_baseline = Path(os.path.realpath(chosen))
-            refusal = self._baseline_refusal(Path(chosen), real_baseline)
+            refusal = self._baseline_refusal(Path(chosen_named), real_baseline)
             if refusal is not None:
                 ASH_LOGGER.warning(
                     text_without_values(
@@ -609,6 +650,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # the operator wrote, as it does for a missing or refused file.
                 self._chosen_baseline = chosen
                 self._baseline_real = real_baseline
+                self._baseline_named = Path(chosen_named)
         elif option_missing is not None:
             # The configured file is not on disk, and no checkout candidate
             # replaces it. The path as the config gave it can be a value the
@@ -888,9 +930,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if not self._baseline_in_use():
             return None
         baseline = self._baseline_file_path()
+        # Judged where it was named, not where it points: an in-tree
+        # ``.secrets.baseline`` that is a link out of the tree is the
+        # repository's (_baseline_named). The resolved path is the fallback
+        # for a baseline no selection pass recorded.
+        judged = self._baseline_named if self._baseline_named is not None else baseline
         config = getattr(self.context, "config", None)
         root = getattr(config, "_scanned_root", None) or self.context.source_dir
-        why = scanned_checkout_reason(Path(baseline), root)
+        why = scanned_checkout_reason(Path(judged), root)
         if why is not None:
             return f"the baseline {Path(baseline).as_posix()} is used, and {why}"
         if record is None or same_baseline(
