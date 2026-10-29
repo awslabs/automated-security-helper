@@ -13,18 +13,18 @@ step 3 creates a small repository to test the gate on.
 
 ## 1. Build the image and push it to your registry
 
-ASH publishes no prebuilt image. Build one from `v3.7.0`, name it for your registry,
+ASH publishes no prebuilt image. Build one from `v3.7.1`, name it for your registry,
 and push it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.0
-ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.0 \
+export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.1
+ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.1 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
 
-You should see `Building image registry.example.com/security/ash:3.7.0`, a few minutes
+You should see `Building image registry.example.com/security/ash:3.7.1`, a few minutes
 of build output, and then the push. `--oci-runner docker` builds with the runtime you push
 with; without it, ASH uses finch when finch is installed. The image holds every scanner
 tool and runs as a non-root user with the UID and GID you passed; use the ones your CI
@@ -181,7 +181,7 @@ docker run --rm \
   --mount type=bind,source="$PWD/../ash-results",destination=/out \
   --mount type=bind,source=/etc/ash/ash.yaml,destination=/etc/ash/ash.yaml,readonly \
   --env ASH_CONFIG=/etc/ash/ash.yaml \
-  registry.example.com/security/ash:3.7.0 \
+  registry.example.com/security/ash:3.7.1 \
   ash scan --source-dir /src --output-dir /out
 ```
 
@@ -221,7 +221,7 @@ rebuild the image on a schedule with it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v3.7.0 \
+ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v3.7.1 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```

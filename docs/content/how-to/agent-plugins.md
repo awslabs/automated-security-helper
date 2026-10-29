@@ -16,7 +16,7 @@ Every MCP configuration in these files starts the server the same way:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.1",
         "ash",
         "mcp"
       ]
@@ -25,7 +25,7 @@ Every MCP configuration in these files starts the server the same way:
 }
 ```
 
-`uvx` installs ASH v3.7.0 from GitHub the first time the agent starts the server, and
+`uvx` installs ASH v3.7.1 from GitHub the first time the agent starts the server, and
 reuses that copy afterward. The plugin does not need ASH installed separately.
 
 ## Prerequisites
@@ -45,7 +45,7 @@ reuses that copy afterward. The plugin does not need ASH installed separately.
 
     <!-- doctest: illustrative reason="downloads ASH and scanner tools from the network" -->
     ```bash
-    uvx --python 3.12 --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash dependencies install
+    uvx --python 3.12 --from=git+https://github.com/awslabs/automated-security-helper@v3.7.1 ash dependencies install
     ```
 
     Without them the scans still run, but a scan ends with status `incomplete` when a scanner
@@ -76,7 +76,7 @@ not installed:
       "args": [
         "--python",
         "3.12",
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.1",
         "ash",
         "mcp"
       ]
@@ -236,7 +236,7 @@ tutorial](../getting-started/agents.md#3-connect-the-agent).
 
 ## Change the ASH version a plugin uses
 
-Each file pins ASH v3.7.0, the release this repository's files were generated for. To
+Each file pins ASH v3.7.1, the release this repository's files were generated for. To
 use another release, change the tag in the `uvx --from` argument of the installed MCP
 configuration, for example in `.mcp.json`, `.cursor/mcp.json`, or `.vscode/mcp.json`. Older
 releases have fewer MCP tools than the [MCP tools reference](../reference/mcp-tools.md) lists.

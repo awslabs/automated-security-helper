@@ -183,10 +183,15 @@ every 3.x release, including the minor releases that carry breaking changes unde
 release line above.
 
 The tag workflow only tags `main`. A patch release for an older version is built on a
-branch from that version's tag, outside the workflow: 3.7.1, for example, is built on
-3.7.0, is not in `main`'s history, and has no entry in `main`'s `CHANGELOG.md`. When such a
-release is the newest one, `v3` points at it, so `v3` can name a commit that is not on
-`main`, and the version that `main` reports can be lower than the newest tag.
+branch from that version's tag, outside the workflow: 3.7.1, for example, was built on
+3.7.0, and its tag is not in `main`'s history. When such a release is the newest one, `v3`
+points at it, so `v3` can name a commit that is not on `main`. Until its bump is brought
+back to `main`, the version that `main` reports is lower than the newest tag and `main`'s
+`CHANGELOG.md` has no entry for it; 3.7.1's bump, changelog entry and install pins were
+brought back after the fact, so that an install of `main` reports the newest release.
+Do that for any later patch release too: bump `main` to the patch version with
+`cz bump <version> --version-files-only --check-consistency` (the tag already exists),
+copy the tag's `CHANGELOG.md` entry, rerun `generate` below, and commit.
 
 ## The documentation site
 

@@ -64,13 +64,27 @@ class VersionTemplateManager:
         # release; scripts/docs_checks.py enforces that with release_in_install_ref.
         self.release_placeholder = "{{RELEASE}}"
 
-        # Files to process (relative to project root)
+        # Files to process (relative to project root). Every page with a
+        # `.template` sibling is listed, because `generate` renders only what is
+        # named here and the round-trip test reads this list: a template with no
+        # entry is never rendered, so its page keeps the pin of the release it was
+        # written at. The tutorials pages were replaced by the getting-started and
+        # how-to pages (docs/redirects.yml), so their entries went with them.
         self.target_files = [
             "README.md",
             "docs/content/docs/advanced-usage.md",
-            "docs/content/tutorials/running-ash-in-ci.md",
-            "docs/content/tutorials/running-ash-locally.md",
-            "docs/content/tutorials/using-ash-with-pre-commit.md",
+            "docs/content/getting-started/ci.md",
+            "docs/content/getting-started/local.md",
+            "docs/content/getting-started/platform-teams.md",
+            "docs/content/how-to/agent-plugins.md",
+            "docs/content/how-to/ci/github-actions.md",
+            "docs/content/how-to/ci/gitlab-ci.md",
+            "docs/content/how-to/ci/other-ci.md",
+            "docs/content/how-to/install.md",
+            "docs/content/how-to/pre-commit.md",
+            "docs/content/how-to/run-in-a-container.md",
+            "docs/content/how-to/scale-large-repos.md",
+            "docs/content/how-to/suppress-findings.md",
             "examples/streamlit_ui/README.md",
         ]
 
