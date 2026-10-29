@@ -958,11 +958,18 @@ def _carry_trusted_module_references(
     (``config_module_names``) and written as the file wrote it in the merged
     results (``config_validator.record_of_config``), as a shard records its
     own. The references sit on the trusted config at the indices of ITS list,
-    so each is moved to the index its name holds in ``loaded``; an entry of
-    several comma-joined names gets one per kept piece, re-resolved to the
-    piece, as ``reindex_plugin_module_references`` does. The three lists move
-    together. References into other config places are not the list's and stay
-    where they are: ``cli/merge.py`` carries those at the write.
+    so each is moved to the index its name holds in ``loaded``, under the one
+    rule ``reindex_plugin_module_references`` applies to its own list
+    (``_remapped_module_reference_lists``): an entry of several comma-joined
+    names gets one per kept piece, re-resolved to the piece; a name two trusted
+    entries both read is carried ONCE, from the first entry that holds it, so
+    the record never holds two rewrites at one index; and a trusted reference
+    recorded at or past the end of the trusted list refuses the carry
+    (PluginModuleReferenceError, ``config`` unchanged), as the reindex refuses
+    it, because such a reference describes no entry and dropping or keeping it
+    are the two harms that docstring names. The three lists move together.
+    References into other config places are not the list's and stay where they
+    are: ``cli/merge.py`` carries those at the write.
 
     ``only`` restricts the carry to the named pieces: the confinement carries
     the operator's off-host packages into a list the config itself wrote, and
@@ -972,44 +979,57 @@ def _carry_trusted_module_references(
     new_index = {
         name: i for i, name in enumerate(loaded) if only is None or name in only
     }
-    for attribute in (
-        "_environment_references",
-        "_displayed_environment_references",
-        "_written_references",
-    ):
-        carried: List[Any] = []
-        for reference in getattr(trusted_config, attribute, None) or ():
-            path = tuple(reference.path)
-            if not (
-                len(path) >= 2
-                and path[0] == "ash_plugin_modules"
-                and isinstance(path[1], int)
-                and path[1] < len(entries)
-            ):
+    seen: set[str] = set()
+    new_indices: Dict[int, List[int]] = {}
+    respelled: Dict[int, bool] = {}
+    for old, entry in enumerate(entries):
+        pieces = split_plugin_modules([entry])
+        respelled[old] = pieces != [entry]
+        mine: List[int] = []
+        for piece in pieces:
+            if piece in seen:
                 continue
-            entry = entries[path[1]]
-            pieces = split_plugin_modules([entry])
-            for piece in pieces:
-                index = new_index.get(piece)
-                if index is None:
-                    continue
-                new_path = ("ash_plugin_modules", index) + path[2:]
-                if attribute == "_written_references":
-                    moved = reference._replace(path=new_path)
-                    if pieces != [entry]:
-                        moved = moved._replace(resolved=piece, environment_part=piece)
-                else:
-                    moved = reference.moved_to_unknown_list(new_path)
-                    if pieces != [entry]:
-                        moved = replace(moved, resolved=piece, value=piece)
-                carried.append(moved)
-        if not carried:
+            seen.add(piece)
+            if piece in new_index:
+                mine.append(new_index[piece])
+        new_indices[old] = mine
+    sources = {
+        attribute: tuple(
+            reference
+            for reference in (getattr(trusted_config, attribute, None) or ())
+            if _names_a_plugin_module_entry(reference)
+        )
+        for attribute in _MODULE_REFERENCE_LISTS
+    }
+    carried = _remapped_module_reference_lists(
+        sources,
+        new_indices,
+        lambda old, index: loaded[index] if respelled[old] else None,
+        described_entries=len(entries),
+    )
+    for attribute, moved in carried.items():
+        if not moved:
             continue
         held = getattr(config, attribute, None) or ()
         if attribute == "_written_references":
-            setattr(config, attribute, [*held, *carried])
+            setattr(config, attribute, [*held, *moved])
         else:
-            setattr(config, attribute, (*tuple(held), *carried))
+            setattr(config, attribute, (*tuple(held), *moved))
+
+
+_MODULE_REFERENCE_LISTS = (
+    "_environment_references",
+    "_displayed_environment_references",
+    "_written_references",
+)
+
+
+def _names_a_plugin_module_entry(reference: Any) -> bool:
+    """Whether ``reference`` points into the ``ash_plugin_modules`` list."""
+    path = tuple(reference.path)
+    return (
+        len(path) >= 2 and path[0] == "ash_plugin_modules" and isinstance(path[1], int)
+    )
 
 
 def reindex_plugin_module_references(
@@ -1122,23 +1142,48 @@ def _remap_module_reference_lists(
     piece text a moved reference of a multi-piece entry re-resolves to, or
     None to keep the reference's own text. References into other config
     places are not the remap's and stay as they are.
+
+    The rebuild itself is ``_remapped_module_reference_lists``, which the
+    trusted-base carry (``_carry_trusted_module_references``) also applies to
+    the trusted config's lists, so the two movers share one rule.
+    """
+    sources = {
+        attribute: tuple(getattr(config, attribute, None) or ())
+        for attribute in _MODULE_REFERENCE_LISTS
+    }
+    moved_lists = _remapped_module_reference_lists(
+        sources, new_indices, piece_at, described_entries=described_entries
+    )
+    for attribute, rebuilt_list in moved_lists.items():
+        setattr(config, attribute, rebuilt_list)
+
+
+def _remapped_module_reference_lists(
+    sources: Mapping[str, Sequence[Any]],
+    new_indices: Mapping[int, Sequence[int]],
+    piece_at: Callable[[int, int], Optional[str]],
+    *,
+    described_entries: "Union[int, Literal['all']]",
+) -> Dict[str, Any]:
+    """Rebuild the reference lists in ``sources`` under the remap rule.
+
+    ``sources`` maps each of the three list names to the references it holds
+    now (``_remap_module_reference_lists`` passes a config's own lists; the
+    carry passes the trusted base's ``ash_plugin_modules`` references). The
+    result maps each NON-EMPTY source list to its rebuilt form: a tuple for
+    the two display lists, a list for the rewrites. Nothing is assigned here,
+    so a refusal leaves every caller's config exactly as it was. The rule is
+    ``_remap_module_reference_lists``'s docstring.
     """
     if described_entries != "all":
         # The whole check runs before any list is rebuilt, so a refusal
         # leaves the config exactly as it was: a half-moved config (displays
         # rebuilt, rewrites untouched) would be a state nothing documents.
-        for attribute in (
-            "_environment_references",
-            "_displayed_environment_references",
-            "_written_references",
-        ):
-            for reference in getattr(config, attribute, None) or ():
+        for attribute in _MODULE_REFERENCE_LISTS:
+            for reference in sources.get(attribute, None) or ():
                 path = tuple(reference.path)
-                if (
-                    len(path) >= 2
-                    and path[0] == "ash_plugin_modules"
-                    and isinstance(path[1], int)
-                    and path[1] >= described_entries
+                if _names_a_plugin_module_entry(reference) and (
+                    path[1] >= described_entries
                 ):
                     raise PluginModuleReferenceError(
                         f"ash_plugin_modules reference at index {path[1]} is "
@@ -1152,19 +1197,15 @@ def _remap_module_reference_lists(
     # together or not at all.
     moved_lists: Dict[str, Any] = {}
     for attribute in ("_environment_references", "_displayed_environment_references"):
-        references = tuple(getattr(config, attribute, ()) or ())
+        references = tuple(sources.get(attribute, None) or ())
         if not references:
             continue
         rebuilt = []
         for reference in references:
-            path = tuple(reference.path)
-            if not (
-                len(path) >= 2
-                and path[0] == "ash_plugin_modules"
-                and isinstance(path[1], int)
-            ):
+            if not _names_a_plugin_module_entry(reference):
                 rebuilt.append(reference)
                 continue
+            path = tuple(reference.path)
             old = path[1]
             for index in new_indices.get(old, ()):
                 moved = reference.moved_to_unknown_list(
@@ -1175,18 +1216,14 @@ def _remap_module_reference_lists(
                     moved = replace(moved, resolved=piece, value=piece)
                 rebuilt.append(moved)
         moved_lists[attribute] = tuple(rebuilt)
-    rewrites = list(getattr(config, "_written_references", None) or [])
+    rewrites = list(sources.get("_written_references", None) or [])
     if rewrites:
         rebuilt_rewrites = []
         for rewrite in rewrites:
-            path = tuple(rewrite.path)
-            if not (
-                len(path) >= 2
-                and path[0] == "ash_plugin_modules"
-                and isinstance(path[1], int)
-            ):
+            if not _names_a_plugin_module_entry(rewrite):
                 rebuilt_rewrites.append(rewrite)
                 continue
+            path = tuple(rewrite.path)
             old = path[1]
             if old not in new_indices:
                 # A dropped entry: its rewrite leaves with it (see the
@@ -1200,8 +1237,7 @@ def _remap_module_reference_lists(
                     moved = moved._replace(resolved=piece, environment_part=piece)
                 rebuilt_rewrites.append(moved)
         moved_lists["_written_references"] = rebuilt_rewrites
-    for attribute, rebuilt_list in moved_lists.items():
-        setattr(config, attribute, rebuilt_list)
+    return moved_lists
 
 
 def drop_plugin_module_references_past_the_list(
