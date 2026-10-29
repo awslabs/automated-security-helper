@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404 - this script drives `ash scan`
 import sys
@@ -211,12 +212,36 @@ def read_durations(output: Path) -> Dict[str, float]:
     }
 
 
+_SELECTED_BACKEND = re.compile(r"Scanner sandbox: using (\S+) \(--sandbox (\S+)\)")
+
+
+def selected_backend(log_text: str, requested: str) -> Optional[str]:
+    """The backend ASH resolved for ``--sandbox <requested>``, read from ash.log.
+
+    ASH logs the RESOLVED backend with the requested mode in parentheses, so
+    ``--sandbox auto`` appears as ``Scanner sandbox: using bwrap (--sandbox
+    auto)``. Matching the requested word against the backend name made every
+    ``auto`` run read as "never selected" and the per-scanner lines, which also
+    name the resolved backend, as "ran but not under auto". None when the log
+    holds no selection line for the requested mode.
+    """
+    for match in _SELECTED_BACKEND.finditer(log_text):
+        if match.group(2) == requested:
+            return match.group(1)
+    return None
+
+
 def compare(label: str, off: Path, boxed: Path) -> Tuple[List[dict], List[str]]:
     off_status, off_findings, off_shapes = read_results(off)
     box_status, box_findings, box_shapes = read_results(boxed)
     off_seconds, box_seconds = read_durations(off), read_durations(boxed)
     rows, problems = [], []
-    for name in sorted(set(off_status) | set(box_status)):
+    # Every bucket findings were filed under, not only the scanners the rollup
+    # names: a result whose scanner_name is absent from scanner_results (the "?"
+    # fallback included) was never compared, so a sandbox that dropped or
+    # renamed such a bucket passed parity.
+    names = set(off_status) | set(box_status) | set(off_findings) | set(box_findings)
+    for name in sorted(names):
         a, b = off_status.get(name), box_status.get(name)
         fa, fb = off_findings.get(name, set()), box_findings.get(name, set())
         row = {
@@ -322,7 +347,10 @@ def main() -> int:
         # since the backend no longer shows in the results, only the log can say.
         log_text = (boxed / "ash.log").read_text(encoding="utf-8", errors="replace")
         box_statuses, _, _ = read_results(boxed)
-        if f"Scanner sandbox: using {args.sandbox}" not in log_text:
+        # The log names the backend ASH resolved, so --sandbox auto reads as the
+        # backend it chose; see selected_backend.
+        backend = selected_backend(log_text, args.sandbox)
+        if backend is None:
             problems.append(
                 f"[{label}] the sandboxed run never selected {args.sandbox}"
             )
@@ -330,10 +358,13 @@ def main() -> int:
             if status in ("SKIPPED", "MISSING"):
                 continue
             if (
-                f"Scanner sandbox: {name} on source runs under {args.sandbox}"
+                backend is None
+                or f"Scanner sandbox: {name} on source runs under {backend}"
                 not in log_text
             ):
-                problems.append(f"[{label}] {name} ran but not under {args.sandbox}")
+                problems.append(
+                    f"[{label}] {name} ran but not under {backend or args.sandbox}"
+                )
         statuses, findings, _ = read_results(off)
         total = sum(len(f) for f in findings.values())
         if total < args.min_findings:
