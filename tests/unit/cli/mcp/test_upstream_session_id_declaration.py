@@ -473,10 +473,14 @@ def _ctx_carrying(caller):
     context it is given, so handing it one request's stamp fixes what the
     refusal may say about cause and mode; no state outside the request can.
     """
+    from mcp.server.mcpserver import Context
+
     from automated_security_helper.cli.mcp.http_sessions import CALLER_SCOPE_KEY
 
+    # A Context the SDK built: the refusal reads a stamp only through the same
+    # type test the resolution applies, so a plain stand-in carries none.
     request = SimpleNamespace(scope={CALLER_SCOPE_KEY: caller})
-    return SimpleNamespace(request_context=SimpleNamespace(request=request))
+    return Context(request_context=SimpleNamespace(request=request))
 
 
 def test_the_refusal_names_the_protocol_version_as_a_cause() -> None:
@@ -489,7 +493,7 @@ def test_the_refusal_names_the_protocol_version_as_a_cause() -> None:
     refusal = session_identity_refusal(
         UNIDENTIFIED_SESSION_ID,
         "clear_source",
-        _ctx_carrying(_version_refused_stateful_caller()),
+        ctx=_ctx_carrying(_version_refused_stateful_caller()),
     )
 
     assert refusal is not None
@@ -523,9 +527,11 @@ def test_the_protocol_version_cause_does_not_outlive_the_request_that_set_it() -
 
     ctx = _ctx_carrying(_version_refused_stateful_caller())
     with_request = session_identity_refusal(
-        UNIDENTIFIED_SESSION_ID, "clear_source", ctx
+        UNIDENTIFIED_SESSION_ID, "clear_source", ctx=ctx
     )
-    without_request = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+    without_request = session_identity_refusal(
+        UNIDENTIFIED_SESSION_ID, "clear_source", ctx=None
+    )
 
     assert with_request is not None and without_request is not None
     assert "newer protocol version" in with_request["error"], with_request
@@ -546,7 +552,7 @@ def test_an_interleaved_resolution_does_not_change_the_refusals_cause() -> None:
     ctx = _ctx_carrying(_version_refused_stateful_caller())
     # Another caller's resolution runs between the request and its refusal.
     assert resolve_caller_session_id(_StandIn()) == "tenant-a"
-    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx)
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx=ctx)
 
     assert refusal is not None
     assert "newer protocol version" in refusal["error"], refusal
@@ -564,7 +570,9 @@ def test_a_refusal_for_a_passed_down_id_claims_no_cause() -> None:
         session_identity_refusal,
     )
 
-    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "scan_directory")
+    refusal = session_identity_refusal(
+        UNIDENTIFIED_SESSION_ID, "scan_directory", ctx=None
+    )
 
     assert refusal is not None
     assert "newer protocol version" not in refusal["error"], refusal
@@ -579,10 +587,10 @@ def test_a_request_no_ash_app_stamped_gets_the_mode_less_advice() -> None:
         session_identity_refusal,
     )
 
-    ctx = SimpleNamespace(
-        request_context=SimpleNamespace(request=SimpleNamespace(scope={}))
-    )
-    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx)
+    from mcp.server.mcpserver import Context
+
+    ctx = Context(request_context=SimpleNamespace(request=SimpleNamespace(scope={})))
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx=ctx)
 
     assert refusal is not None
     assert "newer protocol version" not in refusal["error"], refusal

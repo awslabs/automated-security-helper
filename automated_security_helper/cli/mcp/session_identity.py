@@ -376,15 +376,21 @@ def _caller_behind(ctx: object) -> Optional["HttpCaller"]:
     """The :class:`HttpCaller` stamped on the request behind ``ctx``, or None.
 
     Read from the request's own scope, so it is a fact about one request and
-    nothing else: no resolution order, no task-local state. A ``ctx`` that
+    nothing else: no resolution order, no task-local state. Only a Context the
+    SDK built carries a request a transport produced (:func:`_as_sdk_context`,
+    the same test :func:`resolve_caller_session_id` applies), so the refusal
+    reads the stamp of exactly the request the resolution read. A ``ctx`` that
     carries no request -- a stand-in, a Context used outside a request -- has
     no stamp.
     """
 
     from automated_security_helper.cli.mcp.http_sessions import caller_of
 
+    sdk_context = _as_sdk_context(ctx)
+    if sdk_context is None:
+        return None
     try:
-        request = getattr(getattr(ctx, "request_context", None), "request", None)
+        request = sdk_context.request_context.request
     except ValueError:
         # A Context used outside a request has no transport behind it.
         return None
@@ -392,24 +398,38 @@ def _caller_behind(ctx: object) -> Optional["HttpCaller"]:
 
 
 def session_identity_refusal(
-    session_id: str, operation: str, ctx: object = None
+    session_id: str, operation: str, *, ctx: object
 ) -> Optional[Dict[str, Any]]:
     """The refusal a session-dependent tool returns for an unidentified caller.
 
     Returns None when ``session_id`` names a session, or is None: only the
     :data:`UNIDENTIFIED_SESSION_ID` sentinel is refused.
 
-    ``ctx`` is the refused call's context. Whether the protocol version is the
-    cause, and which server mode the advice holds on, are read from the stamp
-    on the request behind it, so the text depends only on the request being
-    refused, never on whichever resolution ran last in the same task. A
-    refusal built without ``ctx`` -- an id another tool resolved and passed
-    down -- claims no cause and gives the mode-less advice.
+    ``ctx`` is the refused call's context, and is required so that a caller
+    that has one cannot leave it out and get the mode-less advice for a request
+    whose mode is known. Whether the protocol version is the cause, and which
+    server mode the advice holds on, are read from the stamp on the request
+    behind it (:func:`_caller_behind`, which admits only a Context the SDK built,
+    as :func:`resolve_caller_session_id` does), so the text depends only on the
+    request being refused, never on whichever resolution ran last in the same
+    task. A refusal built with ``ctx=None`` -- an id another tool resolved and
+    passed down, with no request in reach -- claims no cause and gives the
+    mode-less advice.
+
+    The advice names what works on the server the request reached: a stateful
+    server issues sessions at ``initialize``; an sse server issues its session
+    with the event stream, and ``--trust-upstream-session-id`` is refused there
+    (``mcp_command``), so the stateless advice would send an sse caller to a
+    flag the server cannot take; a stateless server serves no session unless
+    the operator declared an upstream one.
     """
 
     if session_id != UNIDENTIFIED_SESSION_ID:
         return None
-    from automated_security_helper.cli.mcp.http_sessions import MODE_STATEFUL
+    from automated_security_helper.cli.mcp.http_sessions import (
+        MODE_SSE,
+        MODE_STATEFUL,
+    )
 
     caller = _caller_behind(ctx) if ctx is not None else None
     protocol_sentence = (
@@ -420,7 +440,18 @@ def session_identity_refusal(
         if caller is not None and caller.protocol_version_is_cause
         else ""
     )
-    if caller is not None and caller.server_mode == MODE_STATEFUL:
+    if caller is not None and caller.server_mode == MODE_SSE:
+        # The server issues the session with the event stream; what works here
+        # is in the caller's hands, and no operator flag applies to sse.
+        error = (
+            f"{operation} needs a session, and this call carries none the server "
+            f"issued. An sse server issues its session with the event stream: "
+            f"send tool calls to the messages URL the stream's endpoint event "
+            f"gave, exactly as given, whose session_id names it. A session_id the "
+            f"server did not issue, or one given more than once in the URL, names "
+            f"no session, and an Mcp-Session-Id header is not read on sse."
+        )
+    elif caller is not None and caller.server_mode == MODE_STATEFUL:
         # The server already issues sessions, so operator advice to change the
         # mode would be noise; what works here is in the caller's hands.
         error = (
