@@ -25,6 +25,8 @@ from tests.snapshot.support.cli import (
     simulated_host,
 )
 
+pytestmark = pytest.mark.unit
+
 # Scanner and reporter answers that differ from pressing Enter.
 SCANNER_ANSWERS = {"checkov": "n", "grype": "n"}
 REPORTER_ANSWERS = {"html": "n", "yaml": "y"}

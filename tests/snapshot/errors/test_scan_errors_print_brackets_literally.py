@@ -14,6 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 SCAN = ["scan", "--no-progress", "--scanners", "bandit"]
 TAG = "[/bold]"
 

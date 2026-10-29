@@ -27,7 +27,11 @@ import json
 import subprocess  # nosec B404 - a fresh interpreter is the property under test
 import sys
 
+import pytest
+
 from tests.utils.helpers import importing_this_checkout
+
+pytestmark = pytest.mark.integration
 
 #: Runs ``sys.argv[1]`` (one of the scenarios below) in a fresh interpreter and
 #: prints what it found as JSON on the last line.

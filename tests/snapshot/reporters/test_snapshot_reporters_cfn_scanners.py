@@ -30,6 +30,8 @@ from tests.snapshot.support.reporter_catalog import (
     snapshot_extension,
 )
 
+pytestmark = pytest.mark.unit
+
 CFN_FIXTURES = REPO_ROOT / "tests" / "test_data" / "scanners" / "cfn_lint_guard"
 REPORTERS = ("markdown", "sarif", "text")
 

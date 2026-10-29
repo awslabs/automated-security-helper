@@ -35,6 +35,7 @@ def _src(in_tmp, project_build_files_in_cwd, monkeypatch):
     monkeypatch.setenv("COLUMNS", "1000")
 
 
+@pytest.mark.unit
 class TestRunnerSelection:
     @_POSIX_TEXT
     def test_no_runner_on_path(self, run_cli, snapshot, fake_docker, monkeypatch):
@@ -62,6 +63,7 @@ class TestRunnerSelection:
         assert run_cli(["build-image", "--no-run"]) == snapshot
 
 
+@pytest.mark.unit
 class TestRefusals:
     def test_non_numeric_container_uid(self, run_cli, snapshot, fake_docker):
         assert (
@@ -86,6 +88,7 @@ class TestRefusals:
         assert fake_docker.calls == []
 
 
+@pytest.mark.integration
 class TestDockerfileLookup:
     @_POSIX_TEXT
     def test_no_build_outside_a_checkout(self, run_cli, snapshot, fake_docker, in_tmp):
@@ -98,6 +101,7 @@ class TestDockerfileLookup:
         assert fake_docker.calls == ["run"]
 
 
+@pytest.mark.integration
 class TestBuildFailure:
     BUILD_ERROR = FakeStep(
         returncode=1,

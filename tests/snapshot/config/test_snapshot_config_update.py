@@ -16,6 +16,8 @@ import pytest
 
 from tests.snapshot.support.cli import CONFIG_HOSTS, run_cli, simulated_host
 
+pytestmark = pytest.mark.unit
+
 STARTING_CONFIG = """\
 # yaml-language-server: $schema=https://example.invalid/AshConfig.json
 project_name: snapshot-demo

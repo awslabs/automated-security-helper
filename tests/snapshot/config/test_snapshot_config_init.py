@@ -16,6 +16,8 @@ import yaml
 
 from tests.snapshot.support.cli import CONFIG_HOSTS, run_cli, simulated_host
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

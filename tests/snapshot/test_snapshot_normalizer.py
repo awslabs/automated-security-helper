@@ -31,6 +31,8 @@ from tests.snapshot.support.normalize import (
     default_normalizer,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def normalizer(tmp_path: Path) -> SnapshotNormalizer:

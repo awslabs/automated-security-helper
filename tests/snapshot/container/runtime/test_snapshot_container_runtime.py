@@ -152,16 +152,19 @@ def runner_store_in_environ(monkeypatch):
         monkeypatch.setenv(name, value)
 
 
+@pytest.mark.e2e
 def test_ash_version_in_image(snapshot):
     assert _in_image("ash", "--version") == snapshot
 
 
+@pytest.mark.e2e
 def test_build_image_help_in_image(text_snapshot):
     result = _in_image("ash", "build-image", "--help")
     assert result["exit_code"] == 0
     assert result["stdout"] == text_snapshot("txt")
 
 
+@pytest.mark.e2e
 @pytest.mark.usefixtures("runner_store_in_environ")
 def test_container_scan_of_the_fixture(
     run_cli, snapshot, fixture_repo, project_build_files_in_cwd
@@ -189,6 +192,7 @@ def test_container_scan_of_the_fixture(
     } == snapshot
 
 
+@pytest.mark.integration
 @pytest.mark.usefixtures("runner_store_in_environ")
 def test_an_invalid_config_is_refused_on_the_host_before_the_container_starts(
     run_cli, fixture_repo, project_build_files_in_cwd
@@ -228,6 +232,7 @@ def _wrapper_env() -> dict[str, str]:
     return env
 
 
+@pytest.mark.e2e
 def test_bash_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
     result = subprocess.run(  # nosec B603 - the repository's own wrapper, list args
         [
@@ -275,6 +280,7 @@ def _pwsh(script: str, cwd: Path, env: dict[str, str]) -> subprocess.CompletedPr
     )
 
 
+@pytest.mark.e2e
 def test_powershell_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
     # Invoke-ASH ends with `return $exitCode`, so the status is written to the output
     # stream after the container's own output, and the caller reads the process
@@ -293,6 +299,7 @@ def test_powershell_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
     } == snapshot
 
 
+@pytest.mark.integration
 def test_powershell_wrapper_without_a_runner(snapshot, in_tmp):
     (in_tmp / "src").mkdir()
     # No runner runs here, so pwsh gets a HOME of the test's own as well.
@@ -315,6 +322,7 @@ def test_powershell_wrapper_without_a_runner(snapshot, in_tmp):
     } == snapshot
 
 
+@pytest.mark.integration
 def test_powershell_wrapper_default_runner_discovery(snapshot, fixture_repo, in_tmp):
     # No -OCIRunner, no OCI_RUNNER, and no ASH_OCI_RUNNER. Invoke-ASH tries finch,
     # docker, nerdctl, and podman in turn, and every leg running this has at least one

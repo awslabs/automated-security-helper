@@ -21,6 +21,8 @@ import pytest
 
 from tests.snapshot.support.cli import CONFIG_HOSTS, run_cli, simulated_host
 
+pytestmark = pytest.mark.unit
+
 #: scanner name -> (detected version, dependencies_satisfied). Scanners not listed
 #: report neither, which renders as "Unknown" / "Unknown".
 FAKE_PROBES = {

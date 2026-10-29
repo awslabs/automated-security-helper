@@ -90,6 +90,7 @@ def _ci_files() -> list[Path]:
     return files
 
 
+@pytest.mark.unit
 def test_banned_flag_scanner_detects_an_invocation() -> None:
     # Negative control: the forms a workflow would actually use are found.
     assert banned_flags("run: uv run pytest tests --snapshot-update")
@@ -99,6 +100,7 @@ def test_banned_flag_scanner_detects_an_invocation() -> None:
     assert not banned_flags("run: uv run pytest tests/snapshot")
 
 
+@pytest.mark.unit
 def test_no_ci_file_passes_snapshot_update_or_warn_unused() -> None:
     files = _ci_files()
     assert any(p.name == "ash-unified-ci.yml" for p in files), "scanned the wrong tree"
@@ -122,6 +124,7 @@ def test_no_ci_file_passes_snapshot_update_or_warn_unused() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_every_snapshot_belongs_to_an_existing_test_module(trailers) -> None:
     assert trailers.find_orphans(REPO_ROOT) == []
 
@@ -131,6 +134,7 @@ def _git_init(path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(path)], check=True)
 
 
+@pytest.mark.integration
 def test_orphan_check_reports_a_deleted_module(trailers, tmp_path: Path) -> None:
     _git_init(tmp_path)
     snaps = tmp_path / "tests/x/__snapshots__"
@@ -149,6 +153,7 @@ def test_orphan_check_reports_a_deleted_module(trailers, tmp_path: Path) -> None
     assert "tests/y/__snapshots__/ is empty" in problems
 
 
+@pytest.mark.integration
 def test_orphan_check_counts_tracked_and_untracked_but_not_ignored(
     trailers, tmp_path: Path
 ) -> None:
@@ -179,6 +184,7 @@ def test_orphan_check_counts_tracked_and_untracked_but_not_ignored(
     assert "pytest-temp" not in problems
 
 
+@pytest.mark.integration
 def test_orphan_check_refuses_a_tree_git_cannot_read(
     trailers, tmp_path: Path, monkeypatch
 ) -> None:
@@ -201,6 +207,7 @@ def repo(trailers, tmp_path: Path):
     return trailers._Repo(tmp_path / "repo")
 
 
+@pytest.mark.integration
 def test_self_test_passes(trailers, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     assert trailers.self_test() == 0
@@ -211,6 +218,7 @@ def test_self_test_passes(trailers, tmp_path: Path, monkeypatch) -> None:
 _NTFS_FORBIDDEN = re.compile(r'[<>:"|?*\\\x00-\x1f]')
 
 
+@pytest.mark.integration
 def test_self_test_writes_only_names_a_windows_checkout_can_hold(
     trailers, tmp_path: Path, monkeypatch
 ) -> None:
@@ -234,6 +242,7 @@ def test_self_test_writes_only_names_a_windows_checkout_can_hold(
     assert trailers.self_test() == 0
 
 
+@pytest.mark.integration
 def test_golden_change_without_trailer_fails(trailers, repo, capsys) -> None:
     # NEGATIVE CONTROL: the check exists to produce this failure.
     path = "tests/snapshot/__snapshots__/test_cli/summary.md"
@@ -247,12 +256,14 @@ def test_golden_change_without_trailer_fails(trailers, repo, capsys) -> None:
     assert "git commit --amend --no-edit --trailer" in out
 
 
+@pytest.mark.integration
 def test_golden_change_with_trailer_passes(trailers, repo) -> None:
     repo.write("tests/snapshot/__snapshots__/test_cli.ambr", "new\n")
     repo.commit("feat(cli): change\n\nSnapshot-Update: the summary gained a column")
     assert trailers.run_check(repo.path, trailers.Range(repo.base, "HEAD", "t")) == 0
 
 
+@pytest.mark.integration
 def test_fix_for_an_older_commit_is_a_rebase(trailers, repo, capsys) -> None:
     path = "tests/snapshot/__snapshots__/test_cli.ambr"
     repo.write(path, "new\n")
@@ -270,6 +281,7 @@ _MCP_TOOL_REFERENCE = (
 )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("path", "golden"),
     [
@@ -298,6 +310,7 @@ def test_golden_set(trailers, path: str, golden: bool) -> None:
     assert bool(trailers.golden_reason(path)) is golden
 
 
+@pytest.mark.unit
 def test_golden_set_names_files_that_exist(trailers) -> None:
     # A golden pattern that matches nothing in the tree is a typo that silently exempts
     # the file it meant.
@@ -321,6 +334,7 @@ def test_golden_set_names_files_that_exist(trailers) -> None:
         )
 
 
+@pytest.mark.integration
 def test_squash_sections_expose_mid_message_trailers(trailers, repo) -> None:
     message = (
         "feat: x (#1)\n\n"
