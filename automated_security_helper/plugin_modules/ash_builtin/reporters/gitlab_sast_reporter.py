@@ -276,15 +276,13 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 }
             )
 
-        # Scanner identifier
-        if scanner_name:
-            identifiers.append(
-                {
-                    "type": "scanner",
-                    "name": f"{scanner_name} Scanner",
-                    "value": scanner_name,
-                }
-            )
+        # No identifier for the scanner itself. GitLab deduplicates two findings
+        # that share a location fingerprint and any one identifier other than
+        # CWE or WASC, so a `{type: scanner, value: <scanner>}` identifier that
+        # every finding of one scanner carried made two different rules firing
+        # at one file and line into duplicates, and the Security Dashboard kept
+        # the first. The scanner is already named by the rule identifier's type
+        # above, by `details.scanner` and by `scan.scanner`.
 
         # ASH finding ID identifier
         identifiers.append(
