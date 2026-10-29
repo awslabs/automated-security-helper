@@ -2469,10 +2469,14 @@ class TestTheCombineGate:
         index: int,
         calls: list[str],
         *,
-        marker: str | None = None,
+        marker: str | None = "unit",
         count: int = 2,
     ):
-        """An artifact whose data came from running the named functions."""
+        """An artifact whose data came from running the named functions.
+
+        The name is the tiered one CI uploads today (``...-<tier>-shard<i>of<n>``);
+        ``marker=None`` builds the legacy marker-less name, which no job uploads.
+        """
         prefix = COMBINE.artifact_prefix(
             "ubuntu-latest", COVERAGE_PYTHON, "X64", marker
         )
@@ -2510,7 +2514,7 @@ class TestTheCombineGate:
         monkeypatch,
         results: Path,
         *,
-        marker: str | None = None,
+        marker: str | None = "unit",
     ) -> int:
         for name in list(os.environ):
             if name.startswith(("COV_CORE_", "COVERAGE_")):
@@ -2561,6 +2565,30 @@ class TestTheCombineGate:
         self._shard(tmp_path, results, 1, ["a", "b", "c", "d"])
         broken = self._shard(tmp_path, results, 2, ["a"])
         (broken / COMBINE.DATA_FILE).write_bytes(b"not a coverage data file")
+        assert self._gate(tmp_path, monkeypatch, results) == 1
+
+    def test_the_unit_tiers_one_artifact_missing_fails(self, tmp_path, monkeypatch):
+        """An unsharded unit run that uploaded nothing is not a passing tier.
+
+        The gate's failure paths are tested here against the ``-unit-shard1of1`` name
+        the action uploads, not only against a two-shard set.
+        """
+        results = tmp_path / "results"
+        results.mkdir()
+        assert self._gate(tmp_path, monkeypatch, results) == 1
+
+    def test_the_unit_tiers_one_artifact_unreadable_fails(self, tmp_path, monkeypatch):
+        results = tmp_path / "results"
+        broken = self._shard(tmp_path, results, 1, ["a", "b", "c", "d"], count=1)
+        (broken / COMBINE.DATA_FILE).write_bytes(b"not a coverage data file")
+        assert self._gate(tmp_path, monkeypatch, results) == 1
+
+    def test_the_legacy_marker_less_name_is_not_the_unit_tiers_set(
+        self, tmp_path, monkeypatch
+    ):
+        """The gate reads the tiered name; an artifact in the old shape is not found."""
+        results = tmp_path / "results"
+        self._shard(tmp_path, results, 1, ["a", "b", "c", "d"], marker=None, count=1)
         assert self._gate(tmp_path, monkeypatch, results) == 1
 
     def test_the_unit_tiers_one_artifact_is_a_complete_set(self, tmp_path, monkeypatch):
