@@ -2576,10 +2576,42 @@ class SarifReport(RecordModel):
         include_driver: bool = True,
         include_rules: bool = True,
     ):
+        """Fold every run of *sarif_report* into this report's first run.
+
+        Every run, not only the first. A scanner's SARIF can carry one run per
+        target or per rule set, and the per-scanner counts read them all, so a
+        merge that folded ``runs[0]`` alone dropped the findings of every later
+        run from the summary, the reports and the exit code while the scanner's
+        own row still counted them. Each incoming run's tool joins this report's
+        ``extensions`` and its results and invocations are appended to the first
+        run. A report whose own ``runs`` list is empty adopts the first incoming
+        run's tool and properties, then takes its results and invocations the
+        same way as every other run, so nothing is added twice.
+        """
         if sarif_report.runs is None or len(sarif_report.runs) == 0:
             return
+        if self.runs is None:
+            self.runs = []
 
-        report_run = sarif_report.runs[0]
+        for report_run in sarif_report.runs:
+            self._merge_run(
+                report_run, include_invocation, include_driver, include_rules
+            )
+
+        self.inlineExternalProperties.extend(sarif_report.inlineExternalProperties)
+        if sarif_report.properties.tags is not None:
+            if self.properties.tags is None:
+                self.properties.tags = []
+            self.properties.tags.extend(sarif_report.properties.tags)
+
+    def _merge_run(
+        self,
+        report_run: "Run",
+        include_invocation: bool,
+        include_driver: bool,
+        include_rules: bool,
+    ) -> None:
+        """Fold one run into this report's first run; see ``merge_sarif_report``."""
         report_tool = report_run.tool
         report_invocations = report_run.invocations
         report_results = []
@@ -2590,17 +2622,17 @@ class SarifReport(RecordModel):
                 # Remove `ruleIndex`, since we're reordering rules. RuleId should
                 # correctly correlate results to associated rules in our set of scanners
                 # without it.
-                exclude=["ruleIndex"]
+                exclude={"ruleIndex"},
+                # Only the fields the scanner stated. A full dump marks every field
+                # as set, so a result that stated no level came back with the
+                # default level set and resolve_missing_levels could no longer give
+                # it the level its rule's defaultConfiguration names.
+                exclude_unset=True,
             )
             report_results.append(Result(**clean_result))
-        if self.runs is None:
-            self.runs = []
 
-        self_run = self.runs[0] if self.runs is not None else None
-        if self_run is None:
-            cleaned_run = json.loads(report_run.model_dump_json())
-            self_run = Run(**cleaned_run)
-        else:
+        if self.runs:
+            self_run = self.runs[0]
             if include_driver:
                 if (
                     self_run.tool.extensions is None
@@ -2621,16 +2653,31 @@ class SarifReport(RecordModel):
                     )
                     if existing_extension is None:
                         self_run.tool.extensions.append(report_tool.driver)
-                    else:
-                        if include_rules:
-                            # Add rules if the rule.id doesn't already exist in existing_extension.rules
-                            cur_rule_id_hash = {
-                                rule.id: rule
-                                for rule in (existing_extension.rules or [])
+                    elif include_rules:
+                        # Add the rules whose id the existing extension does not
+                        # carry yet. Its rules list may be None (cfn-lint writes
+                        # none for a clean or an all-failed target), so it is
+                        # materialized before anything is appended to it.
+                        incoming_rules = report_tool.driver.rules or []
+                        if incoming_rules:
+                            if existing_extension.rules is None:
+                                existing_extension.rules = []
+                            known_rule_ids = {
+                                rule.id for rule in existing_extension.rules
                             }
-                            for rule in report_tool.driver.rules or []:
-                                if rule.id not in cur_rule_id_hash:
+                            for rule in incoming_rules:
+                                if rule.id not in known_rule_ids:
                                     existing_extension.rules.append(rule)
+                                    known_rule_ids.add(rule.id)
+        else:
+            # Adopt the incoming run's tool, properties and the rest, with its
+            # results and invocations left out: the common tail below adds them
+            # once, so an adopted run is not counted twice.
+            cleaned_run = json.loads(report_run.model_dump_json(exclude_unset=True))
+            cleaned_run.pop("results", None)
+            cleaned_run.pop("invocations", None)
+            self_run = Run(**cleaned_run)
+            self.runs.append(self_run)
 
         if self_run.results is None:
             self_run.results = []
@@ -2644,13 +2691,6 @@ class SarifReport(RecordModel):
             # told explicitly not to (default is to include)
             if include_invocation:
                 self_run.invocations.extend(report_invocations)
-        self.runs = [self_run]
-
-        self.inlineExternalProperties.extend(sarif_report.inlineExternalProperties)
-        if sarif_report.properties.tags is not None:
-            if self.properties.tags is None:
-                self.properties.tags = []
-            self.properties.tags.extend(sarif_report.properties.tags)
 
 
 Node.model_rebuild()
