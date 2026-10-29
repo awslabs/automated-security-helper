@@ -393,7 +393,7 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
                 files[normalized] += 1
         return files.most_common(1)[0][0] if files else None
 
-    def _build_minimal_empty_sbom(self) -> dict:
+    def _build_minimal_empty_sbom(self, inventory_known: bool = False) -> dict:
         """Build a minimal valid GitLab-flavored CycloneDX document.
 
         Used when no components are detected (e.g., infrastructure-only repos).
@@ -403,8 +403,16 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
 
         The minimal document includes the CycloneDX envelope and the GitLab
         schema version metadata property required by GitLab's parser.
+
+        *inventory_known* is False when no SBOM scanner produced an inventory
+        (it was missing, skipped or failed), and then the document carries a
+        ``compositions`` entry with aggregate ``unknown``, as the ``cyclonedx``
+        reporter does for the same case: an empty component list is not a
+        statement that the project has no dependencies, and without the marker
+        this document was byte-identical to the one a dependency-free repository
+        gets.
         """
-        return {
+        document: dict = {
             "bomFormat": "CycloneDX",
             "specVersion": "1.4",
             "version": 1,
@@ -418,6 +426,9 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
             },
             "components": [],
         }
+        if not inventory_known:
+            document["compositions"] = [{"aggregate": "unknown"}]
+        return document
 
     def report(self, model: "AshAggregatedResults") -> str | None:
         """Enrich CycloneDX with GitLab properties and serialize.
@@ -428,13 +439,18 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         for policy validation) don't fail on repos with no dependencies.
         """
 
-        # Guard: emit a minimal empty SBOM when no CycloneDX data is present
+        # Guard: emit a minimal empty SBOM when no CycloneDX data is present.
+        # No model means no SBOM scanner produced an inventory, so the document
+        # says the inventory is unknown rather than empty.
         if not model.cyclonedx:
             ASH_LOGGER.debug(
                 "gitlab-cyclonedx: No CycloneDX model present, "
                 "emitting minimal empty SBOM."
             )
-            return json.dumps(self._build_minimal_empty_sbom(), separators=(",", ":"))
+            return json.dumps(
+                self._build_minimal_empty_sbom(inventory_known=False),
+                separators=(",", ":"),
+            )
 
         # Serialize to dict for manipulation
         doc = model.cyclonedx.model_dump(
@@ -450,7 +466,14 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
                 "gitlab-cyclonedx: CycloneDX model has no components, "
                 "emitting minimal empty SBOM."
             )
-            return json.dumps(self._build_minimal_empty_sbom(), separators=(",", ":"))
+            # Every SBOM a scanner writes has metadata or a serial number; the
+            # default model, and its dump read back from a results file, have
+            # neither (the ``cyclonedx`` reporter's test for the same case).
+            inventory_known = bool(doc.get("metadata") or doc.get("serialNumber"))
+            return json.dumps(
+                self._build_minimal_empty_sbom(inventory_known=inventory_known),
+                separators=(",", ":"),
+            )
 
         # --- Inject metadata-level schema version property ---
         metadata = doc.setdefault("metadata", {})
@@ -463,48 +486,54 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         # GitLab's CycloneDX parser resolves the report-level source from
         # metadata.properties ONLY. Without these, the parser returns nil for
         # the source and fires "Required GitLab CycloneDX properties are missing".
+        #
+        # Not gated on a dominant ecosystem being found. The category is always
+        # known, and an operator's package_manager_override, language_override
+        # and input_file_path_override are set exactly for the repository whose
+        # components map to no ecosystem in the tables; gating on the dominant
+        # type dropped every one of these and left the report with no source
+        # properties at all, the case the overrides exist to cure.
         options = self.config.options
         dominant_type = self._resolve_dominant_type(components, options)
-        if dominant_type:
-            pm, lang = (None, None)
-            if dominant_type in PURL_TYPE_TO_GITLAB:
-                pm, lang = PURL_TYPE_TO_GITLAB[dominant_type]
-            elif dominant_type in SYFT_TYPE_TO_GITLAB:
-                pm, lang = SYFT_TYPE_TO_GITLAB[dominant_type]
+        pm, lang = (None, None)
+        if dominant_type in PURL_TYPE_TO_GITLAB:
+            pm, lang = PURL_TYPE_TO_GITLAB[dominant_type]
+        elif dominant_type in SYFT_TYPE_TO_GITLAB:
+            pm, lang = SYFT_TYPE_TO_GITLAB[dominant_type]
 
-            input_file = (
-                options.input_file_path_override
-                or self._dominant_input_file(components)
-                or _DEFAULT_LOCKFILES.get(dominant_type)
-            )
+        input_file = (
+            options.input_file_path_override
+            or self._dominant_input_file(components)
+            or (_DEFAULT_LOCKFILES.get(dominant_type) if dominant_type else None)
+        )
 
+        metadata_props.append(
+            {
+                "name": "gitlab:dependency_scanning:category",
+                "value": options.category,
+            }
+        )
+        if options.package_manager_override or pm:
             metadata_props.append(
                 {
-                    "name": "gitlab:dependency_scanning:category",
-                    "value": options.category,
+                    "name": "gitlab:dependency_scanning:package_manager:name",
+                    "value": options.package_manager_override or pm,
                 }
             )
-            if options.package_manager_override or pm:
-                metadata_props.append(
-                    {
-                        "name": "gitlab:dependency_scanning:package_manager:name",
-                        "value": options.package_manager_override or pm,
-                    }
-                )
-            if options.language_override or lang:
-                metadata_props.append(
-                    {
-                        "name": "gitlab:dependency_scanning:language:name",
-                        "value": options.language_override or lang,
-                    }
-                )
-            if input_file:
-                metadata_props.append(
-                    {
-                        "name": "gitlab:dependency_scanning:input_file:path",
-                        "value": input_file,
-                    }
-                )
+        if options.language_override or lang:
+            metadata_props.append(
+                {
+                    "name": "gitlab:dependency_scanning:language:name",
+                    "value": options.language_override or lang,
+                }
+            )
+        if input_file:
+            metadata_props.append(
+                {
+                    "name": "gitlab:dependency_scanning:input_file:path",
+                    "value": input_file,
+                }
+            )
 
         # --- Inject per-component properties ---
         enriched_count = 0
