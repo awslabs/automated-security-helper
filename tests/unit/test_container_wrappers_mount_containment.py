@@ -220,8 +220,9 @@ class TestTheBashWrapperMountsTheSourceReadOnly:
 # ./ash: only the arguments the wrapper means to pass reach the runner
 # ---------------------------------------------------------------------------
 
-#: Options the wrapper passes ``<runner> run`` itself, before the image name.
-_RUN_OPTIONS_WITHOUT_VALUE = {"--rm", "-t", "--network=none"}
+#: Options the wrapper passes ``<runner> run`` itself, before the image name. -i keeps
+#: the container's stdin open when the caller's stdin is a pipe or a file.
+_RUN_OPTIONS_WITHOUT_VALUE = {"--rm", "-t", "-i", "--network=none"}
 _RUN_ENV_KEYS = {
     "ASH_ACTUAL_SOURCE_DIR",
     "ASH_ACTUAL_OUTPUT_DIR",

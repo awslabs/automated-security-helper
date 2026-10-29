@@ -11,7 +11,9 @@ export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 
 # Set local variables
 SOURCE_DIR=""
-OUTPUT_DIR=".ash/ash_output"
+# Empty until the source directory is resolved: the default is .ash/ash_output inside
+# the scanned directory, as `ash scan` defaults it, not under the working directory.
+OUTPUT_DIR=""
 CONTAINER_UID_SPECIFIED="NO"
 CONTAINER_GID_SPECIFIED="NO"
 DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS:-}"
@@ -1146,6 +1148,15 @@ if [[ "${NO_RUN}" = "NO" ]]; then
   # protections below compare against it, so a link to the source counts.
   resolve_dir "${SOURCE_DIR}" -P
   SOURCE_PHYSICAL="${RESOLVED_DIR}"
+  # The default output directory is inside the scanned directory, where `ash scan`
+  # defaults it (source_dir/.ash/ash_output). Taken from the working directory, as it
+  # was, `./ash --source-dir sub` run from a checkout root wrote its reports beside the
+  # working directory, and a `.ash` link the repository commits at that root stood
+  # outside the linked-output rule below, which covers links below the source: the
+  # reports went where the link points.
+  if [ -z "${OUTPUT_DIR}" ]; then
+    OUTPUT_DIR="${SOURCE_DIR%/}/.ash/ash_output"
+  fi
   # The refusal gives mkdir's reason (the text after its last ": ", such as "Not a
   # directory") but not mkdir's line, which quotes the path in its own way: GNU mkdir
   # escapes control characters, and others need not.
@@ -1196,6 +1207,26 @@ if [[ "${NO_RUN}" = "NO" ]]; then
   # because creating it through a linked `.ash` already writes where the link points;
   # so --no-run would be refused as well, but it creates nothing and never reaches
   # here. `ash --mode container` and Invoke-ASH apply the same rule.
+  # Whether path $1 stands below the source directory: by name, under the source as
+  # given or under its physical path, or by place, when the directory that holds it
+  # resolves, every link followed, to the source or a directory under it. The name
+  # test alone decided by spelling: with the working directory itself a link to the
+  # source, an output path spelled through it (`.ash/ash_output` from there) named
+  # the source under a third name, and the committed `.ash` link it reached was
+  # followed. RESOLVED_DIR is left as it was found.
+  below_the_source() {
+    local parent="${1%/*}" resolved_before="${RESOLVED_DIR-}" below=1
+    case "$1" in
+      "${SOURCE_DIR%/}"/* | "${SOURCE_PHYSICAL%/}"/*) return 0 ;;
+    esac
+    if resolve_dir "${parent:-/}" -P; then
+      case "${RESOLVED_DIR%/}/" in
+        "${SOURCE_PHYSICAL%/}"/*) below=0 ;;
+      esac
+    fi
+    RESOLVED_DIR="${resolved_before}"
+    return "${below}"
+  }
   refuse_linked_output_dir() {
     local spelled="$1" rest part current="" link=""
     case "${spelled}" in
@@ -1211,11 +1242,10 @@ if [[ "${NO_RUN}" = "NO" ]]; then
         ..) current="${current%/*}"; continue ;;
       esac
       current="${current}/${part}"
-      case "${current}" in
-        "${SOURCE_DIR%/}"/* | "${SOURCE_PHYSICAL%/}"/*)
-          if [ -L "${current}" ]; then link="${current}"; break; fi
-          ;;
-      esac
+      if [ -L "${current}" ] && below_the_source "${current}"; then
+        link="${current}"
+        break
+      fi
     done
     if [ -z "${link}" ] && [ -n "${current}" ] && [ -L "${current}" ]; then
       link="${current}"
@@ -1506,7 +1536,11 @@ else
     if [[ "${DEBUG}" = "YES" ]]; then
       set -x
     fi
-    echo "Resolved OCI_RUNNER to: $(shown "${RESOLVED_OCI_RUNNER}")"
+    # This script's own status lines, here and below, go to stderr, and so does the
+    # build's output (the image ID under --quiet included): stdout is the container's
+    # alone, so `./ash report --format json > file` writes the report and nothing
+    # else into the file. Written to stdout, they stood at the top of it.
+    echo "Resolved OCI_RUNNER to: $(shown "${RESOLVED_OCI_RUNNER}")" >&2
 
     # Build the image if the --no-build flag is not set
     if [ "${NO_BUILD}" = "NO" ]; then
@@ -1546,26 +1580,29 @@ else
       # as a build context, spelled without the digest because nerdctl reads the image from
       # index.json and treats the rest of the value as the path, plus --pull=false, which nerdctl
       # maps to image-resolve-mode=local. See .github/actions/prepull-base-image for the rest.
-      BASE_IMAGE_OPTION=""
+      # An array, one argument per word: the layout directory is a path the action
+      # computed, and unquoted in a string it was split on its spaces and globbed,
+      # so a directory with a space in its name reached the build as two options.
+      BASE_IMAGE_OPTIONS=()
       if [[ -n "${ASH_BASE_OCI_LAYOUT:-}" ]]; then
         if [[ ! "${ASH_BASE_OCI_LAYOUT}" =~ ^(.+)@(sha256:[0-9a-f]{64})$ ]]; then
           refuse "ASH_BASE_OCI_LAYOUT is '$(shown "${ASH_BASE_OCI_LAYOUT}")', which is not <layout dir>@sha256:<64 hex>. Unset it to build from the Dockerfile's own base image reference."
         fi
         case "${OCI_RUNNER_NAME}" in
           nerdctl | finch)
-            BASE_IMAGE_OPTION="--build-context ash-base-image=oci-layout://${BASH_REMATCH[1]} --build-arg BASE_IMAGE=ash-base-image --pull=false"
-            echo "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, with no registry call."
+            BASE_IMAGE_OPTIONS=(--build-context "ash-base-image=oci-layout://${BASH_REMATCH[1]}" --build-arg BASE_IMAGE=ash-base-image --pull=false)
+            echo "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, with no registry call." >&2
             ;;
           *)
-            echo "Base image expected in $(shown "${OCI_RUNNER_NAME}")'s local store, placed there from the verified OCI layout named by ASH_BASE_OCI_LAYOUT."
+            echo "Base image expected in $(shown "${OCI_RUNNER_NAME}")'s local store, placed there from the verified OCI layout named by ASH_BASE_OCI_LAYOUT." >&2
             ;;
         esac
       elif [[ -n "${ASH_BASE_IMAGE_OVERRIDE:-}" ]]; then
         case "${ASH_BASE_IMAGE_OVERRIDE}" in
           -* | *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:/@-]*) refuse "ASH_BASE_IMAGE_OVERRIDE '$(shown "${ASH_BASE_IMAGE_OVERRIDE}")' starts with '-' or holds a character other than A-Z, a-z, 0-9 and . _ : / @ -, which no image reference does. Name an image reference with only those characters, or unset it to build from the Dockerfile's own base image reference." ;;
         esac
-        BASE_IMAGE_OPTION="--build-arg BASE_IMAGE=${ASH_BASE_IMAGE_OVERRIDE}"
-        echo "Base image redirected to $(shown "${ASH_BASE_IMAGE_OVERRIDE}") by ASH_BASE_IMAGE_OVERRIDE."
+        BASE_IMAGE_OPTIONS=(--build-arg "BASE_IMAGE=${ASH_BASE_IMAGE_OVERRIDE}")
+        echo "Base image redirected to $(shown "${ASH_BASE_IMAGE_OVERRIDE}") by ASH_BASE_IMAGE_OVERRIDE." >&2
       fi
       # A new BUILD_DATE_EPOCH re-runs the Dockerfile's core stage from its apt-get
       # upgrade step down, offline download included (see ARG BUILD_DATE_EPOCH there).
@@ -1573,11 +1610,11 @@ else
       # cache, and OS packages and offline databases are at most a day old.
       NOW_EPOCH="$(date +%s)"
       BUILD_DATE_EPOCH=$((NOW_EPOCH - NOW_EPOCH % 86400))
-      echo "Building image $(shown "${ASH_IMAGE_NAME}") -- this may take a few minutes during the first build..."
+      echo "Building image $(shown "${ASH_IMAGE_NAME}") -- this may take a few minutes during the first build..." >&2
       ${RESOLVED_OCI_RUNNER} build \
         ${CONTAINER_UID_OPTION} \
         ${CONTAINER_GID_OPTION} \
-        ${BASE_IMAGE_OPTION} \
+        "${BASE_IMAGE_OPTIONS[@]}" \
         --tag "${ASH_IMAGE_NAME}" \
         --target "${TARGET_STAGE}" \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
@@ -1586,7 +1623,7 @@ else
         --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \
         --build-arg BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}" \
         ${DOCKER_EXTRA_ARGS} \
-        "${ASH_ROOT_DIR}"
+        "${ASH_ROOT_DIR}" >&2
       BUILD_RC=$?
 
       # Captured on the line above, before anything else can overwrite $?.
@@ -1681,7 +1718,7 @@ else
           "${ASH_ARG_WORDS[@]:SANDBOX_OFF_AT}"
         )
       fi
-      echo "Running ASH scan using built image..."
+      echo "Running ASH scan using built image..." >&2
       # The mounted paths go in through ASH_SOURCE_DIR and ASH_OUTPUT_DIR rather than
       # as --source-dir/--output-dir in front of the arguments. A subcommand in the
       # arguments (`./ash report`) would otherwise be refused, because ash passes an
