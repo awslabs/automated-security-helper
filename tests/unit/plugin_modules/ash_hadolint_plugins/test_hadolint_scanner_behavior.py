@@ -38,6 +38,8 @@ from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scan
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.config_trust import record_provenance
 
+pytestmark = pytest.mark.unit
+
 FIXTURES = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "hadolint"
 CAPTURED = FIXTURES / "captured"
 

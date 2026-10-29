@@ -31,6 +31,8 @@ from tests.snapshot.support.reporter_catalog import (
     snapshot_extension,
 )
 
+pytestmark = pytest.mark.unit
+
 MANIFEST = FIXTURE_ROOT / "scanner_outputs_hadolint"
 SOURCE = REPO_ROOT / "tests" / "test_data" / "scanners" / "hadolint" / "positive"
 REPORTERS = ("csv", "flat-json", "markdown", "sarif", "text")

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 SCRIPT = (
     Path(__file__).resolve().parents[2]
     / ".github"

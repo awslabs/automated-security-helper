@@ -131,6 +131,7 @@ PYPI_SUSPICIOUS_EXPECTED = sorted(
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_real_capture_converts_to_one_result_per_risk():
     converted = convert_guarddog_scan_result(
         _capture("scan_pypi_pypi_suspicious.json"), uri_prefix="pkg", ecosystem="pypi"
@@ -159,6 +160,7 @@ def _mutate_file(doc):
 @pytest.mark.parametrize(
     "mutate", [_mutate_rule, _mutate_severity, _mutate_line, _mutate_file]
 )
+@pytest.mark.unit
 def test_mutated_capture_does_not_match_the_expectation(mutate):
     doc = _capture("scan_pypi_pypi_suspicious.json")
     mutate(doc)
@@ -223,12 +225,14 @@ def test_mutated_capture_does_not_match_the_expectation(mutate):
         ("scan_crates_crate_suspicious.json", []),
     ],
 )
+@pytest.mark.unit
 def test_each_ecosystem_capture(capture, expected):
     doc = _capture(capture)
     converted = convert_guarddog_scan_result(doc, uri_prefix="p", ecosystem="x")
     assert _summary(converted) == sorted(expected)
 
 
+@pytest.mark.unit
 def test_capabilities_are_info_and_only_on_request():
     doc = _capture("scan_crates_crate_suspicious.json")
     off = convert_guarddog_scan_result(doc, uri_prefix="", ecosystem="crates")
@@ -239,6 +243,7 @@ def test_capabilities_are_info_and_only_on_request():
     assert _summary(on) == [("capability-process-spawn", "INFO", "none", "build.rs", 4)]
 
 
+@pytest.mark.unit
 def test_a_capability_a_risk_used_is_not_called_uncorrelated():
     """GuardDog's JSON names the capability rule a risk used, not which match, so
     every capability match is reported, and none claims it was left out of a risk.
@@ -258,6 +263,7 @@ def test_a_capability_a_risk_used_is_not_called_uncorrelated():
         assert "not correlated" not in text, text
 
 
+@pytest.mark.unit
 def test_a_threat_guarddog_did_not_correlate_is_low():
     doc = _capture("scan_npm_npm_suspicious.json")
     doc["risks"] = []
@@ -268,12 +274,14 @@ def test_a_threat_guarddog_did_not_correlate_is_low():
     assert "not correlated" in converted.results[0].message.root.text
 
 
+@pytest.mark.unit
 def test_a_risk_and_its_threat_match_are_reported_once():
     doc = _capture("scan_npm_npm_suspicious.json")
     converted = convert_guarddog_scan_result(doc, uri_prefix="", ecosystem="npm")
     assert len(converted.results) == 1
 
 
+@pytest.mark.unit
 def test_a_metadata_rule_that_fired_is_medium():
     doc = _capture("scan_pypi_pypi_clean.json")
     doc["results"]["typosquatting"] = "This package closely ressembles: requests"
@@ -281,6 +289,7 @@ def test_a_metadata_rule_that_fired_is_medium():
     assert _summary(converted) == [("typosquatting", "MEDIUM", "warning", "pkg", None)]
 
 
+@pytest.mark.unit
 def test_metadata_rules_that_did_not_fire_are_ignored():
     doc = _capture("scan_pypi_pypi_clean.json")
     doc["results"]["typosquatting"] = None
@@ -301,10 +310,12 @@ def test_metadata_rules_that_did_not_fire_are_ignored():
         (None, "MEDIUM"),
     ],
 )
+@pytest.mark.unit
 def test_risk_severity_mapping(value, expected):
     assert _risk_severity(value) == expected
 
 
+@pytest.mark.unit
 def test_verify_findings_land_on_the_manifest_line_with_package_identity():
     entries = _capture("verify_pypi_requirements.json")
     entry = entries[0]
@@ -337,6 +348,7 @@ def test_verify_findings_land_on_the_manifest_line_with_package_identity():
     assert "six.py:735" in on.results[0].message.root.text
 
 
+@pytest.mark.unit
 def test_verify_risk_in_a_dependency_is_reported_on_the_manifest():
     entries = _capture("verify_pypi_requirements.json")
     result = copy.deepcopy(entries[0]["result"])
@@ -381,6 +393,7 @@ def test_verify_risk_in_a_dependency_is_reported_on_the_manifest():
         ("nothing\n", "six", None),
     ],
 )
+@pytest.mark.unit
 def test_manifest_line_for(text, name, expected):
     assert manifest_line_for(text, name) == expected
 
@@ -390,11 +403,13 @@ def test_manifest_line_for(text, name, expected):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_guarddog_is_on_by_default_once_its_module_is_listed():
     assert GuardDogScannerConfig().enabled is True
 
 
 @pytest.mark.parametrize("bad", ["--metadata=/etc/passwd", "-r", "Threat-X", "a b", ""])
+@pytest.mark.unit
 def test_rule_names_are_validated(bad):
     with pytest.raises(ValidationError):
         GuardDogScannerConfigOptions(rules=[bad])
@@ -402,6 +417,7 @@ def test_rule_names_are_validated(bad):
         GuardDogScannerConfigOptions(exclude_rules=[bad])
 
 
+@pytest.mark.unit
 def test_rules_and_exclude_rules_are_exclusive():
     with pytest.raises(ValidationError):
         GuardDogScannerConfigOptions(
@@ -409,6 +425,7 @@ def test_rules_and_exclude_rules_are_exclusive():
         )
 
 
+@pytest.mark.unit
 def test_unknown_ecosystem_is_rejected():
     with pytest.raises(ValidationError):
         GuardDogScannerConfigOptions(ecosystems=["maven"])
@@ -427,6 +444,7 @@ def test_unknown_ecosystem_is_rejected():
         ),
     ],
 )
+@pytest.mark.unit
 def test_an_invalid_option_in_the_config_is_named_when_the_scanner_is_built(
     tmp_path, options, names
 ):
@@ -663,6 +681,7 @@ def _rows(report) -> List[tuple]:
     )
 
 
+@pytest.mark.unit
 def test_scan_reports_every_suspicious_package_and_no_clean_one(tmp_path, fake):
     repo = _repo(tmp_path)
     scanner = _scanner(repo, tmp_path)
@@ -728,6 +747,7 @@ def test_scan_reports_every_suspicious_package_and_no_clean_one(tmp_path, fake):
     assert len(on_disk["runs"][0]["results"]) == 9
 
 
+@pytest.mark.unit
 def test_excluded_directories_symlinks_and_ignores_are_not_staged(tmp_path, fake):
     repo = _repo(tmp_path)
     pkg = repo / "npm_suspicious"
@@ -758,6 +778,7 @@ def test_excluded_directories_symlinks_and_ignores_are_not_staged(tmp_path, fake
     assert fake.staged == [fake.files["npm_suspicious"]]
 
 
+@pytest.mark.unit
 def test_a_nested_package_of_the_same_ecosystem_is_scanned_on_its_own(tmp_path, fake):
     repo = _repo(tmp_path)
     shutil.copytree(
@@ -771,6 +792,7 @@ def test_a_nested_package_of_the_same_ecosystem_is_scanned_on_its_own(tmp_path, 
     assert len(fake.staged) == 3
 
 
+@pytest.mark.unit
 def test_a_finding_matched_by_two_ecosystems_is_reported_once(tmp_path, fake):
     repo = _repo(tmp_path)
     # Make pypi_suspicious also an npm package root; both scans then see setup.py.
@@ -791,6 +813,7 @@ def test_a_finding_matched_by_two_ecosystems_is_reported_once(tmp_path, fake):
     assert len(setup_rows) == 5
 
 
+@pytest.mark.unit
 def test_no_packages_attempts_nothing(tmp_path, fake):
     repo = tmp_path / "src"
     repo.mkdir()
@@ -824,6 +847,7 @@ def test_no_packages_attempts_nothing(tmp_path, fake):
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_failed_invocation_is_an_error_and_the_report_is_kept(
     tmp_path, fake, spec, needle
 ):
@@ -843,6 +867,7 @@ def test_a_failed_invocation_is_an_error_and_the_report_is_kept(
     assert len(on_disk["runs"][0]["results"]) >= 8
 
 
+@pytest.mark.unit
 def test_scan_timeout_is_passed_to_each_invocation(tmp_path, fake, monkeypatch):
     seen = []
     original = FakeGuardDog.__call__
@@ -864,6 +889,7 @@ SANDBOX_UNAVAILABLE = {
 }
 
 
+@pytest.mark.unit
 def test_sandbox_auto_falls_back_once_and_warns(tmp_path, fake, caplog):
     repo = _repo(tmp_path)
 
@@ -892,6 +918,7 @@ def test_sandbox_auto_falls_back_once_and_warns(tmp_path, fake, caplog):
     assert "sandbox is not available" in caplog.text
 
 
+@pytest.mark.unit
 def test_sandbox_required_reports_error(tmp_path, fake):
     repo = _repo(tmp_path)
     fake.default_response = SANDBOX_UNAVAILABLE
@@ -904,6 +931,7 @@ def test_sandbox_required_reports_error(tmp_path, fake):
     assert all("--sandbox" in c and "--no-sandbox" not in c for c in fake.calls)
 
 
+@pytest.mark.unit
 def test_sandbox_disabled_never_asks_for_it(tmp_path, fake):
     repo = _repo(tmp_path)
     scanner = _scanner(repo, tmp_path, ecosystems=["go", "npm"], sandbox="disabled")
@@ -917,6 +945,7 @@ def _under_backend(monkeypatch, name):
     monkeypatch.setattr(guarddog_module, "active_scope", lambda: scope)
 
 
+@pytest.mark.unit
 def test_sandbox_auto_leaves_guarddogs_own_off_inside_sandbox_exec(
     tmp_path, fake, monkeypatch, caplog
 ):
@@ -937,6 +966,7 @@ def test_sandbox_auto_leaves_guarddogs_own_off_inside_sandbox_exec(
 
 
 @pytest.mark.parametrize("backend", ["bwrap", "firejail", "landlock"])
+@pytest.mark.unit
 def test_sandbox_auto_still_asks_for_guarddogs_own_on_the_linux_backends(
     tmp_path, fake, monkeypatch, backend
 ):
@@ -949,6 +979,7 @@ def test_sandbox_auto_still_asks_for_guarddogs_own_on_the_linux_backends(
     assert scans and all("--no-sandbox" not in c for c in scans)
 
 
+@pytest.mark.unit
 def test_sandbox_required_still_asks_inside_sandbox_exec(tmp_path, fake, monkeypatch):
     """`required` is the operator's word: it is never turned into --no-sandbox."""
     _under_backend(monkeypatch, "sandbox-exec")
@@ -959,6 +990,7 @@ def test_sandbox_required_still_asks_inside_sandbox_exec(tmp_path, fake, monkeyp
     assert scans and all("--sandbox" in c and "--no-sandbox" not in c for c in scans)
 
 
+@pytest.mark.unit
 def test_a_scan_outside_any_sandbox_scope_is_unchanged(tmp_path, fake, monkeypatch):
     monkeypatch.setattr(guarddog_module, "active_scope", lambda: None)
     repo = _repo(tmp_path)
@@ -968,6 +1000,7 @@ def test_a_scan_outside_any_sandbox_scope_is_unchanged(tmp_path, fake, monkeypat
     assert scans and all("--no-sandbox" not in c for c in scans)
 
 
+@pytest.mark.unit
 def test_rules_reach_argv_as_separate_values(tmp_path, fake):
     repo = _repo(tmp_path)
     scanner = _scanner(
@@ -982,6 +1015,7 @@ def test_rules_reach_argv_as_separate_values(tmp_path, fake):
     assert call[index + 1] == "threat-runtime-obfuscation-base64exec"
 
 
+@pytest.mark.unit
 def test_verify_is_off_by_default(tmp_path, fake):
     repo = _repo(tmp_path)
     (repo / "requirements.txt").write_text("six==1.16.0\n")
@@ -989,6 +1023,7 @@ def test_verify_is_off_by_default(tmp_path, fake):
     assert all(c[2] == "scan" for c in fake.calls)
 
 
+@pytest.mark.unit
 def test_verify_offline_is_not_attempted_and_is_an_error(tmp_path, fake, monkeypatch):
     monkeypatch.setenv("ASH_OFFLINE", "true")
     repo = _repo(tmp_path)
@@ -1001,6 +1036,7 @@ def test_verify_offline_is_not_attempted_and_is_an_error(tmp_path, fake, monkeyp
     assert all(c[2] == "scan" for c in fake.calls)
 
 
+@pytest.mark.unit
 def test_verify_online_reads_the_manifest_and_its_findings(tmp_path, fake):
     repo = _repo(tmp_path)
     (repo / "requirements.txt").write_text("six==1.16.0\n")
@@ -1019,6 +1055,7 @@ def test_verify_online_reads_the_manifest_and_its_findings(tmp_path, fake):
     assert ("capability-process-spawn", "INFO", "requirements.txt", 1) in _rows(report)
 
 
+@pytest.mark.unit
 def test_verify_that_logged_an_error_and_printed_nothing_is_not_clean(tmp_path, fake):
     """GuardDog prints [] and exits 0 when the registry is unreachable."""
     repo = _repo(tmp_path)
@@ -1033,6 +1070,7 @@ def test_verify_that_logged_an_error_and_printed_nothing_is_not_clean(tmp_path, 
         scanner.scan(target=repo, target_type="source")
 
 
+@pytest.mark.unit
 def test_verify_uses_its_own_timeout_and_parallelism(tmp_path, fake, monkeypatch):
     seen = {}
     original = FakeGuardDog.__call__
@@ -1065,6 +1103,7 @@ def test_verify_uses_its_own_timeout_and_parallelism(tmp_path, fake, monkeypatch
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_install_command_pins_version_and_interpreter(tmp_path):
     repo = tmp_path / "src"
     repo.mkdir()
@@ -1084,6 +1123,7 @@ def test_install_command_pins_version_and_interpreter(tmp_path):
     ] in commands
 
 
+@pytest.mark.unit
 def test_missing_offline_names_the_remedy(tmp_path, monkeypatch):
     monkeypatch.setenv("ASH_OFFLINE", "true")
     repo = tmp_path / "src"
@@ -1107,6 +1147,7 @@ def test_missing_offline_names_the_remedy(tmp_path, monkeypatch):
     assert f"--python '{GUARDDOG_PYTHON_REQUEST}'" in reason
 
 
+@pytest.mark.unit
 def test_construction_records_the_version_probe_and_runs_nothing(tmp_path, monkeypatch):
     """The probe belongs to the dependency check, as for bandit.
 
@@ -1138,6 +1179,7 @@ def test_construction_records_the_version_probe_and_runs_nothing(tmp_path, monke
     assert scanner.tool_version == "3.2.0"
 
 
+@pytest.mark.unit
 def test_a_pre_installed_copy_lends_its_version_when_the_uv_probe_cannot(
     tmp_path, monkeypatch
 ):
@@ -1192,6 +1234,7 @@ def test_a_pre_installed_copy_lends_its_version_when_the_uv_probe_cannot(
     ]
 
 
+@pytest.mark.unit
 def test_the_uv_probe_answer_is_kept_over_the_pre_installed_copy(tmp_path, monkeypatch):
     """When the probe answered, the copy on PATH is not asked again."""
     repo = tmp_path / "src"
@@ -1336,6 +1379,7 @@ def _exit_code(context, results):
     return _compute_exit_code(results, opts, config_fail_on_findings=False)
 
 
+@pytest.mark.unit
 def test_disabled_guarddog_runs_nothing_even_with_the_tool_missing(
     tmp_path, monkeypatch
 ):
@@ -1350,6 +1394,7 @@ def test_disabled_guarddog_runs_nothing_even_with_the_tool_missing(
 
 
 @pytest.mark.parametrize("enabled_by", ["default", "selection"])
+@pytest.mark.unit
 def test_enabled_guarddog_runs_and_reports(tmp_path, monkeypatch, enabled_by):
     context, fake, results = _phase_run(
         tmp_path, monkeypatch, enabled_by=enabled_by, tool="ok"
@@ -1361,6 +1406,7 @@ def test_enabled_guarddog_runs_and_reports(tmp_path, monkeypatch, enabled_by):
 
 
 @pytest.mark.parametrize("enabled_by", ["default", "selection"])
+@pytest.mark.unit
 def test_enabled_but_missing_is_missing_and_exits_1(tmp_path, monkeypatch, enabled_by):
     from automated_security_helper.interactions.run_ash_scan import (
         incomplete_scanner_reason,
@@ -1378,6 +1424,7 @@ def test_enabled_but_missing_is_missing_and_exits_1(tmp_path, monkeypatch, enabl
     assert fake.calls == []
 
 
+@pytest.mark.unit
 def test_enabled_and_erroring_is_error_and_exits_1(tmp_path, monkeypatch):
     from automated_security_helper.interactions.run_ash_scan import incomplete_scanners
 
@@ -1434,6 +1481,7 @@ def _pypi_report() -> SarifReport:
     )
 
 
+@pytest.mark.unit
 def test_rule_path_and_line_suppression(tmp_path):
     got = _suppressed(
         tmp_path,
@@ -1446,6 +1494,7 @@ def test_rule_path_and_line_suppression(tmp_path):
     assert got == [("threat-process-download-exec", 16)]
 
 
+@pytest.mark.unit
 def test_rule_suppression_without_a_line_covers_the_rule_only(tmp_path):
     got = _suppressed(
         tmp_path,
@@ -1460,6 +1509,7 @@ def test_rule_suppression_without_a_line_covers_the_rule_only(tmp_path):
     ]
 
 
+@pytest.mark.unit
 def test_symbol_suppression(tmp_path):
     try:
         import tree_sitter_python  # noqa: F401
@@ -1496,6 +1546,7 @@ def test_symbol_suppression(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_package_suppression_applies_to_verify_findings(tmp_path):
     entry = _capture("verify_pypi_requirements.json")[0]
     converted = convert_guarddog_scan_result(
@@ -1535,6 +1586,7 @@ def test_package_suppression_applies_to_verify_findings(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.unit
 def test_an_exclusion_is_passed_only_to_ecosystems_that_know_it(tmp_path, fake):
     """GuardDog exits 2 on an --exclude-rules name its ecosystem does not have."""
     repo = _repo(tmp_path)
@@ -1547,6 +1599,7 @@ def test_an_exclusion_is_passed_only_to_ecosystems_that_know_it(tmp_path, fake):
         assert has == (call[1] in ("pypi", "npm")), call
 
 
+@pytest.mark.unit
 def test_a_rules_selection_no_ecosystem_rule_matches_skips_that_ecosystem(
     tmp_path, fake
 ):
@@ -1562,6 +1615,7 @@ def test_a_rules_selection_no_ecosystem_rule_matches_skips_that_ecosystem(
     assert scanner.targets_attempted == 2
 
 
+@pytest.mark.unit
 def test_a_rule_name_no_ecosystem_knows_is_an_error(tmp_path, fake):
     repo = _repo(tmp_path)
     scanner = _scanner(
@@ -1571,6 +1625,7 @@ def test_a_rule_name_no_ecosystem_knows_is_an_error(tmp_path, fake):
         scanner.scan(target=repo, target_type="source")
 
 
+@pytest.mark.unit
 def test_list_rules_failing_fails_that_ecosystems_targets(tmp_path, fake):
     repo = _repo(tmp_path)
     fake.overrides[("go", "list-rules")] = {"returncode": 1, "stderr": "boom\n"}
@@ -1584,12 +1639,14 @@ def test_list_rules_failing_fails_that_ecosystems_targets(tmp_path, fake):
     assert {c[1] for c in fake.calls if c[2] == "scan"} == {"npm"}
 
 
+@pytest.mark.unit
 def test_no_rule_options_means_no_list_rules_call(tmp_path, fake):
     repo = _repo(tmp_path)
     _scanner(repo, tmp_path).scan(target=repo, target_type="source")
     assert not [c for c in fake.calls if c[2] == "list-rules"]
 
 
+@pytest.mark.unit
 def test_verify_passes_the_rule_options(tmp_path, fake):
     repo = _repo(tmp_path)
     (repo / "requirements.txt").write_text("six==1.16.0\n")
@@ -1609,6 +1666,7 @@ def test_verify_passes_the_rule_options(tmp_path, fake):
     assert verify[verify.index("--exclude-rules") + 1] == "typosquatting"
 
 
+@pytest.mark.unit
 def test_a_dependency_guarddog_could_not_check_is_a_failed_target(tmp_path, fake):
     repo = _repo(tmp_path)
     (repo / "requirements.txt").write_text("six==1.16.0\n")
@@ -1635,6 +1693,7 @@ def test_a_dependency_guarddog_could_not_check_is_a_failed_target(tmp_path, fake
         (".github/workflows/notes.txt", False),
     ],
 )
+@pytest.mark.unit
 def test_github_action_verify_reads_only_workflow_files(rel, expected):
     from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
         _is_verify_manifest,
@@ -1643,6 +1702,7 @@ def test_github_action_verify_reads_only_workflow_files(rel, expected):
     assert _is_verify_manifest("github_action", rel) is expected
 
 
+@pytest.mark.unit
 def test_the_output_dir_inside_the_source_is_not_staged(tmp_path, fake):
     repo = _repo(tmp_path)
     output = repo / "ash-out"
@@ -1665,6 +1725,7 @@ def test_the_output_dir_inside_the_source_is_not_staged(tmp_path, fake):
     assert not [r for r in _rows(report) if r[2].startswith("ash-out/")]
 
 
+@pytest.mark.unit
 def test_staging_is_removed_after_the_scan_even_when_it_fails(tmp_path, fake):
     repo = _repo(tmp_path)
     fake.overrides[("go", "go_suspicious")] = {"returncode": 1, "stderr": "boom"}
@@ -1676,6 +1737,7 @@ def test_staging_is_removed_after_the_scan_even_when_it_fails(tmp_path, fake):
     assert not fake.staged_dirs[0].parent.exists()
 
 
+@pytest.mark.unit
 def test_dedup_keeps_the_higher_severity(tmp_path, fake):
     """The same match, correlated in one scan (HIGH) and not in another (LOW)."""
     repo = _repo(tmp_path)
@@ -1710,6 +1772,7 @@ def test_dedup_keeps_the_higher_severity(tmp_path, fake):
     ) not in setup
 
 
+@pytest.mark.unit
 def test_the_same_finding_in_two_dependencies_is_kept_twice():
     entries = _capture("verify_pypi_requirements.json")
     result = entries[0]["result"]
@@ -1734,6 +1797,7 @@ def test_the_same_finding_in_two_dependencies_is_kept_twice():
     assert one.keys and two.keys and one.keys[0] != two.keys[0]
 
 
+@pytest.mark.unit
 def test_the_matched_code_is_the_region_snippet():
     converted = convert_guarddog_scan_result(
         _capture("scan_npm_npm_suspicious.json"), uri_prefix="", ecosystem="npm"
@@ -1742,6 +1806,7 @@ def test_the_matched_code_is_the_region_snippet():
     assert "eval(Buffer.from(" in region.snippet.text
 
 
+@pytest.mark.unit
 def test_a_rule_list_that_parses_to_nothing_fails_that_ecosystem(tmp_path, fake):
     """A reformatted list-rules table must not silently drop the exclusions."""
     repo = _repo(tmp_path)
@@ -1761,6 +1826,7 @@ def test_a_rule_list_that_parses_to_nothing_fails_that_ecosystem(tmp_path, fake)
     assert (scanner.targets_attempted, scanner.targets_failed) == (3, 1)
 
 
+@pytest.mark.unit
 def test_an_unknown_rule_with_nothing_run_says_the_configuration_is_unusable(
     tmp_path, fake
 ):
@@ -1771,6 +1837,7 @@ def test_an_unknown_rule_with_nothing_run_says_the_configuration_is_unusable(
         scanner.scan(target=repo, target_type="source")
 
 
+@pytest.mark.unit
 def test_metadata_only_rules_warn_that_a_local_scan_checks_nothing(
     tmp_path, fake, caplog
 ):
@@ -1781,6 +1848,7 @@ def test_metadata_only_rules_warn_that_a_local_scan_checks_nothing(
     assert "only metadata rules" in caplog.text
 
 
+@pytest.mark.unit
 def test_windows_is_an_unsupported_platform_with_no_install_command(
     tmp_path, monkeypatch
 ):
@@ -1817,6 +1885,7 @@ def _scanner_with_output_in_the_source(repo: Path, **options) -> GuardDogScanner
     )
 
 
+@pytest.mark.unit
 def test_staging_is_outside_the_directories_other_scanners_walk(
     tmp_path, fake, monkeypatch
 ):
@@ -1841,6 +1910,7 @@ def test_staging_is_outside_the_directories_other_scanners_walk(
         assert staged.resolve().parent.parent == scratch.resolve(), staged
 
 
+@pytest.mark.unit
 def test_a_temporary_directory_inside_the_scanned_tree_stages_in_the_results_dir(
     tmp_path, fake, monkeypatch, caplog
 ):
@@ -1861,6 +1931,7 @@ def test_a_temporary_directory_inside_the_scanned_tree_stages_in_the_results_dir
     assert "is inside the scanned directory" in caplog.text
 
 
+@pytest.mark.unit
 def test_under_a_sandbox_the_staging_tree_is_the_scans_read_grant(
     tmp_path, fake, monkeypatch
 ):
@@ -1903,6 +1974,7 @@ def test_under_a_sandbox_the_staging_tree_is_the_scans_read_grant(
     assert outer.scan_target is None
 
 
+@pytest.mark.unit
 def test_a_write_to_a_staged_file_does_not_reach_the_source(tmp_path):
     """The staging tree is sandbox-writable, so it must not share inodes with the source."""
     root = tmp_path / "pkg"
@@ -1933,6 +2005,7 @@ def test_a_write_to_a_staged_file_does_not_reach_the_source(tmp_path):
         "3.2.0",
     ],
 )
+@pytest.mark.unit
 def test_a_tool_version_that_is_not_a_specifier_set_is_replaced_by_the_default(
     value, caplog
 ):
@@ -1945,6 +2018,7 @@ def test_a_tool_version_that_is_not_a_specifier_set_is_replaced_by_the_default(
 
 
 @pytest.mark.parametrize("value", ["==3.2.0", ">=3.1,<4", None])
+@pytest.mark.unit
 def test_a_specifier_set_tool_version_is_accepted(value):
     assert GuardDogScannerConfigOptions(tool_version=value).tool_version == value
 
@@ -1978,6 +2052,7 @@ def _limit_and_mode(call: List[str]) -> List[str]:
     return call[start + 2 : start + 4]
 
 
+@pytest.mark.unit
 def test_max_hits_is_unset_by_default_and_guarddog_runs_as_itself(tmp_path, fake):
     repo = _repo(tmp_path)
     scanner = _scanner(repo, tmp_path, ecosystems=["go"])
@@ -1989,11 +2064,13 @@ def test_max_hits_is_unset_by_default_and_guarddog_runs_as_itself(tmp_path, fake
 
 
 @pytest.mark.parametrize("value", [-1, "five"])
+@pytest.mark.unit
 def test_max_hits_must_be_a_count(value):
     with pytest.raises(ValidationError):
         GuardDogScannerConfigOptions(max_hits=value)
 
 
+@pytest.mark.unit
 def test_max_hits_runs_guarddogs_own_cli_in_its_own_python_through_uv(
     tmp_path, fake, uv_at, caplog
 ):
@@ -2029,6 +2106,7 @@ def test_max_hits_runs_guarddogs_own_cli_in_its_own_python_through_uv(
     assert "max_hits" not in caplog.text
 
 
+@pytest.mark.unit
 def test_max_hits_through_uv_is_offline_when_ash_is(tmp_path, fake, uv_at, monkeypatch):
     monkeypatch.setattr(GuardDogScanner, "_is_offline_mode", lambda self: True)
     repo = _repo(tmp_path)
@@ -2040,6 +2118,7 @@ def test_max_hits_through_uv_is_offline_when_ash_is(tmp_path, fake, uv_at, monke
     assert call[:4] == ["/opt/uv/uv", "tool", "run", "--offline"]
 
 
+@pytest.mark.unit
 def test_max_hits_from_the_operator_may_lower_guarddogs_limits(
     tmp_path, fake, uv_at, caplog
 ):
@@ -2056,6 +2135,7 @@ def test_max_hits_from_the_operator_may_lower_guarddogs_limits(
     assert "max_hits" not in caplog.text
 
 
+@pytest.mark.unit
 def test_max_hits_from_the_scanned_tree_only_raises_limits_and_says_so_once(
     tmp_path, fake, uv_at, caplog
 ):
@@ -2073,6 +2153,7 @@ def test_max_hits_from_the_scanned_tree_only_raises_limits_and_says_so_once(
     assert "only raises" in caplog.text
 
 
+@pytest.mark.unit
 def test_max_hits_without_uv_runs_the_python_beside_guarddog(
     tmp_path, fake, monkeypatch
 ):
@@ -2097,6 +2178,7 @@ def test_max_hits_without_uv_runs_the_python_beside_guarddog(
     assert _limit_and_mode(call) == ["0", "raise"]
 
 
+@pytest.mark.unit
 def test_max_hits_with_no_python_for_guarddog_fails_every_target(
     tmp_path, fake, monkeypatch
 ):
@@ -2173,6 +2255,7 @@ def _run_bootstrap(
         ("2", "set", {"one": 2, "three": 2, "five": 2, "open": 2}),
     ],
 )
+@pytest.mark.integration
 def test_the_hit_limit_bootstrap_sets_each_rules_limit(tmp_path, limit, mode, expected):
     completed = _run_bootstrap(
         tmp_path, _STANDIN_RULES, limit, mode, "go", "scan", "/pkg", "--output-format"
@@ -2185,6 +2268,7 @@ def test_the_hit_limit_bootstrap_sets_each_rules_limit(tmp_path, limit, mode, ex
     }
 
 
+@pytest.mark.integration
 def test_the_hit_limit_bootstrap_refuses_a_guarddog_without_per_rule_limits(
     tmp_path,
 ):

@@ -52,7 +52,10 @@ if not (Path(__file__).resolve().parents[1] / "conftest.py").exists():
         allow_module_level=True,
     )
 
-pytestmark = pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True),
+]
 
 DATA = Path(__file__).resolve().parents[2] / "test_data" / "scanners" / "guarddog"
 FIXTURE_REPO = DATA / "fixture_repo"
