@@ -118,8 +118,19 @@ def without_unreadable_references(
         path = _data_path(data, item.get("loc", ()), value)
         if path is None:
             return data, []
-        while path and isinstance(path[-1], int):
-            path = path[:-1]
+        # A reference anywhere inside a list takes the whole list out: the
+        # field is the list's key, at the first index on the path. Cutting
+        # only trailing indices kept a fixed-choice field INSIDE a list item
+        # (content_db_staleness_overrides[i].policy) as a dotted path through
+        # the index, which the pop below cannot walk, so the record reported
+        # the field handled and removed nothing, and the whole recorded
+        # config stayed unreadable.
+        for position, segment in enumerate(path):
+            if isinstance(segment, int):
+                path = path[:position]
+                break
+        if not path:
+            return data, []
         field = ".".join(str(segment) for segment in path)
         if field not in {known for known, _ in found}:
             found.append((field, value))
