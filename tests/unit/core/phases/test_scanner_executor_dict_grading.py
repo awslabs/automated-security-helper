@@ -36,9 +36,15 @@ from automated_security_helper.core.enums import (
     ScannerStatus,
     ScannerToolType,
 )
+from automated_security_helper.core.phases.scan_result_processor import (
+    ScanResultProcessor,
+)
 from automated_security_helper.core.phases.scanner_executor import (
     ScannerExecutor,
     _severity_counts_from_dict,
+)
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -223,3 +229,34 @@ class TestControls:
 
         assert row.status == ScannerStatus.PASSED
         assert row.metadata["scanner_version"] == "1.2.3"
+
+
+class TestAFindingsListsCountsReachTheReport:
+    """The counts a findings list was graded on survive the processor's dump.
+
+    Incremented on the field's default, severity_counts was never marked set, the
+    processor's exclude_unset dump dropped it from the per-target report, the
+    statistics read 0 for the scanner, and the FAILED row rolled up PASSED.
+    """
+
+    def test_the_row_marks_its_counts_set(self, plugin_context):
+        row = _row(plugin_context, {"findings": [{"severity": "high"}]})
+
+        assert row.status == ScannerStatus.FAILED
+        assert "severity_counts" in row.model_fields_set
+
+    def test_the_dumped_report_and_the_statistics_carry_the_counts(
+        self, plugin_context
+    ):
+        row = _row(plugin_context, {"findings": [{"severity": "high"}]})
+
+        aggregated = ScanResultProcessor(
+            plugin_context=plugin_context
+        ).process_container(row, AshAggregatedResults())
+        report = aggregated.additional_reports["shape-tool"]["source"]
+        aggregated.ash_config = plugin_context.config
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(aggregated)
+
+        assert report["severity_counts"]["high"] == 1, sorted(report)
+        assert stats["shape-tool"]["high"] == 1
+        assert stats["shape-tool"]["actionable"] == 1

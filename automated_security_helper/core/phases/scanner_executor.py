@@ -1359,6 +1359,15 @@ class ScannerExecutor:
                                         + container.severity_counts.suppressed
                                     )
                                 elif isinstance(raw_results.get("findings"), list):
+                                    # Counted into a fresh model and ASSIGNED, not
+                                    # incremented on the field's default: an
+                                    # increment on the default never marks the
+                                    # field set, and the processor dumps the row
+                                    # with exclude_unset, so the counts a findings
+                                    # list graded FAILED on were left out of the
+                                    # per-target report, read as 0 by the summary,
+                                    # and the row rolled up PASSED.
+                                    counted = ScannerSeverityCount()
                                     for finding in raw_results["findings"]:
                                         # A finding that states no severity (the key
                                         # is missing, or the finding is not a mapping)
@@ -1379,11 +1388,10 @@ class ScannerExecutor:
                                         if severity is None:
                                             severity = "medium"
                                         try:
-                                            container.severity_counts.increment(
-                                                severity
-                                            )
+                                            counted.increment(severity)
                                         except ValueError:
-                                            container.severity_counts.increment("info")
+                                            counted.increment("info")
+                                    container.severity_counts = counted
                                     container.finding_count = len(
                                         raw_results["findings"]
                                     )
