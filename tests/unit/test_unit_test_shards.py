@@ -619,6 +619,85 @@ class TestAnEmptyShardOfATierRunInARealPytest:
         assert done.returncode == 1, done.stdout + done.stderr
 
 
+@pytest.mark.integration
+class TestATierRunThatRanNothingInARealPytest:
+    """The exit status of pytest itself for a tier leg whose only test is skipped.
+
+    The planted tree uses the wiring conftest of
+    TestAnEmptyShardOfATierRunInARealPytest and one unit module holding a single
+    ``@pytest.mark.skip`` test. The run is the unsharded unit leg of CI: ``-m unit`` with
+    ``GITHUB_ACTIONS=true`` in the child's environment and no shard.
+    """
+
+    CONFTEST = TestAnEmptyShardOfATierRunInARealPytest.CONFTEST
+    LINE = (
+        "tier run executed no test: 1 collected, 1 skipped, 0 executed; "
+        "a leg that runs nothing is not green"
+    )
+
+    def _plant(self, root: Path) -> None:
+        (root / "conftest.py").write_text(self.CONFTEST, encoding="utf-8")
+        (root / "pytest.ini").write_text(
+            "[pytest]\ntestpaths = suite\npython_files = test_*.py\n"
+            "markers =\n    unit: the unit tier\n",
+            encoding="utf-8",
+        )
+        (root / "suite").mkdir()
+        (root / "suite" / "test_only_skipped.py").write_text(
+            "import pytest\n\npytestmark = pytest.mark.unit\n\n\n"
+            '@pytest.mark.skip(reason="the tool is absent")\n'
+            "def test_it():\n    pass\n",
+            encoding="utf-8",
+        )
+
+    def _run(self, root: Path, *, under_ci: bool):
+        env = _clean_env(PYTHONPATH=str(REPO_ROOT))
+        env.pop(sharding.CI_ENV_VAR, None)
+        if under_ci:
+            env[sharding.CI_ENV_VAR] = "true"
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-c",
+                str(root / "pytest.ini"),
+                "--rootdir",
+                str(root),
+                "--confcutdir",
+                str(root),
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+                "-m",
+                "unit",
+            ],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    def test_a_ci_unit_leg_whose_only_test_is_skipped_exits_1_and_says_so(
+        self, tmp_path
+    ):
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=True)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert self.LINE in done.stdout, done.stdout
+
+    def test_the_same_run_on_a_developer_machine_stays_green(self, tmp_path):
+        """The control: without GITHUB_ACTIONS and a shard, a skipped test is a skip."""
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=False)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "1 skipped" in done.stdout, done.stdout
+        assert "executed no test" not in done.stdout, done.stdout
+
+
 @pytest.mark.unit
 class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
     """A shard owns modules, not tiers, so with ``-m`` it can hold none of the tier.
@@ -708,7 +787,9 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         assert manager.get_plugin("ash-shard-empty-admitted") is first
 
     def test_configure_registers_nothing_for_a_whole_run(self, monkeypatch):
+        """No shard and not under GitHub Actions: a developer's plain ``pytest``."""
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.delenv(sharding.CI_ENV_VAR, raising=False)
         manager = pytest.PytestPluginManager()
         sharding.configure(SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager))
         assert manager.get_plugin("ash-shard-empty-admitted") is None
@@ -743,6 +824,199 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
         assert session.exitstatus == pytest.ExitCode.OK
         assert "(2 deselected)" in written[0], written
+
+
+@pytest.mark.unit
+class TestATierRunThatExecutedNoTestFails:
+    """A CI leg that selected tests and ran none of them is not green.
+
+    Every selected test skipped (a tool is absent, a gate is off) exits 0 and reads green
+    while it measured nothing. ``fail_a_tier_run_that_executed_no_test`` turns that
+    into ``TESTS_FAILED`` for a CI tier run only, and leaves the admitted empty shard,
+    a run that executed something and a plain local ``pytest`` alone. The real pytest
+    run of the failing case is in TestATierRunThatRanNothingInARealPytest.
+    """
+
+    LINE = (
+        "tier run executed no test: 3 collected, 3 skipped, 0 executed; "
+        "a leg that runs nothing is not green"
+    )
+
+    @staticmethod
+    def _session(
+        written: list[str],
+        *,
+        expression: str = "unit",
+        text: str = "",
+        under_ci: bool = True,
+        collected: int = 3,
+        status: Any = pytest.ExitCode.OK,
+        **options: Any,
+    ) -> SimpleNamespace:
+        stash = pytest.Stash()
+        stash[sharding._TEXT_KEY] = text
+        stash[sharding._CI_KEY] = under_ci
+        values = {"markexpr": expression, **options}
+        reporter = SimpleNamespace(write_line=written.append)
+        config = SimpleNamespace(
+            stash=stash,
+            getoption=lambda name, default="": values.get(name, default),
+            pluginmanager=SimpleNamespace(get_plugin=lambda name: reporter),
+        )
+        return SimpleNamespace(
+            config=config, exitstatus=status, testscollected=collected
+        )
+
+    def test_every_selected_test_skipped_fails_the_run_and_says_so(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE]
+
+    def test_a_run_that_executed_a_test_is_left_alone(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 1, 2)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_an_admitted_empty_shard_stays_ok(self):
+        """Nothing collected and 4 deselected: the admission, not the floor, decides."""
+        written: list[str] = []
+        session = self._session(
+            written,
+            expression="integration",
+            text="3of8",
+            under_ci=False,
+            collected=0,
+            status=pytest.ExitCode.NO_TESTS_COLLECTED,
+        )
+        plugin = sharding._AdmitAnEmptyShard()
+        plugin.pytest_deselected([object()] * 4)
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert len(written) == 1 and "admitted" in written[0], written
+
+    def test_a_run_that_is_not_a_ci_tier_run_is_left_alone(self):
+        """A developer's ``pytest -m unit``: no GITHUB_ACTIONS and no shard."""
+        written: list[str] = []
+        session = self._session(written, under_ci=False)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_a_shard_is_a_ci_tier_run_without_github_actions(self):
+        written: list[str] = []
+        session = self._session(written, text="2of4", under_ci=False)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+
+    def test_a_run_without_a_marker_expression_is_left_alone(self):
+        written: list[str] = []
+        session = self._session(written, expression="")
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    @pytest.mark.parametrize("option", ["collectonly", "setupplan", "setuponly"])
+    def test_a_run_that_runs_no_test_by_design_is_left_alone(self, option):
+        written: list[str] = []
+        session = self._session(written, **{option: True})
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            pytest.ExitCode.TESTS_FAILED,
+            pytest.ExitCode.INTERRUPTED,
+            pytest.ExitCode.INTERNAL_ERROR,
+            pytest.ExitCode.USAGE_ERROR,
+            pytest.ExitCode.NO_TESTS_COLLECTED,
+        ],
+    )
+    def test_no_other_status_is_touched(self, status):
+        written: list[str] = []
+        session = self._session(written, status=status)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == status and not written
+
+    def test_a_run_that_collected_nothing_is_left_to_exit_5(self):
+        written: list[str] = []
+        session = self._session(written, collected=0)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 0)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    @staticmethod
+    def _report(when: str, outcome: str, **extra: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            when=when,
+            failed=outcome == "failed",
+            skipped=outcome == "skipped",
+            **extra,
+        )
+
+    def test_the_plugin_counts_executed_and_skipped_tests_from_their_reports(self):
+        plugin = sharding._AdmitAnEmptyShard()
+        reports = [
+            # passed: setup, call, teardown
+            self._report("setup", "passed"),
+            self._report("call", "passed"),
+            self._report("teardown", "passed"),
+            # a mark.skip: skipped in setup, no call
+            self._report("setup", "skipped"),
+            # pytest.skip() in the body
+            self._report("setup", "passed"),
+            self._report("call", "skipped"),
+            # a fixture error: failed in setup, no call
+            self._report("setup", "failed"),
+            # an expected failure ran its body
+            self._report("setup", "passed"),
+            self._report("call", "skipped", wasxfail="reason"),
+        ]
+        for report in reports:
+            plugin.pytest_runtest_logreport(report)
+        assert (plugin.executed, plugin.skipped) == (3, 2)
+
+    def test_a_controller_counts_the_reports_xdist_forwards_once(self):
+        """The workers' own counts are not summed too: that would count each test twice."""
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._AdmitAnEmptyShard()
+        for _ in range(3):
+            plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
+        node = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: 0})
+        plugin.pytest_testnodedown(node, None)
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE]
+
+    def test_a_worker_leaves_the_exit_status_to_the_controller(self):
+        written: list[str] = []
+        session = self._session(written)
+        session.config.workeroutput = {}
+        plugin = sharding._AdmitAnEmptyShard()
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_configure_registers_the_plugin_for_a_run_under_github_actions(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.CI_ENV_VAR, "true")
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-shard-empty-admitted") is not None
+        assert config.stash[sharding._CI_KEY] is True
+
+    @pytest.mark.parametrize("value", ["false", "1", ""])
+    def test_only_the_value_true_marks_a_run_as_ci(self, monkeypatch, value):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.CI_ENV_VAR, value)
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-shard-empty-admitted") is None
+        assert config.stash[sharding._CI_KEY] is False
 
 
 class TestTheSettingStaysInTheRunThatWasGivenIt:

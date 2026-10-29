@@ -36,10 +36,27 @@ all (it owns no module, or the shard count is larger than the suite) deselected 
 and keeps exit 5, and so does an empty shard of a run with no ``-m`` expression. A tier
 that is empty as a whole is not caught here: every leg of it would be admitted.
 
+The other side of the same coin is a leg that collected tests and ran none of them. A
+tier leg whose every selected test is skipped (a tool is absent, a gate is off) exits 0
+and reads green while it measured nothing. ``fail_a_tier_run_that_executed_no_test``
+turns that into ``TESTS_FAILED`` and prints one line, but only for a CI tier run: a
+``-m`` expression was given AND the run is under GitHub Actions (``GITHUB_ACTIONS=true``,
+read once in ``configure``) or has a shard. It acts only when pytest is about to exit
+``OK``, at least one item was collected and selected, and none of them executed. An
+item executed when its call phase ran and did not skip, or when its setup failed (an
+error is a result). A run that collected nothing is left to ``admit_empty_shard`` and
+exit 5, so an admitted empty shard stays ``OK``. A plain local ``pytest`` is unaffected,
+and so are ``--collect-only``, ``--setup-plan`` and ``--setup-only``, which run no test
+by design.
+
 The deselected items are counted by a ``pytest_deselected`` hook on a plugin object that
 ``configure`` registers. Under xdist the controller never collects, so each worker counts
 its own and hands the number back in ``workeroutput`` when it finishes; the controller
-adds them up in ``pytest_testnodedown``. The plugin is an object, and not a module-level
+adds them up in ``pytest_testnodedown``. The executed and skipped counts are not sent
+that way: xdist hands every worker's test report to the controller through
+``pytest_runtest_logreport`` (xdist/dsession.py ``worker_testreport``), so the
+controller counts them from the reports it already receives, and summing the workers'
+own counts as well would count each test twice. The plugin is an object, and not a module-level
 ``pytest_sessionfinish`` imported by tests/conftest.py, because that conftest already
 defines its own ``pytest_sessionfinish``. The owner rule is unchanged.
 
@@ -126,6 +143,10 @@ _SHARD_KEY = pytest.StashKey[Optional[Tuple[int, int]]]()
 _TEXT_KEY = pytest.StashKey[str]()
 #: The ``workerinput`` key the controller hands the text to a worker under.
 WORKERINPUT_KEY = "ash_test_shard"
+#: The variable GitHub Actions sets on every runner; ``true`` marks a CI run.
+CI_ENV_VAR = "GITHUB_ACTIONS"
+#: Whether this run is under GitHub Actions, read once by ``configure``.
+_CI_KEY = pytest.StashKey[bool]()
 
 
 def configure(config: pytest.Config) -> None:
@@ -154,10 +175,14 @@ def configure(config: pytest.Config) -> None:
         raise pytest.UsageError(f"{ENV_VAR}: {error}") from None
     config.stash[_SHARD_KEY] = shard
     config.stash[_TEXT_KEY] = text
+    under_ci = os.environ.get(CI_ENV_VAR) == "true"
+    config.stash[_CI_KEY] = under_ci
     # A stand-in config without a plugin manager (the unit tests of this module use one)
     # registers nothing. The early return above is what keeps this to once per config.
+    # A run with a shard needs the plugin for the empty-shard admission, and a run under
+    # GitHub Actions needs it for the executed-test floor, sharded or not.
     plugins = getattr(config, "pluginmanager", None)
-    if shard is not None and plugins is not None:
+    if (shard is not None or under_ci) and plugins is not None:
         plugins.register(_AdmitAnEmptyShard(), _EMPTY_SHARD_PLUGIN)
 
 
@@ -195,23 +220,92 @@ def admit_empty_shard(session: Any, exitstatus: Any, deselected: int) -> bool:
     return True
 
 
+def fail_a_tier_run_that_executed_no_test(
+    session: Any, executed: int, skipped: int
+) -> bool:
+    """Fail a CI tier run that selected tests and executed none of them.
+
+    True when it changed the exit status. Why: a leg whose every selected test is
+    skipped (a tool is absent, a gate is off) exits 0 and reads green while it measured
+    nothing. It acts only when all of these hold: the run was given a ``-m``
+    expression; it is a CI run (``GITHUB_ACTIONS=true`` when ``configure`` ran, or a
+    shard is configured); it is not a ``--collect-only``, ``--setup-plan`` or
+    ``--setup-only`` run, which run no test by design; pytest is about to exit ``OK``;
+    at least one item was collected and selected (``session.testscollected``); and
+    ``executed`` is zero. ``admit_empty_shard`` is not touched: a shard that collected
+    nothing selected nothing, so an admitted empty shard stays ``OK`` here.
+
+    The status becomes ``TESTS_FAILED`` and one line says what the run did.
+    """
+    config = session.config
+    if not config.getoption("markexpr", default=""):
+        return False
+    if not (config.stash.get(_TEXT_KEY, "") or config.stash.get(_CI_KEY, False)):
+        return False
+    if any(
+        config.getoption(name, default=False)
+        for name in ("collectonly", "setupplan", "setuponly")
+    ):
+        return False
+    if session.exitstatus != pytest.ExitCode.OK:
+        return False
+    selected = session.testscollected
+    if selected <= 0 or executed > 0:
+        return False
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    line = (
+        f"tier run executed no test: {selected} collected, {skipped} skipped, "
+        "0 executed; a leg that runs nothing is not green"
+    )
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(line)
+    else:
+        print(line)
+    return True
+
+
 #: The ``workeroutput`` key a worker hands its deselected count back under.
 WORKEROUTPUT_KEY = "ash_shard_deselected"
 
 
 class _AdmitAnEmptyShard:
-    """The plugin object ``configure`` registers for a run that has a shard.
+    """The plugin object ``configure`` registers for a run with a shard or under CI.
 
     A class because tests/conftest.py already defines the module-level
     ``pytest_sessionfinish`` that a hook imported by name would have to share, and
-    because it holds the count of items the run deselected.
+    because it holds the counts of the run: the items it deselected, and the tests it
+    executed and skipped.
     """
 
     def __init__(self) -> None:
         self.deselected = 0
+        self.executed = 0
+        self.skipped = 0
 
     def pytest_deselected(self, items: Sequence[Any]) -> None:
         self.deselected += len(items)
+
+    def pytest_runtest_logreport(self, report: Any) -> None:
+        """Count executed and skipped tests from the reports this process receives.
+
+        A plain run gets its own reports and an xdist controller gets every worker's
+        (``pytest_runtest_logreport`` is called for each, xdist/dsession.py), so the
+        count is the same either way. A test is executed when its call phase ran
+        without skipping, or when its setup failed (an error is a result). A skip
+        in setup, or ``pytest.skip`` in the body, is skipped; an expected failure
+        (``wasxfail``) ran its body and is executed.
+        """
+        if report.when == "setup":
+            if report.failed:
+                self.executed += 1
+            elif report.skipped:
+                self.skipped += 1
+        elif report.when == "call":
+            if report.skipped and not hasattr(report, "wasxfail"):
+                self.skipped += 1
+            else:
+                self.executed += 1
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_testnodedown(self, node: Any, error: Any) -> None:
@@ -227,6 +321,7 @@ class _AdmitAnEmptyShard:
             workeroutput[WORKEROUTPUT_KEY] = self.deselected
             return
         admit_empty_shard(session, exitstatus, self.deselected)
+        fail_a_tier_run_that_executed_no_test(session, self.executed, self.skipped)
 
 
 #: The name the plugin object is registered under, once per config.
