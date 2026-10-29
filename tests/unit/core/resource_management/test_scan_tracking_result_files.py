@@ -3,7 +3,11 @@
 
 """What the file-based progress view reads, and what it counts.
 
-Four mechanisms, each pinned against the behavior it replaced:
+Five mechanisms, each pinned against the behavior it replaced:
+
+* ``summarize_scanner_statuses`` and ``parse_aggregated_results`` read
+  ``ash_aggregated_results.json`` after an ``exists()`` or no check at all, so
+  the link-following and FIFO-blocking shapes below reached that file too.
 
 * ``find_scanner_result_files`` confined the scanner and target directories to
   the output directory but took the ``ASH.ScanResults.json`` entry itself on
@@ -25,12 +29,17 @@ import os
 
 import pytest
 
+from automated_security_helper.core.resource_management.exceptions import (
+    MCPResourceError,
+)
 from automated_security_helper.core.resource_management.scan_tracking import (
     create_scan_progress_from_files,
     find_scanner_result_files,
     get_completed_scanners,
     get_scan_progress_info,
     is_regular_result_file,
+    parse_aggregated_results,
+    summarize_scanner_statuses,
 )
 
 pytestmark = pytest.mark.unit
@@ -87,6 +96,55 @@ class TestOnlyARegularResultFileIsRead:
 
     def test_a_missing_file_is_not_regular(self, tmp_path):
         assert is_regular_result_file(tmp_path / "absent.json") is False
+
+
+class TestTheAggregatedResultsFileGetsTheSameGuard:
+    """summarize_scanner_statuses and parse_aggregated_results read
+    ash_aggregated_results.json under the registry lock; a FIFO or a link at
+    that name reached their read_text as it reached the per-scanner readers."""
+
+    def test_a_link_at_the_aggregated_name_is_not_read(self, tmp_path):
+        if not hasattr(os, "symlink"):
+            pytest.skip("symlinks are not available on this platform")
+        out = tmp_path / "ash_output"
+        out.mkdir()
+        other = tmp_path / "other.json"
+        other.write_text(
+            json.dumps({"scanner_results": {"bandit": {"status": "PASSED"}}}),
+            encoding="utf-8",
+        )
+        (out / "ash_aggregated_results.json").symlink_to(other)
+
+        assert summarize_scanner_statuses(out)["scanner_statuses"] == {}
+        with pytest.raises(MCPResourceError, match="not a regular file"):
+            parse_aggregated_results(out)
+
+    def test_a_fifo_at_the_aggregated_name_is_not_opened(self, tmp_path):
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("FIFOs are not available on this platform")
+        out = tmp_path / "ash_output"
+        out.mkdir()
+        os.mkfifo(out / "ash_aggregated_results.json")
+
+        # Opening a FIFO with no writer blocks; returning at all is the assertion.
+        assert summarize_scanner_statuses(out)["scanner_statuses"] == {}
+        with pytest.raises(MCPResourceError, match="not a regular file"):
+            parse_aggregated_results(out)
+
+    def test_a_large_regular_aggregated_file_is_still_read(self, tmp_path):
+        """The per-scanner size bound does not apply to the aggregated file."""
+        out = tmp_path / "ash_output"
+        out.mkdir()
+        padding = "x" * (17 * 1024 * 1024)
+        (out / "ash_aggregated_results.json").write_text(
+            json.dumps(
+                {"scanner_results": {"bandit": {"status": "PASSED"}}, "pad": padding}
+            ),
+            encoding="utf-8",
+        )
+
+        assert "bandit" in summarize_scanner_statuses(out)["scanner_statuses"]
+        assert "bandit" in parse_aggregated_results(out)["scanner_results"]
 
 
 class TestAScannerCountsOnceItHasWrittenAResult:

@@ -463,20 +463,26 @@ class ScanProgress:
 _SCANNER_RESULT_FILE_MAX_BYTES = 16 * 1024 * 1024
 
 
-def is_regular_result_file(path: Path) -> bool:
+def is_regular_result_file(
+    path: Path, max_bytes: Optional[int] = _SCANNER_RESULT_FILE_MAX_BYTES
+) -> bool:
     """Whether ``path`` is a regular file, read without following a link.
 
-    The scanner result files under a scan's output directory are read by the
-    progress poll while it holds the registry lock. ``read_text`` on a FIFO at
-    that name blocks until something writes to it, and on a link it reads
-    whatever the link points at as this scan's. Both are refused here, as are
-    sockets and devices: only a regular file of a bounded size is read.
+    The result files under a scan's output directory are read by the progress
+    poll while it holds the registry lock. ``read_text`` on a FIFO at that name
+    blocks until something writes to it, and on a link it reads whatever the
+    link points at as this scan's. Both are refused here, as are sockets and
+    devices: only a regular file is read, of at most ``max_bytes`` when a bound
+    is given (the per-scanner files are small; the aggregated results file
+    carries the whole SARIF and is read with no bound).
     """
     try:
         info = os.lstat(path)
     except OSError:
         return False
-    return stat.S_ISREG(info.st_mode) and info.st_size <= _SCANNER_RESULT_FILE_MAX_BYTES
+    if not stat.S_ISREG(info.st_mode):
+        return False
+    return max_bytes is None or info.st_size <= max_bytes
 
 
 def _read_scanner_result_document(result_file: Path) -> Optional[Dict[str, Any]]:
@@ -794,6 +800,10 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
     empty: Dict[str, Any] = {"scanner_statuses": {}, "skipped_scanners": []}
 
     results_path = Path(output_dir) / "ash_aggregated_results.json"
+    # The same guard the per-scanner files get: a FIFO or a link at this name
+    # is not read (this runs under the registry lock).
+    if not is_regular_result_file(results_path, max_bytes=None):
+        return empty
     try:
         raw = results_path.read_text(encoding="utf-8")
     except OSError:
@@ -869,6 +879,20 @@ def parse_aggregated_results(
     )
 
     aggregated_results_path = output_dir / "ash_aggregated_results.json"
+
+    # A FIFO or a link at the results name is refused before any open: the
+    # readers of this file run under the registry lock, and safe_read_json_file's
+    # own check follows links.
+    if os.path.lexists(aggregated_results_path) and not is_regular_result_file(
+        aggregated_results_path, max_bytes=None
+    ):
+        raise MCPResourceError(
+            f"Aggregated results path is not a regular file: {aggregated_results_path}",
+            context={
+                "output_dir": str(output_dir),
+                "error_category": ErrorCategory.INVALID_PATH.value,
+            },
+        )
 
     # Use safe_read_json_file for robust error handling
     data, error = safe_read_json_file(aggregated_results_path, required=True)
