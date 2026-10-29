@@ -1178,7 +1178,10 @@ class TestVerifyThirdParty:
         )
         (third_party / "index.json").unlink()
         (Path(path) / "uv").write_text('#!/bin/sh\necho "uv 0.1.0"\n')
-        self._fails(pins, third_party, searched, "does not report 0.12.23", site_dirs)
+        # The message names the pinned release, so read it from the pin instead of
+        # spelling it: the literal went stale when the uv pin moved.
+        pinned = THIRD_PARTY_LICENSES["uv"].version.lstrip("v")
+        self._fails(pins, third_party, searched, f"does not report {pinned}", site_dirs)
 
     def test_every_release_copy_is_checked_not_only_the_first(self, tmp_path):
         """grype is in both /usr/local/bin and /.ash/bin in the image."""
