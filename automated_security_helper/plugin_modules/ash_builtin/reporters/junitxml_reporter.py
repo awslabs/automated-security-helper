@@ -524,8 +524,6 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                                 type_="threshold",
                             )
                         ]
-                # elif result.kind not in ["notApplicable", "informational"]:
-                #     pass
 
                 # Add additional metadata in system-out
                 metadata = []
