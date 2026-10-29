@@ -364,10 +364,15 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
     shared = shared_workspace_root()
     if shared is None:
         return False
+    # os.path.realpath rather than Path.resolve, as in validate_config_input: on
+    # Python 3.12 and older, resolve raises RuntimeError for a link that leads
+    # back to itself, and a scanned tree can hold one (a self-referencing
+    # .semgrepignore made a scanner's construction raise here). realpath
+    # resolves as far as it can and raises nothing.
     for candidate in (
         Path(os.path.abspath(config_path)),
         *link_locations(config_path),
-        Path(config_path).resolve(),
+        Path(os.path.realpath(config_path)),
     ):
         parts = _parts_below(candidate, shared)
         if parts is not None and not _is_server_written_config(
@@ -563,11 +568,16 @@ def _validated_session_component(session_id: str) -> str:
     directly.
     """
 
-    if not session_id:
-        raise ValueError("session_id must be a non-empty string")
-    if "/" in session_id or "\\" in session_id or session_id in ("..", "."):
-        raise ValueError(f"session_id contains path separators: {session_id!r}")
-    return session_id
+    # The one rule every builder of a session path applies
+    # (session_paths.validated_path_component): the registry, source delivery
+    # and the TTL sweep refuse an id by it, and a separator-only rule here
+    # granted a sandbox root for ids they refuse (a control character, a name
+    # over the length bound, the shape of a hidden delete name).
+    from automated_security_helper.cli.mcp.session_paths import (
+        validated_path_component,
+    )
+
+    return validated_path_component(session_id, "session_id")
 
 
 # ---------------------------------------------------------------------------
@@ -762,13 +772,26 @@ def _sandbox_for_gate(session_id: Optional[str]) -> SessionSandbox:
     nothing, so :func:`_sibling_refusal` refuses every path under the shared
     workspace area -- including the one the malformed id was shaped to reach.
     What the caller loses is exactly the session allowance it failed to name.
+
+    The degraded sandbox is a remote caller's: the operator's grant and nothing
+    else. ``session_sandbox(None)`` is the local caller's, with the permissive
+    denylist fallback and unconfined config reads, and a client that sent a
+    malformed id is not the process that launched the server.
     """
 
     try:
         return session_sandbox(session_id)
     except ValueError as exc:
         _logger.debug("MCP sandbox: no session allowance for %r (%s)", session_id, exc)
-        return session_sandbox(None)
+        granted_scan = operator_scan_roots()
+        return SessionSandbox(
+            session_id=None,
+            root=None,
+            scan_roots=tuple(granted_scan),
+            config_roots=tuple(operator_config_roots()) + tuple(granted_scan),
+            fall_back_to_denylist=False,
+            confine_config=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -798,6 +821,57 @@ def _refusal(
             "resolved_path": str(resolved),
             "error_category": ErrorCategory.INVALID_PATH.value,
         },
+    )
+
+
+def _running_on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _names_a_windows_share(path: object) -> bool:
+    """Whether the text of ``path`` is a UNC path, ``\\\\server\\share`` or ``//server/share``."""
+    text = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
+    return text.startswith(("\\\\", "//"))
+
+
+def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceError]:
+    """On Windows, refuse a client-named path whose resolution would open a connection.
+
+    Resolving a UNC path, or a link whose target is one, makes Windows open a
+    connection to the host the path names, before any gate has judged it.
+    ``config_sources`` refuses a linked source unresolved for that reason
+    (``_permitted``); the gates here resolved the caller's path first, so a UNC
+    path, or a link to one, had the server reach the host it named and then be
+    refused. A UNC spelling and a link at the name are refused as given, without
+    resolving. Nothing is refused on other platforms, where resolving opens
+    nothing.
+    """
+    if not _running_on_windows():
+        return None
+    text = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
+    if _names_a_windows_share(path):
+        return _refusal(
+            what,
+            path,
+            Path(text),
+            "It names a network share, which the MCP server does not open. Name a "
+            "directory on a local volume.",
+        )
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
+
+    try:
+        is_link = _is_link_stat(os.lstat(text))
+    except OSError:
+        return None
+    if not is_link:
+        return None
+    return _refusal(
+        what,
+        path,
+        Path(text),
+        "It is a link, which the MCP server does not resolve on Windows because "
+        "resolving one can open a connection to the host its target names. Name "
+        "the directory itself.",
     )
 
 
@@ -880,13 +954,11 @@ def _server_config_dir_refusal(
         return None
     for name in (CONFIG_DIR_NAME, CLIENT_CONFIG_DIR_NAME):
         server_dir = sandbox.root / name
-        # By file identity too, as _parts_below matches ancestors, so a spelling
-        # that differs only in case on a case-insensitive volume is refused.
-        if (
-            resolved == server_dir
-            or resolved.is_relative_to(server_dir)
-            or _parts_below(resolved, server_dir) is not None
-        ):
+        # By file identity too (_is_or_below), so a spelling that differs only in
+        # case on a case-insensitive volume is refused: the directory itself as
+        # well as a path below it. _parts_below matches ancestors alone, so the
+        # directory's own respelling passed it, and then passed as a scan target.
+        if _is_or_below(resolved, server_dir):
             return _refusal(
                 "Scan target",
                 path,
@@ -902,6 +974,7 @@ def _server_config_dir_refusal(
 def validate_scan_target_in_sandbox(
     directory_path: str | Path,
     session_id: Optional[str] = None,
+    resolved_out: Optional[List[Path]] = None,
 ) -> Optional[MCPResourceError]:
     """Check a scan target against this session's capability.
 
@@ -917,12 +990,31 @@ def validate_scan_target_in_sandbox(
     Args:
         directory_path: Caller-supplied scan target, absolute or relative.
         session_id: The session this call acts for.
+        resolved_out: When given, a permitted target appends to it the resolved
+            path this check judged, so a caller that builds paths under the
+            target builds them from the path that was permitted and not from a
+            second resolution of the caller's text, which can lead elsewhere by
+            then. Nothing is appended for a refusal.
 
     Returns:
         None if permitted, otherwise an :class:`MCPResourceError`.
     """
 
+    unresolved = _refusal_before_resolving("Scan target", directory_path)
+    if unresolved is not None:
+        return unresolved
     resolved = Path(directory_path).resolve()
+    refusal = _scan_target_refusal(directory_path, resolved, session_id)
+    if refusal is None and resolved_out is not None:
+        resolved_out.append(resolved)
+    return refusal
+
+
+def _scan_target_refusal(
+    directory_path: str | Path, resolved: Path, session_id: Optional[str]
+) -> Optional[MCPResourceError]:
+    """The refusal of ``validate_scan_target_in_sandbox`` for ``resolved``, or None."""
+
     sandbox = _sandbox_for_gate(session_id)
 
     sibling = _sibling_refusal(sandbox, directory_path, resolved)
@@ -995,6 +1087,9 @@ def validate_config_input(
     """
 
     if resolved is None:
+        unresolved = _refusal_before_resolving("Config input", config_path)
+        if unresolved is not None:
+            return unresolved
         # os.path.realpath rather than Path.resolve: on Python 3.12 and older,
         # resolve raises RuntimeError for a symbolic link that leads back to
         # itself, which would escape the tool as an exception. Resolved as far as
