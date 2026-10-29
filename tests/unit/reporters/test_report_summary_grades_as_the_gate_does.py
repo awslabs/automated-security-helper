@@ -197,6 +197,79 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         assert not emitter.is_finding_actionable(_vuln(severity="INFO"))
 
 
+class TestALowercaseRecordedGateLabelsAFindingActionableInEveryReport:
+    """A project declared ``medium`` fails on a HIGH finding; the reports say so.
+
+    The exit code upper-cases a project's gate before the ladder reads it. The
+    emitter passed the recorded spelling to the case-sensitive ladder, which
+    reads a name it does not know as CRITICAL, so the HTML, Markdown and text
+    reports labelled a HIGH finding "below threshold" for a project the exit
+    code failed. The three reports read one normalized table now.
+    """
+
+    @pytest.fixture
+    def model(self, tmp_path) -> AshAggregatedResults:
+        model = AshAggregatedResults()
+        model.ash_config = None
+        model.sarif = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "ASH"}},
+                        "results": [
+                            {
+                                "ruleId": "RULE-HIGH",
+                                "level": "error",
+                                "message": {"text": "a high finding"},
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "src/a.py"}
+                                        }
+                                    }
+                                ],
+                                "properties": {
+                                    "scanner_name": "bandit",
+                                    "workspace_project": "lower",
+                                },
+                            }
+                        ],
+                        "invocations": [],
+                    }
+                ],
+            }
+        )
+        model.workspace = _workspace(
+            tmp_path, _project("lower", severity_threshold="medium")
+        )
+        return model
+
+    def test_the_html_card_is_actionable(self, model, test_plugin_context):
+        document = HtmlReporter(context=test_plugin_context).report(model)
+        assert 'data-status="actionable"' in document
+        assert 'data-status="below-threshold"' not in document
+
+    def test_the_markdown_summary_counts_it_actionable(
+        self, model, test_plugin_context
+    ):
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
+            MarkdownReporter,
+        )
+
+        document = MarkdownReporter(context=test_plugin_context).report(model)
+        assert "**1 actionable**" in document
+        assert "0 below threshold" in document
+
+    def test_the_text_summary_counts_it_actionable(self, model, test_plugin_context):
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
+            TextReporter,
+        )
+
+        document = TextReporter(context=test_plugin_context).report(model)
+        assert "1 actionable | 0 below threshold" in document
+
+
 class TestANoChangesSkipIsNotAnIncompleteScan:
     @staticmethod
     def _model(tmp_path, reason: SkippedProjectReason) -> AshAggregatedResults:
