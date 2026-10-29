@@ -9,11 +9,26 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Literal, Optional, Union
+from typing import Annotated, List, Literal, Optional, Union
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, EmailStr, Field, RootModel
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    RootModel,
+    StringConstraints,
+)
 
 from . import spdx
+
+# Not from the codegen: an OWASP OpenCRE identifier, the pattern the schema
+# puts on each entry of Requirement.openCre. The codegen put it on the list
+# field itself, where pydantic cannot apply a string pattern, so any BOM that
+# carried openCre, an empty list included, raised TypeError instead of
+# validating.
+OpenCreIdentifier = Annotated[str, StringConstraints(pattern=r"^CRE:[0-9]+-[0-9]+$")]
 
 
 class BomFormat(str, Enum):
@@ -2671,11 +2686,10 @@ class Requirement(BaseModel):
         description="The supplemental text that provides additional guidance or context to the requirement, but is not directly part of the requirement.",
         title="Descriptions",
     )
-    openCre: Optional[List[str]] = Field(
+    openCre: Optional[List[OpenCreIdentifier]] = Field(
         None,
         description="The Common Requirements Enumeration (CRE) identifier(s). CRE is a structured and standardized framework for uniting security standards and guidelines. CRE links each section of a resource to a shared topic identifier (a Common Requirement). Through this shared topic link, all resources map to each other. Use of CRE promotes clear and unambiguous communication among stakeholders.",
         title="OWASP OpenCRE Identifier(s)",
-        pattern=r"^CRE:[0-9]+-[0-9]+$",
     )
     parent: Optional[RefLinkType] = Field(
         None,

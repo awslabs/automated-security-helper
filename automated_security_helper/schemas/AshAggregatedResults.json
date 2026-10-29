@@ -16048,6 +16048,7 @@
           "anyOf": [
             {
               "items": {
+                "pattern": "^CRE:[0-9]+-[0-9]+$",
                 "type": "string"
               },
               "type": "array"
