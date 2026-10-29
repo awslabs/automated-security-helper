@@ -210,9 +210,12 @@ only the commits that touched the file. Then push with `git push --force-with-le
 CI never updates snapshots: `tests/snapshot/conftest.py` refuses `pytest --snapshot-update`
 when `CI` or `GITHUB_ACTIONS` is exactly `true`, and `tests/snapshot/test_snapshot_policy.py`
 fails if any workflow, action, script, or pytest configuration passes it. A missing
-snapshot fails, and so does a snapshot that no test asserts any more. syrupy cannot see
-the snapshots of a test module you deleted or renamed, so
-`check-snapshot-trailers.py --orphans` checks that every file under a
+snapshot fails, and so does a snapshot that no test asserts any more in a whole-suite run,
+which is syrupy's default and what a local `pytest` does. CI's tier runs and integration
+shards pass `--snapshot-warn-unused`, because each sees only part of the suite, so there
+an unused snapshot is reported as a warning in the run's snapshot summary and does not
+fail the leg. syrupy cannot see the snapshots of a test module you deleted or renamed,
+so `check-snapshot-trailers.py --orphans`, which still fails CI, checks that every file under a
 `__snapshots__/` directory belongs to a test module next to it, and that no
 `__snapshots__/` directory is empty. When you rename a module, move its snapshots; when
 you delete one, delete its snapshots, with a trailer either way. The orphan check reads
