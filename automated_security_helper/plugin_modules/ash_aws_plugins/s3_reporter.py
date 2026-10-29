@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Optional, TYPE_CHECKING, Tuple
 
 import boto3
+import botocore.exceptions
 from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ReporterOptionsBase
@@ -41,7 +42,11 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
             default_factory=lambda: os.environ.get(
                 "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
             ),
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
+            # Every region name AWS publishes: the two-letter areas plus mx and
+            # the eusc, us-isof and eu-isoe partitions, with an optional
+            # country segment (eusc-de-east-1). A value refused here is refused
+            # as a configuration error (exit 3), so the pattern errs wide.
+            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}",
             description="AWS region to use for S3 operations",
         ),
     ]
@@ -218,9 +223,25 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             sts_client = session.client("sts")
             caller_id = sts_client.get_caller_identity()
 
-            # Check if S3 bucket exists and is accessible
+            # Check if S3 bucket exists and is accessible. HeadBucket needs
+            # s3:ListBucket, which the documented write-only policy
+            # (s3:PutObject alone) does not grant: S3 then answers 403 for a
+            # bucket that exists, and 404 for one that does not. A 403 proves
+            # the bucket exists, so the upload is still tried; only a missing
+            # bucket, or any other failure, leaves the dependency unsatisfied.
             s3_client = session.client("s3")
-            s3_client.head_bucket(Bucket=self.config.options.bucket_name)
+            try:
+                s3_client.head_bucket(Bucket=self.config.options.bucket_name)
+            except botocore.exceptions.ClientError as e:
+                status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                code = e.response.get("Error", {}).get("Code")
+                if status != 403 and code not in ("403", "Forbidden", "AccessDenied"):
+                    raise
+                ASH_LOGGER.debug(
+                    "HeadBucket on the bucket the bucket_name option names was "
+                    "refused (s3:ListBucket is not granted); the bucket exists, "
+                    "so the upload is tried with s3:PutObject alone"
+                )
 
             self.dependencies_satisfied = "Account" in caller_id
         except Exception as e:
@@ -236,9 +257,27 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         return self.dependencies_satisfied
 
     def report(self, model: "AshAggregatedResults") -> str | None:
-        """Upload the results to S3 and return a JSON receipt, or None on failure."""
+        """Upload the results to S3 and return a JSON receipt, or None on failure.
+
+        ``ash report`` never calls ``validate_plugin_dependencies``, so the
+        settings are checked here too: an unset bucket used to reach PutObject
+        and come back as a botocore parameter error.
+        """
         if isinstance(self.config, dict):
             self.config = S3ReporterConfig.model_validate(self.config)
+        missing = False
+        if self.config.options.aws_region is None:
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+            )
+            missing = True
+        if self.config.options.bucket_name is None:
+            report_missing_setting(
+                self.config.name, "bucket_name", ("ASH_S3_BUCKET_NAME",)
+            )
+            missing = True
+        if missing:
+            return None
 
         # Create a key for the S3 object. generated_at is set when the model is
         # built and is the same during the scan and in a later `ash report`;
@@ -257,12 +296,23 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             f"ash-report-{timestamp}.{file_extension}"
         )
 
-        # Format the results based on the specified format
+        # Format the results based on the specified format. to_simple_dict()
+        # carries the metadata, the configuration record and the scanner
+        # results, but no findings (the CloudWatch Logs reporter shares it
+        # because PutLogEvents caps an event at 1 MB); the uploaded file is
+        # documented to hold the findings, and S3 has no such cap, so the SARIF
+        # report goes with it. Dumped in JSON mode, so the YAML form holds plain
+        # scalars and no Python-only tag (an enum member used to be written as a
+        # !!python/object/apply tag yaml.safe_load cannot read).
+        output_dict = model.to_simple_dict()
+        if model.sarif is not None:
+            output_dict["sarif"] = model.sarif.model_dump(
+                by_alias=True, exclude_none=True, mode="json"
+            )
+        output_dict = json.loads(json.dumps(output_dict, default=str))
         if self.config.options.file_format == "json":
-            output_dict = model.to_simple_dict()
-            output_content = json.dumps(output_dict, default=str, indent=2)
+            output_content = json.dumps(output_dict, indent=2)
         else:
-            output_dict = model.to_simple_dict()
             # utils/report_yaml.py: no line of it is a CI workflow command, whatever
             # a refused input's name or a finding's text holds.
             output_content = report_yaml(output_dict, default_flow_style=False)
@@ -300,25 +350,6 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 )
             )
 
-            # The documented local copy of the uploaded content.
-            reports_dir = Path(self.context.output_dir) / "reports"
-            reports_dir.mkdir(parents=True, exist_ok=True)
-            local_copy = write_report_file(
-                reports_dir, self._local_copy_name(), output_content
-            )
-
-            # What ReportPhase writes to reports/ash.s3.json: a receipt for the
-            # upload, as JSON so the file matches its extension.
-            return json.dumps(
-                {
-                    "url": s3_url,
-                    "bucket": self.config.options.bucket_name,
-                    "key": s3_key,
-                    "file_format": self.config.options.file_format,
-                    "local_copy": local_copy.as_posix() if local_copy else None,
-                },
-                indent=2,
-            )
         except Exception as e:
             error_msg = (
                 "Error uploading to S3 after retries: "
@@ -333,6 +364,38 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             # reporter that produced nothing, and writes no ash.s3.json. Returning
             # the message used to write it into that file as if it were a report.
             return None
+
+        # The documented local copy of the uploaded content. Outside the upload's
+        # handler: a failure here (a read-only reports directory, say) used to
+        # be logged as a failed upload and turned the receipt of an upload that
+        # succeeded into None.
+        local_copy = None
+        try:
+            reports_dir = Path(self.context.output_dir) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            local_copy = write_report_file(
+                reports_dir, self._local_copy_name(), output_content
+            )
+        except Exception as e:
+            self._plugin_log(
+                "The report was uploaded to S3, but its local copy could not be "
+                f"written: {error_text(e, self._environment_values())}",
+                level=logging.WARNING,
+                append_to_stream="stderr",
+            )
+
+        # What ReportPhase writes to reports/ash.s3.json: a receipt for the
+        # upload, as JSON so the file matches its extension.
+        return json.dumps(
+            {
+                "url": s3_url,
+                "bucket": self.config.options.bucket_name,
+                "key": s3_key,
+                "file_format": self.config.options.file_format,
+                "local_copy": local_copy.as_posix() if local_copy else None,
+            },
+            indent=2,
+        )
 
     def _put_object_with_retry(self, s3_client, **kwargs):
         """Put object to S3, retrying on the schedule this reporter was configured with.
