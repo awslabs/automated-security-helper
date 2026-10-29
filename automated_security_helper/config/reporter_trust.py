@@ -320,6 +320,19 @@ def confine_reporter_destinations(
         == "reporters"
     ]
     if reporter_overrides:
+        # An override the scan's own apply resolved under the repository's
+        # spelling of a section the trusted base spells another way is folded
+        # onto the trusted base's key first (the lockout fold the operator view
+        # replay uses, ``resolve_config._folded_onto_trusted``); without it the
+        # replay refuses the only spelling the scan's apply accepted, and the
+        # scan cannot run.
+        from automated_security_helper.config.resolve_config import (
+            _folded_onto_trusted,
+        )
+
+        reporter_overrides = _folded_onto_trusted(
+            trusted_config, reporter_overrides, config
+        )
         trusted_config = apply_config_overrides(trusted_config, reporter_overrides)
     config._untrusted_membership_source = source
     config._in_tree_config_files = tuple(in_tree)
