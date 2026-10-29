@@ -1520,6 +1520,7 @@ def resolve_workspace(
     trusted_config: Optional[PathLike] = None,
     remote_client: bool = False,
     permit_base: Optional[Callable[[Path], bool]] = None,
+    session_id: Optional[str] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -1579,6 +1580,14 @@ def resolve_workspace(
             raised as the project's ``ASHConfigValidationError``, from the
             ``ASHConfigInputNotPermittedError``, and names neither the file's
             target nor anything in it.
+        session_id: The MCP session the workspace is resolved for, or None. The
+            operator config's chain is judged for ``!ENV`` with it
+            (``resolve_config.check_operator_config``), as each project's
+            resolution judges its chain with ``client_config_rules.session_id``:
+            for a remote caller only that session's own bound profile is set
+            aside, so a non-default session's profile that uses ``!ENV`` is
+            accepted at planning as it is at each project's scan. None reads the
+            session from ``client_config_rules`` when those carry one.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -1630,8 +1639,19 @@ def resolve_workspace(
     operator_digest: Optional[str] = None
     if operator is not None:
         # Once for the whole workspace, so a project with no config of its own,
-        # which uses the operator's file alone, is refused with the rest.
-        check_operator_config(operator, definition.root, remote_client=remote_client)
+        # which uses the operator's file alone, is refused with the rest. With
+        # the call's session, so the !ENV judgement is the one each project's
+        # resolution makes (resolve_config reads client_config_policy.session_id).
+        check_operator_config(
+            operator,
+            definition.root,
+            remote_client=remote_client,
+            session_id=(
+                session_id
+                if session_id is not None
+                else getattr(client_config_rules, "session_id", None)
+            ),
+        )
         operator_digest = operator_config_digest(operator)
 
     projects: List[ProjectPlan] = []

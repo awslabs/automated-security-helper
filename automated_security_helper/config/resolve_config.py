@@ -6931,6 +6931,7 @@ def check_operator_config(
     scanned_root: Path | str,
     permit_base: Optional[Callable[[Path], bool]] = None,
     remote_client: bool = False,
+    session_id: Optional[str] = None,
 ) -> None:
     """Refuse an operator config that cannot be layered over a workspace's projects.
 
@@ -6940,12 +6941,23 @@ def check_operator_config(
     runs them once for the whole workspace, so a project with no config of its
     own, which uses the operator's file alone, is refused with the rest.
 
+    ``session_id`` is the MCP call's session, as ``env_refused_for`` takes it:
+    for a remote caller, of the profile files the server writes in the sessions'
+    ``config/`` directories only that session's own are set aside from ``!ENV``.
+    Each project's resolution judges the chain with it
+    (``resolve_config``'s ``client_config_policy.session_id``); judged without
+    it here, a non-default session's own bound profile that uses ``!ENV`` was
+    refused at planning though every project's resolution accepted it.
+
     Raises:
         ASHConfigValidationError: The config cannot be used; exit 3 in workspace
             mode.
     """
     overlay = _load_overlay(
-        operator_config_path, None, permit_base, env_refused_for(remote_client)
+        operator_config_path,
+        None,
+        permit_base,
+        env_refused_for(remote_client, session_id),
     )
     _refuse_unless_the_operators(overlay, scanned_root)
 

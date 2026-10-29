@@ -562,6 +562,10 @@ def _resolve(
         remote_client=remote_client,
         permit_base=permit_base,
         project_gate=_project_gate(workspace_file, session_id),
+        # The operator config's !ENV judgement is made for this session, as each
+        # project's is: without it a non-default session's own bound profile
+        # that uses !ENV was refused at planning and accepted at every scan.
+        session_id=session_id,
     )
 
 
