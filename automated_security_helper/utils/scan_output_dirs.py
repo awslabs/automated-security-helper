@@ -99,6 +99,7 @@ from automated_security_helper.core.exceptions import ScanSetUnreadableError
 from automated_security_helper.utils.error_text import redact_then_split
 from automated_security_helper.utils.git_command import decode_git_output, git_argv
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
     resolve_uri_reading,
@@ -429,6 +430,78 @@ class GitIndexUnavailable(Exception):
 #: How long git may take to list the index below a directory.
 GIT_INDEX_TIMEOUT_SECONDS = 30
 
+#: Environment variables left out of git's environment when it lists the index: the
+#: ones that point git at another repository or index (``--git-dir`` and
+#: ``--work-tree`` name the repository on the command line; GIT_INDEX_FILE is a
+#: hook's temporary index), and the ones that change what a pathspec matches, which
+#: make git refuse ``--literal-pathspecs`` outright (GIT_ICASE_PATHSPECS or
+#: GIT_GLOB_PATHSPECS together with it is exit 128) or match something other than
+#: the path as spelled.
+_GIT_ENV_LEFT_OUT = frozenset(
+    {
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_GLOB_PATHSPECS",
+        "GIT_NOGLOB_PATHSPECS",
+        "GIT_ICASE_PATHSPECS",
+        "GIT_LITERAL_PATHSPECS",
+    }
+)
+
+
+def _git_index_environ() -> Dict[str, str]:
+    """ASH's environment without :data:`_GIT_ENV_LEFT_OUT`, for the index listing."""
+    return {
+        key: value
+        for key, value in snapshot_environ().items()
+        if key not in _GIT_ENV_LEFT_OUT
+    }
+
+
+def _pathspec_options() -> Tuple[str, ...]:
+    """git's global options that make the index pathspec match the directory as named.
+
+    Literal everywhere, so no character of the path is read as a glob. Where the
+    filesystem compares names without regard to case (:func:`output_name_key`:
+    macOS and Windows) the match ignores case too: the index keeps the spelling the
+    file was committed with, and an output directory spelled ``Out`` is the
+    committed ``out`` there, so a case-exact pathspec listed nothing and the
+    committed-output refusal never fired. ``--noglob-pathspecs`` adds the literal
+    magic that ``--icase-pathspecs`` can be combined with; ``--literal-pathspecs``
+    refuses any magic.
+    """
+    if output_name_key("A") == "A":
+        return ("--literal-pathspecs",)
+    return ("--noglob-pathspecs", "--icase-pathspecs")
+
+
+def _names_below(listed: str, relative: str) -> List[str]:
+    """The entries of *listed* (NUL-separated) below *relative*, spelled under it.
+
+    Compared component by component with :func:`output_name_key`, as the prefix
+    was matched: an entry whose directory prefix differs from *relative* only in
+    case is below it where the filesystem compares names that way. An entry at
+    *relative* itself (git tracks it as a link or a submodule) is ``""``.
+    """
+    if relative == ".":
+        return [name for name in listed.split("\0") if name]
+    prefix_keys = [output_name_key(part) for part in relative.split("/")]
+    depth = len(prefix_keys)
+    names: List[str] = []
+    for name in listed.split("\0"):
+        if not name:
+            continue
+        parts = name.split("/")
+        if len(parts) < depth:
+            continue
+        if [output_name_key(part) for part in parts[:depth]] != prefix_keys:
+            continue
+        names.append("/".join(parts[depth:]))
+    return names
+
+
 #: How much of git's stderr a refusal or a warning quotes.
 _GIT_ERROR_LINES = 2
 _GIT_ERROR_CHARACTERS = 300
@@ -444,12 +517,16 @@ def git_index_below(
     callers that run before a configuration is loaded.
 
     Every entry, whatever its type: a regular file, a link, a submodule. git is
-    asked once, about the repository :func:`_repository_root_of` finds, named on
-    the command line (``--git-dir`` and ``--work-tree``), so nothing inside
-    *directory* decides which repository answers; *directory* is the pathspec,
-    taken literally. ``core.fsmonitor`` is turned off and ``core.hooksPath``
-    pointed at ``/dev/null`` for the call (:func:`git_argv`), so the repository's
-    own config cannot start a program.
+    asked once, about the repository :func:`_repository_root_of` finds from where
+    *directory* really is (every link resolved), named on the command line
+    (``--git-dir`` and ``--work-tree``), so nothing inside *directory* decides
+    which repository answers; *directory* is the pathspec, taken literally, and
+    without regard to case where the filesystem compares names that way
+    (:func:`_pathspec_options`). ``core.fsmonitor`` is turned off and
+    ``core.hooksPath`` pointed at ``/dev/null`` for the call (:func:`git_argv`),
+    so the repository's own config cannot start a program, and the variables that
+    would point git elsewhere or change what the pathspec matches are left out of
+    its environment (:data:`_GIT_ENV_LEFT_OUT`).
 
     No names and no repository when *directory* does not exist or no repository
     holds it. No names, the repository and git's error when git could not list
@@ -467,17 +544,24 @@ def git_index_below(
     base = _absolute(directory)
     if not base.is_dir():
         return GitIndexAnswer(base)
-    root = _repository_root_of(base)
+    # The repository is found from where the directory really is, every link
+    # resolved, as git would find it: a directory reached through a link that
+    # lands inside a repository (``/alias`` to ``<repo>/sub``) is that
+    # repository's, and one reached through a link in the repository that leads
+    # out of it is not. The answer's base stays the directory as spelled, since
+    # its callers join the names onto it, and the two are one directory.
+    real = _resolved(base)
+    root = _repository_root_of(real)
     if root is None:
         return GitIndexAnswer(base)
-    relative = base.relative_to(root).as_posix()
+    relative = real.relative_to(root).as_posix()
     pathspec = "." if relative == "." else relative
     try:
         result = spawn_run(
             git_argv(
                 f"--git-dir={root / '.git'}",
                 f"--work-tree={root}",
-                "--literal-pathspecs",
+                *_pathspec_options(),
                 "ls-files",
                 "-z",
                 "--",
@@ -489,6 +573,7 @@ def git_index_below(
             # to /dev/stdin made git wait on ASH's stdin.
             stdin=subprocess.DEVNULL,
             timeout=GIT_INDEX_TIMEOUT_SECONDS,
+            env=_git_index_environ(),
         )
     except subprocess.TimeoutExpired:
         return GitIndexAnswer(
@@ -517,20 +602,14 @@ def git_index_below(
             error=f"git exited with status {result.returncode}"
             + (f": {said}" if said else ""),
         )
-    prefix = "" if pathspec == "." else f"{relative}/"
     # Decoded as Python decodes a file name, so each name matches the directory
     # entry it is compared with: GIT_OUTPUT_ENCODING (UTF-8 on Windows, whatever
     # the filesystem encoding is there) with surrogateescape, so a byte that does
-    # not decode is kept as a surrogate and never raises.
+    # not decode is kept as a surrogate and never raises. An entry at *directory*
+    # itself (git tracks it as a link or a submodule, which a filesystem walk
+    # follows into) comes back as "".
     listed = decode_git_output(result.stdout)
-    names = []
-    for name in listed.split("\0"):
-        if name == relative and pathspec != ".":
-            # An entry at *directory* itself: git tracks it as a link or a
-            # submodule, which a filesystem walk follows into.
-            names.append("")
-        elif name and name.startswith(prefix):
-            names.append(name[len(prefix) :])
+    names = _names_below(listed, relative)
     return GitIndexAnswer(base, names=names, repository=root)
 
 
@@ -585,7 +664,6 @@ def results_path_names() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
     """
     # Imported here: core.previous_results is above this module.
     from automated_security_helper.core.previous_results import (
-        HELD_DIR_NAME,
         RESTORED_MARKER_NAME,
     )
 
@@ -598,7 +676,7 @@ def results_path_names() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
             "ash.log",
             "ash.log.jsonl",
         ),
-        (*WORKING_DIR_NAMES, HELD_DIR_NAME, f"{HELD_DIR_NAME}.partial"),
+        ash_own_dir_names(),
     )
 
 
@@ -711,7 +789,18 @@ def _resolved(path: Path) -> Path:
 
 
 def _strictly_inside(candidate: Path, root: Path) -> bool:
-    return candidate != root and candidate.is_relative_to(root)
+    """Whether *candidate* is below *root*, component by component.
+
+    Each name as its filesystem compares it (:func:`output_name_key`): on macOS and
+    Windows an output directory spelled ``Out`` is the ``out`` under the source,
+    and a text comparison of the paths said it was outside the tree.
+    """
+    candidate_keys = [output_name_key(part) for part in candidate.parts]
+    root_keys = [output_name_key(part) for part in root.parts]
+    return (
+        len(candidate_keys) > len(root_keys)
+        and candidate_keys[: len(root_keys)] == root_keys
+    )
 
 
 def _reached_through_a_link(directory: Path, base: Path) -> bool:
@@ -792,6 +881,10 @@ def _same_directory(first: Path, second: Path) -> bool:
 CONTAINER_HOST_SOURCE_ENV = "ASH_ACTUAL_SOURCE_DIR"
 CONTAINER_HOST_OUTPUT_ENV = "ASH_ACTUAL_OUTPUT_DIR"
 
+#: Where the launcher mounts the host's source directory inside the container
+#: (``scan_source._CONTAINER_SOURCE_MOUNT`` names the same place).
+CONTAINER_SOURCE_MOUNT = "/src"
+
 
 def _host_output_dir_in_the_tree(root: Path) -> Optional[Path]:
     """Inside ASH's container, the host's output directory as the tree holds it.
@@ -801,8 +894,14 @@ def _host_output_dir_in_the_tree(root: Path) -> Optional[Path]:
     source, the tree holds it too, at the same relative path: the same directory,
     which this run writes. Worked out from the host's paths, in their own
     flavor (a Windows host's compare without case), so that it does not depend
-    on the two mounts reporting one file identity. None outside the container,
-    and when the host's output directory is not strictly inside its source.
+    on the two mounts reporting one file identity. The relative path is joined
+    onto the mount, which is what the host's source became: in a workspace scan
+    *root* is one project's directory below the mount, and joining it there
+    named a directory inside the project that is nobody's output while this
+    run's went unnamed. A *root* that is not the mount or below it (another
+    mount point) is taken as the host's source itself. None outside the
+    container, and when the host's output directory is not strictly inside its
+    source.
     """
     host_source = os.environ.get(CONTAINER_HOST_SOURCE_ENV)
     host_output = os.environ.get(CONTAINER_HOST_OUTPUT_ENV)
@@ -818,8 +917,20 @@ def _host_output_dir_in_the_tree(root: Path) -> Optional[Path]:
             return None
         if not relative.parts or ".." in relative.parts:
             return None
-        return root.joinpath(*relative.parts)
+        return _container_source_mount_of(root).joinpath(*relative.parts)
     return None
+
+
+def _container_source_mount_of(root: Path) -> Path:
+    """The directory the host's source is mounted at, for a scan rooted at *root*.
+
+    ``/src`` when *root* is it or below it; otherwise *root* itself.
+    """
+    mount = PurePosixPath(CONTAINER_SOURCE_MOUNT)
+    posix_root = PurePosixPath(root.as_posix())
+    if posix_root == mount or posix_root.is_relative_to(mount):
+        return Path(CONTAINER_SOURCE_MOUNT)
+    return root
 
 
 def _output_dir_candidates_with_owner(
@@ -921,21 +1032,9 @@ def classified_output_dirs(
     applied, if the scan set still holds a file in it. The cost: there, an
     earlier run's reports left in the tree are scanned too.
     """
-    root = _absolute(source_dir)
-    root_resolved = _resolved(root)
-    named: Set[Path] = set()
-    scanned: Set[Path] = set()
-    for candidate, owned in _output_dir_candidates_with_owner(
+    named, scanned = _classified_output_dirs(
         source_dir, output_dir, workspace_output_dir
-    ):
-        spelled = _spelled_under(candidate, root, root_resolved)
-        if spelled is None:
-            continue
-        if owned or git_index_below(spelled).names is not None:
-            named.add(spelled)
-        else:
-            scanned.add(spelled)
-    scanned -= named
+    )
     outermost = sorted(
         path
         for path in named
@@ -946,6 +1045,51 @@ def classified_output_dirs(
         for path in scanned
         if not any(path == other or path.is_relative_to(other) for other in named)
     )
+
+
+def _classified_output_dirs(
+    source_dir: str | Path,
+    output_dir: Optional[str | Path] = None,
+    workspace_output_dir: Optional[str | Path] = None,
+) -> Tuple[Set[Path], Set[Path]]:
+    """Every named output directory, nested ones included, and the scanned ones.
+
+    :func:`classified_output_dirs` without the reduction to the outermost: what
+    :func:`output_dirs_to_exclude` needs, since a named directory nested inside
+    another that holds a committed file is excluded on its own.
+
+    A directory that is not this run's is named only when git lists the index of
+    a repository ABOVE it. A ``.git`` entry inside the directory itself makes it
+    a repository of its own, whose index says nothing about the tree being
+    scanned: an earlier run's ``.ash/ash_output`` holding one answered "nothing
+    committed" and was left out whole, every file in it hidden from every
+    scanner, where it is scanned with a warning like any other directory git
+    cannot speak for.
+    """
+    root = _absolute(source_dir)
+    root_resolved = _resolved(root)
+    named: Set[Path] = set()
+    scanned: Set[Path] = set()
+    for candidate, owned in _output_dir_candidates_with_owner(
+        source_dir, output_dir, workspace_output_dir
+    ):
+        spelled = _spelled_under(candidate, root, root_resolved)
+        if spelled is None:
+            continue
+        if owned or _an_enclosing_repository_lists(spelled):
+            named.add(spelled)
+        else:
+            scanned.add(spelled)
+    scanned -= named
+    return named, scanned
+
+
+def _an_enclosing_repository_lists(directory: Path) -> bool:
+    """Whether git listed the index below *directory* for a repository above it."""
+    answer = git_index_below(directory)
+    if answer.names is None or answer.repository is None:
+        return False
+    return answer.repository != _resolved(answer.base)
 
 
 def named_output_dirs(
@@ -1034,13 +1178,14 @@ def scanned_files_in(
     for entry in scanned_files:
         parts = Path(os.path.abspath(os.fspath(entry))).parts
         keys = tuple(output_name_key(part) for part in parts)
+        # Every directory holding the entry, not only the first: *dirs* may hold
+        # one named directory nested inside another.
         for directory, prefix in prefixes:
             if len(keys) > len(prefix) and keys[: len(prefix)] == prefix:
                 relative = "/".join(parts[len(prefix) :])
                 path = committed_file_under(Path(directory), relative)
                 if path is not None:
                     found[directory].append(path)
-                break
     return found
 
 
@@ -1063,11 +1208,22 @@ def output_dirs_to_exclude(
     directory holding a committed file, reaches the tool. The executor's drop
     removes the SARIF results located in ASH's files there; a tool that writes
     something else, syft's SBOM, keeps what it found in them.
+
+    A named directory nested inside another (this run's output directory, or a
+    workspace project's, under an earlier run's ``.ash/ash_output`` that holds a
+    committed file) is excluded on its own, whole when it holds no committed
+    file: the outer directory's committed file does not open the inner one, and
+    ASH's in-progress output there was read by every directory-walking tool.
     """
-    dirs = named_output_dirs(source_dir, output_dir, workspace_output_dir)
+    named, _ = _classified_output_dirs(source_dir, output_dir, workspace_output_dir)
+    dirs = sorted(named)
     held = scanned_files_in(dirs, scanned_files)
     excluded: List[Path] = []
     for directory in dirs:
+        if any(
+            directory == done or _strictly_inside(directory, done) for done in excluded
+        ):
+            continue
         committed = held[directory]
         if not committed:
             excluded.append(directory)
@@ -1083,13 +1239,23 @@ def ash_own_dir_names() -> Tuple[str, ...]:
     """The directories ASH creates in its output directory and fills with its own files.
 
     The working directories a scan clears and fills (:data:`WORKING_DIR_NAMES`),
-    and where an MCP scan sets the previous results aside, whole or part way
-    (``core/previous_results.py``).
+    where an MCP scan sets the previous results aside, whole or part way, and
+    where a restore stages them on the way back (``core/previous_results.py``):
+    every name a scan deletes or moves, so the committed-output refusal and the
+    output-directory exclusions cover each one.
     """
     # Imported here: core.previous_results is above this module.
-    from automated_security_helper.core.previous_results import HELD_DIR_NAME
+    from automated_security_helper.core.previous_results import (
+        HELD_DIR_NAME,
+        RESTORING_DIR_NAME,
+    )
 
-    return (*WORKING_DIR_NAMES, HELD_DIR_NAME, f"{HELD_DIR_NAME}.partial")
+    return (
+        *WORKING_DIR_NAMES,
+        HELD_DIR_NAME,
+        f"{HELD_DIR_NAME}.partial",
+        RESTORING_DIR_NAME,
+    )
 
 
 def output_dirs_inside(dirs: Sequence[Path], target: str | Path) -> List[Path]:
@@ -1174,12 +1340,27 @@ def _result_paths(result: Any, source: Path) -> Iterable[Path]:
             continue
         else:
             decoded = unquote(uri)
-            if decoded != uri and not (source / undecodable_of_text(uri)).exists():
+            if decoded != uri and not _names_a_file(source / undecodable_of_text(uri)):
                 uri = decoded
         resolved = resolve_uri_reading(uri, base=source)
         if resolved is None:
             continue
         yield path_in_record_form(resolved)
+
+
+def _names_a_file(path: Path) -> bool:
+    """Whether something exists at *path*; False when the question cannot be asked.
+
+    ``Path.exists`` raises on CPython 3.10-3.12 for a name the filesystem cannot
+    look up at all: a component longer than NAME_MAX (a percent-encoded name is
+    up to three times its decoded length), or one holding a NUL. Such a path
+    names no file, and the caller runs once per scanner result inside the scan,
+    so the answer is False rather than an exception out of the loop.
+    """
+    try:
+        return path.exists()
+    except (OSError, ValueError):
+        return False
 
 
 def _work_dir_of(context: Any) -> Path:
