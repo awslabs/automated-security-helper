@@ -377,7 +377,10 @@ def test_an_installed_tool_is_satisfied_and_installs_nothing(sandbox, monkeypatc
     assert sandbox.installs() == [], sandbox.calls()
 
 
-@pytest.mark.unit
+# integration, though it starts nothing: it guards the thirteen integration tests
+# above by running after them in the same tier, so the integration leg is where the
+# check means something (in the unit leg it would follow one sandbox user).
+@pytest.mark.integration
 def test_the_sandbox_reaches_nothing_real():
     """The stand-ins' environment never leaked out of a test."""
     assert "ASH_TEST_STAND_IN_LOG" not in environ_names()
