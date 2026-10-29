@@ -90,6 +90,8 @@ from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
+    UNKNOWN_SEVERITY,
+    empty_severity_counts,
     resolves_to_directory_inside,
     summarize_scanner_statuses,
     restored_results_refusal,
@@ -368,6 +370,22 @@ class _OmittedSourceResolution(NamedTuple):
     error: Optional[Dict[str, Any]] = None
 
 
+def _holds_an_entry(directory: Path) -> bool:
+    """Whether ``directory`` is a directory with at least one entry in it.
+
+    A delivered tree that is on disk but empty is the same false-negative shape
+    as one that is gone: the scan runs and reports clean. A directory whose
+    listing fails is read as holding nothing, so the caller refuses it as it
+    refuses one that cannot be read.
+    """
+    try:
+        if not directory.is_dir():
+            return False
+        return any(True for _ in directory.iterdir())
+    except OSError:
+        return False
+
+
 def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     """Decide what ``run_ash_scan()`` with no arguments should scan.
 
@@ -415,24 +433,25 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     )
 
     delivered = get_session_source_dir(session_id)
-    if delivered is not None and delivered.is_dir():
+    if delivered is not None and _holds_an_entry(delivered):
         return _OmittedSourceResolution(source_dir=str(delivered))
 
     if delivered is not None:
-        # Registered, but the directory is gone. Returning the path anyway would
-        # report "directory not found" for a tree the server said it had, and an
-        # empty-but-present tree would be worse still -- it scans and reports
-        # clean. Naming the state is what makes it actionable, since re-delivering
-        # is the fix and the caller cannot guess that from a missing-path error.
-        # A target the server cannot scan, as a missing source_dir is.
+        # Registered, but the directory is gone, cannot be read, or holds
+        # nothing. Returning the path anyway would report "directory not found"
+        # for a tree the server said it had, and an empty-but-present tree would
+        # be worse still -- it scans and reports clean. Naming the state is what
+        # makes it actionable, since re-delivering is the fix and the caller
+        # cannot guess that from a missing-path error. A target the server
+        # cannot scan, as a missing source_dir is.
         return _OmittedSourceResolution(
             error=with_exit_code(
                 {
                     "success": False,
                     "error": raw_controls_on_one_line(
                         f"The source tree delivered under this session id is no "
-                        f"longer on disk at {delivered}. Deliver it again with "
-                        f"set_source_git or "
+                        f"longer on disk at {delivered}, or holds no file. Deliver "
+                        f"it again with set_source_git or "
                         f"set_source_zip_chunk/set_source_zip_finalize. Refusing to "
                         f"scan: the recorded directory cannot be read, and scanning "
                         f"the server's working directory instead would report on a "
@@ -656,14 +675,17 @@ async def run_ash_scan(
         # A scan is followed with get_scan_progress and stopped with cancel_scan,
         # and both need a session. A caller the server could not identify would
         # start a scan it can neither follow nor stop, so it starts none.
-        refusal = session_identity_refusal(session_id, "run_ash_scan", ctx)
+        refusal = session_identity_refusal(session_id, "run_ash_scan", ctx=ctx)
         if refusal is not None:
             await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
             # A call that carries no session is the request's own fault, as an
             # unusable session header is, so it reports the same usage code.
             return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
 
-        if source_dir is None:
+        # An empty or blank source_dir names no directory: it is the omitted
+        # form, which resolves to the delivered tree or refuses, never the
+        # server's working directory (Path("") is the working directory).
+        if source_dir is None or not source_dir.strip():
             resolved = _resolve_omitted_source_dir(session_id)
             if resolved.error is not None:
                 await _tell_client_error(
@@ -1322,7 +1344,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "get_scan_progress", ctx)
+    refusal = session_identity_refusal(session_id, "get_scan_progress", ctx=ctx)
     if refusal is not None:
         await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -1367,32 +1389,45 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
         output_dir = Path(entry.output_directory)
 
-        scanner_results = {}
-        severity_counts = {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-            "suppressed": 0,
-        }
+        # The producer's view is the one to keep. Its `scanners` map names every
+        # scanner the scan knows of, a scanner that wrote no results file
+        # included, and its `severity_counts` carries the catch-all bucket for a
+        # finding whose severity is off the ladder (scan_tracking). The walk
+        # below adds each results file's own content under its scanner and
+        # target; it replaces neither map, and the totals are summed from the
+        # files only when the producer gave none.
+        producer_scanners = progress_info.get("scanners")
+        scanner_results: Dict[str, Any] = (
+            {name: dict(targets) for name, targets in producer_scanners.items()}
+            if isinstance(producer_scanners, dict)
+            else {}
+        )
+        producer_counts = progress_info.get("severity_counts")
+        counts_from_files = not isinstance(producer_counts, dict)
+        severity_counts: Dict[str, int] = (
+            empty_severity_counts() if counts_from_files else producer_counts
+        )
 
         # The files in output_dir are the previous scan's when this one ended
         # without results and they were put back; check_scan_progress read nothing
         # from them, and neither does this.
         previous_only = bool(progress_info.get("output_holds_previous_results"))
 
+        # The scanners directory, each scanner's and each target's are read only
+        # when they resolve to a directory inside the output directory, as every
+        # other results reader does: through a link, a results file would be read
+        # from another tree and returned as this scan's.
         scanners_dir = output_dir / "scanners"
-        if scanners_dir.exists() and not previous_only:
+        if not previous_only and resolves_to_directory_inside(scanners_dir, output_dir):
             for scanner_dir in scanners_dir.iterdir():
-                if not scanner_dir.is_dir():
+                if not resolves_to_directory_inside(scanner_dir, output_dir):
                     continue
 
                 scanner_name = scanner_dir.name
-                scanner_results[scanner_name] = {}
+                scanner_results.setdefault(scanner_name, {})
 
                 for target_dir in scanner_dir.iterdir():
-                    if not target_dir.is_dir():
+                    if not resolves_to_directory_inside(target_dir, output_dir):
                         continue
 
                     target_type = target_dir.name
@@ -1412,12 +1447,21 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
                             scanner_results[scanner_name][target_type] = result_data
 
-                            if "severity_counts" in result_data:
+                            if counts_from_files and isinstance(
+                                result_data.get("severity_counts"), dict
+                            ):
                                 for severity, count in result_data[
                                     "severity_counts"
                                 ].items():
-                                    if severity in severity_counts:
-                                        severity_counts[severity] += count
+                                    # A count under a key off the ladder is a
+                                    # finding too: it goes to the catch-all
+                                    # bucket, never nowhere.
+                                    bucket = (
+                                        severity
+                                        if severity in severity_counts
+                                        else UNKNOWN_SEVERITY
+                                    )
+                                    severity_counts[bucket] += count
                         except Exception as e:
                             await _tell_client(
                                 ctx,
@@ -1902,7 +1946,7 @@ async def list_active_scans(ctx: Context) -> Dict[str, Any]:
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "list_active_scans", ctx)
+    refusal = session_identity_refusal(session_id, "list_active_scans", ctx=ctx)
     if refusal is not None:
         await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -1962,7 +2006,7 @@ async def cancel_scan(ctx: Context, scan_id: str) -> Dict[str, Any]:
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "cancel_scan", ctx)
+    refusal = session_identity_refusal(session_id, "cancel_scan", ctx=ctx)
     if refusal is not None:
         await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2509,7 +2553,7 @@ async def set_source_git(
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "set_source_git", ctx)
+    refusal = session_identity_refusal(session_id, "set_source_git", ctx=ctx)
     if refusal is not None:
         await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2581,7 +2625,7 @@ async def set_source_zip_chunk(
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "set_source_zip_chunk", ctx)
+    refusal = session_identity_refusal(session_id, "set_source_zip_chunk", ctx=ctx)
     if refusal is not None:
         await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2650,7 +2694,7 @@ async def set_source_zip_finalize(
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "set_source_zip_finalize", ctx)
+    refusal = session_identity_refusal(session_id, "set_source_zip_finalize", ctx=ctx)
     if refusal is not None:
         await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2706,7 +2750,7 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "clear_source", ctx)
+    refusal = session_identity_refusal(session_id, "clear_source", ctx=ctx)
     if refusal is not None:
         await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2823,7 +2867,7 @@ async def select_profile(
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "select_profile", ctx)
+    refusal = session_identity_refusal(session_id, "select_profile", ctx=ctx)
     if refusal is not None:
         await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
         return refusal
