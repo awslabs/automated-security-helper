@@ -9,11 +9,18 @@ download progress first and the error that stopped it last, so an excerpt of the
 leg, where the message ended inside the download's progress output). An excerpt here
 keeps the start, for context such as which config file was loaded, and the end, where
 the error is, and says how much it left out between them.
+
+A tool's stderr can also echo a configured value (a token passed on its command line,
+a path read from the environment), and the excerpt lands in an error message that
+results, reports and logs keep. :func:`tool_output_excerpt` takes the caller's
+redaction values and hides them (``error_text.text_without_values``) before the cut,
+so a value is matched whole, never split by the cut's marker.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Iterable
 
 #: Share of the limit given to the start of the text; the rest goes to the end.
 _HEAD_SHARE = 4
@@ -43,8 +50,15 @@ _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
-def tool_output_excerpt(text: str, limit: int) -> str:
-    """A tool's output for an error message: escapes removed, then ``head_and_tail``.
+def tool_output_excerpt(text: str, limit: int, values: Iterable[str] = ()) -> str:
+    """A tool's output for an error message: values hidden, escapes removed, then
+    ``head_and_tail``.
+
+    ``values`` are the configured values the caller redacts its own text with (the
+    run's environment-read values, ``error_text.plugin_environment_values``); each
+    is hidden as ``error_text.text_without_values`` hides it, on the whole text
+    before the cut, so a value the cut would split is still matched. With no
+    values the text is only cleaned and cut.
 
     A tool's stderr can carry terminal escape sequences and other control
     characters, from its own coloring or from a file it echoes back, and an error
@@ -52,6 +66,13 @@ def tool_output_excerpt(text: str, limit: int) -> str:
     and every other control character but newline and tab is written as ``\\xNN``,
     so nothing in the message can move a cursor, clear a screen or rewrite a line.
     """
+    values = list(values)
+    if values:
+        # Imported here: error_text imports config modules at call time and this
+        # module is imported by the scanners early.
+        from automated_security_helper.utils.error_text import text_without_values
+
+        text = text_without_values(text, values)
     cleaned = _ANSI.sub("", text)
     cleaned = _CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", cleaned)
     return head_and_tail(cleaned, limit)
