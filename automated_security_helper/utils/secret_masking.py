@@ -2004,3 +2004,25 @@ def mask_secret_values_in_text(text: str, values: Iterable[str]) -> str:
         )
     )
     return pattern.sub(lambda match: replacements[match.group(0)], text)
+
+
+def mask_secret_shapes_in_text(text: str, shapes: Iterable[Any]) -> str:
+    """``text`` with each token of ``shapes`` masked, as the tree masker masks them.
+
+    The counterpart of ``mask_secret_values_in_text`` for a process that holds
+    only what a results file records: the ``secret_value_shapes`` written for an
+    ``ash merge`` of shard results, not the values. ``shapes`` are
+    ``SecretValueShape`` objects or their serialized dicts, read as
+    ``_SecretIndex.add_shapes`` reads them: a shape ASH did not write is
+    ignored. A token of a shape is masked only when it could be a value the
+    shape stands for; an ordinary word of the shape is kept (``_mask_match``).
+
+    A shape is matched in the plain spelling of a value only: an encoding that
+    changes a value's length (a JSON escape) leaves no token of the shape to
+    find, unlike the values masker, which spells each value in every encoding.
+    """
+    index = _SecretIndex()
+    index.add_shapes(shapes)
+    if not index.shapes:
+        return text
+    return index.mask_values(text)
