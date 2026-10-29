@@ -75,10 +75,12 @@ Known limitation: an exception raised while importing this module, or
 ``automated_security_helper/__init__.py`` above it, still precedes the repair and
 is still silent on a console-less host. Closing that would require code in the
 console-script stub, which pip generates and ASH does not control. Keeping this
-module's own imports to ``os``, ``sys``, ``traceback`` and ``typing`` is what holds
-that window as narrow as it can be, so do not add imports at module scope.
+module's own imports to ``errno``, ``os``, ``sys``, ``traceback`` and ``typing``
+is what holds that window as narrow as it can be, so do not add imports at
+module scope.
 """
 
+import errno
 import os
 import sys
 import traceback
@@ -92,6 +94,46 @@ _BANNER = "ash: fatal error"
 #: traceback prints in their place: typer's, and rich.traceback.install()'s. A
 #: wrapper of one (it has ``__wrapped__``) is not one of them.
 _PRINTERS = frozenset({"typer.main", "rich.traceback"})
+
+
+#: The standard descriptors that were closed when the process started and that
+#: :func:`ensure_std_streams` holds with ``os.devnull``. A closed descriptor
+#: number is free, so the next ``open()`` anywhere in ASH would be handed 1 or 2,
+#: and from then on everything that writes to the descriptor by number -- the
+#: raw floor below, a child's inherited stderr -- would write into that file.
+#: Holding the number keeps it out of reach, and :func:`_write_raw` never writes
+#: to a held one: there was nothing there to read it.
+_RESERVED_DESCRIPTORS: set[int] = set()
+
+
+def _descriptor_is_closed(fd: int) -> bool:
+    """Whether descriptor *fd* is closed (EBADF), as distinct from unattached."""
+    try:
+        os.fstat(fd)
+    except OSError as error:
+        return error.errno == errno.EBADF
+    return False
+
+
+def _reserve_descriptor(fd: int) -> bool:
+    """Hold the closed descriptor *fd* with ``os.devnull``.
+
+    Returns whether it is held. Opening the null device may itself be handed
+    *fd*, the lowest free number; then it is already in place and stays open.
+    """
+    try:
+        null = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return False
+    if null != fd:
+        try:
+            os.dup2(null, fd)
+        except OSError:
+            return False
+        finally:
+            os.close(null)
+    _RESERVED_DESCRIPTORS.add(fd)
+    return True
 
 
 def _reattach(fd: int):
@@ -121,6 +163,11 @@ def ensure_std_streams() -> tuple[str, ...]:
     Only ever acts on ``None``. A stream replaced by a test harness, a capture
     object or a pipe is left alone -- this is repairing an absent sink, not
     second-guessing a caller who installed one.
+
+    A descriptor that is closed outright gets no stream, and is held with
+    ``os.devnull`` instead (:data:`_RESERVED_DESCRIPTORS`): left free, the next
+    file ASH opened would take its number, and the raw floor and every child's
+    inherited stderr would then write into that file.
     """
     repaired = []
     for name, fd in (("stdout", 1), ("stderr", 2)):
@@ -128,6 +175,8 @@ def ensure_std_streams() -> tuple[str, ...]:
             continue
         stream = _reattach(fd)
         if stream is None:
+            if _descriptor_is_closed(fd):
+                _reserve_descriptor(fd)
             continue
         setattr(sys, name, stream)
         # The docs quoted above warn that the saved original can be None as
@@ -145,10 +194,14 @@ def _write_raw(text: str) -> bool:
 
     Reached only when there is no Python-level stream object left to trust, so
     it uses ``os.write`` and tries stderr before stdout. Returns whether the
-    text reached anything.
+    text reached anything. A descriptor that was closed when the process
+    started (:data:`_RESERVED_DESCRIPTORS`) is skipped: nothing is reading it,
+    and had it not been held, its number could by now be a file ASH opened.
     """
     payload = text.encode("utf-8", "backslashreplace")
     for fd in (2, 1):
+        if fd in _RESERVED_DESCRIPTORS:
+            continue
         try:
             os.write(fd, payload)
             return True

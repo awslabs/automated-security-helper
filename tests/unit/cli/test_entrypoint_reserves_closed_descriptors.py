@@ -1,0 +1,127 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A standard descriptor closed at startup is held, and the raw floor skips it.
+
+``ensure_std_streams`` reattaches a stream only where a descriptor is open. A
+descriptor that is closed outright (``EBADF``) got no stream and was left free,
+so the next file ASH opened anywhere could be handed descriptor 1 or 2, and from
+then on everything writing to that number -- the last-resort ``os.write`` floor,
+a child's inherited stderr -- wrote into that file. The entry point now holds
+such a descriptor with ``os.devnull`` and records it, and ``_write_raw`` never
+writes to a recorded one: nothing is reading it.
+
+The descriptors here are never really closed; the probes the entry point reads
+them through are stood in for, and the ``os`` calls that would hold one record
+what they were asked.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+import pytest
+
+from automated_security_helper.cli import entrypoint
+
+pytestmark = pytest.mark.unit
+
+NULL_FD = 977
+
+
+@pytest.fixture
+def no_reservations(monkeypatch):
+    monkeypatch.setattr(entrypoint, "_RESERVED_DESCRIPTORS", set())
+    return entrypoint._RESERVED_DESCRIPTORS
+
+
+@pytest.fixture
+def recorded_os(monkeypatch):
+    """os.open of the null device, os.dup2 and os.close as records, not actions."""
+    calls: list[tuple] = []
+    real_open = os.open
+
+    def fake_open(path, flags, *args, **kwargs):
+        if path == os.devnull:
+            calls.append(("open", path, flags))
+            return NULL_FD
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", fake_open)
+    monkeypatch.setattr(os, "dup2", lambda src, dst: calls.append(("dup2", src, dst)))
+    monkeypatch.setattr(os, "close", lambda fd: calls.append(("close", fd)))
+    return calls
+
+
+def test_a_closed_stderr_is_held_with_the_null_device(
+    monkeypatch, no_reservations, recorded_os
+):
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(entrypoint, "_reattach", lambda fd: None)
+    monkeypatch.setattr(entrypoint, "_descriptor_is_closed", lambda fd: fd == 2)
+
+    repaired = entrypoint.ensure_std_streams()
+
+    assert repaired == (), repaired
+    assert recorded_os == [
+        ("open", os.devnull, os.O_WRONLY),
+        ("dup2", NULL_FD, 2),
+        ("close", NULL_FD),
+    ], recorded_os
+    assert no_reservations == {2}
+
+
+def test_an_unattached_but_open_descriptor_is_not_held(
+    monkeypatch, no_reservations, recorded_os
+):
+    """The control: a descriptor that is open but has no stream is left as it was."""
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(entrypoint, "_reattach", lambda fd: None)
+    monkeypatch.setattr(entrypoint, "_descriptor_is_closed", lambda fd: False)
+
+    entrypoint.ensure_std_streams()
+
+    assert recorded_os == [], recorded_os
+    assert no_reservations == set()
+
+
+def test_the_null_device_handed_the_descriptor_itself_stays_open(
+    monkeypatch, no_reservations, recorded_os
+):
+    """When the closed number is the lowest free one, os.open returns it."""
+    monkeypatch.setattr(os, "open", lambda path, flags, *a, **k: 2)
+
+    assert entrypoint._reserve_descriptor(2) is True
+    assert recorded_os == [], recorded_os
+    assert no_reservations == {2}
+
+
+def test_the_raw_floor_skips_a_held_descriptor(monkeypatch, no_reservations):
+    written: list[int] = []
+    monkeypatch.setattr(os, "write", lambda fd, payload: written.append(fd))
+    no_reservations.add(2)
+
+    assert entrypoint._write_raw("report") is True
+    assert written == [1], written
+
+
+def test_the_raw_floor_reports_nothing_reached_when_both_are_held(
+    monkeypatch, no_reservations
+):
+    written: list[int] = []
+    monkeypatch.setattr(os, "write", lambda fd, payload: written.append(fd))
+    no_reservations.update({1, 2})
+
+    assert entrypoint._write_raw("report") is False
+    assert written == [], written
+
+
+def test_a_closed_descriptor_reads_as_closed():
+    """The probe itself, on a descriptor this test opened and then closed."""
+    fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        assert entrypoint._descriptor_is_closed(fd) is False
+    finally:
+        os.close(fd)
+    assert entrypoint._descriptor_is_closed(fd) is True
