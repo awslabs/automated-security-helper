@@ -59,11 +59,15 @@ alongside a triple-loaded one; dealing guarantees sizes within one of each other
 and is predictable enough for an operator to check by eye.
 
 The residual risk is that two executors resolve *different scanner sets* -- one
-missing a plugin module, or with ``--python-only`` set on only some jobs. Then both
-partitions are internally valid and the union has a hole. Nothing at assignment
-time can detect that, so it is caught at merge time instead:
-:func:`verify_shard_coverage` refuses a set of shards that does not reconstruct
-exactly one whole scan.
+missing a plugin module, say. Then both partitions are internally valid and the
+union has a hole. Nothing at assignment time can detect that, so it is caught at
+merge time instead: :func:`verify_shard_coverage` refuses a set of shards that
+does not reconstruct exactly one whole scan. ``--python-only`` set on only some
+jobs is a different shape: every executor records its candidates before the
+selection filters apply, so the candidate sets agree and nothing here can see the
+flag; the merge's contribution check reads it from the shards' records and warns,
+naming the scanners the flagged shards left unrun and which shards ran with the
+flag (``cli.merge``).
 
 Catching it needs each shard to record the set it partitioned, and for a while
 this claim was false because nothing did. ``ShardAssignment`` held only the index,
@@ -474,46 +478,7 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
         )
 
     _verify_candidate_agreement(assignments, claimed)
-    _verify_python_only_agreement(assignments)
     _verify_selection_within_assignment(assignments)
-
-
-def _verify_python_only_agreement(assignments: Sequence[ShardAssignment]) -> None:
-    """Check the shards agree on ``--python-only``.
-
-    The flag is a selection: a shard run with it leaves every non-Python scanner
-    it owns unrun and records each one SKIPPED for that reason. When every shard
-    ran with it, that is the operator's choice and the merged rows say so. When
-    some did and some did not, the scanners the flagged shards owned ran nowhere
-    while the other jobs expected them to run, and the merged report would read
-    as a complete scan with those scanners quietly skipped. The module docstring
-    counts a matrix with the flag set on only some jobs among the cases a merge
-    refuses, and the candidate comparison cannot see it: every executor records
-    its candidates before the selection filters apply, so the candidate sets
-    agree whatever the flag. The flag's own record decides it here.
-
-    A shard that recorded no value (a results file written before the field
-    existed) is counted on neither side, so a mixed-version matrix is left to the
-    merge's contribution check, which warns from the statuses it can read.
-
-    Args:
-        assignments: One entry per shard result being merged.
-
-    Raises:
-        ShardCoverageError: If one shard records running with the flag and another
-            records running without it.
-    """
-    with_flag = sorted(a.shard_index for a in assignments if a.python_only is True)
-    without = sorted(a.shard_index for a in assignments if a.python_only is False)
-    if with_flag and without:
-        raise ShardCoverageError(
-            f"The shards disagree on --python-only: shard(s) "
-            f"{', '.join(map(str, with_flag))} ran with it and shard(s) "
-            f"{', '.join(map(str, without))} ran without it. The non-Python "
-            f"scanners owned by the shards that ran with it ran nowhere, so merging "
-            f"would report a scan that never covered them. Re-run the whole matrix "
-            f"with the same flags on every job."
-        )
 
 
 def _verify_selection_within_assignment(

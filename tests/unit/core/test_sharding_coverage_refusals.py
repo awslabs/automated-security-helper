@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Two refusals of ``verify_shard_coverage``.
+"""The missing-index refusal of ``verify_shard_coverage`` is bounded.
 
 Why this file exists
 --------------------
@@ -11,12 +11,12 @@ bound, so a corrupt or hostile count made ``ash merge`` exhaust memory or print
 a refusal megabytes long instead of refusing promptly. The count is now exact and
 the listing bounded.
 
-The module docstring counts a matrix with ``--python-only`` set on only some
-jobs among the cases a merge refuses, and the candidate-set comparison named the
-flag as a cause it catches. It cannot: every executor records its candidates
-before the selection filters apply, so the candidate sets agree whatever the
-flag, and such a matrix merged with a warning while the non-Python scanners the
-flagged shards owned had run nowhere. The flag's own record now decides it.
+A matrix with ``--python-only`` set on only some jobs is not refused here, and
+the module docstring and the candidate-set message no longer say it is: every
+executor records its candidates before the selection filters apply, so the
+candidate sets agree whatever the flag. The merge's contribution check reads the
+flag from the shards' records and warns, naming the scanners the flagged shards
+left unrun; ``tests/unit/cli/test_merge.py`` pins that disclosure.
 """
 
 from __future__ import annotations
@@ -57,38 +57,30 @@ class TestMissingIndicesAreCountedNotListed:
         assert "(0, 2, 3)" in message
         assert " more" not in message
 
-
-class TestPythonOnlyAgreement:
-    CANDIDATES = ["bandit", "checkov", "grype", "semgrep"]
-
-    def _pair(self, first, second):
-        return [
-            _assignment(
-                0,
-                2,
-                ["bandit", "grype"],
-                candidate_scanners=self.CANDIDATES,
-                python_only=first,
-            ),
-            _assignment(
-                1,
-                2,
-                ["checkov", "semgrep"],
-                candidate_scanners=self.CANDIDATES,
-                python_only=second,
-            ),
-        ]
-
-    def test_a_matrix_where_only_some_jobs_ran_python_only_is_refused(self):
-        with pytest.raises(ShardCoverageError, match=r"disagree on --python-only"):
-            verify_shard_coverage(self._pair(True, False))
-
     @pytest.mark.parametrize(
         "flags",
-        [(True, True), (False, False), (None, None), (True, None)],
-        ids=["all-with", "all-without", "none-recorded", "with-and-unrecorded"],
+        [(True, False), (True, True), (None, None), (True, None)],
+        ids=["mixed", "all-with", "none-recorded", "with-and-unrecorded"],
     )
-    def test_shards_that_agree_or_did_not_record_the_flag_merge(self, flags):
-        # A shard that recorded nothing predates the field; that mix is left to
-        # the merge's contribution check, which warns from the statuses.
-        verify_shard_coverage(self._pair(*flags))
+    def test_the_python_only_record_is_not_a_coverage_refusal(self, flags):
+        # The flag is disclosed by the merge's contribution check, which reads the
+        # shards' records and warns; the coverage check sees complete shards here.
+        candidates = ["bandit", "checkov", "grype", "semgrep"]
+        verify_shard_coverage(
+            [
+                _assignment(
+                    0,
+                    2,
+                    ["bandit", "grype"],
+                    candidate_scanners=candidates,
+                    python_only=flags[0],
+                ),
+                _assignment(
+                    1,
+                    2,
+                    ["checkov", "semgrep"],
+                    candidate_scanners=candidates,
+                    python_only=flags[1],
+                ),
+            ]
+        )

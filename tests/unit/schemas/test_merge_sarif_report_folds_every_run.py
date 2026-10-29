@@ -165,7 +165,9 @@ def test_merging_does_not_alias_the_incoming_report():
 
 def test_rules_are_added_to_an_extension_that_had_none():
     aggregated = SarifReport(runs=[_run("aggregate", [], [])])
-    aggregated.runs[0].tool.extensions = [ToolComponent(name="cfn-lint")]
+    # The model's default is an empty list; a SARIF file that writes
+    # ``"rules": null`` gives None, which is the shape this pins.
+    aggregated.runs[0].tool.extensions = [ToolComponent(name="cfn-lint", rules=None)]
     assert aggregated.runs[0].tool.extensions[0].rules is None, (
         "the extension must start with no rules list"
     )
