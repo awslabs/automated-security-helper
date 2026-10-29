@@ -232,18 +232,34 @@ class VersionTemplateManager:
         prefixes = "|".join(prefix for _name, prefix, _branch in INSTALL_REF_FORMS)
         return re.compile(f"(?:{prefixes})v?" + re.escape(self.release_placeholder))
 
-    def convert_to_template(self, file_path: Path) -> bool:
+    def convert_to_template(self, file_path: Path, overwrite: bool = False) -> bool:
         """
         Convert a file to template format by replacing version numbers with placeholders.
 
+        An existing template is kept unless ``overwrite`` is set. A template is
+        hand-maintained once it exists: it carries placeholders (``{{RELEASE}}`` in a
+        table, say) that the rendered doc holds only as plain numbers, which the
+        patterns here do not recognize, so a convert from the doc wrote a template
+        with those placeholders gone and the next generate stamped the stale doc
+        over every edit made to the template.
+
         Args:
             file_path: Path to the file to convert.
+            overwrite: Replace an existing template instead of keeping it.
 
         Returns:
             True if conversion was successful and changes were made.
         """
         if not file_path.exists():
             print(f"Warning: File {file_path} does not exist, skipping.")
+            return False
+
+        template_path = file_path.with_suffix(file_path.suffix + self.template_suffix)
+        if template_path.exists() and not overwrite:
+            print(
+                f"Template {template_path} exists; keeping it (convert replaces an "
+                "existing template only with --overwrite)"
+            )
             return False
 
         try:
@@ -266,9 +282,6 @@ class VersionTemplateManager:
                 return False
 
             # Create template file
-            template_path = file_path.with_suffix(
-                file_path.suffix + self.template_suffix
-            )
             with open(template_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
@@ -324,9 +337,12 @@ class VersionTemplateManager:
             print(f"Error generating from template {template_path}: {e}")
             return False
 
-    def convert_all_to_templates(self) -> int:
+    def convert_all_to_templates(self, overwrite: bool = False) -> int:
         """
         Convert all target files to templates.
+
+        Args:
+            overwrite: Replace existing templates instead of keeping them.
 
         Returns:
             Number of files successfully converted.
@@ -335,7 +351,7 @@ class VersionTemplateManager:
 
         for file_path_str in self.target_files:
             file_path = self.project_root / file_path_str
-            if self.convert_to_template(file_path):
+            if self.convert_to_template(file_path, overwrite=overwrite):
                 converted_count += 1
 
         return converted_count
@@ -382,6 +398,11 @@ def main():
         default=Path(__file__).parent.parent,
         help="Path to project root directory",
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="convert: replace an existing .template instead of keeping it",
+    )
 
     args = parser.parse_args()
 
@@ -389,7 +410,7 @@ def main():
 
     if args.action == "convert":
         print("Converting files to templates...")
-        count = manager.convert_all_to_templates()
+        count = manager.convert_all_to_templates(overwrite=args.overwrite)
         print(f"Successfully converted {count} files to templates.")
 
     elif args.action == "generate":
