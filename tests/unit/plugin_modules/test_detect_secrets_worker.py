@@ -437,15 +437,19 @@ def test_the_scanner_starts_the_worker_with_the_refusal_unless_it_may_verify(
 
     env = seen["env"]
     assert isinstance(env, dict), env
-    assert (env.get(REFUSE_HTTP_ENV) == "1") is (not verify), env.get(REFUSE_HTTP_ENV)
+    # Always stated, never absent: "0" is the one value the worker reads as
+    # "this scan may verify"; anything else, a missing variable included, refuses.
+    assert env.get(REFUSE_HTTP_ENV) == ("0" if verify else "1"), env.get(
+        REFUSE_HTTP_ENV
+    )
 
 
 @pytest.mark.unit
 def test_a_verifying_worker_does_not_inherit_the_refusal_from_the_parent(
     tmp_path, monkeypatch
 ):
-    """With the variable set in the parent, the environment handed to a verify=True
-    worker does not carry it."""
+    """With the variable set to "1" in the parent, the environment handed to a
+    verify=True worker carries the scanner's own "0", not the parent's value."""
     from automated_security_helper.utils import subprocess_utils
     from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
 
@@ -472,7 +476,25 @@ def test_a_verifying_worker_does_not_inherit_the_refusal_from_the_parent(
         )
 
     assert isinstance(seen["env"], dict), seen["env"]
-    assert REFUSE_HTTP_ENV not in seen["env"]
+    assert seen["env"].get(REFUSE_HTTP_ENV) == "0"
+
+
+def _without_refusal_variable(monkeypatch):
+    """Remove the refusal variable for this test and make pytest put it back.
+
+    ``monkeypatch.delenv(name, raising=False)`` on an ABSENT key records no undo
+    entry (pytest records one only when the key exists), so a test that relies
+    on run() restoring the absent case would, if that restore regressed, leave
+    ASH_DETECT_SECRETS_REFUSE_HTTP=1 in os.environ for the rest of the session;
+    every later worker started without an explicit env would refuse at import,
+    and the regression would surface as an unrelated "the control sent no
+    request" failure. Setting the variable first forces the undo record, so the
+    teardown restores the absent key whatever the test under it did.
+    """
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
+
+    monkeypatch.setenv(REFUSE_HTTP_ENV, "")
+    monkeypatch.delenv(REFUSE_HTTP_ENV)
 
 
 def _in_process_run_request(tmp_path, verify):
@@ -499,7 +521,7 @@ def test_run_leaves_the_refusal_variable_as_it_found_it(tmp_path, monkeypatch, p
 
     monkeypatch.setattr(HTTPAdapter, "send", HTTPAdapter.send)
     if preset is None:
-        monkeypatch.delenv(REFUSE_HTTP_ENV, raising=False)
+        _without_refusal_variable(monkeypatch)
     else:
         monkeypatch.setenv(REFUSE_HTTP_ENV, preset)
 
@@ -518,7 +540,7 @@ def test_run_sets_the_refusal_variable_while_the_pool_runs(tmp_path, monkeypatch
     from requests.adapters import HTTPAdapter
 
     monkeypatch.setattr(HTTPAdapter, "send", HTTPAdapter.send)
-    monkeypatch.delenv(REFUSE_HTTP_ENV, raising=False)
+    _without_refusal_variable(monkeypatch)
     seen = {}
 
     def scan_files(self, *paths):
