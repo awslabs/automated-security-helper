@@ -41,8 +41,18 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 
 
 def _text(value) -> str:
-    """Keep project and scanner-controlled text literal in GitHub Markdown."""
-    return re.sub(r"([\\`*_\[\]{}#|~])", r"\\\1", html.escape(str(value or "")))
+    """Keep project and scanner-controlled text literal in GitHub Markdown.
+
+    Escaped once, for Markdown: ``<``, ``>`` and ``&`` become entities, then
+    each Markdown syntax character gets a backslash. Quotes are left as
+    written. ``html.escape`` with its default quote handling would write ``'``
+    as the numeric entity ``&#x27;``, and the backslash pass would turn its
+    ``#`` into ``\\#``, which Markdown does not read as an entity, so a reader
+    would see the characters ``&#x27;``.
+    """
+    return re.sub(
+        r"([\\`*_\[\]{}#|~])", r"\\\1", html.escape(str(value or ""), quote=False)
+    )
 
 
 def _cell(value) -> str:

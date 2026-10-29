@@ -52,10 +52,13 @@ leaves behind.
 from __future__ import annotations
 
 import asyncio
+import io
 import signal
 import subprocess
 import sys
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -724,3 +727,251 @@ def test_the_stdio_lifespan_flushes_stdout_before_the_transport_gets_it_back(
 
     assert stops and stops[0]["promptly"] is True, stops
     assert flushed == [True], flushed
+
+
+class _FlushRaises:
+    """A stdout whose flush raises ``error``."""
+
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    def flush(self) -> None:
+        raise self._error
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("broken pipe"),
+        ValueError("I/O operation on closed file"),
+        RuntimeError("reentrant call inside <_io.BufferedWriter name='<stdout>'>"),
+    ],
+    ids=["os-error", "value-error", "runtime-error"],
+)
+def test_flushing_stdout_for_the_exit_swallows_what_a_flush_can_raise(
+    monkeypatch, error
+):
+    monkeypatch.setattr(sys, "stdout", _FlushRaises(error))
+
+    mcp_server._flush_stdout()
+
+
+def test_flushing_stdout_for_the_exit_does_not_swallow_every_error(monkeypatch):
+    """The control: the catch is for those three, not for whatever a flush raises."""
+    monkeypatch.setattr(sys, "stdout", _FlushRaises(KeyError("not a flush error")))
+
+    with pytest.raises(KeyError):
+        mcp_server._flush_stdout()
+
+
+def test_a_stdout_flush_from_inside_a_stdout_flush_is_swallowed(monkeypatch):
+    """What a termination signal handled during the flush does, on a real writer.
+
+    The raw stream's write stands for the signal handler: it flushes stdout while
+    the flush that called it is still running.
+    """
+    flushed_inside: List[bool] = []
+
+    class _Raw(io.RawIOBase):
+        def writable(self) -> bool:
+            return True
+
+        def write(self, data) -> int:
+            mcp_server._flush_stdout()
+            flushed_inside.append(True)
+            return len(data)
+
+    stream = io.TextIOWrapper(io.BufferedWriter(_Raw()), write_through=False)
+    monkeypatch.setattr(sys, "stdout", stream)
+    stream.write("x")
+
+    stream.flush()
+
+    assert flushed_inside == [True]
+
+
+@pytest.mark.parametrize("signum", _STOP_SIGNALS, ids=_STOP_SIGNAL_IDS)
+def test_a_late_signal_handled_inside_the_stdout_flush_still_exits_with_its_status(
+    monkeypatch, signum
+):
+    """The late handlers are installed before stdout is taken off the wire, so a
+    termination signal can be handled inside that flush.
+
+    The handler's own flush then re-enters the buffered writer the interrupted
+    flush is using, which Python refuses with a RuntimeError. It must not leave
+    the handler before the exit.
+    """
+    exits: List[int] = []
+
+    monkeypatch.setattr(
+        sys,
+        "stdout",
+        _FlushRaises(RuntimeError("reentrant call inside <_io.BufferedWriter>")),
+    )
+    monkeypatch.setattr(mcp_server.os, "_exit", exits.append)
+    monkeypatch.setattr(mcp_server.logging, "shutdown", lambda: None)
+
+    mcp_server._exit_on_late_signal(signum, None)
+
+    assert exits == [_STOP_STATUS[signum]], exits
+
+
+class _RecordingExecutor:
+    """A pool that records how it was shut down and runs nothing."""
+
+    def __init__(self) -> None:
+        self.calls: List[Dict[str, Any]] = []
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        self.calls.append({"wait": wait, "cancel_futures": cancel_futures})
+
+
+@pytest.fixture
+def recording_pools(monkeypatch):
+    clone, delivery = _RecordingExecutor(), _RecordingExecutor()
+    monkeypatch.setattr(mcp_server, "_CLONE_EXECUTOR", clone)
+    monkeypatch.setattr(mcp_server, "_DELIVERY_EXECUTOR", delivery)
+    return clone, delivery
+
+
+async def _leave_the_stdio_lifespan() -> None:
+    async with mcp_server._lifespan(mcp_server.mcp):
+        pass
+
+
+def test_the_stdio_lifespan_shuts_the_source_pools_down_and_drops_their_queue(
+    monkeypatch, stops, recording_pools
+):
+    monkeypatch.setattr(mcp_server, "_serving_stdio", True)
+
+    asyncio.run(_leave_the_stdio_lifespan())
+
+    for pool in recording_pools:
+        assert pool.calls[0] == {"wait": False, "cancel_futures": True}, pool.calls
+
+
+def test_the_lifespan_leaves_the_source_pools_alone_when_it_is_not_the_stdio_serving(
+    monkeypatch, stops, recording_pools
+):
+    monkeypatch.setattr(mcp_server, "_serving_stdio", False)
+
+    asyncio.run(_leave_the_stdio_lifespan())
+
+    assert [pool.calls for pool in recording_pools] == [[], []]
+
+
+def test_an_http_server_that_stops_shuts_the_source_pools_down_and_drops_their_queue(
+    stops, recording_pools
+):
+    asyncio.run(mcp_server.stop_scans_at_server_exit("the HTTP server is stopping"))
+
+    for pool in recording_pools:
+        assert pool.calls[0] == {"wait": False, "cancel_futures": True}, pool.calls
+
+
+@pytest.fixture
+def a_clone_pool_of_one(monkeypatch):
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ash-test-clone")
+    monkeypatch.setattr(mcp_server, "_CLONE_EXECUTOR", pool)
+    yield pool
+    pool.shutdown(wait=False, cancel_futures=True)
+
+
+def test_a_running_clone_gets_a_bounded_wait_and_a_queued_one_is_dropped(
+    monkeypatch, stops, a_clone_pool_of_one
+):
+    """The running job is waited for, not killed; the one behind it never starts."""
+    monkeypatch.setattr(mcp_server, "_serving_stdio", True)
+    monkeypatch.setattr(mcp_server, "STDIO_SCAN_STOP_TIMEOUT_SECONDS", 0.3)
+    started = threading.Event()
+    release = threading.Event()
+
+    def running_clone() -> str:
+        started.set()
+        release.wait(timeout=60)
+        return "finished"
+
+    running = a_clone_pool_of_one.submit(running_clone)
+    queued = a_clone_pool_of_one.submit(lambda: "never starts")
+    assert started.wait(timeout=30)
+    try:
+        began = time.monotonic()
+        asyncio.run(_leave_the_stdio_lifespan())
+        waited = time.monotonic() - began
+
+        assert queued.cancelled(), "a queued clone was left to run after the shutdown"
+        assert not running.done(), "the running clone was ended by the shutdown"
+        assert mcp_server._source_jobs_left_running is True
+        assert 0.25 <= waited < 20, waited
+    finally:
+        release.set()
+    assert running.result(timeout=30) == "finished"
+
+
+def test_an_http_server_that_stops_reports_a_clone_still_running(
+    stops, a_clone_pool_of_one, monkeypatch
+):
+    monkeypatch.setattr(mcp_server, "STDIO_SCAN_STOP_TIMEOUT_SECONDS", 0.3)
+    started = threading.Event()
+    release = threading.Event()
+
+    def running_clone() -> None:
+        started.set()
+        release.wait(timeout=60)
+
+    running = a_clone_pool_of_one.submit(running_clone)
+    assert started.wait(timeout=30)
+    try:
+        still_running = asyncio.run(mcp_server.stop_scans_at_server_exit("stopping"))
+    finally:
+        release.set()
+    running.result(timeout=30)
+
+    assert still_running is True
+
+
+def test_idle_source_pools_do_not_hold_the_stop_up(
+    monkeypatch, stops, a_clone_pool_of_one
+):
+    monkeypatch.setattr(mcp_server, "_serving_stdio", True)
+    assert a_clone_pool_of_one.submit(lambda: "done").result(timeout=30) == "done"
+
+    began = time.monotonic()
+    asyncio.run(_leave_the_stdio_lifespan())
+    waited = time.monotonic() - began
+
+    assert mcp_server._source_jobs_left_running is False
+    assert waited < mcp_server.STDIO_SCAN_STOP_TIMEOUT_SECONDS, waited
+    assert asyncio.run(mcp_server.stop_scans_at_server_exit("stopping")) is False
+
+
+@pytest.mark.parametrize(
+    "jobs_left_running", [True, False], ids=["a-job-is-running", "no-job-is-running"]
+)
+def test_the_late_stop_handlers_are_kept_only_while_a_source_job_is_running(
+    monkeypatch, stop_signals_put_back, jobs_left_running
+):
+    """The interpreter's exit waits for the pools' threads after run_mcp_server returns.
+
+    A SIGTERM then, left to the handler that was in place before, would end the
+    server with -15 and the tools' groups running.
+    """
+
+    async def serve() -> None:
+        for signum in _STOP_STATUS:
+            signal.signal(signum, mcp_server._exit_on_late_signal)
+        mcp_server._source_jobs_left_running = jobs_left_running
+
+    monkeypatch.setattr(mcp_server, "_source_jobs_left_running", False)
+    monkeypatch.setattr(mcp_server, "_serve_stdio", serve)
+    before = {signum: signal.getsignal(signum) for signum in _STOP_STATUS}
+
+    mcp_server.run_mcp_server()
+
+    for signum, handler in before.items():
+        left = signal.getsignal(signum)
+        name = signal.Signals(signum).name
+        if jobs_left_running:
+            assert left is mcp_server._exit_on_late_signal, (name, left)
+        else:
+            assert left == handler, (name, left, handler)

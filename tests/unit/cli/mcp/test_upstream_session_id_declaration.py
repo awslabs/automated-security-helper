@@ -32,7 +32,10 @@ from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_com
 from automated_security_helper.cli.mcp.session_identity import (
     SESSION_IDENTITY_REQUIRED,
 )
-from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.core.constants import (
+    ASH_EXIT_CODES,
+    ASH_EXIT_USAGE_ERROR,
+)
 from tests.utils.mcp_transport_harness import (
     LOOPBACK_BASE_URL,
     LOOPBACK_PORT,
@@ -227,6 +230,28 @@ def test_a_stateless_caller_without_the_declaration_starts_no_scan(
     assert "--trust-upstream-session-id" in result.get("error", ""), result
     assert registry.get_scan_by_directory(str(granted)) is None
     assert not (granted / ".ash").exists(), "the refused scan wrote into the target"
+
+
+def test_the_scan_tool_reports_an_exit_code_for_the_session_identity_refusal() -> None:
+    """run_ash_scan documents an exit_code on every refusal it returns.
+
+    A caller that branches on it, as a script branches on the CLI's status, must
+    find the key on this refusal too. A call with no session is the request's own
+    fault, so it reports the usage-error code, as an unusable session header does.
+    """
+    app = build_streamable_http_app(
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        http = StreamableHttpClient(client)
+        _issued, headers = http.open_session()
+        result = http.call_tool("run_ash_scan", {}, headers)
+
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert result.get("exit_code") == ASH_EXIT_USAGE_ERROR, result
+    assert result.get("exit_code_meaning") == ASH_EXIT_CODES[ASH_EXIT_USAGE_ERROR], (
+        result
+    )
 
 
 def test_the_scan_backend_refuses_a_caller_with_no_session(tmp_path) -> None:

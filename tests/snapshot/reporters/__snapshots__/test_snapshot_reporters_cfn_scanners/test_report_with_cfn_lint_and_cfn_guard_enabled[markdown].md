@@ -58,7 +58,7 @@ Showing 20 of 26 actionable findings, highest severity first.
 - Rule ID: S3\_BUCKET\_LEVEL\_PUBLIC\_ACCESS\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -72,7 +72,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration\] is missin
 - Rule ID: S3\_BUCKET\_LEVEL\_PUBLIC\_ACCESS\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -86,7 +86,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublic
 - Rule ID: S3\_BUCKET\_LEVEL\_PUBLIC\_ACCESS\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicPolicy\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicPolicy\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -100,7 +100,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublic
 - Rule ID: S3\_BUCKET\_LEVEL\_PUBLIC\_ACCESS\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -114,7 +114,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePubli
 - Rule ID: S3\_BUCKET\_LEVEL\_PUBLIC\_ACCESS\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
     Guard Rule Set: wa-Security-Pillar
     Controls: SEC-3.7,SEC-5.3,SEC-8.4
     Violation: S3 Bucket Public Access controls need to be restricted.
@@ -132,7 +132,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPub
 - Rule ID: S3\_BUCKET\_LOGGING\_ENABLED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[LoggingConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[LoggingConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
     Guard Rule Set: wa-Security-Pillar
     Controls: SEC-4.2
     Violation: S3 Bucket Logging needs to be configured to enable logging.
@@ -150,7 +150,7 @@ Check was not compliant as property \[LoggingConfiguration\] is missing. Value t
 - Rule ID: S3\_BUCKET\_PUBLIC\_READ\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -164,7 +164,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration\] is missin
 - Rule ID: S3\_BUCKET\_PUBLIC\_READ\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -178,7 +178,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublic
 - Rule ID: S3\_BUCKET\_PUBLIC\_READ\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicPolicy\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicPolicy\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -192,7 +192,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublic
 - Rule ID: S3\_BUCKET\_PUBLIC\_READ\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -206,7 +206,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePubli
 - Rule ID: S3\_BUCKET\_PUBLIC\_READ\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
     Guard Rule Set: wa-Security-Pillar
     Controls: SEC-3.7,SEC-5.3,SEC-8.4
     Violation: S3 Bucket Public Write Access controls need to be restricted.
@@ -224,7 +224,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPub
 - Rule ID: S3\_BUCKET\_PUBLIC\_WRITE\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -238,7 +238,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration\] is missin
 - Rule ID: S3\_BUCKET\_PUBLIC\_WRITE\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -252,7 +252,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublic
 - Rule ID: S3\_BUCKET\_PUBLIC\_WRITE\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicPolicy\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublicPolicy\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -266,7 +266,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.BlockPublic
 - Rule ID: S3\_BUCKET\_PUBLIC\_WRITE\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePublicAcls\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -280,7 +280,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePubli
 - Rule ID: S3\_BUCKET\_PUBLIC\_WRITE\_PROHIBITED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
     Guard Rule Set: wa-Security-Pillar
     Controls: SEC-3.7,SEC-5.3,SEC-8.4
     Violation: S3 Bucket Public Write Access controls need to be restricted.
@@ -298,7 +298,7 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPub
 - Rule ID: S3\_BUCKET\_SERVER\_SIDE\_ENCRYPTION\_ENABLED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[BucketEncryption\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[BucketEncryption\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -312,11 +312,11 @@ Check was not compliant as property \[BucketEncryption\] is missing. Value trave
 - Rule ID: S3\_BUCKET\_SERVER\_SIDE\_ENCRYPTION\_ENABLED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[BucketEncryption.ServerSideEncryptionConfiguration\[\*\].ServerSideEncryptionByDefault.SSEAlgorithm\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[BucketEncryption.ServerSideEncryptionConfiguration\[\*\].ServerSideEncryptionByDefault.SSEAlgorithm\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
     Guard Rule Set: wa-Security-Pillar
     Controls: SEC-8.3
     Violation: S3 Bucket must enable server-side encryption.
-    Fix: Set the S3 Bucket property BucketEncryption.ServerSideEncryptionConfiguration.ServerSideEncryptionByDefault.SSEAlgorithm to either &quot;aws:kms&quot; or &quot;AES256&quot;
+    Fix: Set the S3 Bucket property BucketEncryption.ServerSideEncryptionConfiguration.ServerSideEncryptionByDefault.SSEAlgorithm to either "aws:kms" or "AES256"
 
 </details>
 
@@ -330,7 +330,7 @@ Check was not compliant as property \[BucketEncryption.ServerSideEncryptionConfi
 - Rule ID: S3\_BUCKET\_VERSIONING\_ENABLED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[VersioningConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[VersioningConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
 
 </details>
 
@@ -344,11 +344,11 @@ Check was not compliant as property \[VersioningConfiguration\] is missing. Valu
 - Rule ID: S3\_BUCKET\_VERSIONING\_ENABLED
 - Location: templates/insecure.yaml:9
 
-Check was not compliant as property \[VersioningConfiguration.Status\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{&quot;BucketNam&quot;:&quot;misspelled-on-purpose&quot;\}\].
+Check was not compliant as property \[VersioningConfiguration.Status\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
     Guard Rule Set: wa-Security-Pillar
     Controls: SEC-8.4
     Violation: S3 Bucket Versioning must be enabled.
-    Fix: Set the S3 Bucket property VersioningConfiguration.Status to &\#x27;Enabled&\#x27; .
+    Fix: Set the S3 Bucket property VersioningConfiguration.Status to 'Enabled' .
 
 </details>
 
