@@ -38,6 +38,8 @@ say so or `ash config lint --fix` silently narrows suppressions across a repo.
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.config.config_linter import (
     ConfigLinter,
     LintCategory,
@@ -47,6 +49,8 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 from automated_security_helper.utils.suppression_matcher import (
     _line_range_matches,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _write_config(tmp_path: Path) -> Path:

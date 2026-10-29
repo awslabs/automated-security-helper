@@ -311,6 +311,7 @@ def _the_scan_ran(run) -> dict:
     return data
 
 
+@pytest.mark.integration
 def test_the_recorder_records_a_path_like_start(tmp_path):
     """``subprocess.Popen`` takes one str, bytes or path-like argument as well
     as an argv list; the recorder decodes it instead of iterating it, so a
@@ -340,6 +341,7 @@ def test_the_recorder_records_a_path_like_start(tmp_path):
     assert "/bin/true" in log.read_text(encoding="utf-8")
 
 
+@pytest.mark.integration
 def test_an_allowed_worker_start_is_an_instance_of_the_stand_in(tmp_path):
     """The allowed worker start returns the real class's fully built instance,
     which is not an instance of the subclass. The stand-in answers
@@ -381,6 +383,7 @@ def test_an_allowed_worker_start_is_an_instance_of_the_stand_in(tmp_path):
     assert "UNRELATED=False" in done.stdout, (done.stdout, done.stderr)
 
 
+@pytest.mark.e2e
 def test_the_scan_ran_and_records_the_reason_as_its_reference(run):
     data = _the_scan_ran(run)
     entry = data["ash_config"]["global_settings"]["suppressions"][0]
@@ -389,6 +392,7 @@ def test_the_scan_ran_and_records_the_reason_as_its_reference(run):
     assert recorded
 
 
+@pytest.mark.e2e
 def test_the_scan_starts_no_tool_but_the_version_probes(run):
     """Every process of the module records each start at ``subprocess.Popen``
     (_RECORDER, loaded through sitecustomize in the CLI child and the worker
@@ -436,6 +440,7 @@ def test_the_scan_starts_no_tool_but_the_version_probes(run):
     assert len(lines) == scans, lines
 
 
+@pytest.mark.e2e
 def test_the_results_file_holds_no_value(run):
     _the_scan_ran(run)
     text = (run["output"] / "ash_aggregated_results.json").read_text(encoding="utf-8")
@@ -443,6 +448,7 @@ def test_the_results_file_holds_no_value(run):
     assert not holds
 
 
+@pytest.mark.e2e
 @pytest.mark.parametrize("report", list(REPORTS))
 def test_no_report_holds_the_value(run, report):
     _the_scan_ran(run)
@@ -452,6 +458,7 @@ def test_no_report_holds_the_value(run, report):
     assert not holds, report
 
 
+@pytest.mark.e2e
 def test_no_other_output_file_holds_the_value(run, work):
     _the_scan_ran(run)
     # Walked by the path the fixture made it from, so the walk reads as one of
@@ -470,6 +477,7 @@ def test_no_other_output_file_holds_the_value(run, work):
     assert holding == []
 
 
+@pytest.mark.e2e
 @pytest.mark.parametrize("step", ["scan", "scan --verbose"])
 def test_the_scan_console_holds_no_value(run, step):
     scan = run["steps"][step]
@@ -478,6 +486,7 @@ def test_the_scan_console_holds_no_value(run, step):
     assert not holds, step
 
 
+@pytest.mark.e2e
 def test_no_mcp_results_answer_holds_the_value(run):
     _the_scan_ran(run)
     answers = run["answers"]

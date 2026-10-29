@@ -29,6 +29,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _no_ash_config_variable(monkeypatch):

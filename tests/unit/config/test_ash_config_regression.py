@@ -5,7 +5,10 @@ PR#274 Bug #27: yaml.SafeLoader class mutation -- !ENV constructor leaks globall
 
 import textwrap
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 
 class TestYamlSafeLoaderNotMutated:

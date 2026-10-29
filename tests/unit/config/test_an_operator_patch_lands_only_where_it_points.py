@@ -33,6 +33,8 @@ from automated_security_helper.core.exceptions import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 _REFUSED = (ASHConfigSourceError, ASHConfigValidationError)
 
 #: Each shape is (aliased text, the same document spelled without the alias).

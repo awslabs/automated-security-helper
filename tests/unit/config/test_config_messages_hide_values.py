@@ -28,6 +28,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.cli.mcp_tools import mcp_validate_config
 
+pytestmark = pytest.mark.unit
+
 SECRET = "ghp_HIDDENSECRET4242"
 VARIABLE = "ASH_TEST_HIDDEN_VALUE"
 

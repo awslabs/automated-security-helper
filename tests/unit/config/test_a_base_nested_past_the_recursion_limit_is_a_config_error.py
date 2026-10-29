@@ -32,6 +32,8 @@ from automated_security_helper.config.config_sources import resolve_config_docum
 from automated_security_helper.config.config_validator import ConfigValidator
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 #: Deep enough that every parser a config is read with runs out of recursion on
 #: it, whatever the interpreter's limit.
 _NESTING = 100_000

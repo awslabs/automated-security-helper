@@ -23,6 +23,8 @@ from automated_security_helper.config.secret_verification_trust import (
     names_verification,
 )
 
+pytestmark = pytest.mark.unit
+
 VERIFICATION_FILTER = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
 )

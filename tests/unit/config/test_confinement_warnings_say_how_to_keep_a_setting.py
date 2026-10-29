@@ -30,6 +30,8 @@ from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 REMEDY = (
     "move the file outside every git checkout, or pass the setting with "
     "--config-overrides"

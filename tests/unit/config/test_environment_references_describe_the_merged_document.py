@@ -22,6 +22,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.config.config_sources import resolve_config_document
 from automated_security_helper.config.resolve_config import resolve_config
 
+pytestmark = pytest.mark.unit
+
 VAR_REPLACED = "ASH_TEST_ENVREF_REPLACED"
 VAR_KEPT = "ASH_TEST_ENVREF_KEPT"
 VAR_OVERLAY = "ASH_TEST_ENVREF_OVERLAY"

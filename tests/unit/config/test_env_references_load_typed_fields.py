@@ -27,6 +27,8 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 
 def _config(tmp_path, body: str):
     path = tmp_path / ".ash.yaml"

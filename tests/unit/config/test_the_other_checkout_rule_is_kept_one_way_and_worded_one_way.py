@@ -34,6 +34,8 @@ from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.config.restrictions_kept import keep_restrictions
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -361,6 +361,7 @@ def _run_through_the_executor(
 
 
 @pytest.mark.parametrize("case", CASES, ids=str)
+@pytest.mark.unit
 def test_the_config_is_outside_the_scanned_tree_and_holds_what_ash_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: Case
 ) -> None:
@@ -380,6 +381,7 @@ def test_the_config_is_outside_the_scanned_tree_and_holds_what_ash_writes(
 @pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
 @pytest.mark.parametrize("outcome", ["writes results", "fails", "raises"])
 @pytest.mark.parametrize("case", CASES, ids=str)
+@pytest.mark.unit
 def test_the_directory_is_private_while_the_tool_runs_and_gone_after(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: Case, outcome: str
 ) -> None:
@@ -398,6 +400,7 @@ def test_the_directory_is_private_while_the_tool_runs_and_gone_after(
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks")
 @pytest.mark.parametrize("case", CASES, ids=str)
+@pytest.mark.unit
 def test_a_link_at_the_old_path_is_not_written_through(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: Case
 ) -> None:
@@ -461,6 +464,7 @@ def _inside(path: Path, parents) -> bool:
 
 @pytest.mark.skipif(os.name == "nt", reason="no sandbox backend on Windows")
 @pytest.mark.parametrize("case", CASES, ids=str)
+@pytest.mark.integration
 def test_a_sandboxed_scanner_may_read_the_directory_and_not_write_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: Case
 ) -> None:
@@ -510,6 +514,7 @@ def test_a_sandboxed_scanner_may_read_the_directory_and_not_write_it(
 
 
 @pytest.mark.parametrize("scanner_name", ["trivy", "trivy-repo"])
+@pytest.mark.unit
 def test_trivy_s_database_probe_names_no_config_its_run_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scanner_name: str
 ) -> None:
@@ -539,6 +544,7 @@ def test_trivy_s_database_probe_names_no_config_its_run_removed(
     assert probed == EMPTY_TOOL_CONFIG.as_posix() and Path(probed).is_file(), probed
 
 
+@pytest.mark.unit
 def test_constructing_ferret_scan_writes_no_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -737,6 +743,7 @@ class _CopyTool:
 
 
 @pytest.mark.parametrize("case", COPY_CASES, ids=str)
+@pytest.mark.unit
 def test_the_copies_a_tool_is_handed_are_outside_the_scanned_tree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: CopyCase
 ) -> None:
@@ -804,6 +811,7 @@ class _CopyRecordingBackend:
 
 @pytest.mark.skipif(os.name == "nt", reason="no sandbox backend on Windows")
 @pytest.mark.parametrize("case", COPY_CASES, ids=str)
+@pytest.mark.integration
 def test_a_sandboxed_tool_may_read_its_copies_and_not_write_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: CopyCase
 ) -> None:

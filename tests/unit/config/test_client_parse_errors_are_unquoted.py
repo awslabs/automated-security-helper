@@ -26,6 +26,8 @@ import pytest
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 CANARY = "secret-canary-91f3"
 #: An alias to an anchor that is not defined: the parser stops on this line and
 #: quotes it.

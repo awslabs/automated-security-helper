@@ -26,6 +26,8 @@ from automated_security_helper.config.config_validator import (
     describe_validation_error,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 
 #: How a validator might write its input back.

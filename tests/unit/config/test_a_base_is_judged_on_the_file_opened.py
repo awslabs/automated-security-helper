@@ -22,6 +22,8 @@ import pytest
 from automated_security_helper.config import config_sources
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ungranted-base-canary-3b9e"
 
 

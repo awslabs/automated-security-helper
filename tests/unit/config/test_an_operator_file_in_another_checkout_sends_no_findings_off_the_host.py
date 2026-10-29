@@ -43,6 +43,8 @@ from automated_security_helper.config.resolve_config import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 #: The sentence a warning explains the drop of a file outside the scanned trees with.
 OUTSIDE_SENTENCE = (
     "the file is inside the scanned tree or a git checkout, or an MCP client "

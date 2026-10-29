@@ -38,6 +38,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 
 def _running(function: str, module: str) -> bool:
     frame = sys._getframe(2)

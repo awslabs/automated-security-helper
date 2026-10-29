@@ -32,6 +32,8 @@ from automated_security_helper.config.runtime_patch import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 _MODE_PATH_OPEN = RuntimeOverridesConfig(
     enabled=True, allowed_paths=["/sandbox/**"], denied_paths=[]
 )

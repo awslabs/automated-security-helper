@@ -20,6 +20,8 @@ import pytest
 from automated_security_helper.config import config_linter as linter_module
 from automated_security_helper.config import config_validator as validator_module
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 WRITTEN = "project_name: ${ASH_PN}\n"
 CHANGED = "project_name: changed-by-another-writer\n"

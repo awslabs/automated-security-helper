@@ -48,6 +48,8 @@ from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 
+pytestmark = pytest.mark.unit
+
 for _module in pkgutil.iter_modules(plugin_packages.__path__):
     importlib.import_module(f"{plugin_packages.__name__}.{_module.name}")
 

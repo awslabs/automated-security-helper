@@ -83,6 +83,7 @@ def _plugin_paths(settings: dict) -> list:
     return [p.get("path") for p in settings["plugins_used"] if p.get("path")]
 
 
+@pytest.mark.unit
 def test_a_repository_config_cannot_name_a_work_product_as_a_plugin(tmp_path):
     """The probe: the repository's own config names a file the scan derived
     from that repository, under the work dir, as a detect-secrets plugin by
@@ -104,6 +105,7 @@ def test_a_repository_config_cannot_name_a_work_product_as_a_plugin(tmp_path):
     ), settings["plugins_used"]
 
 
+@pytest.mark.unit
 def test_a_repository_baseline_cannot_name_a_work_product_as_a_plugin(tmp_path):
     """The repository's config names only its own baseline file, and the
     baseline's plugins_used names the work product. Entries loaded from a
@@ -140,6 +142,7 @@ def test_a_repository_baseline_cannot_name_a_work_product_as_a_plugin(tmp_path):
     ), settings["plugins_used"]
 
 
+@pytest.mark.unit
 def test_an_operator_option_naming_the_same_work_product_is_kept(tmp_path):
     """Control: the operator's own configuration (not the repository's file)
     naming the same path keeps today's answer."""
@@ -169,6 +172,7 @@ def test_an_operator_option_naming_the_same_work_product_is_kept(tmp_path):
     ), settings["plugins_used"]
 
 
+@pytest.mark.unit
 def test_a_repository_entry_reaching_the_work_dir_through_a_link_is_refused(tmp_path):
     """Spelling probe: the repository entry names an in-tree path whose link
     points into the work dir. The check resolves links before judging, so the
@@ -220,6 +224,7 @@ def _checkov_argv(
     )
 
 
+@pytest.mark.unit
 def test_a_repository_config_cannot_name_a_work_product_as_checkovs_config(tmp_path):
     """The repository's config names the work product, outside the scanned
     tree, as checkov's config file. The entry must not reach the tool."""
@@ -235,6 +240,7 @@ def test_a_repository_config_cannot_name_a_work_product_as_checkovs_config(tmp_p
     assert not any(layout["product"].as_posix() in a for a in argv), argv
 
 
+@pytest.mark.unit
 def test_a_missing_checkov_config_takes_no_discovered_replacement(tmp_path):
     """The configured checkov config file is not on disk, and the checkout
     carries a config checkov would discover. Nothing takes its place."""
@@ -261,6 +267,7 @@ def test_a_missing_checkov_config_takes_no_discovered_replacement(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_an_operator_option_naming_the_work_product_reaches_checkov(tmp_path):
     """Control: the operator's own configuration naming the same path keeps
     today's answer."""
@@ -279,6 +286,7 @@ def test_an_operator_option_naming_the_work_product_reaches_checkov(tmp_path):
     assert argv[argv.index("--config-file") + 1] == layout["product"].as_posix()
 
 
+@pytest.mark.unit
 def test_a_missing_configured_checkov_config_ignores_a_link_candidate_leaving_the_tree(
     tmp_path,
 ):
@@ -309,6 +317,7 @@ def test_a_missing_configured_checkov_config_ignores_a_link_candidate_leaving_th
     assert not any(outside.as_posix() in a for a in argv), argv
 
 
+@pytest.mark.unit
 def test_a_refused_configured_checkov_config_ignores_a_link_candidate_leaving_the_tree(
     tmp_path,
 ):
@@ -337,6 +346,7 @@ def test_a_refused_configured_checkov_config_ignores_a_link_candidate_leaving_th
     ), argv
 
 
+@pytest.mark.unit
 def test_an_honored_configured_checkov_config_draws_no_refusal_warning(tmp_path):
     """An operator-configured config file outside the scanned tree is handed
     to checkov once, and no warning says it was not used. A refusal warning
@@ -386,6 +396,7 @@ def _ferret_found(layout: dict, scanner_config=None):
     return scanner._find_config_file(scanner.config.options.config_file)
 
 
+@pytest.mark.unit
 def test_a_repository_config_cannot_name_a_work_product_as_ferrets_config(tmp_path):
     """The repository's config names the work product as ferret-scan's config
     file. The entry must not reach the tool; the bundled default is used."""
@@ -401,6 +412,7 @@ def test_a_repository_config_cannot_name_a_work_product_as_ferrets_config(tmp_pa
     assert found != layout["product"].resolve(), found
 
 
+@pytest.mark.unit
 def test_a_discovered_ferret_config_linking_to_a_work_product_is_refused(tmp_path):
     """The checkout carries a ferret config by name that is a link to the work
     product. Discovery's find is the checkout's write, so the resolved target
@@ -412,6 +424,7 @@ def test_a_discovered_ferret_config_linking_to_a_work_product_is_refused(tmp_pat
     assert found != layout["product"].resolve(), found
 
 
+@pytest.mark.unit
 def test_a_discovered_dot_ferret_config_linking_to_a_work_product_is_refused(tmp_path):
     """The dot-spelled candidate: the checkout carries .ferret.yaml as a link
     to the work product, and the scanner's own selection must refuse it."""
@@ -422,6 +435,7 @@ def test_a_discovered_dot_ferret_config_linking_to_a_work_product_is_refused(tmp
     assert found != layout["product"].resolve(), found
 
 
+@pytest.mark.unit
 def test_an_operator_option_naming_the_work_product_reaches_ferret(tmp_path):
     """Control: the operator's own configuration naming the same path keeps
     today's answer."""
@@ -469,6 +483,7 @@ def _no_trivy_env(monkeypatch):
     monkeypatch.delenv("TRIVY_IGNOREFILE", raising=False)
 
 
+@pytest.mark.unit
 def test_a_repository_config_cannot_name_a_work_product_as_trivys_input(
     tmp_path, _no_trivy_env
 ):
@@ -487,6 +502,7 @@ def test_a_repository_config_cannot_name_a_work_product_as_trivys_input(
     assert passed != layout["product"].as_posix(), passed
 
 
+@pytest.mark.unit
 def test_an_operator_environment_value_naming_the_work_product_reaches_trivy(
     tmp_path, _no_trivy_env, monkeypatch
 ):
@@ -499,6 +515,7 @@ def test_an_operator_environment_value_naming_the_work_product_reaches_trivy(
     assert passed == layout["product"].as_posix(), passed
 
 
+@pytest.mark.unit
 def test_an_operator_option_naming_the_work_product_reaches_trivy(
     tmp_path, _no_trivy_env
 ):
@@ -594,6 +611,7 @@ def _only_neutral_value(args: list, key: str, layout: dict, name: str) -> str:
     return values[0]
 
 
+@pytest.mark.unit
 def test_a_missing_bandit_config_takes_no_discovered_replacement(tmp_path):
     """Control for the missing arm: the configured file is not on disk and the
     checkout carries a config bandit would discover. Nothing takes its place:
@@ -629,6 +647,7 @@ def test_a_missing_bandit_config_takes_no_discovered_replacement(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_a_discovered_bandit_config_linking_to_a_work_product_is_refused(tmp_path):
     """The checkout carries a bandit config by name that is a link to the work
     product. The resolved target under the work directory must not reach the
@@ -643,6 +662,7 @@ def test_a_discovered_bandit_config_linking_to_a_work_product_is_refused(tmp_pat
     assert not any(key in ("--configfile", "--ini") for key, _ in args), args
 
 
+@pytest.mark.unit
 def test_an_operator_option_naming_the_work_product_reaches_bandit(tmp_path):
     """Control: the operator's own configuration naming the same path keeps
     today's answer."""
@@ -675,6 +695,7 @@ def _layout_with_output_above_source(tmp_path: Path) -> dict:
     return {"source": source, "output": output, "work": work, "product": product}
 
 
+@pytest.mark.unit
 def test_a_repository_config_under_the_work_dir_stays_refused_with_output_above_source(
     tmp_path,
 ):
@@ -695,6 +716,7 @@ def test_a_repository_config_under_the_work_dir_stays_refused_with_output_above_
     )
 
 
+@pytest.mark.unit
 def test_a_file_under_the_output_dir_but_outside_the_tree_stays_refused(tmp_path):
     """Second control: the output directory holds the scanned checkout, and the
     repository's config names a file under that output directory which sits
@@ -740,6 +762,7 @@ def _grype_config_arg(layout: dict, scanner_config=None):
     return values[0] if values else None
 
 
+@pytest.mark.unit
 def test_an_honored_configured_grype_config_is_the_only_config_handed_over(tmp_path):
     """An operator-configured config file outside the scanned tree is handed
     to grype exactly once; a config the checkout carries by name does not
@@ -775,6 +798,7 @@ def _is_the_neutral_file(layout: dict, passed, name: str) -> None:
     assert layout["source"] not in path.parents, passed
 
 
+@pytest.mark.unit
 def test_a_missing_grype_config_takes_no_discovered_replacement(tmp_path):
     """The configured grype config file is not on disk and the checkout carries
     a config grype would discover. Nothing takes its place: the empty config
@@ -802,6 +826,7 @@ def test_a_missing_grype_config_takes_no_discovered_replacement(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_a_discovered_grype_config_linking_to_a_work_product_is_refused(tmp_path):
     """The checkout carries a grype config by name that is a link to the work
     product. The resolved target under the work directory must not reach the
@@ -812,6 +837,7 @@ def test_a_discovered_grype_config_linking_to_a_work_product_is_refused(tmp_path
     assert _grype_config_arg(layout) is None
 
 
+@pytest.mark.unit
 def test_an_operator_option_naming_the_work_product_reaches_grype(tmp_path):
     """Control: the operator's own configuration naming the same path keeps
     today's answer."""
@@ -862,6 +888,7 @@ def _record_grype_parses(monkeypatch) -> list:
     return seen
 
 
+@pytest.mark.unit
 def test_grype_never_parses_a_discovered_config_it_refused(tmp_path, monkeypatch):
     """Load-order pin: the derived-product check runs before the config file is
     opened. A discovered grype config that links to a work product is refused,
@@ -920,6 +947,7 @@ def _no_built_argument_names(scanner, path: Path, layout: dict | None = None) ->
         _only_neutral_value(built, "--config", layout, "syft-config-empty.yaml")
 
 
+@pytest.mark.unit
 def test_a_missing_syft_config_takes_no_discovered_replacement(tmp_path):
     """The configured syft config file is not on disk and the checkout carries
     a config syft would discover. Nothing takes its place: the empty config file
@@ -947,6 +975,7 @@ def test_a_missing_syft_config_takes_no_discovered_replacement(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_a_discovered_syft_config_linking_to_a_work_product_is_refused(tmp_path):
     """The checkout carries a syft config by name that is a link to the work
     product. The resolved target under the work directory must not reach the
@@ -957,6 +986,7 @@ def test_a_discovered_syft_config_linking_to_a_work_product_is_refused(tmp_path)
     assert _syft_config_arg(layout) is None
 
 
+@pytest.mark.unit
 def test_an_operator_option_naming_the_work_product_reaches_syft(tmp_path):
     """Control: the operator's own configuration naming the same path keeps
     today's answer."""
@@ -975,6 +1005,7 @@ def test_an_operator_option_naming_the_work_product_reaches_syft(tmp_path):
     assert passed == layout["product"].resolve().as_posix(), passed
 
 
+@pytest.mark.unit
 def test_a_configured_syft_config_not_written_by_the_operator_is_dropped(
     tmp_path, monkeypatch
 ):
@@ -1008,6 +1039,7 @@ def test_a_configured_syft_config_not_written_by_the_operator_is_dropped(
     os.name != "posix" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="needs a file the process cannot read",
 )
+@pytest.mark.unit
 def test_a_dropped_configured_input_is_never_opened(tmp_path, monkeypatch, request):
     """The drop is decided from the file's place and origin, never from its
     content: with the configured work product unreadable, the drop still
@@ -1038,6 +1070,7 @@ def test_a_dropped_configured_input_is_never_opened(tmp_path, monkeypatch, reque
     _no_built_argument_names(scanner, layout["product"], layout)
 
 
+@pytest.mark.unit
 def test_without_a_configured_input_no_argument_names_the_work_product(tmp_path):
     """The must-not twin: nothing is configured and the checkout carries no
     discoverable config, so the same absence assertions hold with the drop
@@ -1051,6 +1084,7 @@ def test_without_a_configured_input_no_argument_names_the_work_product(tmp_path)
     _no_built_argument_names(scanner, layout["product"])
 
 
+@pytest.mark.unit
 def test_an_honored_configured_syft_config_is_the_only_config_handed_over(tmp_path):
     """An operator-configured config file outside the scanned tree is handed
     to syft exactly once; a config the checkout carries by name does not ride
@@ -1076,6 +1110,7 @@ def test_an_honored_configured_syft_config_is_the_only_config_handed_over(tmp_pa
     assert values[0] in {honored.as_posix(), honored.resolve().as_posix()}, values
 
 
+@pytest.mark.unit
 def test_the_neutral_files_are_written_when_arguments_resolve_not_when_built(
     tmp_path,
 ):
@@ -1191,6 +1226,7 @@ def _plugin_entry_config(written: str) -> str:
     )
 
 
+@pytest.mark.unit
 def test_an_env_chosen_work_product_entry_is_shown_not_named(tmp_path, monkeypatch):
     """The repository's config names the work product through an environment
     reference. The entry must not reach the tool, and the environment's value
@@ -1212,6 +1248,7 @@ def test_an_env_chosen_work_product_entry_is_shown_not_named(tmp_path, monkeypat
     assert all(value not in line for line in lines), lines
 
 
+@pytest.mark.unit
 def test_an_env_chosen_in_tree_entry_is_shown_not_named(tmp_path, monkeypatch):
     """The in-tree pair: an environment reference resolving to a file inside
     the scanned tree is refused, and the value is in no emitted line."""
@@ -1233,6 +1270,7 @@ def test_an_env_chosen_in_tree_entry_is_shown_not_named(tmp_path, monkeypatch):
     assert all(value not in line for line in lines), lines
 
 
+@pytest.mark.unit
 def test_an_env_chosen_link_is_shown_without_its_resolved_target(tmp_path, monkeypatch):
     """Resolution can change the spelling: the environment's value is a link
     into the work directory, so the resolved path shares no text with the
@@ -1300,6 +1338,7 @@ def _detect_secrets_options(layout: dict, scanner_config=None):
     return _detect_secrets_built(layout, scanner_config).config.options
 
 
+@pytest.mark.unit
 def test_a_missing_baseline_takes_no_checkout_candidate(tmp_path):
     """The configured baseline is not on disk, and the checkout carries a
     baseline by its conventional name. The checkout's baseline does not replace
@@ -1338,6 +1377,7 @@ def test_a_missing_baseline_takes_no_checkout_candidate(tmp_path):
 
 
 @pytest.mark.usefixtures("no_tool_probes")
+@pytest.mark.integration
 def test_a_refused_option_baseline_is_never_opened_by_the_scan(tmp_path, monkeypatch):
     """The refused baseline is not read at the scan either: the scan runs
     without a baseline and reports the planted finding, and the path the scan
@@ -1369,6 +1409,7 @@ def test_a_refused_option_baseline_is_never_opened_by_the_scan(tmp_path, monkeyp
     assert [r.ruleId for r in report.runs[0].results] == ["SECRET-AWS-ACCESS-KEY"]
 
 
+@pytest.mark.unit
 def test_an_operator_option_naming_the_work_product_baseline_is_loaded(tmp_path):
     """Control: the operator's own configuration naming the same baseline
     keeps today's answer."""
@@ -1407,6 +1448,7 @@ def _named_baseline_json(plugin_name: str) -> str:
     )
 
 
+@pytest.mark.unit
 def test_a_relative_baseline_option_names_the_scanned_trees_file(tmp_path, monkeypatch):
     """The option as the scan will read it: a relative baseline_file value
     names the scanned tree's file, not a same-named file in the directory the
@@ -1437,6 +1479,7 @@ def test_a_relative_baseline_option_names_the_scanned_trees_file(tmp_path, monke
     assert str(options.baseline_file) == "team.baseline", options.baseline_file
 
 
+@pytest.mark.unit
 def test_a_discovered_baseline_is_found_in_the_scanned_tree_not_the_cwd(
     tmp_path, monkeypatch
 ):
@@ -1458,6 +1501,7 @@ def test_a_discovered_baseline_is_found_in_the_scanned_tree_not_the_cwd(
     assert options.baseline_file is None, options.baseline_file
 
 
+@pytest.mark.unit
 def test_a_relative_repo_baseline_reaching_a_work_product_from_the_cwd_is_refused(
     tmp_path, monkeypatch
 ):
@@ -1484,6 +1528,7 @@ def test_a_relative_repo_baseline_reaching_a_work_product_from_the_cwd_is_refuse
     ), options.baseline_file
 
 
+@pytest.mark.unit
 def test_a_discovered_baseline_linking_to_a_work_product_is_refused(
     tmp_path, monkeypatch
 ):
@@ -1506,6 +1551,7 @@ def test_a_discovered_baseline_linking_to_a_work_product_is_refused(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_config_override_naming_the_work_product_reaches_checkov(tmp_path):
     """The operator's --config-overrides is the operator's own write. A
     repository config file is in the chain, so the resolved value is judged
@@ -1523,6 +1569,7 @@ def test_a_config_override_naming_the_work_product_reaches_checkov(tmp_path):
     assert argv[argv.index("--config-file") + 1] == product, argv
 
 
+@pytest.mark.unit
 def test_a_repository_value_beside_an_operator_override_stays_refused(tmp_path):
     """Control: the operator overrides one scanner option; the repository's
     file sets another to a work product. The override does not make the
@@ -1564,6 +1611,7 @@ def _filter_paths(settings: dict) -> list:
     return [f.get("path") for f in settings["filters_used"] if f.get("path")]
 
 
+@pytest.mark.unit
 def test_a_repository_config_cannot_name_a_work_product_as_a_filter(tmp_path):
     """filters_used entries go through the same refusal as plugins_used.
     The entry is the repository's write and sits under the work directory,
@@ -1584,6 +1632,7 @@ def test_a_repository_config_cannot_name_a_work_product_as_a_filter(tmp_path):
     ), settings["filters_used"]
 
 
+@pytest.mark.unit
 def test_an_operator_filter_naming_the_work_product_is_kept(tmp_path):
     """Control: the operator's own configuration naming the same filter file
     keeps today's answer. Expected: GREEN before and after (the typed config is
@@ -1623,6 +1672,7 @@ class _SectionsConfig:
         return self._sections.get(plugin_name)
 
 
+@pytest.mark.unit
 def test_a_value_the_resolved_walk_cannot_find_is_not_the_operators():
     """A refusal gate fails closed. The resolved section has no
     options.scan_settings.plugins_used place for the walk to read, so the value
@@ -1645,6 +1695,7 @@ def test_a_value_the_resolved_walk_cannot_find_is_not_the_operators():
     )
 
 
+@pytest.mark.unit
 def test_a_value_both_views_hold_is_the_operators():
     """Control: the same value at the same place in the resolved section and in
     the operator's view is the operator's."""
@@ -1661,6 +1712,7 @@ def test_a_value_both_views_hold_is_the_operators():
     )
 
 
+@pytest.mark.unit
 def test_a_value_only_the_resolved_section_holds_is_not_the_operators():
     """Control: the resolved section holds a value the operator's view does
     not, so it came from a repository file."""
@@ -1677,6 +1729,7 @@ def test_a_value_only_the_resolved_section_holds_is_not_the_operators():
     )
 
 
+@pytest.mark.unit
 def test_a_value_the_caller_supplied_is_the_operators_when_the_caller_says_so():
     """A scanner built from a configuration object the embedding caller made
     (not read from the resolved configuration) says so explicitly, and its
@@ -1699,6 +1752,7 @@ def test_a_value_the_caller_supplied_is_the_operators_when_the_caller_says_so():
     )
 
 
+@pytest.mark.unit
 def test_a_repository_trivy_ignore_file_naming_a_work_product_is_refused(
     tmp_path, _no_trivy_env
 ):
@@ -1740,6 +1794,7 @@ def _detect_secrets_scanner(layout: dict):
 _PLANTED_KEY = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002
 
 
+@pytest.mark.unit
 def test_a_typed_object_carrying_the_resolved_sections_value_is_still_judged():
     """A configuration object the caller built can be loaded from the resolved
     section (``model_validate`` of ``get_plugin_config``, or another plugin's
@@ -1764,6 +1819,7 @@ def test_a_typed_object_carrying_the_resolved_sections_value_is_still_judged():
     )
 
 
+@pytest.mark.unit
 def test_a_scanner_value_any_recorded_view_holds_is_the_operators():
     """The recorded scanner views are a list: the trusted base, that base with
     the scanners overrides, and the operator's chain files' sections. A value
@@ -1786,6 +1842,7 @@ def test_a_scanner_value_any_recorded_view_holds_is_the_operators():
     )
 
 
+@pytest.mark.unit
 def test_a_reporter_judgment_never_reads_the_scanner_views():
     """The scanner views hold scanners sections only, so a reporter or
     converter judgment reads the recorded operator configuration itself. Both
@@ -1818,6 +1875,7 @@ def _plugin_context(tmp_path):
     return PluginContext(source_dir=tmp_path / "src", output_dir=tmp_path / "out")
 
 
+@pytest.mark.unit
 def test_a_plugin_built_from_a_dict_section_reads_as_the_contexts(tmp_path):
     from automated_security_helper.base.plugin_base import PluginBase
 
@@ -1825,6 +1883,7 @@ def test_a_plugin_built_from_a_dict_section_reads_as_the_contexts(tmp_path):
     assert plugin._config_from_context is True
 
 
+@pytest.mark.unit
 def test_a_plugin_built_from_a_typed_object_reads_as_caller_built(tmp_path):
     from automated_security_helper.base.plugin_base import PluginBase
     from automated_security_helper.base.plugin_config import PluginConfigBase
@@ -1835,6 +1894,7 @@ def test_a_plugin_built_from_a_typed_object_reads_as_caller_built(tmp_path):
     assert plugin._config_from_context is False
 
 
+@pytest.mark.unit
 def test_a_callers_declaration_wins_over_the_config_objects_type(tmp_path):
     """A caller that knows the provenance states it, and the declaration is
     consumed by the constructor, never kept as a model field."""
@@ -1856,6 +1916,7 @@ def test_a_callers_declaration_wins_over_the_config_objects_type(tmp_path):
     assert "config_from_context" not in declared_own.model_dump()
 
 
+@pytest.mark.unit
 def test_a_plugin_model_validate_builds_read_the_configs_provenance(tmp_path):
     """``model_validate`` of a mapping runs the model's own constructor
     (pydantic's custom-init route), so the provenance reads the same as a
@@ -1876,6 +1937,7 @@ def test_a_plugin_model_validate_builds_read_the_configs_provenance(tmp_path):
     assert from_typed._config_from_context is False
 
 
+@pytest.mark.unit
 def test_a_plugin_made_without_the_constructor_reads_as_the_contexts():
     """``model_construct`` bypasses the constructor, so the provenance is the
     default: read from the context, the stricter judgment."""
@@ -1897,6 +1959,7 @@ def _operator_file_scanner_view(config, document, operator_file):
     )
 
 
+@pytest.mark.unit
 def test_an_operator_file_section_spelled_another_way_folds_onto_the_scanners_key(
     tmp_path,
 ):
@@ -1930,6 +1993,7 @@ def test_an_operator_file_section_spelled_another_way_folds_onto_the_scanners_ke
     assert section["options"]["scan_settings"]["marker_entry"] == "held"
 
 
+@pytest.mark.unit
 def test_a_caller_built_value_matching_a_respelled_section_path_is_judged():
     """A typed model normalizes the doubled separator a file wrote, and the
     spelling difference is not provenance: the resolved section holds the
@@ -1953,6 +2017,7 @@ def test_a_caller_built_value_matching_a_respelled_section_path_is_judged():
     )
 
 
+@pytest.mark.unit
 def test_a_value_the_section_spells_with_a_doubled_separator_is_the_operators():
     """The context arm reads the same membership: a value the resolved
     section holds under another spelling of one path is still judged by the
@@ -1972,6 +2037,7 @@ def test_a_value_the_section_spells_with_a_doubled_separator_is_the_operators():
     )
 
 
+@pytest.mark.unit
 def test_a_parent_segment_is_never_folded_in_an_ownership_comparison():
     """The comparison folds only what a typed path model folds (doubled
     separators and "." segments). A ".." segment stays: the tool is handed
@@ -1984,6 +2050,7 @@ def test_a_parent_segment_is_never_folded_in_an_ownership_comparison():
     assert _holds("/out/./derived.yaml", ["/out/derived.yaml"])
 
 
+@pytest.mark.unit
 def test_a_bare_name_and_its_dot_relative_spelling_are_one_value():
     """Either side being path-shaped is enough to compare by the one folding
     rule, so a bare name and its "./" spelling meet in both directions."""
@@ -1994,6 +2061,7 @@ def test_a_bare_name_and_its_dot_relative_spelling_are_one_value():
     assert not _holds("a.yaml", ["b.yaml"])
 
 
+@pytest.mark.unit
 def test_a_url_shaped_value_folds_only_past_its_scheme():
     """``file:///a/b`` is the absolute ``/a/b`` and ``file://a/b`` is ``a/b``
     relative to the source directory: two files. The folding that collapses a
@@ -2009,6 +2077,7 @@ def test_a_url_shaped_value_folds_only_past_its_scheme():
     assert not _holds("file:///a/b", ["http:///a/b"])
 
 
+@pytest.mark.unit
 def test_a_drive_letter_doubled_separator_is_not_a_url_scheme():
     """``C://dir/a.yaml`` is a path with a doubled separator, not a URL: an
     RFC 3986 scheme here is two or more characters, which leaves a single
@@ -2020,6 +2089,7 @@ def test_a_drive_letter_doubled_separator_is_not_a_url_scheme():
     assert _holds("C:/dir/a.yaml", ["C://dir/a.yaml"])
 
 
+@pytest.mark.unit
 def test_a_separator_past_the_first_segment_does_not_stop_the_fold():
     """A ``://`` past the first segment is not a scheme prefix: the value is
     a path, and the fold covers the whole of it, so the two spellings of one
@@ -2030,6 +2100,7 @@ def test_a_separator_past_the_first_segment_does_not_stop_the_fold():
     assert _holds("x/y://z", ["./x/y://z"])
 
 
+@pytest.mark.unit
 def test_a_path_typed_field_holding_a_url_is_judged_by_its_collapsed_text():
     """A ``Path``-typed field has already collapsed the separator after the
     scheme (``file:///a/b`` reads back as ``file:/a/b``), so its text folds
@@ -2045,6 +2116,7 @@ def test_a_path_typed_field_holding_a_url_is_judged_by_its_collapsed_text():
     assert not _holds("file:///a/b", [typed_text])
 
 
+@pytest.mark.unit
 def test_a_scanner_override_in_the_repositorys_spelling_lands_on_the_trusted_key():
     """The scan's own apply resolved an override against the resolved
     configuration, whose spelling of a section the repository chose, and the
@@ -2075,6 +2147,7 @@ def test_a_scanner_override_in_the_repositorys_spelling_lands_on_the_trusted_key
     assert section["options"].get("config_file") == "/x/own.yaml", section
 
 
+@pytest.mark.unit
 def test_the_scanner_sections_record_is_the_inputs_and_the_input_is_left_alone():
     """The record of the scanner sections the document held is set on the
     rebuilt model, from the input's own sections, and the input keeps none."""
@@ -2094,6 +2167,7 @@ def test_the_scanner_sections_record_is_the_inputs_and_the_input_is_left_alone()
     assert "created-one" not in rebuilt._scanners_before_overrides
 
 
+@pytest.mark.unit
 def test_a_second_application_keeps_the_first_applications_scanner_record():
     """A scanner section an override created is not a section the document
     held: a rebuilt model sent through a second application keeps its first
@@ -2117,6 +2191,7 @@ def test_a_second_application_keeps_the_first_applications_scanner_record():
     assert first.model_copy(deep=True)._scanners_before_overrides == its_sections
 
 
+@pytest.mark.unit
 def test_the_trusted_fold_has_no_record_to_read_for_another_section():
     """The fold reads the before-overrides record of the section it is given.
     A section that has none is refused, not folded against another section's
@@ -2142,6 +2217,7 @@ def test_the_trusted_fold_has_no_record_to_read_for_another_section():
     ) == ["scanners.created-one.enabled=true"]
 
 
+@pytest.mark.unit
 def test_a_plugin_built_without_validation_keeps_a_declared_provenance():
     """``model_construct`` skips the constructor, so it consumes the
     declaration itself: never kept as a field, checked as a real boolean."""
@@ -2181,6 +2257,7 @@ def _checkov_built_without_validation(layout: dict, **declaration):
     )
 
 
+@pytest.mark.unit
 def test_a_scanner_built_without_validation_judges_its_path_by_the_declaration(
     tmp_path,
 ):
@@ -2194,6 +2271,7 @@ def test_a_scanner_built_without_validation_judges_its_path_by_the_declaration(
     assert argv[argv.index("--config-file") + 1] == layout["product"].as_posix(), argv
 
 
+@pytest.mark.unit
 def test_a_scanner_built_without_validation_and_declaring_nothing_is_judged(
     tmp_path,
 ):
@@ -2210,6 +2288,7 @@ def test_a_scanner_built_without_validation_and_declaring_nothing_is_judged(
         )
 
 
+@pytest.mark.unit
 def test_a_plugin_built_without_validation_ignores_an_enclosing_construction():
     """With no declaration the provenance is the context's, the stricter
     judgment, even when the call is made while an enclosing plugin's
@@ -2228,6 +2307,7 @@ def test_a_plugin_built_without_validation_ignores_an_enclosing_construction():
     assert built._config_from_context is True
 
 
+@pytest.mark.unit
 def test_a_plugin_provenance_declaration_must_be_a_boolean(tmp_path):
     """``bool("false")`` is True, so a coerced string would declare the
     opposite of its text: only a real boolean declares provenance."""
@@ -2241,6 +2321,7 @@ def test_a_plugin_provenance_declaration_must_be_a_boolean(tmp_path):
         )
 
 
+@pytest.mark.unit
 def test_a_files_view_hides_a_value_only_the_resolved_configuration_read(
     tmp_path, caplog
 ):
@@ -2286,6 +2367,7 @@ def test_a_files_view_hides_a_value_only_the_resolved_configuration_read(
     assert "held-resolved-value-7w2" not in caplog.text
 
 
+@pytest.mark.unit
 def test_a_files_view_answers_only_scanner_sections(tmp_path):
     """The files view holds scanners sections only, so any other plugin type
     reads as not found rather than reaching for a segment the view lacks."""
@@ -2301,6 +2383,7 @@ def test_a_files_view_answers_only_scanner_sections(tmp_path):
     assert files_view.get_plugin_config("reporter", "csv") is None
 
 
+@pytest.mark.unit
 def test_a_files_view_debug_line_hides_an_environment_read_value(tmp_path, caplog):
     """The files view's section lookup logs the section under --debug, redacted
     with the configuration's environment-read values: an outer chain file can
@@ -2332,6 +2415,7 @@ def test_a_files_view_debug_line_hides_an_environment_read_value(tmp_path, caplo
     assert "held-environment-value-9q4" not in caplog.text
 
 
+@pytest.mark.unit
 def test_a_scanner_override_that_does_not_replay_warns_only_when_it_sets_a_path(
     tmp_path, caplog
 ):
@@ -2377,6 +2461,7 @@ def test_a_scanner_override_that_does_not_replay_warns_only_when_it_sets_a_path(
     assert "not judged the operator's" not in caplog.text
 
 
+@pytest.mark.unit
 def test_a_scanner_override_that_sets_no_path_and_does_not_replay_is_logged_at_debug(
     tmp_path, caplog
 ):
@@ -2405,6 +2490,7 @@ def test_a_scanner_override_that_sets_no_path_and_does_not_replay_is_logged_at_d
     assert "not judged the operator's" not in caplog.text
 
 
+@pytest.mark.unit
 def test_scanner_overrides_valid_only_together_all_land_on_the_operators_view(
     tmp_path, monkeypatch
 ):
@@ -2437,6 +2523,7 @@ def test_scanner_overrides_valid_only_together_all_land_on_the_operators_view(
     assert calls == [[first, second]], calls
 
 
+@pytest.mark.unit
 def test_one_unrelated_failure_does_not_drop_overrides_valid_only_together(
     tmp_path, monkeypatch
 ):
@@ -2471,6 +2558,7 @@ def test_one_unrelated_failure_does_not_drop_overrides_valid_only_together(
     assert section.get("enabled") is False, section
 
 
+@pytest.mark.unit
 def test_independent_failures_still_fall_back_to_applying_one_at_a_time(
     tmp_path, monkeypatch
 ):

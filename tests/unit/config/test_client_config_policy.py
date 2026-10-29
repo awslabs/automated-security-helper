@@ -28,6 +28,8 @@ from automated_security_helper.config.client_config_policy import (
 from automated_security_helper.config.runtime_patch import config_document_denials
 from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
+pytestmark = pytest.mark.unit
+
 
 def _denied_keys(document, *, base=None, exempt=(), **policy) -> list:
     allowlist = RuntimeOverridesConfig(**policy)

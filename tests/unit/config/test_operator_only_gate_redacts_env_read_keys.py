@@ -20,6 +20,8 @@ from automated_security_helper.config.operator_only_options import (
 from automated_security_helper.config.resolve_config import load_config_file_for_run
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 VAR = "ASH_OO_SECT"
 VALUE = "env-oo-sect"
 

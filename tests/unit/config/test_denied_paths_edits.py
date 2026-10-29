@@ -26,6 +26,8 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 
 def _policy(**fields) -> RuntimeOverridesConfig:
     config = AshConfig.model_validate(

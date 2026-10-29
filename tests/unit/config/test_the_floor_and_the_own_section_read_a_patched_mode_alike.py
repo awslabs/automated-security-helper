@@ -29,6 +29,8 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):

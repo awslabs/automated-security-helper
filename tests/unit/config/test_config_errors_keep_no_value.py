@@ -24,6 +24,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+pytestmark = pytest.mark.unit
+
 PROBE = "ASH_TEST_PROBE"
 PROBE_VALUE = "SECRETDIRZQ"
 OPERATOR_VALUE = "SECRETOPZQ"

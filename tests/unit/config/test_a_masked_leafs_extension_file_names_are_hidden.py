@@ -35,8 +35,12 @@ longer name, a letter glued to the leaf).
 
 from __future__ import annotations
 
+import pytest
+
 from automated_security_helper.config.config_validator import redact_values
 from automated_security_helper.plugins.loader import _masked_module_forms
+
+pytestmark = pytest.mark.unit
 
 MASK = "<value>"
 LEAF = "kqleaf"

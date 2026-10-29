@@ -19,6 +19,8 @@ from automated_security_helper.cli.config import config_app
 from automated_security_helper.config.config_sources import uses_env_references
 from automated_security_helper.config.config_validator import ConfigValidator
 
+pytestmark = pytest.mark.unit
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -34,6 +34,8 @@ from automated_security_helper.config.config_validator import (
     redact_values,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Two values in the anywhere band (eight characters or more).
 A = "qzab1234wxyz"
 B = "mnop5678stuv"

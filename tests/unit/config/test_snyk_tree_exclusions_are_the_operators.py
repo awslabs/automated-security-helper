@@ -21,6 +21,8 @@ import yaml
 from automated_security_helper.config.ash_config import RuntimeOverridesConfig
 from automated_security_helper.config.resolve_config import resolve_config
 
+pytestmark = pytest.mark.unit
+
 OPTION = "honor_tree_exclusions"
 
 

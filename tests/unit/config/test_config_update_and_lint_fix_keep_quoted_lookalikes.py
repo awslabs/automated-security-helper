@@ -13,10 +13,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 from automated_security_helper.config.config_sources import load_config_document
+
+pytestmark = pytest.mark.unit
 
 VAR = "ASH_C2H_LOOKALIKE_VAR"
 CANARY = "lookalike-canary-value"

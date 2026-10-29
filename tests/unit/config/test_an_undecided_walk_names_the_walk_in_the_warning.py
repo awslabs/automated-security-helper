@@ -41,6 +41,8 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from tests.utils.helpers import mark_git_checkout as _checkout
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 _WALK_STOPPED = "resolving its name stopped before the walk finished"

@@ -26,6 +26,8 @@ from typing import Iterator, List
 import pytest
 from pydantic import ValidationError
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-env-91d2"
 ENV_NAME = "ASH_CANARY_VALUE"
 

@@ -25,6 +25,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_repor
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 OPERATOR_REGION = "us-east-1"

@@ -16,6 +16,8 @@ import pytest
 
 from automated_security_helper.config import path_trust
 
+pytestmark = pytest.mark.unit
+
 
 def _tree(tmp_path: Path) -> Path:
     source = tmp_path / "src"

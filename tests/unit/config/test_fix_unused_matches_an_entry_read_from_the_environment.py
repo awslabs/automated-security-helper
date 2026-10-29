@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 FORMS = {
     "plain": ("${ASH_GATE_RULE}", "${ASH_GATE_FILE}"),
     "tagged": ("!ENV ${ASH_GATE_RULE}", "!ENV ${ASH_GATE_FILE}"),

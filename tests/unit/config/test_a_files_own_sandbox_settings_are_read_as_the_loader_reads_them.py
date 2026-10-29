@@ -42,6 +42,8 @@ from automated_security_helper.config.resolve_config import (
     _own_sandbox_settings,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _config(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "cfg" / "root.yaml"

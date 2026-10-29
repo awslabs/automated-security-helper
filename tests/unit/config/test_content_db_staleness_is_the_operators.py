@@ -32,7 +32,7 @@ from automated_security_helper.utils.content_databases import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
-pytestmark = pytest.mark.live_tool_probes
+pytestmark = [pytest.mark.unit, pytest.mark.live_tool_probes]
 
 _WARN_TRIVY = {
     "database": "trivy-db",

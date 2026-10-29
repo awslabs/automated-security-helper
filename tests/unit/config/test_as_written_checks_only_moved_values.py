@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 SHORT = "c7f3e0"
 # The same length as CANARY, so a right and a wrong guess differ only in text.

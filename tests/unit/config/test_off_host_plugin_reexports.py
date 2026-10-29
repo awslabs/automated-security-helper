@@ -207,6 +207,7 @@ def _dropped(warnings: List[str], name: str) -> List[str]:
     return [w for w in warnings if name in w and "not selected" in w]
 
 
+@pytest.mark.integration
 def test_a_repository_config_naming_the_package_does_not_select_them(tmp_path, site):
     result = _engine(site, _tree(tmp_path, [PACKAGE]))
 
@@ -218,6 +219,7 @@ def test_a_repository_config_naming_the_package_does_not_select_them(tmp_path, s
     assert AWS in reporter, reporter
 
 
+@pytest.mark.integration
 def test_the_command_line_naming_the_package_selects_them(tmp_path, site):
     result = _engine(site, _tree(tmp_path, [PACKAGE]), cli=[PACKAGE])
 
@@ -226,6 +228,7 @@ def test_the_command_line_naming_the_package_selects_them(tmp_path, site):
     assert not _dropped(result["warnings"], "SnykCodeScanner"), result["warnings"]
 
 
+@pytest.mark.integration
 def test_an_operator_config_naming_the_package_selects_them(tmp_path, site):
     """The operator's config replaces the tree's in workspace mode, and is trusted."""
     source = _tree(tmp_path, [PACKAGE])
@@ -244,6 +247,7 @@ def test_an_operator_config_naming_the_package_selects_them(tmp_path, site):
     assert "S3Reporter" in result["reporters"], result
 
 
+@pytest.mark.integration
 def test_the_command_line_naming_the_off_host_package_itself_selects_its_class(
     tmp_path, site
 ):
@@ -255,6 +259,7 @@ def test_the_command_line_naming_the_off_host_package_itself_selects_its_class(
     assert _dropped(result["warnings"], "S3Reporter"), result["warnings"]
 
 
+@pytest.mark.integration
 def test_config_overrides_naming_the_package_selects_them(tmp_path, site):
     """``--config-overrides`` is the operator's, so it is part of the trusted list.
 
@@ -276,6 +281,7 @@ def test_config_overrides_naming_the_package_selects_them(tmp_path, site):
     assert "S3Reporter" not in unnamed["reporters"], unnamed
 
 
+@pytest.mark.integration
 def test_the_command_line_naming_an_off_host_module_selects_only_its_class(
     tmp_path, site
 ):
@@ -291,6 +297,7 @@ def test_the_command_line_naming_an_off_host_module_selects_only_its_class(
     assert "SnykCodeScanner" not in result["scanners"], result
 
 
+@pytest.mark.integration
 def test_a_name_that_only_starts_like_the_package_trusts_none_of_its_classes(
     tmp_path, site
 ):
@@ -310,6 +317,7 @@ def test_a_name_that_only_starts_like_the_package_trusts_none_of_its_classes(
     assert result.stdout.strip() == "", result.stdout[-2000:]
 
 
+@pytest.mark.integration
 def test_a_delivered_config_naming_the_package_does_not_select_them(tmp_path, site):
     upload = _write(tmp_path / "upload" / "ash.yaml", {"ash_plugin_modules": [PACKAGE]})
     source = tmp_path / "repo"
@@ -321,6 +329,7 @@ def test_a_delivered_config_naming_the_package_does_not_select_them(tmp_path, si
     assert "S3Reporter" not in result["reporters"], result
 
 
+@pytest.mark.integration
 def test_without_a_package_that_re_exports_nothing_is_dropped(tmp_path, site):
     """Positive control: a tree config naming no plugin module drops no class."""
     result = _engine(site, _tree(tmp_path, []))
@@ -329,6 +338,7 @@ def test_without_a_package_that_re_exports_nothing_is_dropped(tmp_path, site):
     assert not [w for w in result["warnings"] if "not selected" in w], result
 
 
+@pytest.mark.integration
 def test_a_repository_config_naming_a_package_of_subclasses_does_not_select_them(
     tmp_path, site
 ):
@@ -343,6 +353,7 @@ def test_a_repository_config_naming_a_package_of_subclasses_does_not_select_them
     assert AWS in reporter, reporter
 
 
+@pytest.mark.integration
 def test_the_command_line_selects_a_subclass_by_loading_its_package_or_its_base(
     tmp_path, site
 ):
@@ -361,6 +372,7 @@ def test_the_command_line_selects_a_subclass_by_loading_its_package_or_its_base(
 
 
 @pytest.mark.parametrize("first", ["tree", "operator"])
+@pytest.mark.integration
 def test_a_later_scan_in_the_same_process_selects_only_what_it_loads(
     tmp_path, site, first
 ):
@@ -399,6 +411,7 @@ def test_a_later_scan_in_the_same_process_selects_only_what_it_loads(
     assert not set(named["reporters"]) & set(OFF_HOST_REPORTERS), named
 
 
+@pytest.mark.unit
 def test_a_class_outside_the_off_host_packages_is_kept(tmp_path):
     """Only a class defined in an off-host package is checked."""
     from automated_security_helper.config.ash_config import AshConfig
@@ -418,6 +431,7 @@ def test_a_class_outside_the_off_host_packages_is_kept(tmp_path):
     assert kept == {"scanner": [LocalScanner]}
 
 
+@pytest.mark.unit
 def test_a_subclass_is_checked_against_the_off_host_class_it_derives_from():
     """Kept when a trusted name covers its own module or its off-host base's."""
     from automated_security_helper.config.ash_config import AshConfig
@@ -444,6 +458,7 @@ def test_a_subclass_is_checked_against_the_off_host_class_it_derives_from():
         assert kept == plugins, names
 
 
+@pytest.mark.unit
 def test_a_config_with_no_untrusted_file_selects_what_its_own_modules_load():
     """``resolve_config`` records the trusted list only when a file needs it.
 
@@ -485,6 +500,7 @@ print(json.dumps({"exit": result.exit_code, "output": result.output}))
 
 
 @pytest.mark.parametrize("where", ["tree", "operator"])
+@pytest.mark.integration
 def test_ash_report_runs_a_re_exported_reporter_only_from_the_operators_config(
     tmp_path, site, where
 ):

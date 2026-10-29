@@ -23,6 +23,8 @@ from automated_security_helper.config.archive_limits import _sets_a_limit
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def ash_warnings():

@@ -21,6 +21,8 @@ import pytest
 
 from automated_security_helper.config import resolve_config as resolve_config_module
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 WRITTEN = "project_name: ${ASH_PN}\n"
 CHANGED = "project_name: changed-by-another-writer\n"

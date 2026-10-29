@@ -16,6 +16,8 @@ import pytest
 
 from automated_security_helper.config import default_config
 
+pytestmark = pytest.mark.unit
+
 
 def test_no_variable_means_no_document(tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)

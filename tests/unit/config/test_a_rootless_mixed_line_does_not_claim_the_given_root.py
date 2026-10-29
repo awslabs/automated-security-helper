@@ -22,6 +22,8 @@ from automated_security_helper.config.sandbox_grants import (
     membership_clause,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The mixed head of a load without known trees: both halves carry the
 #: checkout reading (a host mark is a checkout verdict), and no half claims
 #: a tree the load declared it does not have.

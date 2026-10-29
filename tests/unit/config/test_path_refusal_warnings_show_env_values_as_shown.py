@@ -27,6 +27,8 @@ from automated_security_helper.config.path_trust import (
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _fresh_warnings():

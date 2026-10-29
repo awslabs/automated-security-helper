@@ -43,6 +43,8 @@ from tests.unit.config._plugin_module_helpers import (
     resolved_config as _resolved_config,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

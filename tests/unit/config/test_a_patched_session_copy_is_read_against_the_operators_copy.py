@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-3c9a-0123456789"
 REFERENCE = "${ASH_PN}"
 PROFILE = (

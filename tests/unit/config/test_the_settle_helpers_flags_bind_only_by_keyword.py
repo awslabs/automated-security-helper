@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def test_set_by_override_takes_its_kind_only_by_keyword():
     from automated_security_helper.config.operator_only_options import (

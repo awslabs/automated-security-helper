@@ -20,6 +20,8 @@ from automated_security_helper.config.path_trust import (
     refused_derived_product,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _refused(path, source, config):
     return refused_derived_product(

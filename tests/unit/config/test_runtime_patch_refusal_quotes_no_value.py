@@ -29,6 +29,8 @@ from automated_security_helper.config.runtime_patch import (
 )
 from automated_security_helper.models.core import IgnorePathWithReason
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 
 

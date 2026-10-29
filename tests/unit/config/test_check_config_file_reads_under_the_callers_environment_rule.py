@@ -34,6 +34,8 @@ import pytest
 
 from automated_security_helper.config.config_validator import ConfigValidator
 
+pytestmark = pytest.mark.unit
+
 UNSET_VAR = "ASH_CHECK_RULE_UNSET_PROBE"
 SET_VAR = "ASH_CHECK_RULE_SET_PROBE"
 SET_VALUE = "a-value-the-servers-environment-holds"

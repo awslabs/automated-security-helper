@@ -21,6 +21,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config.resolve_config import load_config_file_for_run
 
+pytestmark = pytest.mark.unit
+
 VAR_SECT = "ASH_TEST_AMBIG_SECT"
 SECT_VALUE = "dEtEcT-sEcReTs"
 VAR_EXT = "ASH_TEST_AMBIG_EXT"
