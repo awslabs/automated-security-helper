@@ -626,6 +626,22 @@ def _plain_gzip_name(archive_file: str) -> Optional[str]:
     return inner or None
 
 
+def _is_tar_header(block: bytes) -> bool:
+    """Whether ``block``, the first 512 bytes of a stream, is a tar header block.
+
+    A header whose checksum holds, whatever its type (a member, a pax header, a
+    GNU long name), or an end-of-archive block of zeros, which is how a tar of
+    end blocks only starts; a short block, or one whose checksum fails, is not.
+    """
+    try:
+        tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
+    except tarfile.EOFHeaderError:
+        return True
+    except tarfile.HeaderError:
+        return False
+    return True
+
+
 def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
     """Whether a gzip file's content starts with a tar header.
 
@@ -636,11 +652,31 @@ def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
     with gzip.GzipFile(fileobj=handle, mode="rb") as stream:
         block = stream.read(tarfile.BLOCKSIZE)
     handle.seek(0)
+    return _is_tar_header(block)
+
+
+def _holds_a_tar(handle: BinaryIO) -> bool:
+    """Whether ``handle`` holds a tar, compressed or not: its first block is a tar
+    header.
+
+    One block is read, through the same decompressor and bounded stream the
+    listing reads through (_tar_stream), so the probe decompresses and holds no
+    more than that block. ``tarfile.is_tarfile`` would open the archive and read
+    its first member's header whole: a pax header or a GNU long name is read to
+    the size it declares, before any bound the converter puts on header reads
+    exists. Content the decompressor or the stream refuses is not a tar the
+    converter reads; the caller records why when the name says it should be one.
+    The handle is left at its start.
+    """
+    handle.seek(0)
     try:
-        tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
-    except tarfile.HeaderError:
+        with _tar_stream(handle) as stream:
+            block = stream.read(tarfile.BLOCKSIZE)
+    except Exception:
         return False
-    return True
+    finally:
+        handle.seek(0)
+    return _is_tar_header(block)
 
 
 def _base_name(name: str) -> str:
@@ -718,7 +754,9 @@ def archive_kind(name: str, handle: BinaryIO) -> Optional[Literal["zip", "tar"]]
     file it accepts: the members reach Snyk with the converted files, where ignore
     paths apply to them one by one. The handle is left at its start. Names are
     read through ``_base_name``, the spelling authority, so a trailing dot or
-    space does not change the kind.
+    space does not change the kind. A tar is told by its first block, read
+    through the bounded stream (_holds_a_tar), not by opening it with tarfile,
+    which reads the first header whole.
     """
     try:
         if not is_archive_name(name):
@@ -727,7 +765,7 @@ def archive_kind(name: str, handle: BinaryIO) -> Optional[Literal["zip", "tar"]]
         if _base_name(name).lower().endswith(".zip") and zipfile.is_zipfile(handle):
             return "zip"
         handle.seek(0)
-        return "tar" if tarfile.is_tarfile(handle) else None
+        return "tar" if _holds_a_tar(handle) else None
     finally:
         handle.seek(0)
 
