@@ -71,6 +71,7 @@ def _steps() -> list[dict]:
     return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["ash"]["steps"]
 
 
+@pytest.mark.unit
 def test_the_job_has_one_definer_before_every_step_that_uses_it():
     steps = _steps()
     (definer,) = definers(steps)
@@ -85,6 +86,7 @@ def test_the_job_has_one_definer_before_every_step_that_uses_it():
     assert first < min(users), [steps[i].get("name") for i in users if i < first]
 
 
+@pytest.mark.unit
 def test_every_step_that_calls_one_line_loads_it_first():
     unloaded = []
     for step in _steps():
@@ -103,6 +105,7 @@ def test_every_step_that_calls_one_line_loads_it_first():
     assert not unloaded, f"these steps call the helper without loading it: {unloaded}"
 
 
+@pytest.mark.unit
 def test_only_the_definer_prints_a_stop_commands_line():
     """Output the runner must not act on goes through with_commands_stopped.
 
@@ -209,6 +212,7 @@ def _log_lines(run: str) -> list[str]:
     return kept + group
 
 
+@pytest.mark.unit
 def test_log_lines_leaves_out_what_goes_to_a_file():
     run = """\
 echo "a=${a}" >> "${GITHUB_OUTPUT}"
@@ -262,6 +266,7 @@ def _kept(
     )
 
 
+@pytest.mark.unit
 def test_a_keep_covers_its_own_line():
     """Control for the test below: the line a keep names is kept."""
     step = "Install cfn-nag"
@@ -270,6 +275,7 @@ def test_a_keep_covers_its_own_line():
     assert _kept(SCAN, step, "BUNDLE_BIN", line, keeps=_CONTROL_KEEPS)
 
 
+@pytest.mark.unit
 def test_a_kept_value_on_a_new_line_is_not_kept():
     """A keep names the line the base branch replaces, not every line of its step
     that prints the same value."""
@@ -279,6 +285,7 @@ def test_a_kept_value_on_a_new_line_is_not_kept():
     assert not _kept(SCAN, step, "BUNDLE_BIN", new_line, keeps=_CONTROL_KEEPS)
 
 
+@pytest.mark.unit
 def test_every_value_a_step_prints_goes_through_one_line():
     """Every step of the three workflows, not only the steps that were changed.
 
@@ -296,6 +303,7 @@ def test_every_value_a_step_prints_goes_through_one_line():
     assert not bare, "values printed outside one_line:\n" + "\n".join(bare)
 
 
+@pytest.mark.unit
 def test_every_value_the_base_branch_replaces_is_still_printed():
     printed = [
         (file, step, value, line) for file, step, _, value, line in _printed_bare()
@@ -315,6 +323,7 @@ def test_every_value_the_base_branch_replaces_is_still_printed():
     assert not stale, f"BASE_BRANCH_KEEPS names values no longer printed:\n{listing}"
 
 
+@pytest.mark.unit
 def test_each_own_step_that_prints_a_value_loads_the_helper():
     steps = {(file, step.get("name")): step for file, step in _every_step()}
     unloaded = [
@@ -327,6 +336,7 @@ def test_each_own_step_that_prints_a_value_loads_the_helper():
     assert not unloaded, f"these steps do not load the helper: {unloaded}"
 
 
+@pytest.mark.unit
 def test_the_definer_writes_the_function_from_the_workflows_own_text():
     (definer,) = definers(_steps())
     run = definer["run"]
@@ -379,6 +389,7 @@ def _one_line(helper: Path, value: str, locale_name: str) -> bytes:
     return result.stdout
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize("locale_name", ["C", "C.UTF-8"])
 @pytest.mark.parametrize("value, shown", CASES, ids=[ascii(v) for v, _ in CASES])
@@ -388,6 +399,7 @@ def test_one_line_keeps_a_value_on_its_line(tmp_path, locale_name, value, shown)
     assert _one_line(helper, value, locale_name) == shown.encode("utf-8")
 
 
+@pytest.mark.integration
 @posix_only
 def test_the_stop_window_closes_after_output_with_no_final_line_feed(tmp_path):
     """The resume line must start a line of its own, or the window stays open."""
@@ -543,6 +555,7 @@ def _closes(seen: str) -> list[str]:
     return [line for line in seen.splitlines() if line == f"::{token}::"]
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize("tool_kind", sorted(CANCELED_TOOLS))
 def test_a_canceled_command_closes_its_stop_window(tmp_path, tool_kind):
@@ -568,6 +581,7 @@ LEFT_RUNNING = (
 )
 
 
+@pytest.mark.integration
 @posix_only
 def test_the_window_closes_within_the_runners_wait_on_a_slow_host(tmp_path):
     """The helper's waits are measured by the clock, not by how many 0.1 s sleeps

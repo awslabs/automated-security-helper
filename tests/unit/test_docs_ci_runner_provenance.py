@@ -103,6 +103,7 @@ def _markers() -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_direct_url_files_are_read_from_a_plain_prefixed_log():
     begin, end = _markers()
     log = "\n".join(
@@ -121,6 +122,7 @@ def test_direct_url_files_are_read_from_a_plain_prefixed_log():
     )
 
 
+@pytest.mark.unit
 def test_direct_url_files_are_read_from_act_json_lines():
     begin, end = _markers()
 
@@ -145,6 +147,7 @@ def test_direct_url_files_are_read_from_act_json_lines():
     assert _api("direct_urls_in_log")(log) == [GIT_INSTALL]
 
 
+@pytest.mark.unit
 def test_a_log_without_markers_has_no_direct_url_files():
     assert _api("direct_urls_in_log")("installed\nscanned\n") == []
 
@@ -154,6 +157,7 @@ def test_a_log_without_markers_has_no_direct_url_files():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_wheel_the_run_built_passes():
     check = _api("wheel_provenance_problems")
     assert check(WHEEL_INSTALL, wheel=WHEEL, sha256=SHA256) == []
@@ -164,6 +168,7 @@ def test_the_wheel_the_run_built_passes():
     assert check(hashes_only, wheel=WHEEL, sha256=SHA256) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "direct_url",
     [
@@ -199,11 +204,13 @@ def test_anything_but_that_wheel_fails(direct_url):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_head_commit_of_the_base_repository_passes():
     check = _api("git_provenance_problems")
     assert check(GIT_INSTALL, head_sha=HEAD, repository=REPOSITORY) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "direct_url",
     [
@@ -242,11 +249,13 @@ def test_anything_but_that_commit_fails(direct_url):
 UV_WHEEL_INSTALL = {"url": WHEEL_URI + "#sha256=" + SHA256, "archive_info": {}}
 
 
+@pytest.mark.unit
 def test_a_uv_install_of_the_wheel_the_run_built_passes():
     check = _api("wheel_provenance_problems")
     assert check(UV_WHEEL_INSTALL, wheel=WHEEL, sha256=SHA256) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "direct_url",
     [
@@ -275,12 +284,14 @@ def test_a_uv_shaped_record_of_anything_else_fails(direct_url):
     assert problems and all(isinstance(p, str) for p in problems)
 
 
+@pytest.mark.unit
 def test_the_base_repository_passes_with_or_without_dot_git():
     check = _api("git_provenance_problems")
     bare = {**GIT_INSTALL, "url": f"https://github.com/{REPOSITORY}"}
     assert check(bare, head_sha=HEAD, repository=REPOSITORY) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "url",
     [
@@ -298,6 +309,7 @@ def test_another_spelling_of_the_repository_url_fails(url):
     assert problems
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "path,expected",
     [
@@ -327,6 +339,7 @@ def test_the_wheel_file_uri_is_the_one_pathlib_writes_without_its_deprecation(
         assert _api("file_uri")(path) == expected
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "path",
     [PurePosixPath("dist/x.whl"), PureWindowsPath("C:dist/x.whl")],
@@ -342,6 +355,7 @@ def test_a_relative_path_has_no_file_uri(path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_an_echoed_print_command_is_not_a_print():
     begin, end = _markers()
     command = _api("direct_url_print_command")("/opt/ash/bin/python")
@@ -414,6 +428,7 @@ def _environment() -> dict[str, str]:
     return env
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "versions,expected",
     [
@@ -440,6 +455,7 @@ def test_the_print_program_prints_the_one_installed_distribution_s_record(
     assert _api("direct_urls_in_log")(done.stdout) == expected
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the runners run on Linux; the command is for sh"
 )
@@ -470,6 +486,7 @@ def test_the_print_command_runs_the_program_in_a_shell(tmp_path):
     assert _api("direct_urls_in_log")(done.stdout) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("name", ["PRINT_PROGRAM", "BUILT_PRINT_PROGRAM"])
 def test_a_print_program_fits_every_quoting_it_is_written_into(name):
     """One line a shell's single quotes, a Groovy ''' string and YAML all keep as is."""
@@ -596,6 +613,7 @@ def _built_record(
     }
 
 
+@pytest.mark.unit
 def test_an_image_holding_the_files_of_the_wheel_the_run_built_passes(tmp_path):
     wheel, sha256 = _build_wheel(tmp_path)
     check = _api("built_provenance_problems")
@@ -608,6 +626,7 @@ _SCAN = "automated_security_helper/cli/scan.py"
 _CHANGED_SCAN = {**PACKAGE_FILES, _SCAN: b"def scan():\n    return 1\n"}
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "change",
     [
@@ -725,6 +744,7 @@ def test_an_image_whose_ash_is_not_that_wheel_s_fails(tmp_path, change):
     assert problems and all(isinstance(p, str) for p in problems)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "change",
     [
@@ -752,6 +772,7 @@ def test_a_count_or_digest_the_print_does_not_write_is_refused_as_such(
     assert any("are not a count and a sha256" in p for p in problems), problems
 
 
+@pytest.mark.unit
 def test_a_difference_in_the_files_names_the_head_commit_and_both_digests(tmp_path):
     """The record holds no file names, so the problem gives the two counts and
     digests, the image's and the wheel's, for the head commit."""
@@ -768,6 +789,7 @@ def test_a_difference_in_the_files_names_the_head_commit_and_both_digests(tmp_pa
     assert len(problems) == 1, "only the files differ, so one problem names them"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "files,differs,not_said",
     [
@@ -805,6 +827,7 @@ MANIFEST_KEYS = {
 }
 
 
+@pytest.mark.unit
 def test_the_wheel_manifest_is_what_the_image_record_is_compared_with(tmp_path):
     """A failed check gives counts and digests only. The run writes this manifest
     beside the failure, so the file that differs can be found by listing the image's
@@ -823,6 +846,7 @@ def test_the_wheel_manifest_is_what_the_image_record_is_compared_with(tmp_path):
     assert json.loads(json.dumps(manifest)) == manifest, "it is written as JSON"
 
 
+@pytest.mark.unit
 def test_the_wheel_manifest_is_only_of_the_wheel_the_run_built(tmp_path):
     wheel, sha256 = _build_wheel(tmp_path)
     manifest = _api("built_wheel_manifest")
@@ -836,6 +860,7 @@ def test_the_wheel_manifest_is_only_of_the_wheel_the_run_built(tmp_path):
         manifest(junk, wheel_sha256=_sha256(b"not a zip"))
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "metadata,entry_points",
     [(_metadata(requires=("pyyaml==6.0.2",)), ENTRY_POINTS), (None, None)],
@@ -858,6 +883,7 @@ def test_the_dist_info_files_compared_are_the_wheel_s_own(
     )
 
 
+@pytest.mark.unit
 def test_the_files_are_compared_with_the_wheel_the_run_built_and_no_other(tmp_path):
     wheel, sha256 = _build_wheel(tmp_path)
     check = _api("built_provenance_problems")
@@ -917,6 +943,7 @@ def _image_python(
     return python
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "installed,dist_info,passes",
     [
@@ -990,6 +1017,7 @@ def _printed_lines(python: Path, cwd: Path) -> list[str]:
     return done.stdout.splitlines()
 
 
+@pytest.mark.integration
 def test_the_built_record_is_one_short_line_however_many_files_it_covers(tmp_path):
     """A runner may cut or wrap a long line, and a record split over two lines reads
     as no record. So the line holds a digest of the files, not one entry per file,
@@ -1027,6 +1055,7 @@ def test_the_built_record_is_one_short_line_however_many_files_it_covers(tmp_pat
     )
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the runners run on Linux; the command is for sh"
 )

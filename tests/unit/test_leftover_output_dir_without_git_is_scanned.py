@@ -75,6 +75,7 @@ def _scan_set(source: Path, output: Path, caplog) -> list[str]:
         return _relative(scan_set(source=str(source), output=str(output)), source)
 
 
+@pytest.mark.unit
 def test_without_git_a_leftover_output_dir_is_scanned_with_one_warning(
     tmp_path, monkeypatch, caplog
 ):
@@ -116,6 +117,7 @@ def _suggested_ignore_paths(message: str) -> list:
     return config["global_settings"]["ignore_paths"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "relative",
     [
@@ -140,6 +142,7 @@ def test_the_suggested_command_adds_exactly_that_directory(relative, caplog):
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("ignore_file", [".ignore", ".gitignore"])
 def test_no_warning_when_an_ignore_file_leaves_the_whole_directory_out(
     tmp_path, monkeypatch, caplog, ignore_file
@@ -157,6 +160,7 @@ def test_no_warning_when_an_ignore_file_leaves_the_whole_directory_out(
     assert _leftover_warnings(caplog) == []
 
 
+@pytest.mark.unit
 def test_the_warning_counts_only_the_files_the_scan_set_keeps(
     tmp_path, monkeypatch, caplog
 ):
@@ -175,6 +179,7 @@ def test_the_warning_counts_only_the_files_the_scan_set_keeps(
     assert "2 files" not in warnings[0], warnings
 
 
+@pytest.mark.unit
 def test_the_warning_says_it_repeats_after_the_ignore_path_is_added(caplog):
     """global_settings.ignore_paths leaves the directory's findings out of the
     results, but the scan set is walked before it applies, so the warning comes
@@ -192,6 +197,7 @@ def test_the_warning_says_it_repeats_after_the_ignore_path_is_added(caplog):
     )
 
 
+@pytest.mark.unit
 def test_without_git_this_runs_output_dir_in_the_tree_stays_out(
     tmp_path, monkeypatch, caplog
 ):
@@ -209,6 +215,7 @@ def test_without_git_this_runs_output_dir_in_the_tree_stays_out(
     assert named_output_dirs(source, output) == [output]
 
 
+@pytest.mark.unit
 def test_without_git_the_default_output_dir_this_run_writes_stays_out(
     tmp_path, monkeypatch, caplog
 ):
@@ -224,6 +231,7 @@ def test_without_git_the_default_output_dir_this_run_writes_stays_out(
     assert named_output_dirs(source, leftover) == [leftover]
 
 
+@pytest.mark.integration
 def test_when_git_gives_no_answer_for_the_repository_the_leftover_is_scanned(
     tmp_path, monkeypatch, caplog
 ):
@@ -243,6 +251,7 @@ def test_when_git_gives_no_answer_for_the_repository_the_leftover_is_scanned(
     assert named_output_dirs(source, output) == []
 
 
+@pytest.mark.integration
 def test_in_a_checkout_git_answers_for_the_leftover_keeps_its_own_files_out(
     tmp_path, monkeypatch, caplog
 ):
@@ -262,6 +271,7 @@ def test_in_a_checkout_git_answers_for_the_leftover_keeps_its_own_files_out(
     assert named_output_dirs(source, output) == [leftover]
 
 
+@pytest.mark.unit
 def test_in_ash_container_the_hosts_output_dir_in_the_tree_is_this_runs(
     tmp_path, monkeypatch, caplog
 ):
@@ -281,6 +291,7 @@ def test_in_ash_container_the_hosts_output_dir_in_the_tree_is_this_runs(
     assert _leftover_warnings(caplog) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "actual_source, actual_output, relative",
     [
@@ -302,6 +313,7 @@ def test_the_hosts_output_dir_is_found_in_the_tree_from_the_host_paths(
     assert named == [source.joinpath(*relative.split("/"))], named
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "actual_source, actual_output",
     [

@@ -17,6 +17,8 @@ from typing import List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO_ROOT / "examples" / "AWSCodeBuild"
 

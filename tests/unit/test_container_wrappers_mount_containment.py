@@ -160,6 +160,7 @@ def _flag(args: List[str], flag: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @needs_bash
 @pytest.mark.parametrize("name", UNUSUAL_NAMES)
 class TestTheBashWrapperMountsTheSourceReadOnly:
@@ -266,6 +267,7 @@ def _assert_only_the_wrappers_own_options(options: List[str]) -> None:
             )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "extra_env",
     [
@@ -334,6 +336,7 @@ _EXTENDS_SPELLING_TABLE = [
 _REFUSED_BY_THE_BASH_WRAPPER = tuple(id_ for id_, _, _ in _EXTENDS_SPELLING_TABLE)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("name", "text"),
     [pytest.param(name, text, id=id_) for id_, name, text in _EXTENDS_SPELLING_TABLE],
@@ -346,6 +349,7 @@ def test_the_spelling_is_an_extends_entry_to_ash(name, text, tmp_path):
     assert "extends" in read_config_file(config)
 
 
+@pytest.mark.integration
 @needs_bash
 @pytest.mark.parametrize(
     ("name", "text"),
@@ -462,6 +466,7 @@ def _bash_decision(fake_runner, source: Path, output: Path, config: Path, cwd: P
     return _decision(run, inner, "--config-from-scanned-repository" in inner)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "layout",
     [
@@ -553,11 +558,13 @@ def _mount_literals(text: str) -> List[str]:
     return paired + added
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_mounts_the_source_read_only(ps1):
     literals = [m for m in _mount_literals(ps1) if "destination=/src," in m]
     assert literals == ["type=bind,source=$sourceDirFull,destination=/src,readonly"]
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_mounts_only_the_documented_destinations(ps1):
     destinations = sorted(
         re.search(r"destination=([^,]*)", m).group(1) for m in _mount_literals(ps1)
@@ -574,6 +581,7 @@ def test_the_powershell_wrapper_mounts_only_the_documented_destinations(ps1):
     ), assigned
 
 
+@pytest.mark.unit
 def test_the_powershell_wrapper_reads_source_and_output_paths_literally(ps1):
     """-Path takes '[', ']', '*' and '?' as wildcards (about_Wildcards), so a source
     directory named 'src[1]' would resolve to 'src1' when that exists. Read on the

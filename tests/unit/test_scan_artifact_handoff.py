@@ -88,6 +88,7 @@ def _inputs(path: Path) -> dict:
     return _workflow_call(_load(path)).get("inputs") or {}
 
 
+@pytest.mark.unit
 def test_the_scan_replaces_an_earlier_attempts_artifact_and_hands_out_its_id():
     scan = _load(SCAN_WORKFLOW)
     job = scan["jobs"]["ash"]
@@ -105,6 +106,7 @@ def test_the_scan_replaces_an_earlier_attempts_artifact_and_hands_out_its_id():
     assert output.get("description")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "attempt, replaces", [("1", False), ("2", True), ("3", True), ("10", True)]
 )
@@ -118,6 +120,7 @@ def test_only_a_re_run_replaces_an_artifact_of_the_same_name(attempt, replaces):
     assert evaluate(expression, {"github.run_attempt": attempt}, "success") is replaces
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("path", [SCAN_WORKFLOW, UPLOAD_WORKFLOW], ids=lambda p: p.name)
 def test_both_workflows_take_the_artifact_name_defaulting_to_ash_output(path):
     spec = _inputs(path)["artifact-name"]
@@ -128,6 +131,7 @@ def test_both_workflows_take_the_artifact_name_defaulting_to_ash_output(path):
     assert "matrix" in spec["description"], spec["description"]
 
 
+@pytest.mark.unit
 def test_the_upload_workflow_takes_an_optional_artifact_id():
     inputs = _inputs(UPLOAD_WORKFLOW)
 
@@ -139,6 +143,7 @@ def test_the_upload_workflow_takes_an_optional_artifact_id():
     assert "upload-artifact" in spec["description"]
 
 
+@pytest.mark.unit
 def test_no_step_names_the_artifact_ash_output_outright():
     """Every message and step that names the artifact follows artifact-name."""
     for path in (SCAN_WORKFLOW, UPLOAD_WORKFLOW):
@@ -152,6 +157,7 @@ def test_no_step_names_the_artifact_ash_output_outright():
                 )
 
 
+@pytest.mark.unit
 def test_it_downloads_by_id_when_given_one_and_by_name_otherwise():
     job = _upload_job()
     downloads = _steps_using(job, DOWNLOAD_ARTIFACT)
@@ -208,6 +214,7 @@ posix_only = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize("value", ["1", "4231987650"])
 def test_the_id_check_accepts_a_number(value):
@@ -215,6 +222,7 @@ def test_the_id_check_accepts_a_number(value):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "value", ["", "ash_output", "12 34", "12,34", "12\n34", "-1", "0x1f", " 12"]
@@ -225,6 +233,7 @@ def test_the_id_check_refuses_anything_else(value):
     assert "::error::" in result.stdout + result.stderr
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "value",
@@ -245,6 +254,7 @@ def test_the_id_check_does_not_print_the_value_it_refuses(value):
     assert value[2:] not in output
 
 
+@pytest.mark.unit
 def test_this_repositorys_caller_passes_the_scan_jobs_artifact_id():
     sarif = _load(CALLER_WORKFLOW)["jobs"]["sarif"]
 
@@ -253,6 +263,7 @@ def test_this_repositorys_caller_passes_the_scan_jobs_artifact_id():
     assert sarif["with"]["artifact-id"] == "${{ needs.ash.outputs.artifact-id }}"
 
 
+@pytest.mark.unit
 def test_the_usage_comment_shows_the_artifact_id_handoff():
     header = UPLOAD_WORKFLOW.read_text(encoding="utf-8").split("\npermissions:")[0]
     assert "artifact-id: ${{ needs.ash.outputs.artifact-id }}" in header

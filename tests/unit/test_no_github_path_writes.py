@@ -52,6 +52,8 @@ from typing import Any, Iterator
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GITHUB_DIRS = (REPO_ROOT / ".github", REPO_ROOT / "ash-agent-plugins" / ".github")
 

@@ -268,6 +268,7 @@ def _runner_with(scripts: Scripts, child: str, *, then: str = "exec sleep 30") -
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("child", sorted(LEFT_CHILDREN))
 def test_a_launch_that_runs_out_of_time_leaves_no_process_and_no_later_write(
     scripts, tmp_path, child
@@ -290,6 +291,7 @@ def test_a_launch_that_runs_out_of_time_leaves_no_process_and_no_later_write(
     _the_stop_line_is_last(_log(tmp_path))
 
 
+@pytest.mark.integration
 def test_a_child_in_a_session_of_its_own_is_stopped_too(scripts, tmp_path):
     """util-linux's script, which the CodeBuild leg runs codebuild_build.sh under,
     starts its child in a new session: that child leaves the runner's process group,
@@ -313,6 +315,7 @@ def test_a_child_in_a_session_of_its_own_is_stopped_too(scripts, tmp_path):
     _the_stop_line_is_last(_log(tmp_path))
 
 
+@pytest.mark.integration
 def test_a_runner_that_exits_leaves_no_child_behind(scripts, tmp_path):
     """A runner that exits with a child still running: the child is stopped before
     the launch returns, so it cannot write to the log or the fixture afterwards."""
@@ -345,6 +348,7 @@ def _child_stopped(scripts: Scripts, tmp_path: Path, what: str) -> None:
     assert not any(LATE in line for line in _log(tmp_path))
 
 
+@pytest.mark.integration
 def test_a_double_fork_into_a_new_session_is_stopped_when_the_time_limit_runs_out(
     scripts, tmp_path
 ):
@@ -360,6 +364,7 @@ def test_a_double_fork_into_a_new_session_is_stopped_when_the_time_limit_runs_ou
     _the_stop_line_is_last(_log(tmp_path))
 
 
+@pytest.mark.integration
 def test_a_child_in_a_session_of_its_own_is_stopped_when_the_runner_exits(
     scripts, tmp_path
 ):
@@ -371,6 +376,7 @@ def test_a_child_in_a_session_of_its_own_is_stopped_when_the_runner_exits(
     _child_stopped(scripts, tmp_path, "the child in a session of its own")
 
 
+@pytest.mark.integration
 def test_a_process_outside_the_tree_is_found_by_the_launch_s_marker(
     scripts, tmp_path, monkeypatch
 ):
@@ -394,6 +400,7 @@ def _wait_for(path: Path) -> str:
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "then,timeout",
     [("exit 3", 20.0), ("exec sleep 60", 4.0)],
@@ -480,6 +487,7 @@ def _group_states(pgid: int) -> dict[int, str]:
 STILL_RUNNING = "still running after it ended"
 
 
+@pytest.mark.integration
 def test_a_group_left_with_only_ended_processes_gets_no_still_running_note(
     scripts, tmp_path, monkeypatch
 ):
@@ -508,6 +516,7 @@ def test_a_group_left_with_only_ended_processes_gets_no_still_running_note(
     assert not any(STILL_RUNNING in line for line in _log(tmp_path)), _log(tmp_path)
 
 
+@pytest.mark.integration
 def test_a_group_left_with_a_running_child_gets_the_still_running_note(
     scripts, tmp_path
 ):
@@ -519,6 +528,7 @@ def test_a_group_left_with_a_running_child_gets_the_still_running_note(
     _child_stopped(scripts, tmp_path, "the runner's child")
 
 
+@pytest.mark.integration
 def test_an_ended_child_started_before_the_launch_keeps_its_exit_code(
     scripts, tmp_path, monkeypatch
 ):
@@ -570,6 +580,7 @@ def test_an_ended_child_started_before_the_launch_keeps_its_exit_code(
         other.wait()
 
 
+@pytest.mark.integration
 def test_a_child_another_thread_starts_during_a_launch_is_left_alone(scripts, tmp_path):
     """The runner leads a session of its own, and no process joins an older session,
     so nothing of a launch is in the test process's own session. A child another
@@ -643,6 +654,7 @@ def test_a_child_another_thread_starts_during_a_launch_is_left_alone(scripts, tm
             each.wait()
 
 
+@pytest.mark.integration
 def test_a_second_launch_while_one_runs_in_the_same_process_is_refused(
     scripts, tmp_path
 ):
@@ -700,6 +712,7 @@ def test_a_second_launch_while_one_runs_in_the_same_process_is_refused(
     assert after == 0, "a launch after the first ended was refused"
 
 
+@pytest.mark.integration
 def test_each_launch_s_runner_carries_a_marker_of_its_own(scripts, tmp_path):
     marker = _api("LAUNCH_MARKER")
     scripts.write("runner", f'env > "{scripts.pids}/env-$$"\n')
@@ -716,6 +729,7 @@ def test_each_launch_s_runner_carries_a_marker_of_its_own(scripts, tmp_path):
     assert all(len(value) >= len(marker) + 1 + 32 for value in values), values
 
 
+@pytest.mark.integration
 def test_a_process_this_test_had_before_the_launch_is_left_alone(scripts, tmp_path):
     """A child the test process already had when the launch began is in what the
     launch listed, by pid and start time, before its runner started, so the stop
@@ -736,6 +750,7 @@ def test_a_process_this_test_had_before_the_launch_is_left_alone(scripts, tmp_pa
         keeper.wait()
 
 
+@pytest.mark.integration
 def test_a_quick_look_finds_the_children_a_full_scan_finds(scripts):
     """A stop looks at the tree below the test process through the children files
     the kernel keeps, a few reads, before it confirms with a scan of every process,
@@ -756,6 +771,7 @@ def test_a_quick_look_finds_the_children_a_full_scan_finds(scripts):
         keeper.wait()
 
 
+@pytest.mark.integration
 def test_what_is_left_in_the_group_of_a_runner_that_exited_is_signalled_at_once(
     scripts, tmp_path, monkeypatch
 ):
@@ -795,6 +811,7 @@ def _child_subreaper_flag() -> int:
     return value.value
 
 
+@pytest.mark.integration
 def test_a_launch_leaves_the_test_process_s_subreaper_setting_as_it_was(
     scripts, tmp_path
 ):
@@ -804,6 +821,7 @@ def test_a_launch_leaves_the_test_process_s_subreaper_setting_as_it_was(
     assert _child_subreaper_flag() == before
 
 
+@pytest.mark.unit
 def test_the_launch_runs_the_process_runner_that_stops_its_group():
     """launch's default is the runner that stops the whole group, never plain
     subprocess.run, which stops only the runner."""
@@ -811,6 +829,7 @@ def test_the_launch_runs_the_process_runner_that_stops_its_group():
     assert default is _api("run_in_new_session")
 
 
+@pytest.mark.unit
 def test_every_process_is_held_before_any_gets_its_signal(monkeypatch):
     """The processes outside the runner's group get their signals one at a time.
     A shell whose child got its signal first and ended could run its next command,
@@ -842,6 +861,7 @@ def _sleeper(scripts: Scripts, *, own_group: bool = False) -> subprocess.Popen:
     )
 
 
+@pytest.mark.integration
 def test_a_pid_now_held_by_a_process_started_later_is_not_signalled(scripts):
     """A stop names each process it saw by pid and start time. A pid whose process
     now started at another time was handed anew to a process the launch did not
@@ -863,6 +883,7 @@ def test_a_pid_now_held_by_a_process_started_later_is_not_signalled(scripts):
             each.wait()
 
 
+@pytest.mark.integration
 def test_a_process_seen_is_running_only_while_its_start_time_is_the_same(scripts):
     env = _module("env")
     keeper = _sleeper(scripts)
@@ -877,6 +898,7 @@ def test_a_process_seen_is_running_only_while_its_start_time_is_the_same(scripts
         keeper.wait()
 
 
+@pytest.mark.integration
 def test_a_group_seen_gone_is_never_signalled_again(scripts, tmp_path, monkeypatch):
     """Once no process is left in the runner's group, its id is free for the system
     to hand out again. So the stop sends no signal to that id while the group is
@@ -920,6 +942,7 @@ def test_a_group_seen_gone_is_never_signalled_again(scripts, tmp_path, monkeypat
     _the_stop_line_is_last(_log(tmp_path))
 
 
+@pytest.mark.unit
 def test_a_group_seen_gone_stays_gone(monkeypatch):
     """A group id that was seen with no process left is never taken back, even if a
     later look finds a group of that id: that is a group the system made anew."""
@@ -932,6 +955,7 @@ def test_a_group_seen_gone_stays_gone(monkeypatch):
     assert group.current() is None, "a group id seen gone was taken back"
 
 
+@pytest.mark.integration
 def test_a_stop_looks_at_the_group_in_every_round_while_it_waits(scripts, monkeypatch):
     """While processes it saw still run, a stop still looks at the runner's group in
     each round, so it knows the group gone as soon as it is empty, before the system
@@ -1056,6 +1080,7 @@ def _assert_swept(calls: list[list[str]]) -> None:
     assert lists[-1] > calls.index(removals[0]), "and listed once more to check"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "then,timeout",
     [("exec sleep 30", LIMIT), ("exit 3", 10.0)],
@@ -1083,6 +1108,7 @@ def test_the_containers_the_launch_started_are_removed_and_no_other(
         _the_stop_line_is_last(lines)
 
 
+@pytest.mark.integration
 def test_a_launch_that_removes_no_containers_never_runs_docker(scripts, tmp_path):
     _fake_docker(scripts)
     _container_runner(scripts, then="exit 0")
@@ -1090,6 +1116,7 @@ def test_a_launch_that_removes_no_containers_never_runs_docker(scripts, tmp_path
     assert _calls(scripts) == [["runner"]]
 
 
+@pytest.mark.integration
 def test_a_launch_whose_containers_cannot_be_listed_never_starts(scripts, tmp_path):
     _fake_docker(scripts, ps_fails=True)
     _container_runner(scripts, then="exit 0")
@@ -1098,6 +1125,7 @@ def test_a_launch_whose_containers_cannot_be_listed_never_starts(scripts, tmp_pa
     assert ["runner"] not in _calls(scripts), "the runner started anyway"
 
 
+@pytest.mark.integration
 def test_a_container_still_listed_after_its_removal_is_removed_again(scripts, tmp_path):
     _fake_docker(scripts, in_progress=True)
     _container_runner(scripts, then="exit 0")
@@ -1107,6 +1135,7 @@ def test_a_container_still_listed_after_its_removal_is_removed_again(scripts, tm
     assert _calls(scripts)[-1][:2] == ["ps", "-aq"], "listed once more to check"
 
 
+@pytest.mark.integration
 def test_containers_that_keep_appearing_fail_the_launch(scripts, tmp_path):
     _fake_docker(scripts, endless=True)
     _container_runner(scripts, then="exit 0")
@@ -1115,6 +1144,7 @@ def test_containers_that_keep_appearing_fail_the_launch(scripts, tmp_path):
     assert "c-loop" in str(raised.value)
 
 
+@pytest.mark.integration
 def test_a_launch_that_needed_sigkill_lists_its_containers_once_more(scripts, tmp_path):
     """A docker client stopped by SIGKILL may have asked the daemon for a container
     that exists only after the client is gone: after the listing that finds none

@@ -149,6 +149,7 @@ def _assert_refused(result, argv) -> None:
     assert "ash-args" in commands[0], commands
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "ash_args",
@@ -177,6 +178,7 @@ def test_a_bare_word_is_refused(tmp_path, ash_args):
     _assert_refused(result, argv)
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "ash_args",
@@ -195,6 +197,7 @@ def test_a_refused_word_cannot_add_a_workflow_command(tmp_path, ash_args):
     assert line.startswith("::error::ash-args word "), line
 
 
+@pytest.mark.integration
 @posix_only
 def test_the_dashdash_refusal_says_what_click_does(tmp_path):
     """After `--` click reads the next word as the subcommand, the rest as its args."""
@@ -212,6 +215,7 @@ def _ash_group():
     return typer.main.get_command(app)
 
 
+@pytest.mark.integration
 @posix_only
 def test_every_subcommand_after_a_flag_is_refused(tmp_path):
     for index, name in enumerate(sorted(_ash_group().commands)):
@@ -237,6 +241,7 @@ _VALUES_NAMING_A_SUBCOMMAND = [
 ]
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "ash_args",
@@ -265,6 +270,7 @@ def _parse(ash_argv: list[str]):
     return (rest[0] if rest else None), context.params
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize("ash_args", _VALUES_NAMING_A_SUBCOMMAND)
 def test_ash_runs_the_scan_with_the_workflows_options(tmp_path, ash_args):
@@ -307,6 +313,7 @@ def _value_options_in_the_step() -> set[str]:
     return first
 
 
+@pytest.mark.unit
 def test_the_options_that_take_a_value_are_the_ash_groups():
     options = [p for p in _ash_group().params if p.param_type_name == "option"]
     takes_a_value = {
@@ -333,6 +340,7 @@ def _value_spellings() -> list[str]:
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("spelling", _value_spellings())
 def test_a_value_option_takes_the_next_word_even_with_a_dash(tmp_path, spelling):
     """Both readings take `--phases` after a value option as its value, not an option.
@@ -349,6 +357,7 @@ def test_a_value_option_takes_the_next_word_even_with_a_dash(tmp_path, spelling)
     _assert_refused(result, argv)
 
 
+@pytest.mark.unit
 def test_the_config_option_takes_a_dash_word_as_its_value():
     """The row measured by hand: --config's value is '--verbose', and verbose is off."""
     subcommand, params = _parse(["--config", "--verbose"])
@@ -356,6 +365,7 @@ def test_the_config_option_takes_a_dash_word_as_its_value():
     assert params["config"] == "--verbose" and params["verbose"] is False, params
 
 
+@pytest.mark.unit
 def test_every_short_option_is_one_letter():
     """The step reads a single-dash word letter by letter; click tries it whole first.
 
@@ -378,6 +388,7 @@ def test_every_short_option_is_one_letter():
     assert not longer, f"short options longer than one letter: {longer}"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "argv, subcommand",
     [

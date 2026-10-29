@@ -103,6 +103,7 @@ def _steps_with_installs() -> Iterator[tuple[str, dict[str, Any], tuple]]:
                 yield f"{path.relative_to(REPO_ROOT)}:{step.get('name')}", step, ()
 
 
+@pytest.mark.unit
 def test_every_bundle_install_in_github_runs_frozen():
     found = list(_steps_with_installs())
     assert any(CFN_NAG_STEP in where for where, _, _ in found), (
@@ -116,6 +117,7 @@ def test_every_bundle_install_in_github_runs_frozen():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "step",
     [
@@ -129,6 +131,7 @@ def test_the_checker_flags_an_install_that_is_not_frozen(step):
     assert not install_is_frozen(step)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "step",
     [
@@ -189,6 +192,7 @@ def _frozen_at_runtime(call: dict[str, Any]) -> bool:
     )
 
 
+@pytest.mark.integration
 @pytestmark_bash
 def test_the_cfn_nag_install_runs_frozen_against_the_fetched_lockfile(tmp_path):
     _, _, step = _workflow_and_step()
@@ -204,6 +208,7 @@ def test_the_cfn_nag_install_runs_frozen_against_the_fetched_lockfile(tmp_path):
     assert {"Gemfile", "Gemfile.lock"} <= fetched, fetched
 
 
+@pytest.mark.integration
 @pytestmark_bash
 def test_without_frozen_mode_the_runtime_check_fails(tmp_path):
     """Negative control: the same step with BUNDLE_FROZEN taken out."""
@@ -221,6 +226,7 @@ def _outer_envs() -> tuple:
     return (workflow.data.get("env"), job.get("env"))
 
 
+@pytest.mark.integration
 @pytestmark_bash
 def test_a_missing_lockfile_stops_the_step_before_bundle_install(tmp_path):
     _, _, step = _workflow_and_step()

@@ -29,6 +29,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTION_DIR = REPO_ROOT / ".github" / "actions" / "setup-ash"
 SCRIPT = ACTION_DIR / "locate_entry_point.py"

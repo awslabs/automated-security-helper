@@ -33,6 +33,8 @@ from automated_security_helper.core.committed_output import (
 )
 from automated_security_helper.utils.scan_output_dirs import GitIndexAnswer
 
+pytestmark = pytest.mark.unit
+
 #: An absolute directory every case's repository is below, on any platform.
 ROOT = Path(os.path.abspath(os.sep + "srv"))
 

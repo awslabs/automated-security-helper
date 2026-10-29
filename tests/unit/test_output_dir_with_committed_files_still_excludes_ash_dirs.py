@@ -41,6 +41,7 @@ from tests.unit.workspace.test_execution import _git
 pytestmark = pytest.mark.usefixtures("no_checkout_above_tmp_path", "no_tool_probes")
 
 
+@pytest.mark.unit
 def test_ashs_own_directories_include_where_previous_results_are_held():
     """An MCP scan sets the previous results aside in the output directory, whole
     or part way: those are ASH's files as much as the working directories."""
@@ -71,6 +72,7 @@ def _repo(tmp_path: Path, committed: list[str]) -> tuple[Path, Path]:
     return source, output
 
 
+@pytest.mark.integration
 def test_a_committed_readme_leaves_ashs_own_directories_excluded(tmp_path):
     """Only .ash/ash_output/README committed, and the scan
     writing to .ash/ash_output."""
@@ -83,6 +85,7 @@ def test_a_committed_readme_leaves_ashs_own_directories_excluded(tmp_path):
     assert sorted(excluded) == sorted(output / name for name in ash_own_dir_names())
 
 
+@pytest.mark.integration
 def test_a_working_directory_holding_a_committed_file_is_not_excluded(
     tmp_path, monkeypatch
 ):
@@ -101,6 +104,7 @@ def test_a_working_directory_holding_a_committed_file_is_not_excluded(
     )
 
 
+@pytest.mark.integration
 def test_syft_is_told_to_skip_ashs_own_reports_beside_a_committed_file(tmp_path):
     """syft's SBOM has no fallback: what it is not told to skip, it catalogs."""
     from automated_security_helper.base.plugin_context import PluginContext
@@ -128,6 +132,7 @@ def test_syft_is_told_to_skip_ashs_own_reports_beside_a_committed_file(tmp_path)
     assert "./.ash/ash_output/**" not in globs, globs
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "platform, matched", [("win32", True), ("darwin", True), ("linux", False)]
 )

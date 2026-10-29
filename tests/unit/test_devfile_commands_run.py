@@ -134,6 +134,7 @@ def _system_path(tmp_path: Path) -> str:
     return str(tools)
 
 
+@pytest.mark.unit
 def test_the_devfile_names_its_image_and_the_documented_commands():
     devfile = _devfile()
     assert str(devfile["schemaVersion"]).startswith("2."), devfile["schemaVersion"]
@@ -148,6 +149,7 @@ def test_the_devfile_names_its_image_and_the_documented_commands():
     assert set(_command_lines()) == {"install", "build", "test"}
 
 
+@pytest.mark.unit
 def test_development_md_shows_the_devfile_commands():
     # DEVELOPMENT.md tells a reader to run the devfile's commands by hand when the IDE
     # integration fails, so its copy is held to the devfile's.
@@ -158,6 +160,7 @@ def test_development_md_shows_the_devfile_commands():
         )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("shell", ["sh", "dash", "bash"])
 @pytest.mark.parametrize("image_path_has_local_bin", [True, False])
 @pytest.mark.parametrize("xdg_bin_home_set", [False, True])

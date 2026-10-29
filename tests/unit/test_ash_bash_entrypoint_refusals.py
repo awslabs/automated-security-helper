@@ -55,6 +55,7 @@ WRAPPER_REFUSAL_EXIT = 3
 USAGE_ERROR_EXIT = 5
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.skipif(
         os.name == "nt",
         reason="bash on Windows runners is the WSL stub; ./ash is the POSIX entrypoint",

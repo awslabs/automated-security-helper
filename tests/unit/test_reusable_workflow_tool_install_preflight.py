@@ -63,6 +63,7 @@ def _step() -> dict:
     return step
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "values", list(itertools.product([True, False], repeat=3)), ids=str
 )
@@ -72,6 +73,7 @@ def test_the_check_runs_when_any_tool_install_is_on(values):
     assert evaluate(_step()["if"], context, "success") is any(values)
 
 
+@pytest.mark.unit
 def test_the_check_comes_after_uv_and_before_every_tool_install():
     steps = _steps()
     order = [step.get("id") or step.get("name") for step in steps]
@@ -169,6 +171,7 @@ def _run(
     return result
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="runs the step's bash script")
 def test_a_check_that_could_not_run_uvx_ends_with_the_helpers_error(tmp_path):
     """with_commands_stopped returns 1 without running uvx when it cannot make a
@@ -188,6 +191,7 @@ posix_only = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize("help_text", [MODERN_HELP, RICH_HELP], ids=["plain", "rich"])
 def test_an_ash_with_the_tool_option_passes(tmp_path, help_text):
@@ -202,6 +206,7 @@ def test_an_ash_with_the_tool_option_passes(tmp_path, help_text):
 NO_COMMAND = "Error: No such command 'dependencies'.\n"
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "help_text, status, stderr_text",
@@ -220,6 +225,7 @@ def test_an_ash_without_it_fails_naming_the_inputs(
         assert name in output, (name, output)
 
 
+@pytest.mark.integration
 @posix_only
 def test_an_ash_that_cannot_be_run_shows_why(tmp_path):
     """uv's own error is the diagnosis; the --tool message would be a wrong one.
@@ -244,6 +250,7 @@ def test_an_ash_that_cannot_be_run_shows_why(tmp_path):
     assert "ash-version" in output, output
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_refused_command_line_still_shows_uvs_output(tmp_path):
     """An ASH without the command: its own message is printed with the diagnosis."""
@@ -254,6 +261,7 @@ def test_a_refused_command_line_still_shows_uvs_output(tmp_path):
     assert "ash dependencies install --tool" in output, output
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "help_text, status, message",
@@ -281,6 +289,7 @@ def test_the_source_cannot_add_a_workflow_command(tmp_path, help_text, status, m
     assert COMMAND_TEXT_SHOWN in line, "the value must be shown, not dropped"
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "status, message",
@@ -305,6 +314,7 @@ def test_uvs_output_starts_no_command(tmp_path, status, message):
     assert line.startswith(message), line
 
 
+@pytest.mark.integration
 @posix_only
 def test_each_run_makes_its_own_stop_token(tmp_path):
     """Every window gets its own token: the capture of uvx's output and the copy
@@ -325,6 +335,7 @@ def test_each_run_makes_its_own_stop_token(tmp_path):
     assert all(len(token) >= 32 for token in tokens), tokens
 
 
+@pytest.mark.unit
 def test_uvx_runs_only_with_commands_stopped():
     """What uvx prints comes from the network and the fetched ASH, so it runs
     through with_commands_stopped, as every tool the workflow runs does. Its
@@ -342,6 +353,7 @@ def test_uvx_runs_only_with_commands_stopped():
     assert all("$(uvx" not in line for line in lines), lines
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize(
     "help_text, status, stderr_text",

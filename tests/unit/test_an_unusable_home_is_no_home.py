@@ -71,6 +71,7 @@ def _made_under(directory: Path) -> list:
     )
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="HOME is not Windows' home")
 @pytest.mark.parametrize(
     "home",
@@ -102,6 +103,7 @@ def test_install_with_no_usable_home_refuses_and_writes_nothing(tmp_path, home):
     assert _made_under(tmp_path) == []
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="HOME is not Windows' home")
 @pytest.mark.parametrize("home", ["relative-home", ""])
 def test_the_bin_path_hint_is_given_when_there_is_no_home(monkeypatch, tmp_path, home):
@@ -117,6 +119,7 @@ def test_the_bin_path_hint_is_given_when_there_is_no_home(monkeypatch, tmp_path,
     assert _bin_path_hint(would_be, None) is not None
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="HOME is not Windows' home")
 @pytest.mark.parametrize(
     "home,passed",
@@ -136,6 +139,7 @@ def test_a_probe_is_given_only_a_usable_home(monkeypatch, home, passed):
     assert ("HOME" in _probe_env()) is passed
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="HOME is not Windows' home")
 @pytest.mark.parametrize("home", ["relative-home", ""])
 def test_shown_paths_name_no_home_when_there_is_none(monkeypatch, home):

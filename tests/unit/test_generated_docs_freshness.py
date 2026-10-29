@@ -235,6 +235,7 @@ def _planted_environment(root: Path, seed: str, home: str | None) -> tuple[dict,
     return env, home_dir
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("script", sorted(REFERENCE_PAGES))
 def test_reference_page_is_current(script: str, tmp_path: Path) -> None:
     """The committed reference page equals what its generator emits now, twice.
@@ -261,6 +262,7 @@ def test_reference_page_is_current(script: str, tmp_path: Path) -> None:
             assert written == [], f"{script} wrote under HOME: {written[:10]}"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("script", sorted(REFERENCE_PAGES))
 def test_reference_page_names_its_generator(script: str) -> None:
     """Each page's banner names the script that writes it and how to rerun it."""
@@ -269,6 +271,7 @@ def test_reference_page_names_its_generator(script: str) -> None:
     assert f"uv run python scripts/{script}" in head
 
 
+@pytest.mark.integration
 def test_docs_root_decides_where_pages_go_and_what_they_link(tmp_path: Path) -> None:
     """--docs-root is the tree written to, and the source of per-scanner links.
 
@@ -309,6 +312,7 @@ def test_docs_root_decides_where_pages_go_and_what_they_link(tmp_path: Path) -> 
     assert "automated_security_helper" in result.stderr.split("Documenting ", 1)[1]
 
 
+@pytest.mark.integration
 def test_reporter_page_needs_no_other_page(tmp_path: Path) -> None:
     """The reporter generator writes its page into a docs tree that holds nothing else.
 
@@ -372,6 +376,7 @@ def _tables(text: str) -> list[tuple[int, str, list[str]]]:
     return found
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("page", sorted(OPTIONS_PAGES))
 def test_options_tables_carry_the_doctest_marker(page: str) -> None:
     """Every options table is marked with the plugin it belongs to, and only those are.
@@ -432,6 +437,7 @@ _HEADING_COMMAND = re.compile(
 )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("page", MARKED_PAGES)
 def test_every_keyed_table_names_what_it_documents(page: str) -> None:
     """A table of options, keys or parameters carries a marker naming what it lists.
@@ -493,6 +499,7 @@ DEFAULT_FORMS = (
 )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "page", ["cli.md", "configuration.md", "mcp-tools.md", *sorted(OPTIONS_PAGES)]
 )
@@ -539,6 +546,7 @@ def _config_generator():
     return generate_config_reference
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "value",
     [
@@ -569,6 +577,7 @@ def test_default_values_read_back_as_themselves(value) -> None:
     assert yaml.safe_load(_config_generator().yaml_value(value)) == value
 
 
+@pytest.mark.unit
 def test_bounds_are_written_with_digit_grouping() -> None:
     """A Type cell's bounds are grouped, ``at most 1,048,576``, never run together.
 
@@ -599,6 +608,7 @@ def test_bounds_are_written_with_digit_grouping() -> None:
     assert generator.default_cell(Bounded.model_fields["size"]) == "`2048`"
 
 
+@pytest.mark.unit
 def test_env_and_platform_defaults_are_found_in_the_model_source(
     tmp_path: Path,
 ) -> None:
@@ -678,6 +688,7 @@ def _per_platform(*values) -> list:
     return list(zip(_PLATFORM_LABELS, values))
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "module, name",
     [
@@ -709,6 +720,7 @@ def test_scanner_enabled_default_is_evaluated_per_platform(
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "annotation,expected",
     [
@@ -728,6 +740,7 @@ def test_type_cells_use_the_oxford_comma(annotation, expected: str) -> None:
     assert _config_generator().type_text(annotation) == expected
 
 
+@pytest.mark.unit
 def test_platform_groups_use_the_oxford_comma() -> None:
     generator = _config_generator()
     assert generator.word_list(["a"], "and") == "a"
@@ -739,6 +752,7 @@ def test_platform_groups_use_the_oxford_comma() -> None:
     assert text == "True on Linux, macOS, and Windows"
 
 
+@pytest.mark.unit
 def test_platform_defaults_evaluate_only_the_forms_they_know(tmp_path: Path) -> None:
     """Every planted default reads the platform; the ones outside the known forms are None.
 
@@ -800,6 +814,7 @@ def test_platform_defaults_evaluate_only_the_forms_they_know(tmp_path: Path) -> 
         del sys.modules["planted_platform_model"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "source",
     [
@@ -850,6 +865,7 @@ def _plant(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
+@pytest.mark.unit
 def test_read_env_names_finds_every_read_shape(tmp_path: Path) -> None:
     """Each kind of read is found, on a tree whose every read is known."""
     tree = _plant(
@@ -940,6 +956,7 @@ def test_read_env_names_finds_every_read_shape(tmp_path: Path) -> None:
     assert defaults["PLANT_SHELL_DEFAULT"] == "docker"
 
 
+@pytest.mark.unit
 def test_read_env_names_refuses_what_is_not_a_read(tmp_path: Path) -> None:
     """Writes, comments, shell locals and help text do not count as reads."""
     tree = _plant(
@@ -982,6 +999,7 @@ def test_read_env_names_refuses_what_is_not_a_read(tmp_path: Path) -> None:
     assert _env_module().collect_env_reads(tree).image_env == {}
 
 
+@pytest.mark.unit
 def test_an_empty_read_default_does_not_hide_the_option_default() -> None:
     """An empty-string read default gives way to the option's or config key's.
 
@@ -1018,6 +1036,7 @@ def test_an_empty_read_default_does_not_hide_the_option_default() -> None:
     assert module._default_entries([read("x")], option, []) == ["`x`"]
 
 
+@pytest.mark.unit
 def test_environment_page_survives_lines_moving(tmp_path: Path) -> None:
     """Each read is cited by file and enclosing function, never by line number.
 
@@ -1083,6 +1102,7 @@ def test_environment_page_survives_lines_moving(tmp_path: Path) -> None:
     assert "`Loader.load`" in before and "`run_it`" in before
 
 
+@pytest.mark.unit
 def test_environment_page_cites_no_line_numbers() -> None:
     """The committed page names files and scopes, not lines (see the test above)."""
     text = (REFERENCE_DIR / "environment-variables.md").read_text(encoding="utf-8")
@@ -1090,6 +1110,7 @@ def test_environment_page_cites_no_line_numbers() -> None:
     assert cited == [], f"line citations on the page: {cited[:5]}"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("script", sorted(REFERENCE_PAGES))
 def test_check_refuses_stdout(script: str) -> None:
     """``--check --output -`` would print the page and compare nothing, so it is refused."""
@@ -1099,6 +1120,7 @@ def test_check_refuses_stdout(script: str) -> None:
     assert result.stdout == "", "a refused run must not print a page"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("script", sorted(REFERENCE_PAGES))
 def test_check_compares_the_output_file(script: str, tmp_path: Path) -> None:
     """``--check --output FILE`` compares FILE, and leaves a stale one as it was."""
@@ -1109,6 +1131,7 @@ def test_check_compares_the_output_file(script: str, tmp_path: Path) -> None:
     assert stale.read_text(encoding="utf-8") == "stale\n"
 
 
+@pytest.mark.unit
 def test_install_text_shows_packages_not_uv_arguments() -> None:
     """A ``uv tool install`` command's options are not shown as if they were packages.
 
@@ -1137,6 +1160,7 @@ def test_install_text_shows_packages_not_uv_arguments() -> None:
     ), text
 
 
+@pytest.mark.integration
 def test_read_env_names_covers_this_tree() -> None:
     """On the real checkout the walk reaches the package and the entry scripts.
 
@@ -1225,6 +1249,7 @@ def _in_code_tree(tmp_path: Path, source: str, *args: str):
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
+@pytest.mark.integration
 def test_output_formats_say_which_values_write_a_report(tmp_path: Path) -> None:
     """``--output-formats`` is checked against ExportFormat, and only reporter names write.
 
@@ -1268,6 +1293,7 @@ def _assert_output_formats_row(row: str, formats: set, reporters: set) -> None:
         assert refused is None, f"no built-in reporter is refused, but: {row}"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "extra_reporters",
     [(), ("planted-only-reporter",)],
@@ -1290,6 +1316,7 @@ def test_output_formats_note_names_refused_reporters_only_when_there_are_some(
     assert ("refused" in note) == bool(extra_reporters)
 
 
+@pytest.mark.unit
 def test_report_format_lists_the_reporters() -> None:
     """``ash report --format`` takes a loaded reporter's name, not an ExportFormat value."""
     row = _row(_page("cli.md"), "report--format")
@@ -1320,6 +1347,7 @@ def _says_it_ignores_unknown_options(page: str, labels) -> dict[str, bool]:
     }
 
 
+@pytest.mark.unit
 def test_cli_page_says_which_commands_ignore_unknown_options() -> None:
     """A command whose click settings ignore unknown options says so; no other does.
 
@@ -1339,6 +1367,7 @@ def test_cli_page_says_which_commands_ignore_unknown_options() -> None:
     assert _says_it_ignores_unknown_options(page, expected) == expected
 
 
+@pytest.mark.unit
 def test_a_command_that_ignores_unknown_options_is_named_on_the_cli_page() -> None:
     """The positive case, planted on a copy of the app, so it is exercised whether or not
     the code under test has such a command: one at the top level and one nested in a
@@ -1373,6 +1402,7 @@ def test_a_command_that_ignores_unknown_options_is_named_on_the_cli_page() -> No
     assert not said["ash planted-strict"] and not said["ash planted-group"], said
 
 
+@pytest.mark.unit
 def test_cli_page_does_not_claim_every_variable() -> None:
     """The env column is the variable click reads, and the page says other variables exist."""
     intro = _page("cli.md").split("## Commands", 1)[0]
@@ -1381,6 +1411,7 @@ def test_cli_page_does_not_claim_every_variable() -> None:
     assert "(environment-variables.md)" in intro
 
 
+@pytest.mark.unit
 def test_flags_without_a_default_read_as_off() -> None:
     """``--install-completion`` defaults to None, which for a flag means off, as for the rest."""
     for anchor in ("ash--install-completion", "ash--show-completion"):
@@ -1454,6 +1485,7 @@ def _validator_note_kind(note: str) -> str:
     return "warns" if "`ash config validate` warns" in note else "rejects"
 
 
+@pytest.mark.integration
 def test_configuration_says_what_ash_config_validate_does_with_each_key(
     tmp_path: Path,
 ) -> None:
@@ -1503,6 +1535,7 @@ def test_configuration_says_what_ash_config_validate_does_with_each_key(
         assert "`ash config validate`" not in name_row, name_row
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("verdict", ["rejects", "warns", ""])
 def test_validator_notes_state_the_verdict_they_are_given(monkeypatch, verdict) -> None:
     """Planted verdicts, since a version of ASH shows only some of them: each note
@@ -1531,6 +1564,7 @@ def test_validator_notes_state_the_verdict_they_are_given(monkeypatch, verdict) 
     assert named == bool(verdict), plugin
 
 
+@pytest.mark.unit
 def test_validator_note_refuses_a_message_it_has_no_words_for() -> None:
     """A validator complaint that is neither "internal" nor "unknown" stops the
     generator, rather than being worded as one of them."""
@@ -1538,6 +1572,7 @@ def test_validator_note_refuses_a_message_it_has_no_words_for() -> None:
         _config_generator()._top_level_reason("Top-level field 'x' is set twice")
 
 
+@pytest.mark.unit
 def test_configuration_types_name_no_classes() -> None:
     """A Type cell describes values (string, mapping, list of ...), never a Python class."""
     for page in ("configuration.md", "scanners.md", "reporters.md", "converters.md"):
@@ -1551,6 +1586,7 @@ def test_configuration_types_name_no_classes() -> None:
     assert "| Scanner options |" not in common
 
 
+@pytest.mark.unit
 def test_reporter_page_names_every_file_a_reporter_writes() -> None:
     """unused-suppressions also writes ash.unused-suppressions.md with its default options."""
     body = _section(_page("reporters.md"), "## `unused-suppressions`")
@@ -1561,6 +1597,7 @@ def test_reporter_page_names_every_file_a_reporter_writes() -> None:
     assert '"json", "markdown", or "both"' in row
 
 
+@pytest.mark.unit
 def test_scanner_page_says_network_scanners_replaces_the_default() -> None:
     """Each scanner's network line is its default, which sandbox.network_scanners replaces."""
     text = _page("scanners.md")
@@ -1571,6 +1608,7 @@ def test_scanner_page_says_network_scanners_replaces_the_default() -> None:
     assert "- Network in the sandbox, by default: " in _section(text, "## `bandit`")
 
 
+@pytest.mark.unit
 def test_environment_page_purposes_and_defaults() -> None:
     """No purpose scraped from an unrelated comment, and config-backed defaults shown."""
     text = _page("environment-variables.md")
@@ -1586,6 +1624,7 @@ def test_environment_page_purposes_and_defaults() -> None:
     assert "width constraint" not in row("ASH_IN_CONTAINER")[4]
 
 
+@pytest.mark.unit
 def test_read_site_comments_must_name_the_variable(tmp_path: Path) -> None:
     """A comment above a read is its purpose when it names it or is a sentence.
 
@@ -1634,6 +1673,7 @@ def test_read_site_comments_must_name_the_variable(tmp_path: Path) -> None:
     assert purposes["PLANT_SH_OTHER"] is None
 
 
+@pytest.mark.unit
 def test_reads_through_a_constant_inside_a_function(tmp_path: Path) -> None:
     """``os.environ.get(CONST)`` in a function, the shape ASH_ALLOW_IN_TREE_TOOLS uses."""
     tree = _plant(
@@ -1659,6 +1699,7 @@ def test_reads_through_a_constant_inside_a_function(tmp_path: Path) -> None:
     assert "PLANT_ALLOW" in names, dynamic
 
 
+@pytest.mark.integration
 def test_build_args_are_not_environment_variables() -> None:
     """ASH_BASE_IMAGE is a container build argument; no code reads it from the environment."""
     names, _dynamic = _env_module().read_env_names()
@@ -1666,6 +1707,7 @@ def test_build_args_are_not_environment_variables() -> None:
     assert "| `ASH_BASE_IMAGE` |" not in _page("environment-variables.md")
 
 
+@pytest.mark.unit
 def test_mcp_notes_match_the_server() -> None:
     """The MCP notes, held to what the server does."""
     text = _page("mcp-tools.md")
@@ -1732,6 +1774,7 @@ def _progress_keys() -> set[str]:
     return max(({key for key, _ in each.keys} for each in response.dicts()), key=len)
 
 
+@pytest.mark.unit
 def test_the_progress_example_names_only_keys_the_server_returns() -> None:
     """Every key of the get_scan_progress example, and no caveat that needs a key the
     server lacks, comes from the response the tool's return statements build."""
@@ -1748,6 +1791,7 @@ def test_the_progress_example_names_only_keys_the_server_returns() -> None:
         assert (key in returned) == (f"`{key}`" in progress), key
 
 
+@pytest.mark.unit
 def test_a_dict_caveat_is_printed_only_while_the_server_returns_what_it_needs() -> None:
     generator = _mcp_reference_module()
     caveat = {
@@ -1766,6 +1810,7 @@ def test_a_dict_caveat_is_printed_only_while_the_server_returns_what_it_needs() 
     assert generator._conditional_caveat(typed, set(), {"other"}) is None
 
 
+@pytest.mark.unit
 def test_the_error_type_paragraph_names_the_types_the_tool_returns() -> None:
     generator = _mcp_reference_module()
     caveat = {
@@ -1784,6 +1829,7 @@ def test_the_error_type_paragraph_names_the_types_the_tool_returns() -> None:
     assert generator._conditional_caveat(caveat, set(), {"z"}) is None
 
 
+@pytest.mark.unit
 def test_the_clone_paragraph_names_no_type_the_server_lacks() -> None:
     """set_source_git's page names the clone types the reader finds in the server's
     source, none from an older or newer one."""
@@ -1806,6 +1852,7 @@ def test_the_clone_paragraph_names_no_type_the_server_lacks() -> None:
     assert clone_types <= set(contracts["set_source_git"].error_types), clone_types
 
 
+@pytest.mark.unit
 def test_check_installation_notes_list_no_scanners() -> None:
     """The check_installation notes say which scanners a first scan installs by how, not by name.
 
@@ -1827,6 +1874,7 @@ def test_check_installation_notes_list_no_scanners() -> None:
     assert len(named) <= 1, f"check_installation lists scanners by name: {named}"
 
 
+@pytest.mark.unit
 def test_community_loading_is_scoped_to_ash_scan() -> None:
     """ "Loaded only when named" is said of ``ash scan``; the MCP server is pointed elsewhere.
 
@@ -1859,6 +1907,7 @@ def _script_module(name: str):
         sys.path.remove(str(SCRIPTS))
 
 
+@pytest.mark.unit
 def test_home_is_replaced_only_where_it_is_a_path(monkeypatch) -> None:
     """HOME=/d made "Enable/disable" read "Enable~isable" on the CLI page.
 
@@ -1897,6 +1946,7 @@ PROXY_VARIABLES = (
 )
 
 
+@pytest.mark.integration
 def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
     tmp_path: Path,
 ) -> None:
@@ -1994,6 +2044,7 @@ def _hidden_option_page(hidden: bool) -> str:
     return content
 
 
+@pytest.mark.unit
 def test_hidden_options_are_marked() -> None:
     """An option click hides from --help says so, as a hidden command does."""
 
@@ -2006,6 +2057,7 @@ def test_hidden_options_are_marked() -> None:
     )
 
 
+@pytest.mark.integration
 def test_a_hidden_option_in_ash_changes_the_cli_page(tmp_path: Path) -> None:
     """In ASH itself: hidden=True on `ash scan --progress` fails --check."""
     import importlib.util

@@ -48,6 +48,8 @@ from tests.unit.test_committed_results_paths_are_never_deleted import (
     _snapshot,
 )
 
+pytestmark = pytest.mark.integration
+
 #: A held set and a restore marker, as a repository could commit them.
 HELD = {
     f"{HELD_DIR_NAME}/notes.txt": "committed notes\n",

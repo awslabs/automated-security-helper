@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Names that trigger the heuristic in ``tests/integration/cli/conftest.py``.

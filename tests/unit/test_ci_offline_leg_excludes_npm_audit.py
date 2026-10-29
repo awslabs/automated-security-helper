@@ -215,6 +215,7 @@ def _expected_scan(offline: bool, config_file: str) -> list[str]:
     return argv + _NO_ASH_ENV
 
 
+@pytest.mark.unit
 def test_the_step_takes_the_offline_and_config_inputs():
     """The values the script branches on come from the action's inputs."""
     env = _step()["env"]
@@ -222,6 +223,7 @@ def test_the_step_takes_the_offline_and_config_inputs():
     assert env["ASH_TEST_CONFIG_FILE"] == "${{ inputs.config-file }}"
 
 
+@pytest.mark.unit
 def test_the_step_sets_no_other_ash_variable():
     """The runs below see only what the script exports; this covers the step's env.
 
@@ -679,6 +681,7 @@ def _env_write_finding(
     )
 
 
+@pytest.mark.unit
 def test_no_layer_above_the_step_sets_an_ash_variable():
     """The env of the calling workflow, job and step reaches the action's steps too.
 
@@ -738,6 +741,7 @@ _PLANTED_WRITERS = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("shape", sorted(_PLANTED_WRITERS))
 def test_a_planted_writer_in_the_calling_job_is_found(tmp_path, shape):
     root = _plant(tmp_path, [_PLANTED_WRITERS[shape], _CALL])
@@ -748,6 +752,7 @@ def test_a_planted_writer_in_the_calling_job_is_found(tmp_path, shape):
     assert len(findings) == 1 and "exports an ASH_* variable" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_a_planted_writer_in_a_nested_composite_is_found(tmp_path):
     nested = "./.github/actions/setup"
     root = _plant(
@@ -770,6 +775,7 @@ def test_a_planted_writer_in_a_nested_composite_is_found(tmp_path):
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "spelling",
     [
@@ -790,6 +796,7 @@ def test_a_caller_is_found_however_the_path_is_spelled(tmp_path, spelling):
     assert len(findings) == 1, findings
 
 
+@pytest.mark.unit
 def test_another_local_action_is_not_a_caller(tmp_path):
     other = "./.github/actions/run-scan-test-other"
     root = _plant(
@@ -800,6 +807,7 @@ def test_another_local_action_is_not_a_caller(tmp_path):
     assert _ash_writers(root) == ([], [])
 
 
+@pytest.mark.unit
 def test_a_local_action_that_is_not_composite_is_not_skipped(tmp_path):
     """A JavaScript or Docker action has no steps to read, so the walk must say so."""
     script_action = "./.github/actions/exporter"
@@ -812,11 +820,13 @@ def test_a_local_action_that_is_not_composite_is_not_skipped(tmp_path):
         _ash_writers(root)
 
 
+@pytest.mark.unit
 def test_a_clean_plant_has_no_findings(tmp_path):
     root = _plant(tmp_path, [{"run": 'echo "COLUMNS is ${COLUMNS}"'}, _CALL])
     assert _ash_writers(root) == (["ci.yml"], [])
 
 
+@pytest.mark.unit
 def test_the_composite_walk_reaches_nested_actions():
     """Control: run-scan-test's own composites are walked, each once."""
     steps = _composite_steps(ACTION_USES, set())
@@ -828,6 +838,7 @@ def test_the_composite_walk_reaches_nested_actions():
     } <= files, sorted(files)
 
 
+@pytest.mark.unit
 def test_the_github_env_reader_sees_an_export():
     """Control for _exports_ash_to_github_env on the shapes a step would use."""
     assert _exports_ash_to_github_env('echo "ASH_CONFIG=x" >> "${GITHUB_ENV}"')
@@ -856,6 +867,7 @@ def _script_step(script: str, uses: str = "actions/github-script@v8") -> dict:
     return {"uses": uses, "with": {"script": script}}
 
 
+@pytest.mark.unit
 def test_the_github_script_reader_sees_an_export():
     """Control for _exports_ash_from_github_script."""
     for script in (
@@ -883,6 +895,7 @@ posix_only = pytest.mark.skipif(
 )
 
 
+@pytest.mark.integration
 @posix_only
 def test_the_stand_in_records_ash_variables_and_skips_the_test_inputs(tmp_path):
     """Control for the recorder: an empty record must mean none was set."""
@@ -915,6 +928,7 @@ def test_the_stand_in_records_ash_variables_and_skips_the_test_inputs(tmp_path):
     ]
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize("config_file", ["default", "community"])
 def test_the_offline_leg_leaves_npm_audit_out(tmp_path, config_file):
@@ -924,6 +938,7 @@ def test_the_offline_leg_leaves_npm_audit_out(tmp_path, config_file):
     assert scan == _expected_scan(True, config_file), scan
 
 
+@pytest.mark.integration
 @posix_only
 @pytest.mark.parametrize("config_file", ["default", "community"])
 def test_an_online_leg_runs_npm_audit(tmp_path, config_file):
@@ -932,6 +947,7 @@ def test_an_online_leg_runs_npm_audit(tmp_path, config_file):
     assert scan == _expected_scan(False, config_file), scan
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "calling_step, composite_step",
     [
@@ -976,6 +992,7 @@ def test_a_file_handed_to_a_composite_is_followed(
     assert len(findings) == 1 and "not on the allowlist" in findings[0], findings
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("using", ["Composite", "COMPOSITE", " composite "])
 def test_a_composite_named_in_another_case_is_still_walked(tmp_path, using):
     """`using` is compared without regard to case or space, so no wrapper hides."""
@@ -991,12 +1008,14 @@ def test_a_composite_named_in_another_case_is_still_walked(tmp_path, using):
     assert len(findings) == 1, findings
 
 
+@pytest.mark.unit
 def test_this_file_states_its_rules_rather_than_citing_review_ids():
     """The file ships in a public repository; an internal rule id means nothing there."""
     text = Path(__file__).read_text(encoding="utf-8")
     assert not re.search(r"\bruling\s+R\d|\bR\d+\s+\([a-z]\)", text)
 
 
+@pytest.mark.unit
 def test_the_step_points_at_the_faq_entry():
     """The exclusion is the documented answer, so the comment says where it is."""
     script = _step()["run"]
@@ -1067,6 +1086,7 @@ _MORE_WRITERS = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("shape", sorted(_MORE_WRITERS))
 def test_a_further_planted_writer_is_found(tmp_path, shape):
     root = _plant_job(tmp_path, {"steps": [_MORE_WRITERS[shape], _CALL]})
@@ -1077,6 +1097,7 @@ def test_a_further_planted_writer_is_found(tmp_path, shape):
     assert len(findings) == 1, findings
 
 
+@pytest.mark.unit
 def test_the_job_containers_env_is_read(tmp_path):
     root = _plant_job(
         tmp_path,
@@ -1088,6 +1109,7 @@ def test_the_job_containers_env_is_read(tmp_path):
     assert findings == ["ci.yml: job container env sets ['ASH_CONFIG']"], findings
 
 
+@pytest.mark.unit
 def test_a_docker_step_fails_the_walk(tmp_path):
     """A docker:// step can write GITHUB_ENV from inside an image nothing here reads."""
     root = _plant_job(tmp_path, {"steps": [{"uses": "docker://alpine:3.20"}, _CALL]})
@@ -1099,6 +1121,7 @@ def test_a_docker_step_fails_the_walk(tmp_path):
 _WRAPPER = "./.github/actions/wrapper"
 
 
+@pytest.mark.unit
 def test_a_caller_through_a_wrapper_composite_is_found(tmp_path):
     root = _plant_job(
         tmp_path,
@@ -1112,6 +1135,7 @@ def test_a_caller_through_a_wrapper_composite_is_found(tmp_path):
     assert len(findings) == 1 and "exports an ASH_* variable" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_env_on_the_way_to_the_action_is_read(tmp_path):
     """A composite passes a step's env on to its own steps, the offline step's too."""
     root = _plant_job(
@@ -1133,6 +1157,7 @@ def test_env_on_the_way_to_the_action_is_read(tmp_path):
     assert all("on to the action's steps" in finding for finding in findings), findings
 
 
+@pytest.mark.unit
 def test_env_on_a_step_that_does_not_lead_to_the_action_is_not_a_finding(tmp_path):
     other = "./.github/actions/cache"
     root = _plant_job(
@@ -1143,6 +1168,7 @@ def test_env_on_a_step_that_does_not_lead_to_the_action_is_not_a_finding(tmp_pat
     assert _ash_writers(root) == (["ci.yml"], [])
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "options",
     [
@@ -1171,6 +1197,7 @@ def test_env_set_through_the_job_containers_options_is_read(tmp_path, options):
     assert len(findings) == 1 and "container options" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_other_job_container_options_are_not_a_finding(tmp_path):
     root = _plant_job(
         tmp_path,
@@ -1212,6 +1239,7 @@ _UNLISTED_WRITES = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("shape", sorted(_UNLISTED_WRITES))
 def test_a_write_not_on_the_allowlist_is_found(tmp_path, shape):
     root = _plant_job(tmp_path, {"steps": [_UNLISTED_WRITES[shape], _CALL]})
@@ -1221,6 +1249,7 @@ def test_a_write_not_on_the_allowlist_is_found(tmp_path, shape):
     assert len(findings) == 1 and "not on the allowlist" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_a_name_held_in_the_job_env_is_named_in_the_finding(tmp_path):
     root = _plant_job(
         tmp_path,
@@ -1235,6 +1264,7 @@ def test_a_name_held_in_the_job_env_is_named_in_the_finding(tmp_path):
     assert len(findings) == 1 and "holds an ASH_* name" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_the_file_named_in_the_job_env_is_found(tmp_path):
     root = _plant_job(
         tmp_path,
@@ -1261,6 +1291,7 @@ def _listed_step(run: str, name: str = "Set the column width") -> dict:
     return {"name": name, "run": run}
 
 
+@pytest.mark.unit
 def test_an_allowlisted_write_passes(tmp_path):
     root = _plant_job(tmp_path, {"steps": [_listed_step(_LISTED.line), _CALL]})
 
@@ -1269,6 +1300,7 @@ def test_an_allowlisted_write_passes(tmp_path):
     assert len(_ash_writers(root)[1]) == 1
 
 
+@pytest.mark.unit
 def test_a_write_beside_an_allowlisted_one_is_still_found(tmp_path):
     run = _LISTED.line + '\necho "PYTHONPATH=/x" >> "$GITHUB_ENV"'
     root = _plant_job(tmp_path, {"steps": [_listed_step(run), _CALL]})
@@ -1278,6 +1310,7 @@ def test_a_write_beside_an_allowlisted_one_is_still_found(tmp_path):
     assert len(findings) == 1 and "not on the allowlist" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_an_allowlisted_step_that_also_names_an_ash_variable_is_found(tmp_path):
     """The entry admits its line; an ASH_* name elsewhere in the script still counts."""
     run = "ASH_SCANNERS=bandit\n" + _LISTED.line
@@ -1290,6 +1323,7 @@ def test_an_allowlisted_step_that_also_names_an_ash_variable_is_found(tmp_path):
     assert "exports an ASH_* variable" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_a_group_write_cannot_be_allowlisted(tmp_path):
     """`{ ...; } >> "$GITHUB_ENV"` names its variables on lines an entry cannot pin."""
     group = '{\n  echo "ASH_CONFIG=x"\n  echo "COLUMNS=160"\n} >> "$GITHUB_ENV"'
@@ -1308,6 +1342,7 @@ def test_a_group_write_cannot_be_allowlisted(tmp_path):
     assert len(findings) == 1 and "exports an ASH_* variable" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_an_allowlist_entry_names_its_variable_and_a_reason():
     for entry in ENV_WRITE_ALLOWLIST:
         _check_entry(entry)
@@ -1337,6 +1372,7 @@ def test_an_allowlist_entry_names_its_variable_and_a_reason():
             _check_entry(bad)
 
 
+@pytest.mark.unit
 def test_a_write_continued_into_a_listed_line_is_found(tmp_path):
     """The listed line is the tail of a command that began a line earlier."""
     run = 'echo "PYTHONPATH=/x" \\\n  "COLUMNS=160" >> "$GITHUB_ENV"'
@@ -1353,6 +1389,7 @@ def test_a_write_continued_into_a_listed_line_is_found(tmp_path):
     assert len(findings) == 1 and "not on the allowlist" in findings[0], findings
 
 
+@pytest.mark.unit
 def test_a_script_action_in_an_unrelated_job_does_not_fail_the_search(tmp_path):
     """Only a calling job is walked; a JavaScript action elsewhere runs no action."""
     script_action = "./.github/actions/js"
@@ -1370,6 +1407,7 @@ def test_a_script_action_in_an_unrelated_job_does_not_fail_the_search(tmp_path):
     assert _ash_writers(root) == (["ci.yml"], [])
 
 
+@pytest.mark.unit
 def test_the_further_readers_see_their_shapes():
     """Controls for _runtime_writes, _env_names_ash and the github-script reader."""
     assert _runtime_writes('echo "${bin}" >> "$GITHUB_PATH"') == ["writes GITHUB_PATH"]
