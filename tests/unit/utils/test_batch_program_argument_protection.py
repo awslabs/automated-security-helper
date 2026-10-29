@@ -82,6 +82,7 @@ def assert_cmd_leaves_alone(command_line: str) -> None:
 # The model must flag what it claims to flag, and pass what it claims to pass.
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "command_line, acts_on",
     [
@@ -116,6 +117,7 @@ def test_the_model_of_cmd_flags_what_it_claims_to(command_line, acts_on):
     assert reads_as_a_command(command_line) == acts_on
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "command_line, received",
     [
@@ -162,6 +164,7 @@ BATTERY = [
 ]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("argument", BATTERY)
 def test_nothing_cmd_would_act_on_reaches_popen_in_either_read(argument):
     try:
@@ -172,6 +175,7 @@ def test_nothing_cmd_would_act_on_reaches_popen_in_either_read(argument):
     assert_cmd_leaves_alone(subprocess.list2cmdline(arguments))
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "argument",
     [
@@ -197,6 +201,7 @@ def test_these_arguments_reach_the_program_as_they_were_given(argument):
 # refused. Writing a caret before it protects the first read only.
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "argument",
     [
@@ -228,6 +233,7 @@ def test_a_bare_argument_cmd_would_read_is_refused_not_written_with_carets(argum
     assert argument not in str(refused.value)
 
 
+@pytest.mark.unit
 def test_the_refusal_of_a_caret_says_how_to_write_a_version_range():
     # The one place the default of npm and its relatives puts a bare caret in an
     # argument: pkg@^1.0.0. The message names the way out and still not the text.
@@ -241,6 +247,7 @@ def test_the_refusal_of_a_caret_says_how_to_write_a_version_range():
     assert "version range" not in str(ampersand.value)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("program", ["C:/tools/npm.cmd", "C:/tools/gem.bat"])
 @pytest.mark.parametrize("suffix_case", [str.lower, str.upper])
 def test_both_batch_suffixes_are_read_in_either_case(program, suffix_case):
@@ -257,6 +264,7 @@ def test_both_batch_suffixes_are_read_in_either_case(program, suffix_case):
 # An argument list2cmdline quotes is left as it is: the quotes protect it in both reads.
 
 
+@pytest.mark.unit
 def test_an_argument_with_a_space_is_left_to_list2cmdline_quoting():
     command_line = command_line_of(["--prefix", "C:/Program Files/a & b|c<d>e^f"])
 
@@ -264,16 +272,19 @@ def test_an_argument_with_a_space_is_left_to_list2cmdline_quoting():
     assert_cmd_leaves_alone(command_line)
 
 
+@pytest.mark.unit
 def test_an_empty_argument_stays_an_empty_quoted_argument():
     assert command_line_of(["", "x"]) == f'{PROGRAM} "" x'
 
 
+@pytest.mark.unit
 def test_an_argument_that_is_not_text_is_left_for_popen_to_report():
     arguments = resolved(["install", 3])
 
     assert arguments[2] == 3
 
 
+@pytest.mark.unit
 def test_a_path_argument_is_read_like_text():
     assert resolved([Path("a b")])[1] == Path("a b")
     with pytest.raises(OSError) as refused:
@@ -282,6 +293,7 @@ def test_a_path_argument_is_read_like_text():
     assert refused.value.errno == errno.EINVAL
 
 
+@pytest.mark.unit
 def test_a_bytes_argument_is_read_like_text():
     assert resolved([b"plain"])[1] == b"plain"
     with pytest.raises(OSError) as refused:
@@ -294,6 +306,7 @@ def test_a_bytes_argument_is_read_like_text():
 # carry the argument.
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "argument",
     ['a" & b', 'a"&b', 'say "hi"', "line\nbreak", "line\rbreak", 'tab\tand"quote'],
@@ -311,11 +324,13 @@ def test_an_argument_that_cannot_be_passed_on_is_refused(argument):
 # A percent sign passes alone and is refused where it could pair with another.
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("argument", ["100%", "%", "%PATH", "100% sure"])
 def test_a_lone_percent_sign_reaches_the_program_as_it_is(argument):
     assert resolved(["install", argument]) == [PROGRAM, "install", argument]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -333,6 +348,7 @@ def test_percent_signs_that_could_pair_are_refused(arguments):
     assert refused.value.errno == errno.EINVAL
 
 
+@pytest.mark.unit
 def test_a_percent_sign_in_the_program_path_can_pair_with_one_in_an_argument():
     with pytest.raises(OSError) as refused:
         resolved(["100%"], program="C:/Users/50%off/tools/npm.cmd")
@@ -343,6 +359,7 @@ def test_a_percent_sign_in_the_program_path_can_pair_with_one_in_an_argument():
 # The program path is read like an argument and is never rewritten.
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "program",
     ["C:/Users/50%off/tools/npm.cmd", "C:\\Users\\50%off\\tools\\npm.cmd"],
@@ -351,6 +368,7 @@ def test_a_program_path_with_one_percent_sign_starts_as_it_is(program):
     assert resolved(["--version"], program=program) == [program, "--version"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "program",
     [
@@ -374,6 +392,7 @@ def test_a_program_path_cmd_would_read_is_refused_not_written_with_carets(progra
     assert "the program" in str(refused.value)
 
 
+@pytest.mark.unit
 def test_a_program_path_with_a_space_is_quoted_by_list2cmdline():
     program = "C:/Program Files/a&b/npm.cmd"
 
@@ -383,6 +402,7 @@ def test_a_program_path_with_a_space_is_quoted_by_list2cmdline():
     assert_cmd_leaves_alone(command_line)
 
 
+@pytest.mark.unit
 def test_a_program_path_with_parentheses_and_a_space_is_quoted_by_list2cmdline():
     program = "C:/Program Files (x86)/nodejs/npm.cmd"
 
@@ -392,6 +412,7 @@ def test_a_program_path_with_parentheses_and_a_space_is_quoted_by_list2cmdline()
     assert_cmd_leaves_alone(command_line)
 
 
+@pytest.mark.unit
 def test_a_program_path_that_cannot_be_passed_on_is_refused():
     with pytest.raises(OSError) as refused:
         resolved(["--version"], program='C:/a "b"/npm.cmd')
@@ -402,6 +423,7 @@ def test_a_program_path_that_cannot_be_passed_on_is_refused():
 # Nothing changes where the operating system does not start the file through cmd.exe.
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("argument", ["a&b", "p|q", "100%", 'a" & b', "x^y"])
 def test_a_program_that_is_not_a_batch_file_gets_its_arguments_as_they_are(argument):
     arguments = resolved(["install", argument], program="C:/tools/npm.exe")
@@ -409,6 +431,7 @@ def test_a_program_that_is_not_a_batch_file_gets_its_arguments_as_they_are(argum
     assert arguments == ["C:/tools/npm.exe", "install", argument]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("argument", ["a&b", "p|q", "100%", 'a" & b', "x^y"])
 @pytest.mark.parametrize("system", ["Linux", "Darwin"])
 def test_a_file_named_like_a_batch_file_is_left_alone_off_windows(system, argument):
@@ -422,6 +445,7 @@ def test_a_file_named_like_a_batch_file_is_left_alone_off_windows(system, argume
 # Every helper that starts a process hands Popen the list it was given, resolved.
 
 
+@pytest.mark.unit
 @patch("subprocess.Popen")
 @patch(f"{MODULE}.find_executable")
 def test_create_process_with_pipes_hands_popen_the_list_it_was_given(
@@ -436,6 +460,7 @@ def test_create_process_with_pipes_hands_popen_the_list_it_was_given(
     assert_cmd_leaves_alone(subprocess.list2cmdline(argv))
 
 
+@pytest.mark.unit
 @patch("subprocess.Popen")
 @patch(f"{MODULE}.find_executable")
 def test_run_command_stream_output_hands_popen_the_list_it_was_given(
@@ -451,6 +476,7 @@ def test_run_command_stream_output_hands_popen_the_list_it_was_given(
     assert_cmd_leaves_alone(subprocess.list2cmdline(argv))
 
 
+@pytest.mark.unit
 @patch("subprocess.Popen")
 @patch(f"{MODULE}.find_executable")
 def test_run_command_stream_output_starts_nothing_for_an_argument_cmd_would_read(
@@ -467,6 +493,7 @@ def test_run_command_stream_output_starts_nothing_for_an_argument_cmd_would_read
     assert codes == [SPAWN_FAILURE_RETURNCODE] * 4
 
 
+@pytest.mark.unit
 @patch("subprocess.Popen")
 @patch(f"{MODULE}.find_executable")
 def test_create_process_with_pipes_starts_nothing_for_an_argument_cmd_would_read(
@@ -481,6 +508,7 @@ def test_create_process_with_pipes_starts_nothing_for_an_argument_cmd_would_read
     assert mock_popen.call_args_list == []
 
 
+@pytest.mark.unit
 def test_run_command_with_output_handling_starts_nothing_for_an_argument_cmd_would_read(
     tmp_path,
 ):
@@ -514,6 +542,7 @@ def test_run_command_with_output_handling_starts_nothing_for_an_argument_cmd_wou
 # was: the helpers resolve a copy.
 
 
+@pytest.mark.unit
 @patch("subprocess.Popen")
 @patch(f"{MODULE}.find_executable")
 def test_create_process_with_pipes_leaves_the_callers_list_as_it_was(
@@ -530,6 +559,7 @@ def test_create_process_with_pipes_leaves_the_callers_list_as_it_was(
     assert first == second == [PROGRAM, "install", "50%"]
 
 
+@pytest.mark.unit
 @patch("subprocess.Popen")
 @patch(f"{MODULE}.find_executable")
 def test_run_command_stream_output_leaves_the_callers_list_as_it_was(
@@ -547,6 +577,7 @@ def test_run_command_stream_output_leaves_the_callers_list_as_it_was(
     assert first == second == [PROGRAM, "install", "50%"]
 
 
+@pytest.mark.unit
 def test_run_command_with_output_handling_leaves_the_callers_list_as_it_was(tmp_path):
     started = []
 
@@ -586,6 +617,7 @@ BATCH_FILES = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "win32", reason="starts a real batch file")
 @pytest.mark.parametrize("shape", sorted(BATCH_FILES))
 @pytest.mark.parametrize("argument", BATTERY)

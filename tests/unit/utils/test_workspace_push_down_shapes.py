@@ -23,6 +23,8 @@ from automated_security_helper.utils.workspace_paths import (
     to_workspace_pattern,
 )
 
+pytestmark = pytest.mark.unit
+
 #: The answer for a pattern with no correct rewrite.
 REFUSED = "refused"
 

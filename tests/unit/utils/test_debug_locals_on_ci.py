@@ -20,6 +20,8 @@ import pytest
 
 import automated_security_helper
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e"
 CI_MARKERS = (
     "GITHUB_ACTIONS",

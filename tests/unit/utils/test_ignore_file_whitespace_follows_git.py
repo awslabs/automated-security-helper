@@ -74,6 +74,7 @@ def _scanned(source: Path, tmp_path: Path) -> set[str]:
     return {os.path.relpath(name, source) for name in found}
 
 
+@pytest.mark.unit
 def test_each_line_ignores_what_git_ignores(tmp_path):
     source = _tree(tmp_path, RULES, NAMES)
 
@@ -82,6 +83,7 @@ def test_each_line_ignores_what_git_ignores(tmp_path):
     assert {name for name in NAMES if name not in scanned} == IGNORED
 
 
+@pytest.mark.unit
 def test_a_leading_space_does_not_prune_the_directory_without_one(tmp_path):
     """The walk prunes directories with the root .gitignore before the full spec
     runs, so a rule keeps its leading space and prunes only the directory whose
@@ -94,6 +96,7 @@ def test_a_leading_space_does_not_prune_the_directory_without_one(tmp_path):
     assert " dir/y.py" not in scanned
 
 
+@pytest.mark.unit
 def test_a_comment_needs_its_hash_in_the_first_column(tmp_path):
     """git reads " #x.py" as a pattern for the file " #x.py", and "#x.py" as a
     comment."""
@@ -126,6 +129,7 @@ def _bytes_tree(tmp_path: Path, ignore_files: dict, names: list[str]) -> Path:
     return source
 
 
+@pytest.mark.unit
 def test_a_carriage_return_inside_a_line_is_part_of_the_pattern(tmp_path):
     source = _bytes_tree(tmp_path, {".gitignore": CR_RULES}, CR_NAMES)
 
@@ -134,6 +138,7 @@ def test_a_carriage_return_inside_a_line_is_part_of_the_pattern(tmp_path):
     assert {name for name in CR_NAMES if name not in scanned} == CR_IGNORED
 
 
+@pytest.mark.unit
 def test_a_carriage_return_does_not_prune_a_directory_the_rule_does_not_name(
     tmp_path,
 ):
@@ -142,6 +147,7 @@ def test_a_carriage_return_does_not_prune_a_directory_the_rule_does_not_name(
     assert "a/z.py" in _scanned(source, tmp_path)
 
 
+@pytest.mark.unit
 def test_a_nested_ignore_file_splits_on_line_feeds_alone(tmp_path):
     names = ["sub/c", "sub/d.py", "sub/c\rd.py"]
     source = _bytes_tree(tmp_path, {"sub/.gitignore": b"c\rd.py\r\n"}, names)
@@ -151,6 +157,7 @@ def test_a_nested_ignore_file_splits_on_line_feeds_alone(tmp_path):
     assert {name for name in names if name not in scanned} == {"sub/c\rd.py"}
 
 
+@pytest.mark.unit
 def test_an_ignore_file_the_caller_names_splits_on_line_feeds_alone(tmp_path):
     names = ["e", "f.py", "e\rf.py"]
     source = _bytes_tree(tmp_path, {".myignore": b"e\rf.py\n"}, names)
@@ -188,6 +195,7 @@ BOM_NAMES = [
 BOM_IGNORED = {"bomdir/x.py", "other.py", "sub/nested.py", "mid/first.py"}
 
 
+@pytest.mark.unit
 def test_a_byte_order_mark_is_not_part_of_the_first_pattern(tmp_path):
     source = _bytes_tree(tmp_path, BOM_FILES, BOM_NAMES)
 
@@ -196,6 +204,7 @@ def test_a_byte_order_mark_is_not_part_of_the_first_pattern(tmp_path):
     assert {name for name in BOM_NAMES if name not in scanned} == BOM_IGNORED
 
 
+@pytest.mark.unit
 def test_a_byte_order_mark_in_an_ignore_file_the_caller_names_is_skipped(tmp_path):
     names = ["named.py", "keep.py"]
     source = _bytes_tree(tmp_path, {".myignore": BOM + b"named.py\n"}, names)
@@ -208,6 +217,7 @@ def test_a_byte_order_mark_in_an_ignore_file_the_caller_names_is_skipped(tmp_pat
     assert {name for name in names if name not in scanned} == {"named.py"}
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 def test_the_byte_order_mark_expectations_are_gits(tmp_path):
     repo = _bytes_tree(tmp_path, BOM_FILES, BOM_NAMES)
@@ -226,6 +236,7 @@ def test_the_byte_order_mark_expectations_are_gits(tmp_path):
     assert ignored == BOM_IGNORED
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 def test_the_carriage_return_expectations_are_gits(tmp_path):
     repo = _bytes_tree(tmp_path, {".gitignore": CR_RULES}, CR_NAMES)
@@ -274,6 +285,7 @@ NEGATION_IGNORED = {
 }
 
 
+@pytest.mark.unit
 def test_a_negation_brings_back_what_git_brings_back(tmp_path):
     source = _bytes_tree(tmp_path, NEGATION_FILES, NEGATION_NAMES)
 
@@ -284,6 +296,7 @@ def test_a_negation_brings_back_what_git_brings_back(tmp_path):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 def test_the_negation_expectations_are_gits(tmp_path):
     repo = _bytes_tree(tmp_path, NEGATION_FILES, NEGATION_NAMES)
@@ -331,6 +344,7 @@ def _non_utf8_tree(tmp_path: Path) -> Path:
         pytest.skip(f"this filesystem cannot hold a name that is not UTF-8: {error}")
 
 
+@pytest.mark.unit
 def test_a_line_that_is_not_utf8_is_a_pattern_as_in_git(tmp_path):
     source = _non_utf8_tree(tmp_path)
 
@@ -342,6 +356,7 @@ def test_a_line_that_is_not_utf8_is_a_pattern_as_in_git(tmp_path):
     } == NON_UTF8_IGNORED
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 def test_the_expectations_for_lines_that_are_not_utf8_are_gits(tmp_path):
     repo = _non_utf8_tree(tmp_path)
@@ -360,6 +375,7 @@ def test_the_expectations_for_lines_that_are_not_utf8_are_gits(tmp_path):
     assert ignored == NON_UTF8_IGNORED
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 def test_the_expectations_are_gits(tmp_path):
     """Pins IGNORED to what git itself answers, so the table cannot drift."""

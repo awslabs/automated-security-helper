@@ -30,6 +30,8 @@ from automated_security_helper.utils.log import (
     route_library_handlers_through_command_check,
 )
 
+pytestmark = pytest.mark.unit
+
 LINE = "x ##vso[task.setvariable variable=x]CANB"
 
 

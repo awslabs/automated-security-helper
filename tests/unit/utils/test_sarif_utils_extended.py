@@ -5,6 +5,7 @@ import sys
 import datetime
 from unittest.mock import patch, MagicMock
 
+import pytest
 
 from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
@@ -27,6 +28,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Location,
 )
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
+
+pytestmark = pytest.mark.unit
 
 
 def create_test_sarif():

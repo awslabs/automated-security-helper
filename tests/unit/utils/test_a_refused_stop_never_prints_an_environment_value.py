@@ -46,9 +46,12 @@ PluginContext.model_rebuild()
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt", reason="the POSIX stop paths and process groups"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt", reason="the POSIX stop paths and process groups"
+    ),
+]
 
 #: A marker no fixture path contains, so its absence is the redaction and
 #: never an accident of the tmp directory's name.

@@ -159,6 +159,7 @@ def _reap_leftovers(pids) -> None:
             os.kill(pid, 9)
 
 
+@pytest.mark.integration
 def test_a_cancel_stops_the_grandchild(tmp_path):
     pids, _ = _run_tree(tmp_path)
     try:
@@ -168,6 +169,7 @@ def test_a_cancel_stops_the_grandchild(tmp_path):
         _reap_leftovers(pids)
 
 
+@pytest.mark.integration
 def test_a_grandchild_that_ignores_sigterm_is_killed(tmp_path):
     pids, took = _run_tree(tmp_path, ignore_grandchild="1")
     try:
@@ -177,6 +179,7 @@ def test_a_grandchild_that_ignores_sigterm_is_killed(tmp_path):
         _reap_leftovers(pids)
 
 
+@pytest.mark.integration
 def test_a_child_that_ignores_sigterm_is_killed_with_its_tree(tmp_path):
     pids, took = _run_tree(tmp_path, ignore_child="1", ignore_grandchild="1")
     try:
@@ -187,6 +190,7 @@ def test_a_child_that_ignores_sigterm_is_killed_with_its_tree(tmp_path):
         _reap_leftovers(pids)
 
 
+@pytest.mark.integration
 def test_a_grandchild_holding_the_pipe_of_a_child_that_exited(tmp_path):
     """The child is gone; its grandchild keeps the output pipe open."""
     pids, took = _run_tree(tmp_path, exits="1")
@@ -214,6 +218,7 @@ time.sleep(60)
 """
 
 
+@pytest.mark.integration
 def test_a_timeout_stops_the_tree_as_well(tmp_path):
     event = threading.Event()
     started = time.monotonic()
@@ -257,6 +262,7 @@ time.sleep(120)
 """
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("ending", ["cancel", "timeout"])
 def test_a_sandboxed_child_that_leads_a_group_is_stopped_with_its_group(
     tmp_path, ending, monkeypatch
@@ -311,6 +317,7 @@ def _getpgid_refused(monkeypatch) -> None:
     monkeypatch.setattr(subprocess_utils.os, "getpgid", refused)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("ending", ["cancel", "timeout"])
 def test_a_child_whose_group_cannot_be_read_is_stopped_with_its_group(
     tmp_path, ending, monkeypatch, caplog
@@ -362,6 +369,7 @@ def test_a_child_whose_group_cannot_be_read_is_stopped_with_its_group(
             _kill_if_alive(tmp_path / f"{name}.pid")
 
 
+@pytest.mark.integration
 def test_a_child_whose_group_cannot_be_read_and_that_leads_none_is_stopped(
     tmp_path, monkeypatch
 ):
@@ -391,6 +399,7 @@ def test_a_child_whose_group_cannot_be_read_and_that_leads_none_is_stopped(
         _kill_if_alive(pid_file)
 
 
+@pytest.mark.integration
 def test_a_reaped_child_is_never_taken_for_a_group_leader(monkeypatch):
     """Once reaped, a child's pid can be another process's, a group leader's even.
 
@@ -428,6 +437,7 @@ time.sleep(60)
 """
 
 
+@pytest.mark.integration
 def test_the_grace_lasts_until_the_whole_group_is_gone(tmp_path):
     """A child that is gone does not end the grace while its group still runs.
 
@@ -471,6 +481,7 @@ class _WindowsOs:
         return getattr(os, attribute)
 
 
+@pytest.mark.integration
 def test_a_timeout_on_windows_reports_what_the_child_wrote_before_it(
     tmp_path, monkeypatch
 ):
@@ -523,6 +534,7 @@ def _group_report(tmp_path: Path) -> str:
     )
 
 
+@pytest.mark.integration
 def test_an_unsandboxed_child_in_a_cancel_scope_leads_its_own_group(tmp_path):
     report = tmp_path / "group.txt"
     with cancel_scope(threading.Event()):
@@ -530,6 +542,7 @@ def test_an_unsandboxed_child_in_a_cancel_scope_leads_its_own_group(tmp_path):
     assert report.read_text() == "True"
 
 
+@pytest.mark.integration
 def test_a_sandboxed_child_is_not_given_a_group_here(tmp_path):
     """The Landlock wrapper calls setsid itself; this leaves its spawn alone."""
     report = tmp_path / "group.txt"
@@ -541,6 +554,7 @@ def test_a_sandboxed_child_is_not_given_a_group_here(tmp_path):
     assert report.read_text() == "False"
 
 
+@pytest.mark.integration
 def test_outside_a_cancel_scope_nothing_changes(tmp_path):
     report = tmp_path / "group.txt"
     run_command([sys.executable, "-c", _group_report(tmp_path), str(report)])
@@ -574,6 +588,7 @@ time.sleep(120)
 """
 
 
+@pytest.mark.integration
 def test_a_timeout_stops_a_stubborn_group_once_and_within_its_bound(
     tmp_path, monkeypatch
 ):
@@ -615,6 +630,7 @@ def test_a_timeout_stops_a_stubborn_group_once_and_within_its_bound(
     assert took < bound, (round(took, 2), bound)
 
 
+@pytest.mark.integration
 def test_a_timeout_stop_that_raises_is_not_retried(tmp_path, monkeypatch):
     """killpg can raise PermissionError; the stop is then not tried again.
 
@@ -657,6 +673,7 @@ def _kill_if_alive(pid_file: Path) -> None:
         os.kill(int(pid_file.read_text()), 9)
 
 
+@pytest.mark.integration
 def test_a_prompt_stop_asked_for_during_the_grace_shortens_it(tmp_path, monkeypatch):
     """A cancel began the stop with the ordinary grace; then the server was told to stop.
 
@@ -701,6 +718,7 @@ def test_a_prompt_stop_asked_for_during_the_grace_shortens_it(tmp_path, monkeypa
         _kill_if_alive(pid_file)
 
 
+@pytest.mark.integration
 def test_a_stop_the_kernel_refuses_leaves_the_call_bounded_and_logged(
     tmp_path, monkeypatch, caplog
 ):
@@ -734,6 +752,7 @@ def test_a_stop_the_kernel_refuses_leaves_the_call_bounded_and_logged(
     assert "could not stop" in caplog.text.lower(), caplog.text
 
 
+@pytest.mark.integration
 def test_every_running_group_is_killed_on_request(tmp_path):
     """What the server calls just before it exits: no scanner group outlives it."""
     pid_file = tmp_path / "child.pid"
@@ -760,6 +779,7 @@ def test_every_running_group_is_killed_on_request(tmp_path):
         _kill_if_alive(pid_file)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("stop", ["_stop", "_stop_tree"])
 def test_a_prompt_stop_asked_for_before_the_stop_shortens_it_too(tmp_path, stop):
     """A stop that starts with the prompt already set gets the short grace.
@@ -816,6 +836,7 @@ class _Unstoppable:
         raise subprocess.TimeoutExpired("child", timeout)
 
 
+@pytest.mark.unit
 def test_stop_waits_a_bounded_time_after_its_kill(monkeypatch):
     """A child a SIGKILL did not end (uninterruptible sleep, say) leaves the stop bounded."""
     child = _Unstoppable()
@@ -825,6 +846,7 @@ def test_stop_waits_a_bounded_time_after_its_kill(monkeypatch):
     assert child.waits and None not in child.waits, child.waits
 
 
+@pytest.mark.unit
 def test_stop_tree_waits_a_bounded_time_after_its_kill(monkeypatch):
     monkeypatch.setattr(subprocess_utils, "_signal_group", lambda pgid, signum: False)
     child = _Unstoppable()
@@ -842,6 +864,7 @@ class _Recorded:
         return None
 
 
+@pytest.mark.unit
 def test_unregistering_an_old_child_leaves_a_new_one_with_its_pid():
     """Once a child is reaped its pid can be reused, and recorded for a new child.
 
@@ -866,6 +889,7 @@ def test_unregistering_an_old_child_leaves_a_new_one_with_its_pid():
         discard_tool_group(_NO_SUCH_PID)
 
 
+@pytest.mark.integration
 def test_the_final_group_kill_is_skipped_once_the_group_is_gone(monkeypatch):
     """A group id the kernel has released can be a stranger's at once.
 

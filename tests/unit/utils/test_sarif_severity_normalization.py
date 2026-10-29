@@ -26,6 +26,8 @@ from automated_security_helper.utils.sarif_utils import (
     normalize_sarif_result_severities,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _report(
     score: object,

@@ -16,9 +16,12 @@ from automated_security_helper.utils.report_path_links import (
     refuse_linked_report_paths,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 @pytest.mark.parametrize("name", ["ash.sarif", "ash.summary.md", ".hidden", "a..b"])

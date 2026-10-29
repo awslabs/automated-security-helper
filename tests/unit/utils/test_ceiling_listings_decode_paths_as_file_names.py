@@ -39,6 +39,8 @@ from automated_security_helper.utils.get_scan_set import (
 from automated_security_helper.utils.scan_source import repository_is_nested
 from tests.utils.git_isolation import isolate_git_at
 
+pytestmark = pytest.mark.integration
+
 # Built with chr() so the source file stays ASCII.
 CAFE = f"caf{chr(0xE9)}"
 #: Any commit id: a gitlink records one without the commit having to exist.

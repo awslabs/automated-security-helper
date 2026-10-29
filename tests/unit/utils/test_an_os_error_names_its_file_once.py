@@ -28,6 +28,8 @@ import pytest
 from automated_security_helper.utils.error_text import error_text, traceback_text
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
+pytestmark = pytest.mark.unit
+
 ESC = chr(0x1B)
 BACKSLASH = chr(0x5C)
 

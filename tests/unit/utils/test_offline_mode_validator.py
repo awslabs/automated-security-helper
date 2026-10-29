@@ -7,11 +7,15 @@ import os
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.utils.offline_mode_validator import (
     validate_grype_offline_mode,
     validate_npm_audit_offline_mode,
     OfflineModeValidator,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestValidateSemgrepOfflineMode:

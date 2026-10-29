@@ -23,7 +23,10 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX links and bits")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(os.name == "nt", reason="POSIX links and bits"),
+]
 
 TOOL = "ash-dangling-link-probe-tool"
 

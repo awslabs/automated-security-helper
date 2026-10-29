@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 PACKAGE = Path(__file__).resolve().parents[3] / "automated_security_helper"
 
 #: Files that start processes directly, and why each may. Everything else in the

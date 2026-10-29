@@ -24,6 +24,8 @@ from automated_security_helper.utils.subprocess_utils import (
 )
 from tests.utils.fake_tool_paths import fake_tool_path
 
+pytestmark = pytest.mark.unit
+
 
 @patch("shutil.which")
 @patch("pathlib.Path.exists")

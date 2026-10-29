@@ -22,6 +22,8 @@ from automated_security_helper.utils.severity_ladder import (
     stricter_of,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Tests: the ordering is data, and it is the documented one

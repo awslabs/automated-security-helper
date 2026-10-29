@@ -13,7 +13,11 @@ is that module's public name.
 import ast
 from pathlib import Path
 
+import pytest
+
 import automated_security_helper.utils.error_text as error_text
+
+pytestmark = pytest.mark.unit
 
 
 def test_error_text_imports_no_private_name_from_another_module():

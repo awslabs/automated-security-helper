@@ -45,6 +45,8 @@ from automated_security_helper.utils.subprocess_utils import (
     scanning_tree,
 )
 
+pytestmark = pytest.mark.unit
+
 posix_only = pytest.mark.skipif(
     sys.platform == "win32", reason="POSIX default directories"
 )

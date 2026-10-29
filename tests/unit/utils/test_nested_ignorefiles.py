@@ -26,6 +26,8 @@ from automated_security_helper.utils.get_scan_set import (
     scan_set,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _relative_posix_names(scan_root: Path, files: list[str]) -> set[str]:
     """Scan-set paths as ``/``-separated paths relative to *scan_root*.

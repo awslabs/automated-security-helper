@@ -27,6 +27,8 @@ if os.name == "nt":
         allow_module_level=True,
     )
 
+pytestmark = pytest.mark.unit
+
 #: The name as the scan lists it: one lone surrogate for the byte.
 LISTED = os.fsdecode(b"secr\xe9t.py")
 #: The name as a result records it: the surrogate as six characters.

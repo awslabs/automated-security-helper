@@ -29,6 +29,8 @@ import yaml
 
 from automated_security_helper.utils.error_text import error_text, traceback_text
 
+pytestmark = pytest.mark.unit
+
 CANARY = "Abc123canaryQ"
 #: A YAML document whose parser message quotes the alias token.
 UNPARSABLE = f"api_key: *{CANARY}\n"

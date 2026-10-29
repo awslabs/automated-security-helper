@@ -30,6 +30,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppr
     UnusedSuppressionsReporter,
 )
 
+pytestmark = pytest.mark.unit
+
 FORMS = {
     "plain": ("${ASH_GATE_RULE}", "${ASH_GATE_FILE}"),
     "tagged": ("!ENV ${ASH_GATE_RULE}", "!ENV ${ASH_GATE_FILE}"),

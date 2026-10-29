@@ -3,12 +3,16 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.utils.version_management import (
     get_project_root,
     get_version_from_pyproject,
     get_version,
     update_version_in_pyproject,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestGetProjectRoot:

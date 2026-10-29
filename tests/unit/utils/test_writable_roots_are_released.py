@@ -34,6 +34,7 @@ def _guarded(path: Path) -> bool:
     return any(root in path.parents for root in fs_guard.registered_roots())
 
 
+@pytest.mark.unit
 def test_a_scoped_root_is_guarded_inside_its_scope_and_released_after(tmp_path):
     output = tmp_path / "output"
 
@@ -43,6 +44,7 @@ def test_a_scoped_root_is_guarded_inside_its_scope_and_released_after(tmp_path):
     assert not _guarded(output / "reports" / "ash.sarif")
 
 
+@pytest.mark.unit
 def test_a_root_two_holders_registered_stays_until_both_release(tmp_path):
     output = tmp_path / "output"
 
@@ -54,12 +56,14 @@ def test_a_root_two_holders_registered_stays_until_both_release(tmp_path):
     assert not _guarded(output / "ash.log")
 
 
+@pytest.mark.unit
 def test_releasing_a_root_never_registered_changes_nothing(tmp_path):
     fs_guard.release_writable_root(tmp_path / "never")
 
     assert tmp_path / "never" not in fs_guard.registered_roots()
 
 
+@pytest.mark.unit
 def test_a_release_from_a_finalizer_does_not_wait_for_the_registry(tmp_path):
     """A collector finalizer can run while this thread holds the registry's lock.
 
@@ -85,6 +89,7 @@ def test_a_release_from_a_finalizer_does_not_wait_for_the_registry(tmp_path):
     assert root not in fs_guard.registered_roots()
 
 
+@pytest.mark.unit
 def test_a_plugin_contexts_root_is_released_when_the_context_is_gone(tmp_path):
     output = tmp_path / "output"
     context = PluginContext(
@@ -144,6 +149,7 @@ def _holders() -> dict:
         return dict(fs_guard._writable_roots)
 
 
+@pytest.mark.unit
 def test_a_scanner_scope_releases_its_results_directory_when_it_is_gone(
     make_scope,
 ):
@@ -158,6 +164,7 @@ def test_a_scanner_scope_releases_its_results_directory_when_it_is_gone(
     assert _guarded(results_dir / "out.log"), "the output directory still is"
 
 
+@pytest.mark.unit
 def test_a_spawns_writable_directories_are_released_by_its_cleanup(make_scope):
     _context, scope = make_scope()
     before = _holders()
@@ -172,6 +179,7 @@ def test_a_spawns_writable_directories_are_released_by_its_cleanup(make_scope):
     assert _holders() == before
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
@@ -233,6 +241,7 @@ def test_a_stream_log_written_after_the_spawn_released_its_roots_is_still_guarde
     assert list(elsewhere.iterdir()) == [], "ASH wrote through the replaced directory"
 
 
+@pytest.mark.unit
 class TestARunReleasesWhatItsObjectsHeld:
     """A scan's roots are released when the scan ends, not when collection runs.
 
@@ -319,6 +328,7 @@ def _close_handlers(name: str) -> None:
         handler.close()
 
 
+@pytest.mark.unit
 class TestTheLogFileHandlers:
     """Each log file's handler holds its directory's registration while it is open."""
 

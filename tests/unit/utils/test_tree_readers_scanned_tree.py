@@ -35,9 +35,12 @@ from automated_security_helper.utils.suppression_matcher import (
 
 MARKER = "HOST-ONLY-CONTENT-5e02"
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 
 @pytest.fixture

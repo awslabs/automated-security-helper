@@ -48,6 +48,7 @@ def _fake_uv(path, stdout_text):
     return path
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "printed, value, case",
     [
@@ -83,6 +84,7 @@ def test_the_version_holds_no_piece_of_a_value(tmp_path, printed, value, case):
     assert HEAD not in version and TAIL not in version, repr(version)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "printed, hidden, case",
     [
@@ -116,6 +118,7 @@ def test_the_version_hides_a_value_in_the_spelling_uv_prints(
     assert hidden not in version, repr(version)
 
 
+@pytest.mark.integration
 def test_the_tool_name_and_the_from_spec_play_their_own_roles(tmp_path):
     """The spec is the plugin-built input and the tool name is the anchor.
 
@@ -142,6 +145,7 @@ def test_the_tool_name_and_the_from_spec_play_their_own_roles(tmp_path):
     assert "vtool[sarif]" not in version, repr(version)
 
 
+@pytest.mark.integration
 def test_a_version_that_is_not_the_value_is_carried_whole(tmp_path):
     """The respelling-aware layer hides the value, not the version around it."""
     fake = _fake_uv(tmp_path / "fake-uv", "1.2.3\n")
@@ -155,6 +159,7 @@ def test_a_version_that_is_not_the_value_is_carried_whole(tmp_path):
     assert version == "1.2.3", repr(version)
 
 
+@pytest.mark.integration
 def test_the_first_probes_redaction_does_not_decide_for_later_callers(tmp_path):
     """The memo must not freeze one caller's redaction into every answer.
 
@@ -187,6 +192,7 @@ def test_the_first_probes_redaction_does_not_decide_for_later_callers(tmp_path):
     assert fourth == second, repr(fourth)
 
 
+@pytest.mark.integration
 def test_a_reader_that_waited_on_the_probe_lock_gets_the_answer_redacted(
     tmp_path, monkeypatch
 ):
@@ -243,6 +249,7 @@ def test_a_reader_that_waited_on_the_probe_lock_gets_the_answer_redacted(
     assert ran.read_text() == "x"
 
 
+@pytest.mark.unit
 def test_the_mixin_threads_the_plugins_values_to_the_probe(tmp_path):
     """The redaction can only hide what it is given: the mixin's version read
     passes the plugin's own values through to the runner's cut."""
@@ -268,6 +275,7 @@ def test_the_mixin_threads_the_plugins_values_to_the_probe(tmp_path):
     assert kwargs.get("values") == (f"{HEAD}\n{TAIL}",), kwargs
 
 
+@pytest.mark.integration
 def test_a_caller_that_checked_nothing_has_the_spec_hidden_from_the_version(tmp_path):
     """No ``values`` means no caller checked where the spec came from, and the
     carried version hides every plugin-built argument: a tool whose
@@ -283,6 +291,7 @@ def test_a_caller_that_checked_nothing_has_the_spec_hidden_from_the_version(tmp_
     assert "==1.0" not in version, repr(version)
 
 
+@pytest.mark.integration
 def test_an_explicit_empty_value_set_still_carries_the_spec(tmp_path):
     """The other side of the same contract: a caller that checked, and found
     no environment-read value, has nothing hidden."""
@@ -296,6 +305,7 @@ def test_an_explicit_empty_value_set_still_carries_the_spec(tmp_path):
     assert version == f"vtool 1.0 {spec}", repr(version)
 
 
+@pytest.mark.unit
 def test_the_post_install_version_read_passes_the_installs_values():
     """The install's own version read has the same values the install and the
     record lines use, so the INFO line it feeds hides what they hide."""
@@ -332,6 +342,7 @@ SGR_ON = "\x1b[1m"
 SGR_OFF = "\x1b[0m"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "printed, case",
     [

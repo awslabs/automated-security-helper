@@ -26,6 +26,8 @@ from automated_security_helper.utils.redacted_model import (
     env_resolved_scalar,
 )
 
+pytestmark = pytest.mark.unit
+
 VARIABLE = "ASH_SLOT_VARIABLE"
 SHOWN = "${" + VARIABLE + "}tail"
 VALUE = "zz-slot-value-krw"

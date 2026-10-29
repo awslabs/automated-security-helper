@@ -74,6 +74,8 @@ import pytest
 
 from tests.unit.walked_package import package_sources
 
+pytestmark = pytest.mark.unit
+
 #: The package's own source, beside this test.
 _PACKAGE = Path(__file__).resolve().parents[3] / "automated_security_helper"
 

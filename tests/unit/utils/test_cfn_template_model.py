@@ -24,6 +24,8 @@ from automated_security_helper.utils.cfn_template_model import (
     unevaluable_template_reason,
 )
 
+pytestmark = pytest.mark.unit
+
 # Resource type names CloudFormation documents as legal and this model used to reject.
 # The AWS CloudFormation User Guide's "Specifying custom resource type names" says a
 # custom resource type name may contain alphanumerics and the characters _@-, so each

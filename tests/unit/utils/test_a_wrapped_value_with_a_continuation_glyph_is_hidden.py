@@ -29,6 +29,8 @@ from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 from automated_security_helper.utils import pre_installed_tool
 from automated_security_helper.utils.uv_tool_runner import shown_uv_output
 
+pytestmark = pytest.mark.unit
+
 #: The halves: either spelling surviving anywhere is the leak.
 _HALF_A = "ops-canary-ab12"
 _HALF_B = "ops-canary-cd34"

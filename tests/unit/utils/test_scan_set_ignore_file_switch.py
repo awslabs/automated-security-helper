@@ -37,6 +37,8 @@ from automated_security_helper.utils.get_scan_set import (
     scan_set,
 )
 
+pytestmark = pytest.mark.unit
+
 PACKAGE_ROOT = Path(gss.__file__).resolve().parents[1]
 
 

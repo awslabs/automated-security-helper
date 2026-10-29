@@ -26,6 +26,8 @@ from automated_security_helper.core import cancellation
 from automated_security_helper.interactions import run_ash_nix
 from automated_security_helper.utils import subprocess_utils
 
+pytestmark = pytest.mark.unit
+
 # Above the kernel's pid space (pid_max is at most 2**22).
 _PID = 2**30 + 71
 

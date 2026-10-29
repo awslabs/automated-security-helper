@@ -71,6 +71,7 @@ def started(monkeypatch) -> list:
     return calls
 
 
+@pytest.mark.unit
 def test_a_program_path_relative_to_the_working_directory_returns_127(
     tmp_path, monkeypatch, started
 ):
@@ -82,6 +83,7 @@ def test_a_program_path_relative_to_the_working_directory_returns_127(
     assert started == []
 
 
+@pytest.mark.unit
 @posix_only
 def test_an_in_tree_copy_of_a_program_returns_127_and_does_not_run(
     tmp_path, monkeypatch
@@ -98,6 +100,7 @@ def test_an_in_tree_copy_of_a_program_returns_127_and_does_not_run(
     assert not ran.exists()
 
 
+@pytest.mark.unit
 @posix_only
 def test_a_program_found_only_through_a_relative_path_entry_returns_127(
     tmp_path, monkeypatch
@@ -114,6 +117,7 @@ def test_a_program_found_only_through_a_relative_path_entry_returns_127(
     assert not ran.exists()
 
 
+@pytest.mark.unit
 def test_the_response_runner_gives_the_same_answer_for_the_same_program(
     tmp_path, monkeypatch
 ):
@@ -126,6 +130,7 @@ def test_the_response_runner_gives_the_same_answer_for_the_same_program(
     assert response["spawn_failed"] is True
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("exit_code", [0, 3])
 def test_control_a_program_that_can_be_started_keeps_its_own_code(exit_code):
     command = [sys.executable, "-c", f"import sys; sys.exit({exit_code})"]
@@ -133,6 +138,7 @@ def test_control_a_program_that_can_be_started_keeps_its_own_code(exit_code):
     assert run_command_stream_output(command) == exit_code
 
 
+@pytest.mark.unit
 def test_control_the_recorder_sees_a_start(started):
     """A program that is not refused does reach ``Popen``, so ``started == []``
     above is the refusal and not a recorder that sees nothing."""

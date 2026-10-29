@@ -23,11 +23,15 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from automated_security_helper.utils.error_text import (
     error_text,
     text_without_values,
     traceback_text,
 )
+
+pytestmark = pytest.mark.unit
 
 #: A non-ASCII character, a double quote and a backslash: JSON with
 #: ``ensure_ascii=False`` escapes the quote and the backslash and keeps the

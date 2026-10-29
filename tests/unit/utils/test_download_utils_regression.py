@@ -6,6 +6,10 @@ PR#274 Bug #1: code injection via f-string in create_url_download_command.
 import shutil
 import tempfile
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestDownloadUtilsCodeInjection:
     """A single quote in url/destination must not escape the Python string."""

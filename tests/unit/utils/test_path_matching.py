@@ -3,11 +3,15 @@
 
 """Tests for the canonical _recursive_glob_match / _path_pattern_matches in utils/path_matching."""
 
+import pytest
+
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
     _recursive_glob_match,
     match_glob,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestRecursiveGlobMatch:

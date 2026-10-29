@@ -31,6 +31,8 @@ from automated_security_helper.utils.atomic_write import (
 )
 from automated_security_helper.utils.sandbox.fs_guard import replace_without_following
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def uuid4_refused(monkeypatch):

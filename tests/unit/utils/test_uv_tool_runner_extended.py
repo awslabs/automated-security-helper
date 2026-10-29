@@ -16,6 +16,8 @@ from automated_security_helper.utils.uv_tool_runner import (
 from automated_security_helper.utils.process_env import DISPLAY_VARIABLES
 from tests.utils.env_assertions import differing_names
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _unresolved_names_reach_the_mocked_spawn(monkeypatch):

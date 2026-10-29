@@ -13,6 +13,8 @@ import os
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("opener", ["open_for_write", "open_for_write_bytes"])
 def test_a_write_outside_a_writable_root_opens_in_binary_mode(

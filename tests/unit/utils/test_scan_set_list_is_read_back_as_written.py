@@ -40,6 +40,8 @@ from automated_security_helper.utils import atomic_write
 from automated_security_helper.utils import get_scan_set as gss
 from automated_security_helper.utils.get_scan_set import scan_set
 
+pytestmark = pytest.mark.unit
+
 SCAN_SET_LIST = "ash-scan-set-files-list.txt"
 RUN_RECORD = "ash-scan-set-run.json"
 RUN_A = "a" * 32

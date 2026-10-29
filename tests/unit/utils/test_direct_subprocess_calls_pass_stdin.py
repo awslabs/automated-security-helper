@@ -59,6 +59,10 @@ import ast
 from pathlib import Path
 from typing import Dict, Iterator, Tuple
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 PACKAGE = Path(__file__).resolve().parents[3] / "automated_security_helper"
 
 #: The module that gives every child it starts /dev/null itself.

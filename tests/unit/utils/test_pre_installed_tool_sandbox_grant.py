@@ -32,6 +32,8 @@ from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 
+pytestmark = pytest.mark.unit
+
 
 class _Recorder:
     name = "recorder"

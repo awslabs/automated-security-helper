@@ -1,5 +1,10 @@
 import logging
+
+import pytest
+
 from automated_security_helper.utils.log import ASHLogger, ASH_LOGGER, WindowsSafeFilter
+
+pytestmark = pytest.mark.unit
 
 
 def test_logger_class_is_ash_logger():

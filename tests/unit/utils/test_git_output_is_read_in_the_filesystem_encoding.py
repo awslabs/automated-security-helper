@@ -33,6 +33,8 @@ import pytest
 
 from automated_security_helper.utils import get_scan_set
 
+pytestmark = pytest.mark.unit
+
 # Built with chr() so the source file stays ASCII.
 NAME = f"caf{chr(0xE9)}"
 #: What git for Windows prints for NAME, and git on a UTF-8 host.

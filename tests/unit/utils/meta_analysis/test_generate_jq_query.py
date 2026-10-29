@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.reporting import (
     generate_jq_query,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_generate_jq_query_simple_path():

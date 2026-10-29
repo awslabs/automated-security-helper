@@ -25,6 +25,8 @@ from automated_security_helper.utils.get_scan_set import (
     ignore_file_lines,
 )
 
+pytestmark = pytest.mark.unit
+
 BOM = b"\xef\xbb\xbf"
 
 #: The mark as UTF-8 decodes it. Spelled with chr() so the source holds no

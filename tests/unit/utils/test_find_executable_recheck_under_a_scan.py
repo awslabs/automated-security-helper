@@ -25,6 +25,8 @@ from automated_security_helper.utils.subprocess_utils import (
     lookup_for_scan,
 )
 
+pytestmark = pytest.mark.unit
+
 POSIX_ONLY = pytest.mark.skipif(
     sys.platform == "win32", reason="POSIX execute permission and file names"
 )

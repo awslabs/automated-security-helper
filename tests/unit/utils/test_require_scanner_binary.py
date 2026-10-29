@@ -15,6 +15,8 @@ import pytest
 
 from tests.utils import helpers
 
+pytestmark = pytest.mark.unit
+
 
 def test_a_missing_tool_fails_when_the_tests_are_required(monkeypatch):
     monkeypatch.setattr(helpers.shutil, "which", lambda name: None)

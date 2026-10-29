@@ -11,6 +11,8 @@ import pytest
 
 from tests.utils.tasks import drain
 
+pytestmark = pytest.mark.unit
+
 
 async def _fails() -> None:
     raise ValueError("the failing task")

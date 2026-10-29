@@ -32,6 +32,8 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
 )
 from automated_security_helper.utils.sbom_merge import merge_cyclonedx_reports
 
+pytestmark = pytest.mark.unit
+
 SERIAL_PATTERN = re.compile(
     r"^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )

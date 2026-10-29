@@ -21,9 +21,10 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="no SIGUSR1 here"),
+]
 
 
 def _checked_stderr(monkeypatch):

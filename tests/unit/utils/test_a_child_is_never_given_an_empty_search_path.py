@@ -100,6 +100,7 @@ def _all_in_tree(repo: Path, layout: str) -> list:
     }[layout]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("layout", ["only-in-tree", "in-tree-and-not-anchored"])
 def test_a_path_with_no_entry_outside_the_tree_is_not_left_empty(
     repo, monkeypatch, layout
@@ -113,6 +114,7 @@ def test_a_path_with_no_entry_outside_the_tree_is_not_left_empty(
     assert not [entry for entry in _entries(env) if is_inside_tree(entry, str(repo))]
 
 
+@pytest.mark.unit
 @posix_only
 def test_that_path_is_the_default_path(repo, monkeypatch):
     """The same answer as for a PATH with no anchored entry at all."""
@@ -129,11 +131,13 @@ def test_that_path_is_the_default_path(repo, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("scope", ["no-scan", "scan"])
 def test_a_path_the_caller_set_to_empty_is_replaced(repo, scope):
     assert_a_path_of_directories(_in_scope(repo, scope, {"PATH": ""}))
 
 
+@pytest.mark.integration
 @posix_only
 def test_a_child_started_with_an_empty_path_gets_the_default_path(repo):
     """Through a spawn helper: what the child itself reads."""
@@ -153,6 +157,7 @@ def test_a_child_started_with_an_empty_path_gets_the_default_path(repo):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_windows_default_path_does_not_bring_the_working_directory_back(
     repo, monkeypatch
 ):
@@ -166,6 +171,7 @@ def test_the_windows_default_path_does_not_bring_the_working_directory_back(
     assert_a_path_of_directories(env)
 
 
+@pytest.mark.unit
 @posix_only
 @pytest.mark.parametrize("source", ["relative-entry", "caller-empty", "all-in-tree"])
 def test_the_default_path_keeps_its_anchored_entries_in_order(
@@ -183,6 +189,7 @@ def test_the_default_path_keeps_its_anchored_entries_in_order(
     assert env["PATH"] == os.pathsep.join(["/opt/a", "/opt/b"])
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "default",
     [".", "", os.pathsep.join(["bin", "."]), os.pathsep],
@@ -203,6 +210,7 @@ def test_a_default_path_with_no_anchored_entry_gives_fixed_directories(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("scope", ["no-scan", "scan", "scan-with-opt-in"])
 @pytest.mark.parametrize(
     "value",
@@ -233,11 +241,13 @@ def test_no_path_through_the_spawn_environment_is_empty_or_not_anchored(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("scope", ["no-scan", "scan"])
 def test_control_an_unset_path_stays_unset(repo, scope):
     assert "PATH" not in _in_scope(repo, scope, {})
 
 
+@pytest.mark.unit
 @posix_only
 @pytest.mark.parametrize("scope", ["no-scan", "scan"])
 def test_control_an_anchored_path_is_handed_over_as_it_is(repo, scope):

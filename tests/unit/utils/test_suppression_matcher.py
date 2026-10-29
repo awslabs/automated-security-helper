@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.suppression_matcher import (
@@ -12,6 +14,8 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
     check_for_expiring_suppressions,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_rule_id_matches_with_none():

@@ -31,6 +31,8 @@ from automated_security_helper.utils.uv_tool_runner import (
     find_uv_or_none,
 )
 
+pytestmark = pytest.mark.unit
+
 EXE = ".exe" if sys.platform == "win32" else ""
 
 #: The lookup under test, as this module imported it. The unit tests' tool guard

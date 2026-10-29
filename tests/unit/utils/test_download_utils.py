@@ -20,6 +20,7 @@ from automated_security_helper.utils.download_utils import (
 pytestmark = pytest.mark.usefixtures("receipt_home")
 
 
+@pytest.mark.unit
 def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
     """An install writes its receipt under Path.home(), here the test's own home.
 
@@ -28,6 +29,7 @@ def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
     assert receipt_root().is_relative_to(tmp_path), receipt_root()
 
 
+@pytest.mark.unit
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")
 def test_download_file(mock_urlopen, tmp_path):
     """Test download_file function.
@@ -62,6 +64,7 @@ def test_download_file(mock_urlopen, tmp_path):
     assert not result.with_name("file.txt.ash-partial").exists()
 
 
+@pytest.mark.unit
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")
 @patch("pathlib.Path.mkdir")
 def test_download_file_invalid_url(mock_mkdir, mock_urlopen):
@@ -70,6 +73,7 @@ def test_download_file_invalid_url(mock_mkdir, mock_urlopen):
         download_file("http://example.com/file.txt", Path("/test/destination"))
 
 
+@pytest.mark.unit
 @patch("pathlib.Path.chmod")
 @patch("pathlib.Path.stat")
 def test_make_executable_unix(mock_stat, mock_chmod):
@@ -88,6 +92,7 @@ def test_make_executable_unix(mock_stat, mock_chmod):
         mock_chmod.assert_called_once_with(0o755)  # 0o644 | 0o111
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(
     sys.platform.lower() != "windows",
     reason="Windows specific test",
@@ -104,6 +109,7 @@ def test_make_executable_windows(mock_chmod):
         mock_chmod.assert_not_called()
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(
     sys.platform.lower() != "darwin",
     reason="Windows specific test",
@@ -122,6 +128,7 @@ def test_unquarantine_macos_binary(mock_run_command):
         )
 
 
+@pytest.mark.unit
 @patch("automated_security_helper.utils.download_utils.run_command")
 def test_unquarantine_macos_binary_non_macos(mock_run_command):
     """Test unquarantine_macos_binary on non-macOS platforms."""
@@ -134,6 +141,7 @@ def test_unquarantine_macos_binary_non_macos(mock_run_command):
         mock_run_command.assert_not_called()
 
 
+@pytest.mark.unit
 @patch("automated_security_helper.utils.download_utils._download_verified")
 @patch("automated_security_helper.utils.download_utils.make_executable")
 @patch("automated_security_helper.utils.download_utils.unquarantine_macos_binary")
@@ -176,6 +184,7 @@ def test_install_binary_from_url(
         assert result == Path("/test/destination/file")
 
 
+@pytest.mark.unit
 @patch("pathlib.Path.exists")
 @patch("pathlib.Path.mkdir")
 def test_create_url_download_command(mock_mkdir, mock_exists):
@@ -212,6 +221,7 @@ def test_create_url_download_command(mock_mkdir, mock_exists):
     assert result.shell is False
 
 
+@pytest.mark.unit
 def test_building_the_download_command_creates_no_directory(tmp_path, monkeypatch):
     """A scan constructs OpengrepScanner, which builds this command for a custom version.
 
@@ -233,6 +243,7 @@ def test_building_the_download_command_creates_no_directory(tmp_path, monkeypatc
     assert sorted(p.name for p in work.iterdir()) == []
 
 
+@pytest.mark.integration
 def test_the_install_creates_its_directory_when_it_runs(tmp_path):
     """What the builder leaves undone, the run does."""
     payload = b"#!/bin/sh\necho tool\n"
@@ -269,6 +280,7 @@ def _bytes_response(data: bytes):
     return _Response(data)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("digest", [None, "", "a" * 63, "g" * 64])
 def test_create_url_download_command_refuses_a_missing_or_malformed_digest(digest):
     """No command that installs an unverified binary can be built at all."""
@@ -278,6 +290,7 @@ def test_create_url_download_command_refuses_a_missing_or_malformed_digest(diges
         )
 
 
+@pytest.mark.unit
 @patch("automated_security_helper.utils.download_utils._download_verified")
 def test_install_binary_from_url_refuses_without_a_digest(mock_download_verified):
     """The unverified install this function used to perform is gone."""
@@ -286,6 +299,7 @@ def test_install_binary_from_url_refuses_without_a_digest(mock_download_verified
     mock_download_verified.assert_not_called()
 
 
+@pytest.mark.unit
 def test_get_opengrep_url():
     """Test get_opengrep_url function for different platforms and architectures."""
     # Test Linux amd64

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 _REFUSAL_SOURCE = "import sys; sys.exit(sys.argv[1])"
 
 

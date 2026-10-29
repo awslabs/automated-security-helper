@@ -30,6 +30,8 @@ from tests.unit.utils.test_scanner_names_registry_agreement import (
     _registry_scanner_classes,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _tool_type_assigned_in_post_init(cls):
     """The ``ScannerToolType`` member ``model_post_init`` assigns to ``self.tool_type``."""

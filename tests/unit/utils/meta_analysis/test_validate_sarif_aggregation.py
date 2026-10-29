@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     validate_sarif_aggregation,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_validate_sarif_aggregation():

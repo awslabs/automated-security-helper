@@ -44,6 +44,8 @@ from automated_security_helper.utils.subprocess_utils import (
     find_executable,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolate_lookup_cache():

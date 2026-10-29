@@ -14,6 +14,8 @@ import pytest
 
 from tests.utils import tasks as tasks_module
 
+pytestmark = pytest.mark.unit
+
 
 def test_drain_clean_passes_when_every_task_is_healthy():
     """Tasks that return ``None`` leave ``drain_clean`` quietly, and so does no task."""

@@ -1,5 +1,7 @@
 """Tests for utils/normalizers.py — covers path normalization functions."""
 
+import pytest
+
 from automated_security_helper.utils.normalizers import (
     get_normalized_filename,
     get_shortest_name,
@@ -7,6 +9,8 @@ from automated_security_helper.utils.normalizers import (
 from automated_security_helper.utils.suppression_matcher import (
     file_path_matches as path_matches_pattern,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestGetNormalizedFilename:

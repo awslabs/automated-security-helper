@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -24,6 +26,8 @@ from automated_security_helper.utils.cfn_template_model import (
     cloudformation_candidate_files,
     cloudformation_nothing_to_scan_reason,
 )
+
+pytestmark = pytest.mark.unit
 
 TEMPLATE = json.dumps(
     {"Resources": {"Bucket": {"Type": "AWS::S3::Bucket", "Properties": {}}}}

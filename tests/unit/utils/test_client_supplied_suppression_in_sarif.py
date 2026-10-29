@@ -32,6 +32,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+pytestmark = pytest.mark.unit
+
 
 def _report() -> SarifReport:
     return SarifReport(

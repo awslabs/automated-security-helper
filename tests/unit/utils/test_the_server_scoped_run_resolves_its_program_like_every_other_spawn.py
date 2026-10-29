@@ -49,9 +49,12 @@ from automated_security_helper.utils.subprocess_utils import (
     scanning_tree,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the planted tools are POSIX executable files"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="the planted tools are POSIX executable files"
+    ),
+]
 
 #: A tool name no installed program has.
 TOOL = "ash-resolve-probe"

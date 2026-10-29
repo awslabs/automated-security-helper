@@ -48,6 +48,8 @@ from automated_security_helper.utils.rules_bundles import (
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
+pytestmark = pytest.mark.unit
+
 BUNDLE = "aws-guard-rules-registry"
 
 

@@ -97,6 +97,7 @@ INSTALL_IDS = [
 
 
 @pytest.mark.parametrize(("package", "argv"), INSTALL_COMMANDS, ids=INSTALL_IDS)
+@pytest.mark.integration
 def test_control_the_install_command_imports_the_planted_package_from_its_cwd(
     tmp_path, package, argv
 ):
@@ -114,6 +115,7 @@ def test_control_the_install_command_imports_the_planted_package_from_its_cwd(
 
 
 @pytest.mark.parametrize(("package", "argv"), INSTALL_COMMANDS, ids=INSTALL_IDS)
+@pytest.mark.integration
 def test_the_installer_runs_python_commands_outside_the_current_directory(
     tmp_path, monkeypatch, package, argv
 ):
@@ -131,6 +133,7 @@ def test_the_installer_runs_python_commands_outside_the_current_directory(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_control_the_detect_secrets_worker_imports_the_planted_package(tmp_path):
     repo, marker = tmp_path / "repo", tmp_path / "IMPORTED"
     _plant(repo, "automated_security_helper", marker)
@@ -145,6 +148,7 @@ def test_control_the_detect_secrets_worker_imports_the_planted_package(tmp_path)
     assert marker.read_text(encoding="utf-8") == "automated_security_helper\n"
 
 
+@pytest.mark.integration
 def test_the_detect_secrets_worker_imports_nothing_from_the_tree_or_its_results(
     tmp_path, monkeypatch
 ):
@@ -179,6 +183,7 @@ def test_the_detect_secrets_worker_imports_nothing_from_the_tree_or_its_results(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_relative_bin_path_is_made_absolute_where_it_is_read(tmp_path, monkeypatch):
     from automated_security_helper.utils import subprocess_utils
 
@@ -194,6 +199,7 @@ def test_a_relative_bin_path_is_made_absolute_where_it_is_read(tmp_path, monkeyp
     [("rel/bin", "{cwd}/rel/bin"), ("", "{home}/.ash/bin")],
     ids=["relative", "empty"],
 )
+@pytest.mark.integration
 def test_the_bin_path_constant_is_absolute(tmp_path, value, expected):
     """``core.constants.ASH_BIN_PATH`` is computed at import, so it is read in a child.
 
@@ -228,6 +234,7 @@ def test_the_bin_path_constant_is_absolute(tmp_path, value, expected):
     assert printed == Path(expected.format(cwd=tmp_path, home=home)), result.stdout
 
 
+@pytest.mark.unit
 def test_the_installer_exports_an_absolute_bin_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # Set first so the value the command exports is undone after the test.
@@ -245,6 +252,7 @@ def test_the_installer_exports_an_absolute_bin_path(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_helper_starts_a_child_in_an_empty_directory_it_removes(tmp_path):
     from automated_security_helper.utils.python_child import python_child
 
@@ -257,6 +265,7 @@ def test_the_helper_starts_a_child_in_an_empty_directory_it_removes(tmp_path):
     assert not child.cwd.exists()
 
 
+@pytest.mark.integration
 def test_the_helper_adds_no_directory_of_the_child_to_sys_path(tmp_path):
     from automated_security_helper.utils.python_child import python_child
 
@@ -423,6 +432,7 @@ def _package_sources() -> Iterator[Tuple[str, str]]:
         yield path.relative_to(PACKAGE).as_posix(), path.read_text(encoding="utf-8")
 
 
+@pytest.mark.unit
 def test_control_the_static_check_reports_a_raw_child_and_a_spawn_in_the_tree():
     source = (
         "import subprocess, sys\n"
@@ -440,6 +450,7 @@ def test_control_the_static_check_reports_a_raw_child_and_a_spawn_in_the_tree():
     ]
 
 
+@pytest.mark.unit
 def test_no_python_child_in_the_package_starts_without_the_helper():
     found: Set[Tuple[str, str]] = set()
     unexpected = []
@@ -455,6 +466,7 @@ def test_no_python_child_in_the_package_starts_without_the_helper():
     assert RAW_PYTHON_ARGV_ALLOWED - found == set()
 
 
+@pytest.mark.unit
 def test_every_python_child_spawn_uses_the_directory_the_helper_chose():
     users = set()
     problems = []

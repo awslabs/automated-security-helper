@@ -28,6 +28,8 @@ from automated_security_helper.utils.error_text import (
     traceback_text,
 )
 
+pytestmark = pytest.mark.unit
+
 CANARY = "ash-canary-7f3e-0123456789"
 
 

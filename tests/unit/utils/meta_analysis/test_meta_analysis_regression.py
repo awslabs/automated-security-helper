@@ -3,6 +3,10 @@
 Covers bugs: #145, #149, #150, #151, #152, #153
 """
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Bug #145 -- validation_results.py KeyError on severity keys

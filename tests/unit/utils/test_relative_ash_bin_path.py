@@ -55,6 +55,7 @@ def lookup(tmp_path, monkeypatch):
     subprocess_utils.clear_find_executable_cache()
 
 
+@pytest.mark.unit
 def test_a_relative_ash_bin_path_is_not_searched(tmp_path, monkeypatch, lookup):
     repo = tmp_path / "repo"
     _stub(repo / "bin" / f"grype{EXE}", tmp_path / "ran")
@@ -63,6 +64,7 @@ def test_a_relative_ash_bin_path_is_not_searched(tmp_path, monkeypatch, lookup):
     assert subprocess_utils.find_executable("grype") is None
 
 
+@pytest.mark.unit
 def test_an_absolute_ash_bin_path_is_searched(tmp_path, monkeypatch, lookup):
     """Positive control: the same directory, named absolutely, is searched."""
     repo = tmp_path / "repo"
@@ -72,6 +74,7 @@ def test_an_absolute_ash_bin_path_is_searched(tmp_path, monkeypatch, lookup):
     assert subprocess_utils.find_executable("grype") == tool.as_posix()
 
 
+@pytest.mark.unit
 def test_one_warning_names_the_value(tmp_path, monkeypatch, lookup, caplog):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -89,6 +92,7 @@ def test_one_warning_names_the_value(tmp_path, monkeypatch, lookup, caplog):
     assert "relative to the working directory" in warnings[0], warnings[0]
 
 
+@pytest.mark.unit
 def test_a_pinned_copy_in_a_relative_ash_bin_path_does_not_skip_the_install(
     tmp_path, monkeypatch, lookup
 ):
@@ -128,6 +132,7 @@ def test_a_pinned_copy_in_a_relative_ash_bin_path_does_not_skip_the_install(
 CONSOLE_TEXT = "Tools in ASH_BIN_PATH 'bin' were not looked for"
 
 
+@pytest.mark.unit
 def test_an_incomplete_scan_names_a_skipped_relative_ash_bin_path(
     monkeypatch, capsys, lookup
 ):
@@ -143,6 +148,7 @@ def test_an_incomplete_scan_names_a_skipped_relative_ash_bin_path(
     assert "absolute path" in out.split(CONSOLE_TEXT, 1)[1], out
 
 
+@pytest.mark.unit
 def test_the_note_is_one_line_whatever_the_value(monkeypatch, capsys, lookup):
     """A long value soft-wraps onto a new line that begins with text it chose.
 
@@ -174,6 +180,7 @@ def test_the_note_is_one_line_whatever_the_value(monkeypatch, capsys, lookup):
         pytest.param([("grype", "MISSING")], None, id="absolute"),
     ],
 )
+@pytest.mark.unit
 def test_no_such_line_without_both(rows, bin_path, tmp_path, monkeypatch, capsys):
     from automated_security_helper.interactions.run_ash_scan import (
         print_incompleteness_message,
@@ -210,6 +217,7 @@ ASH_CHILD = NO_HOST_GRYPE + (
 )
 
 
+@pytest.mark.e2e
 @pytest.mark.skipif(sys.platform == "win32", reason="the stand-ins are sh scripts")
 def test_a_scan_does_not_run_a_tool_the_repository_committed(tmp_path):
     """The whole path: ``ash scan`` from the repository, ASH_BIN_PATH=bin.

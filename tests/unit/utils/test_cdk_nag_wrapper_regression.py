@@ -18,6 +18,8 @@ import re
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 class TestCdkNagImportErrorHandling:
     """Missing cdk_nag module raises ImportError, not just FileNotFoundError."""

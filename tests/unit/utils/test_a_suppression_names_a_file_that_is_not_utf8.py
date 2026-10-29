@@ -51,6 +51,8 @@ if os.name == "nt":
         allow_module_level=True,
     )
 
+pytestmark = pytest.mark.unit
+
 ODD = os.fsdecode(b"secr\xe9t.py")
 RECORDED = "secr\\udce9t.py"
 #: Files a suppression for ODD must not reach: the escape's backslash read as a

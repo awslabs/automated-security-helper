@@ -131,6 +131,7 @@ def _words(command: str) -> list[str]:
     return shlex.split(command)
 
 
+@pytest.mark.unit
 class TestReinstallNamesWhereThisAshCameFrom:
     def test_a_git_install_is_pinned_to_its_commit(self, monkeypatch):
         _origin(monkeypatch, GIT_INSTALL, version="3.7.0")
@@ -361,6 +362,7 @@ class TestReinstallNamesWhereThisAshCameFrom:
         ]
 
 
+@pytest.mark.unit
 class TestTwoDistributionsProvideThisModule:
     """The first distribution located for this module decides which record is read.
 
@@ -443,6 +445,7 @@ class TestTwoDistributionsProvideThisModule:
         ]
 
 
+@pytest.mark.unit
 class TestAnExtraGoesOnTheSameSource:
     @pytest.mark.parametrize(
         "shape, expected",
@@ -476,6 +479,7 @@ class TestAnExtraGoesOnTheSameSource:
         assert find_bare_installs(f"pip install {arguments}") == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "shape",
     [
@@ -503,6 +507,7 @@ def test_every_installer_form_resolves_to_ash(monkeypatch, records, shape, templ
         assert find_bare_installs(command) == [], command
 
 
+@pytest.mark.unit
 def test_this_installation_is_reinstalled_from_its_own_record():
     """The real environment, read without the seam.
 
@@ -522,6 +527,7 @@ def test_this_installation_is_reinstalled_from_its_own_record():
     assert any(expected in word for word in _words(command)), (expected, command)
 
 
+@pytest.mark.unit
 def test_distributions_are_found_from_their_record_on_every_python():
     """ASH's distribution is found by what it installed, not by top_level.txt.
 
@@ -541,6 +547,7 @@ def test_distributions_are_found_from_their_record_on_every_python():
     )
 
 
+@pytest.mark.unit
 class TestExtraRequirementsFromMetadata:
     def test_the_symbols_extra_is_read_from_this_distribution(self):
         declared = ash_install.extra_requirements_from_metadata("symbols")
@@ -579,6 +586,7 @@ class TestExtraRequirementsFromMetadata:
 
 
 class TestTheSymbolsHint:
+    @pytest.mark.unit
     def test_it_names_the_packages_of_the_installed_extra(self, monkeypatch):
         """No tag, no ASH name: v3.7.0 has no symbols extra, main reports 3.7.0."""
         from automated_security_helper.utils.symbol_spans import (
@@ -601,6 +609,7 @@ class TestTheSymbolsHint:
         assert "@v" not in command
         assert find_bare_installs(command) == []
 
+    @pytest.mark.unit
     def test_without_readable_metadata_it_falls_back_to_this_install(self, monkeypatch):
         from automated_security_helper.utils.symbol_spans import (
             symbols_extra_install_command,
@@ -615,6 +624,7 @@ class TestTheSymbolsHint:
             f"automated-security-helper[symbols] @ git+{GIT_INSTALL['url']}@{COMMIT}",
         ]
 
+    @pytest.mark.integration
     @pytest.mark.runs_real_tools(
         reason="a dry run of the printed command through the real uv, against "
         "this environment, is what this test checks"
@@ -650,6 +660,7 @@ class TestTheSymbolsHint:
         assert result.returncode == 0, result.stderr
         assert "Would make no changes" in result.stderr, result.stderr
 
+    @pytest.mark.unit
     def test_it_points_at_the_docs_for_uvx(self, monkeypatch):
         """uvx runs ASH from a cached environment; its users need the docs page."""
         from automated_security_helper.utils.symbol_spans import (
@@ -682,6 +693,7 @@ def _name_and_clauses(requirement: str) -> tuple[str, frozenset[str]]:
     return normalize(name), frozenset(c.strip() for c in clauses if c.strip())
 
 
+@pytest.mark.unit
 def test_the_suppressions_page_lists_the_packages_of_the_extra():
     """The docs page's install command installs what the metadata declares.
 
@@ -712,6 +724,7 @@ FIRST_RELEASE_WITH_SYMBOLS: tuple[int, ...] | None = None
 _SYMBOLS_PIN = re.compile(r"\[symbols\][^\n]*?@v(\d+(?:\.\d+)*)")
 
 
+@pytest.mark.unit
 def test_no_docs_page_pins_the_symbols_extra_to_a_release_without_it():
     """A ``[symbols]`` requirement pinned to a tag must name a tag that has it.
 
@@ -743,6 +756,7 @@ def test_no_docs_page_pins_the_symbols_extra_to_a_release_without_it():
         assert too_old == [], too_old
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("shape", ["git", "editable-with-space-and-brackets"])
 def test_the_mcp_reinstall_hint_names_this_install_on_one_line(
     capsys, monkeypatch, tmp_path, shape

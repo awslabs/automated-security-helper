@@ -29,6 +29,8 @@ from automated_security_helper.utils.uv_tool_runner import (
 from tests.utils.env_assertions import differing_names
 from tests.utils.fake_tool_paths import fake_tool_path
 
+pytestmark = pytest.mark.unit
+
 #: The uv the probe tests find. The probe spawns this path with the process boundary
 #: mocked, and ASH starts a program given by path only when the host anchors it: on
 #: Windows a bare ``/opt/uv/bin/uv`` has no drive, is refused before the mocked runner

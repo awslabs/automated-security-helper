@@ -130,6 +130,7 @@ def _watched_communicate(fail_with: Optional[BaseException] = None) -> Iterator[
         yield seen
 
 
+@pytest.mark.unit
 def test_the_plain_branch_is_ashs_own_runner():
     """Outside a sandbox and a cancel scope, _runner hands out _run_plain."""
     assert subprocess_utils._runner(sandboxed=False) is _plain()
@@ -138,12 +139,14 @@ def test_the_plain_branch_is_ashs_own_runner():
 # -- capture_output, input and stdin -------------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_capture_output_with_a_stream_given_is_a_value_error(stream):
     with pytest.raises(ValueError, match="may not be used with capture_output"):
         _plain()(WRITES_AND_EXITS_3, capture_output=True, **{stream: subprocess.PIPE})
 
 
+@pytest.mark.integration
 def test_capture_output_with_a_stream_given_as_none_is_allowed():
     """subprocess.run checks ``is not None``, so stdout=None is no conflict."""
     result = _plain()(WRITES_AND_EXITS_3, capture_output=True, text=True, stdout=None)
@@ -152,12 +155,14 @@ def test_capture_output_with_a_stream_given_as_none_is_allowed():
     assert result.stderr == "err\n", result
 
 
+@pytest.mark.integration
 def test_input_is_written_to_the_childs_stdin():
     result = _plain()(ECHOES_STDIN, input="hello\n", capture_output=True, text=True)
 
     assert result.stdout == "hello\n", result
 
 
+@pytest.mark.unit
 def test_input_with_stdin_given_is_a_value_error():
     with pytest.raises(ValueError, match="stdin and input arguments may not both"):
         _plain()(ECHOES_STDIN, input="x", stdin=subprocess.DEVNULL)
@@ -166,6 +171,7 @@ def test_input_with_stdin_given_is_a_value_error():
 # -- a timeout ------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_timeout_kills_reaps_and_raises_the_same_timeout_expired():
     started = time.monotonic()
     with (
@@ -183,6 +189,7 @@ def test_a_timeout_kills_reaps_and_raises_the_same_timeout_expired():
     assert process.returncode not in (None, 0), process.returncode
 
 
+@pytest.mark.integration
 def test_a_timeout_keeps_the_output_read_before_it():
     with pytest.raises(subprocess.TimeoutExpired) as info:
         _plain()(PARTIAL_THEN_SLEEPS, capture_output=True, text=True, timeout=3.0)
@@ -191,6 +198,7 @@ def test_a_timeout_keeps_the_output_read_before_it():
     assert "diag" in _text(info.value.stderr), info.value.stderr
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="wait() after the kill is POSIX's path")
 def test_a_timeout_does_not_wait_for_a_grandchild_holding_the_pipes(tmp_path):
     """subprocess.run kills the child, then wait()s for it. A read of the pipes
@@ -218,6 +226,7 @@ def test_a_timeout_does_not_wait_for_a_grandchild_holding_the_pipes(tmp_path):
 # -- check=True -------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_check_raises_called_process_error_with_the_output():
     with pytest.raises(subprocess.CalledProcessError) as info:
         _plain()(WRITES_AND_EXITS_3, capture_output=True, text=True, check=True)
@@ -228,6 +237,7 @@ def test_check_raises_called_process_error_with_the_output():
     assert info.value.stderr == "err\n"
 
 
+@pytest.mark.integration
 def test_control_check_with_a_clean_exit_returns_the_result():
     result = _plain()([PY, "-c", "pass"], capture_output=True, check=True)
 
@@ -238,6 +248,7 @@ def test_control_check_with_a_clean_exit_returns_the_result():
 # -- any other error while waiting ----------------------------------------------
 
 
+@pytest.mark.integration
 def test_an_error_while_waiting_kills_reaps_and_raises_the_same_object():
     raised = RuntimeError("reading the pipes failed")
     started = time.monotonic()
@@ -254,6 +265,7 @@ def test_an_error_while_waiting_kills_reaps_and_raises_the_same_object():
     assert process.returncode not in (None, 0), "the child was left running"
 
 
+@pytest.mark.integration
 def test_an_interrupt_while_waiting_is_raised_without_an_unbounded_wait():
     interrupt = KeyboardInterrupt()
     started = time.monotonic()
@@ -271,6 +283,7 @@ def test_an_interrupt_while_waiting_is_raised_without_an_unbounded_wait():
     assert process.wait(timeout=WELL_SHORT_OF_THE_CHILD) != 0
 
 
+@pytest.mark.integration
 def test_an_interrupt_waits_only_briefly_for_a_child_the_kill_did_not_stop():
     """On KeyboardInterrupt subprocess.run kills the child, and Popen's exit then
     waits at most a quarter second for it, never without a bound. With the kill a
@@ -324,6 +337,7 @@ def _of_resources(caught: List[warnings.WarningMessage]) -> List[str]:
     return [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
 
 
+@pytest.mark.integration
 def test_no_pipe_or_process_is_left_unclosed():
     with _resource_warnings() as caught:
         _plain()(WRITES_AND_EXITS_3, capture_output=True, text=True)
@@ -341,6 +355,7 @@ def test_no_pipe_or_process_is_left_unclosed():
     assert not _of_resources(caught), _of_resources(caught)
 
 
+@pytest.mark.unit
 def test_control_an_unclosed_pipe_is_seen():
     """The detector above is not vacuous: a pipe dropped unclosed is reported."""
     with _resource_warnings() as caught:
@@ -470,6 +485,7 @@ DIFFERENTIAL = [
 ]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("args, kwargs", DIFFERENTIAL)
 def test_the_plain_runner_answers_as_subprocess_run(args, kwargs):
     expected = _outcome(subprocess.run, args, **kwargs)
@@ -477,6 +493,7 @@ def test_the_plain_runner_answers_as_subprocess_run(args, kwargs):
     assert _outcome(_plain(), args, **kwargs) == expected
 
 
+@pytest.mark.integration
 def test_the_plain_runner_answers_as_subprocess_run_in_a_cwd(tmp_path):
     prints_cwd = [PY, "-c", "import os, sys; sys.stdout.write(os.getcwd())"]
     kwargs = {"capture_output": True, "text": True, "cwd": str(tmp_path)}
