@@ -1147,14 +1147,21 @@ class TestTheUnitTestMatrixIsSplitByOs:
 
     @staticmethod
     def _comparable(job: dict[str, Any]) -> dict[str, Any]:
-        """The job without what the split is for: its cap and its matrix."""
+        """The job without what the split is for: its cap, its matrix and its runners.
+
+        ``runs-on`` is left out because the runner image choice is the other reason the
+        three jobs exist: the Linux unit and integration jobs may route their legs to
+        self-hosted runners behind a repository variable, and the macOS and Windows jobs
+        keep the literal ``${{ matrix.os }}``. tests/unit/test_unit_test_runner_opt_in.py
+        pins each job's ``runs-on`` on its own, so dropping it here loses no coverage.
+        """
         strategy = {
             k: v
             for k, v in job["strategy"].items()
             if k not in ("matrix", "max-parallel")
         }
         return {
-            **{k: v for k, v in job.items() if k != "strategy"},
+            **{k: v for k, v in job.items() if k not in ("strategy", "runs-on")},
             "strategy": strategy,
         }
 
@@ -1266,11 +1273,19 @@ class TestTheIntegrationAndE2eFamiliesMirrorTheUnitFamily:
 
     @pytest.mark.parametrize("pool", POOLS)
     def test_each_job_runs_on_the_runner_images_of_its_unit_job(self, pool):
+        """Same os axis; the integration job's ``runs-on`` is its unit job's, byte for byte.
+
+        The Linux unit and integration jobs may route to self-hosted runners behind one
+        repository variable, so their ``runs-on`` is an expression and the same one; the
+        e2e job keeps the hosted literal, since it drives the container image and the
+        installed scanners. tests/unit/test_unit_test_runner_opt_in.py pins the expression.
+        """
         unit = _workflow_job(f"unit-test-{pool}")
         for family in ("integration-test", "e2e-test"):
             job = _workflow_job(f"{family}-{pool}")
             assert job["strategy"]["matrix"]["os"] == unit["strategy"]["matrix"]["os"]
-            assert job["runs-on"] == "${{ matrix.os }}"
+        assert _workflow_job(f"integration-test-{pool}")["runs-on"] == unit["runs-on"]
+        assert _workflow_job(f"e2e-test-{pool}")["runs-on"] == "${{ matrix.os }}"
 
     @pytest.mark.parametrize("pool", POOLS)
     def test_each_integration_job_covers_the_pythons_and_caps_of_its_unit_job(
