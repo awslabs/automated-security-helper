@@ -160,7 +160,6 @@ import json
 import logging
 import os
 import re
-import shutil
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
@@ -199,7 +198,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.utils.subprocess_utils import path_independent_dirs
+from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
@@ -390,25 +389,24 @@ def local_uses_references(text: str) -> Set[str]:
 
 
 def find_absolute_executable(name: str) -> Optional[str]:
-    """``name`` as an absolute path, from PATH's absolute entries or ASH's bin dirs.
+    """``name`` as an absolute path, through ASH's own lookup (``find_executable``).
 
     A relative PATH entry (``.``, ``bin``) names a directory relative to the
     working directory: ASH's when it looks, the scan target when the program runs,
     since actionlint runs from the target and starts shellcheck and pyflakes from
-    there. ``find_executable`` honors such entries and returns the relative path
-    they produce, so this lookup skips them and returns an absolute path: what ASH
-    checked is then the file that runs. None when ``name`` is in none of them.
+    there. ``find_executable`` reads only PATH's anchored entries and ASH's bin
+    directories, never the working directory (on Windows ``shutil.which`` would
+    look there first), and while a scan is in progress it passes over a copy
+    inside the scanned tree, unless the operator allowed in-tree tools, and goes
+    on to the next candidate. So a repository's own copy earlier on PATH neither
+    passes the dependency check only to be refused at spawn, nor hides a usable
+    copy later on PATH or in ASH's bin directory. None when ``name`` is found
+    nowhere ASH looks.
     """
-    directories = [entry for entry in os.get_exec_path() if os.path.isabs(entry)]
-    directories += [
-        str(directory)
-        for directory in path_independent_dirs()
-        if Path(directory).is_absolute()
-    ]
-    if not directories:
+    found = find_executable(name)
+    if found is None or not os.path.isabs(found):
         return None
-    found = shutil.which(name, path=os.pathsep.join(directories))
-    return Path(found).absolute().as_posix() if found else None
+    return Path(found).absolute().as_posix()
 
 
 def config_ignore_patterns(config_path: Path) -> List[str]:

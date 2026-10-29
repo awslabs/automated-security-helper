@@ -1539,6 +1539,44 @@ def test_a_relative_path_entry_never_chooses_an_integration(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.parametrize("name", ["actionlint", "shellcheck"])
+@pytest.mark.unit
+def test_a_copy_inside_the_scanned_tree_is_passed_over_for_the_next_one(
+    repo, tmp_path, monkeypatch, name
+):
+    """An in-repo bin directory first on PATH (a .venv/bin under `uv run`, a
+    committed tools directory) must not be the copy ASH checks: the spawn guard
+    refuses it and the scan would read ERROR although a usable copy exists later
+    on PATH. The lookup is ASH's own, which passes over the tree's copy."""
+    _plant(repo / "bin", name)
+    usable = _plant(tmp_path / "abs-bin", name)
+    _only_path(monkeypatch, repo / "bin", tmp_path / "abs-bin")
+
+    with subprocess_utils.scanning_tree(repo):
+        found = module.find_absolute_executable(name)
+
+    assert found == usable.as_posix()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.unit
+def test_actionlint_found_only_inside_the_scanned_tree_is_missing(
+    repo, tmp_path, monkeypatch
+):
+    """With no copy anywhere else, the tree's copy is not used either: the scanner
+    reports MISSING, as the spawn guard would have refused the copy."""
+    _plant(repo / "bin", "actionlint")
+    _only_path(monkeypatch, repo / "bin")
+    scanner = _scanner(repo)
+
+    with subprocess_utils.scanning_tree(repo):
+        satisfied = scanner.validate_plugin_dependencies()
+
+    assert satisfied is False
+    assert scanner._executable is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
 @pytest.mark.unit
 def test_an_integration_reachable_only_through_a_relative_path_entry_is_missing(
     repo, tmp_path, monkeypatch
