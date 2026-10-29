@@ -582,15 +582,26 @@ def _known_lines(sarif_report: Any) -> Dict[str, Dict[int, str]]:
 
 
 def _block_end(known: Dict[str, Dict[int, str]], uri: str, start: int) -> Optional[int]:
-    """The first line at or after ``start`` known to end a PEM block in ``uri``."""
-    ends = [
-        number
-        for candidate, lines in known.items()
-        if _same_file(candidate, uri)
-        for number, text in lines.items()
-        if number >= start and _PEM_END in text
-    ]
-    return min(ends) if ends else None
+    """The line a PEM block starting at ``start`` ends on in ``uri``, if known.
+
+    Each file ``uri`` may name (``_same_file``: equal, or one a suffix of the
+    other) gives the first line at or after ``start`` known to end a block; the
+    last of those is taken. Two spellings of one file agree on it, and a
+    different file of the same name with an earlier END line can then not cut
+    the range short.
+    """
+    ends: List[int] = []
+    for candidate, lines in known.items():
+        if not _same_file(candidate, uri):
+            continue
+        own = [
+            number
+            for number, text in lines.items()
+            if number >= start and _PEM_END in text
+        ]
+        if own:
+            ends.append(min(own))
+    return max(ends) if ends else None
 
 
 def _starts_a_block(known: Dict[str, Dict[int, str]], uri: str, line: int) -> bool:
@@ -647,6 +658,9 @@ class _SecretIndex:
         self.local_values: List[Tuple[str, Optional[int], Optional[int], Set[str]]] = []
         #: id(secret finding) -> every value it exposed, whatever it looks like.
         self.values_of: Dict[int, Set[str]] = {}
+        #: (region, END line) of each key block found from other snippets, for the
+        #: masking to write back into the finding's region (``_mask_report``).
+        self.block_ends: List[Tuple[Any, int]] = []
         self._pattern: Optional[re.Pattern[str]] = None
 
     def add_values(self, values: Iterable[str]) -> None:
@@ -847,7 +861,14 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                     known = _known_lines(sarif_report)
                 if private_key or _starts_a_block(known, uri, start):
                     block_end = _block_end(known, uri, start)
-                    end = block_end if block_end is not None else _TO_END_OF_FILE
+                    if block_end is not None:
+                        end = block_end
+                        index.block_ends.append((region, block_end))
+                    elif not (isinstance(end, int) and end > start):
+                        # No END line in any snippet: an earlier masking may
+                        # have replaced it with MASKED_LINE and kept the block's
+                        # extent in the finding's own endLine, which stands.
+                        end = _TO_END_OF_FILE
                 elif resource_only and not isinstance(end, int):
                     end = _TO_END_OF_FILE
             index.add_location(uri, start, end)
@@ -1382,6 +1403,15 @@ def _mask_report(
     index.add_shapes(secret_value_shape(value) for value in index.values)
     if not has_runs:
         return index
+    # A key block's END line, found in another finding's snippet, is written into
+    # the key finding's own region: the next masking (every reload, ash merge,
+    # the findings browser) reads those lines as MASKED_LINE and could not find
+    # it again, so it masked to the end of the file for a private-key finding
+    # and, for a finding known only from its BEGIN line, that one line.
+    for region, block_end in index.block_ends:
+        current = getattr(region, "endLine", None)
+        if not (isinstance(current, int) and current >= block_end):
+            region.endLine = block_end
     for result in sarif_report.get_all_results() or []:
         message = getattr(result, "message", None)
         root: Any = getattr(message, "root", message)
