@@ -3176,11 +3176,8 @@ def merge_command(
         # every one is refused (select_merge_reporters), so the list is empty
         # then; the None check states that to the type checker. Overrides alone
         # are enough to enable and aim one.
-        if (
-            off_host_reporters
-            and (not parsed_formats or requested_off_host)
-            and operator_config is not None
-        ):
+        off_host_to_run = off_host_reporters_to_run(off_host_reporters, operator_config)
+        if off_host_to_run and (not parsed_formats or requested_off_host):
             off_host_context = PluginContext(
                 source_dir=Path.cwd(),
                 output_dir=output_dir_path,
@@ -3189,7 +3186,7 @@ def merge_command(
                 ignore_suppressions=ignore_suppressions,
             )
             merged = ReportPhase(
-                plugins=off_host_reporters,
+                plugins=off_host_to_run,
                 plugin_context=off_host_context,
                 progress_display=LiveProgressDisplay(show_progress=False),
                 asharp_model=merged,
@@ -3231,6 +3228,33 @@ def _section(config: Optional[AshConfig], reporter_class: type) -> Optional[Any]
         )
     except Exception:  # noqa: BLE001 -- an unknown reporter has no section
         return None
+
+
+def off_host_reporters_to_run(
+    off_host_reporters: Sequence[Type[ReporterPluginBase[Any]]],
+    operator_config: Optional[AshConfig],
+) -> List[Type[ReporterPluginBase[Any]]]:
+    """The off-host reporters the merge runs, given the operator's configuration.
+
+    An off-host reporter runs with the operator's configuration, so none can run
+    without one. :func:`select_merge_reporters` refuses every off-host reporter
+    when ``operator_config`` is None, so the list it returns is empty then and
+    this returns it unchanged. Should a caller ever hand this a non-empty list
+    with no operator configuration, the reporters are not run and the omission is
+    said at ERROR, naming them, rather than skipped in silence: a merge whose
+    uploads quietly did not happen would read as one that never asked for them.
+    """
+    if not off_host_reporters or operator_config is not None:
+        return list(off_host_reporters)
+    names = ", ".join(plugin_config_key(cls) for cls in off_host_reporters)
+    ASH_LOGGER.error(
+        f"The off-host reporter(s) {names} were selected to run but no operator "
+        f"configuration (--config or --config-overrides) was given to run them "
+        f"with, so they did not run. This is a defect in the reporter selection: "
+        f"report it with the command line used.",
+        extra=NO_MARKUP,
+    )
+    return []
 
 
 def select_merge_reporters(

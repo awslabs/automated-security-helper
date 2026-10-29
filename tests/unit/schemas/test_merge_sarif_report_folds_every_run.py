@@ -110,6 +110,59 @@ def test_the_same_tool_merged_twice_into_an_empty_aggregate_is_listed_once():
     assert _rule_ids(aggregated) == ["S-1", "S-2"]
 
 
+def test_a_driver_listing_one_rule_id_twice_adds_it_once():
+    aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+    aggregated.runs[0].tool.extensions = [
+        ToolComponent(name="scanner", rules=[{"id": "S-0"}])
+    ]
+    incoming = SarifReport(
+        runs=[
+            _run(
+                "scanner",
+                [_finding("S-1")],
+                [],
+                rules=[{"id": "S-1"}, {"id": "S-1"}, {"id": "S-0"}],
+            )
+        ]
+    )
+
+    aggregated.merge_sarif_report(incoming)
+
+    assert [rule.id for rule in aggregated.runs[0].tool.extensions[0].rules] == [
+        "S-0",
+        "S-1",
+    ]
+
+
+def test_merging_does_not_alias_the_incoming_report():
+    # ash merge promises not to mutate its inputs: the aggregate's invocations,
+    # extensions and rules must be copies, so editing the aggregate afterwards
+    # leaves the merged report as it was.
+    aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+    aggregated.runs[0].tool.extensions = [
+        ToolComponent(name="shared", rules=[{"id": "SH-0"}])
+    ]
+    incoming = SarifReport(
+        runs=[
+            _run("shared", [], [{"executionSuccessful": True}], rules=[{"id": "SH-1"}]),
+            _run("other", [], [{"executionSuccessful": True}], rules=[{"id": "O-1"}]),
+        ]
+    )
+
+    aggregated.merge_sarif_report(incoming)
+
+    run = aggregated.runs[0]
+    run.invocations[0].executionSuccessful = False
+    run.invocations[1].executionSuccessful = False
+    run.tool.extensions[0].rules[1].name = "renamed"
+    run.tool.extensions[1].name = "renamed-extension"
+
+    assert incoming.runs[0].invocations[0].executionSuccessful is True
+    assert incoming.runs[1].invocations[0].executionSuccessful is True
+    assert incoming.runs[0].tool.driver.rules[0].name is None
+    assert incoming.runs[1].tool.driver.name == "other"
+
+
 def test_rules_are_added_to_an_extension_that_had_none():
     aggregated = SarifReport(runs=[_run("aggregate", [], [])])
     aggregated.runs[0].tool.extensions = [ToolComponent(name="cfn-lint")]

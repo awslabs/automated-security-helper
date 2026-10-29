@@ -2613,7 +2613,14 @@ class SarifReport(RecordModel):
     ) -> None:
         """Fold one run into this report's first run; see ``merge_sarif_report``."""
         report_tool = report_run.tool
-        report_invocations = report_run.invocations
+        # Copies, never the incoming objects: ash merge promises not to mutate
+        # its inputs, and a later merge appends to the aggregate's lists, so an
+        # aliased invocation or rule would change the report it came from.
+        report_invocations = (
+            [invocation.model_copy(deep=True) for invocation in report_run.invocations]
+            if report_run.invocations is not None
+            else None
+        )
         report_results = []
         # A run may carry no results list at all (SARIF allows omitting it, and a
         # scanner that failed leaves it so), which merges as no results.
@@ -2645,7 +2652,9 @@ class SarifReport(RecordModel):
                     self_run.tool.extensions is None
                     or len(self_run.tool.extensions) == 0
                 ):
-                    self_run.tool.extensions = [report_tool.driver]
+                    self_run.tool.extensions = [
+                        report_tool.driver.model_copy(deep=True)
+                    ]
                 else:
                     # Check if report_tool.driver.name already exists in self_run.tool.extensions
                     existing_extension = next(
@@ -2657,7 +2666,9 @@ class SarifReport(RecordModel):
                         None,
                     )
                     if existing_extension is None:
-                        self_run.tool.extensions.append(report_tool.driver)
+                        self_run.tool.extensions.append(
+                            report_tool.driver.model_copy(deep=True)
+                        )
                     elif include_rules:
                         _union_rules(existing_extension, report_tool.driver.rules)
         else:
@@ -2700,10 +2711,13 @@ def _same_tool_component(
 def _union_rules(
     component: "ToolComponent", incoming_rules: Optional[List["ReportingDescriptor"]]
 ) -> None:
-    """Add to *component* the rules whose id it does not carry yet.
+    """Add to *component* copies of the rules whose id it does not carry yet.
 
     The component's rules list may be None (cfn-lint writes none for a clean or
     an all-failed target), so it is materialized before anything is appended.
+    Each appended id joins the known set at once, so a driver that lists one id
+    twice adds it once. Copies, not the incoming descriptors: the aggregate must
+    not alias the report it was built from.
     """
     incoming = incoming_rules or []
     if not incoming:
@@ -2713,7 +2727,7 @@ def _union_rules(
     known_rule_ids = {rule.id for rule in component.rules}
     for rule in incoming:
         if rule.id not in known_rule_ids:
-            component.rules.append(rule)
+            component.rules.append(rule.model_copy(deep=True))
             known_rule_ids.add(rule.id)
 
 
