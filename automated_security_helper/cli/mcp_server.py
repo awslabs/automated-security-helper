@@ -140,6 +140,7 @@ from automated_security_helper.utils.log import (
     route_library_handlers_through_command_check,
 )
 from automated_security_helper.utils.subprocess_utils import kill_running_groups
+from automated_security_helper.utils.threads import ash_thread
 
 logger = ASH_LOGGER
 
@@ -219,8 +220,8 @@ def _begin_stopping_source_jobs() -> threading.Thread:
     executors = (_CLONE_EXECUTOR, _DELIVERY_EXECUTOR)
     for executor in executors:
         executor.shutdown(wait=False, cancel_futures=True)
-    joiner = threading.Thread(
-        target=_join_source_pools,
+    joiner = ash_thread(
+        _join_source_pools,
         args=(executors,),
         name="ash-mcp-source-jobs-join",
         daemon=True,
