@@ -138,9 +138,9 @@ def test_a_quoted_list_item_loses_its_quotes():
 
 
 def test_an_override_can_set_a_string_field_to_digit_text():
-    config = apply_config_overrides(AshConfig(), ["project_name=123456789012"])
+    config = apply_config_overrides(AshConfig(), ["project_name=007"])
 
-    assert config.project_name == "123456789012"
+    assert config.project_name == "007"
 
 
 def test_an_override_that_does_not_apply_is_still_refused():

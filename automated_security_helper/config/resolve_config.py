@@ -446,9 +446,9 @@ def _validated_with_overrides(
     """``config_dict`` validated as an AshConfig, with a string field's refusal
     of an override typed as a number cured by the override's own text.
 
-    _parse_config_value types "123456789012" as an int and "1.10" as a float,
-    so an override could never set a str option to digit text (an account id,
-    a tool version). Where the model refuses such a value as not a string at
+    _parse_config_value types "007" as the int 7 and "1.10" as a float, so an
+    override could never set a str option to digit text (an account id, a
+    tool version). Where the model refuses such a value as not a string at
     the place the override landed (``applied``, with the text of each override
     in ``raw_values``), the value is set back to the text the operator wrote
     and the document is validated once more. Any other refusal, and a refusal
