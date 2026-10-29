@@ -73,6 +73,9 @@ FILE_ONLY_RIGHTS = (
 
 PR_SET_NO_NEW_PRIVS = 38
 PR_SET_CHILD_SUBREAPER = 36
+PR_SET_PDEATHSIG = 1
+#: The signals that ask the wrapper to stop (ASH sends SIGTERM on a timeout).
+STOP_SIGNALS = frozenset({signal.SIGTERM, signal.SIGINT, signal.SIGHUP})
 #: The most /proc entries one fallback scan reads (``_parent_map``). A host can
 #: carry tens of thousands of processes and each entry costs an open and a read,
 #: so an unbounded scan could on its own outlast STOP_REAP_DEADLINE_SECONDS;
@@ -507,6 +510,44 @@ def _descendants(until: Optional[float] = None) -> List[int]:
     return found
 
 
+def _child_setup(restrict: Callable[[], None]) -> None:
+    """The forked child, before it becomes the scanner.
+
+    The stop signals the wrapper blocked across the fork are unblocked, the child
+    leads a new session, it asks the kernel for SIGTERM should the wrapper exit,
+    the dispositions this interpreter ignores are restored, and ``restrict``
+    confines it. Failing to restrict is fatal (``restrict`` raises); a parent-death
+    signal the kernel will not set is noted and the child goes on, as the file's
+    other best-effort steps do.
+    """
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, STOP_SIGNALS)
+    # A new session has no controlling terminal, so the scanner cannot push
+    # keystrokes into the user's shell through TIOCSTI.
+    os.setsid()
+    # Landlock does not end a process's descendants with it, so a wrapper that
+    # dies before it reaps (ASH SIGKILLs one that outlives its grace) would leave
+    # the scanner running with nothing to end it. SIGTERM on the wrapper's exit
+    # is what an unwrapped scanner gets from ASH's own stop; the scanner may
+    # still be told to stop before this call lands if the wrapper dies in the
+    # few instructions between the fork and here.
+    if libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0) != 0:
+        sys.stderr.write(
+            _shown(
+                "ash-landlock: prctl(PR_SET_PDEATHSIG): "
+                f"{os.strerror(ctypes.get_errno())}; the scanner outlives a killed "
+                "wrapper"
+            )
+            + "\n"
+        )
+    # The interpreter ignores these at startup and an exec keeps an ignored
+    # disposition, so without this the scanner would run with SIGPIPE and SIGXFSZ
+    # ignored, unlike the same scanner started unwrapped (subprocess restores
+    # them in every child it starts).
+    for restored in (signal.SIGPIPE, signal.SIGXFSZ):
+        signal.signal(restored, signal.SIG_DFL)
+    restrict()
+
+
 def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     """Run the scanner and, once it exits, kill whatever it left running.
 
@@ -520,18 +561,14 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     """
     if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
         fail(f"prctl(PR_SET_CHILD_SUBREAPER): {os.strerror(ctypes.get_errno())}")
-    stop_signals = {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
+    stop_signals = STOP_SIGNALS
     # Blocked across the fork, so a signal that arrives before the handler is in
     # place is held rather than killing the wrapper and orphaning the scanner.
     signal.pthread_sigmask(signal.SIG_BLOCK, stop_signals)
     pid = os.fork()
     if pid == 0:
         try:
-            signal.pthread_sigmask(signal.SIG_UNBLOCK, stop_signals)
-            # A new session has no controlling terminal, so the scanner cannot
-            # push keystrokes into the user's shell through TIOCSTI.
-            os.setsid()
-            restrict()
+            _child_setup(restrict)
             os.execve(command[0], command, os.environ)
         except OSError as e:
             # The scanner's path, and the error that quotes it.

@@ -1,14 +1,18 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The Landlock wrapper's walk of its process tree is bounded.
+"""The Landlock wrapper's walk of its process tree is bounded, and its child ends
+with the wrapper.
 
 utils/sandbox/landlock_exec.py reaps what a scanner left behind by walking its
 descendants through /proc. Before these tests, any failure to read a thread's
 children file (a descendant that exited between the listing and the read, a file
 this process may not read) fell back to a listing of every /proc entry, once per
 descendant, with no bound, so one reap pass could outlast the quarter second a
-stopped wrapper has before ASH kills it.
+stopped wrapper has before ASH kills it. And the forked child asked the kernel for
+nothing on its parent's death, so a wrapper killed mid-reap left the scanner
+running with no reaper, and it kept the SIGPIPE and SIGXFSZ dispositions the
+interpreter ignores, unlike the same scanner started unwrapped.
 
 Everything here runs in-process against a stand-in /proc: no fork, no sandbox.
 """
@@ -16,9 +20,10 @@ Everything here runs in-process against a stand-in /proc: no fork, no sandbox.
 import errno
 import io
 import os
+import signal
 import sys
 import types
-from typing import Dict, List, Union
+from typing import Dict, List, Tuple, Union
 
 import pytest
 
@@ -205,3 +210,91 @@ def test_a_walk_inside_its_deadline_reads_the_whole_tree(procfs, monkeypatch):
 
     assert landlock_exec._descendants(until=20.0) == [11, 21, 31]
     assert landlock_exec._descendants() == [11, 21, 31]
+
+
+class _Recording:
+    """A module whose named functions record their calls and return ``returns``;
+    every other attribute is the real module's."""
+
+    def __init__(self, real, names, calls: List[Tuple[str, tuple]], returns=0):
+        self._real = real
+        self._names = frozenset(names)
+        self._calls = calls
+        self._returns = returns
+
+    def __getattr__(self, name: str):
+        if name in self._names:
+
+            def record(*args):
+                self._calls.append((name, args))
+                return self._returns
+
+            return record
+        return getattr(self._real, name)
+
+
+@pytest.fixture
+def child_calls(monkeypatch):
+    """Run the child's setup with its system calls recorded; return the calls."""
+
+    def run(prctl_returns: int = 0) -> List[Tuple[str, tuple]]:
+        calls: List[Tuple[str, tuple]] = []
+        monkeypatch.setattr(landlock_exec, "os", _Recording(os, {"setsid"}, calls))
+        monkeypatch.setattr(
+            landlock_exec,
+            "signal",
+            _Recording(signal, {"pthread_sigmask", "signal"}, calls),
+        )
+        monkeypatch.setattr(
+            landlock_exec,
+            "libc",
+            _Recording(None, {"prctl"}, calls, returns=prctl_returns),
+        )
+        landlock_exec._child_setup(lambda: calls.append(("restrict", ())))
+        return calls
+
+    return run
+
+
+def test_the_child_asks_for_sigterm_on_its_parents_exit_between_setsid_and_restrict(
+    child_calls,
+):
+    calls = child_calls()
+    names = [name for name, _ in calls]
+
+    assert names.index("setsid") < names.index("prctl") < names.index("restrict")
+    (prctl_args,) = [args for name, args in calls if name == "prctl"]
+    assert prctl_args == (landlock_exec.PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0)
+    assert landlock_exec.PR_SET_PDEATHSIG == 1
+    assert names[0] == "pthread_sigmask"
+    assert calls[0][1][0] == signal.SIG_UNBLOCK
+    assert set(calls[0][1][1]) == {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
+
+
+def test_the_child_restores_the_dispositions_the_interpreter_ignores(child_calls):
+    """SIGPIPE and SIGXFSZ go back to their defaults before the exec, as
+    subprocess does for every child it starts."""
+    calls = child_calls()
+    names = [name for name, _ in calls]
+    restored = {args for name, args in calls if name == "signal"}
+
+    assert restored == {
+        (signal.SIGPIPE, signal.SIG_DFL),
+        (signal.SIGXFSZ, signal.SIG_DFL),
+    }
+    assert max(i for i, name in enumerate(names) if name == "signal") < names.index(
+        "restrict"
+    )
+
+
+def test_a_refused_parent_death_signal_is_noted_and_the_child_goes_on(
+    child_calls, capsys
+):
+    """The parent-death signal is best effort: the child says so and is still
+    restricted and exec'd."""
+    calls = child_calls(prctl_returns=-1)
+
+    assert ("restrict", ()) == calls[-1]
+    noted = capsys.readouterr().err
+    assert "prctl(PR_SET_PDEATHSIG)" in noted
+    assert noted.startswith("ash-landlock: ")
