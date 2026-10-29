@@ -21,6 +21,7 @@ from automated_security_helper.interactions.run_ash_container import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_resolve_oci_runner_finch_first():
     """When multiple runners are on PATH, the first discovered wins (finch before docker)."""
 
@@ -40,6 +41,7 @@ def test_resolve_oci_runner_finch_first():
     assert result == "/usr/local/bin/finch"
 
 
+@pytest.mark.unit
 def test_resolve_oci_runner_docker_when_no_finch():
     """Falls back to docker when finch is not available."""
 
@@ -56,6 +58,7 @@ def test_resolve_oci_runner_docker_when_no_finch():
     assert result == "/usr/bin/docker"
 
 
+@pytest.mark.unit
 def test_resolve_oci_runner_raises_when_none_available():
     """Raises RuntimeError when no OCI runner is found."""
     with patch(
@@ -66,6 +69,7 @@ def test_resolve_oci_runner_raises_when_none_available():
             _resolve_oci_runner(oci_runner=None)
 
 
+@pytest.mark.unit
 def test_resolve_oci_runner_respects_explicit_arg():
     """Explicit oci_runner bypasses discovery and returns the found path."""
 
@@ -80,6 +84,7 @@ def test_resolve_oci_runner_respects_explicit_arg():
     assert result == "/usr/bin/podman"
 
 
+@pytest.mark.unit
 def test_resolve_oci_runner_respects_env_wrapper():
     """OCI_RUNNER_WRAPPER env var is returned as a prefix list via the helper."""
 
@@ -103,6 +108,7 @@ def test_resolve_oci_runner_respects_env_wrapper():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_find_dockerfile_uses_repo_dockerfile(tmp_path):
     """Returns the bundled Dockerfile from ASH_ASSETS_DIR when not in a repo dir."""
     fake_dockerfile = tmp_path / "Dockerfile"
@@ -165,6 +171,7 @@ def _base_assemble_kwargs(**overrides):
     return base
 
 
+@pytest.mark.unit
 def test_assemble_run_command_mounts():
     """--mount flags for source and output dirs are present and correct."""
     kwargs = _base_assemble_kwargs()
@@ -181,6 +188,7 @@ def test_assemble_run_command_mounts():
     assert any("destination=/out" in m for m in mount_args), mount_args
 
 
+@pytest.mark.unit
 def test_assemble_run_command_env_vars():
     """ASH_ACTUAL_SOURCE_DIR and ASH_ACTUAL_OUTPUT_DIR are set correctly."""
     kwargs = _base_assemble_kwargs()
@@ -195,6 +203,7 @@ def test_assemble_run_command_env_vars():
     assert "ash_output" in out_val, out_val
 
 
+@pytest.mark.unit
 def test_assemble_run_command_carries_ash_config_as_a_mount_not_the_variable(tmp_path):
     """The assembled command never passes ASH_CONFIG as an environment
     variable: the value is a host path, meaningless inside the container. The
@@ -236,6 +245,7 @@ def _scan_source_env(cmd):
     return [v for v in env_values if v.startswith("ASH_SCAN_SOURCE=")]
 
 
+@pytest.mark.integration
 def test_the_container_scan_is_told_the_scanned_directory_within_its_repository(
     tmp_path, _git_stops_at_tmp
 ):
@@ -269,6 +279,7 @@ def _git_stops_at_tmp(tmp_path, monkeypatch):
     isolate_git_at(tmp_path, monkeypatch)
 
 
+@pytest.mark.integration
 def test_an_empty_label_is_passed_for_a_directory_outside_a_repository(
     tmp_path, _git_stops_at_tmp
 ):
@@ -285,6 +296,7 @@ def test_an_empty_label_is_passed_for_a_directory_outside_a_repository(
     assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE="]
 
 
+@pytest.mark.integration
 def test_an_empty_label_is_passed_for_a_clone_nested_in_another_repository(
     tmp_path, _git_stops_at_tmp
 ):
@@ -300,6 +312,7 @@ def test_an_empty_label_is_passed_for_a_clone_nested_in_another_repository(
     assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE="]
 
 
+@pytest.mark.integration
 def test_workspace_mode_passes_the_mounts_own_label(tmp_path, _git_stops_at_tmp):
     """The label names the workspace mount. Projects in the container use git's
     view only when it is ".", the mount being a repository's root."""
@@ -317,6 +330,7 @@ def test_workspace_mode_passes_the_mounts_own_label(tmp_path, _git_stops_at_tmp)
     assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE=services"]
 
 
+@pytest.mark.integration
 def test_an_empty_label_is_passed_for_a_submodule(tmp_path, _git_stops_at_tmp):
     """A submodule's root is "." to git, as the superproject's root is; the two
     must not share a scope, so the label is empty and nothing is archived."""
@@ -360,6 +374,7 @@ def test_an_empty_label_is_passed_for_a_submodule(tmp_path, _git_stops_at_tmp):
     assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE="]
 
 
+@pytest.mark.unit
 def test_assemble_run_command_image_argument_position():
     """Image name appears before the 'ash' subcommand."""
     image = "automated-security-helper:non-root"
@@ -369,6 +384,7 @@ def test_assemble_run_command_image_argument_position():
     assert img_idx < ash_idx
 
 
+@pytest.mark.unit
 def test_assemble_run_command_names_the_outer_run_id_without_its_value():
     """The in-container run writes it into its results file.
 
@@ -384,6 +400,7 @@ def test_assemble_run_command_names_the_outer_run_id_without_its_value():
     assert not any(run_id in arg for arg in cmd), cmd
 
 
+@pytest.mark.unit
 def test_assemble_run_command_passes_the_outer_run_id_through_a_wrapper():
     """OCI_RUNNER_WRAPPER (sudo, for one) need not pass the environment on."""
     run_id = "0123456789abcdef0123456789abcdef"
@@ -394,6 +411,7 @@ def test_assemble_run_command_passes_the_outer_run_id_through_a_wrapper():
     assert cmd[index - 1] == "-e"
 
 
+@pytest.mark.unit
 def test_the_run_environment_carries_the_outer_run_id(monkeypatch):
     from automated_security_helper.interactions.run_ash_container import (
         _run_environment,
@@ -409,18 +427,21 @@ def test_the_run_environment_carries_the_outer_run_id(monkeypatch):
     assert _run_environment(None) is None
 
 
+@pytest.mark.unit
 def test_assemble_run_command_offline_uses_network_none():
     """--network=none is added when offline=True."""
     cmd = _assemble_run_command(**_base_assemble_kwargs(offline=True))
     assert "--network=none" in cmd
 
 
+@pytest.mark.unit
 def test_assemble_run_command_online_no_network_flag():
     """--network=none is NOT present when offline=False."""
     cmd = _assemble_run_command(**_base_assemble_kwargs(offline=False))
     assert "--network=none" not in cmd
 
 
+@pytest.mark.unit
 class TestTheInTreeToolOptInReachesTheContainer:
     """The container's ASH makes the same in-tree decision as the host's."""
 

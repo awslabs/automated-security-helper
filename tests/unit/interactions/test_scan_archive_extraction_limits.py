@@ -33,6 +33,8 @@ import pytest
 
 from tests.utils.archive_builders import TEBIBYTE, tar_bytes, zip_bytes
 
+pytestmark = pytest.mark.integration
+
 #: Assembled at run time, so this file holds no private key header of its own.
 KEY_HEADER = "-----BEGIN " + "RSA PRIVATE" + " KEY-----"
 

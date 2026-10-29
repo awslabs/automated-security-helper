@@ -30,9 +30,12 @@ import pytest
 
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the stand-in tools are POSIX shell scripts"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="the stand-in tools are POSIX shell scripts"
+    ),
+]
 
 # The ASH the parent test imported, ahead of whatever the interpreter has installed,
 # so the child runs the code under test. Its tool probes are answered first

@@ -23,9 +23,12 @@ import pytest
 
 from automated_security_helper.interactions import container_leftovers
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="records use POSIX directory descriptors"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="records use POSIX directory descriptors"
+    ),
+]
 
 
 def _record(directory: Path, name: str, pid: int) -> Path:

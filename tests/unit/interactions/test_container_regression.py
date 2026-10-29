@@ -5,6 +5,10 @@ Covers bugs: #94, #95, #96, #97
 
 import inspect
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Bug #94 -- custom_containerfile build command never invoked

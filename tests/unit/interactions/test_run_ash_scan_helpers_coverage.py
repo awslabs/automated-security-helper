@@ -203,6 +203,7 @@ def _sarif_with_uris(*uris: str) -> SarifReport:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestSeverityFiltersFinding:
     """``properties=None`` is on every stand-in because the real SARIF ``Result``
     always carries the field, and the severity resolver now reads it -- a stand-in
@@ -229,6 +230,7 @@ class TestSeverityFiltersFinding:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestResolveConfigFailOnFindings:
     def test_a_config_beside_the_source_is_discovered(self, tmp_path):
         (tmp_path / ".ash.yaml").write_text(
@@ -272,6 +274,7 @@ class TestResolveConfigFailOnFindings:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestResolveLogLevel:
     def test_verbose_wins_over_everything(self, tmp_path):
         opts = _opts(tmp_path, tmp_path / "out", verbose=True, debug=True, quiet=True)
@@ -333,6 +336,7 @@ def container_result(monkeypatch):
     return install
 
 
+@pytest.mark.unit
 class TestRunContainerModeChangedFiles:
     def test_changed_files_only_warns_and_scans_everything(
         self, container_result, logger, tmp_path, capsys
@@ -351,6 +355,7 @@ class TestRunContainerModeChangedFiles:
         )
 
 
+@pytest.mark.unit
 class TestRunContainerModeBuildOnly:
     def test_build_only_exits_zero_on_success(self, container_result, logger, tmp_path):
         """With --no-run there is no results file, so the build status is the verdict."""
@@ -379,6 +384,7 @@ class TestRunContainerModeBuildOnly:
         assert "build broke" in _plain(capsys.readouterr().out)
 
 
+@pytest.mark.unit
 class TestRunContainerModeResultsFile:
     def test_a_valid_results_file_is_parsed_and_returned(
         self, container_result, logger, tmp_path
@@ -476,6 +482,7 @@ def local_orchestrator(monkeypatch):
     return install
 
 
+@pytest.mark.unit
 class TestRunLocalModeConfigDiscovery:
     def test_discovery_is_left_to_the_orchestrators_resolution(
         self, local_orchestrator, logger, tmp_path
@@ -522,6 +529,7 @@ class TestRunLocalModeConfigDiscovery:
         )
 
 
+@pytest.mark.unit
 class TestRunLocalModePrecommit:
     def test_precommit_adds_the_fast_scanner_set(
         self, local_orchestrator, logger, tmp_path
@@ -559,6 +567,7 @@ class TestRunLocalModePrecommit:
         assert recorded["create_kwargs"][0]["enabled_scanners"] == ["grype"]
 
 
+@pytest.mark.unit
 class TestRunLocalModePhases:
     def test_an_empty_phase_list_falls_back_to_the_standard_three(
         self, local_orchestrator, logger, tmp_path
@@ -621,6 +630,7 @@ def git_available() -> bool:
     return probe.returncode == 0
 
 
+@pytest.mark.integration
 class TestRunLocalModeChangedFiles:
     """What run_ash_scan computes for --changed-files-only and hands the engine.
 
@@ -1029,6 +1039,7 @@ class TestRunLocalModeChangedFiles:
 @pytest.mark.skipif(
     os.name == "nt", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 class TestChangedFilesSarifRewriteIsNotWrittenThroughALink:
     """The rewrite of ``reports/ash.sarif`` refuses a link there, as reports do.
 
@@ -1077,6 +1088,7 @@ class TestChangedFilesSarifRewriteIsNotWrittenThroughALink:
         assert pointed_at.read_text(encoding="utf-8") == "unchanged"
 
 
+@pytest.mark.unit
 class TestChangedFilesRewriteLeavesAnEarlierRunsSarif:
     def test_a_sarif_report_this_run_did_not_write_is_not_rewritten(
         self, local_orchestrator, logger, monkeypatch, tmp_path
@@ -1149,6 +1161,7 @@ class TestChangedFilesRewriteLeavesAnEarlierRunsSarif:
         ) == "another reporter's file"
 
 
+@pytest.mark.unit
 class TestARunWithoutAReportPhaseRecordsNoReports:
     def test_the_results_say_no_report_file_was_written(
         self, local_orchestrator, logger, tmp_path
@@ -1174,6 +1187,7 @@ class TestARunWithoutAReportPhaseRecordsNoReports:
         ] == [{"files": [], "formats": {}}]
 
 
+@pytest.mark.unit
 class TestChangedFilesSarifRewriteIsNotSkippedSilently:
     def test_a_sarif_report_the_rewrite_may_not_write_refuses_the_run(
         self, local_orchestrator, logger, monkeypatch, tmp_path
@@ -1214,6 +1228,7 @@ class TestChangedFilesSarifRewriteIsNotSkippedSilently:
         assert sarif.as_posix() in getattr(refused.value, "reason", "")
 
 
+@pytest.mark.unit
 class TestRunLocalModeResultPersistence:
     def test_the_aggregated_results_are_written_to_the_output_dir(
         self, local_orchestrator, logger, tmp_path
@@ -1263,6 +1278,7 @@ class TestRunLocalModeResultPersistence:
         assert config_fail_on_findings is False
 
 
+@pytest.mark.unit
 class TestRunLocalModeFailure:
     def test_an_unexpected_error_exits_one(
         self, local_orchestrator, logger, tmp_path, capsys
@@ -1374,12 +1390,14 @@ def unified_metrics(monkeypatch):
     return install
 
 
+@pytest.mark.unit
 class TestComputeExitCodeNoResults:
     def test_no_results_is_a_scan_error_not_a_clean_pass(self, tmp_path):
         opts = _opts(tmp_path, tmp_path / "out")
         assert _compute_exit_code(None, opts) == 1
 
 
+@pytest.mark.unit
 class TestComputeExitCodeFailOnFindings:
     def test_fail_on_findings_off_returns_zero_despite_findings(
         self, unified_metrics, tmp_path
@@ -1414,6 +1432,7 @@ class TestComputeExitCodeFailOnFindings:
         )
 
 
+@pytest.mark.unit
 class TestComputeExitCodeCorruptSarif:
     def test_an_unreadable_sarif_report_falls_back_to_the_unified_metrics(
         self, unified_metrics, tmp_path
@@ -1467,6 +1486,7 @@ class TestComputeExitCodeCorruptSarif:
         )
 
 
+@pytest.mark.unit
 class TestComputeExitCodeMinSeverity:
     def test_nothing_at_or_above_min_severity_clears_the_finding_count(
         self, unified_metrics, tmp_path
@@ -1531,6 +1551,7 @@ class TestComputeExitCodeMinSeverity:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestPrintSummary:
     def test_config_warnings_are_surfaced_above_the_next_steps(self, tmp_path, capsys):
         results = SimpleNamespace(
@@ -1574,6 +1595,7 @@ class TestPrintSummary:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFilterResultsToChangedFiles:
     def test_a_finding_with_no_physical_location_is_always_kept(self, tmp_path):
         """An unlocatable finding cannot be shown to be outside the change set."""
@@ -1654,6 +1676,7 @@ class TestFilterResultsToChangedFiles:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestRunAshScanScanErrorExit:
     def test_a_scan_that_produced_no_results_announces_and_exits_one(
         self, monkeypatch, tmp_path, capsys

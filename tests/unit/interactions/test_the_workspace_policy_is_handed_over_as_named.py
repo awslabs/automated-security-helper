@@ -21,9 +21,12 @@ import pytest
 
 from automated_security_helper.interactions import run_ash_container, run_ash_scan
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt", reason="the layouts are built from POSIX symlinks"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        os.name == "nt", reason="the layouts are built from POSIX symlinks"
+    ),
+]
 
 
 def _opts(root: Path, named, target) -> SimpleNamespace:

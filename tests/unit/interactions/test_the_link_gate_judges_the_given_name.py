@@ -40,9 +40,12 @@ from tests.utils.helpers import mark_git_checkout
 
 MARK_FLAG = "--config-from-scanned-repository"
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt", reason="the layouts are built from POSIX symlinks"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        os.name == "nt", reason="the layouts are built from POSIX symlinks"
+    ),
+]
 
 
 def test_a_name_through_a_tree_link_and_back_out_is_refused(tmp_path):

@@ -27,6 +27,8 @@ from automated_security_helper.core import execution_engine
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 _LINE = "Using ASH configuration from"
 
 

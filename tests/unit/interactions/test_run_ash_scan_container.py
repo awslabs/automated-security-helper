@@ -15,6 +15,8 @@ from automated_security_helper.utils.subprocess_utils import (
 )
 from automated_security_helper.core.enums import BuildTarget, AshLogLevel
 
+pytestmark = pytest.mark.unit
+
 
 @patch("automated_security_helper.utils.subprocess_utils.run_command")
 def test_get_host_uid_success(mock_run_command):

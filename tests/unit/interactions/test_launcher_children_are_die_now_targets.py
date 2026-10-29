@@ -25,14 +25,17 @@ import pytest
 from automated_security_helper.core import cancellation
 from automated_security_helper.utils import subprocess_utils
 
-pytestmark = pytest.mark.skipif(
-    # By the build, not the platform: these cells call os.waitid themselves,
-    # and CPython leaves it out on some POSIX systems (macOS), where the
-    # observation falls back to the reap-then-discard poll arm these cells
-    # cannot pin.
-    not hasattr(os, "waitid"),
-    reason="the observe-before-reap order needs os.waitid",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        # By the build, not the platform: these tests call os.waitid themselves,
+        # and CPython leaves it out on some POSIX systems (macOS), where the
+        # observation falls back to the reap-then-discard poll arm these tests
+        # cannot pin.
+        not hasattr(os, "waitid"),
+        reason="the observe-before-reap order needs os.waitid",
+    ),
+]
 
 #: ("record", pid, was-in-the-mirror) and ("discard", pid, was-still-reapable).
 _Calls = List[Tuple[str, int, bool]]

@@ -46,6 +46,8 @@ from automated_security_helper.interactions.run_ash_container import (
     _local_source_tree,
 )
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REFUSAL = re.escape(
     "a LOCAL revision builds the ASH source tree this ASH was installed"

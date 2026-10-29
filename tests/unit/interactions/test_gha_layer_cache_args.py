@@ -19,6 +19,8 @@ from automated_security_helper.interactions.run_ash_container import (
     _runner_supports_buildx,
 )
 
+pytestmark = pytest.mark.unit
+
 # The credentials buildx needs. Actions does not expose these to `run:` steps by
 # default, so a workflow has to export them; the gate treats their absence as
 # "caching unavailable".

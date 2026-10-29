@@ -12,11 +12,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     _run_local_mode,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestScanSucceedsWhenCwdDiffersFromSourceDir:

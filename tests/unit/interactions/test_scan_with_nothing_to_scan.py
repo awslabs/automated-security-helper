@@ -36,6 +36,8 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.utils.helpers import importing_this_checkout
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
+pytestmark = pytest.mark.integration
+
 # The child's tool probes are answered first (CHILD_TOOL_PROBE_STUBS): it finds the
 # uv installed with ASH beside its interpreter whatever PATH it is given, and ran it,
 # which left uv's cache in the test's HOME.

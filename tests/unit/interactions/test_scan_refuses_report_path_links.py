@@ -33,9 +33,12 @@ import pytest
 
 from tests.utils.helpers import importing_this_checkout, results_of_a_scan
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+]
 
 MARKER = "TARGET-OF-A-LINK-IN-REPORTS-9d27"
 

@@ -32,6 +32,8 @@ from automated_security_helper.utils.subprocess_utils import create_completed_pr
 from tests.utils.host_file_names import skip_unless_the_host_can_name
 from tests.utils.windows_file_names import created_on_disk
 
+pytestmark = pytest.mark.unit
+
 #: Each character the mount syntax cannot carry, in a directory name. Windows cannot
 #: hold a double quote, a line feed or a carriage return in a name either, so the
 #: tests that make something under one skip there (tests/utils/host_file_names.py);

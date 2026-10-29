@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 from rich.console import Console
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -33,6 +34,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_rep
 from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
     TextReporter,
 )
+
+pytestmark = pytest.mark.unit
 
 ESCAPE = "\x1b[31mred\x1b[0m.zip"
 REVERSED = "invoice\u202egpj.zip"

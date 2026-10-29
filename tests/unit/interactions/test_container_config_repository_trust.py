@@ -44,6 +44,8 @@ from tests.utils.container_scan import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 FLAG = "--config-from-scanned-repository"
 #: A module no environment has: a config inside the tree may not add it.
 UNINSTALLED = "not_installed_ash_plugins"

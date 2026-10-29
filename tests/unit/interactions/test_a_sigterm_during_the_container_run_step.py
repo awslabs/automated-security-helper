@@ -40,9 +40,12 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.interactions import run_ash_container
 from automated_security_helper.utils import subprocess_utils
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt", reason="a signal raised at this process is POSIX"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        os.name == "nt", reason="a signal raised at this process is POSIX"
+    ),
+]
 
 
 @pytest.fixture

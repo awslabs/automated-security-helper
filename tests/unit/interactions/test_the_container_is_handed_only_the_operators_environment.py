@@ -93,6 +93,7 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
+@pytest.mark.unit
 def test_an_operator_files_variable_is_passed_by_name(layout, commands, monkeypatch):
     monkeypatch.setenv(OPERATOR_VAR, OPERATOR_VALUE)
     config = _write(layout["w"] / "ash.yaml", "project_name: ${" + OPERATOR_VAR + "}\n")
@@ -113,6 +114,7 @@ def test_an_operator_files_variable_is_passed_by_name(layout, commands, monkeypa
     assert not any(OPERATOR_VALUE in arg for arg in run), run
 
 
+@pytest.mark.unit
 def test_a_repository_written_bases_variable_is_not_passed(layout, monkeypatch):
     """The operator root's own variable is passed; the repository-written
     base's is not: the value would be read by a file the scanned repository
@@ -135,6 +137,7 @@ def test_a_repository_written_bases_variable_is_not_passed(layout, monkeypatch):
     assert names == [OPERATOR_VAR], names
 
 
+@pytest.mark.unit
 def test_an_operator_file_reading_an_ash_setting_is_refused(layout, monkeypatch):
     """A name ASH sets in the container or reads as its own setting is
     refused by name and field, never quoting the value."""
@@ -150,6 +153,7 @@ def test_an_operator_file_reading_an_ash_setting_is_refused(layout, monkeypatch)
 
 
 @pytest.mark.parametrize("name", ["HOME", "PATH"])
+@pytest.mark.unit
 def test_an_operator_file_reading_an_image_owned_name_is_refused(
     layout, monkeypatch, name
 ):
@@ -177,6 +181,7 @@ def test_an_operator_file_reading_an_image_owned_name_is_refused(
     assert "/host/value-7c1e" not in refusal, refusal
 
 
+@pytest.mark.unit
 def test_an_operators_own_tool_variable_is_still_passed_by_name(
     layout, commands, monkeypatch
 ):
@@ -189,12 +194,14 @@ def test_an_operators_own_tool_variable_is_still_passed_by_name(
     assert names == [OPERATOR_VAR], names
 
 
+@pytest.mark.unit
 def test_an_operators_own_tool_variable_is_in_neither_refusal_set():
     """The name the cell above passes is in neither refusal set."""
     assert OPERATOR_VAR not in rac.CONTAINER_IMAGE_OWNED_ENV
     assert OPERATOR_VAR not in rac.CONTAINER_ENV_NOT_PASSED
 
 
+@pytest.mark.unit
 def test_an_in_source_config_with_an_absolute_base_is_refused(layout):
     base = _write(layout["source"] / ".ash" / "base.yaml", "project_name: b\n")
     config = _write(
@@ -208,6 +215,7 @@ def test_an_in_source_config_with_an_absolute_base_is_refused(layout):
     assert "names a base by absolute path" in refusal, refusal
 
 
+@pytest.mark.unit
 def test_an_absolute_extends_refusal_shows_the_entry_as_written(layout, monkeypatch):
     """A refusal quotes an env-reading extends entry as the file wrote it.
 
@@ -232,6 +240,7 @@ def test_an_absolute_extends_refusal_shows_the_entry_as_written(layout, monkeypa
     assert str(ops) not in refusal, refusal
 
 
+@pytest.mark.unit
 def test_an_absolute_refusal_names_an_env_chosen_file_as_value(layout, monkeypatch):
     """A chain file reached through an env-reading entry is named ``<value>``.
 
@@ -279,6 +288,7 @@ def _operator_config_extending_an_env_chosen_file(layout, monkeypatch, mid_text)
     return sub, config
 
 
+@pytest.mark.unit
 def test_an_image_owned_name_refusal_names_an_env_chosen_file_as_value(
     layout, monkeypatch
 ):
@@ -309,6 +319,7 @@ def test_an_image_owned_name_refusal_names_an_env_chosen_file_as_value(
     assert sub not in refusal, refusal
 
 
+@pytest.mark.unit
 def test_an_ash_setting_refusal_names_an_env_chosen_file_as_value(layout, monkeypatch):
     """The same naming for a file that reads a name ASH reads as its own
     setting."""
@@ -333,6 +344,7 @@ def test_an_ash_setting_refusal_names_an_env_chosen_file_as_value(layout, monkey
     assert "handoff-scanner-value" not in refusal, refusal
 
 
+@pytest.mark.unit
 def test_an_unloadable_env_chosen_file_is_named_as_value_in_the_refusal(
     layout, monkeypatch
 ):
@@ -354,6 +366,7 @@ def test_an_unloadable_env_chosen_file_is_named_as_value_in_the_refusal(
     assert "parse" in refusal.lower(), refusal
 
 
+@pytest.mark.unit
 def test_an_env_value_naming_the_source_absolutely_is_not_printed(layout, monkeypatch):
     """An entry whose variable holds the source directory's absolute path is
     refused as any absolute base is, quoting the entry as written: the value
@@ -370,6 +383,7 @@ def test_an_env_value_naming_the_source_absolutely_is_not_printed(layout, monkey
     assert str(layout["source"]) not in refusal, refusal
 
 
+@pytest.mark.unit
 def test_a_base_inside_the_source_refusal_shows_no_env_value(layout, monkeypatch):
     """The base-inside-the-source refusal never prints an env-built path.
 
@@ -395,6 +409,7 @@ def test_a_base_inside_the_source_refusal_shows_no_env_value(layout, monkeypatch
     assert f"includes {ENVIRONMENT_VALUE_SHOWN}, which is inside it" in refusal, refusal
 
 
+@pytest.mark.unit
 def test_a_repository_reach_out_refusal_shows_no_env_value(layout, monkeypatch):
     """The repository-file-reaching-out refusal never prints an env-built path.
 
@@ -428,6 +443,7 @@ def test_a_repository_reach_out_refusal_shows_no_env_value(layout, monkeypatch):
     ) in refusal, refusal
 
 
+@pytest.mark.unit
 def test_ash_config_is_named_when_the_source_has_no_config(layout, monkeypatch):
     env_config = _write(layout["w"] / "env" / "ash-env.yaml", "project_name: e\n")
     monkeypatch.setenv("ASH_CONFIG", str(env_config))
@@ -436,6 +452,7 @@ def test_ash_config_is_named_when_the_source_has_no_config(layout, monkeypatch):
     assert ras._ash_config_fallback(layout["source"]) == str(env_config)
 
 
+@pytest.mark.unit
 def test_ash_config_is_not_named_over_the_sources_own_config(layout, monkeypatch):
     """The scan inside would read the operator's file instead of the
     repository's own discovered config."""
@@ -447,6 +464,7 @@ def test_ash_config_is_not_named_over_the_sources_own_config(layout, monkeypatch
     assert ras._ash_config_fallback(layout["source"]) is None
 
 
+@pytest.mark.unit
 def test_a_discoverable_source_config_wins_over_ash_config_in_the_container(
     layout, commands, monkeypatch
 ):
@@ -532,6 +550,7 @@ def _value_after(arguments: List[str], flag: str):
     return values[0] if values else None
 
 
+@pytest.mark.unit
 def test_a_workspace_scan_names_ash_config_whatever_the_workspace_root_holds(
     layout, monkeypatch
 ):
@@ -578,6 +597,7 @@ def _discoverable_source_with_an_env_config(layout, monkeypatch) -> Path:
     return env_config
 
 
+@pytest.mark.unit
 def test_the_command_of_a_workspace_scan_never_asks_the_rule(layout, monkeypatch):
     """The workspace gate comes first at the command's call site: a workspace
     scan names the mounted file without the rule being asked at all, and a scan
@@ -602,6 +622,7 @@ def test_the_command_of_a_workspace_scan_never_asks_the_rule(layout, monkeypatch
     assert len(asked) == 1, asked
 
 
+@pytest.mark.unit
 def test_the_pre_flight_of_a_workspace_scan_never_asks_the_rule(layout, monkeypatch):
     """The same gate at the pre-flight, which decides ahead of the build for the
     command to carry: nothing is decided for a workspace scan, and the same
@@ -630,6 +651,7 @@ def test_the_pre_flight_of_a_workspace_scan_never_asks_the_rule(layout, monkeypa
     assert len(asked) == 1, asked
 
 
+@pytest.mark.unit
 def test_a_one_directory_answer_in_the_record_does_not_reach_a_workspace_command(
     layout, monkeypatch
 ):
@@ -658,6 +680,7 @@ def test_a_one_directory_answer_in_the_record_does_not_reach_a_workspace_command
     assert named is not None and _value_after(workspace, "--config") == named
 
 
+@pytest.mark.unit
 def test_a_workspace_pre_flight_leaves_no_answer_for_a_one_directory_command(
     layout, monkeypatch
 ):
@@ -682,6 +705,7 @@ def test_a_workspace_pre_flight_leaves_no_answer_for_a_one_directory_command(
     assert _value_after(one_directory, rac.ASH_CONFIG_FROM_HOST_FLAG) is not None
 
 
+@pytest.mark.unit
 def test_the_pre_flight_of_a_scan_that_names_its_config_never_asks_the_rule(
     layout, monkeypatch
 ):
@@ -708,6 +732,7 @@ def test_the_pre_flight_of_a_scan_that_names_its_config_never_asks_the_rule(
     assert len(asked) == 1, asked
 
 
+@pytest.mark.unit
 def test_a_scan_that_names_its_config_logs_nothing_about_files_discovery_would_read(
     layout, monkeypatch, caplog
 ):
@@ -803,6 +828,7 @@ def _discovery_layouts():
 
 
 @pytest.mark.parametrize(("populate", "env_config_is_the_config"), _discovery_layouts())
+@pytest.mark.unit
 def test_the_rule_and_the_parse_check_agree_on_what_discovery_finds(
     populate, env_config_is_the_config, layout
 ):
@@ -823,6 +849,7 @@ def test_the_rule_and_the_parse_check_agree_on_what_discovery_finds(
     assert (parsed is None) is env_config_is_the_config, parsed
 
 
+@pytest.mark.unit
 def test_the_rule_asks_the_same_discovery_call_as_the_parse_check(layout, monkeypatch):
     """One call decides both: a stand-in for ``find_config_file`` that finds a
     file makes the rule answer False, one that fails leaves the error to the scan
@@ -855,6 +882,7 @@ def _unparsable_source_config(source: Path) -> None:
     _write(source / "pyproject.toml", "[tool.ash]\nproject_name = = broken\n")
 
 
+@pytest.mark.unit
 def test_a_discovery_error_never_promotes_ash_config_on_the_host(layout, monkeypatch):
     """A source directory whose config discovery raises is not one that has no
     config: ASH_CONFIG is not named as the scan's config, and the error is left
@@ -873,6 +901,7 @@ def test_a_discovery_error_never_promotes_ash_config_on_the_host(layout, monkeyp
     assert ras._ash_config_fallback(layout["source"]) is None
 
 
+@pytest.mark.unit
 def test_a_discovery_error_never_names_ash_config_in_the_container(
     layout, commands, monkeypatch
 ):
@@ -896,6 +925,7 @@ def test_a_discovery_error_never_names_ash_config_in_the_container(
     assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG not in run, run
 
 
+@pytest.mark.unit
 def test_ash_config_is_named_in_the_container_when_the_source_has_no_config(
     layout, commands, monkeypatch
 ):
@@ -919,6 +949,7 @@ def test_ash_config_is_named_in_the_container_when_the_source_has_no_config(
     assert ("--ash-config-from-host", "/ash-env-config/ash-env.yaml") in pairs, run
 
 
+@pytest.mark.unit
 def test_a_runtime_name_in_a_data_field_is_not_read_and_not_passed(layout):
     """The loader reads only its own allowlist into a config (names beginning
     with ASH_, plus AWS_DEFAULT_REGION, AWS_PROFILE and AWS_REGION): a field
@@ -931,6 +962,7 @@ def test_a_runtime_name_in_a_data_field_is_not_read_and_not_passed(layout):
     assert names == []
 
 
+@pytest.mark.unit
 def test_a_runtime_name_in_extends_refuses_the_scan(layout):
     """An extends entry spelling ${PATH} does not resolve, because the loader
     does not read that name: the scan is refused with the entry named, rather
@@ -941,6 +973,7 @@ def test_a_runtime_name_in_extends_refuses_the_scan(layout):
         rac.operator_environment_names(str(config), None, layout["source"])
 
 
+@pytest.mark.unit
 def test_the_chain_is_placed_where_the_extending_file_names_each_base(layout):
     """Each base is mounted at the entry as written, relative to the extending
     file's container path, with its content from where the host resolves it."""
@@ -961,6 +994,7 @@ def test_the_chain_is_placed_where_the_extending_file_names_each_base(layout):
     ]
 
 
+@pytest.mark.unit
 def test_a_chain_entry_leaving_the_mount_root_is_refused(layout):
     """An entry whose container path would sit outside the mount root is
     refused before anything is mounted, naming the entry."""
@@ -974,6 +1008,7 @@ def test_a_chain_entry_leaving_the_mount_root_is_refused(layout):
         )
 
 
+@pytest.mark.unit
 def test_a_repository_file_extending_outside_the_checkout_is_refused(layout):
     """A chain file inside the scanned checkout may extend only files inside
     it; one reaching out is refused with both files named. A base inside the
@@ -1035,6 +1070,7 @@ def _debug_scan_output(layout, monkeypatch, config: Path) -> str:
     return text
 
 
+@pytest.mark.unit
 def test_the_debug_echo_hides_env_chosen_mount_sources(layout, commands, monkeypatch):
     """The --debug echo of the container command never prints an env value.
 
@@ -1052,6 +1088,7 @@ def test_the_debug_echo_hides_env_chosen_mount_sources(layout, commands, monkeyp
     assert value not in text, [line for line in text.splitlines() if value in line][:3]
 
 
+@pytest.mark.unit
 def test_the_debug_echo_prints_a_literal_chain_as_written(
     layout, commands, monkeypatch
 ):
@@ -1065,6 +1102,7 @@ def test_the_debug_echo_prints_a_literal_chain_as_written(
     assert "team/base.yaml" in text, text[-2000:]
 
 
+@pytest.mark.unit
 def test_an_unmountable_env_chosen_container_path_shows_no_value(layout, monkeypatch):
     """The container-path refusal names an env-built path as the chain views do.
 
@@ -1111,6 +1149,7 @@ def _one_base_at_two_container_paths(layout, monkeypatch, link_name: str) -> Pat
     )
 
 
+@pytest.mark.unit
 def test_one_base_reached_by_a_link_and_by_its_path_is_mounted_at_both_places(
     layout, commands, monkeypatch
 ):
@@ -1148,6 +1187,7 @@ def test_one_base_reached_by_a_link_and_by_its_path_is_mounted_at_both_places(
         assert any(f"destination={destination},readonly" in arg for arg in run), run
 
 
+@pytest.mark.unit
 def test_a_container_path_through_an_env_entry_is_refused_without_the_value(
     layout, commands, monkeypatch
 ):
@@ -1245,6 +1285,7 @@ def _base_reached_literally_and_through_the_environment(
 
 @pytest.mark.parametrize("env_first", [True, False])
 @pytest.mark.parametrize("shape_name", sorted(_BASE_TWICE_SHAPES))
+@pytest.mark.unit
 def test_the_chain_names_a_file_and_its_container_paths_by_every_way_they_are_reached(
     layout, monkeypatch, shape_name, env_first
 ):
@@ -1281,6 +1322,7 @@ def test_the_chain_names_a_file_and_its_container_paths_by_every_way_they_are_re
 
 @pytest.mark.parametrize("env_first", [True, False])
 @pytest.mark.parametrize("shape_name", sorted(_BASE_TWICE_SHAPES))
+@pytest.mark.unit
 def test_an_unmountable_base_reached_both_ways_is_refused_without_the_value(
     layout, monkeypatch, shape_name, env_first
 ):
@@ -1330,6 +1372,7 @@ def _base_with_its_own_entry_reached_both_ways(
 
 
 @pytest.mark.parametrize("env_first", [True, False])
+@pytest.mark.unit
 def test_a_file_below_a_base_reached_both_ways_is_named_by_the_entry_that_reached_the_base(
     layout, monkeypatch, env_first
 ):
@@ -1366,6 +1409,7 @@ def test_a_file_below_a_base_reached_both_ways_is_named_by_the_entry_that_reache
 
 
 @pytest.mark.parametrize("env_first", [True, False])
+@pytest.mark.unit
 def test_an_unmountable_file_below_a_base_reached_both_ways_is_refused_without_the_value(
     layout, monkeypatch, env_first
 ):
@@ -1391,6 +1435,7 @@ def test_an_unmountable_file_below_a_base_reached_both_ways_is_refused_without_t
 
 
 @pytest.mark.parametrize("env_first", [True, False])
+@pytest.mark.unit
 def test_a_base_leaving_the_mount_root_below_a_base_reached_both_ways_is_refused_without_the_value(
     layout, monkeypatch, env_first
 ):
@@ -1413,6 +1458,7 @@ def test_a_base_leaving_the_mount_root_below_a_base_reached_both_ways_is_refused
 
 
 @pytest.mark.parametrize("env_first", [True, False])
+@pytest.mark.unit
 def test_an_absolute_entry_in_a_base_reached_both_ways_is_refused_without_the_value(
     layout, monkeypatch, env_first
 ):
@@ -1432,6 +1478,7 @@ def test_an_absolute_entry_in_a_base_reached_both_ways_is_refused_without_the_va
     assert _ENV_DIRECTORY not in text, text
 
 
+@pytest.mark.unit
 def test_a_chain_of_literal_entries_is_named_as_written(layout):
     """Control: with no entry reading the environment, every file and container
     path is named as written, so the marker never widens past what the
@@ -1459,6 +1506,7 @@ def test_a_chain_of_literal_entries_is_named_as_written(layout):
     }
 
 
+@pytest.mark.unit
 def test_an_unmountable_env_chosen_file_path_shows_no_value(layout, monkeypatch):
     """The config-file refusal names an env-chosen chain file as the views do:
     its host path holds the variable's value as a segment."""
@@ -1481,6 +1529,7 @@ def test_an_unmountable_env_chosen_file_path_shows_no_value(layout, monkeypatch)
     )
 
 
+@pytest.mark.unit
 def test_an_unmountable_literal_path_is_still_named_as_written(layout):
     """Control: a literal chain entry's refusal names the path as written, so
     the masking never widens past what the environment chose."""
@@ -1494,6 +1543,7 @@ def test_an_unmountable_literal_path_is_still_named_as_written(layout):
     assert "te,am" in refusal, refusal
 
 
+@pytest.mark.unit
 def test_an_unresolved_chain_debug_line_shows_no_value(layout, monkeypatch):
     """The mounted-alone debug line renders the failure without env values.
 
@@ -1543,6 +1593,7 @@ def test_an_unresolved_chain_debug_line_shows_no_value(layout, monkeypatch):
     assert len(files) == 1 and plan.document is None  # the file is mounted alone
 
 
+@pytest.mark.unit
 def test_the_env_file_holds_the_values_and_only_this_user_reads_it(layout, monkeypatch):
     """_write_env_file writes NAME=value lines into a mode-0600 file in a new
     mode-0700 directory outside the source and output directories; a runner
@@ -1590,6 +1641,7 @@ def test_the_env_file_holds_the_values_and_only_this_user_reads_it(layout, monke
 EMPTY_VAR = "ASH_HANDOFF_CELL_EMPTY_VALUE"
 
 
+@pytest.mark.unit
 def test_an_entry_that_resolves_to_nothing_is_refused_as_the_scan_inside_refuses_it(
     layout, monkeypatch
 ):
@@ -1610,6 +1662,7 @@ def test_an_entry_that_resolves_to_nothing_is_refused_as_the_scan_inside_refuses
         rac._extends_refs_shown(config)
 
 
+@pytest.mark.unit
 def test_the_naming_walk_stays_best_effort_over_a_refused_chain(layout, monkeypatch):
     """The files-reached walk only supplies names for refusal messages, so a
     chain whose entries refuse ends that walk quietly and names nothing; the
@@ -1629,6 +1682,7 @@ def test_the_naming_walk_stays_best_effort_over_a_refused_chain(layout, monkeypa
     assert rac._files_reached_through_environment(config) == frozenset()
 
 
+@pytest.mark.unit
 def test_a_streamed_line_keeps_a_bare_common_word_matching_a_short_value():
     """The streamed output is the operator's scan report: a bare word equal
     to a short carried value prints as the child wrote it, while the line
@@ -1641,6 +1695,7 @@ def test_a_streamed_line_keeps_a_bare_common_word_matching_a_short_value():
     assert "'HIGH'" not in out, out
 
 
+@pytest.mark.unit
 def test_a_streamed_line_hides_a_long_carried_value_anywhere():
     """The must-flag twin: a value long enough to be matched anywhere stays
     hidden wherever the child prints it."""
@@ -1653,6 +1708,7 @@ def test_a_streamed_line_hides_a_long_carried_value_anywhere():
     assert value not in out, out
 
 
+@pytest.mark.unit
 def test_recorded_text_keeps_its_bands_for_everything_but_the_stream():
     """The loosened band is the stream's own: error text and recorded
     messages keep hiding a short carried value as a whole word."""
@@ -1663,6 +1719,7 @@ def test_recorded_text_keeps_its_bands_for_everything_but_the_stream():
     assert "HIGH" not in out, out
 
 
+@pytest.mark.unit
 def test_a_json_extends_entry_keeps_its_reference_literal(layout, monkeypatch):
     """JSON is never interpolated by the loader, so a reference-shaped entry
     in a JSON config names a literal path, exactly as the scan inside will
@@ -1677,6 +1734,7 @@ def test_a_json_extends_entry_keeps_its_reference_literal(layout, monkeypatch):
     assert rac._extends_refs_shown(config) == [(reference, reference, False)]
 
 
+@pytest.mark.unit
 def test_a_quoted_yaml_extends_entry_keeps_its_reference_literal(layout, monkeypatch):
     """A quoted scalar is the documented way to keep a reference literal, and
     the loader honors it; the host follows the quoted text as the scan inside
@@ -1691,6 +1749,7 @@ def test_a_quoted_yaml_extends_entry_keeps_its_reference_literal(layout, monkeyp
     assert rac._extends_refs_shown(config) == [(reference, reference, False)]
 
 
+@pytest.mark.unit
 def test_each_extends_entry_is_classified_by_its_own_text(layout, monkeypatch):
     """Control: an entry that reads a variable is resolved, quoted as written
     and marked as reading the environment; the literal entry beside it is
@@ -1712,6 +1771,7 @@ def test_each_extends_entry_is_classified_by_its_own_text(layout, monkeypatch):
     }
 
 
+@pytest.mark.unit
 def test_a_chain_file_is_read_once_while_one_check_walks_the_chain(layout):
     """Within one decorated call a file's entries are read once, so a change
     made meanwhile is not seen; outside one, each ask reads the file."""
@@ -1730,6 +1790,7 @@ def test_a_chain_file_is_read_once_while_one_check_walks_the_chain(layout):
     assert rac._extends_refs_shown(config) == [("b.yaml", "b.yaml", False)]
 
 
+@pytest.mark.unit
 def test_every_name_a_config_may_read_has_its_value_hidden(monkeypatch):
     """The values hidden in a failure's text come from the same name rule the
     loader resolves references by: one ``ASH_`` variable and the three
@@ -1749,6 +1810,7 @@ def test_every_name_a_config_may_read_has_its_value_hidden(monkeypatch):
     assert "outside-the-rule-value" not in hidden
 
 
+@pytest.mark.unit
 def test_the_checks_sharing_one_record_see_one_read_across_calls(layout):
     """Two decorated calls that carry the scan's record judge the same
     entries: a file changed between the pre-run check and the mount assembly
@@ -1771,6 +1833,7 @@ def test_the_checks_sharing_one_record_see_one_read_across_calls(layout):
     assert ask(reads=rac.OperatorConfigReads()) == [("b.yaml", "b.yaml", False)]
 
 
+@pytest.mark.unit
 def test_the_checks_sharing_a_positional_record_see_one_read(layout):
     """The decorator finds the record among positional arguments too, so a
     caller that passes it positionally shares the same one read."""
@@ -1793,6 +1856,7 @@ def test_the_checks_sharing_a_positional_record_see_one_read(layout):
 KEY_VAR = "ASH_HANDOFF_CELL_KEY_SPELLING"
 
 
+@pytest.mark.unit
 def test_a_single_scalar_entry_resolving_to_nothing_is_no_extends(layout, monkeypatch):
     """A reference-only scalar whose variable is empty resolves to no extends,
     and the stock loader runs with no base; the host follows the stock
@@ -1810,6 +1874,7 @@ def test_a_single_scalar_entry_resolving_to_nothing_is_no_extends(layout, monkey
     assert refusal is None, refusal
 
 
+@pytest.mark.unit
 def test_an_empty_valued_extends_reference_to_a_name_the_container_sets_is_refused(
     layout, monkeypatch
 ):
@@ -1832,6 +1897,7 @@ def test_an_empty_valued_extends_reference_to_a_name_the_container_sets_is_refus
 BASE_VAR = "ASH_HANDOFF_CELL_BASE_NAME"
 
 
+@pytest.mark.unit
 def test_a_key_the_environment_spells_is_followed_as_the_loader_follows_it(
     layout, monkeypatch
 ):
@@ -1854,6 +1920,7 @@ def test_a_key_the_environment_spells_is_followed_as_the_loader_follows_it(
     ]
 
 
+@pytest.mark.unit
 def test_a_key_spelled_as_another_name_leaves_the_written_extends_entry_alone(
     layout, monkeypatch
 ):
@@ -1875,6 +1942,7 @@ def test_a_key_spelled_as_another_name_leaves_the_written_extends_entry_alone(
     assert names == sorted([KEY_VAR, BASE_VAR]), names
 
 
+@pytest.mark.unit
 def test_a_written_extends_after_a_key_spelled_as_extends_keeps_its_variable(
     layout, monkeypatch
 ):
@@ -1899,6 +1967,7 @@ def test_a_written_extends_after_a_key_spelled_as_extends_keeps_its_variable(
     assert names == sorted([KEY_VAR, BASE_VAR]), names
 
 
+@pytest.mark.unit
 def test_a_replaced_key_spelled_as_a_name_the_container_sets_is_refused(
     layout, monkeypatch
 ):
@@ -1920,6 +1989,7 @@ def test_a_replaced_key_spelled_as_a_name_the_container_sets_is_refused(
     assert isinstance(refusal, str) and "ASH_OFFLINE" in refusal, refusal
 
 
+@pytest.mark.unit
 def test_a_key_spelled_as_extends_after_the_written_entry_is_the_one_followed(
     layout, monkeypatch
 ):
@@ -1945,6 +2015,7 @@ def test_a_key_spelled_as_extends_after_the_written_entry_is_the_one_followed(
     assert names == sorted([KEY_VAR, BASE_VAR]), names
 
 
+@pytest.mark.unit
 def test_a_key_spelled_as_another_name_after_the_written_extends_leaves_it_alone(
     layout, monkeypatch
 ):
@@ -1966,6 +2037,7 @@ def test_a_key_spelled_as_another_name_after_the_written_extends_leaves_it_alone
     assert names == sorted([KEY_VAR, BASE_VAR]), names
 
 
+@pytest.mark.unit
 def test_an_extends_variable_with_a_default_is_handed_over_beside_a_spelled_key(
     layout, monkeypatch
 ):
@@ -1986,6 +2058,7 @@ def test_an_extends_variable_with_a_default_is_handed_over_beside_a_spelled_key(
     assert BASE_VAR in names, names
 
 
+@pytest.mark.unit
 def test_an_extends_variable_the_container_sets_is_refused_beside_a_spelled_key(
     layout, monkeypatch
 ):
@@ -2004,6 +2077,7 @@ def test_an_extends_variable_the_container_sets_is_refused_beside_a_spelled_key(
 
 
 @pytest.mark.parametrize("empty_value", ["", "  "])
+@pytest.mark.unit
 def test_a_key_reference_to_a_set_but_empty_variable_refuses_the_container_scan(
     layout, monkeypatch, empty_value
 ):
@@ -2040,6 +2114,7 @@ def test_a_key_reference_to_a_set_but_empty_variable_refuses_the_container_scan(
     assert KEY_VAR in refusal, refusal
 
 
+@pytest.mark.unit
 def test_an_empty_valued_key_spelling_a_name_the_container_sets_is_refused(
     layout, monkeypatch
 ):
@@ -2066,6 +2141,7 @@ def test_an_empty_valued_key_spelling_a_name_the_container_sets_is_refused(
     assert "ASH_OFFLINE" in refusal, refusal
 
 
+@pytest.mark.unit
 def test_an_unset_key_reference_with_a_default_reads_nothing_and_is_not_named(
     layout, monkeypatch
 ):
@@ -2085,6 +2161,7 @@ def test_an_unset_key_reference_with_a_default_reads_nothing_and_is_not_named(
     assert names == [BASE_VAR], names
 
 
+@pytest.mark.unit
 def test_the_empty_valued_key_refusal_shows_no_value_the_chain_read(
     layout, monkeypatch, caplog
 ):
@@ -2117,6 +2194,7 @@ def test_the_empty_valued_key_refusal_shows_no_value_the_chain_read(
     assert planted_value not in caplog.text, caplog.text
 
 
+@pytest.mark.unit
 def test_a_refused_entry_in_an_env_chosen_file_names_it_as_value(layout, monkeypatch):
     """The stock refusal of a chain entry that is no path, raised for a file
     the environment chose, names that file as the chain views name one: its
@@ -2136,6 +2214,7 @@ def test_a_refused_entry_in_an_env_chosen_file_names_it_as_value(layout, monkeyp
     assert sub not in refusal, refusal
 
 
+@pytest.mark.unit
 def test_a_refused_entry_names_the_file_the_walk_gave(layout, monkeypatch):
     """The unit of the same rule: the stock refusal names the file as the
     caller shows it, so a walk that hands ``ENVIRONMENT_VALUE_SHOWN`` gets a
@@ -2154,6 +2233,7 @@ def test_a_refused_entry_names_the_file_the_walk_gave(layout, monkeypatch):
     assert str(config) not in str(raised.value), raised.value
 
 
+@pytest.mark.unit
 def test_a_tagged_entry_resolves_and_quotes_its_written_reference(layout, monkeypatch):
     """An explicit ``!ENV`` tag resolves like a plain reference, and the
     written form a message may quote is the reference without the tag."""
@@ -2166,6 +2246,7 @@ def test_a_tagged_entry_resolves_and_quotes_its_written_reference(layout, monkey
     ]
 
 
+@pytest.mark.unit
 def test_a_json_entry_spelling_the_tag_bytes_is_literal_text(layout, monkeypatch):
     """JSON has no tags: an entry whose text starts with the tag's bytes is a
     literal path spelling, followed and quoted as written, reading nothing."""
@@ -2179,6 +2260,7 @@ def test_a_json_entry_spelling_the_tag_bytes_is_literal_text(layout, monkeypatch
     assert rac._extends_refs_shown(config) == [(reference, reference, False)]
 
 
+@pytest.mark.unit
 def test_a_quoted_yaml_entry_spelling_the_tag_bytes_is_literal_text(
     layout, monkeypatch
 ):
@@ -2191,6 +2273,7 @@ def test_a_quoted_yaml_entry_spelling_the_tag_bytes_is_literal_text(
     assert rac._extends_refs_shown(config) == [(reference, reference, False)]
 
 
+@pytest.mark.unit
 def test_a_streamed_line_hides_a_bare_long_plain_value_by_length():
     """The length floor alone hides a letters-and-digits value of the
     anywhere band's length: no punctuation earns it the band, and the floor
@@ -2208,6 +2291,7 @@ def test_a_streamed_line_hides_a_bare_long_plain_value_by_length():
     assert value not in glued, glued
 
 
+@pytest.mark.unit
 def test_a_streamed_line_hides_a_short_secret_named_value_everywhere():
     """A value carried on the strict carrier has no bare-word exemption: a
     six-character token is hidden wherever the line holds it."""
@@ -2220,6 +2304,7 @@ def test_a_streamed_line_hides_a_short_secret_named_value_everywhere():
     assert value not in out, out
 
 
+@pytest.mark.unit
 def test_secret_shaped_names_are_split_to_the_strict_carrier(monkeypatch):
     """The run's carried values split by name shape: a secret-shaped name's
     value rides the strict carrier beside the plain one."""
@@ -2234,6 +2319,7 @@ def test_secret_shaped_names_are_split_to_the_strict_carrier(monkeypatch):
     assert strict == ("k9Zq2x",), strict
 
 
+@pytest.mark.unit
 def test_a_stream_that_is_not_the_scan_report_keeps_the_strict_band():
     """The image build's stream has no report words to keep: every carried
     value keeps the strict band there."""
@@ -2242,6 +2328,7 @@ def test_a_stream_that_is_not_the_scan_report_keeps_the_strict_band():
     assert "HIGH" not in out, out
 
 
+@pytest.mark.unit
 def test_a_streamed_line_without_the_scan_report_flag_keeps_the_strict_band():
     """A caller that forgets the flag gets the band the carrier defaults to,
     not the looser one: a bare short value is hidden."""
@@ -2267,6 +2354,7 @@ def test_a_streamed_line_without_the_scan_report_flag_keeps_the_strict_band():
         "ash_report_token",
     ],
 )
+@pytest.mark.unit
 def test_names_that_spell_a_secret_by_plural_or_abbreviation_are_strict(
     monkeypatch, name
 ):
@@ -2282,6 +2370,7 @@ def test_names_that_spell_a_secret_by_plural_or_abbreviation_are_strict(
 @pytest.mark.parametrize(
     "name", ["ASH_REPORT_REGION", "ASH_REPORT_PROFILE", "ASH_REPORT_BUCKET"]
 )
+@pytest.mark.unit
 def test_names_that_say_where_to_send_a_report_stay_loose(monkeypatch, name):
     """The must-not twin: a destination name is not secret-shaped."""
     monkeypatch.setenv(name, "eu-west-1")
@@ -2292,6 +2381,7 @@ def test_names_that_say_where_to_send_a_report_stay_loose(monkeypatch, name):
     assert strict == (), strict
 
 
+@pytest.mark.integration
 def test_the_build_stream_hides_a_bare_short_value(capsys):
     """The wiring: a stream run without ``scan_report_stream`` is not the
     scan's report, so a bare short carried value stays hidden in it."""
@@ -2307,6 +2397,7 @@ def test_the_build_stream_hides_a_bare_short_value(capsys):
     assert "HIGH" not in capsys.readouterr().out
 
 
+@pytest.mark.integration
 def test_the_scan_report_stream_keeps_a_bare_short_value(capsys):
     """The twin: the scan's own report stream keeps the bare word. The scan
     run's spawn carrier marks it (``_spawn_values(scan_report=True)``)."""
@@ -2326,6 +2417,7 @@ def test_the_scan_report_stream_keeps_a_bare_short_value(capsys):
 _MOUNT_FAILURE = "invalid mount config: source=/ops/HIGH/base.yaml"
 
 
+@pytest.mark.integration
 def test_the_runtimes_stderr_hides_a_bare_short_value_in_the_scan_report_run(capsys):
     """The scan's run marks its stream as the report, but the runtime's own
     stderr is not the report: a mount failure can quote a carried value as a
@@ -2347,6 +2439,7 @@ def test_the_runtimes_stderr_hides_a_bare_short_value_in_the_scan_report_run(cap
     assert "HIGH" not in capsys.readouterr().err
 
 
+@pytest.mark.integration
 def test_the_scan_report_run_keeps_the_same_bare_word_on_stdout(capsys):
     """The must-not twin: the same line on stdout is the report's own words
     and prints as the child wrote it."""
@@ -2363,6 +2456,7 @@ def test_the_scan_report_run_keeps_the_same_bare_word_on_stdout(capsys):
     assert "/ops/HIGH/base.yaml" in capsys.readouterr().out
 
 
+@pytest.mark.unit
 def test_the_stream_bands_follow_the_one_secret_name_rule(monkeypatch):
     """The names that take the strict band are the suffixes
     ``core.constants`` lists, read when the run's values are split: changing
@@ -2381,6 +2475,7 @@ def test_the_stream_bands_follow_the_one_secret_name_rule(monkeypatch):
     assert after == ("m4Wp8y",), after
 
 
+@pytest.mark.unit
 def test_no_name_a_config_may_read_by_allowlist_is_secret_shaped():
     """The allowlisted names say where to send a report, never what to
     authenticate with."""
@@ -2409,6 +2504,7 @@ def test_no_name_a_config_may_read_by_allowlist_is_secret_shaped():
         "ash_api_key_prod",
     ],
 )
+@pytest.mark.unit
 def test_a_secret_word_in_a_whole_segment_makes_a_name_secret_shaped(name):
     from automated_security_helper.core import constants
 
@@ -2430,6 +2526,7 @@ def test_a_secret_word_in_a_whole_segment_makes_a_name_secret_shaped(name):
         "_",
     ],
 )
+@pytest.mark.unit
 def test_a_denylisted_last_segment_or_an_unrelated_name_is_not_secret_shaped(
     name,
 ):
@@ -2438,6 +2535,7 @@ def test_a_denylisted_last_segment_or_an_unrelated_name_is_not_secret_shaped(
     assert not constants.is_secret_shaped_environment_name(name), name
 
 
+@pytest.mark.unit
 def test_a_multi_segment_entry_matches_only_as_a_contiguous_run(monkeypatch):
     """An entry spelled with a separator matches its segments in order and
     adjacent, anywhere in the name, and not with another segment between."""
@@ -2452,6 +2550,7 @@ def test_a_multi_segment_entry_matches_only_as_a_contiguous_run(monkeypatch):
     assert not constants.is_secret_shaped_environment_name("ASH_KEY_SIGNING")
 
 
+@pytest.mark.unit
 def test_a_qualified_secret_name_rides_the_strict_carrier(monkeypatch):
     """The streamed report's strict band follows the name rule end to end: a
     short value read from a name with a trailing qualifier is hidden as a whole
@@ -2485,6 +2584,7 @@ def _report_line_for(monkeypatch, name, value, line):
         "ASH_SSH_PASSPHRASES",
     ],
 )
+@pytest.mark.unit
 def test_a_short_secret_from_a_qualified_or_plural_name_never_prints_in_the_report(
     monkeypatch, name
 ):
@@ -2502,6 +2602,7 @@ def test_a_short_secret_from_a_qualified_or_plural_name_never_prints_in_the_repo
     "name",
     ["ASH_REPORT_AUTHS", "ASH_GATE_PASSES", "ASH_DB_PASSWDS", "ASH_DB_PWDS"],
 )
+@pytest.mark.unit
 def test_a_plural_spelling_of_any_listed_suffix_rides_the_strict_band(
     monkeypatch, name
 ):
@@ -2526,6 +2627,7 @@ def test_a_plural_spelling_of_any_listed_suffix_rides_the_strict_band(
         ),
     ],
 )
+@pytest.mark.unit
 def test_a_flag_or_limit_value_prints_bare_in_the_report_and_hides_only_quoted(
     monkeypatch, name, value, line
 ):
@@ -2540,6 +2642,7 @@ def test_a_flag_or_limit_value_prints_bare_in_the_report_and_hides_only_quoted(
     assert f"'{value}'" not in out, (name, out)
 
 
+@pytest.mark.unit
 def test_a_qualified_secret_stays_hidden_beside_the_freed_flag_names(monkeypatch):
     """The must-flag pair bounding the exemption above: the qualifier
     protection holds (a qualified key name's short value is hidden) and a
@@ -2562,6 +2665,7 @@ def test_a_qualified_secret_stays_hidden_beside_the_freed_flag_names(monkeypatch
     "name",
     ["ASH_BYPASSES", "ASH_COMPASSES", "ASH_COMPATS", "ASH_OLDPWDS", "ASH_BYPASS2"],
 )
+@pytest.mark.unit
 def test_a_denylisted_segments_plural_or_digit_spelling_stays_loose(monkeypatch, name):
     """The denylist interaction: the plural or digit-qualified spelling of a
     denylisted segment is no more secret-shaped than the segment itself, so
@@ -2593,6 +2697,7 @@ _PLAIN_SUFFIXES = (
 _DENYLIST = ("COMPAT", "BYPASS", "COMPASS", "OLDPWD")
 
 
+@pytest.mark.unit
 def test_the_suffix_list_still_holds_every_plain_suffix():
     from automated_security_helper.core import constants
 
@@ -2601,6 +2706,7 @@ def test_the_suffix_list_still_holds_every_plain_suffix():
 
 
 @pytest.mark.parametrize("suffix", _PLAIN_SUFFIXES)
+@pytest.mark.unit
 def test_every_plain_suffix_reads_strict_bare_separated_and_qualified(suffix):
     from automated_security_helper.core import constants
 
@@ -2613,6 +2719,7 @@ def test_every_plain_suffix_reads_strict_bare_separated_and_qualified(suffix):
 
 
 @pytest.mark.parametrize("suffix", _PLAIN_SUFFIXES)
+@pytest.mark.unit
 def test_every_plain_suffix_reads_strict_glued(suffix):
     from automated_security_helper.core import constants
 
@@ -2644,12 +2751,14 @@ def test_every_plain_suffix_reads_strict_glued(suffix):
         "MYSQL_PWD",
     ],
 )
+@pytest.mark.unit
 def test_a_glued_or_real_secret_name_is_secret_shaped(name):
     from automated_security_helper.core import constants
 
     assert constants.is_secret_shaped_environment_name(name), name
 
 
+@pytest.mark.unit
 def test_the_denylisted_segments_are_the_only_names_the_plain_test_matched_and_this_does_not():
     """Over a corpus, every name a plain ends-with test over the plain suffix
     list matched and the matcher does not is listed here, and each one is a
@@ -2730,6 +2839,7 @@ def _standing_below_a_checkout_link(layout, monkeypatch):
     return standing
 
 
+@pytest.mark.unit
 def test_a_relative_name_is_judged_from_the_directory_the_shell_names(
     layout, monkeypatch
 ):
@@ -2747,6 +2857,7 @@ def test_a_relative_name_is_judged_from_the_directory_the_shell_names(
     assert "is inside the scanned tree but is a link" in str(refused.value)
 
 
+@pytest.mark.unit
 def test_a_relative_name_is_judged_from_the_physical_directory_alone_without_pwd(
     layout, monkeypatch
 ):

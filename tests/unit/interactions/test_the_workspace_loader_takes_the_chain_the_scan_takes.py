@@ -23,6 +23,8 @@ from automated_security_helper.core.exceptions import (
 from automated_security_helper.interactions import run_ash_scan
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 _REFUSED = (ASHConfigSourceError, ASHConfigValidationError)
 
 

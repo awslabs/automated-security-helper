@@ -59,6 +59,7 @@ def _passed_env(run_argv: list[str], image: str) -> list[str]:
 
 
 @pytest.mark.parametrize("name, value", RUNNERS)
+@pytest.mark.unit
 def test_a_terminal_run_under_a_runner_passes_its_variable_in(
     tmp_path, monkeypatch, name, value
 ):
@@ -74,6 +75,7 @@ def test_a_terminal_run_under_a_runner_passes_its_variable_in(
     assert name in _passed_env(cmd, "ash:test"), cmd
 
 
+@pytest.mark.unit
 def test_without_a_runner_variable_none_is_passed(tmp_path, monkeypatch):
     for name in RUNNER_NAMES:
         monkeypatch.delenv(name, raising=False)
@@ -134,6 +136,7 @@ def _ash_run_argv(tmp_path: Path, env: dict[str, str]) -> list[str]:
 
 @needs_the_bash_entrypoint
 @pytest.mark.parametrize("name, value", RUNNERS)
+@pytest.mark.integration
 def test_the_bash_entrypoint_passes_the_runner_variable_in(tmp_path, name, value):
     run_argv = _ash_run_argv(tmp_path, {name: value})
 
@@ -141,6 +144,7 @@ def test_the_bash_entrypoint_passes_the_runner_variable_in(tmp_path, name, value
 
 
 @needs_the_bash_entrypoint
+@pytest.mark.integration
 def test_the_bash_entrypoint_passes_none_without_one(tmp_path):
     run_argv = _ash_run_argv(tmp_path, {})
 
@@ -272,6 +276,7 @@ def _container_mode(tmp_path, monkeypatch, env, wrapper, *, build=False):
 
 @posix_runner_stand_ins
 @pytest.mark.parametrize("wrapper", [None, *WRAPPERS])
+@pytest.mark.integration
 def test_container_mode_gives_the_markers_through_any_wrapper(
     tmp_path, monkeypatch, wrapper
 ):
@@ -291,6 +296,7 @@ def test_container_mode_gives_the_markers_through_any_wrapper(
 
 
 @posix_runner_stand_ins
+@pytest.mark.integration
 def test_through_a_wrapper_only_the_markers_go_on_argv_with_a_value(
     tmp_path, monkeypatch
 ):
@@ -333,6 +339,7 @@ def test_through_a_wrapper_only_the_markers_go_on_argv_with_a_value(
     [f"True\n{NEWLINE_TAIL}", f"True\0{NEWLINE_TAIL}"],
     ids=["newline", "nul"],
 )
+@pytest.mark.unit
 def test_the_argv_path_refuses_a_marker_holding_a_newline_or_nul(value):
     # A POSIX environment cannot hold a NUL, so this cell gives the mapping itself.
     from automated_security_helper.interactions import run_ash_container as rac
@@ -347,6 +354,7 @@ def test_the_argv_path_refuses_a_marker_holding_a_newline_or_nul(value):
 
 
 @posix_runner_stand_ins
+@pytest.mark.integration
 def test_container_mode_refuses_a_marker_holding_a_newline_before_building(
     tmp_path, monkeypatch
 ):
@@ -365,6 +373,7 @@ def test_container_mode_refuses_a_marker_holding_a_newline_before_building(
 
 
 @posix_runner_stand_ins
+@pytest.mark.integration
 def test_without_a_wrapper_a_marker_holding_a_newline_still_goes_by_name(
     tmp_path, monkeypatch
 ):
@@ -416,6 +425,7 @@ def _ash_through(
 
 @needs_the_bash_entrypoint
 @pytest.mark.parametrize("wrapper", list(WRAPPERS))
+@pytest.mark.integration
 def test_the_bash_entrypoint_gives_the_markers_through_a_wrapper(tmp_path, wrapper):
     result, out = _ash_through(tmp_path, {**MARKERS, **CANARIES}, wrapper)
 
@@ -428,6 +438,7 @@ def test_the_bash_entrypoint_gives_the_markers_through_a_wrapper(tmp_path, wrapp
 
 
 @needs_the_bash_entrypoint
+@pytest.mark.integration
 def test_the_bash_entrypoint_refuses_a_marker_holding_a_newline_before_building(
     tmp_path,
 ):
@@ -452,6 +463,7 @@ WITH_CONTROLS = {
 
 
 @needs_the_bash_entrypoint
+@pytest.mark.integration
 def test_the_bash_entrypoint_traces_the_markers_shown_under_debug(tmp_path):
     """./ash --debug traces its commands. Through a wrapper the run line carries the
     markers' values, so it is traced as shown: a control in a marker is written out,
@@ -477,6 +489,7 @@ ONLY_WHITESPACE = {"OCI_RUNNER_WRAPPER": " \t "}
 
 
 @posix_runner_stand_ins
+@pytest.mark.integration
 def test_container_mode_takes_a_wrapper_of_only_whitespace_as_none(
     tmp_path, monkeypatch
 ):
@@ -494,6 +507,7 @@ def test_container_mode_takes_a_wrapper_of_only_whitespace_as_none(
 
 
 @needs_the_bash_entrypoint
+@pytest.mark.integration
 def test_the_bash_entrypoint_takes_a_wrapper_of_only_whitespace_as_none(tmp_path):
     _result, out = _ash_through(tmp_path, {**MARKERS, **ONLY_WHITESPACE}, None)
 
@@ -503,6 +517,7 @@ def test_the_bash_entrypoint_takes_a_wrapper_of_only_whitespace_as_none(tmp_path
 
 
 @needs_the_bash_entrypoint
+@pytest.mark.integration
 def test_the_bash_entrypoint_takes_a_wrapper_of_other_whitespace_as_a_wrapper(
     tmp_path,
 ):
@@ -526,6 +541,7 @@ def test_the_bash_entrypoint_takes_a_wrapper_of_other_whitespace_as_a_wrapper(
 
 
 @posix_runner_stand_ins
+@pytest.mark.unit
 def test_container_mode_takes_a_wrapper_of_other_whitespace_as_a_wrapper(
     tmp_path, monkeypatch
 ):

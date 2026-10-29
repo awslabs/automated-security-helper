@@ -109,6 +109,7 @@ def live_child():
 # --- the die-now signals -----------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_die_now_interrupts_a_recorded_child_and_does_not_kill_it(monkeypatch):
     sent: list = []
     monkeypatch.setattr("os.kill", lambda pid, sig: sent.append((pid, sig)))
@@ -125,6 +126,7 @@ def test_the_die_now_interrupts_a_recorded_child_and_does_not_kill_it(monkeypatc
     assert (_STAND_IN, signal.SIGKILL) not in sent, sent
 
 
+@pytest.mark.unit
 def test_the_die_now_still_kills_a_recorded_tool_group(monkeypatch):
     sent: list = []
     monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(("kill", pid, sig)))
@@ -142,6 +144,7 @@ def test_the_die_now_still_kills_a_recorded_tool_group(monkeypatch):
 # --- the record --------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_run_command_names_its_container(state):
     name = container_leftovers.new_container_name()
     assert name.startswith(f"ash-scan-{os.getpid()}-")
@@ -178,6 +181,7 @@ def test_a_run_command_names_its_container(state):
     assert cmd.index("--name") < cmd.index("img")
 
 
+@pytest.mark.unit
 def test_the_record_holds_the_name_and_the_creating_process(state):
     name = container_leftovers.new_container_name()
     path = container_leftovers.record_container(name)
@@ -191,6 +195,7 @@ def test_the_record_holds_the_name_and_the_creating_process(state):
 # --- the sweep ---------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_container_whose_creator_is_gone_is_removed(state, runtime, dead_pid):
     stub, log = runtime
     name = f"ash-scan-{dead_pid}-0a1b2c3d"
@@ -203,6 +208,7 @@ def test_a_container_whose_creator_is_gone_is_removed(state, runtime, dead_pid):
     assert not record.exists(), "a removed container's record was kept"
 
 
+@pytest.mark.integration
 def test_a_container_whose_creator_is_alive_is_not_touched(state, runtime, live_child):
     stub, log = runtime
     name = f"ash-scan-{live_child.pid}-0a1b2c3d"
@@ -215,6 +221,7 @@ def test_a_container_whose_creator_is_alive_is_not_touched(state, runtime, live_
     assert record.exists()
 
 
+@pytest.mark.integration
 def test_a_record_the_runtime_would_not_remove_is_kept(state, tmp_path, dead_pid):
     refusing = tmp_path / "refusing-runtime"
     refusing.write_text("#!/bin/sh\necho daemon unreachable >&2\nexit 1\n")
@@ -226,6 +233,7 @@ def test_a_record_the_runtime_would_not_remove_is_kept(state, tmp_path, dead_pid
     assert record.exists()
 
 
+@pytest.mark.integration
 def test_a_record_naming_something_else_never_reaches_the_runtime(
     state, runtime, dead_pid
 ):
@@ -266,6 +274,7 @@ class _Stop(Exception):
     """Ends the container-mode path once the cells have what they measure."""
 
 
+@pytest.mark.integration
 def test_a_leftover_is_removed_before_the_host_clears_declared_outputs(
     state, tmp_path, dead_pid, monkeypatch
 ):
@@ -323,6 +332,7 @@ def test_a_leftover_is_removed_before_the_host_clears_declared_outputs(
     assert calls == [f"rm -f {leftover} planted=present", "CLEAR"], calls
 
 
+@pytest.mark.integration
 def test_the_run_the_entry_point_starts_names_its_container(
     state, runtime, tmp_path, monkeypatch
 ):
@@ -335,6 +345,7 @@ def test_the_run_the_entry_point_starts_names_its_container(
     assert len(runs) == 1 and "--name ash-scan-" in runs[0], runs
 
 
+@pytest.mark.integration
 def test_the_record_exists_when_the_runtime_starts_and_goes_when_it_ends(
     state, runtime, tmp_path, monkeypatch
 ):
@@ -355,6 +366,7 @@ def test_the_record_exists_when_the_runtime_starts_and_goes_when_it_ends(
     assert list(state.glob("ash-scan-*.json")) == [], "a finished run's record stayed"
 
 
+@pytest.mark.integration
 def test_a_run_ended_by_an_exception_leaves_its_record_for_the_sweep(
     state, runtime, tmp_path, monkeypatch
 ):
@@ -409,6 +421,7 @@ def _nix_mode_run(tmp_path, runtime_path, monkeypatch):
     return log
 
 
+@pytest.mark.integration
 def test_nix_mode_removes_a_leftover_container_before_its_clear(
     state, tmp_path, dead_pid, monkeypatch
 ):
@@ -427,6 +440,7 @@ def test_nix_mode_removes_a_leftover_container_before_its_clear(
     assert not record.exists()
 
 
+@pytest.mark.integration
 def test_nix_mode_with_no_container_runtime_keeps_the_record(
     state, tmp_path, dead_pid, monkeypatch
 ):
@@ -441,6 +455,7 @@ def test_nix_mode_with_no_container_runtime_keeps_the_record(
 # --- another host's records --------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_record_from_another_host_is_left_alone_even_with_a_dead_pid(
     state, runtime, dead_pid
 ):
@@ -458,6 +473,7 @@ def test_a_record_from_another_host_is_left_alone_even_with_a_dead_pid(
     assert foreign.exists(), "another host's record was deleted"
 
 
+@pytest.mark.integration
 def test_a_record_from_this_host_with_a_dead_pid_is_still_removed(
     state, runtime, dead_pid
 ):
@@ -468,6 +484,7 @@ def test_a_record_from_this_host_with_a_dead_pid_is_still_removed(
     assert container_leftovers.sweep_leftover_containers([str(stub)]) == [name]
 
 
+@pytest.mark.unit
 def test_a_new_record_carries_this_hosts_key_and_its_kind(state):
     path = container_leftovers.record_container(
         container_leftovers.new_container_name()
@@ -481,6 +498,7 @@ def test_a_new_record_carries_this_hosts_key_and_its_kind(state):
 # --- the record's kind -------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_record_of_an_unknown_kind_is_skipped(state, runtime, dead_pid):
     stub, log = runtime
     other = _write_record(
@@ -492,6 +510,7 @@ def test_a_record_of_an_unknown_kind_is_skipped(state, runtime, dead_pid):
     assert other.exists()
 
 
+@pytest.mark.integration
 def test_a_record_with_no_kind_counts_as_a_container(state, runtime, dead_pid):
     stub, _ = runtime
     name = f"ash-scan-{dead_pid}-0a1b2c3d"
@@ -506,6 +525,7 @@ def test_a_record_with_no_kind_counts_as_a_container(state, runtime, dead_pid):
 # --- the state directory -----------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_state_directory_laxer_than_0700_is_tightened_when_it_is_ours(
     state, runtime, dead_pid
 ):
@@ -518,6 +538,7 @@ def test_a_state_directory_laxer_than_0700_is_tightened_when_it_is_ours(
     assert state.stat().st_mode & 0o777 == 0o700
 
 
+@pytest.mark.integration
 def test_a_state_directory_that_is_not_ours_is_not_swept(
     state, runtime, dead_pid, monkeypatch
 ):
@@ -534,6 +555,7 @@ def test_a_state_directory_that_is_not_ours_is_not_swept(
     )
 
 
+@pytest.mark.integration
 def test_a_symlinked_state_directory_is_never_followed(
     tmp_path, runtime, dead_pid, monkeypatch
 ):

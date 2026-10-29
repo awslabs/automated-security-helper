@@ -82,6 +82,7 @@ from tests.utils.windows_console import as_windows
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestValidateAshRevision:
     def test_empty_revision_is_rejected(self):
         """An empty build-arg would expand to nothing; it is not a revision."""
@@ -169,6 +170,7 @@ def pip_installed_ash(monkeypatch, tmp_path):
     return dist_info / "direct_url.json"
 
 
+@pytest.mark.unit
 class TestGetAshRevisionFromDirectUrl:
     def test_a_local_ash_source_directory_builds_from_local_source(
         self, pip_installed_ash, tmp_path
@@ -306,6 +308,7 @@ class TestGetAshRevisionFromDirectUrl:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestValidatePath:
     def test_an_existing_path_is_returned_resolved(self, tmp_path):
         assert validate_path(tmp_path) == tmp_path.resolve()
@@ -413,6 +416,7 @@ _CHILD_WRITES_BOTH_STREAMS = (
 )
 
 
+@pytest.mark.integration
 class TestRunCmdDirectAgainstARealChild:
     def test_both_streams_are_captured_and_echoed(self, capfd):
         result = run_cmd_direct(
@@ -458,6 +462,7 @@ class TestRunCmdDirectAgainstARealChild:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the runtime is sent SIGINT on POSIX")
+@pytest.mark.unit
 class TestRunCmdDirectInterruption:
     """Ctrl-C is passed on to the runtime, which gets the grace to stop, and re-raised.
 
@@ -554,6 +559,7 @@ _SLICES = [INTERRUPT_WAIT_SLICE_SECONDS] * round(
 )
 
 
+@pytest.mark.unit
 class TestRunCmdDirectInterruptionOnWindows:
     """On Windows the runtime shares ASH's console, so a Ctrl-C there reached it too.
 
@@ -631,6 +637,7 @@ class TestRunCmdDirectInterruptionOnWindows:
         assert process.wait_timeouts == _SLICES[:1]
 
 
+@pytest.mark.unit
 class TestRunCmdDirectPipeFailure:
     def test_a_reader_error_is_reported_and_does_not_abort_the_command(
         self, stub_process, capfd
@@ -655,6 +662,7 @@ class TestRunCmdDirectPipeFailure:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFindRunner:
     def test_a_lookup_failure_yields_none_rather_than_propagating(self, monkeypatch):
         """Runner discovery tries four names; one raising must not end the search."""
@@ -690,6 +698,7 @@ def _lookup(revision: str) -> Any:
         return error
 
 
+@pytest.mark.unit
 class TestFindDockerfileLocal:
     """A LOCAL revision builds the Dockerfile of the ASH tree it was installed from.
 
@@ -747,6 +756,7 @@ class TestFindDockerfileLocal:
         assert _lookup("LOCAL") == _ASH_SOURCE_DOCKERFILE
 
 
+@pytest.mark.unit
 class TestFindDockerfileLocalFromTheInstallRecord:
     """A LOCAL revision for a package that does not run from a clone.
 
@@ -817,6 +827,7 @@ class TestFindDockerfileLocalFromTheInstallRecord:
         assert project.as_posix() not in message
 
 
+@pytest.mark.unit
 class TestFindDockerfileNonLocal:
     def test_a_project_dockerfile_in_the_cwd_does_not_replace_the_packaged_one(
         self, monkeypatch, tmp_path
@@ -909,6 +920,7 @@ def _build_image_kwargs(dockerfile: Path, **overrides: Any) -> Dict[str, Any]:
     return kwargs
 
 
+@pytest.mark.unit
 class TestBuildImage:
     @pytest.fixture
     def dockerfile(self, tmp_path):
@@ -1142,6 +1154,7 @@ class TestBuildImage:
         )
 
 
+@pytest.mark.unit
 class TestBuildCustomImage:
     def test_a_missing_containerfile_raises_before_any_command_runs(
         self, recorded_commands, tmp_path
@@ -1234,6 +1247,7 @@ def _run_command(source_dir: Path, output_dir: Path, **overrides: Any) -> List[s
     return _assemble_run_command(**kwargs)
 
 
+@pytest.mark.unit
 class TestAssembleRunCommandNetwork:
     def test_a_named_network_is_passed_through(self, tmp_path):
         cmd = _run_command(tmp_path, tmp_path / "out", container_network="ash-net")
@@ -1251,6 +1265,7 @@ class TestAssembleRunCommandNetwork:
         assert "--network=ash-net" not in cmd
 
 
+@pytest.mark.unit
 class TestAssembleRunCommandTerminalSize:
     def test_an_undetectable_terminal_size_is_skipped_rather_than_fatal(
         self, monkeypatch, tmp_path
@@ -1269,6 +1284,7 @@ class TestAssembleRunCommandTerminalSize:
         assert "ash" in cmd
 
 
+@pytest.mark.unit
 class TestAssembleRunCommandFlagPassthrough:
     def test_extra_context_args_are_forwarded(self, tmp_path):
         ctx = SimpleNamespace(args=["--unrecognised-passthrough"])
@@ -1446,6 +1462,7 @@ class TestAssembleRunCommandFlagPassthrough:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestTheInnerArgvIsAcceptedByTheInnerCli:
     """Every flag in the container argv has to exist on the CLI that receives it.
 
@@ -1536,6 +1553,7 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestExecuteContainer:
     def test_a_successful_run_returns_the_completed_process(self, monkeypatch, capfd):
         expected = create_completed_process(args=["docker"], returncode=0)

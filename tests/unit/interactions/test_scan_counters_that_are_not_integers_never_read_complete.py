@@ -37,6 +37,8 @@ from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
 
+pytestmark = pytest.mark.unit
+
 _COMPLETE = (ScannerStatus.PASSED, ScannerStatus.SKIPPED)
 
 

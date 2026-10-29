@@ -26,6 +26,8 @@ from automated_security_helper.interactions.run_ash_container import (
 )
 from tests.utils.helpers import mark_git_checkout
 
+pytestmark = pytest.mark.unit
+
 #: A name ASH reads as its own setting: a container scan refuses a config
 #: file that reads it.
 REFUSED_VAR = "ASH_SCANNERS"

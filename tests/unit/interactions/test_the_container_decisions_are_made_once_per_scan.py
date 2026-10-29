@@ -30,6 +30,8 @@ from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrate
 from automated_security_helper.interactions import run_ash_container as rac
 from tests.utils.helpers import stand_in_host_ids
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _host_ids(monkeypatch):

@@ -25,6 +25,8 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 GOOD_YAML = """\
 fail_on_findings: false
 global_settings:

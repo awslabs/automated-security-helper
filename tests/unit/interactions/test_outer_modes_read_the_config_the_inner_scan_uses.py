@@ -65,6 +65,7 @@ def _operator_config(tmp_path: Path, body: str) -> Path:
 
 
 @pytest.mark.parametrize("mode", [RunMode.nix, RunMode.container])
+@pytest.mark.unit
 def test_ash_config_s_file_is_read_when_no_config_is_found(
     tmp_path, source, monkeypatch, mode
 ):
@@ -79,6 +80,7 @@ def test_ash_config_s_file_is_read_when_no_config_is_found(
 
 
 @pytest.mark.parametrize("mode", [RunMode.nix, RunMode.container])
+@pytest.mark.unit
 def test_an_override_sets_the_fields_with_no_config_file(source, mode):
     opts = _opts(
         source,
@@ -91,6 +93,7 @@ def test_an_override_sets_the_fields_with_no_config_file(source, mode):
 
 
 @pytest.mark.parametrize("mode", [RunMode.nix, RunMode.container])
+@pytest.mark.unit
 def test_an_override_wins_over_the_config_file(source, mode):
     (source / ".ash.yaml").write_text(
         "project_name: p\nfail_on_findings: true\nfail_on_incomplete_scanners: true\n",
@@ -113,6 +116,7 @@ def test_an_override_wins_over_the_config_file(source, mode):
         pytest.param(["scanners.bandit.enabled=false"], id="an-unrelated-override"),
     ],
 )
+@pytest.mark.unit
 def test_control_with_no_config_file_nothing_is_read(source, overrides):
     """Unset, as before: the caller tells "not set" from a file that sets it."""
     opts = _opts(source, RunMode.nix, overrides)
@@ -121,6 +125,7 @@ def test_control_with_no_config_file_nothing_is_read(source, overrides):
     assert _resolve_config_fail_on_incomplete_scanners(opts) is None
 
 
+@pytest.mark.unit
 def test_control_the_discovered_file_wins_over_ash_config(
     tmp_path, source, monkeypatch
 ):
@@ -135,6 +140,7 @@ def test_control_the_discovered_file_wins_over_ash_config(
     assert _resolve_config_fail_on_findings(_opts(source, RunMode.nix)) is True
 
 
+@pytest.mark.integration
 def test_container_mode_hands_the_scan_inside_the_overridden_value(
     tmp_path, source, monkeypatch
 ):

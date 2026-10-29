@@ -26,6 +26,8 @@ from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from tests.unit.test_powershell_wrapper_matches_ash import REFUSAL_EXIT, _IMAGE_NAMES
 
+pytestmark = pytest.mark.unit
+
 SCAN = [
     "scan",
     "--mode",

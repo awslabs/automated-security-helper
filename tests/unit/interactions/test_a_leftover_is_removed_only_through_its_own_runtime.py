@@ -122,6 +122,7 @@ def _known(stub: Path, **overrides: Any) -> Dict[str, Any]:
     return fields
 
 
+@pytest.mark.unit
 def test_a_record_keeps_its_runtime_and_the_daemon_environment(state, monkeypatch):
     monkeypatch.setenv("DOCKER_HOST", _SECRET_A)
 
@@ -142,6 +143,7 @@ def test_a_record_keeps_its_runtime_and_the_daemon_environment(state, monkeypatc
 
 
 @pytest.mark.parametrize("different", ["runtime", "runner_argv", "DOCKER_HOST"])
+@pytest.mark.integration
 def test_a_record_started_under_another_runtime_is_left_with_its_container(
     state, tmp_path, dead_pid, monkeypatch, different
 ):
@@ -164,6 +166,7 @@ def test_a_record_started_under_another_runtime_is_left_with_its_container(
     assert record.exists(), "a record for another runtime's container was dropped"
 
 
+@pytest.mark.integration
 def test_a_record_started_under_this_runtime_is_removed(state, tmp_path, dead_pid):
     """The control: the same record with nothing different is swept."""
     stub = _runtime(tmp_path)
@@ -175,6 +178,7 @@ def test_a_record_started_under_this_runtime_is_removed(state, tmp_path, dead_pi
     assert not record.exists()
 
 
+@pytest.mark.integration
 def test_a_runtime_that_has_no_such_container_still_drops_a_matching_record(
     state, tmp_path, dead_pid
 ):
@@ -185,6 +189,7 @@ def test_a_runtime_that_has_no_such_container_still_drops_a_matching_record(
     assert not record.exists()
 
 
+@pytest.mark.integration
 def test_the_reason_names_the_key_and_never_a_value(
     state, tmp_path, dead_pid, monkeypatch, logged
 ):
@@ -201,6 +206,7 @@ def test_the_reason_names_the_key_and_never_a_value(
     assert "hunter2" not in text and "daemon-" not in text, logged.messages
 
 
+@pytest.mark.integration
 def test_an_older_record_is_tried_and_kept_when_the_runtime_has_no_such_container(
     state, tmp_path, dead_pid
 ):
@@ -216,6 +222,7 @@ def test_an_older_record_is_tried_and_kept_when_the_runtime_has_no_such_containe
     assert record.exists()
 
 
+@pytest.mark.integration
 def test_an_older_record_is_dropped_when_the_runtime_removed_the_container(
     state, tmp_path, dead_pid
 ):
@@ -228,6 +235,7 @@ def test_an_older_record_is_dropped_when_the_runtime_removed_the_container(
     assert not record.exists()
 
 
+@pytest.mark.integration
 def test_a_record_past_the_age_bound_is_forgotten_without_asking_a_runtime(
     state, tmp_path, dead_pid, monkeypatch
 ):
@@ -250,6 +258,7 @@ def test_a_record_past_the_age_bound_is_forgotten_without_asking_a_runtime(
     assert _calls(tmp_path) == []
 
 
+@pytest.mark.integration
 def test_a_foreign_hosts_record_past_the_age_bound_is_forgotten_too(
     state, tmp_path, dead_pid
 ):
@@ -262,6 +271,7 @@ def test_a_foreign_hosts_record_past_the_age_bound_is_forgotten_too(
     assert _calls(tmp_path) == []
 
 
+@pytest.mark.integration
 def test_a_record_with_no_creation_time_is_aged_by_its_file(
     state, tmp_path, dead_pid, monkeypatch
 ):
