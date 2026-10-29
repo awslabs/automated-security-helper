@@ -170,6 +170,18 @@ def _case_only_spelling(pattern: str, project_root: Path) -> Optional[str]:
     return "/".join(spelled) + ("/" if current.is_dir() else "")
 
 
+def _names_a_directory(path: Path) -> bool:
+    """Whether ``path`` is a directory, with a stat that raises read as "not
+    one": a parent that cannot be searched (EACCES), a name past the system's
+    length (ENAMETOOLONG) or a NUL in the pattern (ValueError). The advice for
+    one pattern must not abort every structural warning of the check, and the
+    catch-all that would report the exception prints the pattern's value."""
+    try:
+        return path.is_dir()
+    except (OSError, ValueError):
+        return False
+
+
 def path_pattern_advice(
     path_pattern: str,
     project_root: Path,
@@ -217,7 +229,7 @@ def path_pattern_advice(
         names_directory = (
             not any(character in rest for character in _GLOB_CHARACTERS)
             and not (ignore_path and rest.endswith(("/", "\\")))
-            and (project_root / rest).is_dir()
+            and _names_a_directory(project_root / rest)
         )
         if names_directory:
             spelling = directory_spelling(shown_rest, ignore_path=ignore_path)
@@ -253,7 +265,7 @@ def path_pattern_advice(
     basename = PurePosixPath(clean_path).name
     if any(character in basename for character in _GLOB_CHARACTERS):
         return None
-    if (project_root / clean_path).is_dir():
+    if _names_a_directory(project_root / clean_path):
         return directory_path_advice(shown, ignore_path=ignore_path)
     return None
 
@@ -2263,6 +2275,61 @@ def _reference_variable_is_set(written: str) -> bool:
     return reference is None or os.environ.get(reference.group(1)) is not None
 
 
+def _has_reference_key(key: Any) -> bool:
+    """Whether ``key``, a mapping key as its file wrote it, holds a reference."""
+    return isinstance(key, str) and "${" in key
+
+
+def _resolved_reference_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
+    """The key of ``resolved`` that ``written_key``, a mapping key written as a
+    reference, came to by the loader's own rule (resolve_env_references), or
+    None when it came to none of them (the variable unset with no default, a
+    name the loader does not read)."""
+    try:
+        key = resolve_env_references(_without_env_tag(written_key))
+    except Exception:  # noqa: BLE001 - a key that does not resolve came to none
+        return None
+    return key if key is not None and key in resolved else None
+
+
+def _paired_keys(
+    written: Dict[Any, Any], resolved: Dict[Any, Any]
+) -> Tuple[List[Tuple[Any, Any]], List[Tuple[Any, Any, Any, bool]]]:
+    """How the entries of ``written``, a mapping as its file wrote it, pair with
+    the entries of ``resolved``, the same mapping as the loader read it.
+
+    A key written without a reference pairs with the same key. A key written
+    as a reference pairs with the key it resolves to (_resolved_reference_key),
+    never by position: a reference that resolves onto another key of its
+    mapping merges the two entries, and pairing the referenced keys with the
+    leftover resolved keys in order compared every later entry with the wrong
+    one and the merged entry's value with nothing, so that value was neither
+    redacted nor recorded as its reference. The loader keeps the last entry
+    written under a name, so of a plain key and the referenced keys that come
+    to one name, the one written last holds the value there: only that entry's
+    value is paired (``kept``). Returns the plain entries whose value is kept,
+    as ``(key, value)``, and every referenced entry as ``(written key, written
+    value, resolved key, kept)``; a referenced key that came to no key of
+    ``resolved`` is left out.
+    """
+    order = {key: index for index, key in enumerate(written)}
+    plain_keys = [key for key in written if not _has_reference_key(key)]
+    referenced_keys = [key for key in written if _has_reference_key(key)]
+    names = {key: _resolved_reference_key(key, resolved) for key in referenced_keys}
+    kept: Dict[Any, int] = {key: order[key] for key in plain_keys}
+    for key in referenced_keys:
+        name = names[key]
+        if name is not None:
+            kept[name] = max(kept.get(name, -1), order[key])
+    plain = [(key, written[key]) for key in plain_keys if kept[key] == order[key]]
+    referenced = [
+        (key, written[key], names[key], kept[names[key]] == order[key])
+        for key in referenced_keys
+        if names[key] is not None
+    ]
+    return plain, referenced
+
+
 def _interpolated_pairs(literal: Any, resolved: Any) -> List[Tuple[str, str]]:
     """The strings in ``resolved`` that came from the environment, each with the
     text the file writes for it.
@@ -2282,20 +2349,14 @@ def _interpolated_pairs(literal: Any, resolved: Any) -> List[Tuple[str, str]]:
     """
     found: List[Tuple[str, str]] = []
     if isinstance(literal, dict) and isinstance(resolved, dict):
-
-        def has_reference(key: Any) -> bool:
-            return isinstance(key, str) and "${" in key
-
-        plain = [(k, v) for k, v in literal.items() if not has_reference(k)]
-        referenced = [(k, v) for k, v in literal.items() if has_reference(k)]
-        plain_keys = {k for k, _ in plain}
+        plain, referenced = _paired_keys(literal, resolved)
         for key, literal_value in plain:
             if key in resolved:
                 found += _interpolated_pairs(literal_value, resolved[key])
-        others = [(k, v) for k, v in resolved.items() if k not in plain_keys]
-        for (literal_key, literal_value), (key, value) in zip(referenced, others):
+        for literal_key, literal_value, key, kept in referenced:
             found += _interpolated_pairs(literal_key, key)
-            found += _interpolated_pairs(literal_value, value)
+            if kept:
+                found += _interpolated_pairs(literal_value, resolved[key])
     elif isinstance(literal, list) and isinstance(resolved, list):
         for literal_item, item in zip(literal, resolved):
             found += _interpolated_pairs(literal_item, item)
@@ -2319,11 +2380,11 @@ def _interpolated_pairs(literal: Any, resolved: Any) -> List[Tuple[str, str]]:
         # no longer matches.
         reference = ENV_REFERENCE_PATTERN.match(_without_env_tag(literal))
         if reference:
-            rest = _without_env_tag(literal)[reference.end() :].strip()
-            if rest and resolved.endswith(rest):
-                found.append(
-                    (resolved[: len(resolved) - len(rest)], reference.group(0))
-                )
+            part = _environment_part(
+                resolved, _without_env_tag(literal)[reference.end() :]
+            )
+            if part != resolved:
+                found.append((part, reference.group(0)))
     return found
 
 
@@ -2372,9 +2433,25 @@ def _rewrite_for(
     match = ENV_REFERENCE_PATTERN.match(text)
     if match is None:
         return EnvironmentRewrite(kind, path, resolved, written, resolved, written)
-    rest = text[match.end() :].strip()
-    part = resolved[: len(resolved) - len(rest)] if rest else resolved
+    part = _environment_part(resolved, text[match.end() :])
     return EnvironmentRewrite(kind, path, resolved, written, part, match.group(0))
+
+
+def _environment_part(resolved: str, rest: str) -> str:
+    """The part of ``resolved`` the variable gave, for a reference the file
+    follows with ``rest`` (``${VAR}rest`` or ``${VAR} rest``).
+
+    The loader keeps what follows the reference as written, blanks included,
+    so the part ends where ``rest`` begins in ``resolved``. A tail that is not
+    there as written (a value a model normalized) is matched stripped, and one
+    found neither way leaves the whole value as the part. Stripping the tail
+    first folded the blank between the reference and the rest into the part,
+    so the record's reference text and the redaction needle each carried a
+    trailing blank the value never had."""
+    for tail in (rest, rest.strip()):
+        if tail and resolved.endswith(tail):
+            return resolved[: len(resolved) - len(tail)]
+    return resolved
 
 
 def _written_rewrites(
@@ -2390,21 +2467,15 @@ def _written_rewrites(
     """
     found: List[EnvironmentRewrite] = []
     if isinstance(written, dict) and isinstance(resolved, dict):
-
-        def has_reference(key: Any) -> bool:
-            return isinstance(key, str) and "${" in key
-
-        plain = [(k, v) for k, v in written.items() if not has_reference(k)]
-        referenced = [(k, v) for k, v in written.items() if has_reference(k)]
-        plain_keys = {k for k, _ in plain}
+        plain, referenced = _paired_keys(written, resolved)
         for key, written_value in plain:
             if key in resolved:
                 found += _written_rewrites(written_value, resolved[key], (*path, key))
-        others = [(k, v) for k, v in resolved.items() if k not in plain_keys]
-        for (written_key, written_value), (key, value) in zip(referenced, others):
+        for written_key, written_value, key, kept in referenced:
             if _interpolated_pairs(written_key, key):
                 found.append(_rewrite_for("key", path, written_key, key))
-            found += _written_rewrites(written_value, value, (*path, key))
+            if kept:
+                found += _written_rewrites(written_value, resolved[key], (*path, key))
     elif isinstance(written, list) and isinstance(resolved, list):
         for index, (written_item, item) in enumerate(zip(written, resolved)):
             found += _written_rewrites(written_item, item, (*path, index))
@@ -2497,6 +2568,23 @@ def placed_at_appends(
 _MISSING_IN_RECORD = object()
 
 
+def _record_key(record: Dict[Any, Any], segment: Any) -> Any:
+    """The key of the mapping ``record`` that a rewrite's path segment names: a
+    string by the merge's spelling rule (_resolve_dict_key); an index by itself,
+    or, where the mapping keys the digits as text ("123"), by that text.
+
+    A patch pointer's segment of digits is typed as an index when the rewrite
+    is placed (_placed_rewrites), before anything says whether a list or a
+    mapping holds it. Looked up as an index alone, a rewrite into a mapping
+    keyed by a numeric string found no place, and the record kept the value
+    read from the environment."""
+    if isinstance(segment, str):
+        return _resolve_dict_key(record, segment)
+    if segment not in record and str(segment) in record:
+        return str(segment)
+    return segment
+
+
 def _record_child(model: Any, record: Any, segment: Any) -> Tuple[Any, Any]:
     """The key ``segment`` (a key the file wrote) has in ``record``, the dump of
     ``model``, and the part of ``model`` under it.
@@ -2518,19 +2606,11 @@ def _record_child(model: Any, record: Any, segment: Any) -> Tuple[Any, Any]:
                         if key is not None and key in record:
                             return key, getattr(model, name, None)
             extra = model.model_extra or {}
-            key = (
-                _resolve_dict_key(record, segment)
-                if isinstance(segment, str)
-                else segment
-            )
+            key = _record_key(record, segment)
             if key in record:
                 return key, extra.get(key)
         else:
-            key = (
-                _resolve_dict_key(record, segment)
-                if isinstance(segment, str)
-                else segment
-            )
+            key = _record_key(record, segment)
             if key in record:
                 child = model.get(key) if isinstance(model, dict) else None
                 return key, child
@@ -4096,6 +4176,18 @@ class ConfigValidator:
         return rest[:end] if end >= 0 else None
 
     @classmethod
+    def _declared_spelling_of(cls, field_name: Any) -> Optional[str]:
+        """The declared top-level field that ``field_name`` respells with '-'
+        for '_' or the reverse, or None when it is no such respelling."""
+        if not isinstance(field_name, str):
+            return None
+        wanted = field_name.replace("-", "_")
+        for declared in sorted(cls.VALID_TOP_LEVEL_FIELDS):
+            if declared != field_name and declared.replace("-", "_") == wanted:
+                return declared
+        return None
+
+    @classmethod
     def _both_spellings_warnings(cls, config_data: dict) -> List[str]:
         """A top-level key written both as its alias and as its field name.
 
@@ -4287,9 +4379,24 @@ class ConfigValidator:
                     f"Top-level field '{shown_field}' is an internal field and should not be in user configs"
                 )
             elif field_name not in cls.VALID_TOP_LEVEL_FIELDS:
-                warnings.append(
-                    f"Unknown top-level field '{shown_field}' - a scan ignores it"
-                )
+                declared = cls._declared_spelling_of(field_name)
+                if declared is not None:
+                    # A '-'/'_' respelling of a declared field. A file read on
+                    # its own does not read it as that field, but the extends
+                    # merge and an operator overlay fold it onto the base's
+                    # spelling (config_sources.deep_merge) and the scan then
+                    # applies it, so "a scan ignores it" was wrong for a chain.
+                    warnings.append(
+                        f"Top-level field '{shown_field}' is spelled "
+                        f"'{declared}' by a scan: on its own it is not read as "
+                        f"'{declared}', and an extends merge or an operator "
+                        f"overlay folds it onto '{declared}' and applies it. "
+                        f"Write '{declared}'."
+                    )
+                else:
+                    warnings.append(
+                        f"Unknown top-level field '{shown_field}' - a scan ignores it"
+                    )
         warnings.extend(cls._both_spellings_warnings(config_data))
 
         # Check for duplicate field definitions (YAML allows this but causes
