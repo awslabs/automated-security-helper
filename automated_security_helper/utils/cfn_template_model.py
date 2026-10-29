@@ -91,6 +91,50 @@ _TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
 
 _ImplicitResolvers = Dict[Any, list[tuple[str, Any]]]
 
+#: The most key/value pairs a mapping may hold once its merge keys (``<<``) are
+#: merged in. PyYAML's ``flatten_mapping`` copies every merged mapping's pairs into
+#: the merging node, and the anchored nodes are shared, so a chain in which each
+#: mapping merges the previous one twice (``b: &b {<<: [*a, *a]}``) doubles at
+#: every link: thirty links are a billion pairs from a 1 KB file, in the
+#: unsandboxed ASH process. Checked after each node is flattened, so the work
+#: before the refusal is about twice this many pairs. A real template merges a
+#: few defaults into a few hundred resources and stays far below it.
+MERGED_MAPPING_PAIRS_BOUND = 100_000
+
+
+def _flatten_mapping_within_bound(flatten: Any, node: yaml.MappingNode) -> None:
+    """``flatten(node)``, refused when merging grows the node past the bound.
+
+    Raises:
+        ConstructorError: the merged mapping holds more than
+            ``MERGED_MAPPING_PAIRS_BOUND`` pairs, and more than it held before.
+    """
+    before = len(node.value)
+    flatten(node)
+    merged = len(node.value)
+    if merged > before and merged > MERGED_MAPPING_PAIRS_BOUND:
+        raise ConstructorError(
+            None,
+            None,
+            f"a merge key (<<) expands this mapping to {merged} key/value pairs, "
+            f"more than the {MERGED_MAPPING_PAIRS_BOUND} ASH reads",
+            node.start_mark,
+        )
+
+
+#: The byte order mark as UTF-8 decoding keeps it, U+FEFF, spelled by code point.
+_BOM = chr(0xFEFF)
+
+
+def _without_bom(text: str) -> str:
+    """*text* without a leading byte order mark, for ``json.loads``.
+
+    The template text is decoded as UTF-8, which keeps a BOM as U+FEFF; the YAML
+    reader skips it, ``json.loads`` refuses it ("Unexpected UTF-8 BOM"). A JSON
+    template that YAML refused for its tabs was then refused by JSON for its BOM.
+    """
+    return text[1:] if text.startswith(_BOM) else text
+
 
 def _without_the_timestamp_resolver(
     resolvers: _ImplicitResolvers,
@@ -114,8 +158,12 @@ class _TemplateLoader(CfnYamlLoader):
     ConstructorError. CloudFormation itself does not accept hash merges (its
     template format specification lists them as unsupported), so such a template is
     one a preprocessor flattens before it deploys, and ASH scans what the merged
-    document says. A merge of anything but a mapping (``<<: 5``) still raises.
+    document says. A merge of anything but a mapping (``<<: 5``) still raises, and
+    so does a merge that grows a mapping past ``MERGED_MAPPING_PAIRS_BOUND``.
     """
+
+    def flatten_mapping(self, node: yaml.MappingNode) -> None:
+        _flatten_mapping_within_bound(super().flatten_mapping, node)
 
 
 _TemplateLoader.yaml_implicit_resolvers = _without_the_timestamp_resolver(
@@ -369,7 +417,7 @@ def get_model_from_template_text(
         # Broad on purpose, and not silent: every failure is raised again below as a
         # typed YAMLError, and a constructor failure on a template is a failed target.
         try:
-            template = json.loads(text)
+            template = json.loads(_without_bom(text))
         except RecursionError:
             raise TemplateDocumentError(_JSON_TOO_DEEP) from None
         except ValueError:
@@ -477,8 +525,12 @@ class _TagTolerantLoader(yaml.SafeLoader):
     parser rejected: is it a mapping with ``Resources``? mkdocs.yml carries
     ``!!python/name:`` tags, which ``SafeLoader`` refuses to construct and which this
     reads as the string after them. Nothing is executed; the base loader is the safe
-    one. Date-like scalars are strings here too, as in :class:`_TemplateLoader`.
+    one. Date-like scalars are strings here too, as in :class:`_TemplateLoader`, and
+    a merge key is bounded the same way (``MERGED_MAPPING_PAIRS_BOUND``).
     """
+
+    def flatten_mapping(self, node: yaml.MappingNode) -> None:
+        _flatten_mapping_within_bound(super().flatten_mapping, node)
 
 
 def _construct_untagged(
@@ -604,7 +656,7 @@ def _could_be_a_template(text: str) -> bool:
             loader.dispose()
     if not parsed:
         try:
-            document = json.loads(_without_jsonc_comments(text))
+            document = json.loads(_without_jsonc_comments(_without_bom(text)))
         except (ValueError, RecursionError):
             return bool(_CLOUDFORMATION_MARKER.search(text))
     return isinstance(document, Mapping) and isinstance(
@@ -648,6 +700,13 @@ def holds_cloudformation_template(
             return True
         except Exception:
             pass
+        # A template the scanners count as a failed, unevaluated target (its
+        # structure is a template and a value in it could not be built, or it is
+        # nested deeper than ASH reads) is a template here too, marker or not:
+        # otherwise the tool-absent run read SKIPPED where the tool-present run
+        # reported a failed target.
+        if unevaluable_template_reason(candidate, scan_root, text=text) is not None:
+            return True
         if _could_be_a_template(text):
             return True
     return False
