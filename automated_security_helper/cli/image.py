@@ -4,10 +4,19 @@
 from typing import Annotated, Optional, List
 import typer
 
+from automated_security_helper.core.cancellation import (
+    CancelEvent,
+    ScanCancelled,
+    cancel_scope,
+    shutdown_cancels,
+    shutdown_requested,
+)
+
 # Import subprocess utilities
 from automated_security_helper.core.constants import (
     ASH_CONFIG_SOURCES_DESCRIPTION,
     ASH_EXIT_INTERRUPTED,
+    ASH_EXIT_TERMINATED,
 )
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -160,37 +169,65 @@ def build_ash_image_cli_command(
     if config_overrides is None:
         config_overrides = []
 
-    # Call run_ash_scan with all parameters
+    # Call run_ash_scan with all parameters, inside a scope the entry point's
+    # SIGTERM handler cancels, as ash scan runs it (cli/scan.py;
+    # core/cancellation.py, "SIGTERM on the CLI"). The container scan this
+    # starts waits on the OCI runner the same way a scan in container mode does,
+    # and the handler cooperates only while a scope is registered: with none, a
+    # SIGTERM took the die-now kill instead of the cooperative stop.
+    cancel_event = CancelEvent()
     try:
-        run_ash_scan(
-            # Container-specific params
-            build=not no_build,
-            run=not no_run,
-            force=force,
-            oci_runner=oci_runner,
-            container_network=container_network,
-            # None picks the host's default: 'ci' on Windows, where the non-root user
-            # cannot write the bind-mounted output directory, 'non-root' elsewhere.
-            build_target=build_target,
-            offline_semgrep_rulesets=offline_semgrep_rulesets,
-            container_uid=container_uid,
-            container_gid=container_gid,
-            ash_revision_to_install=ash_revision_to_install,
-            custom_containerfile=custom_containerfile,
-            custom_build_arg=custom_build_arg,
-            # General params
-            show_summary=False,
-            config=config,
-            config_overrides=config_overrides,
-            offline=offline,
-            progress=False,
-            log_level=log_level,
-            quiet=quiet,
-            verbose=verbose,
-            debug=debug,
-            color=color,
-            mode=RunMode.container,
-        )
+        with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
+            run_ash_scan(
+                # Container-specific params
+                build=not no_build,
+                run=not no_run,
+                force=force,
+                oci_runner=oci_runner,
+                container_network=container_network,
+                # None picks the host's default: 'ci' on Windows, where the non-root
+                # user cannot write the bind-mounted output directory, 'non-root'
+                # elsewhere.
+                build_target=build_target,
+                offline_semgrep_rulesets=offline_semgrep_rulesets,
+                container_uid=container_uid,
+                container_gid=container_gid,
+                ash_revision_to_install=ash_revision_to_install,
+                custom_containerfile=custom_containerfile,
+                custom_build_arg=custom_build_arg,
+                # General params
+                show_summary=False,
+                config=config,
+                config_overrides=config_overrides,
+                offline=offline,
+                progress=False,
+                log_level=log_level,
+                quiet=quiet,
+                verbose=verbose,
+                debug=debug,
+                color=color,
+                mode=RunMode.container,
+            )
+    except ScanCancelled as error:
+        if not shutdown_requested():
+            # Not this frame's stop: nothing on the CLI sets the event but the
+            # SIGTERM handler, so an unexplained cancel is a defect to report as
+            # one, as ash scan reports it.
+            raise
+        # The handler printed nothing (a signal frame must not take the logger's
+        # locks), so this is the only word on how the run ended.
+        message = "ASH build-image stopped by SIGTERM before it finished"
+        if not no_run:
+            message += (
+                ": the scan did not complete, and the output directory may hold "
+                "partial results"
+            )
+        survivors = getattr(error, "could_not_stop", ())
+        if survivors:
+            names = "; ".join(f"{tool} (pid {pid})" for tool, pid in survivors)
+            message += f". A tool the stop could not end may still be running: {names}"
+        echo(f"{message}.", err=True)
+        raise typer.Exit(ASH_EXIT_TERMINATED) from None
     except KeyboardInterrupt:
         # As ash scan does: the runtime has had the interrupt and its grace
         # (run_cmd_direct). With --no-run there was no scan, so no verdict was owed.
