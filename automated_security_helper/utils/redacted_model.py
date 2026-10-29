@@ -1237,9 +1237,9 @@ def _marker_a_slot_would_type(
         return None
     args = get_args(annotation)
     if not args:
-        if isinstance(value, (list, tuple, set, dict)) and _has_opaque_schema(
-            annotation
-        ):
+        if isinstance(
+            value, (list, tuple, set, frozenset, dict)
+        ) and _has_opaque_schema(annotation):
             # The class builds its own core schema, so what it does with the
             # text in the container it is given cannot be read: fail closed,
             # as the scalar slot of the same class already does.
@@ -1257,7 +1257,7 @@ def _marker_a_slot_would_type(
             if typed is not None:
                 return typed
         return None
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, (list, tuple, set, frozenset)):
         if (
             origin is tuple
             and Ellipsis not in args
@@ -1436,8 +1436,8 @@ def without_env_scalars(value: Any) -> Any:
     """*value* with every EnvResolvedScalar inside downcast to plain str, a
     dict's keys included.
 
-    Walks lists, tuples, sets and dicts on its own stack, in post-order:
-    each container is rebuilt after its entries. The input is a config
+    Walks lists, tuples, sets, frozensets and dicts on its own stack, in
+    post-order: each container is rebuilt after its entries. The input is a config
     value at whatever depth the operator wrote it, so a walk that recursed
     per nesting level crashed with a RecursionError past the interpreter's
     limit (the shape config_validator's _string_leaves already walks
@@ -1472,7 +1472,7 @@ def without_env_scalars(value: Any) -> Any:
             continue
         if isinstance(node, EnvResolvedScalar):
             rebuilt[id(node)] = str(node)
-        elif not isinstance(node, (list, tuple, set, dict)):
+        elif not isinstance(node, (list, tuple, set, frozenset, dict)):
             rebuilt[id(node)] = node
         elif not entries_done:
             if id(node) in in_progress:
@@ -1500,6 +1500,8 @@ def without_env_scalars(value: Any) -> Any:
                 rebuilt[id(node)] = [rebuilt[id(entry)] for entry in node]
             elif isinstance(node, tuple):
                 rebuilt[id(node)] = tuple(rebuilt[id(entry)] for entry in node)
+            elif isinstance(node, frozenset):
+                rebuilt[id(node)] = frozenset(rebuilt[id(entry)] for entry in node)
             else:
                 rebuilt[id(node)] = {rebuilt[id(entry)] for entry in node}
     return rebuilt[id(value)]
@@ -1553,7 +1555,7 @@ def first_env_scalar(value: Any) -> Optional["EnvResolvedScalar"]:
         current = stack.pop()
         if isinstance(current, EnvResolvedScalar):
             return current
-        if isinstance(current, (list, tuple, set, dict)):
+        if isinstance(current, (list, tuple, set, frozenset, dict)):
             if id(current) in seen:
                 continue
             seen.add(id(current))
@@ -1563,7 +1565,7 @@ def first_env_scalar(value: Any) -> Optional["EnvResolvedScalar"]:
                     entries.append(key)
                     entries.append(item)
                 stack.extend(reversed(entries))
-            elif isinstance(current, set):
+            elif isinstance(current, (set, frozenset)):
                 stack.extend(sorted(current, key=_set_member_order, reverse=True))
             else:
                 stack.extend(reversed(current))
@@ -1715,7 +1717,9 @@ class RedactedSection(BaseModel):
             if _admits_plain_str(annotation, str(value)):
                 return str(value)
             _refuse_env_reference(value, _refused_noun(annotation), field_name, hint)
-        if isinstance(value, (list, tuple, set, dict)) and _holds_env_scalar(value):
+        if isinstance(value, (list, tuple, set, frozenset, dict)) and _holds_env_scalar(
+            value
+        ):
             annotation = cls.model_fields[field_name].annotation
             if _annotation_reaches_a_section(annotation):
                 # The sections in the shape must receive their markers (only
