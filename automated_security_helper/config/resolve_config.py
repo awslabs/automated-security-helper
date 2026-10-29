@@ -262,9 +262,9 @@ def _anchored_operator_overrides(config_overrides: Sequence[str]) -> List[str]:
     if cwd is not None:
         return anchor_override_paths(config_overrides, cwd)
     needs_a_directory = [
-        str(override).partition("=")[0].strip()
+        _override_key_as_written(override)
         for override in config_overrides
-        if anchor_override_paths([override], Path(os.sep)) != [override]
+        if _needs_a_working_directory(override)
     ]
     if needs_a_directory:
         raise ASHConfigValidationError(
@@ -273,6 +273,41 @@ def _anchored_operator_overrides(config_overrides: Sequence[str]) -> List[str]:
             "and that directory is gone, so the load is refused."
         )
     return list(config_overrides)
+
+
+#: Two directories no operator ran ASH from. An override anchored at each of
+#: them reads the same unless its value is taken from the directory it is
+#: anchored at.
+_PLACEHOLDER_ROOTS: Tuple[Path, Path] = (
+    Path(os.sep, "ash-no-working-directory-1"),
+    Path(os.sep, "ash-no-working-directory-2"),
+)
+
+
+def _needs_a_working_directory(override: str) -> bool:
+    """Whether ``anchor_override_paths`` rewrites this override by the directory
+    it is anchored at.
+
+    ``anchor_override_paths`` reads each override on its own, so one is probed
+    alone here. It rewrites a relative operator path only: an absolute path, a
+    ``~`` path, a URL and a value holding ``$`` come back as written
+    (``operator_paths.anchored_path``), and so does a rules option (semgrep's
+    and opengrep's ``config``) that names nothing under the directory. Probed
+    at one real root, such a rules value that happens to name a directory of
+    the host (``etc``) read as anchored and was refused; the two placeholder
+    roots agree on every value the directory does not change.
+    """
+    first, second = (
+        anchor_override_paths([override], root) for root in _PLACEHOLDER_ROOTS
+    )
+    return first != second
+
+
+def _override_key_as_written(override: str) -> str:
+    """The key of a ``--config-overrides`` entry for a refusal: ``key`` for a
+    setting override, ``key+=`` for an appending one, never the value."""
+    key = str(override).partition("=")[0].strip()
+    return f"{key}=" if key.endswith("+") else key
 
 
 def _sets_network_scanners(override: str) -> bool:

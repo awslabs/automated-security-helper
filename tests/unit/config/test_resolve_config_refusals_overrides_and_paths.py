@@ -12,6 +12,9 @@ record, on the shapes that quoted a value, dropped a setting or crashed.
   reporters override from the off-host reporter view, a disable included.
 - The client-overrides sentinel, a relative path, was resolved against a
   working directory the load says may be gone.
+- With that directory gone, the refusal of an override that needs it printed
+  an appending key as ``key+``, and a rules name that happened to name a
+  directory of the host (``etc``) was refused as a relative path.
 - A quoted list item kept its quotes; a numeric-looking value could never set a
   string field.
 - The provenance record listed a client's overrides among the operator's, so
@@ -264,3 +267,71 @@ def test_the_own_writes_arm_records_the_anchored_tool_path(tmp_path):
     assert record.named(TOOL_PATH_KEY, anchored) is True
     (document,) = record.documents
     assert "project_name" not in document, document
+
+
+def _delete_the_working_directory(tmp_path, monkeypatch) -> None:
+    # os.rmdir of the process's working directory is PermissionError on
+    # Windows, so every deleted-directory case skips there through this helper.
+    if sys.platform == "win32":
+        pytest.skip("the working directory cannot be removed on Windows")
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+
+
+def test_an_appending_override_is_named_as_written_with_no_working_directory(
+    tmp_path, monkeypatch
+):
+    from automated_security_helper.config.resolve_config import (
+        _anchored_operator_overrides,
+    )
+
+    _delete_the_working_directory(tmp_path, monkeypatch)
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        _anchored_operator_overrides(
+            ["scanners.cfn-guard.options.rules_paths+=rules/zz-own.guard"]
+        )
+
+    text = str(refused.value)
+    assert "scanners.cfn-guard.options.rules_paths+=" in text, text
+    assert "rules_paths+ " not in text, text
+    assert "zz-own" not in text, text
+
+
+def test_a_rules_name_that_names_a_host_directory_passes_with_no_working_directory(
+    tmp_path, monkeypatch
+):
+    """semgrep's ``config`` is anchored only when it names a file under the
+    directory; ``etc`` names none under a working directory, so with a live one
+    it passes as written, and the probe for a gone one must agree."""
+    from automated_security_helper.config.resolve_config import (
+        _anchored_operator_overrides,
+    )
+
+    _delete_the_working_directory(tmp_path, monkeypatch)
+
+    assert _anchored_operator_overrides(["scanners.semgrep.options.config=etc"]) == [
+        "scanners.semgrep.options.config=etc"
+    ]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        "scanners.bandit.options.config_file=/zz-elsewhere/bandit.yaml",
+        "scanners.bandit.options.config_file=~/bandit.yaml",
+        "scanners.cfn-guard.options.rules_paths+=/zz-elsewhere/own.guard",
+    ],
+)
+def test_a_path_not_taken_from_the_directory_passes_with_no_working_directory(
+    tmp_path, monkeypatch, override
+):
+    from automated_security_helper.config.resolve_config import (
+        _anchored_operator_overrides,
+    )
+
+    _delete_the_working_directory(tmp_path, monkeypatch)
+
+    assert _anchored_operator_overrides([override]) == [override]
