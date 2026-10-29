@@ -286,20 +286,28 @@ def project_relative_uri(uri: str, project_path: str) -> Any:
     ``source_dir`` is ``<workspace>/<project>``, so the working directory cannot
     coincide with more than one of them.
 
-    The separator-stripped shape, and why a leading-separator test is not enough
-    ---------------------------------------------------------------------------
-    checkov emits ``ws/api/src/insecure_bucket.tf`` -- absolute, with the leading
-    separator already gone upstream. No test on the leading character can catch
-    it. So an unrooted URI is also tried with a separator restored, and is read
-    as absolute only when that lands inside the project.
-
-    The residual ambiguity is a project that contains a directory tree mirroring
-    its own absolute path -- project ``/ws/api`` holding ``ws/api/src/`` -- where
-    a genuinely project-relative ``ws/api/src/x.py`` would be misread as
-    absolute. Resolved textually and in favour of the absolute reading, because
-    that nesting is pathological while the checkov shape is routine. Deliberately
-    no filesystem check: aggregation would then depend on the tree still being
-    present, and reading the same SARIF twice could give two answers.
+    An unrooted URI is project-relative, and is never tried as an absolute path
+    ------------------------------------------------------------------------
+    An earlier form also tried an unrooted URI with a separator restored, and
+    read it as absolute when that landed inside the project, for a shape checkov
+    emits when the process working directory differs from ``source_dir``:
+    ``ws/api/src/insecure_bucket.tf``, absolute with the leading separator
+    already gone. That reading relocated routine findings. In workspace mode a
+    project is scanned with its own path as ``source_dir``, so
+    ``sanitize_sarif_paths`` has already relativized checkov's URI before the
+    aggregator sees it (measured; ``scripts/verify_multi_project_attribution.py``
+    records that both scanners hand over ``src/...``), and the separator-stripped
+    shape does not reach this function. What does reach it is the ordinary
+    project-relative URI of a project whose own files spell its absolute path:
+    the container mounts the workspace at ``/src``, so a Python src-layout
+    project at ``/src/api`` holds ``src/api/__init__.py``, and a Next.js project
+    at ``/src/app`` holds ``src/app/page.tsx``. Restoring a separator read those
+    as ``/src/api/__init__.py`` and relocated the finding to ``__init__.py`` at
+    the project root -- a different, existing file, silently. So the leading
+    character decides: rooted text (a leading separator or a drive anchor) is
+    absolute, and anything else is read as the project-relative path it is.
+    Deliberately no filesystem check: aggregation would then depend on the tree
+    still being present, and reading the same SARIF twice could give two answers.
 
     Args:
         uri: A SARIF artifact URI as a scanner emitted it.
@@ -308,34 +316,30 @@ def project_relative_uri(uri: str, project_path: str) -> Any:
     Returns:
         The project-relative path when the URI is absolute and inside the
         project; ``None`` when it is absolute and outside; :data:`NOT_ABSOLUTE`
-        when it does not look like an absolute path at all.
+        when it is not rooted, which is to say project-relative.
     """
     text = _posix_text(uri, project_path)
     if not text:
         return None
 
-    root = PurePosixPath(root_text(project_path))
     rooted = text.startswith("/") or bool(_DRIVE_ANCHOR.match(text))
+    if not rooted:
+        return NOT_ABSOLUTE
 
-    candidates = [text] if rooted else [text, "/" + text]
-    for candidate in candidates:
-        # ".." would make relative_to lie about containment, and Phase 0 rejects
-        # it anyway; leave those to the pattern converter, which returns None.
-        if _PARENT_COMPONENT in PurePosixPath(candidate).parts:
-            continue
-        try:
-            remainder = PurePosixPath(candidate).relative_to(root)
-        except ValueError:
-            continue
-        # relative_to succeeds for the root itself, whose remainder is "."; that
-        # names a directory, not a finding location.
-        return remainder.as_posix() if remainder.parts else None
-
-    if rooted:
+    # ".." would make relative_to lie about containment, and Phase 0 rejects it
+    # anyway; leave those to the pattern converter, which returns None.
+    if _PARENT_COMPONENT in PurePosixPath(text).parts:
+        return None
+    root = PurePosixPath(root_text(project_path))
+    try:
+        remainder = PurePosixPath(text).relative_to(root)
+    except ValueError:
         # Absolute, and not inside this project. Counted, never prefixed: a
         # prefix would invent a path that names nothing.
         return None
-    return NOT_ABSOLUTE
+    # relative_to succeeds for the root itself, whose remainder is "."; that
+    # names a directory, not a finding location.
+    return remainder.as_posix() if remainder.parts else None
 
 
 def to_workspace_uri(

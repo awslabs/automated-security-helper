@@ -178,9 +178,12 @@ class TestAbsoluteScannerUris:
         [
             # bandit: absolute, rooted.
             ("/ws/api/src/insecure_app.py", "api/src/insecure_app.py"),
-            # checkov: absolute with the leading separator already stripped
-            # upstream. No leading-separator test can catch this one.
-            ("ws/api/src/insecure_bucket.tf", "api/src/insecure_bucket.tf"),
+            # Unrooted: project-relative, whatever its components spell. checkov's
+            # separator-stripped absolute shape does not reach the aggregator in
+            # workspace mode (sanitize_sarif_paths relativizes it against the
+            # project first), and reading an unrooted URI as absolute relocated
+            # the routine src-layout finding below.
+            ("ws/api/src/insecure_bucket.tf", "api/ws/api/src/insecure_bucket.tf"),
             # detect-secrets: relative to the process cwd, which we cannot know.
             ("../../../../ws/api/src/app.py", None),
             # The ordinary case, unchanged.
@@ -229,18 +232,20 @@ class TestAbsoluteScannerUris:
         assert project_relative_uri("/elsewhere/a.py", "/ws/api") is None
         assert project_relative_uri("src/a.py", "/ws/api") is NOT_ABSOLUTE
 
-    def test_the_ambiguous_nesting_is_read_as_absolute(self):
+    def test_an_unrooted_uri_spelling_the_projects_path_stays_relative(self):
         """Documented, not accidental.
 
-        A project at /ws/api containing its own path as a subtree -- ws/api/src
+        A project at /ws/api whose files spell its own absolute path -- ws/api/src
         under /ws/api -- makes a project-relative 'ws/api/src/x.py' textually
-        identical to a separator-stripped absolute one. Resolved in favour of
-        absolute, because that nesting is pathological while checkov's shape is
-        routine. No filesystem check: aggregation must not depend on the tree
-        still being present, and reading the same SARIF twice must not give two
-        answers.
+        identical to a separator-stripped absolute one. Read as project-relative:
+        the stripped shape does not reach the aggregator in workspace mode, while
+        this nesting is the routine container layout (the workspace mounted at
+        /src, a src-layout project at /src/api holding src/api/x.py). No
+        filesystem check: aggregation must not depend on the tree still being
+        present, and reading the same SARIF twice must not give two answers.
         """
-        assert project_relative_uri("ws/api/src/x.py", "/ws/api") == "src/x.py"
+        assert project_relative_uri("ws/api/src/x.py", "/ws/api") is NOT_ABSOLUTE
+        assert project_relative_uri("src/api/x.py", "/src/api") is NOT_ABSOLUTE
 
 
 class TestProjectRootUri:
