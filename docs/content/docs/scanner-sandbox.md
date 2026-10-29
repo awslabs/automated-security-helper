@@ -593,7 +593,8 @@ Out of scope:
   fails naming the link. snyk-code tests a copy of the scan set.
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
-  tree, only installed modules outside the tree are imported (see
+  tree, only installed modules outside the tree and outside every git checkout are
+  imported (see
   [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set)),
   but an installed package still runs with ASH's access. The sandbox doesn't change
   this; review the plugin modules a repository's config names before you scan it.
