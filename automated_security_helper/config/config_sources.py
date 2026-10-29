@@ -4758,9 +4758,15 @@ def resolve_config_document(
         for opened in state.held:
             opened.close()
     if blind_for is not None:
-        raise _environment_blind_error(
-            config_path, root, permit_base, blind_for
-        ) from None
+        blind = _environment_blind_error(config_path, root, permit_base, blind_for)
+        # The fresh error's traceback carries this frame, and a walker that
+        # prints frame locals (a debugger, a verbose traceback renderer) would
+        # print what the chain read from the environment: `state` holds every
+        # reference read with its value, and `blind_for` is the refused error,
+        # whose text can quote one. Both are dropped from the frame before the
+        # raise, so the error leaves with a frame that holds no value.
+        del state, blind_for
+        raise blind from None
     places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = {
         reference.place_key: [] for reference in state.read
     }
