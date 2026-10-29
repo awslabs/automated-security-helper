@@ -2045,7 +2045,10 @@ class UVToolRunner:
             cwd: Working directory for the command
             capture_output: Whether to capture stdout/stderr
             text: Whether to return text output
-            check: Whether to raise exception on non-zero exit
+            check: Whether to raise exception on non-zero exit. A run that
+                timed out is a failed run under ``check`` on both branches
+                (with and without ``results_dir``); without ``check`` it is
+                returned as a ``TimedOutProcess``.
             timeout: Timeout in seconds
             package_extras: Optional list of package extras for --from parameter
             version_constraint: Optional version constraint for --from parameter
@@ -2329,7 +2332,7 @@ class UVToolRunner:
             started = getattr(e, "_ash_started_child", None)
             process = getattr(started, "process", None)
             still_running = process is not None and process.poll() is None
-            return TimedOutProcess(
+            timed_out = TimedOutProcess(
                 args=command,
                 returncode=None if still_running else TIMEOUT_RETURNCODE,
                 stdout=_text(e.stdout),
@@ -2343,6 +2346,17 @@ class UVToolRunner:
                     + (", and the stop did not end it" if still_running else "")
                 ),
             )
+            if check:
+                # The caller asked for a raise on anything but a clean exit, as
+                # the results_dir branch gives it for a timed-out run: a timeout
+                # returned as a result here read as a run that completed. The
+                # fixed shape, as for a non-zero exit above.
+                raise UVToolRunnerError(
+                    f"UV tool run failed for {tool_name}: "
+                    f"{_exit_description(timed_out)} "
+                    f"(uv tool run {tool_name}, arguments not shown)"
+                ) from e
+            return timed_out
         except Exception as e:
             from automated_security_helper.utils.subprocess_utils import (
                 spawn_run_failure_after_the_start,
@@ -3229,10 +3243,20 @@ def get_uv_tool_command(
             with _uv_tool_runner_cache_lock:
                 if _lookup_generation != generation:
                     return command
-                # A None is remembered only after a probe ran to an exit: probing
-                # again on each call is what the memo is for (see above). With no
-                # uv to probe, or a probe that never exited, the lookups behind a
+                # A probe that never exited (a timeout, a refused or failed
+                # spawn) answered nothing about uv's copy of the tool: this
+                # call runs the PATH binary it found, if any, and nothing is
+                # remembered, so the next call probes uv again. Remembered,
+                # one slow probe pinned the tool to its PATH binary for the
+                # rest of the process. A None is remembered only after a probe
+                # ran to an exit: probing again on each call is what the memo
+                # is for (see above). With no uv to probe, the lookups behind a
                 # None are searched again on the next call.
+                probe_inconclusive = uv_path is not None and not probe_exited
+                if probe_inconclusive:
+                    _uv_command_cache.pop(cache_key, None)
+                    _uv_command_binary.pop(cache_key, None)
+                    return command
                 if command is not None or probe_exited:
                     _uv_command_cache[cache_key] = command
                 else:

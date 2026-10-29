@@ -15,10 +15,13 @@ right cause.
   not an exception out of the scanner's dependency check.
 * When the bare package does not resolve in the copy's environment, no extra
   is blamed; the resolver's own cause is reported.
+* A probe that could not run carries the spawn's own error into the verdict:
+  "could not execute" alone read the same for every cause.
 """
 
 from __future__ import annotations
 
+import errno
 import stat
 import subprocess  # nosec B404
 import sys
@@ -222,3 +225,36 @@ class TestTheCauseOfAnUnsatisfiedVerdict:
             values=(),
         )
         assert verdict.missing_extras == ("sarif",)
+
+
+class TestAProbeThatCouldNotRunNamesItsCause:
+    def test_the_version_probes_spawn_error_is_in_the_detail(self, monkeypatch):
+        def _spawn(*args, **kwargs):
+            raise OSError(errno.E2BIG, "Argument list too long")
+
+        monkeypatch.setattr(pre_installed_tool, "spawn_run", _spawn)
+        verdict = pre_installed_tool._verify(
+            "/opt/bin/bandit", "bandit", [], None, "bandit", None
+        )
+        assert verdict.status == "unverifiable"
+        assert verdict.detail.startswith("could not execute /opt/bin/bandit")
+        assert "Argument list too long" in verdict.detail, verdict.detail
+
+    def test_the_dry_runs_timeout_is_in_the_reason(self, monkeypatch):
+        def _spawn(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 30)
+
+        monkeypatch.setattr(pre_installed_tool, "spawn_run", _spawn)
+        status, reason = _dry_run("/opt/uv", sys.executable, "bandit[sarif]")
+        assert status == "unverifiable"
+        assert reason.startswith("could not run uv to check 'bandit[sarif]'")
+        assert "TimeoutExpired" in reason, reason
+
+    def test_an_older_stub_answering_none_still_reads_as_not_run(self, monkeypatch):
+        """The control: a probe stub that knows only None keeps the old detail."""
+        monkeypatch.setattr(pre_installed_tool, "_run", lambda command, timeout: None)
+        verdict = pre_installed_tool._verify(
+            "/opt/bin/bandit", "bandit", [], None, "bandit", None
+        )
+        assert verdict.status == "unverifiable"
+        assert verdict.detail == "could not execute /opt/bin/bandit"

@@ -15,7 +15,9 @@ Each test pins one fix in ``base/uv_tool_mixin.py``:
 * the stored install command carries the plugin's ``--with`` dependencies;
 * a successful install is not reported as failed by its best-effort version read;
 * an installed-but-broken tool is reinstalled, and the plugin's own offline mode
-  reaches uv.
+  reaches uv;
+* the import-failure arm of the uv run names the component that failed to
+  import, and still answers when the runner's own import is what raised.
 """
 
 from __future__ import annotations
@@ -350,6 +352,51 @@ class TestADeferredVersionProbeStaysOwedUntilItAnswers:
         assert plugin.tool_version == "1.7.9"
         assert plugin._deferred_tool_version_probe is None
         assert runner.get_tool_version.call_count == 2
+
+
+class TestTheImportFailureArmNamesTheComponent:
+    RUNNER_WORDING = "the uv tool runner could not be imported"
+
+    def _available_runner(self):
+        runner = MagicMock()
+        runner.uv_availability.return_value = (True, None)
+        return runner
+
+    def test_another_modules_import_error_is_not_blamed_on_the_runner(self):
+        class Plugin(FakePlugin):
+            def _uv_run_inputs_for_records(self):
+                raise ImportError("No module named 'yaml'", name="yaml")
+
+        plugin = Plugin(command="bandit")
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=self._available_runner(),
+        ):
+            result = plugin._try_uv_tool_execution(
+                command=["bandit"],
+                working_dir=Path("/tmp"),  # nosec B108
+            )
+        assert result is None
+        assert plugin._uv_run_failure is not None
+        assert not plugin._uv_run_failure.startswith(self.RUNNER_WORDING)
+        assert "yaml" in plugin._uv_run_failure, plugin._uv_run_failure
+
+    def test_the_runners_own_import_failure_is_still_answered(self, monkeypatch):
+        """The control, and the unbound-name hazard: the except arm names the
+        runner's error class, which the failing import used to bind locally."""
+        from automated_security_helper.utils import uv_tool_runner
+
+        monkeypatch.delattr(uv_tool_runner, "get_uv_tool_runner")
+        plugin = FakePlugin(command="bandit")
+        result = plugin._try_uv_tool_execution(
+            command=["bandit"],
+            working_dir=Path("/tmp"),  # nosec B108
+        )
+        assert result is None
+        assert plugin._uv_run_failure is not None
+        assert plugin._uv_run_failure.startswith(self.RUNNER_WORDING), (
+            plugin._uv_run_failure
+        )
 
 
 class TestThePluginsOwnOfflineMode:

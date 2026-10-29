@@ -51,9 +51,15 @@ from automated_security_helper.utils.subprocess_utils import (
 # checking_only is re-exported here, where the scanners' dependency checks live;
 # it is defined beside the uv probes it governs.
 from automated_security_helper.utils.uv_tool_runner import (
+    UVToolRunnerError,
     checking_only,
     is_checking_only,
 )
+
+#: The runner's module, for the import-failure arm of the uv run: an
+#: ImportError whose ``name`` is this module (or one under it) is the runner
+#: failing to import; any other names the component that failed.
+_UV_TOOL_RUNNER_MODULE = "automated_security_helper.utils.uv_tool_runner"
 
 if TYPE_CHECKING:
     pass
@@ -473,9 +479,11 @@ class UVToolMixin:
         # results directory is not this run's output.
         stderr_log_before = self._uv_stderr_log_identity(results_dir)
         try:
+            # UVToolRunnerError is the module's own import: named by the except
+            # arm below, a local import of it would leave that arm reading an
+            # unbound name when this import is what raised.
             from automated_security_helper.utils.uv_tool_runner import (
                 get_uv_tool_runner,
-                UVToolRunnerError,
             )
 
             uv_runner = get_uv_tool_runner()
@@ -601,14 +609,28 @@ class UVToolMixin:
             )
             if after is not None:
                 return after
-            self._uv_run_failure = f"the uv tool runner could not be imported: {e}"
+            # The try covers more than the runner's import: the sandbox scope's
+            # record context and the plugin's own input hooks import too, and
+            # an ImportError from one of those worded as the runner failing to
+            # import pointed the operator at the wrong component. The failed
+            # module's name decides the wording.
+            failed_module = getattr(e, "name", None) or ""
+            if failed_module == _UV_TOOL_RUNNER_MODULE or failed_module.startswith(
+                f"{_UV_TOOL_RUNNER_MODULE}."
+            ):
+                self._uv_run_failure = f"the uv tool runner could not be imported: {e}"
+                logged = f"UV tool runner module not available: {e}"
+            else:
+                self._uv_run_failure = (
+                    f"an import failed while preparing the uv run: {e}"
+                )
+                logged = (
+                    f"Import failed while preparing the uv run of {self.command}: {e}"
+                )
             # Redacted like the runner-error arm above: the raise can quote the
             # full argv, and an argument can carry an env-read value.
             self._plugin_log(
-                text_without_values(
-                    f"UV tool runner module not available: {e}",
-                    record_values,
-                ),
+                text_without_values(logged, record_values),
                 level=logging.WARNING,
             )
             return None

@@ -15,6 +15,8 @@ Each test here pins one fix in ``utils/uv_tool_runner.py``:
 * ``install_tool_with_version`` reinstalls a listed tool when asked to.
 * ``run_tool`` and the probes honor a caller's own offline mode, and build the
   ``--from`` spec on the package that provides the tool.
+* a probe that never exited does not pin the tool to its PATH binary, and a
+  timed-out run under ``check`` is a failed run on the fallback branch too.
 """
 
 from __future__ import annotations
@@ -83,6 +85,36 @@ class TestGetUvToolCommandMemo:
         assert get_uv_tool_command("bandit") is None
         assert get_uv_tool_command("bandit") is None
         assert spawn.call_count == 2
+
+    def test_a_probe_that_timed_out_does_not_pin_the_path_binary(
+        self, spawn, monkeypatch
+    ):
+        """One slow probe used to remember the PATH binary for the rest of the
+        process; this call runs it, the next call asks uv again."""
+        monkeypatch.setattr(
+            uv_tool_runner, "find_executable", lambda name: "/usr/bin/bandit"
+        )
+        spawn.side_effect = subprocess.TimeoutExpired(["uv"], 5)
+        assert get_uv_tool_command("bandit") == ["/usr/bin/bandit"]
+        assert get_uv_tool_command("bandit") == ["/usr/bin/bandit"]
+        assert spawn.call_count == 2
+        spawn.side_effect = None
+        spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.9", "")
+        assert get_uv_tool_command("bandit") == ["uv", "tool", "run", "bandit"]
+
+
+class TestATimeoutUnderCheckIsAFailedRun:
+    def test_the_fallback_branch_raises_under_check(self, spawn, runner):
+        spawn.side_effect = subprocess.TimeoutExpired(["uv"], 5)
+        with pytest.raises(UVToolRunnerError) as raised:
+            runner.run_tool("bandit", check=True)
+        assert "timed out" in str(raised.value), str(raised.value)
+
+    def test_without_check_the_timeout_is_returned(self, spawn, runner):
+        """The control: the mixin's shape, a flagged result and no raise."""
+        spawn.side_effect = subprocess.TimeoutExpired(["uv"], 5)
+        result = runner.run_tool("bandit", check=False)
+        assert getattr(result, "timed_out", False) is True
 
     def test_a_probe_that_exited_non_zero_is_remembered(self, spawn):
         """The control: uv's own answer about the tool is still memoized."""

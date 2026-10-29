@@ -87,7 +87,7 @@ import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Sequence, Tuple
+from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
 from automated_security_helper.utils.error_text import ESCAPE_CODES
 from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.process_env import environ_for_parsed_output
@@ -347,10 +347,36 @@ def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
     return staged
 
 
-def _run(
-    command: List[str], timeout: int
-) -> Optional[subprocess.CompletedProcess[str]]:
-    """Run one probe in an empty directory; None when it could not run.
+@dataclass(frozen=True)
+class _ProbeFailure:
+    """A probe that could not run, with the spawn's own error.
+
+    The verdict's detail carries ``error``: "could not execute" alone read the
+    same for a too-long argument list, a busy text file, an exhausted file table
+    and an out-of-memory spawn, and the operator could not tell which.
+    """
+
+    error: str
+
+
+#: What ``_run`` and ``_probe`` answer: the probe's result, a failure to run it
+#: (with the cause), or None from an older stub that knows only "did not run".
+_ProbeAnswer = Union[subprocess.CompletedProcess, _ProbeFailure, None]
+
+
+def _did_not_run(answer: _ProbeAnswer) -> bool:
+    return answer is None or isinstance(answer, _ProbeFailure)
+
+
+def _probe_cause(answer: _ProbeAnswer) -> str:
+    """The failure's own words after the caller's sentence, or nothing."""
+    if isinstance(answer, _ProbeFailure) and answer.error:
+        return f": {answer.error}"
+    return ""
+
+
+def _run(command: List[str], timeout: int) -> _ProbeAnswer:
+    """Run one probe in an empty directory; a ``_ProbeFailure`` when it could not run.
 
     ASH is usually started in the repository it scans, and a tool reads modules
     and configuration from where it starts, so a probe does not start there.
@@ -373,14 +399,14 @@ def _run(
             return _probe(command, timeout, empty)
     except SandboxUnavailable:
         raise
-    except OSError:
+    except OSError as error:
         # No empty directory to start it in: it is not started from anywhere else.
-        return None
+        return _ProbeFailure(
+            f"no empty directory to start it in ({type(error).__name__}: {error})"
+        )
 
 
-def _probe(
-    command: List[str], timeout: int, cwd: Optional[str]
-) -> Optional[subprocess.CompletedProcess[str]]:
+def _probe(command: List[str], timeout: int, cwd: Optional[str]) -> _ProbeAnswer:
     """``command`` run with its output read, from ``cwd`` when there is one.
 
     ``command``'s output is read here, so it runs without the caller's display
@@ -404,8 +430,10 @@ def _probe(
         )
     except SandboxUnavailable:
         raise
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as error:
+        # The error's own words ride to the verdict: a timeout, E2BIG, ETXTBSY,
+        # EMFILE and ENOMEM used to read alike as "could not execute".
+        return _ProbeFailure(f"{type(error).__name__}: {error}")
 
 
 #: uv's warning for an extra the installed package does not declare, as a
@@ -442,8 +470,11 @@ def _dry_run(
     # interpreter's environment as well as uv's own directory.
     with also_runs(interpreter):
         result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
-    if result is None:
-        return "unverifiable", f"could not run uv to check {requirement!r}"
+    if _did_not_run(result):
+        return (
+            "unverifiable",
+            f"could not run uv to check {requirement!r}{_probe_cause(result)}",
+        )
     # uv colors its output into a pipe when FORCE_COLOR or CLICOLOR_FORCE is
     # set, and a terminal-aware uv can also write non-color codes: the escapes
     # would otherwise land in the reason a user reads, and a non-color code
@@ -651,12 +682,12 @@ def _verify(
     values: Tuple[str, ...] = (),
 ) -> PreInstalledToolVerdict:
     probe = _run([executable, "--version"], _VERSION_PROBE_TIMEOUT)
-    if probe is None:
+    if _did_not_run(probe):
         return PreInstalledToolVerdict(
             "unverifiable",
             executable,
             requirement,
-            f"could not execute {executable}",
+            f"could not execute {executable}{_probe_cause(probe)}",
             summary="the copy could not be executed",
         )
     if probe.returncode != 0:
