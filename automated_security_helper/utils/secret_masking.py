@@ -869,7 +869,10 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                         # have replaced it with MASKED_LINE and kept the block's
                         # extent in the finding's own endLine, which stands.
                         end = _TO_END_OF_FILE
-                elif resource_only and not isinstance(end, int):
+                elif resource_only and not (isinstance(end, int) and end > start):
+                    # cdk-nag writes endLine == startLine for the resource's
+                    # first line; a one-line region says nothing about where
+                    # the resource ends.
                     end = _TO_END_OF_FILE
             index.add_location(uri, start, end)
             if local:

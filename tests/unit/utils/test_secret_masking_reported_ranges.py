@@ -168,3 +168,49 @@ class TestTheEndLineOfAnotherFileOfTheSameName:
         mask_secrets_in_results(model)
 
         assert _context(model, 1) == BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
+
+
+RESOURCE_LINES = [
+    "  Database:\n",
+    "    Type: AWS::RDS::DBInstance\n",
+    "    Properties:\n",
+    "      MasterUserPassword: placeholder-example-value\n",
+]
+
+
+class TestAResourceLevelCredentialFinding:
+    """A rule about a credential written into a resource reports the resource's
+    first line; the property holding the value is somewhere after it, so the
+    range runs to the end of the file unless the producer gives a real end line."""
+
+    def _credential_finding(self, end):
+        return _result(
+            "AwsSolutions-RDS-1",
+            "template.yaml",
+            3,
+            "The database password must not be a plaintext string.",
+            "cdk-nag",
+            end=end,
+        )
+
+    def test_an_end_line_equal_to_the_start_line_does_not_bound_the_range(self):
+        """cdk-nag's wrapper writes endLine == startLine."""
+        model = _results(
+            self._credential_finding(end=3),
+            _neighbor("template.yaml", 6, 3, RESOURCE_LINES),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == (MASKED_LINE + "\n") * 4
+
+    def test_a_producers_real_end_line_bounds_the_range(self):
+        """Control: checkov reports the resource block's own last line."""
+        model = _results(
+            self._credential_finding(end=6),
+            _neighbor("template.yaml", 8, 3, RESOURCE_LINES + ["Outputs: {}\n"]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == (MASKED_LINE + "\n") * 4 + "Outputs: {}\n"
