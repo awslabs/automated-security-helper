@@ -968,10 +968,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         actionlint resolves ``./`` against its project root: in 1.7.12, the nearest
         ancestor holding ``.github/workflows`` that is also a git root. Every
         ancestor holding ``.github/workflows`` is checked here, so a different
-        project rule cannot widen what is read. For each, the path the reference
-        names and the ``action.yml``/``action.yaml`` inside it are followed through
-        symlinks and ``..``; one that lands outside both the scanned tree and the
-        scan target is reported. An unreadable workflow is left to actionlint, which
+        project rule cannot widen what is read. For each, the reference is joined
+        to the ancestor lexically, as actionlint joins it (``..`` taken before any
+        link is followed), and the path that names and the
+        ``action.yml``/``action.yaml`` inside it are then followed through
+        symlinks; one that lands outside both the scanned tree and the scan
+        target is reported. An unreadable workflow is left to actionlint, which
         reports it.
         """
         try:
@@ -995,7 +997,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         ]
         for base in bases:
             for spec in specs:
-                named = base / spec
+                # actionlint joins the reference to its root lexically (Go's
+                # filepath.Join cleans the path, so ".." is taken before any
+                # link is followed) and opens what that names. Resolving links
+                # first would judge a different file: "./link/../x" is
+                # <root>/x to actionlint, whatever the link points at.
+                named = Path(os.path.normpath(os.path.join(str(base), spec)))
                 for candidate in (named, named / "action.yml", named / "action.yaml"):
                     if candidate is not named and not (
                         candidate.is_symlink() or candidate.exists()

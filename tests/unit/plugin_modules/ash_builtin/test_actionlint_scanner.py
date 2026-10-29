@@ -2027,6 +2027,47 @@ def test_a_workflow_whose_local_reference_leaves_the_tree_is_not_linted(
     assert "outside the scanned tree" in caplog.text
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.parametrize(
+    ("link_target", "spec", "linted"),
+    [
+        # The link points inside the tree; ".." after it leaves the tree
+        # lexically, which is where actionlint reads.
+        ("inside", "./.github/actions/linked/../../../../outside/action", False),
+        # The link points outside the tree; ".." after it comes back inside
+        # lexically, so actionlint reads a file of the tree.
+        ("outside", "./.github/actions/linked/../inside", True),
+    ],
+    ids=["link-in-dotdot-out", "link-out-dotdot-in"],
+)
+@pytest.mark.unit
+def test_a_reference_through_a_link_is_judged_where_actionlint_reads_it(
+    repo, tmp_path, monkeypatch, on_path, link_target, spec, linted
+):
+    """actionlint joins "uses: ./..." to its root lexically, so ".." is taken
+    before any link is followed. Resolving the link first judged the wrong file:
+    inside when actionlint reads outside, and the reverse."""
+    (repo / ".git").mkdir()
+    outside = tmp_path / "outside" / "action"
+    outside.mkdir(parents=True)
+    (outside / "action.yml").write_text(_OUTSIDE_ACTION)
+    actions = repo / ".github" / "actions"
+    for name in ("inside", "deep/real"):
+        (actions / name).mkdir(parents=True)
+        (actions / name / "action.yml").write_text(_OUTSIDE_ACTION)
+    (actions / "linked").symlink_to(
+        actions / "deep" / "real" if link_target == "inside" else outside
+    )
+    (repo / ".github" / "workflows" / "refs.yml").write_text(_step_uses(spec))
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert (".github/workflows/refs.yml" in argv[argv.index("--") + 1 :]) is linted
+
+
 @pytest.mark.unit
 def test_a_local_reference_holding_a_nul_does_not_fail_the_scan(
     repo, monkeypatch, on_path
