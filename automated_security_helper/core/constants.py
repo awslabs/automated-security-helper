@@ -419,16 +419,62 @@ ASH_CONFIG_ENV_VAR_ALLOWLIST = [
 # ash-container-init take out of the environment before ASH starts because a
 # config could read it. A reference to one of these names is left as written,
 # as a reference to an unlisted name is.
+#
+# The suffixes are the plain ends-with reading only. The one rule a config
+# loader applies is :func:`is_refused_config_environment_name`, which reads
+# these, the names below, and the module's own secret-shaped reading
+# (:func:`is_secret_shaped_environment_name`): the loader's exclusion used to be
+# the suffixes alone, narrower than the rule this module masks stream output
+# with, so a config file inside the scanned tree could interpolate ASH_DB_PASS,
+# ASH_GITHUB_PAT, ASH_API_KEY_PROD, ASH_API_KEY2, ASH_APIKEY or ASH_X_PASSPHRASE,
+# every one of them a name the masking rule classes as holding a secret.
 ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES = (
     "_KEY",
+    "_KEYS",
     "_TOKEN",
+    "_TOKENS",
     "_SECRET",
+    "_SECRETS",
     "_PASSWORD",
+    "_PASSWORDS",
+    "_PASSWD",
+    "_PASSWDS",
+    "_PASS",
+    "_PASSES",
+    "_PASSPHRASE",
+    "_PASSPHRASES",
+    "_PWD",
+    "_PWDS",
+    "_PAT",
+    "_PATS",
+    "_AUTH",
+    "_AUTHS",
     "_CREDENTIAL",
     "_CREDENTIALS",
     "_HEADER_VALUE",
 )
 ASH_CONFIG_ENV_VAR_SECRET_NAMES = ("ASH_MCP_AUTH_HEADER_VALUE",)
+
+
+def is_refused_config_environment_name(name: str) -> bool:
+    """Whether a config file may NOT interpolate the ``ASH_`` variable *name*,
+    whatever it holds: the one name rule for the config loader's ``!ENV``
+    exclusion.
+
+    True for a listed name (``ASH_CONFIG_ENV_VAR_SECRET_NAMES``), a name ending
+    in one of ``ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES``, and any name
+    :func:`is_secret_shaped_environment_name` classes as holding a secret, read
+    case-insensitively. The three readings used to be two: the loader applied
+    the suffixes and the names, while the secret-shaped reading masked the
+    stream output only, so the loader admitted names the same module called
+    secrets (qualified, glued and digit-suffixed forms among them).
+    """
+    upper = name.upper()
+    return (
+        upper in ASH_CONFIG_ENV_VAR_SECRET_NAMES
+        or upper.endswith(ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES)
+        or is_secret_shaped_environment_name(name)
+    )
 
 
 def is_readable_environment_name(name: str) -> bool:
@@ -538,6 +584,17 @@ def _canonical_segment(segment: str) -> str:
     return stripped
 
 
+def _is_trailing_qualifier(segment: str) -> bool:
+    """Whether *segment* is a trailing qualifier, read as written and with its
+    trailing digit run stripped: ``PROD``, ``2`` and ``V2`` as before, and
+    ``PROD2`` (a stage word glued to a digit run) too, which the written-form
+    test alone did not read, contrary to the documented contract."""
+    if _TRAILING_QUALIFIER_SEGMENT.fullmatch(segment):
+        return True
+    stripped = _TRAILING_DIGITS.sub("", segment)
+    return not stripped or bool(_GLUED_QUALIFIER.fullmatch(stripped))
+
+
 def _is_false_positive_segment(segment: str) -> bool:
     """Whether *segment* is denylisted, read with its plural spellings:
     ``BYPASSES`` and ``COMPATS`` are the plurals of denylisted segments, so a
@@ -584,13 +641,28 @@ def is_secret_shaped_environment_name(name: str) -> bool:
     upper = name.upper()
     segments = _name_segments(name)
     canonical = [_canonical_segment(segment) for segment in segments]
+    # The name without its trailing qualifier segments, so the ends-with
+    # reading sees the word a qualifier followed: ASH_GITHUBTOKEN_2 and
+    # ASH_DBPASSWORD_PROD end with a glued word plus a qualifier, which the
+    # segment-run reading cannot split and the plain ends-with test did not
+    # reach, although ASH_GITHUBTOKEN and ASH_GITHUB_TOKEN_2 both matched.
+    kept = len(segments)
+    while kept > 1 and _is_trailing_qualifier(segments[kept - 1]):
+        kept -= 1
+    trimmed = segments[:kept]
+    trimmed_canonical = canonical[:kept]
     joined = "_".join(canonical)
-    last_is_denylisted = bool(segments) and (
-        _is_false_positive_segment(segments[-1])
-        or _is_false_positive_segment(canonical[-1])
+    trimmed_joined = "_".join(trimmed)
+    trimmed_canonical_joined = "_".join(trimmed_canonical)
+    last_is_denylisted = bool(trimmed) and (
+        _is_false_positive_segment(trimmed[-1])
+        or _is_false_positive_segment(trimmed_canonical[-1])
     )
     if not last_is_denylisted and any(
-        upper.endswith(suffix) or joined.endswith(suffix)
+        upper.endswith(suffix)
+        or joined.endswith(suffix)
+        or trimmed_joined.endswith(suffix)
+        or trimmed_canonical_joined.endswith(suffix)
         for suffix in SECRET_SHAPED_NAME_SUFFIXES
     ):
         return True
@@ -603,8 +675,7 @@ def is_secret_shaped_environment_name(name: str) -> bool:
             if canonical[start : start + width] != wanted:
                 continue
             if all(
-                _TRAILING_QUALIFIER_SEGMENT.fullmatch(segment)
-                for segment in segments[start + width :]
+                _is_trailing_qualifier(segment) for segment in segments[start + width :]
             ):
                 return True
     return False
@@ -731,9 +802,18 @@ KNOWN_IGNORE_PATHS = [
 KNOWN_SCANNABLE_EXTENSIONS = [
     # JavaScript and TypeScript ecosystem
     "js",
+    "mjs",
+    "cjs",
     "ts",
     "jsx",
     "tsx",
+    # Credential-bearing and configuration files. Left out, the archive
+    # converter never extracted such a member and detect-secrets never read it:
+    # a private key or a registry token inside an archive went unscanned.
+    "pem",
+    "key",
+    "npmrc",
+    "config",
     # Scripting languages
     "py",
     "ipynb",
