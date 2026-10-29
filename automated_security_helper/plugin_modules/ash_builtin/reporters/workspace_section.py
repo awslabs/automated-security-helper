@@ -57,9 +57,11 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import html as html_escape
+import re
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 from automated_security_helper.models.workspace import is_workspace_scan
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -189,16 +191,51 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
     return rows
 
 
+def _shown(value: Any) -> str:
+    """*value* as one shown line.
+
+    A project's label is ``project_name`` from that project's own config file,
+    and its threshold and detail carry the same file's and the scanners' text,
+    so each is shown, not obeyed: a control character or a newline in it is
+    written as an escape and a CI command form is broken, as every other
+    repository-controlled value the three reporters print. Without this a
+    label's newline started a line of its own in the text report (a CI log) and
+    in the Markdown table.
+    """
+    return str(shown_on_one_line(str(value)))
+
+
 def _cells(row: Dict[str, Any]) -> Sequence[str]:
-    """One row's values in :data:`COLUMNS` order, as strings."""
+    """One row's values in :data:`COLUMNS` order, each one shown line."""
     return (
-        str(row["project"]),
-        str(row["status"]),
-        str(row["findings"]),
-        str(row["actionable"]),
-        str(row["threshold"]),
-        str(row["result"]),
+        _shown(row["project"]),
+        _shown(row["status"]),
+        _shown(row["findings"]),
+        _shown(row["actionable"]),
+        _shown(row["threshold"]),
+        _shown(row["result"]),
     )
+
+
+def _notes(rows: List[Dict[str, Any]]) -> List[tuple[str, str]]:
+    """``(label, detail)`` for every row whose detail is not empty, both shown.
+
+    The detail (an error's text, the scanners that did not complete, a
+    conversion gap, a stale database) is the actionable half of a FAILED row,
+    and it was built for every row and emitted by none of the renderers.
+    """
+    return [(_shown(row["project"]), _shown(row["detail"])) for row in rows if row["detail"]]
+
+
+#: Markdown's syntax characters, and the table's cell separator: each is kept
+#: literal with a backslash, after ``<``, ``>`` and ``&`` become entities. The
+#: same escaping the Markdown reporter applies to every other scanner-controlled
+#: cell (its ``_text``), which the table could not import without a cycle.
+_MARKDOWN_SYNTAX = re.compile(r"([\\`*_\[\]{}#|~])")
+
+
+def _markdown_cell(value: str) -> str:
+    return _MARKDOWN_SYNTAX.sub(r"\\\1", html_escape.escape(value, quote=False))
 
 
 def markdown_workspace_section(model: "AshAggregatedResults") -> List[str]:
@@ -220,13 +257,20 @@ def markdown_workspace_section(model: "AshAggregatedResults") -> List[str]:
     lines.append("| " + " | ".join(COLUMNS) + " |")
     lines.append("| --- | --- | ---: | ---: | --- | --- |")
     for row in rows:
-        # Escaped for markdown tables specifically: a pipe in a project label
+        # Kept literal in Markdown, pipe included: a pipe in a project label
         # would otherwise split the row into extra columns and silently shift
-        # every value after it.
+        # every value after it, and markup in it would render instead of read.
         lines.append(
-            "| " + " | ".join(cell.replace("|", "\\|") for cell in _cells(row)) + " |"
+            "| " + " | ".join(_markdown_cell(cell) for cell in _cells(row)) + " |"
         )
     lines.append("")
+    notes = _notes(rows)
+    if notes:
+        lines.extend(
+            f"- **{_markdown_cell(label)}**: {_markdown_cell(detail)}"
+            for label, detail in notes
+        )
+        lines.append("")
     return lines
 
 
@@ -262,6 +306,10 @@ def text_workspace_section(
     lines.append(line(COLUMNS))
     lines.append("-" * len(line(COLUMNS)))
     lines.extend(line(cell) for cell in cells)
+    notes = _notes(rows)
+    if notes:
+        lines.append("")
+        lines.extend(f"  {label}: {detail}" for label, detail in notes)
     lines.append("")
     return lines
 
@@ -285,6 +333,11 @@ def html_workspace_section(model: "AshAggregatedResults") -> str:
         cells = "".join(f"<td>{html_escape.escape(cell)}</td>" for cell in _cells(row))
         css_class = "failed" if row["result"].startswith("FAILED") else "passed"
         body.append(f'<tr class="{css_class}">{cells}</tr>')
+    notes = "".join(
+        f"<li><strong>{html_escape.escape(label)}</strong>: {html_escape.escape(detail)}</li>"
+        for label, detail in _notes(rows)
+    )
+    notes_list = f'<ul class="project-notes">{notes}</ul>' if notes else ""
 
     return (
         f'<div class="section" id="{HTML_SECTION_ID}">'
@@ -293,5 +346,6 @@ def html_workspace_section(model: "AshAggregatedResults") -> str:
         "threshold, so a workspace fails when any project does.</p>"
         f"<table><thead><tr>{header}</tr></thead>"
         f"<tbody>{''.join(body)}</tbody></table>"
+        f"{notes_list}"
         "</div>"
     )
