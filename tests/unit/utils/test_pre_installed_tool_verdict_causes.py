@@ -22,6 +22,7 @@ from __future__ import annotations
 import stat
 import subprocess  # nosec B404
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,33 @@ class TestNixStaging:
         assert verdict.status == "unverifiable"
         assert verdict.from_nix is True
         assert "could not be staged" in verdict.detail
+
+
+class TestTheVerdictMemoExpires:
+    def test_a_long_lived_process_probes_the_copy_again(self, tmp_path, monkeypatch):
+        """The memo is keyed on the executable's mtime, which does not move when
+        the environment around it changes; a verdict older than the memo window
+        is probed again instead of answering for the life of the process."""
+        tool = _executable(tmp_path / "bin" / "tool", b"#!/bin/sh\necho 1.0\n")
+        probes = []
+
+        def _run(command, timeout):
+            probes.append(list(command))
+            return subprocess.CompletedProcess(command, 0, "1.0\n", "")
+
+        monkeypatch.setattr(pre_installed_tool, "_run", _run)
+        monkeypatch.setattr(pre_installed_tool, "find_tool_interpreter", lambda e: None)
+        verify_pre_installed_tool(str(tool), "bandit", uv_executable="/opt/uv")
+        verify_pre_installed_tool(str(tool), "bandit", uv_executable="/opt/uv")
+        assert len(probes) == 1, "the second check inside the window is answered"
+        real_monotonic = time.monotonic
+        monkeypatch.setattr(
+            pre_installed_tool.time,
+            "monotonic",
+            lambda: real_monotonic() + pre_installed_tool._VERDICT_MEMO_SECONDS + 1,
+        )
+        verify_pre_installed_tool(str(tool), "bandit", uv_executable="/opt/uv")
+        assert len(probes) == 2, "a verdict past the window is probed again"
 
 
 class TestTheCauseOfAnUnsatisfiedVerdict:

@@ -79,6 +79,7 @@ guessing in either direction.
 from __future__ import annotations
 
 import os
+import time
 import re
 import shutil
 import subprocess
@@ -153,8 +154,17 @@ class PreInstalledToolVerdict:
     summary: str = ""
 
 
+#: How long a memoized verdict answers for its copy. The key carries the
+#: executable's own mtime, which does not move when the ENVIRONMENT around it
+#: does (a package installed into the venv that provides it), and the memo is
+#: never cleared in production: an in-process MCP server kept a stale verdict
+#: for as long as it lived. A scan's repeated checks of one copy fall well
+#: inside this; a later scan in a long-lived process probes again.
+_VERDICT_MEMO_SECONDS = 600.0
+
+#: key -> (verdict, the monotonic time it was stored).
 _verdict_cache: Dict[
-    Tuple[str, int, str, Tuple[str, ...]], PreInstalledToolVerdict
+    Tuple[str, int, str, Tuple[str, ...]], Tuple[PreInstalledToolVerdict, float]
 ] = {}
 _verdict_cache_lock = threading.Lock()
 
@@ -611,16 +621,24 @@ def verify_pre_installed_tool(
             )
 
         with _verdict_cache_lock:
-            _verdict_cache[key] = verdict
+            _verdict_cache[key] = (verdict, time.monotonic())
         return verdict
 
 
 def _answer_without_a_probe(
     key: Tuple[str, int, str, Tuple[str, ...]],
 ) -> Optional[PreInstalledToolVerdict]:
-    """The memoized verdict for ``key``, or None when the copy has to be probed."""
+    """The memoized verdict for ``key``, or None when the copy has to be probed:
+    nothing remembered, or a verdict older than ``_VERDICT_MEMO_SECONDS``."""
     with _verdict_cache_lock:
-        return _verdict_cache.get(key)
+        remembered = _verdict_cache.get(key)
+        if remembered is None:
+            return None
+        verdict, stored_at = remembered
+        if time.monotonic() - stored_at > _VERDICT_MEMO_SECONDS:
+            _verdict_cache.pop(key, None)
+            return None
+        return verdict
 
 
 def _verify(
