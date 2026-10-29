@@ -46,6 +46,37 @@ DOCKERFILE_STAGED_PACKAGE_FILES: tuple = (
     ("core/exceptions.py", "exceptions.py"),
 )
 
+# The path every asset the root Dockerfile COPYs is under in a checkout. Inside
+# the shipped Dockerfile's build context (assets/ itself) the same file is at the
+# bare name, so the prefix comes off every source of every COPY.
+_ASSETS_PREFIX = "automated_security_helper/assets/"
+
+
+def staged_dockerfile_text(content: str) -> str:
+    """The root Dockerfile's text with every COPY source inside the assets context.
+
+    Every source of a COPY or ADD instruction that names a file under
+    ``automated_security_helper/assets/`` becomes the bare file name, and every
+    source in DOCKERFILE_STAGED_PACKAGE_FILES becomes its staged name. Every
+    source, not the first: ``COPY <a> <b> /dest/`` carries two, and rewriting
+    only the one right after ``COPY`` left the second pointing outside the
+    context, so the packaged image build failed at that line while the same
+    Dockerfile built from a checkout. Comments and every other instruction are
+    left as they are; the paths in them are documentation.
+    """
+    staged = []
+    for line in content.splitlines(keepends=True):
+        instruction = line.split(maxsplit=1)[0].upper() if line.strip() else ""
+        if instruction in ("COPY", "ADD"):
+            for source_rel, staged_name in DOCKERFILE_STAGED_PACKAGE_FILES:
+                line = line.replace(
+                    f"automated_security_helper/{source_rel}", staged_name
+                )
+            line = line.replace(_ASSETS_PREFIX, "")
+        staged.append(line)
+    return "".join(staged)
+
+
 # The GenAI guide `ash get-genai-guide` writes out. It lives in docs/, which no
 # artifact ships, so it is added to both the sdist and the wheel at this path inside
 # the package; cli/main.py reads it from there. Without it a wheel install had no
@@ -112,14 +143,12 @@ class CustomBuildHook(BuildHookInterface):
 
             if dockerfile_path.exists():
                 content = dockerfile_path.read_text()
-                content = content.replace(
-                    "COPY automated_security_helper/assets/", "COPY "
-                )
-                # Stage the package files the Dockerfile COPYs from outside assets/,
-                # and point the COPY lines at the staged copies. Asserted rather
-                # than skipped when a source is missing: a silently-dropped stage
-                # produces a Dockerfile that fails at build time in the shipped
-                # artifact only, which is the hardest place to notice it.
+                # Stage the package files the Dockerfile COPYs from outside assets/;
+                # staged_dockerfile_text points every COPY source at the staged
+                # copies and the bare asset names. Asserted rather than skipped
+                # when a source is missing: a silently-dropped stage produces a
+                # Dockerfile that fails at build time in the shipped artifact only,
+                # which is the hardest place to notice it.
                 for source_rel, staged_name in DOCKERFILE_STAGED_PACKAGE_FILES:
                     source = ASH_REPO_ROOT.joinpath(
                         "automated_security_helper", *source_rel.split("/")
@@ -130,12 +159,8 @@ class CustomBuildHook(BuildHookInterface):
                             f"at {source}"
                         )
                     shutil.copyfile(source, ASH_ASSETS_PATH.joinpath(staged_name))
-                    content = content.replace(
-                        f"COPY automated_security_helper/{source_rel}",
-                        f"COPY {staged_name}",
-                    )
                     _say(f"Staged {source_rel} into assets/{staged_name}")
-                dockerfile_copy_path.write_text(content)
+                dockerfile_copy_path.write_text(staged_dockerfile_text(content))
                 _say("Successfully generated assets/Dockerfile from root Dockerfile")
             else:
                 _say(f"Warning: Dockerfile not found at {dockerfile_path}")
