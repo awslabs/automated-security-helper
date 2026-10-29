@@ -94,8 +94,11 @@ Known limitations
 * The ``dominant`` shape does not yet produce a dominant project; see above.
 * The discard pass warms the tool cache, not the filesystem cache, and not any
   state inside a scanner's own cache directory.
-* ``MISSING`` scanners cost nothing. A host with more scanner tools installed will
-  show larger absolute times in both arms; the ratio is the portable part.
+* Both arms run the same two scanners, bandit and checkov (``GATE_SCANNERS``), so
+  the measurement does not depend on which tools a host happens to have. Left at
+  the default set, a host missing any default-enabled scanner made every timed
+  scan exit 1 (the completeness gate is on by default) and the measurement was
+  abandoned instead of run.
 * The projects are Python-and-Terraform only, so the mix of scanners is not
   representative of a polyglot workspace.
 """
@@ -224,6 +227,24 @@ def write_fixture(
     return definition, keys[0]
 
 
+#: The scanners both arms run, named rather than left at the default set.
+#:
+#: The fixture is Python and Terraform, which these two cover. The default set
+#: includes tools most hosts do not have, and a MISSING default scanner makes a
+#: scan exit 1 under the completeness gate, which time_once rightly refuses as a
+#: timing sample -- so on such a host the measurement never ran at all. Naming
+#: the set is what the verification gates do too (``GATE_SCANNERS`` in
+#: verify_external_target_scan.py and verify_multi_project_attribution.py).
+GATE_SCANNERS: Sequence[str] = ("bandit", "checkov")
+
+
+def _scanner_arguments() -> List[str]:
+    arguments: List[str] = []
+    for scanner in GATE_SCANNERS:
+        arguments += ["--scanners", scanner]
+    return arguments
+
+
 def single_project_command(project_dir: Path, output_dir: Path) -> List[str]:
     return [
         sys.executable,
@@ -238,7 +259,7 @@ def single_project_command(project_dir: Path, output_dir: Path) -> List[str]:
         "scan",
         "--no-progress",
         "--simple",
-    ]
+    ] + _scanner_arguments()
 
 
 def workspace_command(definition: Path, output_dir: Path) -> List[str]:
@@ -255,7 +276,7 @@ def workspace_command(definition: Path, output_dir: Path) -> List[str]:
         "scan",
         "--no-progress",
         "--simple",
-    ]
+    ] + _scanner_arguments()
 
 
 def time_once(command: Sequence[str], repo_root: Path, output_dir: Path) -> float:
