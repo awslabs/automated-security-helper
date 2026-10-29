@@ -3035,11 +3035,14 @@ def _stop_tree(
     # a group that still exists after one more settle is a survivor: recorded as
     # a stop that failed, the way a refused stop records one, so the run never
     # reads as a plain timeout while part of the tool may still be writing.
-    if _group_exists(pgid):
+    # Read through _group_survives: when this process is its container's init,
+    # the killed descendants fall to it as zombies that nobody else reaps, and
+    # a group made only of those is a tool that is gone, not one that survived.
+    if _group_survives(pgid):
         settled = time.monotonic() + _KILLED_GROUP_SETTLE_SECONDS
-        while time.monotonic() < settled and _group_exists(pgid):
+        while time.monotonic() < settled and _group_survives(pgid):
             time.sleep(0.02)
-        if _group_exists(pgid):
+        if _group_survives(pgid):
             _note_stop_refused(process)
 
 
@@ -3285,6 +3288,66 @@ def _group_exists(pgid: int) -> bool:
         return _signal_group(pgid, 0)
     except OSError:
         return True
+
+
+def _this_process_is_init() -> bool:
+    """True when this process is PID 1: the reaper of every orphan on the host.
+
+    ASH is PID 1 when it is the entrypoint of its own container image.
+    """
+    return os.name != "nt" and os.getpid() == 1
+
+
+def _zombie_orphans_of_group(pgid: int) -> List[int]:
+    """The exited, unreaped children of this process in group *pgid*, from /proc.
+
+    Read from each ``/proc/<pid>/stat``: the state letter, the parent and the
+    group come right after the command name, which can hold spaces and
+    parentheses, so the fields are taken from after its closing parenthesis.
+    Empty where there is no /proc to read.
+    """
+    me = os.getpid()
+    zombies: List[int] = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return zombies
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", "rb") as stat:
+                fields = stat.read().rpartition(b")")[2].split()
+        except OSError:
+            continue
+        if len(fields) < 3 or fields[0] != b"Z":
+            continue
+        try:
+            if int(fields[1]) == me and int(fields[2]) == pgid:
+                zombies.append(int(entry))
+        except ValueError:
+            continue
+    return zombies
+
+
+def _group_survives(pgid: int) -> bool:
+    """_group_exists, once the orphans this process inherited as init are reaped.
+
+    ``killpg(pgid, 0)`` succeeds while any member exists, a zombie included. A
+    killed tool's children are re-parented to PID 1, and when that is ASH (its
+    own container's init) nothing reaps them, so the group of a tool that is
+    gone kept existing and every stop of a tool that had children was recorded
+    as one ASH could not stop. Only this process's own exited children in the
+    group are waited for, each by its pid, so no other spawn's exit status is
+    taken from under its Popen.
+    """
+    if _this_process_is_init():
+        for pid in _zombie_orphans_of_group(pgid):
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+    return _group_exists(pgid)
 
 
 def _kill(

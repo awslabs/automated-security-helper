@@ -1,0 +1,148 @@
+"""A killed tool whose children fell to ASH as unreaped zombies is not a survivor.
+
+``killpg(pgid, 0)`` succeeds while any member of the group exists, a zombie
+included. When ASH is PID 1 in its own container, a killed tool's children are
+re-parented to it and nothing else reaps them, so the survivor read after the
+SIGKILL in _stop_tree kept seeing the group and recorded every stop of a tool
+that had children as one ASH could not stop.
+"""
+
+import os
+import signal
+import subprocess  # nosec B404 - the module under test wraps subprocess
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from automated_security_helper.utils import subprocess_utils
+
+pytestmark = pytest.mark.unit
+
+skip_on_windows = pytest.mark.skipif(
+    os.name == "nt", reason="process groups are the POSIX arm of _stop_tree"
+)
+
+
+def _reaped_child(pid: int) -> MagicMock:
+    process = MagicMock(spec=subprocess.Popen)
+    process.pid = pid
+    process.returncode = -9
+    process.poll.return_value = -9
+    return process
+
+
+@skip_on_windows
+def test_as_init_the_zombie_orphans_of_the_group_are_reaped_by_pid():
+    zombies = {777, 778}
+
+    def exists(pgid):
+        return bool(zombies)
+
+    def reap(pid, options):
+        zombies.discard(pid)
+        return (pid, 9)
+
+    with (
+        patch.object(subprocess_utils, "_this_process_is_init", return_value=True),
+        patch.object(
+            subprocess_utils, "_zombie_orphans_of_group", return_value=[777, 778]
+        ) as orphans,
+        patch.object(subprocess_utils, "_group_exists", side_effect=exists),
+        patch.object(subprocess_utils.os, "waitpid", side_effect=reap) as waitpid,
+    ):
+        assert subprocess_utils._group_survives(4242) is False
+    orphans.assert_called_once_with(4242)
+    assert waitpid.call_count == 2
+    waitpid.assert_any_call(777, os.WNOHANG)
+    waitpid.assert_any_call(778, os.WNOHANG)
+
+
+@skip_on_windows
+def test_not_as_init_nothing_is_reaped_and_the_group_read_stands():
+    with (
+        patch.object(subprocess_utils, "_this_process_is_init", return_value=False),
+        patch.object(subprocess_utils, "_zombie_orphans_of_group") as orphans,
+        patch.object(subprocess_utils, "_group_exists", return_value=True),
+        patch.object(subprocess_utils.os, "waitpid") as waitpid,
+    ):
+        assert subprocess_utils._group_survives(4242) is True
+    orphans.assert_not_called()
+    waitpid.assert_not_called()
+
+
+@skip_on_windows
+def test_a_killed_group_of_zombies_is_not_recorded_as_a_refused_stop():
+    """At the base the group of zombies kept existing and _note_stop_refused ran."""
+    process = _reaped_child(4242)
+    zombies = {777}
+
+    def group_signal(pgid, signum):
+        # SIGKILL reaches the group; the existence probe (signal 0) sees the
+        # zombie until it is reaped.
+        return signum == signal.SIGKILL or bool(zombies)
+
+    def reap(pid, options):
+        zombies.discard(pid)
+        return (pid, 9)
+
+    with (
+        patch.object(subprocess_utils, "_signal_group", side_effect=group_signal),
+        patch.object(subprocess_utils, "_wait_after_kill"),
+        patch.object(subprocess_utils, "_this_process_is_init", return_value=True),
+        patch.object(
+            subprocess_utils,
+            "_zombie_orphans_of_group",
+            side_effect=lambda pgid: sorted(zombies),
+        ),
+        patch.object(subprocess_utils.os, "waitpid", side_effect=reap),
+        patch.object(subprocess_utils, "_note_stop_refused") as refused,
+    ):
+        subprocess_utils._stop_tree(process, grace=0)
+    refused.assert_not_called()
+    assert zombies == set()
+
+
+@skip_on_windows
+def test_a_live_member_after_the_kill_is_still_recorded_as_a_refused_stop():
+    process = _reaped_child(4242)
+    with (
+        patch.object(subprocess_utils, "_signal_group", return_value=True),
+        patch.object(subprocess_utils, "_wait_after_kill"),
+        patch.object(subprocess_utils, "_this_process_is_init", return_value=True),
+        patch.object(subprocess_utils, "_zombie_orphans_of_group", return_value=[]),
+        patch.object(subprocess_utils, "_KILLED_GROUP_SETTLE_SECONDS", 0.0),
+        patch.object(subprocess_utils, "_note_stop_refused") as refused,
+    ):
+        subprocess_utils._stop_tree(process, grace=0)
+    refused.assert_called_once_with(process)
+
+
+@skip_on_windows
+def test_zombie_orphans_are_read_from_proc_stat_after_the_command_name(tmp_path):
+    me = os.getpid()
+    proc = tmp_path / "proc"
+    for pid, stat in {
+        "777": f"777 (a (tool) name) Z {me} 4242 4242 0 -1 4194560 0 0\n",
+        "778": f"778 (sleeping) S {me} 4242 4242 0 -1 4194560 0 0\n",
+        "779": f"779 (other parent) Z {me + 1} 4242 4242 0 -1 4194560 0 0\n",
+        "780": f"780 (other group) Z {me} 4243 4243 0 -1 4194560 0 0\n",
+    }.items():
+        (proc / pid).mkdir(parents=True)
+        (proc / pid / "stat").write_text(stat)
+    (proc / "self").mkdir()
+    real_listdir = os.listdir
+    real_open = open
+
+    def listdir(path):
+        return real_listdir(proc) if path == "/proc" else real_listdir(path)
+
+    def open_under_tmp(path, *args, **kwargs):
+        if isinstance(path, str) and path.startswith("/proc/"):
+            path = str(proc / path[len("/proc/") :])
+        return real_open(path, *args, **kwargs)
+
+    with (
+        patch.object(subprocess_utils.os, "listdir", side_effect=listdir),
+        patch("builtins.open", side_effect=open_under_tmp),
+    ):
+        assert subprocess_utils._zombie_orphans_of_group(4242) == [777]
