@@ -770,7 +770,10 @@ def open_for_atomic_write(
 
     ``with open_for_atomic_write(path) as handle:`` yields a handle, text unless
     ``binary``, on a new file created exclusively in ``path``'s directory, with the
-    permissions a plain open gives (0o666 less the umask). When the block ends
+    permissions a plain open gives (0o666 less the umask). ``encoding``, ``errors``
+    and ``newline`` are open()'s, for text, as they are for open_for_write; the
+    staging handle is the one they shape, so the bytes renamed over ``path`` are
+    the bytes open() would have written there. When the block ends
     without an exception the file is renamed over ``path``, so a reader of ``path``
     opens the old complete file or the new complete one and never a partial write.
     When the block raises, the staging file is removed and ``path`` is left as it
