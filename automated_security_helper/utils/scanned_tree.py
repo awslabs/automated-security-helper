@@ -34,8 +34,14 @@ A file is read only when all of these hold:
 ``follow_links_inside=True`` relaxes rules 3 and 5 for readers that look up a file a
 scanner already reported: a link is followed when its target is inside the tree, and
 a hard-linked file is read. ``allow_hardlinks=True`` relaxes rule 5 alone, for a
-reader that copies files a directory walk of the tree reads under these names. See
-:func:`open_in_scanned_tree`.
+reader that copies files a directory walk of the tree reads under these names, and
+for the CloudFormation template readers (``utils/cfn_template_model.py``), which
+read a file the scan set already lists to decide whether a scanner evaluates it. A
+hard link to a regular file inside the tree is that file's own bytes under a second
+name: reading it follows no link to another path, so rule 5 protects nothing there
+and refusing it only left a hard-linked template unscanned and unreported. Rules 1
+to 4 still hold for every such read: a symlink, a path that resolves outside the
+tree and a non-regular file stay refused. See :func:`open_in_scanned_tree`.
 
 How the check is made, and why that way
 ---------------------------------------
@@ -451,7 +457,11 @@ def open_in_scanned_tree(
             tree, which reads a hard-linked file under each of its names but
             follows no symlink: the gitleaks ``.gitleaksignore`` re-scan copies the
             files it names, and refusing a hard-linked one would leave a file the
-            scan covers unread.
+            scan covers unread. The CloudFormation template readers set it for the
+            same reason: a template the scan set lists is read to decide whether
+            cfn-nag and cdk-nag evaluate it, and a refusal there skipped a
+            hard-linked template with no finding and no error, so a repository
+            that hard-links its templates read as clean.
 
     Returns:
         A binary file object positioned at the start of the file.
@@ -472,16 +482,21 @@ def open_in_scanned_tree(
     return os.fdopen(fd, "rb")
 
 
-def refusal_reason(path: PathLike, root: PathLike) -> Optional[str]:
+def refusal_reason(
+    path: PathLike, root: PathLike, *, allow_hardlinks: bool = False
+) -> Optional[str]:
     """Why ``path`` would be refused, or None if it may be read.
 
     For callers that only need the verdict, such as counting candidate inputs. Makes
     the same check as :func:`open_in_scanned_tree`, by calling it, so the two cannot
     disagree. An ``OSError`` other than a refusal is not a refusal and returns None;
-    the caller that opens the file for real will meet it there.
+    the caller that opens the file for real will meet it there. ``allow_hardlinks``
+    is passed through, so a caller whose real read admits a hard-linked file (the
+    cdk-nag scanner's pre-check, ahead of the template reader) asks under the same
+    rule its read applies.
     """
     try:
-        handle = open_in_scanned_tree(path, root)
+        handle = open_in_scanned_tree(path, root, allow_hardlinks=allow_hardlinks)
     except TreeInputRefused as refused:
         return refused.reason
     except OSError:
