@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import platform
+import shlex
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -122,6 +123,28 @@ _probe_lock = threading.Lock()
 # must not reuse a backend another scan's lookup chose.
 _resolved: Dict[Any, "SandboxBackend | SandboxUnavailable"] = {}
 
+#: Fragments of a probe's reason that name a passing condition, not a missing
+#: feature: the probe process ran past the backend's probe timeout (the text
+#: subprocess gives a TimeoutExpired, which ``SandboxBackend.probe`` keeps as
+#: the reason), or the kernel refused a resource for now (EAGAIN's strerror).
+#: Such a refusal is reported for this request and not remembered, so the next
+#: scan of the tree probes again; a missing program or kernel feature is
+#: remembered for the process like a working backend is.
+_TRANSIENT_REASON_MARKERS: Tuple[str, ...] = ("timed out", "temporarily unavailable")
+
+
+def _probe_reason_is_transient(refusal: SandboxUnavailable) -> bool:
+    """Whether the probe that produced ``refusal`` could answer differently later.
+
+    Read from the reason's text: the backends report a probe that raised as text,
+    so the exception class is not available here. Under auto the reason joins
+    every backend's, and one transient member makes the whole answer transient,
+    which re-probes the others too; that costs one more probe per scan, where
+    remembering a timeout refused or downgraded every later scan in the process.
+    """
+    reason = str(refusal)
+    return any(marker in reason for marker in _TRANSIENT_REASON_MARKERS)
+
 
 def clear_backend_cache() -> None:
     """Forget probe results. For tests."""
@@ -155,7 +178,9 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     """The working backend for ``mode``; raises SandboxUnavailable with the reason.
 
     Probed once per process and mode, under a lock, because parallel scanner threads
-    ask at the same moment and each probe starts a process.
+    ask at the same moment and each probe starts a process. A refusal whose reason
+    is transient (``_probe_reason_is_transient``) is raised but not kept, so the
+    next request probes again.
     """
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
@@ -176,7 +201,11 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 )
             except SandboxUnavailable as e:
                 cached = e
-            _resolved[cache_key] = cached
+            if not (
+                isinstance(cached, SandboxUnavailable)
+                and _probe_reason_is_transient(cached)
+            ):
+                _resolved[cache_key] = cached
     if isinstance(cached, SandboxUnavailable):
         # Classified at the raise, not in the cache, so a cached refusal is
         # always graded with the mode of the current request.
@@ -867,7 +896,42 @@ def _plan_spawn(
             scope_shown_text(
                 f"Scanner sandbox ({scope.backend.name}, "
                 f"network={'yes' if policy.network else 'no'}) "
-                f"for {scope.scanner_name}: {' '.join(plan.argv)}"
+                f"for {scope.scanner_name}: {_argv_text(plan.argv)}",
+                _quoted_spellings(scope.environment_values),
             )
         )
     return plan
+
+
+def _argv_text(argv: Sequence[Any]) -> str:
+    """``argv`` as one shell-quoted line, for the record of a planned spawn.
+
+    Each argument by its ``str``: subprocess accepts a path object as an
+    argument, and a plain join raised TypeError for one here, after the plan
+    had made its temporary directories and the writable-root registrations
+    above, which nothing then released. Quoted (``shlex.join``) so an argument
+    holding a blank stays one argument in the record.
+    """
+    return shlex.join(str(arg) for arg in argv)
+
+
+def _quoted_spellings(values: Sequence[str]) -> List[str]:
+    """The spellings ``shlex.quote`` gives ``values`` that differ from the values.
+
+    ``scope_shown_text`` hides a value by its text. Quoting rewrites only a
+    quote character inside an argument, so a value holding one is spelled
+    differently in the quoted line and would print: its quoted spelling is
+    passed as a value to hide as well. The uv record context's values are
+    merged by ``scope_shown_text`` itself and are covered the same way here.
+    """
+    merged = list(values)
+    record = _RECORD_INPUTS.get()
+    if record is not None:
+        merged.extend(record[0])
+    spellings = []
+    for value in merged:
+        if value and "'" in value:
+            quoted = shlex.quote(value)[1:-1]
+            if quoted not in spellings:
+                spellings.append(quoted)
+    return spellings
