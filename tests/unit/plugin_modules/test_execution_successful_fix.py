@@ -17,6 +17,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture(autouse=True)
 def _no_tool_starts(tmp_path_factory, monkeypatch):
     """These tests build SARIF from a fixed exit code; none may start a tool.

@@ -14,6 +14,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _unresolved_names_reach_the_mocked_spawn(monkeypatch):

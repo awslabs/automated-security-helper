@@ -16,6 +16,8 @@ from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner 
     FerretScannerConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 SUPPRESSION_OPTIONS = ["generate_suppressions", "suppressions_file", "show_suppressed"]
 
 

@@ -42,11 +42,14 @@ from automated_security_helper.utils.pre_installed_tool import (
     reset_pre_installed_tool_cache,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="fakes a POSIX venv layout (bin/python next to the tool); Windows "
-    "launchers are .exe files this fixture does not model",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="fakes a POSIX venv layout (bin/python next to the tool); Windows "
+        "launchers are .exe files this fixture does not model",
+    ),
+]
 
 # Verbatim shape of the stderr in the issue.
 UV_RESOLVE_FAILURE = """  x No solution found when resolving tool dependencies:

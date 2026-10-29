@@ -170,6 +170,7 @@ def _unresolved(node: ast.Import | ast.ImportFrom) -> list:
 
 
 @pytest.mark.parametrize("module", MODULES)
+@pytest.mark.unit
 def test_a_scanners_main_prints_its_sarif_with_commands_broken(module):
     calls = _echo_raw_calls_in_main(SCANNERS / module)
 
@@ -182,6 +183,7 @@ def test_a_scanners_main_prints_its_sarif_with_commands_broken(module):
 
 
 @pytest.mark.parametrize("module", MODULES)
+@pytest.mark.unit
 def test_every_import_in_a_scanners_main_resolves(module):
     imports = _imports_in_main(SCANNERS / module)
     bound = {
@@ -200,6 +202,7 @@ def test_every_import_in_a_scanners_main_resolves(module):
 
 
 @pytest.mark.parametrize("module", MODULES)
+@pytest.mark.integration
 def test_a_scanner_run_as_a_script_prints_no_named_command_a_file_name_holds(
     module, tmp_path
 ):
@@ -239,6 +242,7 @@ def test_a_scanner_run_as_a_script_prints_no_named_command_a_file_name_holds(
     ], completed.stdout[-3000:]
 
 
+@pytest.mark.unit
 def test_json_commands_broken_keeps_the_document():
     from automated_security_helper.utils.command_safe_stream import json_commands_broken
 

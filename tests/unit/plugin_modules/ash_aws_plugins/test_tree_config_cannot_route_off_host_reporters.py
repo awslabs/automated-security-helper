@@ -48,6 +48,8 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 #: A value for each operator-only option that its reporter's model accepts and
 #: that no default has, so a value that got through would build and show.
+pytestmark = pytest.mark.unit
+
 _REPO_VALUES: Dict[str, Any] = {
     "aws_region": "eu-west-3",
     "aws_profile": "repo-profile",

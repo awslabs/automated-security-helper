@@ -45,6 +45,8 @@ from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter impo
     _outcome,
 )
 
+pytestmark = pytest.mark.unit
+
 # THRESHOLD_QUALIFYING_LEVELS and ALL_SARIF_LEVELS are imported rather than
 # transcribed again. This file used to carry its own copy, which meant one table
 # existed three times -- here, in test_junitxml_threshold_ladder.py, and inside

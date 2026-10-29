@@ -30,6 +30,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 _SCANNER = (
     "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner"
 )

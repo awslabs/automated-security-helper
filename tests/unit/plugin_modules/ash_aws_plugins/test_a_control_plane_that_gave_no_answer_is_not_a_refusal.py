@@ -44,6 +44,8 @@ from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_pat
     sarif_model,
 )
 
+pytestmark = pytest.mark.unit
+
 OK = {
     "output": {
         "message": {"role": "assistant", "content": [{"text": "fallback content"}]}

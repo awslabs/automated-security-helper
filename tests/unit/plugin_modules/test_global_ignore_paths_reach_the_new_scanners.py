@@ -33,9 +33,12 @@ from automated_security_helper.models.core import IgnorePathWithReason
 
 PluginContext.model_rebuild()
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="trivy's skip values are POSIX paths"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="trivy's skip values are POSIX paths"
+    ),
+]
 
 TEMPLATE = "Resources:\n  Q:\n    Type: AWS::SQS::Queue\n"
 IGNORES = [

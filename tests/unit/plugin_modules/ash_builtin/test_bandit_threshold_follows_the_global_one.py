@@ -35,6 +35,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
 )
 from automated_security_helper.utils.severity_ladder import resolve_scanner_threshold
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 LADDER = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]

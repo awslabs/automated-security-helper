@@ -238,6 +238,7 @@ def _convert(world) -> List[Path]:
 
 
 @pytest.mark.parametrize("outcome", ["exit-1", "timed-out", "raised-after-start"])
+@pytest.mark.unit
 def test_a_uv_run_that_started_keeps_its_outcome_and_runs_once(world, outcome):
     _uv_chosen(world)
     world.uv.outcome = outcome
@@ -249,6 +250,7 @@ def test_a_uv_run_that_started_keeps_its_outcome_and_runs_once(world, outcome):
     assert world.launches.argvs == []
 
 
+@pytest.mark.unit
 def test_a_uv_run_that_did_not_start_runs_nothing_in_its_place(world):
     _uv_chosen(world)
     world.uv.outcome = "not-started"
@@ -260,6 +262,7 @@ def test_a_uv_run_that_did_not_start_runs_nothing_in_its_place(world):
     assert world.launches.argvs == []
 
 
+@pytest.mark.unit
 def test_uv_unavailable_at_conversion_runs_nothing_in_its_place(world):
     _uv_chosen(world)
     world.uv.available = False
@@ -271,6 +274,7 @@ def test_uv_unavailable_at_conversion_runs_nothing_in_its_place(world):
     assert world.launches.argvs == []
 
 
+@pytest.mark.unit
 def test_control_a_uv_run_that_succeeds_converts_the_notebook_once(world):
     _uv_chosen(world)
 
@@ -285,6 +289,7 @@ def test_control_a_uv_run_that_succeeds_converts_the_notebook_once(world):
 # The copy the check verified
 
 
+@pytest.mark.unit
 def test_a_copy_the_check_verified_is_launched_by_that_path(world):
     _installation(
         world,
@@ -304,6 +309,7 @@ def test_a_copy_the_check_verified_is_launched_by_that_path(world):
     assert [argv[0] for argv in world.launches.argvs] == [str(world.installed)]
 
 
+@pytest.mark.unit
 def test_the_conversion_launches_the_copy_the_check_recorded(world, tmp_path):
     """The conversion runs the copy the check recorded, not a fresh lookup's
     answer: a PATH that changed between the check and the conversion would
@@ -333,6 +339,7 @@ def test_the_conversion_launches_the_copy_the_check_recorded(world, tmp_path):
     assert [argv[0] for argv in world.launches.argvs] == [str(world.installed)]
 
 
+@pytest.mark.unit
 def test_a_healthy_check_that_chooses_uv_logs_no_warning(world, caplog):
     """A PATH copy that does not verify, replaced by an install through uv
     that succeeds, is a healthy run: the fallback's detail is DEBUG, and a
@@ -364,6 +371,7 @@ def test_a_healthy_check_that_chooses_uv_logs_no_warning(world, caplog):
 # Readiness: a verified copy, or a uv that can run nbconvert
 
 
+@pytest.mark.unit
 def test_a_copy_on_path_that_does_not_verify_leaves_the_converter_missing(world):
     world.uv.available = False
     world.verified["status"] = "unsatisfied"
@@ -384,6 +392,7 @@ def test_a_copy_on_path_that_does_not_verify_leaves_the_converter_missing(world)
     assert world.uv.runs == []
 
 
+@pytest.mark.unit
 def test_a_copy_that_fails_verification_is_replaced_by_an_install_through_uv(world):
     """The install carries the converter's requirement, so what uv runs after it
     is a version the check vouched for, not whatever uv resolves."""
@@ -409,6 +418,7 @@ def test_a_copy_that_fails_verification_is_replaced_by_an_install_through_uv(wor
     assert world.launches.argvs == []
 
 
+@pytest.mark.unit
 def test_a_copy_that_fails_verification_with_no_install_leaves_it_missing(world):
     """uv being present is not a way to run nbconvert: with the install failing
     (offline, say), the converter is missing, with the verification's reason,
@@ -432,6 +442,7 @@ def test_a_copy_that_fails_verification_with_no_install_leaves_it_missing(world)
     assert world.launches.argvs == []
 
 
+@pytest.mark.unit
 def test_after_a_failed_install_a_copy_answering_by_name_does_not_make_it_ready(
     world,
 ):
@@ -446,6 +457,7 @@ def test_after_a_failed_install_a_copy_answering_by_name_does_not_make_it_ready(
     assert "nbconvert" in reason, reason
 
 
+@pytest.mark.unit
 def test_after_a_failed_install_the_verified_copy_is_ready_and_launched_by_its_path(
     world,
 ):
@@ -469,6 +481,7 @@ def _a_refusing_lookup(world, refusal: str) -> None:
     )
 
 
+@pytest.mark.unit
 def test_a_copy_the_lookup_refuses_is_not_run_even_when_found_first(world):
     """The path the installation info found goes through the same lookup that
     can refuse a copy (one inside the scanned tree, say): a refused copy starts
@@ -495,6 +508,7 @@ def test_a_copy_the_lookup_refuses_is_not_run_even_when_found_first(world):
     assert "inside the scanned tree" in reason, reason
 
 
+@pytest.mark.unit
 def test_a_refused_copy_is_replaced_by_an_install_through_uv(world):
     _a_refusing_lookup(world, "the jupyter-nbconvert found is inside the scanned tree")
     _installation(
@@ -515,6 +529,7 @@ def test_a_refused_copy_is_replaced_by_an_install_through_uv(world):
     assert world.launches.argvs == []
 
 
+@pytest.mark.unit
 def test_an_unverified_copys_recorded_reason_names_no_path(world):
     """dependency_unavailable_reason reaches the results, so the copy's host
     path stays in the log and out of the record, as a failed input's reason
@@ -538,6 +553,7 @@ def test_an_unverified_copys_recorded_reason_names_no_path(world):
     assert "/" not in reason, reason
 
 
+@pytest.mark.integration
 def test_the_real_verifications_recorded_reason_names_no_path_or_output(world):
     """The reason built from the real check's verdict, not the fixture's
     stand-in, carries neither the copy's path nor the probe's own words: the

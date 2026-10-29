@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 import os
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
@@ -12,6 +14,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
     S3ReporterConfig,
     S3ReporterConfigOptions,
 )
+
+pytestmark = pytest.mark.unit
 
 # Rebuild models to resolve forward references
 AshConfig.model_rebuild()

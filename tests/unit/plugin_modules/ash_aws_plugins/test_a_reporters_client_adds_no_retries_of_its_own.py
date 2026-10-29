@@ -52,6 +52,8 @@ from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_pat
     sarif_model,
 )
 
+pytestmark = pytest.mark.unit
+
 LOGS_MODULE = (
     "automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter"
 )

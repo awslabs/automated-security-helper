@@ -24,6 +24,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
+pytestmark = pytest.mark.unit
+
 _MOD = "automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils"
 
 #: Long and dotted like a real model id, so redaction replaces it anywhere.

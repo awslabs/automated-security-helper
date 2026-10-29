@@ -20,6 +20,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def npm_scanner(test_plugin_context):
     scanner = NpmAuditScanner(

@@ -48,6 +48,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanne
     ZizmorScanner,
 )
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 

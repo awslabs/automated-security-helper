@@ -204,10 +204,12 @@ ANCHOR = "/work/repo"
         ("**/a*/b/**", []),
     ],
 )
+@pytest.mark.unit
 def test_translation(pattern, expected):
     assert bandit_scanner.bandit_exclude_globs(ANCHOR, pattern) == expected
 
 
+@pytest.mark.unit
 def test_a_comma_in_the_target_emits_nothing():
     """bandit splits --exclude on commas, so an anchor holding one would split."""
     assert bandit_scanner.bandit_exclude_globs("/work/a,b", "vendor/**") == []
@@ -226,6 +228,7 @@ def _context_with_output(tmp_path, output_name):
     )
 
 
+@pytest.mark.unit
 def test_a_comma_in_the_output_dir_emits_nothing_for_it(tmp_path):
     context = _context_with_output(tmp_path, "out,put")
     scanner = BanditScanner(context=context, config=BanditScannerConfig())
@@ -236,6 +239,7 @@ def test_a_comma_in_the_output_dir_emits_nothing_for_it(tmp_path):
     )
 
 
+@pytest.mark.unit
 def test_a_comma_in_the_output_dir_is_named_in_a_warning(tmp_path, caplog):
     """The directory is still read by bandit, and its findings dropped after the
     scan; the operator is told why bandit was not asked to skip it, as ferret-scan's
@@ -252,6 +256,7 @@ def test_a_comma_in_the_output_dir_is_named_in_a_warning(tmp_path, caplog):
     ), [r.getMessage() for r in caplog.records]
 
 
+@pytest.mark.unit
 def test_glob_characters_in_the_output_dir_are_escaped(tmp_path):
     context = _context_with_output(tmp_path, "out[1]")
     scanner = BanditScanner(context=context, config=BanditScannerConfig())
@@ -261,12 +266,14 @@ def test_glob_characters_in_the_output_dir_are_escaped(tmp_path):
     assert f"{anchor}/out[1]/*" not in entries
 
 
+@pytest.mark.unit
 def test_glob_characters_in_the_target_are_escaped():
     assert bandit_scanner.bandit_exclude_globs("/work/re[po]", "vendor/**") == [
         glob.escape("/work/re[po]") + "/vendor/*"
     ]
 
 
+@pytest.mark.unit
 def test_global_ignore_paths_reach_bandit(scanner, context):
     target = context.source_dir
     anchor = glob.escape(Path(target).as_posix())
@@ -276,6 +283,7 @@ def test_global_ignore_paths_reach_bandit(scanner, context):
     assert f"{anchor}/*/generated/*" in entries
 
 
+@pytest.mark.unit
 def test_an_expired_global_ignore_path_does_not(scanner, context):
     final_args, _, _ = scanner._execute_scan(
         target=context.source_dir,
@@ -289,12 +297,14 @@ def test_an_expired_global_ignore_path_does_not(scanner, context):
     assert not [e for e in _entries(final_args) if "vendor" in e]
 
 
+@pytest.mark.unit
 def test_the_output_directory_is_excluded_from_the_source_pass(scanner, context):
     anchor = glob.escape(Path(context.source_dir).as_posix())
     entries = _entries(_run(scanner, context.source_dir))
     assert f"{anchor}/.ash/ash_output/*" in entries, entries
 
 
+@pytest.mark.unit
 def test_not_from_the_converted_pass(scanner, context):
     """The converted target is inside the output directory; excluding it there
     would exclude everything the converters wrote. Checked by what bandit
@@ -308,6 +318,7 @@ def test_not_from_the_converted_pass(scanner, context):
     assert _bandit_skips(work, entries) == set(), entries
 
 
+@pytest.mark.unit
 def test_ignore_paths_are_not_anchored_at_the_converted_target(scanner, context):
     """Ignore paths are relative to the source directory. Anchored at the
     converted target, "archive/**" would skip the archive converter's whole
@@ -318,6 +329,7 @@ def test_ignore_paths_are_not_anchored_at_the_converted_target(scanner, context)
     assert not [e for e in entries if "archive" in e], entries
 
 
+@pytest.mark.unit
 def test_an_output_directory_outside_the_target_adds_nothing(tmp_path):
     source = tmp_path / "src"
     source.mkdir()
@@ -372,6 +384,7 @@ def checkout_context(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.integration
 def test_an_earlier_runs_default_output_dir_is_excluded_too(checkout_context):
     """The directories every other directory-walking scanner skips
     (``ScannerPluginBase._ash_output_dirs_inside``), not only this run's: an
@@ -389,6 +402,7 @@ def test_an_earlier_runs_default_output_dir_is_excluded_too(checkout_context):
     ]
 
 
+@pytest.mark.integration
 def test_a_look_alike_deeper_in_the_tree_is_not_excluded(checkout_context):
     """Only the directories ASH names as its own: ``.ash/ash_output`` at the root
     of the source tree, and this run's output directory. One deeper down is the
@@ -402,6 +416,7 @@ def test_a_look_alike_deeper_in_the_tree_is_not_excluded(checkout_context):
     assert not [e for e in entries if "pkg" in e], entries
 
 
+@pytest.mark.integration
 def test_a_default_output_dir_with_committed_files_is_scanned(
     checkout_context, monkeypatch
 ):
@@ -440,6 +455,7 @@ POSIX_ONLY = pytest.mark.skipif(
 
 
 @POSIX_ONLY
+@pytest.mark.integration
 def test_the_real_git_runs_in_a_checkout(checkout_context, _no_tool_runs):
     """The control for the refusals below."""
     git = shutil.which("git")
@@ -461,6 +477,7 @@ def test_the_real_git_runs_in_a_checkout(checkout_context, _no_tool_runs):
         "env git",
     ],
 )
+@pytest.mark.integration
 def test_nothing_else_runs_under_gits_name(
     checkout_context, _no_tool_runs, tmp_path, monkeypatch, way
 ):
@@ -533,6 +550,7 @@ ROUTES = ("global", "system", "environment")
     ids=ROUTES,
     indirect=True,
 )
+@pytest.mark.integration
 def test_no_alias_from_the_environments_config_runs(
     operator_git_config, checkout_context
 ):
@@ -551,6 +569,7 @@ def test_no_alias_from_the_environments_config_runs(
     ids=ROUTES,
     indirect=True,
 )
+@pytest.mark.integration
 def test_no_fsmonitor_from_the_environments_config_runs(
     operator_git_config, checkout_context
 ):
@@ -564,6 +583,7 @@ def test_no_fsmonitor_from_the_environments_config_runs(
     assert not operator_git_config.exists(), "git ran the configured fsmonitor"
 
 
+@pytest.mark.unit
 def test_the_configured_entries_are_kept(context):
     scanner = BanditScanner(
         context=context,
@@ -579,6 +599,7 @@ def test_the_configured_entries_are_kept(context):
     assert f"{anchor}/.venv/*" in entries and f"{anchor}/*/.venv/*" in entries
 
 
+@pytest.mark.unit
 def test_one_exclude_token_per_scan_and_none_left_behind(scanner, context):
     before = [a.key for a in scanner.args.extra_args]
     for _ in range(3):
@@ -619,6 +640,7 @@ def _fake_directories(monkeypatch, directories):
     ],
     ids=["empty-dir", "dir-symlink", "symlink-to-root", "question-mark", "class"],
 )
+@pytest.mark.unit
 def test_no_entry_names_an_existing_directory(
     context, monkeypatch, layout, ignore, excluded
 ):
@@ -684,6 +706,7 @@ def _fake_walk(monkeypatch, top, layout):
     monkeypatch.setattr(os, "walk", walk)
 
 
+@pytest.mark.unit
 def test_an_entry_a_path_contains_as_text_is_left_out(context, monkeypatch):
     """bandit skips a path that contains an --exclude entry as plain text too.
 
@@ -713,6 +736,7 @@ def test_an_entry_a_path_contains_as_text_is_left_out(context, monkeypatch):
     assert f"{anchor}/.ash/ash_output/*" in entries, entries
 
 
+@pytest.mark.unit
 def test_the_output_dir_entry_is_kept_for_paths_inside_it(context, monkeypatch):
     """A directory named ``*`` inside the output directory: the path of a file
     under it holds the entry ``<src>/.ash/ash_output/*`` as text, but it is
@@ -737,6 +761,7 @@ def test_the_output_dir_entry_is_kept_for_paths_inside_it(context, monkeypatch):
     assert f"{anchor}/.ash/ash_output/*" in entries, entries
 
 
+@pytest.mark.unit
 def test_the_output_dir_entry_is_left_out_when_a_path_outside_contains_it(
     context, monkeypatch
 ):
@@ -838,6 +863,7 @@ def _skipped_for(context, excluded):
         ("tests/*", {"tests/t.py", "src/tests/t.py"}),
     ],
 )
+@pytest.mark.unit
 def test_an_excluded_path_skips_what_it_names(context, excluded, expected):
     assert _skipped_for(context, excluded) == expected
 
@@ -865,6 +891,7 @@ def test_an_excluded_path_skips_what_it_names(context, excluded, expected):
         ("[a]pp.py", False),
     ],
 )
+@pytest.mark.unit
 def test_a_global_ignore_path_skips_only_what_it_covers(context, pattern, exact):
     """bandit skips no file the ignore path does not cover, by bandit's rules.
 
@@ -883,6 +910,7 @@ def test_a_global_ignore_path_skips_only_what_it_covers(context, pattern, exact)
         assert skipped == covered, sorted(covered - skipped)
 
 
+@pytest.mark.unit
 def test_no_entry_skips_files_above_or_beside_the_target(tmp_path):
     """The known directories (``.venv/``, ``venv/``, ``node_modules/``) are
     anchored below the target, so a project inside a directory named ``venv``

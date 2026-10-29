@@ -8,6 +8,10 @@ PR#274 Bug #31: Duplicate "xml" in KNOWN_SCANNABLE_EXTENSIONS (from low)
 import inspect
 from unittest.mock import MagicMock
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # PR#274 Bug #24 -- bandit excluded_paths accumulates across calls

@@ -38,6 +38,8 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
 
+pytestmark = pytest.mark.unit
+
 
 class _Spawn:
     def __init__(self, command, cwd, env):

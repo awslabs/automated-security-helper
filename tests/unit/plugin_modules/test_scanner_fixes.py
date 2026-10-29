@@ -11,6 +11,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.models.core import IgnorePathWithReason, ToolExtraArg
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 

@@ -31,6 +31,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
     S3ReporterConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 BUCKET = "fixture-bucket"
 
 

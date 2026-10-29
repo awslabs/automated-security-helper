@@ -15,6 +15,9 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestRetryWithBackoff:
     """Tests for the retry_with_backoff decorator."""
 

@@ -43,7 +43,7 @@ from tests.unit.plugin_modules.ash_builtin.test_detect_secrets_scanner_behavior 
 # detect-secrets --version``), so every scan here started the tool wherever uv could
 # reach it. The scan itself runs in ASH's worker, so the probes answer without a
 # process (tests/unit/conftest.py).
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_tool_probes")]
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()

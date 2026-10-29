@@ -11,6 +11,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter
     CSVReporterConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def csv_reporter(test_plugin_context):

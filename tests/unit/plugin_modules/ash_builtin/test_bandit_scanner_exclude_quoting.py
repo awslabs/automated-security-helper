@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
@@ -10,6 +12,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     BanditScannerConfigOptions,
     bandit_excluded_path_globs,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_process_config_options_exclude_argument_contains_no_literal_quotes(

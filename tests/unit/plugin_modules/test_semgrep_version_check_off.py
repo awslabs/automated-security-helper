@@ -39,7 +39,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 )
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
 VERSION_CHECK = "SEMGREP_ENABLE_VERSION_CHECK"
 

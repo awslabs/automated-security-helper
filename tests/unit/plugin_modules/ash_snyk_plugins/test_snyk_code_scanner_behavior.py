@@ -170,6 +170,7 @@ def writes_sarif(sarif_text, exit_code=0):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_scanner_wires_the_snyk_code_test_command(scanner):
     """model_post_init sets the command, subcommands and SARIF output flag."""
     assert scanner.command == "snyk"
@@ -181,6 +182,7 @@ def test_scanner_wires_the_snyk_code_test_command(scanner):
     assert scanner.args.format_arg is None
 
 
+@pytest.mark.unit
 def test_config_defaults_are_applied_when_config_is_none(plugin_context):
     scanner = SnykCodeScanner(context=plugin_context)
 
@@ -189,6 +191,7 @@ def test_config_defaults_are_applied_when_config_is_none(plugin_context):
     assert scanner.config.enabled is True
 
 
+@pytest.mark.unit
 def test_execute_scan_stub_raises_not_implemented(scanner):
     with pytest.raises(NotImplementedError, match="overrides scan"):
         scanner._execute_scan(
@@ -203,6 +206,7 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_offline_mode_fails_dependency_validation(scanner):
     """Snyk needs the network, so offline mode disqualifies it outright."""
     with patch.object(
@@ -211,6 +215,7 @@ def test_offline_mode_fails_dependency_validation(scanner):
         assert scanner.validate_plugin_dependencies() is False
 
 
+@pytest.mark.unit
 def test_missing_snyk_binary_fails_dependency_validation(scanner, monkeypatch):
     monkeypatch.setenv("SNYK_TOKEN", "placeholder-token")
     monkeypatch.setattr(snyk_code_scanner, "find_executable", lambda name: None)
@@ -218,6 +223,7 @@ def test_missing_snyk_binary_fails_dependency_validation(scanner, monkeypatch):
     assert scanner.validate_plugin_dependencies() is False
 
 
+@pytest.mark.unit
 def test_snyk_token_in_environment_satisfies_credential_check(
     scanner, snyk_on_path, caplog
 ):
@@ -230,6 +236,7 @@ def test_snyk_token_in_environment_satisfies_credential_check(
     )
 
 
+@pytest.mark.unit
 def test_absent_credentials_warn_but_do_not_block_validation(
     scanner, monkeypatch, tmp_path, caplog
 ):
@@ -258,6 +265,7 @@ def test_absent_credentials_warn_but_do_not_block_validation(
     ), f"expected a credential warning; got {[r.message for r in caplog.records]}"
 
 
+@pytest.mark.unit
 def test_existing_configstore_credentials_suppress_the_warning(
     scanner, monkeypatch, tmp_path, caplog
 ):
@@ -304,6 +312,7 @@ SEVERITY_LADDER = {
 @pytest.mark.parametrize(
     "threshold, expected", sorted(SEVERITY_LADDER.items(), key=lambda kv: str(kv[0]))
 )
+@pytest.mark.unit
 def test_severity_threshold_translates_to_the_snyk_flag(
     plugin_context, threshold, expected
 ):
@@ -334,6 +343,7 @@ def test_severity_threshold_translates_to_the_snyk_flag(
         )
 
 
+@pytest.mark.unit
 def test_the_severity_flag_is_sent_once(plugin_context, tmp_path):
     """One --severity-threshold in the argv, however often the options are processed.
 
@@ -357,6 +367,7 @@ def test_the_severity_flag_is_sent_once(plugin_context, tmp_path):
     assert [a.key for a in scanner.args.extra_args] == ["--severity-threshold"]
 
 
+@pytest.mark.unit
 def test_severity_ladder_is_not_vacuous():
     """The ladder must not collapse to a single outcome.
 
@@ -379,6 +390,7 @@ def test_severity_ladder_is_not_vacuous():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_resolve_arguments_puts_the_target_positionally_and_output_with_equals(
     scanner, tmp_path
 ):
@@ -396,6 +408,7 @@ def test_resolve_arguments_puts_the_target_positionally_and_output_with_equals(
     assert "--sarif-file-output" not in args
 
 
+@pytest.mark.unit
 def test_resolve_arguments_omits_the_output_flag_when_no_results_file(
     scanner, tmp_path
 ):
@@ -407,6 +420,7 @@ def test_resolve_arguments_omits_the_output_flag_when_no_results_file(
     assert not any(arg.startswith(SARIF_OUTPUT_FLAG) for arg in args)
 
 
+@pytest.mark.unit
 def test_valueless_extra_args_are_emitted_as_bare_flags(plugin_context, tmp_path):
     """An extra arg with value None becomes one token, not a token pair."""
     from automated_security_helper.models.core import ToolExtraArg
@@ -430,6 +444,7 @@ def test_valueless_extra_args_are_emitted_as_bare_flags(plugin_context, tmp_path
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_empty_target_returns_true_without_running_snyk(
     scanner, snyk_on_path, subprocess_double
 ):
@@ -441,6 +456,7 @@ def test_empty_target_returns_true_without_running_snyk(
     assert any("empty or doesn't exist" in err for err in scanner.errors)
 
 
+@pytest.mark.unit
 def test_unsatisfied_dependencies_return_false(
     scanner, populated_source, subprocess_double, monkeypatch
 ):
@@ -453,6 +469,7 @@ def test_unsatisfied_dependencies_return_false(
     subprocess_double.assert_not_called()
 
 
+@pytest.mark.unit
 def test_dependency_flag_is_rechecked_after_pre_scan(
     scanner, populated_source, subprocess_double
 ):
@@ -470,6 +487,7 @@ def test_dependency_flag_is_rechecked_after_pre_scan(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_sarif_written_by_snyk_becomes_the_returned_report(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -489,6 +507,7 @@ def test_sarif_written_by_snyk_becomes_the_returned_report(
     assert "Hardcoded credential in app.js" in results[0].message.root.text
 
 
+@pytest.mark.unit
 def test_results_file_is_written_under_the_target_type_directory(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -503,6 +522,7 @@ def test_results_file_is_written_under_the_target_type_directory(
     assert f"{SARIF_OUTPUT_FLAG}{expected.as_posix()}" in command
 
 
+@pytest.mark.unit
 def test_invocation_records_a_shell_quoted_command_line(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -529,6 +549,7 @@ def test_invocation_records_a_shell_quoted_command_line(
     )
 
 
+@pytest.mark.unit
 def test_scanner_details_are_attached_to_the_run(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -543,6 +564,7 @@ def test_scanner_details_are_attached_to_the_run(
     )
 
 
+@pytest.mark.unit
 def test_nonzero_exit_code_raises_scanner_error(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -556,6 +578,7 @@ def test_nonzero_exit_code_raises_scanner_error(
     assert "exit code 2" in str(excinfo.value)
 
 
+@pytest.mark.unit
 def test_exit_code_one_means_findings_not_failure(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -571,6 +594,7 @@ def test_exit_code_one_means_findings_not_failure(
     assert len(report.runs[0].results) == 1
 
 
+@pytest.mark.unit
 def test_exit_code_one_is_kept_on_the_scanner_and_its_invocation(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -583,6 +607,7 @@ def test_exit_code_one_is_kept_on_the_scanner_and_its_invocation(
     assert report.runs[0].invocations[0].exitCode == 1
 
 
+@pytest.mark.unit
 def test_a_rejected_exit_code_is_kept_on_the_scanner(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -594,6 +619,7 @@ def test_a_rejected_exit_code_is_kept_on_the_scanner(
     assert scanner.exit_code == 2
 
 
+@pytest.mark.unit
 def test_scan_starts_each_target_with_exit_code_zero(scanner, snyk_on_path):
     """An earlier target's code is not carried into this one (the empty-target path
     returns before snyk runs, so the code it ends with is this target's own)."""
@@ -605,6 +631,7 @@ def test_scan_starts_each_target_with_exit_code_zero(scanner, snyk_on_path):
     assert scanner.exit_code == 0
 
 
+@pytest.mark.unit
 def test_malformed_results_file_logs_an_error_and_returns_none(
     scanner, snyk_on_path, populated_source, subprocess_double, caplog
 ):
@@ -622,6 +649,7 @@ def test_malformed_results_file_logs_an_error_and_returns_none(
     assert any("Failed to parse" in err for err in scanner.errors)
 
 
+@pytest.mark.unit
 def test_missing_results_file_warns_and_returns_none(
     scanner, snyk_on_path, populated_source, subprocess_double, caplog
 ):
@@ -640,6 +668,7 @@ def test_missing_results_file_warns_and_returns_none(
     assert any("No results file found" in err for err in scanner.errors)
 
 
+@pytest.mark.unit
 def test_exit_code_one_without_a_results_file_is_not_a_clean_scan(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -661,6 +690,7 @@ def test_exit_code_one_without_a_results_file_is_not_a_clean_scan(
     assert any("No results file found" in err for err in scanner.errors)
 
 
+@pytest.mark.unit
 def test_unreadable_results_file_is_wrapped_in_scanner_error(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -837,6 +867,7 @@ SNYK_CASES = {
 
 
 @pytest.mark.parametrize("case", sorted(SNYK_CASES))
+@pytest.mark.unit
 def test_snyk_code_results_become_the_report(
     case, scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -869,6 +900,7 @@ def test_snyk_code_results_become_the_report(
 
 
 @pytest.mark.parametrize("case", sorted(SNYK_CASES))
+@pytest.mark.unit
 def test_snyk_code_results_are_counted_at_their_severity(
     case, scanner, snyk_on_path, populated_source, subprocess_double, plugin_context
 ):
@@ -895,6 +927,7 @@ def test_snyk_code_results_are_counted_at_their_severity(
     assert counts.suppressed == len(spec["suppressed"])
 
 
+@pytest.mark.unit
 def test_exit_code_three_evaluated_nothing_and_is_not_a_failure(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -946,6 +979,7 @@ def _executor_row(scanner, plugin_context, monkeypatch, ignore_paths=None):
 
 
 @pytest.mark.parametrize("document", sorted(EMPTY_SNYK_DOCUMENTS))
+@pytest.mark.unit
 def test_exit_code_one_with_no_results_is_an_error_row(
     document,
     scanner,
@@ -968,6 +1002,7 @@ def test_exit_code_one_with_no_results_is_an_error_row(
 
 
 @pytest.mark.parametrize("document", sorted(EMPTY_SNYK_DOCUMENTS))
+@pytest.mark.unit
 def test_exit_code_one_with_no_results_names_the_contradiction(
     document, scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -979,6 +1014,7 @@ def test_exit_code_one_with_no_results_names_the_contradiction(
         scanner.scan(target=populated_source, target_type="source")
 
 
+@pytest.mark.unit
 def test_exit_code_zero_with_no_results_is_a_passed_row(
     scanner,
     snyk_on_path,
@@ -996,6 +1032,7 @@ def test_exit_code_zero_with_no_results_is_a_passed_row(
     assert row.exit_code == 0
 
 
+@pytest.mark.unit
 def test_the_row_records_exit_code_one_for_a_run_with_findings(
     scanner,
     snyk_on_path,
@@ -1015,6 +1052,7 @@ def test_the_row_records_exit_code_one_for_a_run_with_findings(
     assert row.exit_code == 1
 
 
+@pytest.mark.unit
 def test_the_exit_code_of_each_target_is_its_own(
     scanner, snyk_on_path, populated_source, subprocess_double, plugin_context
 ):
@@ -1054,6 +1092,7 @@ def test_the_exit_code_of_each_target_is_its_own(
         ([], 0),
     ],
 )
+@pytest.mark.unit
 def test_results_are_counted_across_every_run(document, expected):
     from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
         _sarif_result_count,
@@ -1111,6 +1150,7 @@ def tree_with_vendor(populated_source):
     return populated_source
 
 
+@pytest.mark.unit
 def test_files_under_an_ignore_path_are_not_sent_to_snyk(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double, refusals_set_aside
 ):
@@ -1127,6 +1167,7 @@ def test_files_under_an_ignore_path_are_not_sent_to_snyk(
     assert not seen["tested"].exists(), "the copy is removed after the run"
 
 
+@pytest.mark.unit
 def test_the_copy_is_made_outside_the_scanned_tree_and_the_output_dir(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double, plugin_context
 ):
@@ -1144,6 +1185,7 @@ def test_the_copy_is_made_outside_the_scanned_tree_and_the_output_dir(
     assert tested.is_relative_to(Path(tempfile.gettempdir()).resolve())
 
 
+@pytest.mark.unit
 def test_the_sarif_names_the_scanned_directory_not_the_deleted_copy(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double
 ):
@@ -1158,6 +1200,7 @@ def test_the_sarif_names_the_scanned_directory_not_the_deleted_copy(
     assert seen["tested"].as_posix() not in report.model_dump_json()
 
 
+@pytest.mark.unit
 def test_a_full_disk_while_copying_is_a_scanner_error(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double, monkeypatch
 ):
@@ -1193,6 +1236,7 @@ def test_a_full_disk_while_copying_is_a_scanner_error(
     assert not any(d.exists() for d in made["dirs"]), "the partial copy is removed"
 
 
+@pytest.mark.unit
 def test_a_full_disk_while_copying_is_an_error_row(
     scanner,
     snyk_on_path,
@@ -1216,6 +1260,7 @@ def test_a_full_disk_while_copying_is_an_error_row(
     subprocess_double.assert_not_called()
 
 
+@pytest.mark.unit
 def test_an_unreadable_source_file_is_skipped_not_fatal(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double, monkeypatch
 ):
@@ -1238,6 +1283,7 @@ def test_an_unreadable_source_file_is_skipped_not_fatal(
     assert seen["files"] == ["app.js", "web/site.min.js"]
 
 
+@pytest.mark.unit
 def test_under_a_sandbox_snyk_is_granted_the_copy(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double, plugin_context
 ):
@@ -1276,6 +1322,7 @@ def test_under_a_sandbox_snyk_is_granted_the_copy(
     assert after is outer, "the grant ends with the run"
 
 
+@pytest.mark.unit
 def test_tmpdir_inside_the_scanned_tree_is_refused(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double, monkeypatch
 ):
@@ -1290,6 +1337,7 @@ def test_tmpdir_inside_the_scanned_tree_is_refused(
     subprocess_double.assert_not_called()
 
 
+@pytest.mark.unit
 def test_the_copy_log_line_counts_in_english(
     scanner, snyk_on_path, populated_source, subprocess_double, caplog
 ):
@@ -1307,6 +1355,7 @@ def test_the_copy_log_line_counts_in_english(
 @pytest.mark.parametrize(
     "pattern", ["vendor/**", "**/*.min.js", "app.js", "vendor/lib/dep.js", "nomatch/**"]
 )
+@pytest.mark.unit
 def test_the_copy_matches_ignore_paths_the_way_findings_are_dropped(
     pattern,
     scanner,
@@ -1331,6 +1380,7 @@ def test_the_copy_matches_ignore_paths_the_way_findings_are_dropped(
     assert seen["files"] == [f for f in everything if not file_path_matches(f, pattern)]
 
 
+@pytest.mark.unit
 def test_with_no_ignore_paths_the_whole_scan_set_is_tested(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double
 ):
@@ -1342,6 +1392,7 @@ def test_with_no_ignore_paths_the_whole_scan_set_is_tested(
     assert seen["files"] == ["app.js", "vendor/lib/dep.js", "web/site.min.js"]
 
 
+@pytest.mark.unit
 def test_when_every_file_is_ignored_nothing_is_sent(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double, refusals_set_aside
 ):
@@ -1358,6 +1409,7 @@ def test_when_every_file_is_ignored_nothing_is_sent(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_a_symlink_in_the_tree_is_not_sent(
     scanner,
     snyk_on_path,
@@ -1377,6 +1429,7 @@ def test_a_symlink_in_the_tree_is_not_sent(
     assert seen["files"] == ["app.js"]
 
 
+@pytest.mark.unit
 def test_the_converted_target_is_tested_in_place(
     scanner, snyk_on_path, plugin_context, subprocess_double
 ):
@@ -1399,6 +1452,7 @@ def test_the_converted_target_is_tested_in_place(
     assert seen["files"] == ["jupyter/nb-converted.py"]
 
 
+@pytest.mark.unit
 def test_ash_output_inside_the_tree_is_not_sent(
     snyk_on_path, tmp_path, subprocess_double, refusals_set_aside
 ):
@@ -1441,6 +1495,7 @@ def _link_outside(kind, link, outside):
     sys.platform == "win32", reason="creating links needs privileges on Windows"
 )
 @pytest.mark.parametrize("kind", ["hardlink", "symlink"])
+@pytest.mark.unit
 def test_when_every_file_is_refused_the_row_is_an_error(
     kind,
     scanner,
@@ -1488,6 +1543,7 @@ def test_when_every_file_is_refused_the_row_is_an_error(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_a_tree_holding_only_a_link_leaving_it_sends_nothing(
     scanner,
     snyk_on_path,
@@ -1521,6 +1577,7 @@ def test_a_tree_holding_only_a_link_leaving_it_sends_nothing(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating links needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_a_hard_linked_file_is_not_sent_and_the_warning_says_why(
     scanner, snyk_on_path, populated_source, subprocess_double, caplog, tmp_path
 ):
@@ -1546,6 +1603,7 @@ def test_a_hard_linked_file_is_not_sent_and_the_warning_says_why(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
 @pytest.mark.parametrize("spelled_through_link", ["source", "output"])
+@pytest.mark.unit
 def test_ash_output_reached_through_a_symlinked_prefix_is_not_sent(
     spelled_through_link, snyk_on_path, tmp_path, subprocess_double
 ):
@@ -1573,6 +1631,7 @@ def test_ash_output_reached_through_a_symlinked_prefix_is_not_sent(
     assert seen["files"] == ["app.js"]
 
 
+@pytest.mark.unit
 def test_tmpdir_inside_the_output_dir_is_refused(
     snyk_on_path, tmp_path, subprocess_double, monkeypatch
 ):
@@ -1595,6 +1654,7 @@ def test_tmpdir_inside_the_output_dir_is_refused(
     subprocess_double.assert_not_called()
 
 
+@pytest.mark.unit
 def test_a_file_that_fails_partway_through_reading_is_left_out(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double, monkeypatch, caplog
 ):
@@ -1647,6 +1707,7 @@ def _stale_copy(temp_root, name, age_seconds):
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the liveness check uses flock, which is POSIX"
 )
+@pytest.mark.unit
 def test_a_copy_left_by_a_killed_run_is_removed_by_the_next_run(
     scanner, snyk_on_path, populated_source, subprocess_double, monkeypatch, tmp_path
 ):
@@ -1688,6 +1749,7 @@ def test_a_copy_left_by_a_killed_run_is_removed_by_the_next_run(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the liveness check uses flock, which is POSIX"
 )
+@pytest.mark.unit
 def test_the_copy_is_held_while_snyk_runs(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
@@ -1720,6 +1782,7 @@ def test_the_copy_is_held_while_snyk_runs(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_nothing_reached_through_a_link_leaving_the_tree_is_copied(
     scanner,
     snyk_on_path,
@@ -1788,6 +1851,7 @@ def test_nothing_reached_through_a_link_leaving_the_tree_is_copied(
     assert any("linked_in.js" in m and "not copied" in m for m in debug), debug
 
 
+@pytest.mark.integration
 def test_files_committed_to_this_runs_output_dir_are_sent_and_ashs_are_not(
     snyk_on_path, subprocess_double, tmp_path, refusals_set_aside
 ):
@@ -1828,6 +1892,7 @@ def test_files_committed_to_this_runs_output_dir_are_sent_and_ashs_are_not(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_a_linked_output_dir_inside_the_tree_is_refused_when_the_context_is_built(
     tmp_path,
 ):
@@ -1866,6 +1931,7 @@ def test_a_linked_output_dir_inside_the_tree_is_refused_when_the_context_is_buil
     assert sorted(entry.name for entry in (source / "src").iterdir()) == ["lib"]
 
 
+@pytest.mark.unit
 def test_the_same_layout_with_a_directory_is_refused_by_snyk_code_by_its_path(
     snyk_on_path, tmp_path, subprocess_double
 ):
@@ -1892,6 +1958,7 @@ def test_the_same_layout_with_a_directory_is_refused_by_snyk_code_by_its_path(
     subprocess_double.assert_not_called()
 
 
+@pytest.mark.unit
 def test_an_empty_scan_set_is_not_reported_as_all_ignored(
     scanner, snyk_on_path, plugin_context, subprocess_double, caplog
 ):
@@ -1908,6 +1975,7 @@ def test_an_empty_scan_set_is_not_reported_as_all_ignored(
     assert "holds no file to send" in messages, messages
 
 
+@pytest.mark.unit
 def test_all_ignored_says_so(
     scanner,
     snyk_on_path,
@@ -1928,6 +1996,7 @@ def test_all_ignored_says_so(
     assert "holds no file to send" not in messages, messages
 
 
+@pytest.mark.unit
 def test_a_refused_target_is_refused_before_the_copy_is_made(
     scanner, snyk_on_path, tree_with_vendor, subprocess_double
 ):
@@ -1959,6 +2028,7 @@ def temp_root(tmp_path, monkeypatch):
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the liveness check uses flock, which is POSIX"
 )
+@pytest.mark.unit
 def test_the_sweep_leaves_another_users_copies(
     scanner, snyk_on_path, populated_source, subprocess_double, temp_root, monkeypatch
 ):
@@ -1978,6 +2048,7 @@ def test_the_sweep_leaves_another_users_copies(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_the_sweep_does_not_follow_a_link_named_like_a_copy(
     scanner, snyk_on_path, populated_source, subprocess_double, temp_root, tmp_path
 ):
@@ -2003,6 +2074,7 @@ def test_the_sweep_does_not_follow_a_link_named_like_a_copy(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the liveness check uses flock, which is POSIX"
 )
+@pytest.mark.unit
 def test_with_no_scan_timeout_a_copy_is_swept_after_an_hour(
     plugin_context, snyk_on_path, populated_source, subprocess_double, temp_root
 ):
@@ -2027,6 +2099,7 @@ def test_with_no_scan_timeout_a_copy_is_swept_after_an_hour(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+@pytest.mark.unit
 def test_a_file_listed_below_a_symlinked_directory_is_not_copied(
     scanner,
     snyk_on_path,
@@ -2091,6 +2164,7 @@ def test_a_file_listed_below_a_symlinked_directory_is_not_copied(
     assert any("vendor/lib/dep.js" in m and "not copied" in m for m in debug), debug
 
 
+@pytest.mark.unit
 def test_a_name_ending_in_whitespace_is_copied_under_its_own_name(
     scanner, snyk_on_path, plugin_context, subprocess_double, caplog
 ):

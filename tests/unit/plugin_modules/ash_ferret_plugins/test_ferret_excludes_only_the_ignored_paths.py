@@ -39,9 +39,10 @@ from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner 
     FerretScanScanner,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="the patterns are POSIX paths"
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(sys.platform == "win32", reason="the patterns are POSIX paths"),
+]
 
 FILES = ["api/a.js", "api/sub/b.js", "apix/a.js", "src/a.js", "src/api.js"]
 

@@ -6,6 +6,8 @@ import json
 import os
 from datetime import datetime, timezone
 
+import pytest
+
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
@@ -13,6 +15,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_re
     CloudWatchLogsReporterConfig,
     CloudWatchLogsReporterConfigOptions,
 )
+
+pytestmark = pytest.mark.unit
 
 # Rebuild models to resolve forward references
 AshConfig.model_rebuild()

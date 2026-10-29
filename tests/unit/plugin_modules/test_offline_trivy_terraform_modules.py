@@ -157,6 +157,7 @@ def _trivy(ctx) -> TrivyRepoScanner:
 
 
 @pytest.mark.parametrize("target_type", ["source", "converted"])
+@pytest.mark.unit
 def test_offline_trivy_leaves_out_its_terraform_checks(offline, context, target_type):
     offline.setattr(
         trivy_repo_scanner,
@@ -172,6 +173,7 @@ def test_offline_trivy_leaves_out_its_terraform_checks(offline, context, target_
     assert chosen[-1].split(",") == WITHOUT_TERRAFORM
 
 
+@pytest.mark.unit
 def test_offline_trivy_runs_no_misconfig_checks_when_their_list_is_unknown(
     offline, context
 ):
@@ -211,6 +213,7 @@ def _refusal(scanner, ctx, monkeypatch):
     return raised.value, scans
 
 
+@pytest.mark.unit
 def test_offline_misconfig_only_trivy_refuses_without_the_list(offline, context):
     """With misconfig the only scanner and its list unknown, nothing is left to run.
 
@@ -239,6 +242,7 @@ def test_offline_misconfig_only_trivy_refuses_without_the_list(offline, context)
 @pytest.mark.parametrize(
     "variable", ["TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"]
 )
+@pytest.mark.unit
 def test_an_operator_input_that_is_not_a_file_refuses_the_scan(
     online, context, tmp_path, variable
 ):
@@ -253,6 +257,7 @@ def test_an_operator_input_that_is_not_a_file_refuses_the_scan(
     assert variable in str(error) and "not a file" in str(error), error
 
 
+@pytest.mark.unit
 def test_control_online_trivy_keeps_its_terraform_checks(online, context):
     command = _scan_command(_trivy(context), context, online)
 
@@ -278,6 +283,7 @@ def _builtin_trivy(ctx, scanners) -> TrivyScanner:
 
 
 @pytest.mark.parametrize("target_type", ["source", "converted"])
+@pytest.mark.unit
 def test_offline_builtin_trivy_leaves_out_its_terraform_checks(
     offline, context, target_type
 ):
@@ -296,6 +302,7 @@ def test_offline_builtin_trivy_leaves_out_its_terraform_checks(
     assert chosen[-1].split(",") == WITHOUT_TERRAFORM
 
 
+@pytest.mark.unit
 def test_offline_builtin_trivy_runs_no_misconfig_checks_when_their_list_is_unknown(
     offline, context
 ):
@@ -314,6 +321,7 @@ def test_offline_builtin_trivy_runs_no_misconfig_checks_when_their_list_is_unkno
     assert "vuln" in scanners, command
 
 
+@pytest.mark.unit
 def test_control_online_builtin_trivy_keeps_its_terraform_checks(online, context):
     scanner = _builtin_trivy(context, ["vuln", "misconfig"])
 
@@ -323,6 +331,7 @@ def test_control_online_builtin_trivy_keeps_its_terraform_checks(online, context
     assert "misconfig" in ",".join(_values(command, "--scanners")).split(",")
 
 
+@pytest.mark.unit
 def test_the_default_list_is_read_from_trivys_help(monkeypatch):
     seen = []
 
@@ -357,6 +366,7 @@ def _reset_list_cache() -> None:
 @pytest.mark.runs_real_tools(
     reason="what trivy fetches offline, and the list its --help prints, are trivy's own"
 )
+@pytest.mark.integration
 def test_a_real_offline_trivy_fetches_no_terraform_module(offline, context, tmp_path):
     """trivy itself, offline, over a .tf file that names remote module sources.
 

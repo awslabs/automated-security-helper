@@ -58,6 +58,8 @@ from automated_security_helper.utils.sandbox.policy import (
     build_scanner_policy,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def layout(tmp_path, monkeypatch):
