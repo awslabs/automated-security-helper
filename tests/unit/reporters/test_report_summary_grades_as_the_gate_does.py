@@ -158,6 +158,39 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         assert 'data-status="actionable"' in document
         assert 'data-status="below-threshold"' not in document
 
+    def test_the_headline_count_agrees_with_the_cards_when_scanner_rows_exist(
+        self, model
+    ):
+        """The scanner rows grade by ASH's default; the headline must not.
+
+        A merged workspace file carries scanner rows (the SARIF names bandit,
+        and the merge writes ``scanner_results``), and each row's actionable
+        count comes from the scanner resolver, which with no ash_config grades
+        at ASH's default. Summing those rows into the headline read "0
+        actionable" above a card marked actionable under the project's ALL.
+        """
+        model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        rows = emitter.get_scanner_results()
+        assert rows, "the fixture must exercise the scanner-row path"
+        assert sum(row["actionable"] for row in rows) == 0, rows
+        assert emitter.get_scan_summary()["actionable"] == 1
+
+    def test_a_lowercase_recorded_gate_grades_as_its_upper_case_name(self, model):
+        """A recorded ``"medium"`` grades at MEDIUM in every report.
+
+        The JUnit reporter normalized the recorded gate and the emitter passed
+        it to the case-sensitive ladder as stored, which read an unknown name
+        as CRITICAL: the same finding was below threshold in the HTML report
+        and actionable in the JUnit one.
+        """
+        model.workspace.projects[0].severity_threshold = "medium"
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        (finding,) = emitter.flat_vulns
+        assert not emitter.is_finding_actionable(finding), "INFO is below MEDIUM"
+        finding.severity = "MEDIUM"
+        assert emitter.is_finding_actionable(finding)
+
     def test_a_single_directory_finding_keeps_the_scanner_threshold(self):
         """The control: with no workspace the recorded config still decides."""
         emitter = ReportContentEmitter(AshAggregatedResults())

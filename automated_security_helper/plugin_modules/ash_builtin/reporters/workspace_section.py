@@ -64,6 +64,7 @@ from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     is_workspace_scan,
 )
+from automated_security_helper.utils.severity_ladder import normalize_threshold
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -78,10 +79,8 @@ HTML_SECTION_ID = "workspace-projects"
 COLUMNS = ("Project", "Status", "Findings", "Actionable", "Threshold", "Result")
 
 
-def workspace_project_threshold(
-    model: "AshAggregatedResults", project_key: Optional[str]
-) -> Optional[str]:
-    """The threshold *project_key*'s outcome was judged against, or None.
+def workspace_project_thresholds(model: "AshAggregatedResults") -> Dict[str, str]:
+    """``{project key: threshold}`` for every project whose gate is recorded.
 
     Read off ``model.workspace.projects`` -- the per-project record carries the
     gate threshold its own scan used (``WorkspaceProjectResult.severity_threshold``
@@ -92,17 +91,45 @@ def workspace_project_threshold(
     every project against one threshold while each project's outcome and the
     exit code used its own.
 
-    None for a single-directory scan, an unattributed finding, a project the
-    workspace block does not list, and a project that never ran (its threshold
-    is recorded null).
+    Built once per model rather than scanned per finding: the emitter grades
+    each finding several times (summary, hotspots, cards, detailed findings)
+    and the JUnit reporter once per result, so a per-call scan over the project
+    list was findings times projects times passes on a large workspace.
+
+    Every value is the ladder's own spelling (``normalize_threshold``), so the
+    JUnit, HTML, Markdown and text reports grade a recorded ``"medium"`` alike;
+    before this the JUnit reporter normalized the value and the emitter passed
+    it to the case-sensitive ladder as stored, which read it as CRITICAL. A
+    recorded value the ladder does not recognise is left out, so the finding
+    falls back to the scanner's or the scan's gate as an unattributed finding
+    does, instead of being graded by a gate nobody configured.
+
+    Empty for a single-directory scan; a project that never ran (its threshold
+    is recorded null) has no entry.
     """
-    if not project_key or not is_workspace_scan(model):
-        return None
+    if not is_workspace_scan(model):
+        return {}
+    thresholds: Dict[str, str] = {}
     for project in model.workspace.projects:
-        if project.project == project_key:
-            threshold = project.severity_threshold
-            return str(threshold) if threshold else None
-    return None
+        normalized = normalize_threshold(project.severity_threshold)
+        if normalized is not None:
+            thresholds[project.project] = normalized
+    return thresholds
+
+
+def workspace_project_threshold(
+    model: "AshAggregatedResults", project_key: Optional[str]
+) -> Optional[str]:
+    """The threshold *project_key*'s outcome was judged against, or None.
+
+    One lookup in ``workspace_project_thresholds``; a caller grading many
+    findings builds that dict once instead. None for a single-directory scan,
+    an unattributed finding, a project the workspace block does not list, and a
+    project whose recorded threshold is null or not a ladder name.
+    """
+    if not project_key:
+        return None
+    return workspace_project_thresholds(model).get(project_key)
 
 
 def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]]:

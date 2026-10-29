@@ -60,9 +60,7 @@ def test_an_env_read_scanner_key_prints_as_its_reference(
     assert "bandit" not in expected, expected
 
 
-def test_an_env_read_project_name_prints_as_its_reference(
-    tmp_path, monkeypatch, test_plugin_context
-):
+def _env_named_project(tmp_path, monkeypatch) -> AshAggregatedResults:
     config = _resolve(
         tmp_path,
         monkeypatch,
@@ -71,12 +69,49 @@ def test_an_env_read_project_name_prints_as_its_reference(
     )
     model = AshAggregatedResults(ash_config=config)
     model.metadata.project_name = "zz-secret-project"
+    return model
 
-    section = _metadata_section(HtmlReporter(context=test_plugin_context).report(model))
 
+def test_an_env_read_project_name_prints_as_its_reference(
+    tmp_path, monkeypatch, test_plugin_context
+):
+    """The whole document, not one section of it.
+
+    A first fix recorded the metadata block alone, so the page read the
+    reference there and the resolved value in its title and masthead (the
+    ``report-title`` heading), which is the value the record exists to keep out
+    of the report.
+    """
+    model = _env_named_project(tmp_path, monkeypatch)
+
+    document = HtmlReporter(context=test_plugin_context).report(model)
+
+    section = _metadata_section(document)
     project = section.split("project_name", 1)[1].split("</div>", 1)[0]
     assert "${" + PROJECT_VAR + "}" in project, project
-    assert "zz-secret-project" not in project, project
+    assert "zz-secret-project" not in document
+    assert '<h1 id="report-title">${' + PROJECT_VAR + "}</h1>" in document
+
+
+@pytest.mark.parametrize(
+    "module, cls",
+    [("markdown_reporter", "MarkdownReporter"), ("text_reporter", "TextReporter")],
+)
+def test_the_markdown_and_text_project_lines_print_the_reference(
+    tmp_path, monkeypatch, test_plugin_context, module, cls
+):
+    """The three human reports read the name from one place; all three record it."""
+    import importlib
+
+    reporter_module = importlib.import_module(
+        f"automated_security_helper.plugin_modules.ash_builtin.reporters.{module}"
+    )
+    model = _env_named_project(tmp_path, monkeypatch)
+
+    document = getattr(reporter_module, cls)(context=test_plugin_context).report(model)
+
+    assert "${" + PROJECT_VAR + "}" in document
+    assert "zz-secret-project" not in document
 
 
 def test_a_literal_scanner_key_prints_as_written(

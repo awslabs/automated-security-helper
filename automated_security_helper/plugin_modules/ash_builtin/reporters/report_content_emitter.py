@@ -15,6 +15,10 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.models.workspace import is_workspace_scan
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    workspace_project_thresholds,
+)
 from automated_security_helper.utils.severity_ladder import severity_fails_threshold
 from collections import Counter
 
@@ -65,6 +69,10 @@ class ReportContentEmitter:
         if human_presentation:
             self.flat_vulns = [vuln.model_copy() for vuln in self.flat_vulns]
         self.ash_conf = model.ash_config
+        # Each project's recorded gate, read once: is_finding_actionable runs
+        # several times per finding (summary, hotspots, cards, detailed
+        # findings), and the project list is scanned here instead of there.
+        self._project_thresholds = workspace_project_thresholds(model)
 
         # Get unified scanner metrics - always compute from the model to ensure consistency
         # The scanner_results in the model contain ScannerStatusInfo objects, not ScannerMetrics
@@ -125,12 +133,33 @@ class ReportContentEmitter:
                 )
 
         return {
-            "project": self.model.metadata.project_name or "Unknown",
+            "project": self._recorded_project_name() or "Unknown",
             "scan_time": scan_time_str,
             "report_time": current_time_str,
             "tool_version": self.model.metadata.tool_version or "Unknown",
             "time_delta": time_delta,
         }
+
+    def _recorded_project_name(self) -> Any:
+        """The project name as the configuration's record of the metadata has it.
+
+        The metadata names the project as ``config.project_name``; where the
+        configuration's file read it from the environment, every other sink
+        (the results file, the flat export, the off-host payloads) records the
+        written reference through ``record_of_metadata``. The HTML masthead and
+        the Markdown and text ``Project:`` lines print this value, so recording
+        it here, at the one place the three reports read it, keeps the resolved
+        value out of the whole document rather than out of one section of it.
+        """
+        from automated_security_helper.config.config_validator import (
+            record_of_metadata,
+        )
+
+        name = self.model.metadata.project_name
+        if not name:
+            return name
+        recorded = record_of_metadata(self.ash_conf, {"project_name": name})
+        return recorded.get("project_name", name)
 
     def get_scanner_results(self) -> List[Dict[str, Any]]:
         """Get scanner results with pass/fail status based on severity thresholds."""
@@ -243,6 +272,17 @@ class ReportContentEmitter:
         }
         actionable = sum(result["actionable"] for result in results)
         suppressed = sum(result["suppressed"] for result in results)
+        if is_workspace_scan(self.model):
+            # The scanner rows grade each finding by the scanner resolver's
+            # answer, which with the merged file's missing ash_config is ASH's
+            # default for every project. The cards, the hotspots and the
+            # "Showing N of M" notes grade by the project's recorded gate
+            # (is_finding_actionable), so a headline summed from the rows could
+            # name one count while the cards below it showed another. The
+            # headline counts the findings as the cards do.
+            actionable = sum(
+                self.is_finding_actionable(vuln) for vuln in self.flat_vulns
+            )
         if not results:
             # Imported SARIF can contain findings without execution metadata.
             # Count those findings while making no completion claim.
@@ -373,10 +413,6 @@ class ReportContentEmitter:
         if vuln.is_suppressed:
             return False
 
-        from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
-            workspace_project_threshold,
-        )
-
         # Get scanner name
         scanner_name = vuln.scanner or "Unknown"
 
@@ -387,7 +423,9 @@ class ReportContentEmitter:
         # a project is graded by that, as the project's outcome and the exit
         # code graded it. A single-directory scan reads the scanner's threshold
         # from the recorded configuration, as before.
-        threshold = workspace_project_threshold(self.model, vuln.workspace_project)
+        threshold = None
+        if vuln.workspace_project:
+            threshold = self._project_thresholds.get(vuln.workspace_project)
         if threshold is None:
             threshold, _ = ScannerStatisticsCalculator.get_scanner_threshold_info(
                 self.model, scanner_name
