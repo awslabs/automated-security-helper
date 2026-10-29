@@ -28,6 +28,7 @@ is replaced by a recorder, so what is asserted is the decision
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any, Dict, List
@@ -64,7 +65,7 @@ def container_stubs(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 4242)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 4343)
     monkeypatch.setattr(rac, "_resolve_oci_runner", lambda oci_runner: "docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", lambda revision: dockerfile)
 
     def fake_build_image(**kwargs):
@@ -78,8 +79,9 @@ def container_stubs(monkeypatch, tmp_path):
         recorded["run_command"].append(kwargs)
         return ["docker", "run", "--rm", kwargs["image_name"]]
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         recorded["executed"].append(list(cmd))
+        recorded.setdefault("environments", []).append(env)
         return create_completed_process(args=list(cmd), returncode=0)
 
     monkeypatch.setattr(rac, "_build_image", fake_build_image)
@@ -129,6 +131,19 @@ class TestCwdDefaults:
         assert kwargs["output_dir"] == workdir / "ash_output"
         assert (workdir / "ash_output").is_dir()
 
+    def test_the_container_runner_is_started_with_the_outer_run_id(
+        self, container_stubs, tmp_path
+    ):
+        """The command names it with ``-e``; the runner's environment holds it."""
+        run_id = "0123456789abcdef0123456789abcdef"
+
+        run_ash_container(
+            source_dir=tmp_path, build=False, run=True, outer_run_id=run_id
+        )
+
+        assert container_stubs["run_command"][0]["outer_run_id"] == run_id
+        assert container_stubs["environments"][0]["ASH_OUTER_RUN_ID"] == run_id
+
     def test_building_without_running_returns_success_without_a_run_command(
         self, container_stubs, tmp_path
     ):
@@ -136,6 +151,23 @@ class TestCwdDefaults:
 
         assert result.returncode == 0
         assert container_stubs["build"], "the build helper should still have run"
+        assert container_stubs["run_command"] == []
+
+    def test_building_without_running_does_not_check_the_run_mounts(
+        self, container_stubs, tmp_path, monkeypatch
+    ):
+        """A build mounts nothing, so a path only a run would mount refuses
+        nothing when run=False: the directory check belongs to the run phase,
+        which checks it again for a caller that reaches it directly."""
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        output = tmp_path / "out,dir"
+
+        result = run_ash_container(
+            source_dir=tmp_path, output_dir=str(output), build=True, run=False
+        )
+
+        assert result.returncode == 0
+        assert container_stubs["build"], "the build was refused over a run mount"
         assert container_stubs["run_command"] == []
 
 
@@ -166,7 +198,7 @@ class TestContainerIdValidation:
             source_dir=tmp_path, container_uid="root", build=False, run=False
         )
 
-        assert result.returncode == 1
+        assert result.returncode == 3
         assert result.stderr == "Container UID must be a numeric value"
 
     def test_a_non_numeric_container_gid_is_refused(self, container_stubs, tmp_path):
@@ -174,7 +206,7 @@ class TestContainerIdValidation:
             source_dir=tmp_path, container_gid="wheel", build=False, run=False
         )
 
-        assert result.returncode == 1
+        assert result.returncode == 3
         assert result.stderr == "Container GID must be a numeric value"
 
     def test_the_host_ids_are_used_when_none_are_given(self, container_stubs, tmp_path):
@@ -352,8 +384,11 @@ class TestCustomContainerfile:
         run_ash_container(source_dir=tmp_path, build=True, run=True)
 
         assert container_stubs["custom"] == []
+        # The default stage is non-root, and ci on Windows (see _build_target in
+        # run_ash_container), where the non-root user cannot write the output.
+        stage = "ci" if sys.platform == "win32" else "non-root"
         assert container_stubs["run_command"][0]["image_name"] == (
-            "automated-security-helper:non-root"
+            f"automated-security-helper:{stage}"
         )
 
 

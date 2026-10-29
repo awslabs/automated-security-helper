@@ -43,7 +43,7 @@ from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.execution_engine import ScanExecutionEngine
 
 
-def _engine(enabled, excluded, tmp_path):
+def _engine(enabled, excluded, tmp_path, **kwargs):
     context = MagicMock()
     context.config = AshConfig(project_name="selection-test")
     context.source_dir = tmp_path
@@ -54,6 +54,7 @@ def _engine(enabled, excluded, tmp_path):
         enabled_scanners=enabled,
         excluded_scanners=excluded,
         asharp_model=MagicMock(),
+        **kwargs,
     )
 
 
@@ -125,3 +126,54 @@ class TestSelectionsThatStillMeanSomething:
         """A CI matrix may pass a blanket exclusion list to differently-narrowed jobs."""
         engine = _engine(["bandit"], ["grype", "syft"], tmp_path)
         assert engine._init_enabled_scanners == ["bandit"]
+
+
+class TestTheRefusalNamesTheSelectionsOwnInputs:
+    """The refusal names what the caller used, and says it as the workspace does.
+
+    ``selection_origin`` is a public orchestrator field, so an engine built for an
+    MCP caller outside a workspace scan reaches this refusal directly. The workspace
+    pre-flight makes the same refusal for a workspace scan; the two share one
+    implementation (``core.scanner_selection``), so their texts cannot drift.
+    """
+
+    def test_an_mcp_selection_names_the_parameters(self, tmp_path):
+        with pytest.raises(ScannerSelectionError) as excinfo:
+            _engine(["bandit"], ["bandit"], tmp_path, selection_origin="mcp")
+
+        message = str(excinfo.value)
+        assert (
+            "Every scanner named by the scanners parameter is also named by the "
+            "excluded_scanners parameter, so the selection cancels itself" in message
+        ), message
+        assert message.endswith("Drop one of the two."), message
+        for flag in ("--scanners", "--exclude-scanners"):
+            assert flag not in message, message
+
+    @pytest.mark.parametrize("origin", ["cli", "mcp"])
+    def test_the_engine_and_the_workspace_refuse_in_the_same_words(
+        self, tmp_path, origin
+    ):
+        from automated_security_helper.workspace.execution import (
+            ProjectScanSettings,
+            refuse_unresolvable_scanner_selection,
+        )
+        from automated_security_helper.workspace.resolver import resolve_workspace
+
+        with pytest.raises(ScannerSelectionError) as engine_refusal:
+            _engine(["bandit"], ["bandit"], tmp_path, selection_origin=origin)
+        (tmp_path / "api").mkdir()
+        workspace_file = tmp_path / "dev.code-workspace"
+        workspace_file.write_text('{"folders": [{"path": "api"}]}', encoding="utf-8")
+        settings = ProjectScanSettings(
+            output_dir=tmp_path / "workspace-out",
+            enabled_scanners=("bandit",),
+            excluded_scanners=("bandit",),
+            selection_origin=origin,
+        )
+        with pytest.raises(ScannerSelectionError) as workspace_refusal:
+            refuse_unresolvable_scanner_selection(
+                resolve_workspace(workspace_file), settings
+            )
+
+        assert str(engine_refusal.value) == str(workspace_refusal.value)

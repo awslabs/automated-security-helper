@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Get help with ASH
+    url: https://awslabs.github.io/automated-security-helper/docs/support/
+    about: Find troubleshooting guides and support channels.
+  - name: Report a security concern
+    url: https://github.com/awslabs/automated-security-helper/blob/main/CONTRIBUTING.md#security-issue-notifications
+    about: Follow ASH's security reporting process.

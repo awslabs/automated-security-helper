@@ -19,8 +19,17 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    warning_of_dropped_keys,
+)
+from automated_security_helper.utils.error_text import (
+    error_text,
+    log_unexpected_error,
+    validation_errors_in,
+)
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.severity_ladder import result_severity
 
 # Configure module logger
 _logger = ASH_LOGGER
@@ -104,6 +113,22 @@ def scanner_status_from_results(status: Any) -> MCScannerStatus:
     if isinstance(status, str):
         return _SCANNER_STATUS_MAP.get(status.upper(), MCScannerStatus.FAILED)
     return MCScannerStatus.FAILED
+
+
+#: The scanner states that are an ending: ``finished_scanners`` counts these.
+_FINISHED_SCANNER_STATUSES = frozenset(
+    {MCScannerStatus.COMPLETED, MCScannerStatus.FAILED, MCScannerStatus.SKIPPED}
+)
+
+#: ``scanner_status_counts`` key per state. COMPLETED means the scanner PASSED,
+#: and is named for that so the breakdown cannot be read as "finished".
+_SCANNER_STATUS_COUNT_NAMES = {
+    MCScannerStatus.COMPLETED: "passed",
+    MCScannerStatus.FAILED: "failed",
+    MCScannerStatus.SKIPPED: "skipped",
+    MCScannerStatus.RUNNING: "running",
+    MCScannerStatus.PENDING: "pending",
+}
 
 
 class ScannerProgress:
@@ -329,7 +354,10 @@ class ScanProgress:
     @property
     def completed_scanners(self) -> int:
         """
-        Get the number of completed scanners.
+        Get the number of completed scanners: those that ran and PASSED.
+
+        A scanner that failed, errored or never ran is not counted here; see
+        :attr:`finished_scanners` for every scanner that has ended.
 
         Returns:
             Number of completed scanners
@@ -340,6 +368,36 @@ class ScanProgress:
                 if scanner_progress.status == MCScannerStatus.COMPLETED:
                     count += 1
         return count
+
+    @property
+    def finished_scanners(self) -> int:
+        """The number of scanners that have ended, whatever their status.
+
+        PASSED, FAILED or errored, MISSING or SKIPPED all count. This is the
+        progress count: ``completed_scanners`` counts PASSED only, so a finished
+        scan with one finding or one missing tool never reaches 100% by it. How
+        each scanner ended is :attr:`scanner_status_counts`.
+        """
+        return sum(
+            1
+            for scanner_dict in self.scanners.values()
+            for scanner_progress in scanner_dict.values()
+            if scanner_progress.status in _FINISHED_SCANNER_STATUSES
+        )
+
+    @property
+    def scanner_status_counts(self) -> Dict[str, int]:
+        """How many scanners are in each state.
+
+        ``passed`` is PASSED, ``failed`` FAILED or ERROR, ``skipped`` MISSING or
+        SKIPPED; ``running`` and ``pending`` have not finished. The keys are
+        always all present.
+        """
+        counts = dict.fromkeys(_SCANNER_STATUS_COUNT_NAMES.values(), 0)
+        for scanner_dict in self.scanners.values():
+            for scanner_progress in scanner_dict.values():
+                counts[_SCANNER_STATUS_COUNT_NAMES[scanner_progress.status]] += 1
+        return counts
 
     @property
     def total_scanners(self) -> int:
@@ -386,12 +444,24 @@ class ScanProgress:
             "end_time": self.end_time.isoformat() if self.end_time else None,
             "duration": self.duration,
             "completed_scanners": self.completed_scanners,
+            "finished_scanners": self.finished_scanners,
             "total_scanners": self.total_scanners,
+            "scanner_status_counts": self.scanner_status_counts,
             "total_findings": self.total_findings,
             "severity_counts": self.severity_counts,
             "scanners": scanner_progress_dict,
             "error_message": self.error_message,
         }
+
+
+def _recorded_scanner_status(result_file: Path) -> Optional[str]:
+    """The ``status`` a scanner wrote into its ``ASH.ScanResults.json``, or None."""
+    try:
+        data = json.loads(result_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    status = data.get("status") if isinstance(data, dict) else None
+    return status if isinstance(status, str) and status else None
 
 
 def check_scan_completion(
@@ -412,11 +482,33 @@ def check_scan_completion(
     return aggregated_results_path.exists()
 
 
+def resolves_to_directory_inside(directory: Path, output_dir: Path) -> bool:
+    """Whether ``directory`` resolves to a directory inside ``output_dir``.
+
+    A results directory under a scan's output directory is read only when this
+    holds. Through a link, a scanner's directory would list, and its results
+    file would be read from, another tree, as this scan's. A link elsewhere and
+    a link to nothing are both False, so what is read says nothing about where
+    a link leads.
+    """
+    try:
+        resolved = directory.resolve(strict=True)
+        return resolved.is_dir() and resolved.is_relative_to(
+            output_dir.resolve(strict=True)
+        )
+    except (OSError, RuntimeError):
+        return False
+
+
 def find_scanner_result_files(
     output_dir: Path | None = None,
 ) -> Dict[str, Dict[str, Path]]:
     """
     Find individual scanner result files to determine partial progress.
+
+    The scanners directory, each scanner's and each target's are followed only
+    when they resolve to a directory inside ``output_dir``
+    (``resolves_to_directory_inside``).
 
     Args:
         output_dir: Path to the scan output directory
@@ -432,18 +524,18 @@ def find_scanner_result_files(
     # .ash/ash_output/scanners/{scanner_name}/{target_type}/ASH.ScanResults.json
     scanners_dir = output_dir / "scanners"
 
-    if not scanners_dir.exists():
+    if not resolves_to_directory_inside(scanners_dir, output_dir):
         return scanner_results
 
     for scanner_dir in scanners_dir.iterdir():
-        if not scanner_dir.is_dir():
+        if not resolves_to_directory_inside(scanner_dir, output_dir):
             continue
 
         scanner_name = scanner_dir.name
         scanner_results[scanner_name] = {}
 
         for target_dir in scanner_dir.iterdir():
-            if not target_dir.is_dir():
+            if not resolves_to_directory_inside(target_dir, output_dir):
                 continue
 
             target_type = target_dir.name
@@ -724,6 +816,7 @@ def coverage_has_gap(coverage: Optional[Dict[str, Any]]) -> bool:
         or coverage.get("incomplete_converters")
         or coverage.get("unevaluated_rules")
         or coverage.get("stale_content_databases")
+        or coverage.get("could_not_stop")
     )
 
 
@@ -782,7 +875,10 @@ def load_aggregated_results_model(
     try:
         return AshAggregatedResults(**raw)
     except Exception as e:  # noqa: BLE001 -- "not assessable" is the answer
-        _logger.debug(f"Aggregated results in {output_dir} did not load: {e}")
+        _logger.debug(
+            f"Aggregated results in {output_dir} did not load: {error_text(e)}",
+            extra=NO_MARKUP,
+        )
         return None
 
 
@@ -809,7 +905,7 @@ def _add_aggregated_scanner_progress(
                     # Convert SARIF result to a simplified finding
                     finding = {
                         "id": result.get("ruleId", "unknown"),
-                        "severity": result.get("level", "MEDIUM").upper(),
+                        "severity": result_severity(result),
                         "scanner": run.get("tool", {})
                         .get("driver", {})
                         .get("name", "unknown"),
@@ -978,7 +1074,9 @@ def create_scan_progress_from_files(
                     # Parse scanner result file
                     findings = parse_scanner_result_file(result_file)
 
-                    # Create scanner progress
+                    # The scanner has finished: it wrote its results. How it
+                    # finished is in the file's own status, which every scanner
+                    # writes; one without it is counted as passed.
                     scanner_progress = ScannerProgress(
                         scanner_name=scanner_name,
                         target_type=target_type,
@@ -987,6 +1085,9 @@ def create_scan_progress_from_files(
                     )
                     scanner_progress.update_findings(findings)
                     scanner_progress.mark_completed()
+                    recorded = _recorded_scanner_status(result_file)
+                    if recorded is not None:
+                        scanner_progress.status = scanner_status_from_results(recorded)
 
                     # Add to scan progress
                     scan_progress.add_scanner_progress(scanner_progress)
@@ -1152,8 +1253,42 @@ def validate_output_directory(output_dir: Path) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def _sarif_severity_thresholds(
+    results: AshAggregatedResults, sarif: Dict[str, Any]
+) -> Dict[str, Optional[str]]:
+    """The severity threshold each SARIF result's scanner was judged by.
+
+    Keyed by ``properties.scanner_name``, with ``""`` for a result that names no
+    scanner, and resolved by ``ScannerStatisticsCalculator.get_scanner_threshold_info``
+    from the config the scan resolved, the resolver ``run_ash_scan._compute_exit_code``
+    uses per result: a scanner's own ``options.severity_threshold`` when it sets
+    one, else ``global_settings.severity_threshold`` (the threshold
+    ``mcp_tools._judged_threshold`` reports). A threshold a client passed to
+    ``run_ash_scan`` is already in both, because the scan tightened them before it
+    ran. ``result_filters.filter_actionable_only`` needs this to keep the findings
+    exit 2 counts, and the results dict carries no config of its own.
+    """
+    from automated_security_helper.core.scanner_statistics_calculator import (
+        ScannerStatisticsCalculator,
+    )
+
+    names = {""}
+    for run in sarif.get("runs") or []:
+        for result in run.get("results") or []:
+            properties = result.get("properties")
+            name = (
+                properties.get("scanner_name") if isinstance(properties, dict) else None
+            )
+            names.add(name if isinstance(name, str) else "")
+    return {
+        name: ScannerStatisticsCalculator.get_scanner_threshold_info(results, name)[0]
+        for name in names
+    }
+
+
 def get_scan_results(
     output_dir: Path | None = None,
+    include_sarif: bool = False,
 ) -> Dict[str, Any]:
     """
     Get the results of a completed scan.
@@ -1165,6 +1300,14 @@ def get_scan_results(
     Args:
         output_dir: Path to the scan output directory. Defaults to
             ``.ash/ash_output`` under the working directory.
+        include_sarif: Also return the scan's SARIF as ``raw_results["sarif"]``,
+            and beside it ``raw_results["severity_thresholds"]``, the threshold
+            each of its results was judged by (see
+            ``_sarif_severity_thresholds``). Left out by default because the
+            SARIF holds every finding and is the largest part of the file.
+            ``result_filters.filter_actionable_only`` and ``add_findings_list``
+            read the findings from it, so a caller that builds a findings list
+            has to ask for it.
 
     Returns:
         Dictionary containing scan results information
@@ -1243,7 +1386,12 @@ def get_scan_results(
                 },
             )
 
-        results: AshAggregatedResults = AshAggregatedResults(**int_results_dict)
+        with warning_of_dropped_keys(
+            Path(output_dir) / "ash_aggregated_results.json"
+        ) as context:
+            results: AshAggregatedResults = AshAggregatedResults.model_validate(
+                int_results_dict, context=context
+            )
 
         # Build comprehensive results object
         results_dict = results.model_dump(
@@ -1257,6 +1405,13 @@ def get_scan_results(
             by_alias=True,
             mode="json",
         )
+        if include_sarif and results.sarif is not None:
+            results_dict["sarif"] = results.sarif.model_dump(
+                exclude_none=True, by_alias=True, mode="json"
+            )
+            results_dict["severity_thresholds"] = _sarif_severity_thresholds(
+                results, results_dict["sarif"]
+            )
         metadata = results_dict.get("metadata", {})
         scanners_completed = []
         for scanner_name, scanner_results in results_dict.get(
@@ -1309,18 +1464,25 @@ def get_scan_results(
             e.context["output_dir"] = str(output_dir)
         raise e
     except Exception as e:
-        # Handle unexpected errors
-        raise MCPResourceError(
-            f"Unexpected error retrieving scan results: {str(e)}",
+        # Handle unexpected errors. The model's ValidationError, for a record
+        # that does not load, is described by field rather than quoting its
+        # input (utils/error_text.py), and is not chained: a traceback of the
+        # chain would print it.
+        message = error_text(e)
+        unexpected = MCPResourceError(
+            f"Unexpected error retrieving scan results: {message}",
             context={
                 "scan_id": scan_id,
                 "cwd": str(Path.cwd()),
                 "output_dir": str(output_dir),
                 "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
                 "error_type": type(e).__name__,
-                "error_message": str(e),
+                "error_message": message,
             },
         )
+        if validation_errors_in(e):
+            raise unexpected from None
+        raise unexpected from e
 
 
 def extract_scan_summary(results: Dict[str, Any]) -> Dict[str, Any]:
@@ -1467,8 +1629,50 @@ def resolve_output_directory(source_dir=None, output_dir=None):
         return cwd / ".ash" / "ash_output"
 
 
+def restored_results_refusal(
+    output_dir: Path, operation: str
+) -> Optional[Dict[str, Any]]:
+    """The error a results reader returns for put-back results, or None.
+
+    An MCP scan that ended without results has the previous scan's results put
+    back with a marker beside them (core/previous_results.py). They are complete
+    and parseable, and they are not the last scan's, so a tool that reads results
+    from a directory, with no scan id to tell it whose they are, answers as it did
+    when such a scan left the directory empty: not complete. The previous results
+    stay on disk for anyone who reads the files themselves.
+    """
+    from automated_security_helper.core.previous_results import (
+        holds_restored_results,
+    )
+    from automated_security_helper.core.resource_management.error_handling import (
+        ErrorCategory,
+        create_error_response,
+    )
+
+    if not holds_restored_results(Path(output_dir)):
+        return None
+    return create_error_response(
+        error=MCPResourceError(
+            f"Scan of output_dir {output_dir} is not complete. Results are not "
+            "available: the last scan there ended without results, and ASH put "
+            "back the results of the scan before it, which are not that scan's.",
+            context={
+                "output_dir": str(output_dir),
+                "error_category": ErrorCategory.SCAN_INCOMPLETE.value,
+                "output_holds_previous_results": True,
+            },
+        ),
+        operation=operation,
+        suggestions=[
+            "Run the scan again",
+            "get_scan_progress with the scan's id says how it ended",
+        ],
+    )
+
+
 def get_scan_results_with_error_handling(
     output_dir: Path,
+    include_sarif: bool = False,
 ) -> Dict[str, Any]:
     """
     Get scan results with comprehensive error handling.
@@ -1478,6 +1682,7 @@ def get_scan_results_with_error_handling(
 
     Args:
         output_dir: Path to the scan output directory
+        include_sarif: Passed to :func:`get_scan_results`.
 
     Returns:
         Dictionary containing scan results or error information
@@ -1502,6 +1707,10 @@ def get_scan_results_with_error_handling(
                 ],
             )
 
+        refusal = restored_results_refusal(output_dir, "get_scan_results")
+        if refusal is not None:
+            return refusal
+
         # Check if scan has completed
         is_complete = check_scan_completion(output_dir)
         if not is_complete:
@@ -1523,7 +1732,7 @@ def get_scan_results_with_error_handling(
             )
 
         # Get scan results
-        results = get_scan_results(output_dir)
+        results = get_scan_results(output_dir, include_sarif=include_sarif)
         return results
 
     except MCPResourceError as e:
@@ -1533,18 +1742,20 @@ def get_scan_results_with_error_handling(
             operation="get_scan_results",
         )
     except Exception as e:
-        # Handle unexpected errors
-        _logger.error(f"Unexpected error getting scan results: {str(e)}", exc_info=True)
+        # Handle unexpected errors, describing a ValidationError by field rather
+        # than quoting its input, in the log's traceback too (utils/error_text.py).
+        log_unexpected_error(_logger, e, "Unexpected error getting scan results")
+        message = error_text(e)
         return create_error_response(
             error=MCPResourceError(
-                f"Unexpected error getting scan results: {str(e)}",
+                f"Unexpected error getting scan results: {message}",
                 context={
                     # "scan_id": scan_id,
                     "cwd": str(Path.cwd()),
                     "output_dir": str(output_dir),
                     "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
                     "error_type": type(e).__name__,
-                    "error_message": str(e),
+                    "error_message": message,
                 },
             ),
             operation="get_scan_results",

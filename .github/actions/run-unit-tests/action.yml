@@ -8,6 +8,15 @@ inputs:
   python-version:
     description: "Python version label for artifact naming"
     required: true
+  shard:
+    description: >-
+      Which slice of the suite to run, written <index>of<count> (for example 3of8).
+      The default, 1of1, runs the whole suite and enforces the coverage threshold
+      itself. Any other value runs only that shard's test files, measures coverage
+      without gating it, and leaves the threshold to the unit-coverage job, which
+      combines every shard's data (.github/scripts/combine-unit-coverage.py).
+    required: false
+    default: "1of1"
 
 runs:
   using: "composite"
@@ -72,13 +81,110 @@ runs:
       # loaded.
       run: uv sync --extra cdk --extra symbols
 
-    # ASH_REQUIRE_SYMBOLS_EXTRA turns the symbol tests' skip-when-absent into a hard
-    # failure, so a leg that stops installing the extra cannot pass by skipping them.
+    # Prints the limits that decide how many processes a macOS job may hold, so that a refused
+    # process start in the tests can be read against them. It only reports and never fails the
+    # job: every command ends in `|| true`.
+    - name: Report the process limits (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo "ulimit -u: $(ulimit -u || true)"
+        echo "kern.maxproc / kern.maxprocperuid:"
+        sysctl kern.maxproc kern.maxprocperuid || true
+        echo "hw.logicalcpu: $(sysctl -n hw.logicalcpu || true)"
+        echo "processes owned by $(id -un): $(ps -U "$(id -un)" -o pid= | wc -l || true)"
+
+    # ASH_REQUIRE_SYMBOLS_EXTRA and ASH_REQUIRE_CDK_EXTRA turn the skip-when-absent of the
+    # tests that need each extra into a hard failure, so a leg that stops installing an extra
+    # cannot pass by skipping them. A plain `uv sync` on a contributor's machine sets neither,
+    # and those tests skip there and name the `uv sync --extra ...` that installs the extra.
+    # tests/unit/test_unit_test_step_gates.py fails if either variable is dropped here.
+    #
+    # The coverage options and the 80% threshold are passed here rather than through
+    # pytest.ini's addopts. In addopts they gated every run, so a contributor's run of one
+    # directory failed on total coverage with every test passing. This step is the one run
+    # of the whole suite, so it is where the threshold means something.
+    # tests/unit/test_unit_test_step_gates.py runs this command against a planted test and
+    # fails unless it exits non-zero below 80%.
+    #
+    # It runs only for the whole-suite shard (1of1). ash-unified-ci.yml gives the suite
+    # eight shards per OS and Python version, because the whole suite (about 47,000 items)
+    # did not finish inside any job timeout on a 4-worker runner. A shard covers part of
+    # the package, so the next step runs it without the threshold, and the unit-coverage
+    # job applies the same 80% to the shards' combined data.
+    #
+    # PYTEST_DEBUG_TEMPROOT moves pytest's basetemp (tmp_path and friends) off the
+    # runner's shared /tmp. The sandbox backends deliberately treat anything under
+    # /tmp as already covered by --private-tmp and the fresh `--tmpfs /tmp` mount
+    # (automated_security_helper/utils/sandbox/backends.py, _TMP_ROOT), so a fake
+    # home a test builds under tmp_path gets no --blacklist args when basetemp is
+    # /tmp/pytest-of-runner, and a passwd home under /tmp reads the `--tmpfs /tmp`
+    # value as an ancestor grant: 29 sandbox-policy tests fail on the hosted Linux
+    # runners and pass wherever basetemp lives off /tmp. runner.temp is
+    # /home/runner/work/_temp on the Linux images, so the tests measure the
+    # intended scenario, a home that is NOT inside the sandbox's private tmp.
+    # tests/conftest.py sets this knob with setdefault, so the value here wins.
     - name: Run PyTest
+      if: inputs.shard == '1of1'
       shell: bash
       env:
         ASH_REQUIRE_SYMBOLS_EXTRA: "1"
-      run: uv run pytest
+        ASH_REQUIRE_CDK_EXTRA: "1"
+        PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
+      run: |
+        uv run pytest \
+          --cov=automated_security_helper \
+          --cov-config=.coveragerc \
+          --cov-report=term-missing \
+          --cov-report=xml:test-results/pytest.coverage.xml \
+          --cov-report=html:test-results/coverage_html \
+          --cov-fail-under=80
+
+    # One shard of the suite, with the same extras gates and basetemp as "Run PyTest" above.
+    #
+    # ASH_TEST_SHARD makes tests/conftest.py's pytest_ignore_collect hook (tests/utils/
+    # sharding.py) ignore the test modules another shard owns. No file is named on the
+    # command line: a file named there would skip pytest's own ignore rules and its
+    # python_files match, so pytest collects exactly as it does for the whole suite and the
+    # hook only removes modules, which are then never imported.
+    #
+    # The variable is read once, in tests/conftest.py's pytest_configure, and removed from
+    # the environment there, so a pytest a test starts does not inherit it (it would drop
+    # the modules other shards own when it collected a directory). xdist workers get the
+    # setting through workerinput instead.
+    #
+    # Coverage is measured, with no threshold, because a shard covers only part of the
+    # package; --cov-report= prints and writes no report. The data stays in pytest-cov's
+    # default .coverage, not a COVERAGE_FILE set here: that variable would reach every
+    # process a test starts and could merge a nested run's data into this shard's.
+    #
+    # Its own --junit-xml path, so it does not claim the file "Run PyTest" names. The
+    # report step's glob matches both.
+    - name: Run PyTest shard
+      if: inputs.shard != '1of1'
+      shell: bash
+      env:
+        ASH_REQUIRE_SYMBOLS_EXTRA: "1"
+        ASH_REQUIRE_CDK_EXTRA: "1"
+        PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
+        ASH_TEST_SHARD: ${{ inputs.shard }}
+      run: |
+        uv run pytest \
+          --cov=automated_security_helper \
+          --cov-config=.coveragerc \
+          --cov-report= \
+          --junit-xml=test-results/pytest-shard.junit.xml
+
+    # The shard's coverage data, where the artifact upload below carries it to the
+    # unit-coverage job. It runs after a failed test run too, since that run's data is
+    # still the shard's. The name has no leading dot on purpose: upload-artifact leaves out
+    # hidden files unless told otherwise.
+    - name: Keep this shard's coverage data
+      if: (success() || failure()) && inputs.shard != '1of1'
+      shell: bash
+      run: |
+        mkdir -p test-results
+        cp .coverage test-results/coverage.data
 
     # Runs the cdk-nag integration tests, which the default pytest invocation above does
     # NOT run: tests/conftest.py skips anything whose keywords include "integration", and
@@ -97,14 +203,25 @@ runs:
     #
     # ASH_REQUIRE_CDK_EXTRA turns a missing extra into a hard failure instead of a skip, so
     # this step cannot silently stop testing anything if the install step above changes.
+    #
+    # Its own --junit-xml path. Without one it took pytest.ini's
+    # test-results/pytest.junit.xml and overwrote the report "Run PyTest" had just
+    # written, so the published check listed only these tests. report_paths below
+    # matches both files.
+    #
+    # Once per OS and Python version, not once per shard: it runs in the first shard
+    # (the whole-suite shard 1of1 also starts with "1of"), so each OS and Python
+    # combination still runs these eleven tests exactly once.
     - name: Run cdk-nag integration tests
+      if: success() && startsWith(inputs.shard, '1of')
       shell: bash
       env:
         ASH_REQUIRE_CDK_EXTRA: "1"
       run: |
         uv run pytest \
           tests/integration/scanners/test_cdk_nag_real_pack.py \
-          --run-integration -p no:randomly --no-cov -v
+          --run-integration -p no:randomly --no-cov -v \
+          --junit-xml=test-results/cdk-nag-integration.junit.xml
 
     # No `update_check: true`. It selected the action's update path, which looks up an
     # existing check run by `job_name` -- default `${{ github.job }}`, the job's YAML
@@ -125,9 +242,11 @@ runs:
       uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
       if: success() || failure()
       with:
-        report_paths: "**/pytest.junit.xml"
+        # One glob for both steps' reports, so they are grouped into the one check run
+        # this cell publishes (group_reports defaults to true).
+        report_paths: "test-results/*.junit.xml"
         include_passed: true
-        check_name: PyTest - ${{ inputs.os }} ${{ steps.runner-arch.outputs.label }} Python ${{ inputs.python-version }}
+        check_name: PyTest - ${{ inputs.os }} ${{ steps.runner-arch.outputs.label }} Python ${{ inputs.python-version }} shard ${{ inputs.shard }}
 
     # Rendered by coverage.py itself rather than by irongut/CodeCoverageSummary, which is a
     # Docker-based action. A Docker action's image is pulled during the job's prepare phase,
@@ -150,10 +269,11 @@ runs:
     # queue.
     #
     # coverage.py has rendered Markdown since 7.0 and pytest-cov>=7.1 already pins it, so this
-    # needs no new dependency and no container. `--fail-under=0` is load-bearing: .coveragerc
-    # sets fail_under=80, `coverage report` exits 2 below it, and this step must not become a
-    # second coverage gate. The real gate is the `--cov` run in pytest.ini, which has already
-    # run by this point and fails the leg on its own.
+    # needs no new dependency and no container. `--fail-under=0` keeps this step from becoming
+    # a second coverage gate: `coverage report` exits 2 below any fail_under it is given, and
+    # .coveragerc would supply one if a threshold were ever added there again. The real gate
+    # is `--cov-fail-under=80` on "Run PyTest" above, which has already run by this point and
+    # fails the leg on its own.
     - name: Code coverage summary
       shell: bash
       # `runner.arch == 'X64'`, not a comparison against the derived label. Both select the same
@@ -161,7 +281,10 @@ runs:
       # reads the runner context directly, so the selection does not depend on the mapping in the
       # step above being right. A typo there can only break an artifact name, never silently
       # deselect every leg.
-      if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64'
+      #
+      # Only for the whole-suite shard: a sharded leg has only its own slice's data, and the
+      # unit-coverage job renders this table from the combined data instead.
+      if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64' && inputs.shard == '1of1'
       run: |
         {
           echo '## Code coverage'
@@ -173,6 +296,6 @@ runs:
       if: success() || failure()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: test-results-${{ inputs.os }}-${{ steps.runner-arch.outputs.label }}-py${{ inputs.python-version }}
+        name: test-results-${{ inputs.os }}-${{ steps.runner-arch.outputs.label }}-py${{ inputs.python-version }}-shard${{ inputs.shard }}
         path: test-results/
         if-no-files-found: warn

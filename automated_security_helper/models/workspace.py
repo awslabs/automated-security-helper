@@ -22,10 +22,11 @@ not have to relearn the first four codes:
 * ``0`` success.
 * ``1`` scan errors / scanner failures. A workspace-mode internal error -- ASH
   itself failed and reached no verdict -- is a case of this.
-* ``2`` actionable findings above threshold. Workspace mode uses this for
+* ``2`` actionable findings at or above threshold. Workspace mode uses this for
   exactly that: a project exceeded its effective threshold, consistently with
   single-project mode.
-* ``3`` invalid config. A project's own config being unusable is a case of this.
+* ``3`` invalid config or refused input. A project's own config being unusable is
+  a case of this.
 * ``4`` workspace definition or policy error -- the workspace file, a project
   path, or a workspace-level policy is not usable. NOTHING WAS SCANNED.
 
@@ -40,7 +41,7 @@ This is a deliberate deviation from the RFC, not a transcription error.
 The RFC assigned "workspace definition or policy error" to exit code 2. But 2
 was already published, in
 ``automated_security_helper.core.constants.ASH_EXIT_CODES``, as "actionable
-findings above threshold" -- exposed as an MCP resource and pinned by
+findings at or above threshold" -- exposed as an MCP resource and pinned by
 ``tests/unit/cli/mcp/test_exit_codes_resource.py``. It is also the ordinary,
 expected result of a scan that worked: ``_compute_exit_code`` in
 ``run_ash_scan`` returns 2 whenever there are actionable findings.
@@ -98,21 +99,28 @@ exit status, which stands on its own.
 
 Precedence in ``workspace_exit_code``, and why it runs in this order
 -------------------------------------------------------------------
-``INVALID_PROJECT_CONFIG`` (3) > ``ACTIONABLE_FINDINGS`` (2) >
-``INTERNAL_ERROR`` (1) > ``SUCCESS`` (0).
+``INVALID_PROJECT_CONFIG`` (3) > ``INTERNAL_ERROR`` (1) >
+``ACTIONABLE_FINDINGS`` (2) > ``SUCCESS`` (0).
 
-An earlier ordering put 1 above 2, reasoning that "we do not know whether this
-project is clean" is worse news than "this project is not clean". That is sound
-about severity and wrong about consequence. A CI gate that treats 1 as retryable
-infrastructure trouble and 2 as blocking would retry a workspace that has real
-findings and never block on them -- fail-open, and silently. A finding is a
-certainty; a failed project is an unknown; an unknown must not be allowed to
-suppress a certainty. So findings win, and the failure stays disclosed in the
-payload and through every reporter, which is where an unknown belongs.
+The same order as a single-directory scan, whose ``_compute_exit_code`` runs the
+completeness pass before the threshold count: a workspace with an incomplete or
+failed project exits 1 even when another project has findings. A gate told "2,
+clear these and you are done" is misled when part of the scan measured nothing,
+and with ``ash --source-dir P`` and P inside a workspace giving different answers
+for the same project, neither could be read on its own.
 
-3 stays above 2 because both are blocking. No gate retries "invalid
-configuration", so promoting findings past it would buy nothing, and 3 names one
-misconfigured project -- a more specific diagnosis, actionable by one person.
+What was rejected: findings above the unknown (2 > 1), which this module used
+until 2026-10. Its reasoning was that a CI gate treating 1 as retryable
+infrastructure trouble would retry a workspace with real findings and never block
+on them, and that one project's absent tool should not hide another's findings.
+Both still describe a gate that reads only the exit code. The findings are not
+hidden: every project's ``exceeds_threshold`` and finding counts stay in the
+payload and in every reporter, and a gate that must block on findings whatever
+else happened reads them there. The ordering was chosen for parity with
+single-directory mode.
+
+3 stays above both because it is blocking and names one misconfigured project:
+a more specific diagnosis, actionable by one person.
 
 ``INTERNAL_ERROR`` has two inputs, not one. A project that failed outright is
 one; a project that completed with a scanner at ERROR or MISSING is the other,
@@ -120,15 +128,6 @@ carried on ``WorkspaceProjectResult.scan_incomplete``. They share a code because
 they are the same kind of news -- neither says whether the code is clean -- and
 because collapsing "we could not run it" into 0 is what let a workspace report a
 project clean while ``ash --source-dir P`` on the same project exited 1.
-
-That the two modes disagree about where the unknown sits is deliberate on both
-sides. Single-project mode checks completeness FIRST and returns 1 even when
-there are findings, because a reviewer told "2, clear these and you are done" is
-being misled when a scanner contributed nothing. Workspace mode cannot copy
-that: with N projects it can hold an incomplete project and a project with real
-findings at the same time, and leading with the unknown would let one project's
-absent tool suppress another project's certainty. A single-project scan has no
-second project to suppress, which is why it can afford the stricter order.
 
 ``WORKSPACE_ERROR`` (4) does not appear in that ordering because it is not a
 verdict over projects. It is returned when nothing was attempted at all, and
@@ -161,7 +160,12 @@ from __future__ import annotations
 from enum import Enum, IntEnum
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import Field, PrivateAttr, computed_field
+
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.utils.undecodable_text import RecordModel
+
+from automated_security_helper.models.core import IgnoreFileExclusions
 
 
 class WorkspaceExitCode(IntEnum):
@@ -171,6 +175,8 @@ class WorkspaceExitCode(IntEnum):
     ``sys.exit`` without conversion at the call site.
 
     Every value agrees with ``ASH_EXIT_CODES``; only ``WORKSPACE_ERROR`` is new.
+    ``USAGE_ERROR`` is the CLI-wide code for a refused command line, listed here
+    because a workspace-mode invocation can exit with it too.
     ``ACTIONABLE_FINDINGS`` is modelled here rather than left as a bare literal
     because workspace mode really does return it -- a project over its
     effective threshold -- and a call site should not have to hardcode 2.
@@ -184,18 +190,25 @@ class WorkspaceExitCode(IntEnum):
     ACTIONABLE_FINDINGS = 2
     INVALID_PROJECT_CONFIG = 3
     WORKSPACE_ERROR = 4
+    # Not a verdict over projects either: the command line was refused before any
+    # workspace was resolved. Taken from ASH_EXIT_CODES' own name, so the number
+    # is defined once.
+    USAGE_ERROR = ASH_EXIT_USAGE_ERROR
 
 
 # Descriptions keyed by code, mirroring the shape of ASH_EXIT_CODES so the MCP
 # resource can serialise either table the same way. The wording matches
-# ASH_EXIT_CODES for the four shared codes, because they are the same codes --
+# ASH_EXIT_CODES for every shared code, because they are the same codes --
 # not a parallel vocabulary for them.
 WORKSPACE_EXIT_CODES: Dict[int, str] = {
     WorkspaceExitCode.SUCCESS.value: "success",
     WorkspaceExitCode.INTERNAL_ERROR.value: "scan errors / scanner failures",
-    WorkspaceExitCode.ACTIONABLE_FINDINGS.value: "actionable findings above threshold",
-    WorkspaceExitCode.INVALID_PROJECT_CONFIG.value: "invalid config",
+    WorkspaceExitCode.ACTIONABLE_FINDINGS.value: (
+        "actionable findings at or above threshold"
+    ),
+    WorkspaceExitCode.INVALID_PROJECT_CONFIG.value: "invalid config or refused input",
     WorkspaceExitCode.WORKSPACE_ERROR.value: "workspace definition or policy error",
+    WorkspaceExitCode.USAGE_ERROR.value: "usage error",
 }
 
 
@@ -216,7 +229,7 @@ class SkippedProjectReason(str, Enum):
         return self is SkippedProjectReason.ERROR
 
 
-class SkippedProject(BaseModel):
+class SkippedProject(RecordModel):
     """One entry of the ``workspace.skipped_projects`` payload."""
 
     project: Annotated[
@@ -263,7 +276,33 @@ class ProjectRunStatus(str, Enum):
     FAILED = "failed"
 
 
-class WorkspaceProjectResult(BaseModel):
+class ProjectInputNotScanned(RecordModel):
+    """One input a project's scanner found and did not scan, and why."""
+
+    scanner: Annotated[str, Field(..., min_length=1, description="The scanner.")]
+    path: Annotated[
+        str,
+        Field(
+            ...,
+            description=(
+                "The input's workspace-relative path, '/' separated: the project's "
+                "relative_path joined to the path the scanner recorded."
+            ),
+        ),
+    ]
+    reason: Annotated[str, Field(..., description="Why the scanner did not scan it.")]
+
+
+#: The code a scanner's rolled-up entry reads when its project's row recorded none and
+#: the scanner did not complete: it produced no target report, so ``exit_code`` was
+#: never set on the row. ASH's own stand-in for a run that did not complete (the
+#: incomplete-run member of the judged codes), never the default 0 of an unset field
+#: and never a tool's own exit. A SKIPPED scanner is a complete outcome and does not
+#: read it.
+SCANNER_EXIT_CODE_UNRECORDED = 125
+
+
+class WorkspaceProjectResult(RecordModel):
     """One project's outcome, as it appears in the aggregated results."""
 
     model_config = {"extra": "allow"}
@@ -389,6 +428,25 @@ class WorkspaceProjectResult(BaseModel):
             description="Final status per scanner name, for this project alone.",
         ),
     ]
+    scanner_reasons: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            # Carried in-process from the project run to the workspace rollup
+            # (WorkspaceAggregator.add) and never dumped: the rolled-up
+            # scanner_results entry is the public surface, so this map is not a
+            # second copy of it in every project block.
+            exclude=True,
+            description=(
+                "Why each SKIPPED, MISSING or ERROR scanner gave no result, for "
+                "this project alone: a SKIPPED or MISSING row's skipped_reason or "
+                "missing_reason, and the first error an ERROR scanner's reports "
+                "recorded, such as a constructor that raised. A scanner that ran, "
+                "or that recorded no reason, is not listed. Empty in a workspace "
+                "file written before the field existed."
+            ),
+        ),
+    ]
     incomplete_scanners: Annotated[
         List[str],
         Field(
@@ -400,7 +458,61 @@ class WorkspaceProjectResult(BaseModel):
                 "the risk and has not asked to be told the scan was complete. Read "
                 "through the unified metrics rather than off `scanners`, so a "
                 "scanner the operator excluded on a host that also lacks its tool "
-                "reads SKIPPED here rather than MISSING."
+                "reads SKIPPED here rather than MISSING. A scanner listed only for "
+                "a stale content database is not here; see stale_content_databases."
+            ),
+        ),
+    ]
+    incomplete_scanner_details: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "Each incomplete scanner's display status as the completeness "
+                "gate reports it -- the bare status, or the status followed by "
+                "the unevaluated-target counts for a partial audit. Keyed by the "
+                "names in incomplete_scanners; empty in results files written "
+                "before the field existed, where a reader falls back to the "
+                "status."
+            ),
+        ),
+    ]
+    partial_coverage_scanners: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "The incomplete scanners whose recorded counts show a partial "
+                "audit (some targets evaluated, some not), whatever status the "
+                "writer graded. A coverage row for one carries the reason "
+                "partial_coverage rather than its status token. Empty in results "
+                "files written before the field existed."
+            ),
+        ),
+    ]
+    stale_content_databases: Annotated[
+        List[Dict[str, Any]],
+        Field(
+            default_factory=list,
+            description=(
+                "Content databases past their declared age bound under "
+                "content_db_staleness: fail, each as the single-scan MCP payload "
+                "reports it. A stale database fails the project (scan_incomplete) "
+                "whatever fail_on_incomplete_scanners says."
+            ),
+        ),
+    ]
+    inputs_not_scanned: Annotated[
+        List[ProjectInputNotScanned],
+        Field(
+            default_factory=list,
+            description=(
+                "Every input one of this project's scanners found and did not scan "
+                "(an offline npm-audit's lockfiles, for instance), with the reason. "
+                "The project's own results list them per target; the workspace "
+                "results carry no per-target reports, so they are repeated here, "
+                "for the merged summaries and the console. A scanner's status "
+                "cannot say which input it skipped."
             ),
         ),
     ]
@@ -422,13 +534,27 @@ class WorkspaceProjectResult(BaseModel):
             ),
         ),
     ] = False
+    incomplete_converters: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "Converter name to reason, for each converter of this project that "
+                "lost coverage: it crashed, could not convert some of its inputs, "
+                "or its tool was absent with inputs to convert. The same rows "
+                "`ash --source-dir P` fails on. Populated whether or not the "
+                "completeness gate is on, for the same reason incomplete_scanners is."
+            ),
+        ),
+    ]
     scan_incomplete: Annotated[
         bool,
         Field(
             False,
             description=(
-                "Whether the two completeness facts above fail this project -- the "
-                "incomplete scanners it names, or having run no scanner at all. "
+                "Whether the completeness facts above fail this project -- the "
+                "incomplete scanners or converters it names, or having run no "
+                "scanner at all. "
                 "Stored rather than derived from them for the same reason "
                 "exceeds_threshold is: fail_on_incomplete_scanners can be off, in "
                 "which case a project has scanners that did not run and still "
@@ -454,6 +580,19 @@ class WorkspaceProjectResult(BaseModel):
             ),
         ),
     ]
+    ignore_file_exclusions: Annotated[
+        Optional[IgnoreFileExclusions],
+        Field(
+            None,
+            description=(
+                "The project's own metadata.ignore_file_exclusions: whether its "
+                ".gitignore and .ignore files were honored and how many files they "
+                "removed from its scan set, keyed by path relative to the project. "
+                "Null for a project that built no scan set (skipped, or failed "
+                "before scanning)."
+            ),
+        ),
+    ] = None
     skip_reason: Annotated[
         Optional[SkippedProjectReason],
         Field(None, description="Why the project was skipped, when it was."),
@@ -488,8 +627,31 @@ class WorkspaceProjectResult(BaseModel):
             detail=self.skip_detail,
         )
 
+    # Carried in-process from the project run to the workspace rollup
+    # (WorkspaceAggregator.add) and never serialized: the rolled-up
+    # scanner_results entry is the public surface. A private attribute, not a
+    # field, because a declared field is listed in the published results schema
+    # even when it is excluded from dumps.
+    _scanner_exit_codes: Dict[str, Optional[int]] = PrivateAttr(default_factory=dict)
 
-class WorkspaceResults(BaseModel):
+    def carry_scanner_exit_codes(self, codes: Dict[str, Optional[int]]) -> None:
+        """Record the exit code each scanner's row recorded for this project.
+
+        Read from the same row as the status in ``scanners``. A scanner that did not
+        finish and whose row recorded none reads ``SCANNER_EXIT_CODE_UNRECORDED``; a
+        skipped scanner whose row recorded none reads what its own row carries
+        (``None``). Set after construction: a constructor argument is not accepted
+        into it.
+        """
+        self._scanner_exit_codes = dict(codes)
+
+    @property
+    def carried_scanner_exit_codes(self) -> Dict[str, Optional[int]]:
+        """The codes :meth:`carry_scanner_exit_codes` recorded; empty when none were."""
+        return self._scanner_exit_codes
+
+
+class WorkspaceResults(RecordModel):
     """Everything a workspace scan concluded, keyed under ``workspace``."""
 
     model_config = {"extra": "allow"}
@@ -662,41 +824,26 @@ def workspace_exit_code(
 
     if any(entry.invalid_config for entry in failed):
         return WorkspaceExitCode.INVALID_PROJECT_CONFIG
-    if any(entry.exceeds_threshold for entry in completed):
-        # ASH's long-standing "actionable findings" status, with the same meaning
-        # it has in single-project mode. Named rather than written as 2, so that
-        # renumbering the table cannot silently turn this into another code.
-        #
-        # Deliberately ABOVE a failed project, reversing an earlier ordering that
-        # put INTERNAL_ERROR first on the grounds that "we do not know" is worse
-        # news than "we know it is bad". That reasoning was sound about severity
-        # and wrong about consequence: a CI gate that treats 1 as retryable
-        # infrastructure trouble and 2 as blocking would retry a workspace with
-        # real findings and never block on them. A finding is a certainty and a
-        # failed project is an unknown, and an unknown must not suppress a
-        # certainty. The failure stays disclosed in the payload and in every
-        # reporter, which is where an unknown belongs.
-        return WorkspaceExitCode.ACTIONABLE_FINDINGS
     if failed or any(entry.scan_incomplete for entry in completed):
         # A project that completed with a scanner at ERROR or MISSING belongs
         # here for the same reason a project that failed outright does: neither
-        # tells us whether the code is clean. Single-project mode reaches 1 by
-        # the same route -- see the completeness pass in _compute_exit_code,
-        # which runs before the threshold count and returns 1 -- so `ash
-        # --source-dir P` and P inside a workspace now agree that an unrun
-        # scanner is not a pass.
+        # tells us whether the code is clean.
         #
-        # Placed HERE, below ACTIONABLE_FINDINGS, and not above it. Single-project
-        # mode answers 1 when both hold; workspace mode answers 2, and that
-        # difference is deliberate rather than an oversight in one of them. See
-        # "Precedence" in the module docstring: with N projects a workspace can
-        # hold both outcomes at once, so promoting the unknown would let one
-        # project's absent tool suppress another project's real findings. A
-        # single-project scan has no second project to suppress, which is why it
-        # can afford to lead with the unknown.
+        # ABOVE ACTIONABLE_FINDINGS, as in single-project mode, whose
+        # _compute_exit_code runs the completeness pass before the threshold
+        # count and returns 1 when both hold. So `ash --source-dir P` and P
+        # inside a workspace give the same answer, and a gate that clears 2 by
+        # fixing findings is never told a scan was whole when part of it measured
+        # nothing. See "Precedence" in the module docstring for the ordering this
+        # replaced.
         #
         # WORKSPACE_ERROR (4) is unreachable from here by construction: this
         # branch requires a completed or failed project, and 4 is the
         # nothing-was-attempted answer.
         return WorkspaceExitCode.INTERNAL_ERROR
+    if any(entry.exceeds_threshold for entry in completed):
+        # ASH's long-standing "actionable findings" status, with the same meaning
+        # it has in single-project mode. Named rather than written as 2, so that
+        # renumbering the table cannot silently turn this into another code.
+        return WorkspaceExitCode.ACTIONABLE_FINDINGS
     return WorkspaceExitCode.SUCCESS

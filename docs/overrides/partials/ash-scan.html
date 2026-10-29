@@ -1,0 +1,81 @@
+{% from "partials/ash-icons.html" import icon %}
+{% set tracks = [
+  ("code", "Code", "app.py", "code-braces", "Bandit", "Semgrep", "Shell command", "High"),
+  ("infrastructure", "Infrastructure", "template.yaml", "cloud-outline", "Checkov", "CFN-Nag", "Public ingress", "High"),
+  ("secrets", "Secrets", ".env", "key-outline", "detect-secrets", "", "Embedded credential", "High"),
+  ("dependencies", "Dependencies", "package-lock.json", "package-variant-closed", "npm audit", "Syft + Grype", "Package vulnerability", "Medium")
+] %}
+<section class="ash-scan" aria-labelledby="scan-title" data-ash-scan data-step="3" data-category="all">
+  <div class="ash-scan__header">
+    <div><h2 id="scan-title">Scan example</h2><span class="ash-scan__state" data-scan-state>Reports ready</span></div>
+    <div class="ash-scan__controls" data-scan-controls>
+      <button type="button" class="ash-scan__all" data-scan-category="all" aria-pressed="true">All files</button>
+      <button type="button" class="ash-scan__play" data-scan-play aria-label="Replay scan example" disabled><span class="ash-scan__play-icon">{{ icon("play-circle-outline", "ash-scan__play-start") }}{{ icon("pause-circle-outline", "ash-scan__play-pause") }}</span><span data-scan-play-label>Replay</span></button>
+    </div>
+  </div>
+  <div class="ash-scan__progress" aria-hidden="true"><span data-scan-progress></span></div>
+
+  <div class="ash-scan__board" data-scan-board>
+    <svg class="ash-scan__routes" aria-hidden="true" focusable="false" data-scan-routes></svg>
+
+    <div class="ash-scan__column ash-scan__column--files" data-scan-column="files">
+      <h3>Files <span>01</span></h3>
+      <div class="ash-scan__stack">
+        {% for category, label, file, symbol, scanner, second, finding, severity in tracks %}
+        <button class="ash-scan__file is-selected" type="button" data-scan-category="{{ category }}" data-scan-source="{{ category }}" aria-pressed="false" title="Trace {{ label | lower }}: {{ file }}" disabled>
+          <span class="ash-scan__file-icon">{{ icon(symbol) }}</span>
+          <span><span class="ash-scan__file-label">{{ label }}</span><code>{{ file }}</code></span>
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="ash-scan__column ash-scan__column--scanners" data-scan-column="scanners">
+      <h3>Scanners <span>02</span></h3>
+      <div class="ash-scan__stack">
+        {% for category, label, file, symbol, scanner, second, finding, severity in tracks %}
+        <div class="ash-scan__scanner is-selected" data-scan-engine="{{ category }}">
+          <div class="ash-scan__scanner-names"><span>{{ scanner }}</span>{% if second %}<span>{{ second }}</span>{% endif %}</div>
+          <span class="ash-scan__scanner-check" aria-hidden="true">{{ icon("check-circle-outline") }}</span>
+          <span class="ash-scan__scanner-progress" aria-hidden="true"></span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="ash-scan__column ash-scan__column--findings" data-scan-column="findings">
+      <h3>Findings <span>03</span></h3>
+      <div class="ash-scan__findings">
+        {% for category, label, file, symbol, scanner, second, finding, severity in tracks %}
+        <div class="ash-scan__finding" data-scan-finding="{{ category }}">
+          <span class="ash-scan__severity ash-scan__severity--{{ severity | lower }}">{{ severity }}</span>
+          <span>{{ finding }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="ash-scan__coverage" data-scan-coverage>{{ icon("check-circle-outline") }}<span>Coverage recorded</span></div>
+      <div class="ash-scan__report" data-scan-report>
+        <span class="ash-scan__report-label">{{ icon("file-document-outline") }}<span>Aggregated results</span></span>
+        <div class="ash-scan__report-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ash-scan__steps" role="group" aria-label="Select scan example step" data-scan-controls>
+    {% for step, label in [(0, "Files"), (1, "Scanners"), (2, "Findings"), (3, "Reports")] %}
+    <button type="button" data-scan-step="{{ step }}" aria-pressed="{{ 'true' if step == 3 else 'false' }}"><span>0{{ step + 1 }}</span>{{ label }}</button>
+    {% endfor %}
+  </div>
+
+  <div class="ash-scan__formats" aria-label="Example report formats">
+    <span data-scan-formats-label>Reports</span>
+    <div>
+      <a href="{{ 'docs/output-formats/#html' | url }}" data-scan-format="html">HTML</a>
+      <a href="{{ 'docs/output-formats/#sarif' | url }}" data-scan-format="sarif">SARIF</a>
+      <a href="{{ 'docs/output-formats/#markdown' | url }}" data-scan-format="markdown">Markdown</a>
+      <a href="{{ 'docs/output-formats/#flat-json' | url }}" data-scan-format="json">JSON</a>
+    </div>
+  </div>
+  <p class="ash-scan__caption" data-scan-caption>Example data · Scanner coverage depends on configuration.</p>
+  <span class="ash-sr-only" role="status" aria-live="polite" aria-atomic="true" data-scan-announcement></span>
+</section>

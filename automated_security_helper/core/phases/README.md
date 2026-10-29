@@ -1,10 +1,18 @@
-# ASH Engine Phases
+# ASH engine phases
 
-This directory contains the implementation of the different phases of the ASH execution engine.
+This directory holds the phases of the ASH scan engine. Each phase is a subclass of
+`EnginePhase` (`automated_security_helper/base/engine_phase.py`):
 
-## Phase Structure
+- `ConvertPhase` (`convert_phase.py`) turns archives and notebooks into files the scanners can read.
+- `ScanPhase` (`scan_phase.py`) runs the selected scanners over the source and the converted files.
+- `ReportPhase` (`report_phase.py`) writes the reports from the aggregated results.
+- `InspectPhase` (`inspect_phase.py`) runs the optional inspection step.
 
-Each phase inherits from the `EnginePhase` base class and implements the specific logic for that phase:
+`ScanExecutionEngine` (`automated_security_helper/core/execution_engine.py`) creates each phase
+with the scan's `PluginContext` and the plugins for that phase, then runs them in order. The phases
+are internal: to run a scan, use `ash scan` or the
+[Python API](https://awslabs.github.io/automated-security-helper/reference/python-api/) rather than
+creating phases yourself.
 
 - `ConvertPhase`: Handles the conversion of files to formats that can be scanned
 - `ScanPhase`: Executes security scanners on the source and converted files
@@ -16,50 +24,38 @@ The phases are designed to be used by the `ScanExecutionEngine` class. Each phas
 
 Example:
 
+<!-- doctest: illustrative reason="a fragment that uses objects the scan engine creates for a run (the plugin context, the plugin classes, the progress display and the results model)" -->
 ```python
-# Create a convert phase
+# Every phase takes the run's PluginContext (source, output and work
+# directories, and the config), the plugin classes it runs, a progress display
+# and the results model it updates.
 convert_phase = ConvertPhase(
-    source_dir=source_dir,
-    output_dir=output_dir,
-    work_dir=work_dir,
-    config=config,
-    progress_display=progress_display,
-    asharp_model=asharp_model,
-)
-
-# Execute the convert phase
-converted_paths = convert_phase.execute(plugin_registry=plugin_registry)
-
-# Create a scan phase
-scan_phase = ScanPhase(
-    source_dir=source_dir,
-    output_dir=output_dir,
-    work_dir=work_dir,
-    config=config,
-    progress_display=progress_display,
-    asharp_model=asharp_model,
-)
-
-# Execute the scan phase
-results = scan_phase.execute(
-    scanner_factory=scanner_factory,
-    plugin_registry=plugin_registry,
-    enabled_scanners=enabled_scanners,
-    parallel=True,
-)
-
-# Create a report phase
-report_phase = ReportPhase(
-    source_dir=source_dir,
-    output_dir=output_dir,
-    work_dir=work_dir,
-    config=config,
+    plugin_context=plugin_context,
+    plugins=converter_classes,
     progress_display=progress_display,
     asharp_model=results,
 )
+results = convert_phase.execute(aggregated_results=results)
 
-# Execute the report phase
-report_phase.execute()
+scan_phase = ScanPhase(
+    plugin_context=plugin_context,
+    plugins=scanner_classes,
+    progress_display=progress_display,
+    asharp_model=results,
+)
+results = scan_phase.execute(aggregated_results=results, parallel=True)
+
+# A report phase runs only the reporters it is given, here ASH's built-ins and
+# those of the modules the config names; given none, it runs none.
+report_phase = ReportPhase(
+    plugin_context=plugin_context,
+    plugins=reporter_classes_for_run(plugin_context.config.ash_plugin_modules),
+    progress_display=progress_display,
+    asharp_model=results,
+)
+results = report_phase.execute(
+    report_dir=plugin_context.output_dir / "reports", aggregated_results=results
+)
 ```
 
 ## Benefits of the Phase-Based Architecture
@@ -81,6 +77,8 @@ To add a new phase:
 Example:
 
 ```python
+from typing import Any
+
 from automated_security_helper.base.engine_phase import EnginePhase
 
 

@@ -6,10 +6,10 @@
 WHAT WAS MEASURED
 -----------------
 A scanner reports per-target counters -- ``targets_attempted`` and ``targets_failed`` -- and
-``ScanResultsContainer.determine_status`` only returns ERROR once ``targets_failed >=
-targets_attempted``. So total coverage loss is loud and partial coverage loss is silent. Measured
-end to end with the real cdk-nag scanner over four trees of three targets each, with the findings
-gate off so the exit code reflects coverage alone:
+``ScanResultsContainer.determine_status``, when this was measured, only returned ERROR once
+``targets_failed >= targets_attempted``. So total coverage loss was loud and partial coverage
+loss was silent. Measured end to end with the real cdk-nag scanner over four trees of three
+targets each, with the findings gate off so the exit code reflects coverage alone:
 
     failing   determine_status   executionSuccessful   exit   summary status
     0/3       PASSED             True                  0      PASSED
@@ -17,9 +17,13 @@ gate off so the exit code reflects coverage alone:
     2/3       PASSED             True                  0      PASSED
     3/3       ERROR              False                 0      ERROR
 
-The cliff is exactly at "all failed", and 1/3 and 2/3 are indistinguishable from 0/3 in every
+The cliff sat exactly at "all failed", and 1/3 and 2/3 were indistinguishable from 0/3 in every
 status channel. ``scanner_evaluated_nothing`` does not cover this: it keys on
 ``targets_attempted <= 0``, and here three targets were attempted every time.
+``determine_status`` has since gone fail-closed, severity gate first: a partial loss grades FAILED
+when the surviving findings fail the gate and ERROR when they are clean (the table above ran with
+the gate off, so its zero-findings rows now read ERROR for 1/3 and 2/3). The derived-status cells
+below hold both, and the counters this file made legible are what still carry the denominator.
 
 On ASH's own repository cdk-nag attempts 10 targets and fails 4 -- a 40% loss reported as a clean
 scan. Two of those four are genuine CloudFormation templates that went unscanned; the other two
@@ -33,18 +37,19 @@ field for either counter. So the counters existed in ``ash_aggregated_results.js
 scanner's own SARIF and could not reach the table, ``ash.flat.json``, or any human-facing report
 even in principle. That is the half of the defect that is purely additive to fix.
 
-Whether a partially-covered scan should FAIL is a separate question with a real blast radius --
-at a 40% rate on this repository, "ERROR on any failed target" would turn a routine condition
-into a permanent red -- so PARTIAL loss moves neither the status nor the exit code, and the tests
-below assert that, so a later change to it is a visible decision rather than a side effect.
+Whether a partially-covered scan should FAIL was a separate question with a real blast radius,
+so at the time of this change PARTIAL loss moved neither the status nor the exit code, and this
+file asserted that so a later change would be a visible decision rather than a side effect. That
+later change happened: ``determine_status`` is fail-closed with the severity gate first, so a
+current scan's partial loss is a status too (FAILED when the surviving findings fail the gate,
+ERROR when they are clean). The verdict cells below hold the two states that
+remain: a derived (current-scan) row keeps its derived status through the metrics, and a legacy row --
+written PASSED beside its counters by an ASH from before the rule -- keeps its recorded status
+while the counts still reach the gate.
 
-Read that as scoped to partial loss, not as a claim about the change this file belongs to. A
-sibling commit ORs ``any_target_errored`` into the ``error`` flag, so a tree that lost ALL of its
-targets -- which ``determine_status`` does report as ERROR -- now reaches the rolled-up status
-where it previously could not. That is a status change, it has no opt-in, and
-``tests/unit/core/test_scanner_status_across_targets.py`` owns it. The two are consistent because
-they concern different conditions: 4 of 10 lost is not a status, 10 of 10 lost on some tree always
-was one and simply could not be seen.
+A sibling commit of the original change ORs ``any_target_errored`` into the ``error`` flag, so a
+tree that lost ALL of its targets reaches the rolled-up status where it previously could not;
+``tests/unit/core/test_scanner_status_across_targets.py`` owns that.
 
 ASSERTIONS ARE ON COUNTS AND CHANNELS, NEVER ON WORDING
 -------------------------------------------------------
@@ -227,15 +232,99 @@ class TestCoverageShortfallsAreEnumerated:
         assert coverage_shortfalls(_model(total)) == [("cdk-nag", 3, 3)]
 
 
-class TestTheVerdictIsDeliberatelyUnchanged:
-    @pytest.mark.parametrize("failed", [1, 2])
-    def test_partial_coverage_loss_still_reports_passed(self, failed: int):
-        """Named as PASSED, not as "not ERROR".
+class TestTheVerdictFollowsTheRecordedState:
+    """The successor of a class that pinned partial loss as PASSED.
 
-        This change makes the loss legible and does not turn it into a failure, because at the
-        measured 40% rate on this repository that would make a routine condition a permanent red.
-        Asserting the exact status means a later decision to fail on partial coverage has to
-        change this test, which is where such a decision should be visible.
+    That pin was this file's promise that failing on partial coverage would be
+    a visible decision. The decision was made -- ``determine_status`` is
+    fail-closed, severity gate first -- so the class now holds the states that
+    remain: a current scan's derived row (ERROR for clean survivors, FAILED for
+    gate-failing ones), and the artifact an older ASH wrote.
+    """
+
+    @pytest.mark.parametrize("failed", [1, 2])
+    def test_partial_coverage_loss_derived_today_reports_error(self, failed: int):
+        """A current scan's partial loss keeps its ERROR through the metrics.
+
+        The report's status is derived through ``determine_status`` rather than
+        hand-written, so the fixture is the state a current scan writes and a
+        change to the grading rule moves it too. The premise assert names the
+        rule, so a loosening shows up here as a conscious edit.
+        """
+        from automated_security_helper.core.unified_metrics import (
+            get_unified_scanner_metrics,
+        )
+        from automated_security_helper.models.scan_results_container import (
+            ScanResultsContainer,
+        )
+
+        container = ScanResultsContainer()
+        container.record_target_attempt(3)
+        for index in range(failed):
+            container.record_target_failure(f"target-{index}", "not evaluated")
+        derived = container.determine_status("MEDIUM").value
+        assert derived == "ERROR", (
+            "a partial loss with clean surviving findings grades ERROR"
+        )
+
+        model = _model(
+            {"cdk-nag": {"source": _report(derived, attempted=3, failed=failed)}}
+        )
+        metrics = {m.scanner_name: m for m in get_unified_scanner_metrics(model)}
+
+        assert metrics["cdk-nag"].status == "ERROR"
+        assert metrics["cdk-nag"].passed is False
+
+    def test_partial_coverage_loss_with_a_gate_failing_finding_reports_failed(
+        self, model_with_one_high_finding
+    ):
+        """The FAILED half of the derived rule, through the metrics.
+
+        The same 1-of-3 loss, but the surviving targets carry a HIGH finding, so
+        ``determine_status`` grades FAILED (the severity gate runs first on a partial
+        loss). ``_model`` keeps ``sarif.runs`` empty, so the finding comes from the
+        shared one-finding builder, set on this file's stand-in model.
+        """
+        from automated_security_helper.core.unified_metrics import (
+            get_unified_scanner_metrics,
+        )
+        from automated_security_helper.models.scan_results_container import (
+            ScanResultsContainer,
+        )
+
+        container = ScanResultsContainer()
+        container.record_target_attempt(3)
+        container.record_target_failure("target-0", "not evaluated")
+        container.severity_counts.high = 1
+        derived = container.determine_status("MEDIUM").value
+        assert derived == "FAILED", (
+            "a partial loss with gate-failing surviving findings grades FAILED"
+        )
+
+        reports = {"cdk-nag": {"source": _report(derived, attempted=3, failed=1)}}
+        model = model_with_one_high_finding(
+            reports, scanner="cdk-nag", model=_model(reports)
+        )
+        metrics = {m.scanner_name: m for m in get_unified_scanner_metrics(model)}
+
+        assert metrics["cdk-nag"].status == "FAILED"
+        assert metrics["cdk-nag"].passed is False
+        assert metrics["cdk-nag"].actionable == 1
+        assert (
+            metrics["cdk-nag"].targets_attempted,
+            metrics["cdk-nag"].targets_failed,
+        ) == (3, 1)
+
+    @pytest.mark.parametrize("failed", [1, 2])
+    def test_a_legacy_passed_row_keeps_its_recorded_status(self, failed: int):
+        """A pre-rule artifact -- PASSED beside counters -- is not regraded here.
+
+        The metrics read the recorded status. Regrading an old results file at
+        read time would change a saved report's verdict between ASH versions
+        with no rescan behind it. The shortfall still reaches the completeness
+        gate from the counts, which
+        ``tests/unit/interactions/test_fail_on_partial_target_coverage.py``
+        holds with its legacy-row cell.
         """
         from automated_security_helper.core.unified_metrics import (
             get_unified_scanner_metrics,
@@ -359,3 +448,96 @@ class TestTheShortfallReachesTheConsole:
         clean = {"cdk-nag": {"source": _report("PASSED", attempted=3, failed=0)}}
 
         assert self._render(_model(clean)) == ""
+
+    def test_unusable_counters_are_named_without_a_count(self):
+        out = self._render(_model(UNUSABLE))
+
+        assert "cdk-nag" in out
+        assert "-1" not in out
+
+
+#: Stored reports whose counters cannot be trusted. ``target_counts`` answers its internal
+#: sentinel pair for each of them. The unified row must not grade PASSED on such a report
+#: (the status derivation does not read the stored counters), must not carry the literal -1
+#: in either count field or the serialized row, and ``coverage_shortfalls`` must keep the
+#: scanner.
+POISONED_REPORTS = {
+    "string attempted": {"targets_attempted": "3", "targets_failed": 0},
+    "negative failed": {"targets_attempted": 3, "targets_failed": -1},
+    "failed with no attempted": {"targets_failed": 2},
+}
+
+UNUSABLE = {"cdk-nag": {"source": {**_report("PASSED"), "targets_failed": 2}}}
+
+
+class TestUnusableCountersNeverSerializeAsCounts:
+    @pytest.mark.parametrize("stored", POISONED_REPORTS.values(), ids=POISONED_REPORTS)
+    def test_the_row_grades_error_with_no_counts_and_the_flag(self, stored):
+        from automated_security_helper.core.unified_metrics import (
+            get_unified_scanner_metrics,
+        )
+
+        reports = {"cdk-nag": {"source": {**_report("PASSED"), **stored}}}
+        row = get_unified_scanner_metrics(_model(reports))[0]
+
+        assert row.status == "ERROR"
+        assert row.counters_unusable is True
+        assert row.targets_attempted is None
+        assert row.targets_failed is None
+        dumped = row.model_dump()
+        assert (dumped["targets_attempted"], dumped["targets_failed"]) == (None, None)
+
+    @pytest.mark.parametrize("stored", POISONED_REPORTS.values(), ids=POISONED_REPORTS)
+    def test_no_reporter_row_carries_a_literal_minus_one(self, stored):
+        import json
+
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+            ReportContentEmitter,
+        )
+
+        reports = {"cdk-nag": {"source": {**_report("PASSED"), **stored}}}
+        rows = ReportContentEmitter(_model(reports)).get_scanner_results()
+
+        assert rows[0]["targets_attempted"] is None
+        assert rows[0]["targets_failed"] is None
+        assert rows[0]["counters_unusable"] is True
+        assert "-1" not in json.dumps(rows)
+
+    @pytest.mark.parametrize("stored", POISONED_REPORTS.values(), ids=POISONED_REPORTS)
+    def test_the_scanner_is_a_shortfall_of_unknown_size(self, stored):
+        from automated_security_helper.core.unified_metrics import coverage_shortfalls
+
+        reports = {"cdk-nag": {"source": {**_report("PASSED"), **stored}}}
+
+        assert coverage_shortfalls(_model(reports)) == [("cdk-nag", None, None)]
+
+    @pytest.mark.parametrize("stored", POISONED_REPORTS.values(), ids=POISONED_REPORTS)
+    def test_the_incomplete_scanner_gate_still_lists_it(self, stored):
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        reports = {"cdk-nag": {"source": {**_report("PASSED"), **stored}}}
+        listed = incomplete_scanners(_model(reports))
+
+        assert [name for name, _ in listed] == ["cdk-nag"]
+
+    def test_an_honest_row_serializes_its_counts_unchanged(self):
+        import json
+
+        from automated_security_helper.core.unified_metrics import (
+            get_unified_scanner_metrics,
+        )
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+            ReportContentEmitter,
+        )
+
+        honest = {"cdk-nag": {"source": _report("PASSED", attempted=3, failed=1)}}
+        row = get_unified_scanner_metrics(_model(honest))[0]
+        emitted = ReportContentEmitter(_model(honest)).get_scanner_results()[0]
+
+        assert row.counters_unusable is False
+        assert (row.targets_attempted, row.targets_failed) == (3, 1)
+        assert (emitted["targets_attempted"], emitted["targets_failed"]) == (3, 1)
+        assert emitted["counters_unusable"] is False
+        assert json.loads(json.dumps(emitted))["targets_failed"] == 1

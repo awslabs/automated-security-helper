@@ -1,12 +1,31 @@
-"""Unit tests for Opengrep scanner version detection and metrics flag handling."""
+"""Unit tests for Opengrep scanner version detection, metrics flags and patterns mode."""
+
+import json
+from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock, patch
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked subprocess.run on Windows too.
+
+    opengrep is not installed here, and on Windows ASH refuses an unresolved name
+    before spawning it (subprocess_utils._refuse_unresolved_on_windows). These tests
+    are about what the version probe does with the spawn's answer.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    monkeypatch.setattr(subprocess_utils, "_refuse_unresolved_on_windows", False)
 
 
 @pytest.fixture
@@ -24,7 +43,10 @@ def test_get_opengrep_version_success(opengrep_scanner):
     mock_result.returncode = 0
     mock_result.stdout = "opengrep 1.15.1"
 
-    with patch("subprocess.run", return_value=mock_result):
+    with patch(
+        "automated_security_helper.utils.subprocess_utils._run_plain",
+        return_value=mock_result,
+    ):
         version = opengrep_scanner._get_opengrep_version()
         assert version == (1, 15, 1)
 
@@ -35,14 +57,20 @@ def test_get_opengrep_version_with_v_prefix(opengrep_scanner):
     mock_result.returncode = 0
     mock_result.stdout = "v1.6.0"
 
-    with patch("subprocess.run", return_value=mock_result):
+    with patch(
+        "automated_security_helper.utils.subprocess_utils._run_plain",
+        return_value=mock_result,
+    ):
         version = opengrep_scanner._get_opengrep_version()
         assert version == (1, 6, 0)
 
 
 def test_get_opengrep_version_failure(opengrep_scanner):
     """Test version detection failure."""
-    with patch("subprocess.run", side_effect=Exception("Command failed")):
+    with patch(
+        "automated_security_helper.utils.subprocess_utils._run_plain",
+        side_effect=Exception("Command failed"),
+    ):
         version = opengrep_scanner._get_opengrep_version()
         assert version is None
 
@@ -163,3 +191,62 @@ def test_process_config_options_online_new_version(test_plugin_context):
             arg for arg in scanner.args.extra_args if arg.key == "--metrics"
         ]
         assert len(metrics_args) == 0
+
+
+def test_patterns_mode_reads_the_results_file_its_command_writes(tmp_path):
+    """Patterns mode moves the results file to opengrep_results.json.
+
+    _execute_scan resolves the command a second time after the move. Without that,
+    the command still names results_sarif.sarif: opengrep writes its report there
+    and the scan reads a file nothing wrote. No opengrep runs here: the spawn is a
+    stand-in that writes an empty report where the command says, and the version
+    probe and the tool check are answered without it.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "app.py").write_text("x = 1\n", encoding="utf-8")
+    context = PluginContext(
+        source_dir=source,
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    commands = []
+
+    def opengrep(command, **_kwargs):
+        commands.append(command)
+        output = Path(command[command.index("--sarif-output") + 1])
+        output.write_text(
+            json.dumps(
+                {
+                    "version": "2.1.0",
+                    "runs": [{"tool": {"driver": {"name": "opengrep"}}, "results": []}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {"returncode": 0}
+
+    with (
+        # Online, whatever ASH's offline mode is here: offline without a rule
+        # cache, the scanner declines before it builds a command.
+        patch.object(OpengrepScanner, "_scanner_offline", return_value=False),
+        patch.object(OpengrepScanner, "_get_opengrep_version", return_value=(1, 15, 1)),
+        patch.object(OpengrepScanner, "_validate_tool_dependencies", return_value=True),
+        patch.object(OpengrepScanner, "_run_subprocess", side_effect=opengrep),
+    ):
+        scanner = OpengrepScanner(
+            context=context,
+            config=OpengrepScannerConfig(
+                options=OpengrepScannerConfigOptions(patterns=["eval($X)"])
+            ),
+        )
+        report = scanner.scan(target=source, target_type="source")
+
+    (command,) = commands
+    assert command[command.index("--pattern") + 1] == "eval($X)"
+    assert "--json" in command
+    written = Path(command[command.index("--sarif-output") + 1])
+    assert written.name == "opengrep_results.json", command
+    assert isinstance(report, SarifReport)
+    assert len(report.runs) == 1

@@ -136,15 +136,31 @@ def test_repeated_scans_do_not_accumulate_the_pattern(tree):
     assert scanner.args.extra_args == before
 
 
-def test_the_value_carries_no_regex_grouping(tree):
-    """checkov's terraform module finder joins every --skip-path character into
-    one regex, so a parenthesis in any value fails the terraform scan outright
-    ("unbalanced parenthesis"). Measured with a grouped pattern before this one."""
-    source, output = tree
+def _module_finder_regex(skip_paths):
+    """The regex checkov 3.3.26's terraform module finder builds from --skip-path
+    (``find_modules`` in ``module_loading/module_finder.py``), character by
+    character. When it does not compile, the whole terraform scan fails."""
+    return re.compile("|".join(f"({skip_paths})"))
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "name", ["ash-out", "ash.out", "ash[1]", "a]b", "a{2}|b*c?d+$^"]
+)
+def test_the_module_finder_regex_compiles(tmp_path, name):
+    """For ASH's values alone, and after a user skip_path holding a "]", which
+    closes the character class the joined list opens. An unmatched parenthesis
+    then breaks it, which is why a path holding one is not emitted (the next
+    test)."""
+    source = tmp_path / "src"
+    output = source / name
+    output.mkdir(parents=True)
     argv, _, _ = _scanner(source, output)._execute_scan(source, "source", [])
 
-    for value in _skip_values(argv):
-        assert not set(value) & set("()[]{}|\\"), value
+    values = _skip_values(argv)
+    assert any(name in v or re.escape(name) in v for v in values), values
+    _module_finder_regex(values)
+    _module_finder_regex(["user]dir", *values])
 
 
 def test_a_path_checkov_cannot_take_is_not_emitted(tmp_path):
@@ -154,6 +170,10 @@ def test_a_path_checkov_cannot_take_is_not_emitted(tmp_path):
     argv, _, _ = _scanner(source, output)._execute_scan(source, "source", [])
 
     assert not any("ash-out" in v for v in _skip_values(argv))
+    with pytest.raises(re.error):
+        # What emitting a path with an unmatched parenthesis would do, after a
+        # user skip_path holding a "]". ASH leaves out every path with one.
+        _module_finder_regex(["user]dir", re.escape("/t/src (copy/ash-out/")])
 
 
 def test_nothing_is_emitted_on_windows(tree, monkeypatch):

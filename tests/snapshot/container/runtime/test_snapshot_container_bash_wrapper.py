@@ -7,8 +7,8 @@ The real script runs under bash with a fake OCI runner: a shell script that reco
 each call, prints a canned line and exits with a chosen status. Runner discovery
 then exercises the script's own ``command -v`` chain, and the build and run
 statuses go through its own exit-code handling. The fake runner's path, the
-caller's UID/GID and ``BUILD_DATE`` are the only values that differ between machines,
-and none of them is printed except the runner path, which is fixed here.
+caller's UID/GID and ``BUILD_DATE_EPOCH`` are the only values that differ between
+machines, and none of them is printed except the runner path, which is fixed here.
 
 No container runtime is needed, but the module carries ``container_runtime`` so it
 runs in the scan-validation legs (tests/conftest.py deselects it elsewhere). ./ash is
@@ -34,8 +34,11 @@ ASH_SCRIPT = REPO_ROOT / "ash"
 
 pytestmark = pytest.mark.container_runtime
 
-#: The utilities ./ash calls besides bash builtins and the runner.
-_TOOLS = ("dirname", "basename", "mkdir", "id", "date", "cat")
+#: The utilities ./ash calls besides bash builtins and the runner. tr lower-cases the
+#: build target, so without it the image tag is empty and every run prints
+#: "tr: command not found". tests/unit/test_ash_bash_entrypoint_refusals.py lists the
+#: same tools.
+_TOOLS = ("dirname", "basename", "mkdir", "id", "date", "cat", "tr", "rm")
 
 FAKE_RUNNER = """#!/bin/bash
 echo "fake-oci-runner $1" >> "$FAKE_RUNNER_LOG"
@@ -131,6 +134,15 @@ def test_run_status_is_the_wrapper_status(status, run_wrapper, snapshot, fake_ru
 
 def test_malformed_base_oci_layout(run_wrapper, snapshot, fake_runner):
     assert run_wrapper(ASH_BASE_OCI_LAYOUT="/layouts/base") == snapshot
+
+
+def test_source_dir_that_does_not_exist(run_wrapper, snapshot, fake_runner):
+    # The later --source-dir wins, as it always has.
+    assert run_wrapper("--source-dir", "does-not-exist") == snapshot
+
+
+def test_option_without_its_value(run_wrapper, snapshot, fake_runner):
+    assert run_wrapper("--oci-runner") == snapshot
 
 
 def test_base_image_override_is_announced(run_wrapper, snapshot, fake_runner):

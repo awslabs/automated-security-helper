@@ -59,6 +59,9 @@ trivy's vulnerability database
     ``trivy version --format json``. Online, trivy replaces a database past ``NextUpdate``
     before scanning and fails if it cannot; offline, ``--skip-db-update`` bypasses the rule
     entirely (db.go:145-151), which is the case ASH's check exists for.
+    Two scanners of the Trivy plugin read it: ``trivy-repo``, which the entry is declared
+    for, and ``trivy``, named in ``also_read_by``. Both are held to the same bound and
+    measured the same way, each under its own name.
 
 semgrep and opengrep offline rulesets
     Downloaded into the image at build time when ``OFFLINE=YES`` (Dockerfile, the
@@ -96,6 +99,8 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
+from typing import Mapping
 
 # The key prefix's version. Bump it when the bucket arithmetic changes, so entries keyed under
 # the old arithmetic are never restored by the new one.
@@ -118,6 +123,42 @@ DEFAULT_STALENESS_POLICY = STALENESS_FAIL
 STALENESS_CONFIG_FIELD = "content_db_staleness"
 #: Per-database exceptions to ``content_db_staleness``, each with a required expiration date.
 STALENESS_OVERRIDES_CONFIG_FIELD = "content_db_staleness_overrides"
+#: Whether an image built with ``OFFLINE=YES`` applies ``OFFLINE_IMAGE_POLICIES``. The config
+#: can only turn it off; see ``OFFLINE_IMAGE_POLICIES``.
+STALENESS_OFFLINE_IMAGE_CONFIG_FIELD = "content_db_staleness_offline_image_default"
+
+#: Set by the Dockerfile from its ``OFFLINE`` build argument (``ENV
+#: ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"``), so it is ``YES`` in an image built with
+#: ``OFFLINE=YES``; nothing else in ASH sets it, and ASH reads it wherever it is set. It
+#: describes the image, not the scan: ``ASH_OFFLINE`` says whether a scan runs offline,
+#: and is also set by ``--offline`` and the nix shell.
+OFFLINE_IMAGE_ENV = "ASH_OFFLINE_AT_BUILD_TIME"
+
+#: The policy a database is held to by default in an image built with ``OFFLINE=YES``, in
+#: place of ``content_db_staleness: fail``.
+#:
+#: Why trivy-db, and only trivy-db: such an image carries the databases it was built with.
+#: trivy's bound is its own 24h ``NextUpdate``, so without this every scan in the image
+#: failed from a day after it was built, and keeping the image usable meant rebuilding it
+#: daily. Its scans now pass, and the stale-database warning goes into every report, so the
+#: age stays visible to whoever reads them. grype's 120h bound and the rulesets' bound leave
+#: a rebuild cadence a release can meet, and they keep ``fail``.
+#:
+#: Fixed here rather than read from the environment or the config, so neither can widen it to
+#: another database. ``OFFLINE_IMAGE_ENV`` turns it on; ``content_db_staleness_offline_image_default:
+#: false``, either form of ``--allow-stale-content-db``, or a ``content_db_staleness_overrides``
+#: entry naming the database outranks it; ``content_db_staleness: warn`` makes it moot.
+OFFLINE_IMAGE_POLICIES: Mapping[str, str] = MappingProxyType(
+    {"trivy-db": STALENESS_WARN}
+)
+
+
+def built_offline(environ: Mapping[str, str]) -> bool:
+    """Whether ``environ`` is an image built with ``OFFLINE=YES`` (``OFFLINE_IMAGE_ENV``).
+
+    The same spellings ``ASH_OFFLINE`` accepts (``core/constants.is_offline_mode``).
+    """
+    return str(environ.get(OFFLINE_IMAGE_ENV, "NO")).upper() in ("YES", "TRUE", "1")
 
 
 def content_db_staleness_override(allow_stale: bool) -> str:
@@ -130,14 +171,17 @@ def content_db_staleness_override(allow_stale: bool) -> str:
 def content_db_staleness_flag_overrides(allow_stale: bool) -> list[str]:
     """Every ``--config-overrides`` entry either form of the flag means.
 
-    The policy, and an empty ``content_db_staleness_overrides``: the flag decides for one
-    scan and every database, so a per-database entry in the config file cannot outrank it.
+    The policy, an empty ``content_db_staleness_overrides``, and the offline image's
+    default turned off: the flag decides for one scan and every database, so neither a
+    per-database entry in the config file nor ``OFFLINE_IMAGE_POLICIES`` can outrank it.
     Without the second entry, ``--no-allow-stale-content-db`` would not restore ``fail``
-    for a database the config file relaxes.
+    for a database the config file relaxes; without the third, for trivy-db in an image
+    built with ``OFFLINE=YES``.
     """
     return [
         content_db_staleness_override(allow_stale),
         f"{STALENESS_OVERRIDES_CONFIG_FIELD}=[]",
+        f"{STALENESS_OFFLINE_IMAGE_CONFIG_FIELD}=false",
     ]
 
 
@@ -176,6 +220,16 @@ class ContentDatabase:
     # A declared max age alone is not enough: it bounds what a SCAN accepts, not what a cache
     # hands out, and the drift gate refuses a CI cache of anything not marked here.
     cacheable_in_ci: bool = False
+    # Other scanners that read the same database, by config name. ``scanner`` is the one
+    # the database is declared for; a scanner named here is held to the same bound, and
+    # its measurements are recorded under its own name. The trivy database is read by
+    # both scanners of the Trivy plugin, ``trivy-repo`` and ``trivy``.
+    also_read_by: tuple[str, ...] = ()
+
+    @property
+    def readers(self) -> tuple[str, ...]:
+        """Every scanner config name that reads this database, ``scanner`` first."""
+        return (self.scanner, *self.also_read_by)
 
     @property
     def cacheable(self) -> bool:
@@ -242,6 +296,7 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
     ContentDatabase(
         name="trivy-db",
         scanner="trivy-repo",
+        also_read_by=("trivy",),
         cache_path="~/.cache/trivy",
         max_age=TRIVY_DB_MAX_AGE,
         bound_source=(
@@ -315,16 +370,13 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
 #: database whose age matters, each with the reason. A scanner of that strategy that is in
 #: neither this table nor ``CONTENT_DATABASES`` fails
 #: ``tests/unit/utils/test_content_db_staleness.py``, so a new database-reading scanner cannot
-#: arrive without a bound.
+#: arrive without a bound. npm-audit is not here: it reads its advisories from the registry
+#: at scan time and does not run offline (``OfflineStrategy.SKIP_OFFLINE``).
 SCANNERS_WITHOUT_CONTENT_DATABASE: dict[str, str] = {
     "checkov": (
         "its policies ship inside the checkov package ASH pins, so they age with the "
         "package version rather than with a separately downloaded database; offline mode "
         "only stops it fetching platform policies"
-    ),
-    "npm-audit": (
-        "advisories come from the npm registry's audit endpoint at scan time; npm keeps no "
-        "local advisory database for offline mode to read"
     ),
     "syft": (
         "it catalogs packages and matches nothing against advisories; offline mode only "
@@ -395,14 +447,30 @@ def use_allowed(entry: ContentDatabase, built: datetime, now: datetime) -> bool:
     return now - built <= entry.max_age
 
 
+#: How far ahead of this host's clock a database's build time may be and still count
+#: as measured. A build time further ahead is not a usable age: ``now - built`` would
+#: be negative, inside every bound, for as long as the clock stays behind it. The
+#: allowance tolerates a host clock that is somewhat behind the publisher's, and caps
+#: what a future-dated timestamp can add to a database's apparent freshness.
+CLOCK_SKEW_ALLOWANCE = timedelta(minutes=15)
+
+
+def is_future_dated(built: datetime, now: datetime) -> bool:
+    """Whether `built` is further ahead of `now` than ``CLOCK_SKEW_ALLOWANCE``."""
+    return built - now > CLOCK_SKEW_ALLOWANCE
+
+
 def is_stale(entry: ContentDatabase, built: datetime, now: datetime) -> bool:
     """Whether a database built at `built` is past its bound at `now`, for a scan.
+
+    A build time more than ``CLOCK_SKEW_ALLOWANCE`` in the future counts as stale too:
+    its age cannot be measured, and an unmeasured database is not a fresh one.
 
     Separate from ``use_allowed`` on purpose. That answers a CI-cache question and refuses
     anything not cacheable there; this answers "may a scan trust it", which every declared
     database has an answer to.
     """
-    return now - built > entry.max_age
+    return is_future_dated(built, now) or now - built > entry.max_age
 
 
 def parse_timestamp(value: str) -> datetime:
@@ -431,7 +499,11 @@ def main(argv: list[str] | None = None) -> int:
     p_key.add_argument("name")
     p_check = sub.add_parser(
         "check-age",
-        help="exit 0 if a database built at --built may be used or saved now, 1 if not",
+        help=(
+            "exit 0 if a database built at --built may be used or saved now, 1 if "
+            "not, 2 for a usage error (an unknown name, or a --built that is not an "
+            "RFC 3339 timestamp)"
+        ),
     )
     p_check.add_argument("name")
     p_check.add_argument("--built", required=True, help="RFC 3339 build timestamp")
@@ -443,29 +515,50 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_env.add_argument("name")
     args = parser.parse_args(argv)
+    # Here rather than at the top: this module imports nothing but the standard
+    # library, so the drift gate can load it by path and CI can run it before ASH's
+    # dependencies are installed. terminal_text is the standard library only too.
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
     try:
         entry = get(args.name)
     except KeyError as exc:
-        print(exc.args[0], file=sys.stderr)
+        # Quotes the name as given, which CI passes in.
+        print(shown_not_obeyed(exc.args[0]), file=sys.stderr)
         return 2
     now = datetime.now(timezone.utc)
 
     if args.command == "cache-key":
         if not entry.cacheable:
             print(
-                f"{entry.name} is not declared cacheable in CI and must not be cached",
+                shown_not_obeyed(
+                    f"{entry.name} is not declared cacheable in CI and must not be cached"
+                ),
                 file=sys.stderr,
             )
             return 2
-        print(cache_key_suffix(entry, now))
+        print(cache_key_suffix(entry, now))  # print-ok: the bucket CI keys on
         return 0
     if args.command == "bound-env":
         for name, value in entry.bound_env.items():
-            print(f"{name}={value}")
+            print(f"{name}={value}")  # print-ok: lines CI reads, from the table
         return 0
 
-    built = parse_timestamp(args.built)
+    # The value comes from the database's own metadata, and the workflows print this
+    # program's output into a step log, where a line holding `::` or `##[` can be read
+    # as a workflow command. So a value that does not parse is refused without being
+    # printed, and with no traceback, which would quote it.
+    try:
+        built = parse_timestamp(args.built)
+    except ValueError:
+        print(
+            shown_not_obeyed(
+                "--built is not an RFC 3339 timestamp with a timezone, so the "
+                "database's age cannot be checked; it is neither used nor saved."
+            ),
+            file=sys.stderr,
+        )
+        return 2
     allowed = (save_allowed if args.purpose == "save" else use_allowed)(
         entry, built, now
     )
@@ -478,8 +571,10 @@ def main(argv: list[str] | None = None) -> int:
     verdict = "allowed" if allowed else "REFUSED"
     limit_text = go_duration(limit) if limit is not None else "not cacheable in CI"
     print(
-        f"{entry.name}: built {built.isoformat()}, {go_duration(age)} old; "
-        f"{args.purpose} {verdict} (limit {limit_text})"
+        shown_not_obeyed(
+            f"{entry.name}: built {built.isoformat()}, {go_duration(age)} old; "
+            f"{args.purpose} {verdict} (limit {limit_text})"
+        )
     )
     return 0 if allowed else 1
 

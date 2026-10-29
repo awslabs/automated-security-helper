@@ -59,10 +59,9 @@ class TestArgumentRefusals:
         )
 
     def test_misspelled_option(self, run_cli, snapshot, monkeypatch):
-        # MEASURED: `ash scan` is declared with ignore_unknown_options and
-        # allow_extra_args (it forwards extra arguments to the container), so a
-        # misspelled option is not refused. The probe shows which directory the scan
-        # would then have scanned.
+        # A misspelled option is refused as a usage error, before any scan starts:
+        # the probe would show which directory a scan reached, and must not be
+        # reached at all.
         monkeypatch.setattr(
             "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
             _report_orchestrator_reached,
@@ -71,6 +70,29 @@ class TestArgumentRefusals:
 
     def test_unknown_subcommand(self, run_cli, snapshot):
         assert run_cli(["scna", "--source-dir", "src"]) == snapshot
+
+    def test_option_before_the_subcommand(self, run_cli, snapshot, monkeypatch):
+        # `ash --source-dir X scan` passes --source-dir to scan, so scan's own check
+        # refuses X. The probe would show the directory a scan reached.
+        monkeypatch.setattr(
+            "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
+            _report_orchestrator_reached,
+        )
+        assert (
+            run_cli(["--source-dir", "does-not-exist", "scan", "--no-progress"])
+            == snapshot
+        )
+
+    def test_option_before_a_subcommand_that_does_not_take_it(self, run_cli, snapshot):
+        assert run_cli(["--source-dir", "src", "report"]) == snapshot
+
+
+def _report_scan_started(self, phases=None):
+    suppressions = len(self.config.global_settings.suppressions or [])
+    raise RuntimeError(
+        f"probe: the scan started, with {suppressions} suppressions and "
+        f"fail_on_findings={self.config.fail_on_findings}"
+    )
 
 
 def _report_orchestrator_reached(*_args, source_dir, **_kwargs):
@@ -144,6 +166,14 @@ class TestWorkspaceRefusals:
         assert run_cli([*SCAN, "--workspace", "team.code-workspace"]) == snapshot
 
     def test_project_config_invalid(self, run_cli, snapshot, in_tmp):
+        from automated_security_helper.config.resolve_config import pasteable_path
+
+        if not pasteable_path(in_tmp):
+            # The refusal's `Run:` command names the project's files only when
+            # their paths hold nothing but letters, digits and `_ . / : -`;
+            # under a temporary directory with a `~` or a space it points at
+            # them instead, which the recorded output does not show.
+            pytest.skip("the temporary directory's path is not one lint_hint prints")
         _write(
             in_tmp / "team.code-workspace",
             json.dumps({"folders": [{"path": "service-a"}]}),
@@ -210,6 +240,31 @@ class TestScanFailures:
         assert (
             run_cli([*SCAN, "--config", "bad.yaml", "--output-dir", "out"]) == snapshot
         )
+
+    @pytest.mark.parametrize(
+        ("name", "content"),
+        [
+            pytest.param("missing.yaml", None, id="missing"),
+            pytest.param(
+                "bad.yaml", "project_name: snapshot\nscanners: [bandit\n", id="not_yaml"
+            ),
+        ],
+    )
+    def test_configuration_that_cannot_be_loaded(
+        self, run_cli, snapshot, in_tmp, monkeypatch, name, content
+    ):
+        # Exit 3 before any scanner, as for the schema-invalid file above. The scan
+        # is replaced by a probe, so that reaching it fails the exit-code assertion
+        # instead of running every scanner.
+        if content is not None:
+            _write(in_tmp / name, content)
+        monkeypatch.setattr(
+            "automated_security_helper.core.orchestrator.ASHScanOrchestrator.execute_scan",
+            _report_scan_started,
+        )
+        seen = run_cli([*SCAN, "--config", name, "--output-dir", "out"])
+        assert seen["exit_code"] == 3, seen["stdout"][-1500:]
+        assert seen == snapshot
 
     def test_unknown_scanner(self, run_cli, snapshot):
         assert (

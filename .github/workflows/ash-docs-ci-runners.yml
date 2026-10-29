@@ -1,0 +1,666 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Docs CI Runners
+
+# WHY THIS WORKFLOW EXISTS
+#
+# The CI pages show complete pipelines for GitHub Actions, GitLab CI, Jenkins, AWS
+# CodeBuild and CircleCI. The docs checks parse them and check their ash lines; this
+# workflow runs them, each with its CI system's local runner (act, gitlab-ci-local,
+# Jenkinsfile Runner, the CodeBuild local agent and the CircleCI CLI), against the docs
+# fixture, with the ASH this pull request builds. Each row of the matrix is one runner on
+# one page, and tests/integration/docs/test_docs_ci_runners.py runs every block of that
+# page the runner can run. A leg passes only when each pipeline printed ASH's verdict for
+# the findings the fixture plants, the ASH it ran is the wheel this leg built (or, for a
+# block that installs from git, the pull request's head commit), every block of the leg
+# ran, and the negative controls in test_docs_ci_runners_can_fail.py showed that the
+# pipelines can fail.
+#
+# WHY IT IS PATH-FILTERED AND NOT A REQUIRED CHECK
+#
+# Each leg installs its runner and the scanner tools and runs full scans, which takes
+# 10 to 60 minutes. A pull request starts it only when it changes what the runs depend
+# on: the CI pages and their templates, the workflows they call, the harness and its pins,
+# the fixture, the wheel build, the tool installs, and the code whose output the runs
+# check. Each `paths` entry says why it is there. The pages are named one by one rather
+# than as docs/**, so an edit to any other page starts no leg. A required check that does
+# not run blocks the merge, so this path-filtered workflow is not a required check, and
+# the required-checks job in ash-unified-ci.yml does not cover it. workflow_dispatch runs
+# it on demand, every leg or the one its `legs` input names. Every step that installs or
+# runs something reads that choice: a row the input does not name runs no step but the
+# upload, which finds nothing, and its job name ends in "- not selected". A pull request
+# runs every leg.
+#
+# WHY act SKIPS IT
+#
+# The runners start containers and need a GitHub-hosted runner's throwaway VM, not a
+# developer's host. A job-level if cannot read env, on GitHub (where it reads only github,
+# needs, vars and inputs) or under act, so the job checks github.event.act, which an act
+# event file sets, and each step checks env.ACT, which act always sets. Under act, no step
+# runs. install_tools.py also refuses to install anything outside a GitHub-hosted runner.
+#
+# WHY THE STEPS HAVE THEIR OWN TIMEOUTS
+#
+# A job that runs out of time is cancelled, and a cancelled job skips the upload. The
+# install, the runs and the controls each time out before the job does, from their matrix
+# row, so a step that hangs fails and the leg still uploads what it wrote. Each launch of a
+# runner also times out on its own, after the row's launch_timeout seconds, so a pipeline
+# that hangs fails its test with the end of its log. The budgets leave room for one launch
+# to hang; a run that does not hang uses a fraction of them.
+#
+# WHY NOTHING CACHES
+#
+# setup-uv runs with enable-cache: false, and no step restores or saves a cache. Each leg
+# tests the wheel it builds from this checkout, with runners and tools whose sha256 and
+# images whose digest are committed in tests/integration/docs/ci_runners/runners.toml. A
+# cache entry that another ref saved could put other bytes in their place, the
+# cache-poisoning shape zizmor reports, so every leg downloads and checks everything
+# again.
+#
+# WHY THE BUNDLED JENKINS LEG RUNS AN OLD CORE
+#
+# Jenkinsfile Runner's latest release, 1.0-beta-32, bundles Jenkins core 2.375.4, which
+# is past its upstream support period. The jenkinsfile-runner-lts leg runs that release
+# on the LTS core pinned in runners.toml, and the jenkinsfile-runner-bundled leg runs it
+# on its own core, so the page's Jenkinsfile is checked on both. Each runs only on a
+# GitHub-hosted runner, with no listener, no credentials and only its committed plugin
+# closure: the harness starts Jenkins with no HTTP port, the job holds no secret and its
+# checkout keeps no token, and the plugins are the ones listed under
+# tests/integration/docs/ci_runners/, each checked against its sha256 before Jenkins
+# starts.
+#
+# WHY COMMANDS RUN WITH WORKFLOW COMMANDS STOPPED
+#
+# A failure message from pytest, or a line install_tools.py or image_allowlist.py prints,
+# can quote a pipeline's output or a downloaded file's name. Each such command runs
+# between `::stop-commands::` with a new random token and the token on a line of its own,
+# as the docs' own workflow steps do, so the runner reads that text as text. The three
+# long steps, the install, the runs and the controls, run through with_commands_stopped,
+# which also ends the command's process group and closes the section when the step's
+# timeout fires; the short checks print the token themselves. Nothing the
+# workflow relies on, such as an ::error:: line, is printed inside a stopped section. Each
+# runner's log goes to a file under the leg's output directory, which the last step
+# uploads; a failing test prints the last lines of its runner's log, inside the stopped
+# section. Uploaded logs can be read by anyone for seven days, so no runner is asked for
+# verbose output. The upload takes only the output directory, without hidden files or
+# secret-shaped names, and pytest's work trees, which hold each Jenkins home, are outside
+# it.
+
+on:
+  pull_request:
+    paths:
+      - "docs/content/getting-started/ci.md" # act runs its workflow blocks
+      - "docs/content/getting-started/ci.md.template" # ci.md is generated from it
+      - "docs/content/how-to/ci/github-actions.md" # act runs its workflow blocks
+      - "docs/content/how-to/ci/github-actions.md.template" # github-actions.md is generated from it
+      - "docs/content/how-to/scale-large-repos.md" # act runs its sharded workflow
+      - "docs/content/how-to/scale-large-repos.md.template" # scale-large-repos.md is generated from it
+      - "docs/content/how-to/ci/gitlab-ci.md" # gitlab-ci-local runs its pipelines
+      - "docs/content/how-to/ci/gitlab-ci.md.template" # gitlab-ci.md is generated from it
+      - "docs/content/how-to/ci/other-ci.md" # the Jenkins, CodeBuild and CircleCI legs run its blocks
+      - "docs/content/how-to/ci/other-ci.md.template" # other-ci.md is generated from it
+      - "docs/content/how-to/export-reports.md" # the runner census lists its CI block; an edit can change which leg runs it
+      - "examples/AWSCodeBuild/README.md" # the runner census lists its buildspec; an edit can change which leg runs it
+      - "docs/content/docs/advanced-usage.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/advanced-usage.md.template" # advanced-usage.md is generated from it
+      - "docs/content/docs/plugins/community/ferret-scan-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/plugins/community/snyk-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/plugins/community/trivy-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "automated_security_helper/plugin_modules/ash_snyk_plugins/README.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "automated_security_helper/plugin_modules/ash_trivy_plugins/README.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - ".github/workflows/run-ash-security-scan.yml" # the reusable workflow ci.md calls, run from this checkout
+      - ".github/workflows/upload-ash-sarif.yml" # the SARIF upload workflow ci.md calls, run from this checkout
+      - ".github/workflows/ash-docs-ci-runners.yml" # this workflow
+      - "tests/integration/docs/ci_runners/**" # the harness, the pins in runners.toml, the Jenkins plugin closures and init hook, the GitLab helper Dockerfile, and the install and check scripts
+      - "tests/integration/docs/test_docs_ci_runners*.py" # the runs and the negative controls
+      - "tests/integration/conftest.py" # the preinstalled-tools guard of the integration suite, loaded with the runs
+      - "tests/integration/docs/conftest.py" # options of the docs integration tests, loaded with the runs
+      - "tests/conftest.py" # the ci_runner marker and the options that select the runs
+      - "pytest.ini" # the pytest settings the runs read besides the flags on their command lines
+      - "tests/test_data/docs_fixtures/sample-project/**" # the fixture every pipeline scans, with the findings the runs expect
+      - "scripts/docs_checks.py" # parses the pages, merges fragments and takes the census the legs follow
+      - "scripts/verify_docs_freshness.py" # lists the pages the census reads
+      - "Dockerfile" # the GitLab container block builds its ci target
+      - "pyproject.toml" # the wheel's metadata and dependencies, and the test environment
+      - "uv.lock" # the test environment's locked versions
+      - "hatch_build.py" # builds the wheel under test
+      - "automated_security_helper/cli/entrypoint.py" # the ash command every pipeline runs
+      - "automated_security_helper/cli/main.py" # registers the scan, merge and dependencies commands the entry point runs
+      - "automated_security_helper/cli/scan.py" # ash scan, whose verdict line the runs check
+      - "automated_security_helper/cli/merge.py" # ash merge, which the sharded workflow runs
+      - "automated_security_helper/cli/dependencies.py" # ash dependencies install, which every pipeline runs
+      - "automated_security_helper/utils/tool_downloads.py" # the pinned tools ash dependencies install fetches
+      - "automated_security_helper/utils/download_utils.py" # downloads those tools and checks each against its pinned SHA256, which the pages' cache text relies on
+      - "automated_security_helper/assets/Gemfile" # the cfn-nag version the pipelines install
+      - "automated_security_helper/assets/Gemfile.lock" # the cfn-nag gems the pipelines install
+      - "automated_security_helper/plugin_modules/ash_builtin/reporters/sarif_reporter.py" # the SARIF the runs and the upload read
+      - "automated_security_helper/plugin_modules/ash_builtin/reporters/github_ghas_reporter.py" # the code scanning SARIF the workflows upload
+      - "automated_security_helper/plugin_modules/ash_builtin/reporters/junitxml_reporter.py" # the JUnit file Jenkins and GitLab read
+      - "automated_security_helper/utils/get_scan_set.py" # the changed-files scan two blocks run
+      - "automated_security_helper/interactions/run_ash_scan.py" # runs the scan behind ash scan
+  workflow_dispatch:
+    inputs:
+      legs:
+        description: The leg to run, or all
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - act
+          - gitlab-ci-local
+          - jenkinsfile-runner-lts
+          - jenkinsfile-runner-bundled
+          - codebuild-agent
+          - circleci
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per ref and leg choice: pushing again to a pull request supersedes its run,
+  # and a dispatch of one leg does not cancel a dispatch of another on the same branch.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.legs || 'all' }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  legs:
+    name: ${{ matrix.runner }} (${{ matrix.page }})${{ !(github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && ' - not selected' || '' }}
+    if: ${{ github.event.act != true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      # Per row, in minutes: the job's budget, then the install's, the runs' and the
+      # controls' step budgets, which leave at least 15 minutes of the job's for the other
+      # steps and the upload; in seconds, the budget of one runner launch, which is shorter
+      # than the runs' and the controls' steps. A page with more blocks gets a longer runs
+      # step, the CodeBuild leg a longer install for its image pulls, and the sharded
+      # workflow a longer launch.
+      matrix:
+        include:
+          - runner: act
+            page: docs/content/getting-started/ci.md
+            timeout: 95
+            install_timeout: 10
+            runs_timeout: 45
+            controls_timeout: 25
+            launch_timeout: 1200
+          - runner: act
+            page: docs/content/how-to/ci/github-actions.md
+            timeout: 120
+            install_timeout: 10
+            runs_timeout: 70
+            controls_timeout: 25
+            launch_timeout: 1200
+          - runner: act
+            page: docs/content/how-to/scale-large-repos.md
+            timeout: 130
+            install_timeout: 10
+            runs_timeout: 60
+            controls_timeout: 45
+            launch_timeout: 2400
+          - runner: gitlab-ci-local
+            page: docs/content/how-to/ci/gitlab-ci.md
+            timeout: 120
+            install_timeout: 10
+            runs_timeout: 70
+            controls_timeout: 25
+            launch_timeout: 1200
+          - runner: jenkinsfile-runner-lts
+            page: docs/content/how-to/ci/other-ci.md
+            timeout: 80
+            install_timeout: 10
+            runs_timeout: 30
+            controls_timeout: 25
+            launch_timeout: 1200
+          - runner: jenkinsfile-runner-bundled
+            page: docs/content/how-to/ci/other-ci.md
+            timeout: 80
+            install_timeout: 10
+            runs_timeout: 30
+            controls_timeout: 25
+            launch_timeout: 1200
+          - runner: codebuild-agent
+            page: docs/content/how-to/ci/other-ci.md
+            timeout: 105
+            install_timeout: 25
+            runs_timeout: 35
+            controls_timeout: 30
+            launch_timeout: 1500
+          - runner: circleci
+            page: docs/content/how-to/ci/other-ci.md
+            timeout: 80
+            install_timeout: 10
+            runs_timeout: 30
+            controls_timeout: 25
+            launch_timeout: 1200
+    # Every value from the event, the matrix or an input reaches a script through env:,
+    # never as an expression inside run:. The scripts derive their directories from
+    # RUNNER_TEMP: the runner's bin dir, the Jenkins dir and the output directory.
+    env:
+      LEG: ${{ matrix.runner }}
+      PAGE: ${{ matrix.page }}
+      LAUNCH_TIMEOUT: ${{ matrix.launch_timeout }}
+    steps:
+      # On a pull request, the head commit rather than the merge commit, so the wheel
+      # this leg builds and the blocks that install from git test the same tree.
+      - name: Check out the pull request
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install uv
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: false
+
+      - name: Install the test environment
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        run: uv sync --frozen
+
+      # The wheel is built in each leg, not passed between jobs, so "Re-run all jobs"
+      # and a re-run of one leg test the same thing a first run does.
+      - name: Build the wheel under test
+        id: wheel
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        run: |
+          shopt -s nullglob
+          wheel_dir="${RUNNER_TEMP:?}/ash-wheel"
+          uv build --wheel --out-dir "${wheel_dir}"
+          wheels=("${wheel_dir}"/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one wheel in ${wheel_dir}, found ${#wheels[@]}"
+            exit 1
+          fi
+          echo "path=${wheels[0]}" >> "${GITHUB_OUTPUT}"
+
+      # The CodeBuild leg pulls the agent and the CodeBuild build image, which is larger
+      # than the rest of the legs' images together. The toolchains removed here are ones
+      # no CodeBuild pipeline uses on the host: the build runs inside the build image.
+      - name: Make disk room for the CodeBuild images
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && matrix.runner == 'codebuild-agent' }}
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
+
+      # The page's Jenkinsfile asks for an agent labeled linux with Python 3.10 or later,
+      # git, Node.js, npm and Ruby, and its cfn-nag install builds gems, which needs Ruby's
+      # headers and a C compiler. Jenkinsfile Runner runs the pipeline on its built-in
+      # node, which is this VM, so the image's system directories have to hold them. This
+      # fails early, naming what is missing, instead of in the middle of the pipeline.
+      - name: Check the Jenkins agent's tools
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && startsWith(matrix.runner, 'jenkinsfile-runner-') }}
+        run: |
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          missing=()
+          python3 -I -c 'import sys, venv, ensurepip; sys.exit(0 if sys.version_info >= (3, 10) else 1)' ||
+            missing+=("Python 3.10 or later with venv")
+          for tool in git node npm ruby gem cc make; do
+            command -v "${tool}" > /dev/null || missing+=("${tool}")
+          done
+          ruby -rrbconfig -e 'exit(File.file?(File.join(RbConfig::CONFIG["rubyhdrdir"], "ruby.h")))' ||
+            missing+=("Ruby's headers")
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "::error::the Jenkins agent's system PATH lacks: ${missing[*]}"
+            exit 1
+          fi
+          python3 --version
+          git --version
+          node --version
+          npm --version
+          ruby --version
+
+      # Every image pull from here to the end of the runs is recorded, then checked
+      # against the digests in runners.toml and the images the harness builds. --since
+      # replays the daemon's events from this second on, so a pull that starts before the
+      # stream attaches is still recorded.
+      - name: Start recording image pulls
+        id: events
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        run: |
+          out="${RUNNER_TEMP:?}/ci-runner-out"
+          mkdir -p "${out}"
+          since="$(date +%s)"
+          docker events --since "${since}" --filter type=image --filter event=pull \
+            --format '{{json .}}' > "${out}/docker-events.jsonl" 2> "${out}/docker-events.err" &
+          echo "$!" > "${out}/docker-events.pid"
+
+      # The same helper run-ash-security-scan.yml writes, byte for byte (a test holds
+      # the copies equal). The install, the runs and the controls run through its
+      # with_commands_stopped, which puts the command in a process group of its own. When
+      # a step's timeout fires, the helper ends that group and closes the section that
+      # keeps the command's output from being read as workflow commands, so a command
+      # that hangs cannot keep running into the next step, and the logs the upload reads
+      # are not still being written.
+      - name: Write the one_line helper
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+          one_line() {
+            local LC_ALL=C
+            local text="${1//[[:cntrl:]]/ }"
+            text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+            text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+            while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
+            printf '%s' "${text}"
+          }
+          __wcs_clock() {
+            __wcs_now="${EPOCHREALTIME:-}"
+            __wcs_now="${__wcs_now//[!0-9]/}"
+            if [ -z "${__wcs_now}" ]; then
+              __wcs_now=$((SECONDS * 1000000))
+            fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
+          }
+          __wcs_end_group() {
+            local __wcs_now="" __wcs_until=""
+            if [ -z "${__wcs_pid}" ]; then
+              return 0
+            fi
+            __wcs_clock
+            __wcs_until=$((__wcs_now + $1 * 100000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            if ! kill -0 -- "-${__wcs_pid}" 2>/dev/null; then
+              return 0
+            fi
+            kill -s KILL -- "-${__wcs_pid}" 2>/dev/null || true
+            __wcs_until=$((__wcs_now + 500000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            return 1
+          }
+          __wcs_on_signal() {
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
+            fi
+            if [ -n "${__wcs_pid}" ]; then
+              kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
+            fi
+            if [ "$1" = TERM ]; then
+              __wcs_end_group 10 || __wcs_left=1
+              if [ -n "${__wcs_open}" ]; then
+                printf '\n::%s::\n' "${__wcs_token}"
+              fi
+              if [ -n "${__wcs_left}" ]; then
+                printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              fi
+              exit 143
+            fi
+            __wcs_interrupted="$2"
+          }
+          __wcs_exec() {
+            if command -v setsid >/dev/null 2>&1; then
+              exec setsid -w "$@"
+            fi
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+          }
+          with_commands_stopped() {
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+              printf '%s\n' "::error::with_commands_stopped must run in the step's own shell, the one process the runner signals on a cancel, not in a subshell, a pipeline, a command substitution or a background job. For ( cd DIR && ... ), use env -C DIR, or cd at the top level" >&2
+              kill -s TERM "$$" 2>/dev/null || true
+              return 1
+            fi
+            local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
+            case "${1:-}" in
+              --stdout) __wcs_out="$2"; shift 2 ;;
+              --capture) __wcs_var="$2"; shift 2 ;;
+            esac
+            __wcs_token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+            if [ "${#__wcs_token}" -ne 32 ]; then
+              printf '%s\n' "::error::no random token could be read for stop-commands, so the command did not run"
+              return 1
+            fi
+            if [ -n "${__wcs_var}" ]; then
+              __wcs_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ash-wcs.XXXXXX")" || return 1
+              __wcs_out="${__wcs_file}"
+            fi
+            trap '__wcs_on_signal INT 130' INT
+            trap '__wcs_on_signal QUIT 131' QUIT
+            trap '__wcs_on_signal TERM 143' TERM
+            __wcs_open=1
+            printf '::stop-commands::%s\n' "${__wcs_token}"
+            if [ -z "${__wcs_interrupted}" ]; then
+              if [ -n "${__wcs_out}" ]; then
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 > "${__wcs_out}" <&0 &
+              else
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 <&0 &
+              fi
+              __wcs_pid=$!
+              wait "${__wcs_pid}" || __wcs_status=$?
+            fi
+            if [ -n "${__wcs_interrupted}" ] && [ -n "${__wcs_pid}" ]; then
+              wait "${__wcs_pid}" 2>/dev/null || true
+            fi
+            __wcs_end_group 50 || __wcs_left=1
+            printf '\n::%s::\n' "${__wcs_token}"
+            __wcs_open=""
+            trap - INT QUIT TERM
+            if [ -n "${__wcs_left}" ]; then
+              printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              if [ "${__wcs_status}" -eq 0 ]; then
+                __wcs_status=1
+              fi
+            fi
+            if [ -n "${__wcs_interrupted}" ]; then
+              exit "${__wcs_interrupted}"
+            fi
+            if [ -n "${__wcs_file}" ]; then
+              printf -v "${__wcs_var}" '%s' "$(cat "${__wcs_file}")"
+              rm -f -- "${__wcs_file}"
+            fi
+            return "${__wcs_status}"
+          }
+          EOF
+
+      - name: Install the leg's runner, tools and images
+        id: install
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        timeout-minutes: ${{ matrix.install_timeout }}
+        run: |
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          out="${RUNNER_TEMP:?}/ci-runner-out"
+          jenkins_args=()
+          case "${LEG}" in
+            jenkinsfile-runner-*) jenkins_args=(--jenkins-dir "${RUNNER_TEMP:?}/ci-runner-jenkins") ;;
+          esac
+          with_commands_stopped python3 -I tests/integration/docs/ci_runners/install_tools.py --runner "${LEG}" \
+            --bin-dir "${RUNNER_TEMP:?}/ci-runner-bin" --pull-log "${out}/pulls.log" \
+            "${jenkins_args[@]}"
+
+      - name: Show disk use after the CodeBuild pulls
+        if: ${{ !cancelled() && !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && matrix.runner == 'codebuild-agent' && (steps.install.outcome == 'success' || steps.install.outcome == 'failure') }}
+        run: df -h /
+
+      # Both pytest steps clear pytest.ini's addopts with -o addopts= and pass every flag
+      # they need themselves. pytest also reads options from PYTEST_ADDOPTS, which -o
+      # addopts= leaves in place, so each command starts with env -u PYTEST_ADDOPTS;
+      # nothing in this workflow sets it. -o log_cli=false turns off pytest.ini's live
+      # logging, which prints log records to the job's log as they are made and turns on
+      # verbose output. Nothing reads either, and a failing test prints its captured
+      # records anyway. -n 0 runs the blocks one at a time, since they share the Docker
+      # daemon, the pull recording and the images the session builds. --durations=0 with
+      # --durations-min=0 prints how long each block's setup, run and teardown took,
+      # however short, the times the step budgets are checked against. --basetemp puts
+      # pytest's work trees, which hold every Jenkins home, outside the output directory
+      # the upload takes. Each step has its own, because pytest deletes an existing
+      # --basetemp when a session starts and cannot empty a directory a container
+      # created there as root. The junit file goes to the output directory, where the
+      # census checks read it. Coverage is left out: this process imports none of the
+      # code the pipelines run, so .coveragerc's fail_under would fail every leg. Verbose
+      # output is left out too: a failure prints in full either way, and the junit file
+      # names every test. -p no:cacheprovider keeps pytest's cache out of the checkout.
+      # Every long option is written --name=value: until pytest has read the conftest.py
+      # that adds an option, it takes the option's value, written as a word of its own,
+      # for a test path, and loads the conftest.py files of that path's directories.
+      - name: Run the pages' pipelines
+        id: runs
+        if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        env:
+          WHEEL: ${{ steps.wheel.outputs.path }}
+        timeout-minutes: ${{ matrix.runs_timeout }}
+        run: |
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          out="${RUNNER_TEMP:?}/ci-runner-out"
+          work="${RUNNER_TEMP:?}/ci-runner-work"
+          mkdir -p "${work}"
+          with_commands_stopped env -u PYTEST_ADDOPTS uv run --frozen pytest -o addopts= -o log_cli=false \
+            -p no:cacheprovider -n 0 --durations=0 --durations-min=0 \
+            --basetemp="${work}/runs" \
+            tests/integration/docs/test_docs_ci_runners.py \
+            --run-integration --run-ci-runners --ci-runner="${LEG}" --ci-runner-page="${PAGE}" \
+            --ci-runner-bin="${RUNNER_TEMP:?}/ci-runner-bin" \
+            --ci-runner-jenkins-dir="${RUNNER_TEMP:?}/ci-runner-jenkins" \
+            --ci-runner-wheel="${WHEEL}" --ci-runner-launch-timeout="${LAUNCH_TIMEOUT}" \
+            --ci-runner-out="${out}/runs" --junit-xml="${out}/junit-runs.xml"
+
+      # One control per install mechanism: a pipeline given a wheel that does not exist,
+      # or a head commit that does not exist, has to fail without ASH's verdict line.
+      # They run whether or not the runs passed, so one CI round shows both. The flags are
+      # the runs' flags, with a work tree of its own.
+      - name: Check that the pipelines can fail
+        if: ${{ !cancelled() && !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && steps.install.outcome == 'success' }}
+        env:
+          WHEEL: ${{ steps.wheel.outputs.path }}
+        timeout-minutes: ${{ matrix.controls_timeout }}
+        run: |
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          out="${RUNNER_TEMP:?}/ci-runner-out"
+          work="${RUNNER_TEMP:?}/ci-runner-work"
+          mkdir -p "${work}"
+          with_commands_stopped env -u PYTEST_ADDOPTS uv run --frozen pytest -o addopts= -o log_cli=false \
+            -p no:cacheprovider -n 0 --durations=0 --durations-min=0 \
+            --basetemp="${work}/controls" \
+            tests/integration/docs/test_docs_ci_runners_can_fail.py \
+            --run-integration --run-ci-runners --ci-runner="${LEG}" --ci-runner-page="${PAGE}" \
+            --ci-runner-bin="${RUNNER_TEMP:?}/ci-runner-bin" \
+            --ci-runner-jenkins-dir="${RUNNER_TEMP:?}/ci-runner-jenkins" \
+            --ci-runner-wheel="${WHEEL}" --ci-runner-launch-timeout="${LAUNCH_TIMEOUT}" \
+            --ci-runner-out="${out}/controls" --junit-xml="${out}/junit-controls.xml"
+
+      - name: Stop recording image pulls
+        if: ${{ !cancelled() && !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && steps.events.outcome == 'success' }}
+        run: |
+          out="${RUNNER_TEMP:?}/ci-runner-out"
+          read -r pid < "${out}/docker-events.pid"
+          case "${pid}" in
+            '' | *[!0-9]*)
+              echo "::error::${out}/docker-events.pid holds no process id"
+              exit 1
+              ;;
+          esac
+          if ! kill "${pid}"; then
+            echo "::error::the image pull recording (process ${pid}) had already stopped"
+            exit 1
+          fi
+          for _ in $(seq 1 30); do
+            kill -0 "${pid}" 2> /dev/null || exit 0
+            sleep 1
+          done
+          echo "::error::the image pull recording (process ${pid}) did not stop within 30 seconds"
+          exit 1
+
+      - name: Check every image pull against the pins
+        if: ${{ !cancelled() && !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) && steps.events.outcome == 'success' }}
+        run: |
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          out="${RUNNER_TEMP:?}/ci-runner-out"
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          python3 -I tests/integration/docs/ci_runners/image_allowlist.py \
+            --events "${out}/docker-events.jsonl" --pulls "${out}/pulls.log" \
+            --manifest tests/integration/docs/ci_runners/runners.toml \
+            --built doctest-gitlab-helper:local \
+            --built registry.example.com/security/automated-security-helper:ci \
+            2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
+
+      # The census checks run whether or not their pytest step ran: a run that was skipped
+      # left no junit file, and its check then fails the leg.
+      - name: Check every block of the leg ran
+        if: ${{ !cancelled() && !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        run: |
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          out="${RUNNER_TEMP:?}/ci-runner-out"
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          uv run --frozen python tests/integration/docs/ci_runners/check_junit.py \
+            --junit "${out}/junit-runs.xml" --runner "${LEG}" --page "${PAGE}" \
+            2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
+
+      - name: Check every control ran
+        if: ${{ !cancelled() && !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
+        run: |
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          out="${RUNNER_TEMP:?}/ci-runner-out"
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          uv run --frozen python tests/integration/docs/ci_runners/check_junit.py \
+            --junit "${out}/junit-controls.xml" --runner "${LEG}" --page "${PAGE}" --controls \
+            2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
+
+      # The runners' logs, the pipelines as run, the rewrite records, the reports and the
+      # install provenance of each block, for seven days. pytest's work trees, where each
+      # Jenkins home lives, are outside the output directory. Hidden files stay out, as
+      # upload-artifact leaves them by default, and so do the secret-shaped names the
+      # harness leaves out of what it copies there (Jenkins' secret.key files, secrets
+      # and identity.key.enc, and any *.key or *.pem file), should a runner's state ever
+      # be written under the output directory. The harness matches those names in any
+      # letter case and upload-artifact matches case-sensitively on Linux, so each
+      # letter is a character set.
+      - name: Upload the leg's logs, pipelines and reports
+        if: ${{ !cancelled() && !env.ACT }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-ci-runners-${{ matrix.runner }}-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ci-runner-out
+            !${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT].[kK][eE][yY]*
+            !${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT][sS]
+            !${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT][sS]/**
+            !${{ runner.temp }}/ci-runner-out/**/[iI][dD][eE][nN][tT][iI][tT][yY].[kK][eE][yY].[eE][nN][cC]
+            !${{ runner.temp }}/ci-runner-out/**/*.[kK][eE][yY]
+            !${{ runner.temp }}/ci-runner-out/**/*.[pP][eE][mM]
+          retention-days: 7

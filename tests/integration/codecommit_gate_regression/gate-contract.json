@@ -25,6 +25,7 @@
     "base": [
       "--source-dir",
       "--output-dir",
+      "--config",
       "--no-progress",
       "--simple",
       "--compact-report"
@@ -43,6 +44,7 @@
     "2": "failed",
     "3": "errored",
     "4": "errored",
+    "5": "errored",
     "unknown": "errored"
   }
 }

@@ -88,12 +88,17 @@ class TestMCPPathCanonicalization:
 # #184 — cancel_scan: warn clearly when no PID is available
 # ---------------------------------------------------------------------------
 class TestCancelScanNoPID:
-    """cancel_scan should log a clear warning when the scan has no process_id
-    instead of silently failing."""
+    """cancel_scan on a scan with no process_id must not fail silently.
 
-    def test_cancel_scan_no_pid_logs_warning(self, tmp_path):
-        """When process_id is None, cancel_scan should log a warning containing
-        the scan_id and mention that no termination signal can be sent."""
+    With no process to signal, marking the entry cancelled would let the
+    in-process scan run on, and a warning that no termination signal can be sent
+    would be false: the scan is stopped through its entry's cancel event
+    (core/cancellation.py).
+    """
+
+    def test_cancel_scan_no_pid_signals_the_scan(self, tmp_path):
+        """When process_id is None, cancel_scan sets the scan's cancel event,
+        which its runner checks, and does not warn that it cannot stop it."""
         from automated_security_helper.core.resource_management.scan_registry import (
             ScanRegistry,
             MCScanStatus,
@@ -117,13 +122,9 @@ class TestCancelScanNoPID:
             result = registry.cancel_scan(scan_id)
             # It should still cancel (mark as cancelled)
             assert result is True
-            # Should have logged a warning about missing PID
-            mock_logger.warning.assert_called()
-            warning_text = mock_logger.warning.call_args[0][0]
-            assert (
-                "no process id" in warning_text.lower()
-                or "process id" in warning_text.lower()
-            )
+            # The runner is told to stop, so nothing warns that it cannot be.
+            assert registry.get_scan(scan_id).cancel_event.is_set()
+            mock_logger.warning.assert_not_called()
 
     def test_cancel_scan_returns_success_with_warning_in_response(self, tmp_path):
         """The higher-level cancel_scan management function should include

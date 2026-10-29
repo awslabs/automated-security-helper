@@ -7,7 +7,7 @@ Consumes the `image_uri` output of `ash-image-pipeline`.
 
 ## Stage layout
 
-```
+```text
 Source  ->  CodeCommit (existing repository, read only)
 Scan    ->  N CodeBuild actions, all at run_order 1 (parallel)
             each: ash scan --shard-index <i> --shard-count <n>
@@ -43,8 +43,12 @@ The verdict is `ash merge`'s exit code, propagated unchanged:
 | Exit | Meaning |
 |---|---|
 | 0 | No actionable findings at or above `min_severity` |
-| 1 | Refused to merge — shard coverage incomplete, so findings are **unknown** |
+| 1 | The result is incomplete, so findings are **unknown**: shard coverage has a gap, a scanner in the merged result did not finish, a rule could not be evaluated, or a content database is past its age limit |
 | 2 | Actionable findings at or above `min_severity` |
+| 5 | Usage error — ASH refused the merge command line, so nothing was merged |
+
+Exit 5 comes from ASH releases after 3.7.1. ASH 3.7.0 and 3.7.1 have no `ash
+merge`, and report that as exit 2.
 
 **Nothing in this module re-derives that judgment**, and that is deliberate. ASH
 routes the merged verdict through `_compute_exit_code`, the same function
@@ -61,13 +65,19 @@ one implementation of "does this breach".
 ### `min_severity` is a floor, so lower is stricter
 
 The name reads like a tolerance, but ASH tests
-`rank(finding) >= rank(min_severity)`, which inverts the direction:
+`rank(finding) >= rank(min_severity)`, which inverts the direction. It is also not
+the only floor. A finding first has to be at or above the scan config's
+`global_settings.severity_threshold`, which defaults to `MEDIUM`, and it fails the
+pipeline only when it clears both. With the default threshold:
 
 | `min_severity` | Fails the pipeline on | |
 |---|---|---|
-| `low` | low, medium, high | strictest |
+| `low` | medium, high | strictest; the same as `medium` under the default threshold |
 | `medium` | medium, high | |
 | `high` | high only | laxest |
+
+To fail the pipeline on low findings too, set `severity_threshold: LOW` under
+`global_settings` in the base config.
 
 `critical` and `high` share a rank in ASH's ladder, so they cannot be
 distinguished here.
@@ -133,18 +143,35 @@ image with its own entrypoint can run a buildspec at all. So
 `ash-container-init`, which materializes the base config from SSM, would never
 execute here. Both buildspecs therefore invoke it explicitly:
 
-```
-/usr/local/bin/ash-container-init ash scan ...
-/usr/local/bin/ash-container-init ash merge ...
+<!-- doctest: illustrative reason="excerpt of the two buildspecs; runs inside the ASH image in CodeBuild" -->
+```bash
+/usr/local/bin/ash-container-init ash scan --source-dir . --output-dir ash_output \
+  --shard-index "$SHARD_INDEX" --shard-count "$SHARD_COUNT" --no-fail-on-findings
+# The merge passes one --results per shard, and --fail-on-findings when
+# fail_on_findings is true.
+/usr/local/bin/ash-container-init ash merge --output-dir merged \
+  --min-severity "$MIN_SEVERITY" --fail-on-findings --results shard-results/shard-0
 ```
 
-Without that, every shard would silently scan with ASH's defaults instead of the
-configuration you supplied — a wrong result with no error. Invoking it explicitly
-is also correct if a future CodeBuild release did run the entrypoint, since the
-work it does is idempotent.
+Without that, `ASH_CONFIG` would not be set, and each shard would use the
+repository's own config file if it has one, or ASH's defaults, instead of the
+configuration you supplied: a wrong result with no error. With it, every shard uses
+the base config and never reads the repository's own `.ash.yaml`. `ash merge` takes
+the scan config from the shard results rather than from a file. Invoking it
+explicitly is also correct if a future CodeBuild release did run the entrypoint,
+since the work it does is idempotent.
+
+With `base_config_ssm_parameter_name` null, `ash-container-init` sets no
+`ASH_CONFIG`, so both buildspecs write `{}`, ASH's defaults, to a temporary
+directory outside the checkout and point `ASH_CONFIG` at it. Without a config
+ASH would look for one in the scanned repository, which would then choose the
+scanners, ignore paths and `fail_on_findings` the shards record and the merge
+judges by. Scanners still read their own config files committed in the scanned
+tree (bandit's `.bandit`, grype's `.grype.yaml`).
 
 ## Variables
 
+<!-- doctest: options of=terraform:deploy/terraform/modules/codepipeline-executor complete -->
 | Variable | Contract | Type | Default | Notes |
 |---|---|---|---|---|
 | `codecommit_repository_arn` | `CodeCommitRepositoryArn` | `string` | *required* | Must already exist. Read only. |
@@ -155,7 +182,7 @@ work it does is idempotent.
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-scan"` | |
 | `source_branch` | — | `string` | `"main"` | |
-| `min_severity` | — | `string` | `"low"` | Passed to `ash merge --min-severity`. A floor, so lower is stricter — see below. |
+| `min_severity` | — | `string` | `"low"` | Passed to `ash merge --min-severity`, lower-cased. One of `critical`, `high`, `medium` or `low`, in any case; any other value fails at plan time. A floor, so lower is stricter, applied after `global_settings.severity_threshold`; see above. |
 | `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `enable_eventbridge_trigger` | — | `bool` | `true` | Preferred over polling. |
 | `build_compute_type` | — | `string` | `BUILD_GENERAL1_LARGE` | Scanners are CPU-bound. |
@@ -171,11 +198,11 @@ work it does is idempotent.
 
 ## Outputs
 
-`pipeline_name`, `pipeline_arn`, `shard_count`, `shard_project_name`,
+`pipeline_name`, `pipeline_arn`, `shard_count`, `shard_project_names`,
 `merge_project_name`, `artifact_bucket_name`, `results_prefix`,
 `merged_results_location_template`, `min_severity`, `fail_on_findings`,
 `shard_log_group_name`, `merge_log_group_name`, `pipeline_role_arn`,
-`shard_role_arn`, `merge_role_arn`.
+`shard_role_arns`, `merge_role_arn`. The two shard outputs are lists indexed by shard.
 
 ## Constraints and known limitations
 
@@ -189,11 +216,28 @@ shards with nothing to do. They still cost a CodeBuild start and still upload an
 empty result set, so nothing breaks — they are simply wasted. Size `shard_count`
 against the number of scanners your configuration enables.
 
-**One shard project, N actions.** Adding a shard adds an action, not a project.
-The index arrives as a per-action `EnvironmentVariables` override. Note that
-CodePipeline enforces a 1000-character limit on an action configuration value, so
-a very large override set would be rejected — not reachable with what this module
-passes.
+**One project and one role per shard.** Each shard build can write only
+`<results_prefix>/<execution id>/shard-<index>/<its own build ARN>/`, so no shard can
+replace another shard's results or the merged output the verdict is formed from.
+The grant ends in `${codebuild:BuildArn}`, which IAM replaces with the calling
+build's ARN, and the execution id is matched by one `?` per character of
+CodePipeline's execution id format. The merge calls
+`codepipeline:ListActionExecutions` on this pipeline to learn which build ran each
+shard action of its execution, downloads only that build's keys, skips the keys of
+a shard action's earlier failed runs, and fails on any other key under the
+execution's prefix. IAM has no variable for the execution id, so a shard build could
+write under another execution's id, but only under its own build ARN, which that
+execution's merge does not read. The merge also refuses a key with an empty, `.` or
+`..` segment. IAM cannot tell
+two actions of one role apart, and a CodeBuild action runs as its project's role,
+so this takes a project per shard. The index is a project environment variable;
+the execution id arrives as a per-action `EnvironmentVariables` override.
+CodePipeline enforces a 1000-character limit on an action configuration value,
+which that override does not approach. The pipeline role may start builds of
+`<name_prefix>-shard-*` and `<name_prefix>-merge` rather than of a listed ARN per
+shard, so its inline policy stays the same size at any `shard_count`; a listed ARN
+per shard would put it over IAM's inline-policy size limit at 100 shards with a long
+`name_prefix`.
 
 **The results bucket also holds pipeline artifacts.** One bucket with two
 prefixes, versioning on because CodePipeline requires it on its artifact bucket.
@@ -205,7 +249,7 @@ makes sense if the shards agreed on what to scan. Both projects therefore receiv
 the same `base_config_ssm_parameter_name`. Overriding the configuration per shard
 would make the merged verdict meaningless.
 
-**`ash merge` and the shard CLI flags are a cross-lane dependency.** At the commit
+**`ash merge` and the shard CLI flags are a dependency on work landing elsewhere.** At the commit
 this module was written against, `automated_security_helper/core/sharding.py` and
 the scan-phase shard selection exist, but `--shard-index` / `--shard-count` are
 not yet wired onto `ash scan`, and there is no `ash merge` command or `--results`

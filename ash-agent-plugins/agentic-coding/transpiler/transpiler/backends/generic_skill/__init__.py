@@ -24,8 +24,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-import frontmatter
-
 from ...core import BaseBackend, BuildContext, SkillConfig
 from ...formats import AGENTSKILLS
 from ...cli_tools import CLI_SKILLS_REF
@@ -62,6 +60,11 @@ class GenericSkillBackend(BaseBackend):
         — those agents' validators only apply when the skill is embedded in
         their plugin tree, not to the standalone format-only release.
         """
+        # Imported here, not at module level: only this check reads frontmatter, and
+        # importing the backend registers it for build and drift checks that run in an
+        # environment without python-frontmatter.
+        import frontmatter
+
         skills_dir = ctx.out / "skills"
         if not skills_dir.is_dir():
             return {"ok": False, "reason": "skills/ directory missing"}

@@ -29,7 +29,6 @@ EXEMPT = {
     "utils/get_scan_set.py": "ASH's own git calls, never inside a scanner",
     "interactions/run_ash_nix.py": "re-executes ASH itself inside nix develop",
     "cli/mcp/source_delivery.py": "git clone and checkout for MCP source delivery",
-    "plugin_modules/ash_builtin/converters/jupyter_converter.py": "converter, runs before any scanner",
     "assets/install-pinned-tool.py": "standalone script run during the container image build",
 }
 
@@ -99,6 +98,9 @@ def test_the_guarded_set_is_not_empty():
         "plugin_base.py",
         "pre_installed_tool.py",
         "content_db_staleness.py",
+        # A converter's tool reads the scanned tree like a scanner does, so it is
+        # started through the same helpers and confined the same way.
+        "jupyter_converter.py",
     } <= names
     assert len(GUARDED) > 100
 

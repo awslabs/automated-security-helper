@@ -9,12 +9,23 @@ The completeness gate selected on status alone::
 
     _INCOMPLETE_SCANNER_STATUSES = {ERROR, MISSING}
 
-and ``ScanResultsContainer.determine_status`` returns ERROR only once
-``targets_failed >= targets_attempted``. Those two facts compose into a hole: a
-scanner that failed on *some* of its targets keeps whatever status the severity
-gate gives it -- normally PASSED -- so the gate never saw it. An operator who
-turned the gate on to be told when coverage was lost was told only about total
-loss, which is the rarer case.
+and, at the time, ``ScanResultsContainer.determine_status`` returned ERROR only
+once ``targets_failed >= targets_attempted``. Those two facts composed into a
+hole: a scanner that failed on *some* of its targets kept whatever status the
+severity gate gave it -- normally PASSED -- so the gate never saw it. An
+operator who turned the gate on to be told when coverage was lost was told only
+about total loss, which is the rarer case.
+
+``determine_status`` has since gone fail-closed, severity gate first: a partial
+loss grades FAILED when the surviving findings fail the gate and ERROR when they
+are clean, so a current scan's partial loss carries a status as well as the
+counts.
+The counters path this file pins still matters twice over: the gate's message
+is what names the exact shortfall ("4 of 10 targets unevaluated"), and results
+written before the status change -- a merged shard's artifact, say -- carry
+PASSED beside the counts and must still gate. Cells that model a current scan
+derive their status through ``determine_status`` (``_derived_status``), so the
+fixture states stay states a current scan produces.
 
 Measured on this repository before the change: cdk-nag attempts 10 targets and
 fails 4, its per-target container reports PASSED, and
@@ -29,7 +40,10 @@ What is deliberately NOT changed
   ``test_partial_coverage_still_counts_as_having_run`` pins that, and pins it
   falsifiably: it measures that the counters DO reach the entry -- the model sets
   ``extra="allow"`` -- so ``_completed`` ignoring them is a behavior a mutation can
-  break rather than a structural impossibility.
+  break rather than a structural impossibility. Shard verification has since
+  grown one sanctioned counter read beside it: ``cli.merge._ran_partially``
+  widens the did-it-run answer for an ERROR entry whose counts show a partial
+  audit, and only widens it (``tests/unit/cli/test_merge.py`` pins both sides).
 * No new config key. This is the existing opt-in flag learning about a case it
   was always meant to cover.
 * The opt-out. ``TestTheOptOutIsWhatUngatesPartialCoverage`` asserts that a
@@ -46,10 +60,15 @@ A sibling commit ORs ``any_target_errored`` into the ``error`` flag, so a target
 tree that lost ALL its targets -- which ``determine_status`` does report as ERROR
 -- now reaches the ROLLED-UP status. That is a status change with no opt-in, and
 it is not what this file is about; ``tests/unit/core/
-test_scanner_status_across_targets.py`` owns it. The distinction that makes both
-true at once: partial loss on a tree never became a status, total loss on a tree
-always was one and simply could not be seen. ``TestTheGateReadsTheRealRollup``
-below is where the two meet, and it is the only class here that does not patch
+test_scanner_status_across_targets.py`` owns it. The rule it pins is the one
+``determine_status`` applies on a single tree: findings outrank lost coverage
+except total loss. A tree that lost every target it attempted sets the
+rolled-up ERROR whatever its siblings found. A tree that lost only some
+targets sets it only when no tree carries gate-failing findings, and reads
+FAILED beside them. Either way the partial loss reaches this gate, with its
+counts, through ``incomplete_scanners``.
+``TestTheGateReadsTheRealRollup`` below is where the gate and the rollup meet,
+and it is the only class here that does not patch
 ``get_unified_scanner_metrics``.
 
 The tri-state is the subtle part
@@ -156,6 +175,34 @@ class TestPartialCoverageTripsTheGate:
             "a scanner that could not evaluate 4 of its 10 targets has not "
             "completed; exit 0 is indistinguishable from having scanned all 10"
         )
+
+    def test_a_failed_scanner_with_partial_loss_still_exits_one(self, tmp_path):
+        """FAILED is a verdict about findings, not a claim of full coverage.
+
+        ``determine_status`` grades a partial loss FAILED when the surviving
+        findings fail the severity gate, so FAILED-with-a-shortfall is a state
+        a real run produces. The listing side is pinned by
+        ``test_a_failed_scanner_with_partial_coverage_is_still_a_shortfall``;
+        this cell pins the exit code for the same shape. The helper bakes in
+        ``fail_on_findings=False``, so the 1 here can only come from the
+        coverage arm -- a FAILED run whose findings gate is off and whose
+        coverage was partial must not exit 0.
+        """
+        code = _exit_code(
+            tmp_path,
+            [
+                _metric(
+                    "cdk-nag",
+                    ScannerStatus.FAILED.value,
+                    targets_attempted=10,
+                    targets_failed=4,
+                    actionable=3,
+                )
+            ],
+            fail_on_incomplete_scanners=True,
+        )
+
+        assert code == 1
 
     def test_a_single_lost_target_is_enough(self, tmp_path):
         """No tolerance threshold. One unevaluated target is unevaluated input.
@@ -293,6 +340,15 @@ class TestTheOptOutIsWhatUngatesPartialCoverage:
         * ``incomplete_scanners`` asks whether everything the scanner was given was
           evaluated. It answers no, and that is what the opt-in exit-code gate acts
           on.
+
+        The row here carries PASSED beside its counters. A current scan derives
+        ERROR for these counts when its surviving findings are clean
+        (``determine_status`` runs the severity gate first and grades a partial
+        loss ERROR or FAILED), so this row is the artifact an older ASH's shard wrote -- which ``ash
+        merge`` still loads, and which must keep counting as having run. The
+        current-scan ERROR shape has its own seam: ``cli.merge._ran_partially``
+        reads the counts for ERROR entries, and only to widen; both of its
+        sides are pinned in ``tests/unit/cli/test_merge.py``.
 
         Why this is falsifiable, which an earlier note in ``tests/unit/cli/
         test_merge.py`` denied. That note said ``ScannerTargetStatusInfo``
@@ -612,6 +668,256 @@ def _target_report(status: str, attempted=None, failed=None, name="cdk-nag") -> 
     return report
 
 
+class TestThePartialLossReasonToken:
+    """The MCP reason token tells "never ran" apart from "ran and lost targets".
+
+    A client acts on ``reason``: ``error`` says the tool failed to run,
+    ``partial_coverage`` says it ran and some targets went unevaluated. The
+    token has to follow the counts, not the status the writer graded, because
+    the same partial loss is written ERROR by a current scan when its surviving
+    findings are clean, FAILED when they fail the severity gate (the gate runs
+    first on a partial loss), and PASSED by an ASH from before the fail-closed
+    rule. The FAILED shape is held by ``TestAPartialLossWithGateFailingFindings``.
+    """
+
+    def test_partial_loss_reason_token_depends_only_on_the_counts(self):
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        derived = _rollup_model(
+            {"cdk-nag": {"source": _target_report(_derived_status(10, 4), 10, 4)}}
+        )
+        (row,) = scan_incompleteness(derived, gate=True).to_payload()[
+            "incomplete_scanners"
+        ]
+        assert row["reason"] == "partial_coverage", row
+
+        legacy = _rollup_model({"cdk-nag": {"source": _target_report("PASSED", 10, 4)}})
+        (legacy_row,) = scan_incompleteness(legacy, gate=True).to_payload()[
+            "incomplete_scanners"
+        ]
+        assert legacy_row["reason"] == "partial_coverage", legacy_row
+
+    def test_a_total_loss_keeps_the_error_token(self):
+        # failed == attempted makes no partial claim: nothing distinguishes the
+        # run from a tool that failed outright, so the status token stands.
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        model = _rollup_model(
+            {"cdk-nag": {"source": _target_report(_derived_status(10, 10), 10, 10)}}
+        )
+        (row,) = scan_incompleteness(model, gate=True).to_payload()[
+            "incomplete_scanners"
+        ]
+        assert row["reason"] == "error", row
+
+    def test_the_workspace_rows_match_the_single_scan_rows_for_a_partial_loss(self):
+        """A workspace client reads the same reason and the same counts.
+
+        Coverage fields from execution.py's own ``_coverage_fields``, as the stale
+        database parity test does, so the two payload shapes cannot drift.
+        """
+        from automated_security_helper.cli.mcp.workspace import _project_coverage
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+        from automated_security_helper.models.workspace import (
+            ProjectRunStatus,
+            WorkspaceProjectResult,
+        )
+        from automated_security_helper.workspace.execution import _coverage_fields
+
+        model = _rollup_model(
+            {"cdk-nag": {"source": _target_report(_derived_status(10, 4), 10, 4)}}
+        )
+        incompleteness = scan_incompleteness(model, gate=True)
+        single = incompleteness.to_payload()
+        outcome = WorkspaceProjectResult(
+            project="app",
+            relative_path="app",
+            display_label="app",
+            status=ProjectRunStatus.COMPLETED,
+            severity_threshold="MEDIUM",
+            output_path="projects/app",
+            scanners={"cdk-nag": _derived_status(10, 4)},
+            **_coverage_fields(model),
+            scan_incomplete=True,
+        )
+
+        coverage = _project_coverage(outcome)
+
+        assert coverage["incomplete_scanners"] == single["incomplete_scanners"]
+        (row,) = coverage["incomplete_scanners"]
+        assert row["reason"] == "partial_coverage", row
+        assert "4 of 10 targets unevaluated" in row["detail"], row
+
+    @pytest.mark.parametrize(
+        ("attempted", "failed", "expected"),
+        [
+            # Partial loss: the scanner audited 6 of 10 targets, so it ran. A
+            # workspace project must answer as a single scan does.
+            (10, 4, False),
+            # Control: total loss is no partial claim, so nothing ran, in both.
+            (10, 10, True),
+        ],
+    )
+    def test_the_workspace_no_scanner_ran_matches_the_single_scan_answer(
+        self, attempted, failed, expected
+    ):
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+        from automated_security_helper.workspace.execution import _coverage_fields
+
+        model = _rollup_model(
+            {
+                "cdk-nag": {
+                    "source": _target_report(
+                        _derived_status(attempted, failed), attempted, failed
+                    )
+                }
+            }
+        )
+        model.metadata.expected_scanners = []
+
+        single = scan_incompleteness(model, gate=True).no_scanner_ran
+        # What _scan_one_project writes, not a second call of the same function.
+        workspace = _coverage_fields(model)["no_scanner_ran"]
+
+        assert single is expected
+        assert workspace == single
+
+
+def _derived_status(attempted: int, failed: int) -> str:
+    """The status ``determine_status`` grades for these counts.
+
+    Cells that model a current scan derive the fixture's status here instead of
+    hand-writing one, so a change to the grading rule moves the fixtures with it
+    rather than leaving them pinning states no scan produces.
+    """
+    from automated_security_helper.models.scan_results_container import (
+        ScanResultsContainer,
+    )
+
+    container = ScanResultsContainer()
+    container.record_target_attempt(attempted)
+    for index in range(failed):
+        container.record_target_failure(f"target-{index}", "not evaluated")
+    return container.determine_status("MEDIUM").value
+
+
+def _derived_status_with_findings(attempted: int, failed: int) -> str:
+    """The status ``determine_status`` grades for a partial loss whose survivors have a
+    gate-failing finding: FAILED, because the severity gate runs first on a partial loss.
+    """
+    from automated_security_helper.models.scan_results_container import (
+        ScanResultsContainer,
+    )
+
+    container = ScanResultsContainer()
+    container.record_target_attempt(attempted)
+    for index in range(failed):
+        container.record_target_failure(f"target-{index}", "not evaluated")
+    container.severity_counts.high = 1
+    return container.determine_status("MEDIUM").value
+
+
+def _rollup_model_with_a_finding(build, reports: dict, scanner: str = "cdk-nag"):
+    """``_rollup_model`` plus one HIGH SARIF result attributed to *scanner*.
+
+    *build* is the ``model_with_one_high_finding`` fixture, shared with
+    ``tests/unit/core/test_scanner_status_across_targets.py``. The rolled-up status
+    reads its finding count off the aggregated SARIF, not off the per-target report,
+    so a FAILED row needs a real finding there to stay FAILED.
+    """
+    return build(reports, scanner=scanner, model=_rollup_model(reports))
+
+
+class TestAPartialLossWithGateFailingFindings:
+    """The FAILED shape of a current scan's partial loss, through the same surfaces.
+
+    The cells above build the zero-findings shape (ERROR) and a legacy PASSED row. A
+    current scan whose surviving targets carry gate-failing findings is graded FAILED
+    instead, and a client reads that row through the same reason token and the same
+    workspace payload.
+    """
+
+    def test_the_premise_is_the_failed_grade(self):
+        assert _derived_status_with_findings(10, 4) == ScannerStatus.FAILED.value
+
+    def test_the_failed_row_carries_the_partial_coverage_token(
+        self, model_with_one_high_finding
+    ):
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        model = _rollup_model_with_a_finding(
+            model_with_one_high_finding,
+            {
+                "cdk-nag": {
+                    "source": _target_report(
+                        _derived_status_with_findings(10, 4), 10, 4
+                    )
+                }
+            },
+        )
+        (row,) = scan_incompleteness(model, gate=True).to_payload()[
+            "incomplete_scanners"
+        ]
+
+        assert row["scanner"] == "cdk-nag", row
+        assert row["status"] == ScannerStatus.FAILED.value, row
+        assert row["reason"] == "partial_coverage", row
+        assert "4 of 10 targets unevaluated" in row["detail"], row
+
+    def test_the_workspace_rows_match_the_single_scan_rows_for_a_failed_partial_loss(
+        self, model_with_one_high_finding
+    ):
+        from automated_security_helper.cli.mcp.workspace import _project_coverage
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+        from automated_security_helper.models.workspace import (
+            ProjectRunStatus,
+            WorkspaceProjectResult,
+        )
+
+        failed = _derived_status_with_findings(10, 4)
+        model = _rollup_model_with_a_finding(
+            model_with_one_high_finding,
+            {"cdk-nag": {"source": _target_report(failed, 10, 4)}},
+        )
+        incompleteness = scan_incompleteness(model, gate=True)
+        single = incompleteness.to_payload()
+        # The three coverage fields the way workspace/execution.py derives them,
+        # from the one incompleteness read the production path uses.
+        outcome = WorkspaceProjectResult(
+            project="app",
+            relative_path="app",
+            display_label="app",
+            status=ProjectRunStatus.COMPLETED,
+            severity_threshold="MEDIUM",
+            output_path="projects/app",
+            scanners={"cdk-nag": failed},
+            incomplete_scanners=[name for name, _status in incompleteness.scanners],
+            incomplete_scanner_details=dict(incompleteness.scanners),
+            partial_coverage_scanners=list(incompleteness.partial_coverage),
+            scan_incomplete=True,
+        )
+
+        coverage = _project_coverage(outcome)
+
+        assert coverage["incomplete_scanners"] == single["incomplete_scanners"]
+        (row,) = coverage["incomplete_scanners"]
+        assert row["status"] == ScannerStatus.FAILED.value, row
+        assert row["reason"] == "partial_coverage", row
+        assert "4 of 10 targets unevaluated" in row["detail"], row
+
+
 class TestTheGateReadsTheRealRollup:
     """End to end from serialized per-target reports to the gate's verdict, unpatched.
 
@@ -632,13 +938,15 @@ class TestTheGateReadsTheRealRollup:
         """The measured shape, derived rather than injected.
 
         10 attempted and 4 failed on the source tree, which is what a real cdk-nag run
-        on this repository writes. The status stays PASSED because
-        ``determine_status`` only reports ERROR on total loss, so the counts are the
-        only thing that can carry the fact -- and they now arrive through the rollup.
+        on this repository writes. The status is derived through
+        ``determine_status`` -- ERROR under the fail-closed rule -- so the fixture is
+        the state a current scan writes, and the counts still arrive through the
+        rollup with the exact shortfall in the gate's message.
         """
+        derived = _derived_status(10, 4)
         listed = dict(
             incomplete_scanners(
-                _rollup_model({"cdk-nag": {"source": _target_report("PASSED", 10, 4)}})
+                _rollup_model({"cdk-nag": {"source": _target_report(derived, 10, 4)}})
             )
         )
 
@@ -646,6 +954,21 @@ class TestTheGateReadsTheRealRollup:
             "the counters did not survive the trip from additional_reports through "
             "get_unified_scanner_metrics to the gate"
         )
+        assert listed["cdk-nag"] == f"{derived} (4 of 10 targets unevaluated)"
+
+    def test_a_legacy_passed_report_beside_counts_still_gates(self):
+        """The artifact an older ASH wrote keeps gating.
+
+        Before the fail-closed status rule, a real partial loss was written as
+        PASSED beside its counters. ``ash merge`` still loads such results, so
+        the gate keeps reading the counts whatever the status says.
+        """
+        listed = dict(
+            incomplete_scanners(
+                _rollup_model({"cdk-nag": {"source": _target_report("PASSED", 10, 4)}})
+            )
+        )
+
         assert listed["cdk-nag"] == "PASSED (4 of 10 targets unevaluated)"
 
     def test_a_total_loss_on_one_tree_arrives_as_error_carrying_its_counts(self):
@@ -719,9 +1042,13 @@ class TestTheGateReadsTheRealRollup:
         was untouched, and is still what it is for.
 
         ``fail_on_findings=False`` on both arms so the code under test is the
-        completeness gate and not the finding count.
+        completeness gate and not the finding count. The report's status is
+        derived through ``determine_status`` so the fixture is a state a
+        current scan writes.
         """
-        model = _rollup_model({"cdk-nag": {"source": _target_report("PASSED", 10, 4)}})
+        model = _rollup_model(
+            {"cdk-nag": {"source": _target_report(_derived_status(10, 4), 10, 4)}}
+        )
 
         assert dict(incomplete_scanners(model)), (
             "the fixture must be genuinely partial or this asserts nothing"

@@ -82,6 +82,7 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
@@ -214,7 +215,18 @@ def validate_contained_path(
     joined = resolved_root / Path(str(candidate).replace("\\", "/"))
 
     # Before resolution, because resolve() follows the link and would hide it.
-    if joined.is_symlink():
+    # Not Path.is_symlink(), which is False for a Windows junction: one to a
+    # directory inside the root resolved inside it and passed. A reparse point
+    # counts only when it names another path, as a junction does; a OneDrive
+    # placeholder is the directory it appears to be. Imported here, as this
+    # module imports nothing of ASH's at load time.
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
+
+    try:
+        names_another_path = _is_link_stat(os.lstat(joined))
+    except OSError:
+        names_another_path = False
+    if names_another_path:
         return _reject(
             PathContainmentViolation.SYMLINK,
             candidate,

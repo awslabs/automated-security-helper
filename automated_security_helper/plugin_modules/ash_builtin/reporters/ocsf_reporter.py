@@ -38,6 +38,17 @@ from datetime import datetime, timezone
 import uuid
 from typing import Optional, List, Tuple
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.severity_ladder import result_severity
+
+#: OCSF severity_id for each ASH severity (OCSF: 1 Informational, 2 Low,
+#: 3 Medium, 4 High, 5 Critical).
+_OCSF_SEVERITY_ID = {
+    "CRITICAL": SeverityId.integer_5,
+    "HIGH": SeverityId.integer_4,
+    "MEDIUM": SeverityId.integer_3,
+    "LOW": SeverityId.integer_2,
+    "INFO": SeverityId.integer_1,
+}
 
 
 #: Prefix for the ``metadata.labels`` entry carrying workspace attribution.
@@ -177,19 +188,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 )
                 desc = "No description available"
 
-            # Safely extract severity level
-            severity = "MEDIUM"  # Default
-            try:
-                if result.level:
-                    # result.level is already the string value from the enum
-                    severity = result.level.upper()
-                    ASH_LOGGER.debug(
-                        f"Extracted severity level for {rule_id}: {severity}"
-                    )
-            except Exception as e:
-                ASH_LOGGER.debug(
-                    f"Error extracting severity level for {rule_id}, using default MEDIUM: {str(e)}"
-                )
+            # The gate's severity (issue_severity, else the level, error being
+            # CRITICAL), not the SARIF level ("ERROR").
+            severity = result_severity(result)
 
             # Create vulnerability object with required fields
             vuln_dict = {
@@ -485,33 +486,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 getattr(result, "suppressions", None), rule_id
             )
 
-            # Map SARIF severity levels to OCSF severity IDs
-            ASH_LOGGER.debug(f"Mapping severity level for {rule_id}")
-            severity_id = SeverityId.integer_2  # Default to LOW
-            try:
-                if result.level:
-                    # result.level is already the string value from the enum
-                    level_str = result.level.lower()
-                    match level_str:
-                        case "error":
-                            severity_id = SeverityId.integer_4  # HIGH
-                        case "warning":
-                            severity_id = SeverityId.integer_3  # MEDIUM
-                        case "note":
-                            severity_id = SeverityId.integer_2  # LOW
-                        case "none":
-                            severity_id = SeverityId.integer_1  # INFORMATIONAL
-                    ASH_LOGGER.debug(
-                        f"Mapped severity for {rule_id}: {level_str} -> {severity_id}"
-                    )
-                else:
-                    ASH_LOGGER.debug(
-                        f"No severity level found for {rule_id}, using default LOW"
-                    )
-            except Exception as e:
-                ASH_LOGGER.debug(
-                    f"Error mapping severity level for {rule_id}, using default LOW: {str(e)}"
-                )
+            # severity_id from the gate's severity too, so a finding the scan
+            # fails as critical reaches a SIEM as critical.
+            severity_id = _OCSF_SEVERITY_ID[result_severity(result)]
 
             # Create unique finding info for this result
             ASH_LOGGER.debug(f"Creating finding info for {rule_id}")

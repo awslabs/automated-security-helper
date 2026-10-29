@@ -311,15 +311,11 @@ class TestCreateScanProgressFromFiles:
         source = progress.scanners["bandit"]["source"]
         assert source.finding_count == 2
         assert progress.total_findings == 2
-        # SARIF "level" values (error/warning/note) are carried through as the
-        # finding severity, and they are not ASH severities. This used to assert
-        # `sum(...) == 0` over exactly the six named buckets, with the note
-        # "Pinned as current behavior, not endorsed as correct" -- so the drop was
-        # already identified as wrong here and recorded rather than fixed.
-        #
-        # That pin is deliberately retired. Such findings now land in the
-        # "unknown" bucket, which is what makes the breakdown account for every
-        # finding instead of disagreeing with finding_count.
+        # Each finding's severity is its ASH severity (utils.severity_ladder.
+        # result_severity), error CRITICAL and warning MEDIUM, as every report
+        # and the gate grade it, not the SARIF level upper-cased ("ERROR",
+        # "WARNING"), which is no ASH severity and would put both findings in
+        # the "unknown" bucket.
         assert set(source.severity_counts) == {
             "critical",
             "high",
@@ -329,7 +325,9 @@ class TestCreateScanProgressFromFiles:
             "suppressed",
             "unknown",
         }
-        assert source.severity_counts["unknown"] == 2
+        assert source.severity_counts["critical"] == 1
+        assert source.severity_counts["medium"] == 1
+        assert source.severity_counts["unknown"] == 0
         assert sum(source.severity_counts.values()) == source.finding_count
 
     def test_severity_counts_on_the_scanner_take_precedence_over_findings(
@@ -562,11 +560,14 @@ class TestGetScanResults:
         e.context` branch is only observable with a bare error.
         """
         _write_results(tmp_path, _aggregated_doc())
+        # Built by its constructor or by model_validate, the model is refused the
+        # same way.
+        rejecting = MagicMock(
+            side_effect=MCPResourceError("model rejected the document", context={})
+        )
+        rejecting.model_validate.side_effect = rejecting.side_effect
 
-        with patch(
-            f"{_MODULE}.AshAggregatedResults",
-            side_effect=MCPResourceError("model rejected the document", context={}),
-        ):
+        with patch(f"{_MODULE}.AshAggregatedResults", rejecting):
             with pytest.raises(MCPResourceError) as excinfo:
                 get_scan_results(tmp_path)
 

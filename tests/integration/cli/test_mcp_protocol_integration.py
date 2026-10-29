@@ -156,8 +156,9 @@ async def test_every_expected_tool_is_reachable_over_tools_list(ash_mcp_client) 
     )
     assert not added, (
         f"These tools are served but not listed in EXPECTED_TOOLS: {sorted(added)}. "
-        "Add them here and to README's MCP tools table -- "
-        "tests/unit/cli/mcp/test_tool_surface_parity.py enforces the table."
+        "Add them here and regenerate docs/content/reference/mcp-tools.md with "
+        "scripts/generate_mcp_tool_reference.py -- "
+        "tests/unit/cli/mcp/test_tool_surface_parity.py enforces that page."
     )
 
 
@@ -411,16 +412,27 @@ async def test_the_exit_codes_resource_matches_the_canonical_constant(
     Compared against the constant rather than against a copied table. A copied table
     would make this test pass forever while the resource served stale meanings,
     which is the failure mode a client hits when it branches on an exit code the
-    server described wrongly.
+    server described wrongly. Its ``commands`` entry, a code one command gives a
+    meaning of its own, comes from ASH_EXIT_BAD_SELECTION the same way.
     """
-    from automated_security_helper.core.constants import ASH_EXIT_CODES
+    from automated_security_helper.core.constants import (
+        ASH_EXIT_BAD_SELECTION,
+        ASH_EXIT_BAD_SELECTION_MEANING,
+        ASH_EXIT_CODES,
+    )
 
     async with ash_mcp_client() as client:
         read = await client.read_resource("ash://exit-codes")
 
     served = json.loads(read.contents[0].text)
+    commands = served.pop("commands")
     assert served, "ASH_EXIT_CODES is empty, which would make this comparison vacuous"
     assert served == {str(code): meaning for code, meaning in ASH_EXIT_CODES.items()}
+    assert commands == {
+        "ash dependencies install": {
+            str(ASH_EXIT_BAD_SELECTION): ASH_EXIT_BAD_SELECTION_MEANING
+        }
+    }
 
 
 @pytest.mark.asyncio

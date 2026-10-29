@@ -20,7 +20,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     ProfileEntry,
     bind_session_config,  # noqa: F401 — imported for symmetry with binding tests
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
     get_profile_registry,
     get_session_state,
     register_profiles,
@@ -41,10 +41,10 @@ from automated_security_helper.config.ash_config import (
 def _isolate_state() -> None:
     """Each test starts with empty registry + empty session state."""
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _write(path: Path, body: str) -> Path:
@@ -116,6 +116,7 @@ class TestStaticSelect:
         _install_profile("default", cfg, tmp_path)
         mcp_select_profile("default")
         state = get_session_state()
+        assert state is not None
         assert state.bound_config is not None
         assert state.bound_config.project_name == "static-fixture"
         assert state.profile_name == "default"
@@ -141,9 +142,11 @@ class TestInheritAndPatch:
         assert result["mode"] == "inherit_and_patch"
 
         state = get_session_state()
+        assert state is not None
         assert state.bound_config is not None
         assert state.bound_config.project_name == "patched-name"
-        assert state.patch_ops == ops
+        # The binding stores its own tuple of deep-copied ops, not the list.
+        assert state.patch_ops == tuple(ops)
 
     def test_patch_targeting_disallowed_path_is_denied(self, tmp_path: Path) -> None:
         # Allowlist only permits /project_name. A patch on /fail_on_findings
@@ -158,7 +161,7 @@ class TestInheritAndPatch:
         assert result["success"] is False
         assert "denied" in result["error"]
         # No partial bind on rejection.
-        assert get_session_state().bound_config is None
+        assert get_session_state() is None
 
     def test_patch_with_disabled_allowlist_is_denied(self, tmp_path: Path) -> None:
         # The Track 10.4 master switch defaults to False — even an
@@ -197,6 +200,7 @@ class TestFullOverride:
         assert result["mode"] == "override"
 
         state = get_session_state()
+        assert state is not None
         assert state.bound_config is not None
         assert state.bound_config.project_name == "override-name"
         assert state.override_yaml == override
@@ -215,7 +219,7 @@ class TestFullOverride:
         assert result["success"] is False
         assert result["error"].startswith("override denied: ")
         assert "/global_settings/mcp" in result["error"]
-        assert get_session_state().bound_config is None
+        assert get_session_state() is None
 
     def test_override_validated_against_ashconfig(self, tmp_path: Path) -> None:
         cfg = AshConfig(project_name="profile-name")
@@ -227,7 +231,7 @@ class TestFullOverride:
         )
         assert result["success"] is False
         assert "validation error" in result["error"].lower()
-        assert get_session_state().bound_config is None
+        assert get_session_state() is None
 
     def test_override_yaml_parse_error(self, tmp_path: Path) -> None:
         cfg = AshConfig(project_name="profile-name")
@@ -259,7 +263,7 @@ class TestMutualExclusion:
         assert result["success"] is False
         assert "mutually exclusive" in result["error"]
         # Neither mode bound anything.
-        assert get_session_state().bound_config is None
+        assert get_session_state() is None
 
 
 class TestBadProfileName:
@@ -339,6 +343,8 @@ class TestSessionIsolation:
 
         s1 = get_session_state("session-1")
         s2 = get_session_state("session-2")
+        assert s1 is not None
+        assert s2 is not None
         assert s1.bound_config is not None
         assert s2.bound_config is not None
         assert s1.bound_config.project_name == "multi-session"

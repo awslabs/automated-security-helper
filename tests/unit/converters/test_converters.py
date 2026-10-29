@@ -14,6 +14,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverter,
     JupyterConverterConfig,
 )
+from tests.unit.converters.nbconvert_routes import use_stand_in_nbconvert
 
 
 class TestArchiveConverter:
@@ -126,6 +127,65 @@ class TestArchiveConverter:
         assert (extracted_dir / "test.py").exists()
         assert (extracted_dir / "subfolder" / "test2.py").exists()
         assert not (extracted_dir / "test.txt").exists()
+
+    def test_a_client_supplied_ignore_path_does_not_skip_extraction(
+        self, temp_dir, test_plugin_context, monkeypatch
+    ):
+        """A client's ignore path hides findings in the results; the archive is extracted."""
+        from automated_security_helper.models.core import IgnorePathWithReason
+
+        archives = []
+        for folder in ("client", "vendor"):
+            (temp_dir / folder).mkdir()
+            path = temp_dir / folder / f"{folder}.zip"
+            with zipfile.ZipFile(path, "w") as zf:
+                zf.writestr(f"{folder}.py", "x = 1\n")
+            archives.append(str(path))
+        test_plugin_context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator"),
+            IgnorePathWithReason(
+                path="client/*", reason="client", client_supplied=True
+            ),
+        ]
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.scan_set",
+            lambda *args, **kwargs: archives,
+        )
+        converter = ArchiveConverter(
+            context=test_plugin_context, config=ArchiveConverterConfig()
+        )
+
+        results = converter.convert()
+
+        assert len(results) == 1
+        assert (results[0] / "client.py").exists()
+
+    def test_ignore_suppressions_extracts_an_archive_under_an_ignore_path(
+        self, temp_dir, test_plugin_context, monkeypatch
+    ):
+        """With --ignore-suppressions an ignore path skips nothing."""
+        from automated_security_helper.models.core import IgnorePathWithReason
+
+        (temp_dir / "vendor").mkdir()
+        archive = temp_dir / "vendor" / "vendor.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("vendor.py", "x = 1\n")
+        test_plugin_context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator"),
+        ]
+        test_plugin_context.ignore_suppressions = True
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.scan_set",
+            lambda *args, **kwargs: [str(archive)],
+        )
+        converter = ArchiveConverter(
+            context=test_plugin_context, config=ArchiveConverterConfig()
+        )
+
+        results = converter.convert()
+
+        assert len(results) == 1
+        assert (results[0] / "vendor.py").exists()
 
     def test_archive_converter_convert_tar(
         self, temp_dir, sample_tar_file, test_plugin_context, monkeypatch
@@ -301,9 +361,10 @@ class TestArchiveConverterPathTraversal:
             safe_file.write_text('print("safe")')
             tf.add(safe_file, arcname="safe.py")
 
-            # This should be blocked by path traversal protection
+            # This should be blocked by path traversal protection. The content does
+            # not matter to the test; only the member's name does.
             malicious_file = temp_dir / "evil.py"
-            malicious_file.write_text('import os; os.system("whoami")')
+            malicious_file.write_text('print("evil")')
             tf.add(malicious_file, arcname="../../../../../../tmp/evil.py")
 
         def mock_scan_set(*args, **kwargs):
@@ -327,6 +388,11 @@ class TestArchiveConverterPathTraversal:
 
         # The malicious file should NOT exist at the traversal path
         assert not Path("/tmp/evil.py").exists()  # nosec B108 — validates traversal protection
+        # Nor anywhere else: the member was refused for its name, not extracted.
+        assert not list(extracted_dir.rglob("evil.py"))
+        assert [(r.member, r.reason) for r in converter.refused_inputs] == [
+            ("../../../../../../tmp/evil.py", "its path contains a '..' component")
+        ]
 
     def test_convert_zip_with_traversal_does_not_write_outside(
         self, temp_dir, test_plugin_context, monkeypatch
@@ -336,9 +402,8 @@ class TestArchiveConverterPathTraversal:
         zip_path = temp_dir / "source-code.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("safe.py", 'print("safe")')
-            zf.writestr(
-                "../../../../../../tmp/evil.py", 'import os; os.system("whoami")'
-            )
+            # The content does not matter to the test; only the member's name does.
+            zf.writestr("../../../../../../tmp/evil.py", 'print("evil")')
 
         def mock_scan_set(*args, **kwargs):
             return [str(zip_path)]
@@ -361,6 +426,12 @@ class TestArchiveConverterPathTraversal:
 
         # The malicious file should NOT exist at the traversal path
         assert not Path("/tmp/evil.py").exists()  # nosec B108 — validates traversal protection
+        # Nor anywhere else: zipfile itself drops '..' and would write the member
+        # inside the destination, so only the refusal shows ASH refused it.
+        assert not list(extracted_dir.rglob("evil.py"))
+        assert [(r.member, r.reason) for r in converter.refused_inputs] == [
+            ("../../../../../../tmp/evil.py", "its path contains a '..' component")
+        ]
 
     def test_inspect_members_without_target_path_backward_compat(
         self, temp_dir, converter
@@ -442,29 +513,49 @@ class TestJupyterConverter:
         assert converter.validate_plugin_dependencies() is True
 
     def test_jupyter_converter_convert(
-        self, test_plugin_context, sample_notebook, monkeypatch
+        self, test_plugin_context, sample_notebook, monkeypatch, tmp_path
     ):
         """Test convert method."""
+        import os
+        import sys
         from unittest.mock import Mock
+
+        from automated_security_helper.utils import subprocess_utils
+
+        # A jupyter-nbconvert on PATH for the direct route to resolve; never executed.
+        bin_dir = tmp_path / "installed" / "bin"
+        bin_dir.mkdir(parents=True)
+        name = "jupyter-nbconvert"
+        jupyter = bin_dir / (f"{name}.exe" if sys.platform == "win32" else name)
+        jupyter.write_text("#!/bin/sh\nexit 0\n")
+        jupyter.chmod(0o755)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), os.environ["PATH"]]))
+        subprocess_utils.clear_find_executable_cache()
 
         # Mock scan_set to return our sample notebook
         def mock_scan_set(*args, **kwargs):
             return [str(sample_notebook)]
 
-        # Mock subprocess.run to simulate successful nbconvert execution
-        def mock_subprocess_run(*args, **kwargs):
+        # Stands in for the direct nbconvert run (run_ended_with_the_server), which
+        # succeeds
+        def nbconvert_double(*args, **kwargs):
             # Create the expected output file
-            if len(args) > 0 and isinstance(args[0], list) and "nbconvert" in args[0]:
+            if (
+                len(args) > 0
+                and isinstance(args[0], list)
+                and args[0]
+                and "nbconvert" in Path(args[0][0]).name
+            ):
                 # Extract output path from command
                 cmd = args[0]
-                if "--output" in cmd:
-                    output_idx = cmd.index("--output") + 1
-                    if output_idx < len(cmd):
-                        output_path = Path(cmd[output_idx] + ".py")
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                        output_path.write_text(
-                            '#!/usr/bin/env python\n# coding: utf-8\n\nprint("Hello World")\n'
-                        )
+                # nbconvert writes <--output-dir>/<--output>.py.
+                output_path = Path(
+                    cmd[cmd.index("--output-dir") + 1],
+                    cmd[cmd.index("--output") + 1] + ".py",
+                )
+                output_path.write_text(
+                    '#!/usr/bin/env python\n# coding: utf-8\n\nprint("Hello World")\n'
+                )
 
             # Return successful result
             result = Mock()
@@ -473,26 +564,31 @@ class TestJupyterConverter:
             result.stderr = ""
             return result
 
-        # Apply the monkeypatches
-        monkeypatch.setattr(
-            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.scan_set",
-            mock_scan_set,
-        )
-        monkeypatch.setattr(
-            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.subprocess.run",
-            mock_subprocess_run,
-        )
-
+        # Built before anything is patched. Construction probes uv through the
+        # process-wide uv runner, which memoizes the answers; a probe that reached
+        # the stand-in below would leave "uv is available" and "nbconvert has no
+        # version" behind for every later test on the worker.
         converter = JupyterConverter(
             context=test_plugin_context,
             config=JupyterConverterConfig(),
         )
 
+        # Apply the monkeypatches
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.scan_set",
+            mock_scan_set,
+        )
+        # The converter module's own `spawn_run` name, not the standard library's
+        # subprocess module that every other caller in the process shares.
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.run_ended_with_the_server",
+            nbconvert_double,
+        )
+
         # Mock the validate method to return True (skip UV tool validation for test)
         monkeypatch.setattr(converter, "validate", lambda: True)
-        monkeypatch.setattr(
-            converter, "use_uv_tool", False
-        )  # Use direct execution for test
+        # The direct route, run by a verified copy the double stands in for.
+        use_stand_in_nbconvert(monkeypatch, converter)
 
         results = converter.convert()
         assert len(results) == 1
@@ -503,3 +599,4 @@ class TestJupyterConverter:
         # Check content
         content = converted_file.read_text()
         assert 'print("Hello World")' in content
+        subprocess_utils.clear_find_executable_cache()

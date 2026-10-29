@@ -9,7 +9,10 @@ entirely; backends with multi-step builds use PHASES instead.
 from __future__ import annotations
 
 import json
+import posixpath
+import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +59,164 @@ def _references_concatenated(base_dir: Path) -> str:
 
 def _interpolate_path(template: str, **values: str) -> str:
     return template.format(**values)
+
+
+# ---------------------------------------------------------------------------
+# Links from a _base body to the references
+# ---------------------------------------------------------------------------
+
+# `_base/skill.md` links to a reference as `](references/<name>.md)`, which is
+# where the reference sits beside SKILL.md in the agentskills.io layout. The
+# other outputs put the references somewhere else (`.clinerules/02-<name>.md`),
+# append them to the same file (AGENTS.md, GEMINI.md, POWER.md), or leave them
+# out (copilot-instructions.md, the Windsurf and Continue rules). Copied
+# verbatim, the link resolved in five outputs and was dead in the rest, so each
+# output gets it pointed at its own copy, or at the published one if it has none.
+_REFERENCE_LINK = re.compile(r"\]\(references/([^)#\s]+\.md)\)")
+
+#: Where the published copy of each reference lives in the repository: the
+#: repository-root skills/ tree the skills-root backend writes. Outputs that
+#: ship no references link here. tests/test_reference_links.py holds this to
+#: the skills-root backend's own layout.
+PUBLISHED_REFERENCE_PATH = "skills/{skill_name}/references/{ref_name}"
+
+_FENCE_OPEN = re.compile(r"(`{3,}|~{3,})")
+_HEADING = re.compile(r"#{1,6}\s+(.+?)\s*#*\s*$")
+
+
+def _closes(fence: str, stripped_line: str) -> bool:
+    """Whether a line closes the fenced block `fence` opened: the same character, at least as many."""
+    return (
+        re.fullmatch(re.escape(fence[0]) + "{%d,}" % len(fence), stripped_line)
+        is not None
+    )
+
+
+def link_references(body: str, base_dir: Path, target: Callable[[str], str]) -> str:
+    """Rewrite each `](references/<name>.md)` link in `body` to `target(name)`.
+
+    A link to a reference `_base/references/` does not have fails the build, so
+    a renamed reference cannot leave a dead link in every output.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        ref_name = match.group(1)
+        if not (base_dir / "references" / ref_name).is_file():
+            raise ValueError(
+                f"a _base body links to references/{ref_name}, which "
+                f"{base_dir / 'references'} does not have"
+            )
+        return f"]({target(ref_name)})"
+
+    return _REFERENCE_LINK.sub(replace, body)
+
+
+def references_beside(
+    doc_path: str, ref_path: str, **values: str
+) -> Callable[[str], str]:
+    """Relative links from `doc_path` to references written at `ref_path`.
+
+    Both are path templates relative to the backend's output directory, as in
+    the backend's class vars; `values` fills their placeholders.
+    """
+    doc_dir = posixpath.dirname(_interpolate_path(doc_path, **values)) or "."
+
+    def target(ref_name: str) -> str:
+        path = _interpolate_path(ref_path, ref_name=ref_name, **values)
+        return posixpath.relpath(path, doc_dir)
+
+    return target
+
+
+def references_in_page(base_dir: Path) -> Callable[[str], str]:
+    """Links to each reference's first heading, for a file that appends them."""
+
+    def target(ref_name: str) -> str:
+        return "#" + _heading_anchor(base_dir / "references" / ref_name)
+
+    return target
+
+
+def references_published(m: Manifest) -> Callable[[str], str]:
+    """Links to the published copy, for an output that ships no references."""
+
+    def target(ref_name: str) -> str:
+        path = PUBLISHED_REFERENCE_PATH.format(
+            skill_name=m.skill_name, ref_name=ref_name
+        )
+        return f"{m.repository}/blob/main/{path}"
+
+    return target
+
+
+def _heading_anchor(path: Path) -> str:
+    """The anchor GitHub gives the first heading of `path` outside a code block.
+
+    Lowercase, punctuation other than hyphens dropped, spaces to hyphens. The
+    references' headings are plain words, so this matches what GitHub and the
+    repository's docs checks compute for them.
+    """
+    fence = ""
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if fence:
+            if _closes(fence, stripped):
+                fence = ""
+            continue
+        if opened := _FENCE_OPEN.match(stripped):
+            fence = opened.group(1)
+            continue
+        heading = _HEADING.fullmatch(stripped)
+        if heading:
+            text = heading.group(1).replace("`", "").lower()
+            return re.sub(r"[^\w\- ]", "", text).replace(" ", "-")
+    raise ValueError(f"{path} has no heading to link to")
+
+
+# ---------------------------------------------------------------------------
+# Truncation for platforms with a size cap
+# ---------------------------------------------------------------------------
+
+
+def _truncate_markdown(
+    text: str, limit: int, footer: str | None, size: Callable[[str], int]
+) -> str:
+    """Cut `text` at its last paragraph break that fits in `limit`, then add `footer`.
+
+    `size` measures the result (characters or UTF-8 bytes, whichever the
+    platform caps). Only a blank line outside every fenced code block counts as
+    a break, and not one right under a heading, which would leave the heading
+    with nothing below it. Cutting at a fixed offset could stop inside a fence,
+    and then every markdown reader takes the rest of the file, footer included,
+    as code; it could also separate a docs-check marker from the fence under it.
+    """
+    if size(text) <= limit:
+        return text
+    tail = f"\n\n{footer}\n" if footer else ""
+    best: str | None = None
+    fence = ""
+    offset = 0
+    previous = ""
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if fence:
+            if _closes(fence, stripped):
+                fence = ""
+        elif opened := _FENCE_OPEN.match(stripped):
+            fence = opened.group(1)
+        elif not stripped and not _HEADING.fullmatch(previous):
+            candidate = text[:offset].rstrip() + tail
+            if size(candidate) > limit:
+                break
+            best = candidate
+        if stripped:
+            previous = stripped
+        offset += len(line)
+    if best is None:
+        raise ValueError(
+            f"cannot truncate to {limit}: no paragraph break outside a code block fits"
+        )
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -227,34 +388,43 @@ def _render_skill(skill: SkillConfig, m: Manifest, base_dir: Path) -> str:
     """
     values = _skill_frontmatter_values(m)
     fm_values = {f: values[f] for f in skill.frontmatter_fields}
+    # emit_skill refuses separate_files without a references_path before it
+    # gets here, so the second condition only narrows the type.
+    if skill.include_references == "separate_files" and skill.references_path:
+        target = references_beside(
+            skill.path, skill.references_path, skill_name=m.skill_name
+        )
+    else:
+        target = references_published(m)
     rendered = render(
         "skill.md.j2",
         frontmatter_fields=list(skill.frontmatter_fields),
         frontmatter_values=fm_values,
-        body=_read_base(base_dir, "skill.md"),
+        body=link_references(_read_base(base_dir, "skill.md"), base_dir, target),
         single_quote_strings=False,
     )
     if skill.truncate_bytes is not None:
-        if len(rendered.encode("utf-8")) > skill.truncate_bytes:
-            footer = (
-                f"\n\n{skill.truncation_footer}\n" if skill.truncation_footer else ""
-            )
-            keep = skill.truncate_bytes - len(footer.encode("utf-8")) - 50
-            rendered = rendered[:keep].rstrip() + footer
+        rendered = _truncate_markdown(
+            rendered,
+            skill.truncate_bytes,
+            skill.truncation_footer,
+            lambda text: len(text.encode("utf-8")),
+        )
     return rendered
 
 
 def emit_skill(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
     if b.SKILL is None:
         return
+    separate = b.SKILL.include_references == "separate_files"
+    if separate and b.SKILL.references_path is None:
+        raise ValueError(
+            "SKILL.references_path required when include_references=separate_files"
+        )
     skill_path = _interpolate_path(b.SKILL.path, skill_name=m.skill_name)
     _write_text(out / skill_path, _render_skill(b.SKILL, m, base_dir))
 
-    if b.SKILL.include_references == "separate_files":
-        if b.SKILL.references_path is None:
-            raise ValueError(
-                "SKILL.references_path required when include_references=separate_files"
-            )
+    if separate and b.SKILL.references_path is not None:
         for ref in sorted((base_dir / "references").glob("*.md")):
             ref_path = _interpolate_path(
                 b.SKILL.references_path,
@@ -320,16 +490,23 @@ def emit_instruction_file(
         "keywords": list(m.keywords),
     }
     if instr.include_skill_body:
-        context["skill_body"] = _read_base(base_dir, "skill.md")
+        target = (
+            references_in_page(base_dir)
+            if instr.include_references == "appended"
+            else references_published(m)
+        )
+        context["skill_body"] = link_references(
+            _read_base(base_dir, "skill.md"), base_dir, target
+        )
     if instr.include_references == "appended":
         context["references"] = _references_concatenated(base_dir)
 
     rendered = render(instr.template, **context)
 
-    if instr.truncate_chars is not None and len(rendered) > instr.truncate_chars:
-        keep = instr.truncate_chars - 50
-        footer = f"\n\n{instr.truncation_footer}\n" if instr.truncation_footer else ""
-        rendered = rendered[:keep].rstrip() + footer
+    if instr.truncate_chars is not None:
+        rendered = _truncate_markdown(
+            rendered, instr.truncate_chars, instr.truncation_footer, len
+        )
 
     _write_text(out / instr.path, rendered)
 
@@ -342,7 +519,17 @@ def emit_rules_dir(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> No
     rules_root = out / base_path
 
     if rd.include_skill_body:
-        _write_text(rules_root / rd.skill_filename, _read_base(base_dir, "skill.md"))
+        target = (
+            references_beside(
+                rd.skill_filename, f"{rd.reference_filename_prefix}{{ref_name}}"
+            )
+            if rd.include_references == "separate_files"
+            else references_published(m)
+        )
+        _write_text(
+            rules_root / rd.skill_filename,
+            link_references(_read_base(base_dir, "skill.md"), base_dir, target),
+        )
 
     if rd.include_references == "separate_files":
         for ref in sorted((base_dir / "references").glob("*.md")):

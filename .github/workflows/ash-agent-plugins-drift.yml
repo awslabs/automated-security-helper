@@ -109,11 +109,15 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per pull request; pushing again supersedes the previous run.
+  # One in-flight run per pull request or branch; pushing again supersedes the previous
+  # run.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # pull_request runs may be cancelled, and so may push runs on branches other than
+  # main: a newer push to the same pull request or branch supersedes the run on its old
+  # head. A push to main or a tag is the only report its commit will get, a
+  # workflow_dispatch run was asked for by a person, and a merge_group run must finish
+  # or the queue loses the answer it is waiting for.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
 
 jobs:
   drift-and-validate:
@@ -153,7 +157,7 @@ jobs:
       # writes an entry. With setup-uv's cache off, UV_CACHE_DIR is left unset and
       # uv uses its default, ~/.cache/uv on Linux, which is the path cached here.
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: false
 

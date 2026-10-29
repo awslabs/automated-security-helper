@@ -136,8 +136,8 @@ describe('cfn-guard suppressions sit only on the approved resources', () => {
     // Positive control: the collector has to see a suppression placed somewhere new,
     // or the exact-set assertion above would pass over a blind spot.
     const tampered = structuredClone(COMMITTED);
-    const victim = Object.keys(tampered.AshImagePipeline.Resources)[0];
-    tampered.AshImagePipeline.Resources[victim].Metadata = {
+    const edited = Object.keys(tampered.AshImagePipeline.Resources)[0];
+    tampered.AshImagePipeline.Resources[edited].Metadata = {
       guard: { SuppressedRules: [VPC], SuppressedRuleReasons: { [VPC]: 'x'.repeat(50) } },
     };
     expect(guardEntries(tampered)).toHaveLength(APPROVED.length + 1);
@@ -208,8 +208,8 @@ describe('cfn-nag suppressions sit only on the approved resource', () => {
 
   test('a W5 or W12 suppression on any other resource is caught', () => {
     const tampered = structuredClone(COMMITTED);
-    const victim = Object.keys(tampered.AshFargate.Resources)[0];
-    tampered.AshFargate.Resources[victim].Metadata = {
+    const edited = Object.keys(tampered.AshFargate.Resources)[0];
+    tampered.AshFargate.Resources[edited].Metadata = {
       cfn_nag: { rules_to_suppress: [{ id: 'W12', reason: 'x'.repeat(50) }] },
     };
     expect(cfnNagEntries(tampered)).not.toEqual(cfnNagEntries(COMMITTED));

@@ -44,6 +44,7 @@ from automated_security_helper.utils.version_management import (
     _load_toml,
     get_project_root,
 )
+from tests.utils.helpers import checkout_env
 
 REPO_ROOT = get_project_root()
 
@@ -99,14 +100,11 @@ def _run_child(body: str, tmp_path: Path) -> subprocess.CompletedProcess:
     env.pop("PYTHONIOENCODING", None)
     # The child must import the tree under test, not a differently-versioned
     # ASH that happens to be installed in the environment.
-    env["PYTHONPATH"] = (
-        str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
-    ).rstrip(os.pathsep)
     return subprocess.run(
         [sys.executable, str(script)],
         capture_output=True,
         text=True,
-        env=env,
+        env=checkout_env(env),
         cwd=str(tmp_path),
         timeout=300,
     )
@@ -405,3 +403,415 @@ class TestStreamRepair:
         assert entrypoint._write_raw(f"{SENTINEL}\n") is True
 
         assert SENTINEL in capfd.readouterr().err
+
+
+def test_the_interpreters_own_hook_does_not_write_the_error_as_given(
+    monkeypatch, capsys
+):
+    """Before typer installs its hook, sys.excepthook is the interpreter's own,
+    and the floor called it: it writes the exception's text as given, so an ESC
+    sequence in an error reached the terminal. It is reported through ASH's
+    shown traceback, as typer's hook is."""
+    from automated_security_helper.cli import entrypoint
+
+    monkeypatch.setattr(sys, "excepthook", sys.__excepthook__)
+    entrypoint._report_failure(RuntimeError("boom" + chr(0x1B) + "[31m red"))
+    err = capsys.readouterr().err
+
+    assert "RuntimeError: boom\\x1b[31m red" in err, err
+    assert chr(0x1B) not in err, err
+
+
+def test_typers_hook_is_reported_through_ashs_traceback(monkeypatch, capsys):
+    """typer's hook prints with typer's own console, which writes the exception's
+    text as given: the floor reports through ASH's traceback in its place, once,
+    and does not call it."""
+    import typer.main
+
+    from automated_security_helper.cli import entrypoint
+
+    monkeypatch.setattr(sys, "excepthook", typer.main.except_hook)
+    reports: list = []
+    real = entrypoint._ash_traceback
+
+    def recorded(exc_type, exc, tb):
+        reports.append(exc)
+        real(exc_type, exc, tb)
+
+    monkeypatch.setattr(entrypoint, "_ash_traceback", recorded)
+    error = RuntimeError("boom" + chr(0x1B) + "[31m red")
+    entrypoint._report_failure(error)
+    err = capsys.readouterr().err
+
+    assert reports == [error], reports
+    assert "RuntimeError: boom\\x1b[31m red" in err, err
+    assert chr(0x1B) not in err, err
+
+
+def test_a_wrapper_of_richs_hook_is_called(monkeypatch, capsys):
+    """A crash reporter that wraps rich.traceback's hook with functools.wraps
+    takes its module name, but does more than print: it is called, once, as any
+    other installed hook is, and what it writes is shown."""
+    import functools
+
+    import rich.traceback
+
+    from automated_security_helper.cli import entrypoint
+
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    rich.traceback.install()
+    printer = sys.excepthook
+    reported: list = []
+
+    @functools.wraps(printer)
+    def reporter(exc_type, exc, tb):
+        reported.append(exc)
+        printer(exc_type, exc, tb)
+
+    sys.excepthook = reporter
+    reports: list = []
+    real = entrypoint._ash_traceback
+
+    def recorded(exc_type, exc, tb):
+        reports.append(exc)
+        real(exc_type, exc, tb)
+
+    monkeypatch.setattr(entrypoint, "_ash_traceback", recorded)
+    error = RuntimeError("boom" + chr(0x1B) + "[31m red")
+    entrypoint._report_failure(error)
+    err = capsys.readouterr().err
+
+    assert reporter.__module__ == "rich.traceback"
+    assert reported == [error], reported
+    assert reports == [], reports
+    assert "boom\\x1b[31m red" in err and chr(0x1B) not in err, err
+
+
+def test_an_installed_hook_that_exits_sets_the_exit_code(tmp_path):
+    """A hook's sys.exit ends the process as it says, as CPython's own handling
+    of an uncaught exception does: the hook's code, and no report on top."""
+    result = _run_child(
+        _stub(
+            _BREAK_CLI_IMPORT
+            + "\nsys.excepthook = lambda exc_type, exc, tb: sys.exit(3)\n"
+        ),
+        tmp_path,
+    )
+
+    assert result.returncode == 3, (result.returncode, result.stderr)
+    assert SENTINEL not in result.stdout + result.stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "where",
+    ["installed-hook", "ash-traceback", "fallback-shown", "fallback-emit", "banner"],
+)
+def test_an_interrupt_while_reporting_is_not_reported_past(where, monkeypatch):
+    """Ctrl-C while the failure is reported, in an installed hook, in ASH's own
+    traceback, in the plain traceback written when neither could report, or in
+    the line saying a console was missing, interrupts the process, as it would
+    anywhere else: it is not taken for a failed report and printed past with an
+    exit of 1. It ends as an interrupted process does, with 130, and carries
+    nothing to print: re-raised, the interrupt held the failure as its context,
+    and the interpreter printed that chain as given."""
+    from automated_security_helper.cli import entrypoint
+
+    def interrupted(*info):
+        raise KeyboardInterrupt
+
+    def broken(*info):
+        raise RuntimeError("the reporter failed")
+
+    if where == "installed-hook":
+        monkeypatch.setattr(sys, "excepthook", interrupted)
+    else:
+        monkeypatch.setattr(sys, "excepthook", sys.__excepthook__)
+    if where == "ash-traceback":
+        monkeypatch.setattr(entrypoint, "_ash_traceback", interrupted)
+    elif where.startswith("fallback-"):
+        # Neither hook reports, so the plain traceback is written.
+        monkeypatch.setattr(entrypoint, "_ash_traceback", broken)
+        monkeypatch.setattr(entrypoint, "_" + where.split("-")[1], interrupted)
+    elif where == "banner":
+        monkeypatch.setattr(entrypoint, "ensure_std_streams", lambda: ("stdout",))
+        monkeypatch.setattr(entrypoint, "_emit", interrupted)
+
+    def run():
+        raise RuntimeError("boom")
+
+    # Caught whole, so an interrupt that escapes does not end the test run.
+    stopped: BaseException | None = None
+    try:
+        entrypoint._run_reporting_failures(run)
+    except BaseException as caught:
+        stopped = caught
+
+    assert isinstance(stopped, SystemExit), repr(stopped)
+    assert stopped.code == 130, stopped.code
+    assert stopped.__cause__ is None and stopped.__suppress_context__
+
+
+def _run_child_on_a_pty(body: str, tmp_path: Path) -> tuple[int, str]:
+    """Run *body* as :func:`_run_child` does, with stdin, stdout and stderr on a
+    pseudo-terminal: (exit code, what it wrote)."""
+    import pty
+
+    script = tmp_path / "child.py"
+    script.write_text(body)
+    env = dict(os.environ)
+    env.pop("PYTHONIOENCODING", None)
+    primary, secondary = pty.openpty()
+    try:
+        child = subprocess.Popen(
+            [sys.executable, str(script)],
+            stdin=secondary,
+            stdout=secondary,
+            stderr=secondary,
+            env=checkout_env(env),
+            cwd=str(tmp_path),
+        )
+    finally:
+        os.close(secondary)
+    chunks = []
+    try:
+        while True:
+            try:
+                data = os.read(primary, 65536)
+            except OSError:  # EIO once the child has closed its side
+                break
+            if not data:
+                break
+            chunks.append(data)
+    finally:
+        os.close(primary)
+    return child.wait(timeout=300), b"".join(chunks).decode("utf-8", "replace")
+
+
+@pytest.mark.parametrize("stream", ["pipe", "pty"])
+@pytest.mark.parametrize("where", ["installed-hook", "ash-traceback", "fallback"])
+def test_an_interrupt_while_reporting_prints_nothing_raw(where, stream, tmp_path):
+    """The whole process: a Ctrl-C while the failure is reported ends it with 130,
+    the interrupted reporter called once, and none of the failure's text written
+    as given, its ESC and right-to-left override included, on a pipe and on a
+    terminal."""
+    if stream == "pty" and sys.platform == "win32":
+        pytest.skip("no pseudo-terminal on Windows")
+    module, attr = _console_script_target()
+    body = textwrap.dedent(
+        f"""
+            import sys
+
+            _ERROR = "{SENTINEL}" + chr(0x1B) + "[31m" + chr(0x202E) + "tail"
+
+
+            class _BrokenCLI:
+                __name__ = "automated_security_helper.cli.main"
+
+                def __getattr__(self, name):
+                    raise ImportError(_ERROR)
+
+
+            sys.modules["automated_security_helper.cli.main"] = _BrokenCLI()
+
+            from automated_security_helper.cli import entrypoint
+
+
+            def interrupted(*info):
+                sys.stderr.write("REPORTER_CALLED\\n")
+                raise KeyboardInterrupt
+
+
+            def broken(*info):
+                raise RuntimeError("the reporter failed")
+
+
+            if {where!r} == "installed-hook":
+                sys.excepthook = interrupted
+            elif {where!r} == "ash-traceback":
+                entrypoint._ash_traceback = interrupted
+            else:
+                # Neither hook reports, so the plain traceback is written.
+                entrypoint._ash_traceback = broken
+                entrypoint._shown = interrupted
+
+            from {module} import {attr}
+
+            sys.exit({attr}())
+            """
+    )
+    if stream == "pipe":
+        result = _run_child(body, tmp_path)
+        code, written = result.returncode, result.stdout + result.stderr
+    else:
+        code, written = _run_child_on_a_pty(body, tmp_path)
+
+    assert code == 130, (code, ascii(written))
+    assert written.count("REPORTER_CALLED") == 1, ascii(written)
+    assert chr(0x1B) not in written and chr(0x202E) not in written, ascii(written)
+
+
+def test_an_interrupt_before_the_cli_runs_ends_with_130(monkeypatch):
+    """A Ctrl-C that escapes the CLI itself, during its import say, before Click
+    has a handler of its own, ends the process as an interrupted one ends, with
+    130, carrying nothing to print and reporting nothing: re-raised, it held the
+    exception being handled when it came as its context, and the interpreter
+    printed that chain as given."""
+    from automated_security_helper.cli import entrypoint
+
+    reported: list = []
+    monkeypatch.setattr(
+        entrypoint, "_report_failure", lambda *args: reported.append(args)
+    )
+
+    def run():
+        try:
+            raise ImportError("boom" + chr(0x1B) + "[31m")
+        except ImportError:
+            raise KeyboardInterrupt
+
+    # Caught whole, so an interrupt that escapes does not end the test run.
+    stopped: BaseException | None = None
+    try:
+        entrypoint._run_reporting_failures(run)
+    except BaseException as caught:
+        stopped = caught
+
+    assert isinstance(stopped, SystemExit), repr(stopped)
+    assert stopped.code == 130, stopped.code
+    assert stopped.__cause__ is None and stopped.__suppress_context__
+    assert reported == [], reported
+
+
+@pytest.mark.parametrize("stream", ["pipe", "pty"])
+def test_an_interrupt_during_the_cli_import_prints_nothing_raw(stream, tmp_path):
+    """The whole process: a Ctrl-C while the CLI is imported, as an import error
+    holding an ESC and a right-to-left override is handled, exits 130 and writes
+    neither character, on a pipe and on a terminal."""
+    if stream == "pty" and sys.platform == "win32":
+        pytest.skip("no pseudo-terminal on Windows")
+    module, attr = _console_script_target()
+    body = textwrap.dedent(
+        f"""
+            import sys
+
+            _ERROR = "{SENTINEL}" + chr(0x1B) + "[31m" + chr(0x202E) + "tail"
+
+
+            class _InterruptedCLI:
+                __name__ = "automated_security_helper.cli.main"
+                _announced = False
+
+                def __getattr__(self, name):
+                    # Announced once, raised on every probe: the import
+                    # machinery can swallow an interrupt raised from one dunder
+                    # probe and go on to the next (3.12 probes __spec__ then
+                    # __path__), where a real Ctrl-C rises once.
+                    try:
+                        raise ImportError(_ERROR)
+                    except ImportError:
+                        if not _InterruptedCLI._announced:
+                            _InterruptedCLI._announced = True
+                            sys.stderr.write("IMPORT_INTERRUPTED\\n")
+                        raise KeyboardInterrupt
+
+
+            sys.modules["automated_security_helper.cli.main"] = _InterruptedCLI()
+
+            from {module} import {attr}
+
+            sys.exit({attr}())
+            """
+    )
+    if stream == "pipe":
+        result = _run_child(body, tmp_path)
+        code, written = result.returncode, result.stdout + result.stderr
+    else:
+        code, written = _run_child_on_a_pty(body, tmp_path)
+
+    assert code == 130, (code, ascii(written))
+    assert written.count("IMPORT_INTERRUPTED") == 1, ascii(written)
+    assert chr(0x1B) not in written and chr(0x202E) not in written, ascii(written)
+
+
+def _raw_printing_hook(calls, raises=False):
+    def hook(exc_type, exc, tb):
+        calls.append(exc)
+        # Written in pieces, a line split between writes included, and the last
+        # one without its newline.
+        sys.stderr.write("note\n:")
+        sys.stderr.write(":add-mask::hidden\n")
+        sys.stderr.write(f"{exc_type.__name__}: ")
+        sys.stderr.write(f"{exc}")
+        if raises:
+            raise RuntimeError("the installed hook failed")
+
+    return hook
+
+
+@pytest.mark.parametrize(
+    "installed",
+    [
+        "rich-traceback",
+        "rich-traceback-on-a-terminal",
+        "raw-printing-hook",
+        "hook-that-raises",
+    ],
+)
+def test_an_installed_hook_runs_and_what_it_writes_is_shown(
+    installed, monkeypatch, capsys
+):
+    """A hook a library, a plugin or the user installs over the interpreter's is
+    called, so what else it does still happens, but with sys.stdout and sys.stderr
+    writing each line it writes shown, not obeyed. A hook that raises is reported
+    past by ASH's shown traceback. rich.traceback.install()'s hook does nothing but
+    print, and its console picks color when it is made, so on a terminal its frame
+    came out as color codes written as text: it is reported through ASH's
+    traceback in its place."""
+    import rich.traceback
+    from rich.console import Console
+
+    from automated_security_helper.cli import entrypoint
+
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    hook_calls: list = []
+    if installed == "rich-traceback":
+        rich.traceback.install()
+    elif installed == "rich-traceback-on-a-terminal":
+        # As install() makes its console on a terminal: color chosen once, now.
+        rich.traceback.install(console=Console(stderr=True, force_terminal=True))
+    else:
+        sys.excepthook = _raw_printing_hook(
+            hook_calls, raises=installed == "hook-that-raises"
+        )
+    reports: list = []
+    real = entrypoint._ash_traceback
+
+    def recorded(exc_type, exc, tb):
+        reports.append(exc)
+        real(exc_type, exc, tb)
+
+    monkeypatch.setattr(entrypoint, "_ash_traceback", recorded)
+    # Raised, so it has frames: rich frames a traceback only when it has some.
+    try:
+        raise RuntimeError("boom" + chr(0x1B) + "[31m red")
+    except RuntimeError as raised:
+        error = raised
+    before = sys.stdout, sys.stderr
+    entrypoint._report_failure(error)
+    after = sys.stdout, sys.stderr
+    err = capsys.readouterr().err
+
+    assert after == before, "the streams were not put back"
+    assert chr(0x1B) not in err, err
+    assert "boom\\x1b[31m red" in err, err
+    if installed.startswith("rich-traceback"):
+        # ASH's report, once, and not rich's frame: the one escape written as
+        # text is the error's own ESC.
+        assert reports == [error], reports
+        assert chr(0x256D) not in err, err
+        assert err.count("\\x1b[") == 1, err
+        return
+    assert hook_calls == [error], hook_calls
+    assert not any(line.startswith("::") for line in err.splitlines()), err
+    assert "RuntimeError: boom\\x1b[31m red" in err, err
+    assert reports == ([error] if installed == "hook-that-raises" else []), reports

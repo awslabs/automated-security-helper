@@ -59,15 +59,26 @@ step reported success unconditionally. A gate that cannot fail is worse than no
 gate, because its green is read as evidence.
 
 Reading the JSON status rather than the rendered report also means the guard and
-ASH's own exit code answer from the same field, so they cannot disagree. Both
-assertions above have a counterpart in ``run_ash_scan._compute_exit_code``:
-``incomplete_scanners`` for the per-scanner one and ``no_scanner_ran`` for the
-set-level one. The set-level pair was added later than this script, and until it
-existed the two did disagree -- on a Windows run of this repository's own config,
-``ash scan --scanners semgrep`` recorded ten SKIPPED and exited 0 while this script
-exited 1 on the same file.
+ASH's own exit code read the same field. Both assertions above have a counterpart in
+``run_ash_scan._compute_exit_code``: ``incomplete_scanners`` for the per-scanner one
+and ``no_scanner_ran`` for the set-level one. The set-level pair was added later than
+this script, and until it existed the two did disagree -- on a Windows run of this
+repository's own config, ``ash scan --scanners semgrep`` recorded ten SKIPPED and
+exited 0 while this script exited 1 on the same file.
 
-One difference remains, and it is why this script carries the gate rather than sharing
+The set-level questions differ in one way, on purpose. ASH's ``no_scanner_ran`` counts
+an ERROR scanner as having run when its recorded target counts show a partial audit
+(it evaluated some targets and lost the rest), and when it is in ERROR only because
+its content database is stale. This script reads statuses and not counts, so for a
+results file whose only non-SKIPPED row is such a scanner it still reports that no
+scanner executed, where ASH's ``no_scanner_ran`` field is false. Both still exit 1 on
+that file, but ASH reaches it by a different arm for each kind of scanner. The full
+account is the comment above ``_RAN_SCANNER_STATUSES`` in
+``automated_security_helper/interactions/run_ash_scan.py``; it is kept in that one place
+so the copies cannot drift apart. Do not make the script read counts to close the gap:
+it runs without an importable ASH, and the exit codes already agree.
+
+The other difference is why this script carries the gate rather than sharing
 it: ASH puts both checks behind ``fail_on_incomplete_scanners``, while this script has
 no equivalent and always fails. Both arms in ``run_ash_scan._compute_exit_code`` sit
 inside that flag's ``if``, so anything that turns the flag off -- a
@@ -76,11 +87,10 @@ inside that flag's ``if``, so anything that turns the flag off -- a
 script cannot be switched off that way, so it is what makes the assertion
 unconditional in CI.
 
-That is worth saying outright, because the paragraph above -- that the guard and the
-exit code "answer from the same field, so they cannot disagree" -- is a claim about
-the field they read, not about the verdict they return. The flag's default is now
-True, so on an unconfigured run the two verdicts do agree; the point of keeping this
-script is that they agree by policy rather than by construction.
+That is worth saying outright, because reading the same field is a claim about the
+input, not about the verdict returned. The flag's default is now True, so on an
+unconfigured run the two verdicts do agree; the point of keeping this script is that
+they agree by policy rather than by construction.
 
 Their overlap is deliberate and they fail for different reasons: ASH's exit code is
 ASH judging its own run, and this is CI judging whether that judgement still happens.
@@ -116,7 +126,10 @@ COMPLETE_STATUSES = ("PASSED", "FAILED", "SKIPPED")
 
 # The statuses that mean "this scanner executed". Mirrors ScannerState.ran in
 # scripts/verify_external_target_scan.py, which the sibling gate uses for the same
-# assertion.
+# assertion. Spelled as ASH's _RAN_SCANNER_STATUSES is, but ASH's no_scanner_ran
+# also admits a partial-audit ERROR scanner and a stale-database ERROR scanner;
+# the comment above _RAN_SCANNER_STATUSES in run_ash_scan.py explains why that
+# difference leaves the exit codes equal.
 RAN_STATUSES = ("PASSED", "FAILED")
 
 DEFAULT_RESULTS = Path(".ash") / "ash_output" / "ash_aggregated_results.json"

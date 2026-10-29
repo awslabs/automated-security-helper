@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for StarResourceAccessPolicyRule (automated_security_helper/assets/appsec_cfn_rules).
+  One domain per principal shape that arrives as a Hash. The rule used to compare each
+  Hash value with the String "*", so a value that is an Array holding "*" was not reported.
+
+  Reported by the rule: AwsListStar, AwsListMixedStar, AwsAndServiceStar and
+  ServiceStarOnly.
+  Not reported: ScopedAccount, ScopedAccountList, ServicePrincipal and DeniedStar.
+
+  The rule has one meaning: a "*" under any key of the principal is public. The rule used
+  to report a "*" under a key other than "AWS" only when the principal also had an "AWS"
+  key, so AwsAndServiceStar was reported and ServiceStarOnly was not.
+  Every statement allows only es:ESHttpGet, so ResourcePolicyStarAccessVerbPolicyRule
+  reports nothing on this template and the two rules can be told apart.
+
+Resources:
+  AwsListStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-aws-list-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  AwsListMixedStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-aws-list-mixed-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - "arn:aws:iam::123456789012:root"
+                - "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  AwsAndServiceStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-aws-and-service-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+              Service: "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  ServiceStarOnly:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-service-star-only
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  ScopedAccount:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-scoped-account
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  ScopedAccountList:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-scoped-account-list
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - "arn:aws:iam::123456789012:root"
+                - "arn:aws:iam::123456789012:role/reader"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  ServicePrincipal:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-service-principal
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "es.amazonaws.com"
+            Action: "es:ESHttpGet"
+            Resource: "*"
+
+  DeniedStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-denied-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Deny
+            Principal:
+              AWS:
+                - "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"

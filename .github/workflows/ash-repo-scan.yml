@@ -1,8 +1,10 @@
 name: Run ASH
 on:
   pull_request:
+    # "**" not "*": "*" does not match "/", so a pull request whose base is a nested
+    # branch would get no scan at all. "**" matches nested branch names too.
     branches:
-      - "*"
+      - "**"
   merge_group:
   workflow_dispatch: {}
   # For the grype-db-cache job only. The scan job below skips pushes, so a merge does
@@ -42,22 +44,57 @@ jobs:
       # No security-events here. The called workflow drops it, so granting it here
       # never reached the upload step; the sarif job below holds it instead.
     with:
-      # For PR runs, install ASH from the PR's head repo and branch so fork PRs work.
+      # This job is the required check `ash / SAST, SCA, and IaC Scan`, so the ASH
+      # that judges a pull request is never the one the pull request changes.
+      #
+      # For PR runs, install ASH from this repository at the pull request's base
+      # commit, for same-repo and fork PRs alike. It used to be the PR's head repo
+      # and branch, which let a pull request that changes how ASH scans (a scanner
+      # that stops reporting, a parser that drops results, a gate that exits 0) be
+      # judged by the ASH it ships. ash-repo-scan-pr-head.yml runs the PR's own ASH
+      # as an informational check that nothing requires.
       # For merge_group runs, github.head_ref is empty and github.ref_name is the
       # ephemeral gh-readonly-queue/... branch, which GitHub deletes as soon as the
       # queue entry is processed. The scan step's uvx install would win the race and
       # the later report step's would not, failing with "couldn't find remote ref".
       # The commit is unreachable once the branch is gone, so its SHA is not
-      # fetchable either - the only stable choice is the default branch.
-      # For non-PR runs (workflow_dispatch, push), use the current repo and ref.
-      ash-version: ${{ github.head_ref || (github.event_name == 'merge_group' && github.event.repository.default_branch) || github.ref_name }}
-      ash-repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+      # fetchable either - the stable choice is the branch the queue merges into,
+      # merge_group.base_ref (refs/heads/<target>). That is the default branch for
+      # this repository's queue, but a queue on another branch gets its own.
+      # For non-PR runs (workflow_dispatch), use the current repo and ref.
+      ash-version: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref || github.ref_name }}
+      ash-repo: ${{ github.repository }}
+      # The config comes from the same place as the ASH: the pull request's base
+      # commit, or in the merge queue the branch it merges into. So a pull request
+      # cannot add suppressions or ignore paths to its own required check; its
+      # config edits apply to this check once merged, and ash-repo-scan-pr-head.yml
+      # scans with them before that. workflow_dispatch reads the dispatched ref's
+      # config from the checkout.
+      #
+      # Not merge_group.base_sha: for every entry behind the first, that is the
+      # previous entry's temporary merge commit, which carries that entry's
+      # unmerged config and sits on a queue branch GitHub deletes. The trailing
+      # `|| ''` keeps the input empty on workflow_dispatch.
+      config: .ash/.ash.yaml
+      config-ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref || '' }}
+      # The install steps come from the pull request's workflow files and the ASH
+      # from its base commit, so a pull request that adds a scanner asks the base
+      # ASH for a tool it has no plugin for. That ASH names and skips it rather than
+      # failing the check; the informational check installs and runs it.
+      skip-unknown-tools: true
       # Off because the sarif job below uploads instead. The upload step inside the
       # called workflow cannot hold security-events: write, so it fails on
       # workflow_dispatch; see upload-ash-sarif.yml for why.
       collect-sarif-report: false
       # Set this to `false` if you would prefer that ASH does not comment on PRs with the findings.
       post-pr-comment: true
+      # The repository's own bandit and grype configs, named by the operator: a
+      # config file inside the scanned tree no longer chooses a scanner's own
+      # config file (config/tool_config_trust.py). .ash/.grype.yaml explains its
+      # only-fixed.
+      ash-args: >-
+        --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml
+        --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
       # Set this to `false` if you prefer less verbose log output
       verbose: true
       # Install Grype and Syft for comprehensive vulnerability scanning
@@ -69,6 +106,11 @@ jobs:
       # scan -- correctly, because the CloudFormation in this repository was
       # never actually being checked.
       install-cfn-nag: true
+      # The binary scanners that are on by default and do not install themselves.
+      install-actionlint: true
+      install-cfn-guard: true
+      install-gitleaks: true
+      install-trivy: true
 
   # Uploads the scan's SARIF report to code scanning. It is a separate job because
   # security-events: write has to be granted to a called workflow that declares it,
@@ -84,11 +126,20 @@ jobs:
   # has always relied on the same thing for checks and pull-requests: write.
   sarif:
     needs: ash
-    if: needs.ash.result == 'success' || needs.ash.result == 'failure'
+    # After the scan whether it passed or failed: a scan that fails on findings has
+    # still written its SARIF. `!cancelled()` is what makes it run after a failure;
+    # without a status function GitHub adds an implicit `success() &&`, and the job
+    # was skipped after every failed scan. Not when the scan uploaded no ash_output
+    # (it failed before ASH wrote its reports): the download would fail too and
+    # show a second red check.
+    if: ${{ !cancelled() && needs.ash.outputs.artifact-id != '' }}
     uses: ./.github/workflows/upload-ash-sarif.yml
     permissions:
       contents: read # Required for the checkout in the called workflow
       security-events: write # Required to upload SARIF results to code scanning
+    with:
+      # The exact artifact the scan job uploaded, in whichever attempt it ran.
+      artifact-id: ${{ needs.ash.outputs.artifact-id }}
 
   # WHY THIS JOB EXISTS
   #
@@ -116,12 +167,146 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The same helper run-ash-security-scan.yml writes, byte for byte (a test holds
+      # the copies equal): `built` below comes from the downloaded database's
+      # metadata, and one_line keeps it on the line it is printed in.
+      - name: Write the one_line helper
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+          one_line() {
+            local LC_ALL=C
+            local text="${1//[[:cntrl:]]/ }"
+            text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+            text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+            while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/# #[}"; done
+            printf '%s' "${text}"
+          }
+          __wcs_clock() {
+            __wcs_now="${EPOCHREALTIME:-}"
+            __wcs_now="${__wcs_now//[!0-9]/}"
+            if [ -z "${__wcs_now}" ]; then
+              __wcs_now=$((SECONDS * 1000000))
+            fi
+          }
+          __wcs_last_bg() {
+            case "$-" in
+              *u*) set +u; printf '%s' "$!"; set -u ;;
+              *) printf '%s' "$!" ;;
+            esac
+          }
+          __wcs_end_group() {
+            local __wcs_now="" __wcs_until=""
+            if [ -z "${__wcs_pid}" ]; then
+              return 0
+            fi
+            __wcs_clock
+            __wcs_until=$((__wcs_now + $1 * 100000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            if ! kill -0 -- "-${__wcs_pid}" 2>/dev/null; then
+              return 0
+            fi
+            kill -s KILL -- "-${__wcs_pid}" 2>/dev/null || true
+            __wcs_until=$((__wcs_now + 500000))
+            while kill -0 -- "-${__wcs_pid}" 2>/dev/null && [ "${__wcs_now}" -lt "${__wcs_until}" ]; do
+              sleep 0.1
+              __wcs_clock
+            done
+            return 1
+          }
+          __wcs_on_signal() {
+            if [ -z "${__wcs_pid}" ] && [ "$(__wcs_last_bg)" != "${__wcs_before}" ]; then
+              __wcs_pid="$(__wcs_last_bg)"
+            fi
+            if [ -n "${__wcs_pid}" ]; then
+              kill -s "$1" -- "-${__wcs_pid}" 2>/dev/null || kill -s "$1" "${__wcs_pid}" 2>/dev/null || true
+            fi
+            if [ "$1" = TERM ]; then
+              __wcs_end_group 10 || __wcs_left=1
+              if [ -n "${__wcs_open}" ]; then
+                printf '\n::%s::\n' "${__wcs_token}"
+              fi
+              if [ -n "${__wcs_left}" ]; then
+                printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              fi
+              exit 143
+            fi
+            __wcs_interrupted="$2"
+          }
+          __wcs_exec() {
+            if command -v setsid >/dev/null 2>&1; then
+              exec setsid -w "$@"
+            fi
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+          }
+          with_commands_stopped() {
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+              printf '%s\n' "::error::with_commands_stopped must run in the step's own shell, the one process the runner signals on a cancel, not in a subshell, a pipeline, a command substitution or a background job. For ( cd DIR && ... ), use env -C DIR, or cd at the top level" >&2
+              kill -s TERM "$$" 2>/dev/null || true
+              return 1
+            fi
+            local __wcs_out="" __wcs_var="" __wcs_file="" __wcs_token __wcs_status=0
+            local __wcs_pid="" __wcs_interrupted="" __wcs_open="" __wcs_left="" __wcs_before="$(__wcs_last_bg)"
+            case "${1:-}" in
+              --stdout) __wcs_out="$2"; shift 2 ;;
+              --capture) __wcs_var="$2"; shift 2 ;;
+            esac
+            __wcs_token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+            if [ "${#__wcs_token}" -ne 32 ]; then
+              printf '%s\n' "::error::no random token could be read for stop-commands, so the command did not run"
+              return 1
+            fi
+            if [ -n "${__wcs_var}" ]; then
+              __wcs_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ash-wcs.XXXXXX")" || return 1
+              __wcs_out="${__wcs_file}"
+            fi
+            trap '__wcs_on_signal INT 130' INT
+            trap '__wcs_on_signal QUIT 131' QUIT
+            trap '__wcs_on_signal TERM 143' TERM
+            __wcs_open=1
+            printf '::stop-commands::%s\n' "${__wcs_token}"
+            if [ -z "${__wcs_interrupted}" ]; then
+              if [ -n "${__wcs_out}" ]; then
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 > "${__wcs_out}" <&0 &
+              else
+                (trap - INT QUIT TERM; __wcs_exec "$@") 2>&1 <&0 &
+              fi
+              __wcs_pid=$!
+              wait "${__wcs_pid}" || __wcs_status=$?
+            fi
+            if [ -n "${__wcs_interrupted}" ] && [ -n "${__wcs_pid}" ]; then
+              wait "${__wcs_pid}" 2>/dev/null || true
+            fi
+            __wcs_end_group 50 || __wcs_left=1
+            printf '\n::%s::\n' "${__wcs_token}"
+            __wcs_open=""
+            trap - INT QUIT TERM
+            if [ -n "${__wcs_left}" ]; then
+              printf '%s\n' "::error::processes the command started did not end in time, so they were sent SIGKILL and the step fails"
+              if [ "${__wcs_status}" -eq 0 ]; then
+                __wcs_status=1
+              fi
+            fi
+            if [ -n "${__wcs_interrupted}" ]; then
+              exit "${__wcs_interrupted}"
+            fi
+            if [ -n "${__wcs_file}" ]; then
+              printf -v "${__wcs_var}" '%s' "$(cat "${__wcs_file}")"
+              rm -f -- "${__wcs_file}"
+            fi
+            return "${__wcs_status}"
+          }
+          EOF
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       # No uv cache: this job adds no cache other than the grype database it exists for.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: false
 
@@ -162,13 +347,14 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -uo pipefail
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
             | python -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
           if [ -n "${built}" ] && python -m automated_security_helper.utils.content_databases \
               check-age grype-db --built "${built}" --for save; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::not saving the grype database (built '${built:-unknown}'): too close to its bound to be cached."
+            echo "::warning::not saving the grype database (built '$(one_line "${built:-unknown}")'): too close to its bound to be cached."
           fi
 
       - name: Save the grype database cache (main only)

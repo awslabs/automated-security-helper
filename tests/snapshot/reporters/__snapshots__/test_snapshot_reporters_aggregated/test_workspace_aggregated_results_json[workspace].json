@@ -2,7 +2,7 @@
   "name": "ASH Workspace Scan: workspace",
   "description": "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
   "metadata": {
-    "report_id": "ASH-WORKSPACE-snapshot",
+    "report_id": "ASH-WORKSPACE-snapshot-20260115120042-000000000003",
     "project_name": "workspace",
     "tool_version": "<ASH_VERSION>",
     "description": "Automated Security Helper workspace-mode aggregated report"
@@ -11,7 +11,7 @@
     "workspace_file": "<REPO>/tests/test_data/snapshot_fixture/workspace/snapshot.code-workspace",
     "workspace_root": "<REPO>/tests/test_data/snapshot_fixture/workspace",
     "status": "completed",
-    "exit_code": 2,
+    "exit_code": 1,
     "projects": [
       {
         "project": "api",
@@ -33,9 +33,17 @@
         "incomplete_scanners": [
           "npm-audit"
         ],
+        "incomplete_scanner_details": {
+          "npm-audit": "MISSING"
+        },
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
+        "inputs_not_scanned": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": true,
         "ceiling_unreachable_findings": {},
+        "ignore_file_exclusions": null,
         "skip_reason": null,
         "skip_detail": null,
         "error": null,
@@ -59,9 +67,15 @@
           "semgrep": "PASSED"
         },
         "incomplete_scanners": [],
+        "incomplete_scanner_details": {},
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
+        "inputs_not_scanned": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": false,
         "ceiling_unreachable_findings": {},
+        "ignore_file_exclusions": null,
         "skip_reason": null,
         "skip_detail": null,
         "error": null,
@@ -98,7 +112,8 @@
       "actionable_finding_count": 0,
       "dependencies_satisfied": false,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125,
+      "missing_reason": "api: its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message"
     },
     "semgrep": {
       "status": "PASSED",

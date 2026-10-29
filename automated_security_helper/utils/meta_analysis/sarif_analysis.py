@@ -8,6 +8,7 @@ import os
 from typing import Dict, List, Set, Tuple
 
 from automated_security_helper.utils.meta_analysis import SCANNER_NAME_MAP
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ def analyze_sarif_file(
         return field_paths, final_scanner_name
 
     except Exception as e:
-        print(f"Error processing {file_path}: {e}")
+        print(shown_not_obeyed(f"Error processing {file_path}: {e}"))
         return {}, "error"
 
 

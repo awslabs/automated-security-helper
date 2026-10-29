@@ -112,24 +112,14 @@ jobs:
       contents: read
     steps:
       # Default fetch-depth (1) on purpose. hatch_build.py stamps
-      # automated_security_helper/assets/ASH_INSTALLED_REVISION during the build,
-      # and despite the name of the function that produces it (_get_commit_sha)
-      # what it actually runs is `git rev-parse --abbrev-ref HEAD` -- a branch
-      # name, deliberately, per the NOTE at hatch_build.py:78 saying the Dockerfile
-      # needs the branch rather than a commit. That needs no history, so a full
-      # clone would buy nothing here.
-      #
-      # Worth knowing when reading a built artifact: on a pull_request event the
-      # checkout leaves HEAD detached, and `--abbrev-ref HEAD` on a detached HEAD
-      # prints the literal string "HEAD". So the wheel this job builds records
-      # "HEAD" as its revision. That is pre-existing behavior of the build hook,
-      # not something this workflow introduces, and it does not fail the build --
-      # "HEAD" is not one of the values the hook's fallback rejects. It is noted
-      # here so nobody reads that string as corruption.
+      # automated_security_helper/assets/ASH_INSTALLED_REVISION during the build
+      # with `git rev-parse HEAD`, the full commit id, which a container image
+      # built from the installed package fetches by id. That needs no history,
+      # so a full clone would buy nothing here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: true
 
@@ -212,7 +202,7 @@ jobs:
       #
       #   unpinned-asset                    a file in automated_security_helper/
       #                                     assets/ that is not in
-      #                                     ASSETS_ALLOWLIST (14 entries)
+      #                                     ASSETS_ALLOWLIST (18 entries)
       #   unpinned-package-subdirectory     a new directory directly under
       #                                     automated_security_helper/
       #                                     (PACKAGE_SUBDIRECTORIES, 12 entries)
@@ -272,9 +262,15 @@ jobs:
           # rpm, MSIX, Flatpak, Chocolatey and winget packages put on PATH, and it
           # is declared in wheel metadata that a plain import would not exercise.
           /tmp/ash-wheel-check/bin/ash --version
+          # The wheel carries the GenAI guide for its own version, so the command
+          # writes it with no network: every proxy points at a closed port here, and
+          # the copy must be the docs page the wheel was built from.
+          HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 NO_PROXY='' \
+            /tmp/ash-wheel-check/bin/ash get-genai-guide --output /tmp/ash-genai-guide.md
+          cmp /tmp/ash-genai-guide.md docs/content/docs/genai-steering-guide.md
 
       - name: Upload wheel and sdist
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # run_attempt is in the name because artifact names are immutable within a
           # run from upload-artifact v4 onward, and this is pinned at v7. "Re-run all

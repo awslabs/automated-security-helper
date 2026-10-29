@@ -12,24 +12,47 @@ selection modes:
 * **Full override** — replace the resolved config with a YAML string, still
   validated through :class:`AshConfig`.
 
-The session state object here is intentionally minimal — Track 10.5 (#63) owns
-the full ``MCPSession`` lifecycle and disconnect cleanup. We expose enough
-surface (``bound_config``, ``profile_name``, ``patch_ops``, ``override_yaml``)
-for downstream tools (``run_ash_scan``, ``mcp_validate_config``, etc.) to
-prefer a session-bound config over an explicit ``config_path``.
+The session state here is the single source of truth for a session's bound
+profile. The session lifecycle (``MCPSession``, disconnect cleanup, the TTL
+sweep) lives in :mod:`automated_security_helper.cli.mcp.sessions`, and its
+session model deliberately holds no binding fields, so do not grow a copy of
+this state there. We expose enough surface (``bound_config``,
+``profile_name``, ``patch_ops``, ``override_yaml``) for downstream tools
+(``run_ash_scan``, ``mcp_validate_config``, etc.) to prefer a session-bound
+config over an explicit ``config_path``.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
+import os
+import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import Dict, List, Optional, Tuple
-
-import yaml
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Union
 
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.config_sources import (
+    describe_config_path,
+    is_config_parse_error,
+    original_of_scan_copy,
+    read_config_file_literally,
+    resolve_config_document,
+    unparsed_config_reason,
+)
+from automated_security_helper.core.exceptions import ASHConfigUnparsedError
+from automated_security_helper.utils.error_text import error_text
+
+if TYPE_CHECKING:
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.config.operator_only_options import (
+        RepositorySettings,
+    )
 
 
 class ProfileRegistryError(ValueError):
@@ -89,8 +112,12 @@ def _sha256_of_path(path: Path) -> str:
 def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
     """Parse + load every ``--profile`` spec into a registry dict.
 
-    Each profile is loaded via :meth:`AshConfig.from_file`, so the same
-    YAML/JSON/!ENV resolution path the regular CLI uses is in effect here.
+    Each profile is loaded as a run's configuration is
+    (``resolve_config.load_config_file_for_run``), so the same YAML/JSON/!ENV
+    resolution path the regular CLI uses is in effect here, and the profile knows
+    which of its values were read from the environment and the reference each
+    was written as: materialize_session_config writes those references, not the
+    values.
 
     Raises:
         ProfileRegistryError: on duplicate name, missing file, malformed
@@ -108,17 +135,45 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
             raise ProfileRegistryError(
                 f"--profile {name!r} points at missing file: {path}"
             )
+        unparsed: Optional[str] = None
         try:
-            cfg = AshConfig.from_file(path)
-        except yaml.YAMLError as exc:
-            raise ProfileRegistryError(
-                f"--profile {name!r} failed to parse {path}: {exc}"
-            ) from exc
+            from automated_security_helper.config.operator_paths import (
+                not_delivered_by_a_client,
+            )
+
+            from automated_security_helper.config.resolve_config import (
+                load_config_file_for_run,
+            )
+
+            # The operator's file: a relative path in it is taken from its
+            # directory, before the session's copy is written somewhere else
+            # (config/operator_paths.py). Read as the run reads its
+            # configuration, keeping what it read from the environment, so the
+            # session's copy holds each such value as the file wrote it and the
+            # scan reads it from the environment itself
+            # (materialize_session_config).
+            cfg = load_config_file_for_run(
+                path, anchor_relative_paths=not_delivered_by_a_client
+            )[1]
         except Exception as exc:
-            # Pydantic ValidationError, JSON decode errors, OSError, etc.
-            raise ProfileRegistryError(
-                f"--profile {name!r} failed to load {path}: {exc}"
-            ) from exc
+            if isinstance(exc, ASHConfigUnparsedError):
+                # A TOML parse refusal arrives already formatted: its message is
+                # the complete refusal and names the file, so the "failed to
+                # load <path>" frame would name the path twice.
+                unparsed = error_text(exc)
+            elif not is_config_parse_error(exc):
+                # ASHConfigValidationError (from_file's model refusal, described
+                # and redacted, with no pydantic error chained), OSError, etc.
+                raise ProfileRegistryError(
+                    f"--profile {name!r} failed to load {path}: {error_text(exc)}"
+                ) from exc
+            else:
+                # The parser's own words can quote the file
+                # (unparsed_config_reason).
+                unparsed = unparsed_config_reason(path, exc)
+        if unparsed is not None:
+            # Outside the handler, so the parser's error is not its context.
+            raise ProfileRegistryError(f"--profile {name!r}: {unparsed}")
         # Re-validate the *raw* YAML/JSON top-level keys against AshConfig
         # so operator typos in profile YAML fail at MCP boot rather than at
         # silently-ignored runtime. AshConfig.model_config has extra='ignore'
@@ -129,29 +184,41 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
         # are handled by Issue #82 — discriminated-union plugin config
         # validation — once that lands. Until then, a top-level gate
         # catches the common case (typos at the AshConfig root).
+        #
+        # Read by the loader's own reader, as from_file read it, so a profile that
+        # uses !ENV or is TOML is checked rather than refused by a plain parser.
         try:
-            with open(path, mode="r", encoding="utf-8") as f:
-                if str(path).endswith(".json"):
-                    import json as _json
-
-                    raw = _json.load(f)
-                else:
-                    raw = yaml.safe_load(f)
             allowed = set(AshConfig.model_fields.keys())
             for finfo in AshConfig.model_fields.values():
                 if finfo.alias:
                     allowed.add(finfo.alias)
-            unknown = sorted(set(raw or {}) - allowed)
-            if unknown:
-                raise ProfileRegistryError(
-                    f"--profile {name!r} has unknown top-level field(s): "
-                    f"{', '.join(unknown)}"
-                )
+            # Every file the profile is built from: from_file follows its
+            # `extends` chain, so a base's typo is the same mistake as the
+            # profile's own and was ignored. The chain is resolved as from_file
+            # resolved it (bases confined to the profile's directory, an
+            # error naming no value read from the environment), and each
+            # file's own keys are read in its format (YAML, JSON, TOML, a
+            # pyproject.toml's [tool.ash] table) as the file writes them.
+            chain = resolve_config_document(path).chain
+            for source in dict.fromkeys(chain):
+                raw = read_config_file_literally(source)
+                unknown = sorted(set(raw or {}) - allowed)
+                if unknown:
+                    where = (
+                        ""
+                        if Path(source).resolve() == path.resolve()
+                        else f" in its base {describe_config_path(Path(source))}"
+                    )
+                    raise ProfileRegistryError(
+                        f"--profile {name!r} has unknown top-level field(s)"
+                        f"{where}: {', '.join(unknown)}"
+                    )
         except ProfileRegistryError:
             raise
         except Exception as exc:
             raise ProfileRegistryError(
-                f"--profile {name!r} re-validation against schema failed: {exc}"
+                f"--profile {name!r} re-validation against schema failed: "
+                f"{error_text(exc)}"
             ) from exc
         registry[name] = ProfileEntry(
             name=name,
@@ -201,18 +268,31 @@ def clear_profile_registry() -> None:
 # Per-session state
 # ---------------------------------------------------------------------------
 
-# Track 10.5 (#63) owns the full ``MCPSession`` shape (workspace_root,
-# disconnect cleanup, etc.). We define just the surface ``select_profile``
-# needs so its tests can exercise the binding without depending on #63.
+# ``sessions.MCPSession`` owns the session's workspace and locks. What a client
+# bound is stored here, keyed by session id, and is the only record of the
+# selected profile: ``MCPSession`` has no profile, config or patch fields.
+
+
+def client_values_present(
+    patch_ops: Optional[Sequence[Dict]], override_yaml: Optional[str]
+) -> bool:
+    """Whether a binding made from these holds a change a client asked for.
+
+    True for a non-empty ``patch_ops`` or any ``override_yaml``, an empty string
+    included. An empty ``patch_ops`` changes nothing, so a binding made from it is
+    the registered profile's own copy. This is the one reading: a stored binding
+    answers it as ``SessionState.client_changed``, and ``mcp_select_profile`` writes
+    the client's copy of the profile by it.
+    """
+    return bool(patch_ops) or override_yaml is not None
 
 
 @dataclass
 class SessionState:
-    """Minimal per-connection state for Track 10.3.
+    """The profile a session selected, with its resolved config.
 
-    Track 10.5 will generalize this into a full ``MCPSession`` with workspace
-    + disconnect handling. Until then we hold only what binding the resolved
-    config requires.
+    This is the source of truth for a session's binding; ``sessions.MCPSession``
+    holds none of it.
 
     ``config_path`` is what makes a binding observable. ``bound_config`` is the
     resolved ``AshConfig``, and for a long time it was the only thing stored --
@@ -220,14 +300,34 @@ class SessionState:
     takes a config *path*. The path here names a file
     :func:`materialize_session_config` wrote inside the session's own sandbox, so
     a scan can be handed it and the confinement boundary permits reading it.
+
+    ``trusted_config_path`` names the registered profile as the operator
+    registered it, materialized in the session's ``config/`` directory. It is
+    ``config_path`` itself for a binding without a client patch. With one,
+    ``config_path`` is the patched copy in ``client-config/``, which is the
+    client's, and this is the trusted base it is resolved against.
     """
 
     session_id: str
     bound_config: Optional[AshConfig] = None
     profile_name: Optional[str] = None
-    patch_ops: Optional[List[Dict]] = field(default=None)
+    patch_ops: Optional[Tuple[Dict, ...]] = field(default=None)
     override_yaml: Optional[str] = None
     config_path: Optional[str] = None
+    trusted_config_path: Optional[str] = None
+
+    @property
+    def client_changed(self) -> bool:
+        """Whether a client's patch or override is in this binding's config.
+
+        True for a non-empty ``patch_ops`` or any ``override_yaml``. An empty
+        ``patch_ops`` is stored as an empty tuple, so the binding still records
+        that the session chose inherit-and-patch, but it changes nothing:
+        ``select_profile`` binds the registered profile's own copy for it. It reads
+        the binding with :func:`client_values_present`, the reading
+        ``select_profile`` writes the client's copy by, so the two cannot differ.
+        """
+        return client_values_present(self.patch_ops, self.override_yaml)
 
 
 _session_lock = RLock()
@@ -239,19 +339,24 @@ _session_state: Dict[str, SessionState] = {}
 DEFAULT_SESSION_ID = "__default__"
 
 
-def get_session_state(session_id: Optional[str] = None) -> SessionState:
-    """Return the SessionState for ``session_id``, creating it on first use.
+def get_session_state(session_id: Optional[str] = None) -> Optional[SessionState]:
+    """Return the SessionState bound to ``session_id``, or None if it has none.
 
-    ``None`` resolves to :data:`DEFAULT_SESSION_ID` so callers without an
-    explicit id (stdio transport, in-process tests) still get a stable slot.
+    ``None`` as the id resolves to :data:`DEFAULT_SESSION_ID` so callers without
+    an explicit id (stdio transport, in-process tests) still get a stable slot.
+
+    A lookup creates nothing: an entry for an id with no workspace is one the TTL
+    sweep and ``sessions.end_session`` never find. :func:`bind_session_config` is
+    the way to record a binding.
+
+    A binding holds its own deep copies of the caller's patch ops and config
+    (:func:`bind_session_config`), so the stored state cannot be edited through
+    a reference the caller kept.
     """
-    sid = session_id or DEFAULT_SESSION_ID
     with _session_lock:
-        state = _session_state.get(sid)
-        if state is None:
-            state = SessionState(session_id=sid)
-            _session_state[sid] = state
-        return state
+        return _session_state.get(
+            DEFAULT_SESSION_ID if session_id is None else session_id
+        )
 
 
 #: Filename a bound config is materialized under, inside the session sandbox's
@@ -261,9 +366,103 @@ def get_session_state(session_id: Optional[str] = None) -> SessionState:
 #: profile the session ever selected.
 SESSION_CONFIG_FILENAME = "ash.yaml"
 
+#: Filename, in the session's ``config/`` directory, of a profile a workspace tool
+#: was given for one call (``profile``). Not ``SESSION_CONFIG_FILENAME``: that file
+#: is the profile the session bound, and the trusted base of a patched binding, so
+#: a call that names another profile must not replace it. The prefix of
+#: ``call_profile_filename``'s names.
+CALL_PROFILE_FILENAME = "call-profile.yaml"
 
-def materialize_session_config(session_id: Optional[str], config: AshConfig) -> str:
+_CALL_PROFILE_STEM, _CALL_PROFILE_SUFFIX = os.path.splitext(CALL_PROFILE_FILENAME)
+_CALL_PROFILE_DIGEST_LENGTH = 16
+_CALL_PROFILE_NAME = re.compile(
+    rf"{re.escape(_CALL_PROFILE_STEM)}-[0-9a-f]{{{_CALL_PROFILE_DIGEST_LENGTH}}}"
+    rf"{re.escape(_CALL_PROFILE_SUFFIX)}"
+)
+
+
+def call_profile_filename(profile_name: str) -> str:
+    """The file a workspace tool's ``profile`` is materialized under, one per profile.
+
+    Named by a digest of the profile name, not the name itself, which the
+    operator chose and would otherwise become a path component. One file per
+    profile, so two calls in one session that name different profiles do not
+    replace the file the other's plan recorded and its scan reads.
+    """
+    digest = hashlib.sha256(profile_name.encode("utf-8")).hexdigest()
+    return (
+        f"{_CALL_PROFILE_STEM}-{digest[:_CALL_PROFILE_DIGEST_LENGTH]}"
+        f"{_CALL_PROFILE_SUFFIX}"
+    )
+
+
+def is_call_profile_filename(name: str) -> bool:
+    """Whether ``name`` has the shape of a name ``call_profile_filename`` returns.
+
+    By shape alone: the prefix, a dash, exactly 16 lowercase hex digits and the
+    suffix, nothing before or after. Only the server writes in a session's
+    ``config/`` directory (``sandbox._server_config_dir_refusal``), so a file
+    there named so is one it wrote, and the registered profiles need not be
+    looked up to tell.
+    """
+    return _CALL_PROFILE_NAME.fullmatch(name) is not None
+
+
+def is_client_copy_of(config_path: Path | str, trusted_config_path: Path | str) -> bool:
+    """Whether ``config_path`` is the copy of a profile a client patched, in a
+    session's ``client-config/``, and ``trusted_config_path`` the operator's copy
+    it was built from, in the same session's ``config/``
+    (``materialize_session_binding``). Such a copy holds the values the profile
+    read from the environment as their references, which ``resolve_config``
+    fills from the operator's copy.
+
+    A scan takes its own copy of the operator's copy and hands that over as the
+    trusted base, named for the scan (``config_sources.SCAN_COPY_PREFIX``). The
+    copy stands for the file it copies, so it is read as that file
+    (``original_of_scan_copy``): only a copy a live scan registered maps, and a
+    file that merely carries such a name does not."""
+    from automated_security_helper.cli.mcp.sandbox import (
+        CLIENT_CONFIG_DIR_NAME,
+        CONFIG_DIR_NAME,
+    )
+
+    client = Path(config_path)
+    trusted = Path(original_of_scan_copy(Path(trusted_config_path)))
+    if (
+        client.name != SESSION_CONFIG_FILENAME
+        or trusted.name != SESSION_CONFIG_FILENAME
+    ):
+        return False
+    if (
+        client.parent.name != CLIENT_CONFIG_DIR_NAME
+        or trusted.parent.name != CONFIG_DIR_NAME
+    ):
+        return False
+    try:
+        return client.parent.parent.resolve() == trusted.parent.parent.resolve()
+    except OSError:
+        return False
+
+
+def materialize_session_config(
+    session_id: Optional[str],
+    config: AshConfig,
+    *,
+    client_patched: bool = False,
+    filename: str = SESSION_CONFIG_FILENAME,
+) -> str:
     """Write ``config`` into the session's sandbox and return the path.
+
+    Into ``config/``, which counts as the operator's, unless ``client_patched``:
+    a profile after a client's ``patch_ops`` or ``override_yaml`` goes into
+    ``client-config/``, which counts as the client's (``sandbox.CLIENT_CONFIG_DIR_NAME``).
+
+    The operator's copy holds only the fields the registered profile sets
+    (``AshConfig.save``'s ``exclude_unset``). It loads back as the same values,
+    and the workspace tools layer it over a project's own config, where a field
+    in the file is final (``workspace/resolver._resolve_project_config``): a copy
+    holding every default would set every field and leave the project's config
+    nothing to fill. The client's copy is written whole; it is never layered.
 
     Why a file at all
     -----------------
@@ -318,18 +517,98 @@ def materialize_session_config(session_id: Optional[str], config: AshConfig) -> 
 
     from automated_security_helper.cli.mcp.sandbox import session_sandbox
 
-    sandbox = session_sandbox(session_id or DEFAULT_SESSION_ID)
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+    )
+
+    if session_id == UNIDENTIFIED_SESSION_ID:
+        raise RuntimeError(
+            "cannot materialize a session config: this caller has no session the "
+            "server issued, so it has no session workspace to hold one"
+        )
+    sandbox = session_sandbox(DEFAULT_SESSION_ID if session_id is None else session_id)
     if sandbox.root is None:
         raise RuntimeError(
             "cannot materialize a session config: no MCP workspace root could "
             "be resolved. Set ASH_MCP_WORKSPACE_ROOT."
         )
-    config_dir = sandbox.config_dir
+    from automated_security_helper.cli.mcp.session_paths import (
+        mark_session_workspace,
+    )
+
+    mark_session_workspace(sandbox.root)
+    config_dir = sandbox.client_config_dir if client_patched else sandbox.config_dir
     config_dir.mkdir(parents=True, exist_ok=True)
-    target = config_dir / SESSION_CONFIG_FILENAME
+    target = config_dir / filename
     # Written to the native path; only the recorded spelling is normalized.
-    config.save(target)
+    # Through a temporary file and a rename, so a scan reading the file while
+    # another call writes it reads the old content or the new, never part of one.
+    partial = config_dir / f".{filename}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        # Each value the profile's files read from the environment is written as
+        # the file wrote it, never the value. The operator's copy tags it !ENV,
+        # and the scan reads it from the environment when it loads the copy. The
+        # client's copy, in a directory where !ENV is not resolved
+        # (config_sources), holds it as quoted text, which a scan fills from the
+        # operator's copy (is_client_copy_of, resolve_config).
+        if getattr(config, "_environment_references", ()):
+            config.save(
+                partial,
+                exclude_unset=not client_patched,
+                as_written=True,
+                env_tags=not client_patched,
+            )
+        else:
+            config.save(partial, exclude_unset=not client_patched)
+        os.replace(partial, target)
+    finally:
+        partial.unlink(missing_ok=True)
     return target.as_posix()
+
+
+def materialize_session_binding(
+    session_id: Optional[str],
+    registered: AshConfig,
+    patched: Optional[AshConfig] = None,
+) -> Tuple[str, str]:
+    """Write a ``select_profile`` binding; return ``(config_path, trusted_config_path)``.
+
+    ``registered`` is the profile as the operator registered it, written to
+    ``config/``. ``patched`` is the profile after the client's ``patch_ops`` or
+    ``override_yaml``, written to ``client-config/``; None for a binding without
+    a patch, whose config is ``registered`` and whose previous patched copy, if
+    any, is removed, so the session holds no client copy it is not bound to.
+
+    The client's side changes first: the patched copy is written, or the old one
+    removed, before the operator copy is replaced, so the operator copy is never
+    replaced under an older client copy. The binding is recorded by the caller
+    only after both, so a failure in between leaves the previous binding with a
+    different client copy, still resolved as the client's against the previous
+    profile, or with none, which leaves it unbound.
+
+    Raises:
+        RuntimeError: as ``materialize_session_config`` does.
+        OSError: when a file cannot be written or removed.
+    """
+    from automated_security_helper.cli.mcp.sandbox import session_sandbox
+
+    if patched is not None:
+        # The client's copy is built from the registered profile, so it holds the
+        # values that profile read from the environment where the client did not
+        # change them; it records them as the profile wrote them. A patch has
+        # followed them already: one an op wrote over is the client's text, and
+        # one an op moved is at its new entry.
+        if not patched._references_followed:
+            patched._environment_references = registered._environment_references
+        config_path = materialize_session_config(
+            session_id, patched, client_patched=True
+        )
+        return config_path, materialize_session_config(session_id, registered)
+    sandbox = session_sandbox(DEFAULT_SESSION_ID if session_id is None else session_id)
+    if sandbox.root is not None:
+        (sandbox.client_config_dir / SESSION_CONFIG_FILENAME).unlink(missing_ok=True)
+    trusted = materialize_session_config(session_id, registered)
+    return trusted, trusted
 
 
 def bind_session_config(
@@ -340,27 +619,37 @@ def bind_session_config(
     patch_ops: Optional[List[Dict]] = None,
     override_yaml: Optional[str] = None,
     config_path: Optional[str] = None,
+    trusted_config_path: Optional[str] = None,
 ) -> SessionState:
     """Bind a resolved config to ``session_id``.
 
-    ``patch_ops`` and ``override_yaml`` are stored verbatim for diagnostics
-    so a future ``mcp__ash__get_session`` tool can show *how* the config was
-    derived (static, inherit-and-patch, full-override).
+    The binding stores its own copies of the caller's objects: ``patch_ops``
+    as a tuple of deep-copied ops and ``config`` as a deep model copy, so a
+    caller that mutates the list or the config it passed after binding does
+    not change what :func:`get_session_state` returns. ``override_yaml`` is an
+    immutable string and is stored as given. The content is kept word for word
+    for diagnostics, so a future ``mcp__ash__get_session`` tool can show *how*
+    the config was derived (static, inherit-and-patch, full-override).
 
-    ``config_path`` names the materialized file a scan will be handed. Passed in
-    rather than written here so that a caller which fails to materialize -- no
-    resolvable workspace root -- reports that as its own failure instead of
-    binding a config nothing can reach.
+    ``config_path`` names the materialized file a scan will be handed, and
+    ``trusted_config_path`` the registered profile's copy it is resolved against
+    (``materialize_session_binding`` returns both). Passed in rather than written
+    here so that a caller which fails to materialize -- no resolvable workspace
+    root -- reports that as its own failure instead of binding a config nothing
+    can reach.
     """
-    sid = session_id or DEFAULT_SESSION_ID
+    sid = DEFAULT_SESSION_ID if session_id is None else session_id
     with _session_lock:
         state = SessionState(
             session_id=sid,
-            bound_config=config,
+            bound_config=config.model_copy(deep=True),
             profile_name=profile_name,
-            patch_ops=patch_ops,
+            patch_ops=(
+                tuple(copy.deepcopy(patch_ops)) if patch_ops is not None else None
+            ),
             override_yaml=override_yaml,
             config_path=config_path,
+            trusted_config_path=trusted_config_path,
         )
         _session_state[sid] = state
         return state
@@ -387,21 +676,209 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
     """
 
     with _session_lock:
-        state = _session_state.get(session_id or DEFAULT_SESSION_ID)
+        state = _session_state.get(
+            DEFAULT_SESSION_ID if session_id is None else session_id
+        )
         recorded = state.config_path if state is not None else None
     if recorded is None:
         return None
     return recorded if Path(recorded).is_file() else None
 
 
-def clear_session_state(session_id: Optional[str] = None) -> None:
-    """Drop the SessionState for ``session_id`` (or every state if None).
+def session_config_was_patched(config_path: Union[str, Path]) -> bool:
+    """Whether ``config_path`` is a session's profile after a client's patch.
 
-    Track 10.5 will hook this into ``on_disconnect``; for Track 10.3 it
-    exists so tests can scrub between cases.
+    True for a file in a session's ``client-config/`` directory under the MCP
+    workspace root, where ``materialize_session_binding`` writes a profile after
+    ``patch_ops`` or ``override_yaml``. False for the registered profile in
+    ``config/`` and for any path outside a session's ``client-config/``.
+
+    Decided by where the file is, not by the recorded session state, so the
+    answer is the same after the state is cleared, and it agrees with
+    ``sandbox.config_is_client_supplied`` for a session's profiles. Judged as
+    named and as resolved, as that function is: a link to a patched profile
+    counts, wherever the link is. The unit is the file: a profile any client
+    patch touched is the client's as a whole.
+
+    Also True for a file a session's recorded binding names as its config when
+    that binding carries a non-empty ``patch_ops`` or any ``override_yaml``,
+    wherever the file is: a client's patch is in it, so a tool config path it
+    names is not the operator's (``config/path_trust.py``). An empty
+    ``patch_ops`` changes nothing, and ``select_profile`` binds the registered
+    profile's own copy in ``config/`` for it, so that file is the operator's.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        CLIENT_CONFIG_DIR_NAME,
+        _parts_below,
+        shared_workspace_root,
+    )
+
+    shared = shared_workspace_root()
+    if shared is not None:
+        candidates = [Path(os.path.abspath(config_path))]
+        try:
+            candidates.append(Path(config_path).resolve())
+        except (OSError, RuntimeError):
+            # A path that can't be resolved (a symlink loop) is judged as named.
+            pass
+        for candidate in candidates:
+            parts = _parts_below(candidate, shared)
+            if (
+                parts is not None
+                and len(parts) >= 3
+                and parts[1] == CLIENT_CONFIG_DIR_NAME
+            ):
+                return True
+    try:
+        target = Path(config_path).resolve()
+    except (OSError, RuntimeError):
+        return False
+    with _session_lock:
+        states = list(_session_state.values())
+    for state in states:
+        if state.config_path is None:
+            continue
+        try:
+            if Path(state.config_path).resolve() != target:
+                continue
+        except (OSError, RuntimeError):
+            continue
+        if state.client_changed:
+            return True
+    return False
+
+
+def resolve_session_trusted_config_path(
+    session_id: Optional[str] = None,
+) -> Optional[str]:
+    """The trusted base a config this session's client supplied is resolved against, or None.
+
+    The registered profile the session bound, as the operator registered it: its
+    copy in the session's ``config/`` directory, never the client-patched copy
+    ``resolve_session_config_path`` returns for a patched binding. None for an
+    unbound session, or when the file is gone, as for that function (the two
+    files are removed together, with the session workspace); the caller then
+    takes the server's default config as the trusted base, as for a client's
+    config in an unbound session.
+    """
+
+    with _session_lock:
+        state = _session_state.get(
+            DEFAULT_SESSION_ID if session_id is None else session_id
+        )
+        recorded = state.trusted_config_path if state is not None else None
+    if recorded is None:
+        return None
+    return recorded if Path(recorded).is_file() else None
+
+
+def session_profile_entry(
+    session_id: Optional[str] = None, profile: Optional[str] = None
+) -> Optional[ProfileEntry]:
+    """The registered profile a call runs under: ``profile``, else the session's bound one.
+
+    None when neither applies. The entry is the operator's registered file as
+    loaded at startup, never the session's materialized config, which holds the
+    profile after the client's ``patch_ops`` or ``override_yaml``.
+
+    Raises:
+        ProfileRegistryError: The profile named, or the one bound, is not
+            registered. Failing closed: running under some other policy would
+            accept what the operator's denies.
+    """
+    name = profile
+    if name is None:
+        with _session_lock:
+            state = _session_state.get(
+                DEFAULT_SESSION_ID if session_id is None else session_id
+            )
+            name = state.profile_name if state is not None else None
+    if name is None:
+        return None
+    entry = get_profile_registry().get(name)
+    if entry is None:
+        raise ProfileRegistryError(
+            f"profile {name!r} is not registered, so the runtime-override policy "
+            "it sets cannot be read"
+        )
+    return entry
+
+
+def session_client_rules(
+    session_id: Optional[str] = None,
+    profile: Optional[str] = None,
+    *,
+    repository: "Optional[RepositorySettings]" = None,
+) -> "ClientConfigRules":
+    """The rules a config this session's client delivers is checked against.
+
+    The registered profile's (``session_profile_entry``), so a client allowed to
+    change ``global_settings`` cannot rewrite the policy its own uploads are
+    checked against. An unbound session gets the server's default config's. A
+    bound profile that is no longer registered, or a default config that cannot
+    be loaded, gives rules that refuse only a config with a client-delivered file,
+    which is the one they would check; any other scan reports its own config
+    error as it always has.
+
+    ``repository`` is the settings the caller's load of the same chain uses; the
+    server's default config is read with them (``trusted_default_config``), so a
+    value the load leaves out never makes the rules unreadable.
+    """
+    from automated_security_helper.config.client_config_policy import (
+        rules_from,
+        trusted_default_config,
+        unreadable_rules,
+    )
+
+    try:
+        entry = session_profile_entry(session_id, profile)
+        trusted = (
+            entry.config if entry is not None else trusted_default_config(repository)
+        )
+    except Exception as exc:  # noqa: BLE001 -- held, and raised only where it applies
+        rules = unreadable_rules(
+            f"the trusted config could not be loaded: {type(exc).__name__}: {exc}"
+        )
+    else:
+        rules = rules_from(trusted)
+    # Which session's config/ directory holds the files set aside for this
+    # client (ClientConfigRules.session_id).
+    return rules.model_copy(update={"session_id": session_id})
+
+
+def session_has_binding(session_id: Optional[str] = None) -> bool:
+    """Whether ``session_id`` has bound a profile.
+
+    ``None`` is the stdio session (``DEFAULT_SESSION_ID``), as for the other
+    accessors. A state exists only once ``bind_session_config`` created it, with a
+    profile and a config, so a state in the map is a binding.
     """
     with _session_lock:
-        if session_id is None:
-            _session_state.clear()
-        else:
-            _session_state.pop(session_id, None)
+        return (
+            DEFAULT_SESSION_ID if session_id is None else session_id
+        ) in _session_state
+
+
+def clear_session_state(session_id: Optional[str]) -> None:
+    """Drop the SessionState for ``session_id``.
+
+    The id is required: a call with no argument raises ``TypeError``, so a caller
+    that meant to clear every session cannot clear one by accident. An explicit
+    ``None`` is the stdio session (``DEFAULT_SESSION_ID``), as for the other
+    accessors, and an empty string is not: it is an id of its own, distinct from
+    the stdio session (``bind_session_config("")`` stores a binding under it), so
+    clearing ``""`` drops the state bound under ``""`` and leaves the stdio
+    session's. Dropping every session's state is :func:`clear_all_session_state`.
+    ``sessions.end_session`` calls this when a session ends, so its bound profile
+    goes with its workspace.
+    """
+    with _session_lock:
+        _session_state.pop(
+            DEFAULT_SESSION_ID if session_id is None else session_id, None
+        )
+
+
+def clear_all_session_state() -> None:
+    """Drop every session's SessionState; tests use it to scrub between cases."""
+    with _session_lock:
+        _session_state.clear()

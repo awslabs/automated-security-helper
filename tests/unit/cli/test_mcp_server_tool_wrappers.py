@@ -31,6 +31,7 @@ from mcp.server.mcpserver import Context
 
 from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
+from tests.utils.scan_task_stubs import closing_scan_task_start
 from automated_security_helper.cli.mcp_server import (
     analyze_security_findings,
     check_installation,
@@ -94,20 +95,27 @@ class TestRunAshScanReportingPaths:
 
         with (
             patch(
-                f"{_SERVER}.mcp_scan_directory",
-                AsyncMock(return_value={"success": False, "error": "stopped here"}),
+                "automated_security_helper.cli.mcp_tools._start_scan_task",
+                side_effect=closing_scan_task_start(),
+            ) as started,
+            patch(
+                "automated_security_helper.core.previous_results."
+                "PreviousResults.set_aside",
+                side_effect=PermissionError("read-only"),
             ),
-            patch(f"{_SERVER}.os.remove", side_effect=PermissionError("read-only")),
+            patch(f"{_SERVER}.monitor_scan_progress", AsyncMock()),
         ):
             result = asyncio.run(
                 run_ash_scan(ctx=ctx, source_dir=str(allowed_root), clean_output=True)
             )
 
         warnings = [c.args[0] for c in ctx.warning.await_args_list]
-        assert any("Failed to clean up results file" in w for w in warnings)
+        # The previous results are set aside, not deleted; the warning names that.
+        assert any("Could not set the previous results aside" in w for w in warnings)
         assert any("read-only" in w for w in warnings)
-        # The scan attempt still went ahead; the cleanup failure is not fatal.
-        assert result["error_type"] == "scan_start_failure"
+        # The scan still started; the cleanup failure is not fatal.
+        assert result["success"] is True, result
+        started.assert_called_once()
 
     def test_a_failed_initial_progress_update_does_not_fail_the_scan(
         self, ctx, allowed_root
@@ -316,7 +324,11 @@ class TestGetScanResults:
         assert result["success"] is False
         assert result["error_type"] == "ValueError"
         assert "corrupt results" in result["error"]
-        assert "Failed to send error message to client" in logger.error.call_args[0][0]
+        # The guarded sender logs a lost send at warning by design (the traceback
+        # stays at debug); with level "error" its message spells this phrase.
+        assert (
+            "Failed to send error message to client" in logger.warning.call_args[0][0]
+        )
 
 
 class TestGetScanResultPaths:
@@ -370,7 +382,11 @@ class TestGetScanResultPaths:
 
         assert result["success"] is False
         assert result["error_type"] == "ValueError"
-        assert "Failed to send error message to client" in logger.error.call_args[0][0]
+        # The guarded sender logs a lost send at warning by design (the traceback
+        # stays at debug); with level "error" its message spells this phrase.
+        assert (
+            "Failed to send error message to client" in logger.warning.call_args[0][0]
+        )
 
 
 def _stdio_ctx() -> MagicMock:
@@ -419,11 +435,18 @@ class TestDelegatingToolWrappers:
         with patch(
             f"{_SERVER}.mcp_get_config", return_value={"project_name": "demo"}
         ) as inner:
-            result = asyncio.run(get_config(_stdio_ctx(), config_path=None, raw=True))
+            result = asyncio.run(
+                get_config(
+                    _stdio_ctx(), config_path=None, raw=True, search_dir="a-target"
+                )
+            )
 
         assert result == {"project_name": "demo"}
         inner.assert_called_once_with(
-            config_path=None, raw=True, session_id=DEFAULT_SESSION_ID
+            config_path=None,
+            raw=True,
+            search_dir="a-target",
+            session_id=DEFAULT_SESSION_ID,
         )
 
     def test_get_config_converts_a_raise_into_an_error_dict(self):
@@ -593,7 +616,10 @@ class TestResources:
         assert "rule_id" in schema["properties"]
 
     def test_the_exit_codes_resource_mirrors_the_canonical_constant(self):
+        """Every code a scan's table holds, plus ``commands``, the codes one command
+        gives a meaning of its own (test_exit_codes_resource.py pins that entry)."""
         codes = json.loads(get_ash_exit_codes())
+        codes.pop("commands")
 
         assert codes == {str(k): v for k, v in ASH_EXIT_CODES.items()}
         assert codes  # not an empty mapping

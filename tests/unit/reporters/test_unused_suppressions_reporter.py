@@ -4,9 +4,12 @@
 """Tests for the unused suppressions reporter."""
 
 import json
+import sys
+
 import pytest
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporter,
 )
@@ -141,3 +144,23 @@ def test_unused_suppressions_reporter_no_suppressions(test_plugin_context):
 
     # Verify no suppressions are listed
     assert len(report_data["unused_suppressions"]) == 0
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_the_markdown_copy_is_not_written_through_a_link(test_plugin_context, tmp_path):
+    """``ash report`` writes into an existing reports/, so the name may be a link."""
+    reports_dir = test_plugin_context.output_dir / "reports"
+    reports_dir.mkdir(parents=True)
+    victim = tmp_path / "victim.md"
+    (reports_dir / "ash.unused-suppressions.md").symlink_to(victim)
+    model = AshAggregatedResults()
+    model.used_suppressions = set()
+
+    try:
+        UnusedSuppressionsReporter(context=test_plugin_context).report(model)
+    except OutputDirLinkRefused:
+        pass
+
+    assert not victim.exists(), "the report was written through the link"

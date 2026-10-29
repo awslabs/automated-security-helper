@@ -1,11 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A malicious scanner. Each attempt records "succeeded" or "blocked: <why>".
+"""A fixture scanner that tries to act outside its sandbox. Each attempt records
+"succeeded" or "blocked: <why>".
 
 Run by the sandbox-escape fixture scanner as its tool subprocess, so it is spawned
 through the same path as every real scanner. Arguments are one JSON document naming
-what to attack; the outcome is written as JSON to the path in ``outcome``. Standard
+what to try; the outcome is written as JSON to the path in ``outcome``. Standard
 library only, because it runs with whatever the sandbox lets it see.
 """
 
@@ -37,21 +38,40 @@ def main() -> int:
             if spec["secret"] not in f.read():
                 raise RuntimeError("read something, but not the planted file")
 
+    def read_passwd_home(path):
+        # Planted in the passwd entry's home, which HOME does not name here.
+        def read():
+            with open(path, encoding="utf-8") as f:
+                if spec["secret"] not in f.read():
+                    raise RuntimeError("read something, but not the planted file")
+
+        return read
+
+    def read_link_in_source(key):
+        # A symlink committed in the source tree, read by its in-tree name: the
+        # sandbox hides its target unless the target is on the read list.
+        def read():
+            with open(spec[key], encoding="utf-8") as f:
+                if spec["secret"] not in f.read():
+                    raise RuntimeError("read something, but not the link's target")
+
+        return read
+
     def write_outside_output():
-        with open(os.path.join(spec["outside_dir"], "pwned.txt"), "w") as f:
-            f.write("pwned")
+        with open(os.path.join(spec["outside_dir"], "written.txt"), "w") as f:
+            f.write("written")
 
     def write_elsewhere_in_output():
-        with open(os.path.join(spec["output_dir"], "pwned.txt"), "w") as f:
-            f.write("pwned")
+        with open(os.path.join(spec["output_dir"], "written.txt"), "w") as f:
+            f.write("written")
 
     def modify_source():
         with open(os.path.join(spec["source_dir"], "app.py"), "a") as f:
-            f.write("\n# pwned\n")
+            f.write("\n# appended\n")
 
     def create_in_source():
-        with open(os.path.join(spec["source_dir"], "pwned.txt"), "w") as f:
-            f.write("pwned")
+        with open(os.path.join(spec["source_dir"], "written.txt"), "w") as f:
+            f.write("written")
 
     def tcp_connect():
         with socket.create_connection(("127.0.0.1", spec["tcp_port"]), timeout=5) as s:
@@ -131,23 +151,23 @@ def main() -> int:
         # uv's cache on the host, which a later unsandboxed `uv run` or `uv tool
         # install` reads. Writable only where the write cannot reach the host.
         with open(os.path.join(spec["host_cache"], "seed.txt"), "a") as f:
-            f.write("pwned\n")
-        with open(os.path.join(spec["host_cache"], "pwned.txt"), "w") as f:
-            f.write("pwned")
+            f.write("written\n")
+        with open(os.path.join(spec["host_cache"], "written.txt"), "w") as f:
+            f.write("written")
 
     def write_dev_shm():
         with open(spec["shm_file"], "w") as f:
-            f.write("pwned")
+            f.write("written")
 
     def plant_symlinks():
         # Links where ASH, which is not sandboxed, writes after the scanner exits:
-        # if ASH followed them it would overwrite the victims for the scanner.
+        # if ASH followed them it would overwrite the link targets for the scanner.
         results_dir = os.path.dirname(spec["outcome"])
-        for name, victim in spec["victims"].items():
+        for name, link_target in spec["link_targets"].items():
             link = os.path.join(results_dir, name)
             if os.path.lexists(link):
                 os.unlink(link)
-            os.symlink(victim, link)
+            os.symlink(link_target, link)
 
     def env_credentials():
         if os.environ.get("AWS_SECRET_ACCESS_KEY") != spec["secret"]:
@@ -168,6 +188,8 @@ def main() -> int:
     checks = {
         "read_ssh_key": read_ssh_key,
         "read_outside_source": read_outside_source,
+        "read_link_to_home": read_link_in_source("link_to_home"),
+        "read_link_elsewhere": read_link_in_source("link_elsewhere"),
         "write_outside_output": write_outside_output,
         "write_elsewhere_in_output": write_elsewhere_in_output,
         "modify_source": modify_source,
@@ -189,6 +211,8 @@ def main() -> int:
         checks["unix_datagram_from_socketpair"] = unix_datagram_from_socketpair
     if spec.get("shm_file"):
         checks["write_dev_shm"] = write_dev_shm
+    for name, path in (spec.get("passwd_home_files") or {}).items():
+        checks[name] = read_passwd_home(path)
     for name, fn in checks.items():
         outcomes[name] = attempt(fn)
 

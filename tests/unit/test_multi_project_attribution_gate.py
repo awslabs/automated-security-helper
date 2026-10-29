@@ -308,6 +308,124 @@ class TestAttributionRegression:
         assert any("no properties.workspace_project" in v for v in outcome.violations)
 
 
+def _run_of(results: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """The SARIF run attributed to the project ``key``."""
+    return next(
+        run
+        for run in results["sarif"]["runs"]
+        if run["properties"]["workspace_project"] == key
+    )
+
+
+def _attribution_violations(results: Dict[str, Any]) -> list[str]:
+    """What the payload-internal attribution check says about ``results``."""
+    return gate.check_findings_are_attributed_to_their_own_project(
+        gate.collect_runs(results)
+    )
+
+
+#: Every fixture project. The cases below run against each one, because the prefix
+#: test they sharpen behaves differently for the project named ``src``.
+ALL_PROJECT_KEYS = [project.key for project in gate.FIXTURE_PROJECTS]
+
+
+class TestWorkspaceUriNamesTheFindingsOwnFile:
+    """A workspace_uri is the project's path followed by the finding's own file.
+
+    A prefix test alone cannot show that. For the project named ``src`` every
+    fixture file already begins with ``src/``, so a path that was never rebased
+    onto its project still starts with the project's path. And the part after the
+    prefix is never read, so a path that names a different file of the same
+    project passes. Each failing case applies one of those to a payload that
+    passes cleanly; the controls beside them pass on correct output.
+    """
+
+    @pytest.mark.parametrize("key", ALL_PROJECT_KEYS)
+    def test_a_workspace_uri_never_rebased_onto_its_project_fails(self, healthy, key):
+        result = _run_of(healthy, key)["results"][0]
+        artifact = result["locations"][0]["physicalLocation"]["artifactLocation"]
+        result["properties"]["workspace_uri"] = artifact["uri"]
+        violations = _attribution_violations(healthy)
+        assert any(
+            f"'{key}'" in v and "workspace_uri value(s)" in v for v in violations
+        ), violations
+
+    @pytest.mark.parametrize("key", ALL_PROJECT_KEYS)
+    def test_a_workspace_uri_naming_another_file_of_the_project_fails(
+        self, healthy, key
+    ):
+        project = next(p for p in gate.FIXTURE_PROJECTS if p.key == key)
+        result = _run_of(healthy, key)["results"][0]
+        artifact = result["locations"][0]["physicalLocation"]["artifactLocation"]
+        assert artifact["uri"] == gate.FIXTURE_RELATIVE_PATH
+        result["properties"]["workspace_uri"] = (
+            f"{project.relative_path}/{gate.FIXTURE_MARKER_RELATIVE_PATH}"
+        )
+        violations = _attribution_violations(healthy)
+        assert any(f"'{key}'" in v and "own artifact path" in v for v in violations), (
+            violations
+        )
+
+    def test_a_workspace_uri_with_no_location_to_come_from_fails(self, healthy):
+        result = _run_of(healthy, "project-a")["results"][0]
+        result["locations"] = []
+        violations = _attribution_violations(healthy)
+        assert any(
+            "'project-a'" in v and "own artifact path" in v for v in violations
+        ), violations
+
+    def test_the_gate_reports_a_bare_workspace_uri_in_the_project_named_src(
+        self, healthy, output_dir
+    ):
+        """The case the prefix test could not see: ``src/insecure.py`` in ``src``."""
+        result = _run_of(healthy, "src")["results"][0]
+        result["properties"]["workspace_uri"] = gate.FIXTURE_RELATIVE_PATH
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert not outcome.passed
+        assert any(
+            "'src'" in v and "own artifact path" in v for v in outcome.violations
+        ), outcome.violations
+
+    def test_workspace_uris_naming_each_findings_own_file_pass(self, healthy):
+        """Every project, with several different files in each, on correct output."""
+        assert _attribution_violations(healthy) == []
+
+    def test_the_project_named_src_passes_with_a_rebased_workspace_uri(self, healthy):
+        run = _run_of(healthy, "src")
+        uris = {r["properties"]["workspace_uri"] for r in run["results"]}
+        assert f"src/{gate.FIXTURE_RELATIVE_PATH}" in uris
+        assert _attribution_violations({"sarif": {"runs": [run]}}) == []
+
+    def test_a_workspace_uri_naming_any_of_the_findings_own_locations_passes(
+        self, healthy
+    ):
+        """The aggregator uses the first location it can place, so a finding with
+        several locations may name a later one."""
+        result = _run_of(healthy, "project-b")["results"][0]
+        result["locations"].append(
+            {
+                "physicalLocation": {
+                    "artifactLocation": {
+                        "uri": gate.FIXTURE_MARKER_RELATIVE_PATH,
+                        "uriBaseId": "PROJECTROOT",
+                    }
+                }
+            }
+        )
+        result["properties"]["workspace_uri"] = (
+            f"project-b/{gate.FIXTURE_MARKER_RELATIVE_PATH}"
+        )
+        assert _attribution_violations(healthy) == []
+
+    def test_a_backslash_artifact_uri_matches_the_slashed_workspace_uri(self, healthy):
+        """The aggregator writes separators for a Windows project's backslashes."""
+        result = _run_of(healthy, "project-a")["results"][0]
+        artifact = result["locations"][0]["physicalLocation"]["artifactLocation"]
+        artifact["uri"] = "src\\insecure.py"
+        assert result["properties"]["workspace_uri"] == "project-a/src/insecure.py"
+        assert _attribution_violations(healthy) == []
+
+
 class TestMisattributionShapes:
     """The three ways attribution can be wrong, and the gate failing on each.
 
@@ -599,6 +717,96 @@ class TestSuppressionScopeRegression:
             ]
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("no longer fires" in v for v in outcome.violations)
+
+
+#: Every rule the healthy results show in the suppressing project besides the one
+#: it suppresses: two of the shared file's findings, the project's own marker, and
+#: the terraform finding. Its one suppression names a single rule at a single path,
+#: so none of these may carry a suppression.
+OTHER_RULES_IN_THE_SUPPRESSING_PROJECT = (
+    "B307",
+    "B602",
+    gate.MARKER_RULE_BY_PROJECT[gate.SUPPRESSING_PROJECT],
+    "CKV_AWS_18",
+)
+
+
+class TestSuppressionIsShownToApply:
+    """No unsuppressed occurrence of the rule is not proof its suppression applied.
+
+    In the suppressing project the check used to read a live count of zero as "the
+    suppression applied". Zero is also what a shared file that was never scanned in
+    that project looks like, and what a finding dropped instead of being marked
+    suppressed looks like. The check has to see the rule there with a suppression
+    on it, and has to see no suppression on anything else.
+
+    These call the check itself rather than the whole gate, so each mutation is
+    judged by this check alone and no unrelated assertion can satisfy or break a
+    test.
+    """
+
+    @staticmethod
+    def _suppressing_run(healthy):
+        return next(
+            run
+            for run in healthy["sarif"]["runs"]
+            if run["properties"]["workspace_project"] == gate.SUPPRESSING_PROJECT
+        )
+
+    @staticmethod
+    def _violations(healthy):
+        return gate.check_suppression_is_project_scoped(gate.collect_runs(healthy))
+
+    @pytest.mark.parametrize(
+        "dropped",
+        [
+            pytest.param((gate.SUPPRESSED_RULE_ID,), id="the-rule-alone"),
+            pytest.param(
+                ("B307", "B602", gate.SUPPRESSED_RULE_ID), id="the-whole-shared-file"
+            ),
+        ],
+    )
+    def test_a_suppressing_project_showing_no_trace_of_the_rule_fails(
+        self, healthy, dropped
+    ):
+        run = self._suppressing_run(healthy)
+        run["results"] = [
+            entry for entry in run["results"] if entry["ruleId"] not in dropped
+        ]
+        violations = self._violations(healthy)
+        assert any(
+            "nothing shows that its suppression applied" in v for v in violations
+        ), violations
+
+    @pytest.mark.parametrize("rule", OTHER_RULES_IN_THE_SUPPRESSING_PROJECT)
+    def test_a_suppression_reaching_another_rule_in_its_own_project_fails(
+        self, healthy, rule
+    ):
+        marked = 0
+        for entry in self._suppressing_run(healthy)["results"]:
+            if entry["ruleId"] == rule:
+                entry["suppressions"] = [{"kind": "external"}]
+                marked += 1
+        assert marked == 1, f"the healthy results hold no single {rule} result"
+        violations = self._violations(healthy)
+        assert any(
+            f"rule {rule} is suppressed" in v
+            and "reached beyond its own rule and path" in v
+            for v in violations
+        ), violations
+
+    def test_a_suppression_that_stays_within_its_rule_passes(self, healthy):
+        assert self._violations(healthy) == []
+
+    def test_every_occurrence_of_the_rule_being_suppressed_passes(self, healthy):
+        run = self._suppressing_run(healthy)
+        first = next(
+            entry
+            for entry in run["results"]
+            if entry["ruleId"] == gate.SUPPRESSED_RULE_ID
+        )
+        run["results"].append(copy.deepcopy(first))
+        assert self._violations(healthy) == []
 
 
 class TestThresholdScopeRegression:

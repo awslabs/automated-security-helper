@@ -258,6 +258,12 @@ def test_run_scan_passes_the_redirected_environment(gate, monkeypatch, tmp_path)
     captured: List[Dict[str, Any]] = []
 
     def _fake_run(argv, cwd=None, env=None):
+        if list(argv) == ["ash", "scan", "--help"]:
+            # The gate's probe of the image's options, answered as an ASH that has
+            # --fail-on-incomplete-scanners; not the scan this test is about.
+            return SimpleNamespace(
+                returncode=0, stdout="--fail-on-incomplete-scanners", stderr=""
+            )
         captured.append({"argv": list(argv), "cwd": cwd, "env": env})
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -305,9 +311,9 @@ def test_the_git_calls_keep_the_inherited_environment(gate, monkeypatch, tmp_pat
     gate.clone_source("repo", "feature", "a" * 40, "us-east-1")
 
     assert calls, "clone_source ran no subprocess"
-    assert all(call["env"] is None for call in calls), (
-        f"a git call was given a rewritten environment: {calls}"
-    )
+    # Named by argv: the environment a call was given would print its values.
+    rewritten = [call["argv"] for call in calls if call["env"] is not None]
+    assert rewritten == [], "these git calls were given a rewritten environment"
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +347,48 @@ def test_the_path_is_left_alone_when_the_image_recorded_none(flavor, monkeypatch
     monkeypatch.setenv("PATH", "/only/this")
     env = flavor.scan_env()
     assert env["PATH"] == "/only/this", flavor.name
+
+
+#: Every variable an SDK or CLI could take credentials or a profile from, in a
+#: Lambda function and in the other runtimes the same image may land in (a
+#: container credentials endpoint, a web identity token, a profile).
+CREDENTIAL_VARIABLES = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_SECURITY_TOKEN",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_CONFIG_FILE",
+)
+
+
+def test_the_scan_gets_none_of_the_function_role_credentials(flavor, monkeypatch):
+    """The function role can approve pull requests; the scanners run over one.
+
+    Both copies, every credential source, and the controls that the rest of the
+    environment survives: the scan still needs its region and ASH's own settings.
+    """
+    for name in CREDENTIAL_VARIABLES:
+        monkeypatch.setenv(name, f"function-role-{name.lower()}")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline")
+
+    env = flavor.scan_env()
+
+    leaked = sorted(name for name in CREDENTIAL_VARIABLES if name in env)
+    assert leaked == [], f"{flavor.name}: the scan inherited {leaked}"
+    assert env["AWS_EC2_METADATA_DISABLED"] == "true", flavor.name
+    assert env["AWS_REGION"] == "us-east-1", flavor.name
+    assert env["ASH_SCAN_EXTRA_ARGS"] == "--offline", flavor.name
 
 
 # ---------------------------------------------------------------------------

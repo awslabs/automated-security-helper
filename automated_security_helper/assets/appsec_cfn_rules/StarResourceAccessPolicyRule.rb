@@ -1,6 +1,7 @@
 require 'cfn-nag/custom_rules/base'
 require 'cfn-nag/violation'
 require 'cfn-model/parser/policy_document_parser'
+require_relative 'AccessPolicyReading'
 
 
 class StarResourceAccessPolicyRule < BaseRule
@@ -18,6 +19,8 @@ class StarResourceAccessPolicyRule < BaseRule
 
   def audit_impl(cfn_model)
     logical_resource_ids = []
+    unread_principals = []
+    limited_resources = []
 
     cfn_model.resources.values.each do |resource|
 
@@ -32,12 +35,24 @@ class StarResourceAccessPolicyRule < BaseRule
         # which matches none of the rescue clauses above it, so the process exited before
         # rendering and every rule's verdict on the template was lost -- not just this
         # one's. cfn_model is already audit_impl's parameter, so nothing new is plumbed in.
-        parsed_resource_policy = PolicyDocumentParser.new().parse(cfn_model, resource.accessPolicies)
+        #
+        # The document is built from the policy as the template wrote it, with each branch of
+        # every Fn::If present as a statement of its own: cfn-model resolves an Fn::If to its
+        # first branch when it parses, so a public value in the second would not be seen.
+        document, limited = AccessPolicyReading.policy_document(cfn_model, resource)
+        limited_resources << resource.logical_resource_id if limited
+        parsed_resource_policy = PolicyDocumentParser.new().parse(cfn_model, document)
         parsed_resource_policy.statements.each do |statement|
 
           # If any statement allows access from "*" then the resource is effectively public
           if statement.effect == "Allow" then
-            if statement.principal.has_key?("AWS") and statement.principal.has_value?("*") then
+            # Allow with NotPrincipal grants access to everyone except the principals listed,
+            # so it is public. Before this the rule read only Principal, which is nil on
+            # such a statement, and passed it over.
+            unread = []
+            is_public = public_principal?(cfn_model, statement.principal, unread)
+            unread.each { |shape| unread_principals << [resource.logical_resource_id, shape] }
+            if is_public || AccessPolicyReading.listed?(statement.not_principal) then
               logical_resource_ids << resource.logical_resource_id
             end
           end
@@ -45,6 +60,72 @@ class StarResourceAccessPolicyRule < BaseRule
       end
     end
 
-    logical_resource_ids
+    # One line per resource and shape, so a template with many unreadable principals is
+    # not drowned in them and a reader can find the resource to look at.
+    unread_principals.uniq.each do |logical_id, shape|
+      $stderr.puts(
+        format(
+          "WARNING: StarResourceAccessPolicyRule: unread principal in %s (%s); " \
+          "the rule cannot read it, so the principal was not checked",
+          logical_id,
+          shape
+        )
+      )
+    end
+
+    # A statement with more combinations of Fn::If branches than the helper reads is read as
+    # cfn-model parses it, so the rule says so once per resource.
+    limited_resources.uniq.each do |logical_id|
+      $stderr.puts(AccessPolicyReading.limit_warning(self.class.name, logical_id))
+    end
+
+    # A resource is added once per matching statement. The result lists each resource once.
+    logical_resource_ids.uniq
+  end
+
+  private
+
+  # True when a statement's principal names everyone. cfn-model's PolicyDocumentParser keeps
+  # the principal in the shape the template wrote it, so it can be:
+  #   a String   Principal: "*"
+  #   a Hash     Principal: {AWS: "*"}, {AWS: ["*"]} or {AWS: ["arn:...", "*"]}
+  #   an Array   Principal: ["*"] (cfn-model's own wildcard check raises on this shape,
+  #              but its parser passes it through)
+  #   nil        a statement with no Principal (one written with NotPrincipal instead is
+  #              read through AccessPolicyReading.listed?)
+  # This used to call has_key? and has_value? on the principal. Only a Hash answers those, so
+  # a String made the rule raise NoMethodError, and {AWS: ["*"]} was passed over because the
+  # Array is not equal to the String "*". With --isolate-custom-rule-exceptions a raise costs
+  # this rule's result for every resource in the template, not only the one that raised.
+  #
+  # A Hash counts when any of its values is "*" or a list holding "*", under any key. The old
+  # test read a Hash only when it had an "AWS" key, so {Service: "*"} was not reported while
+  # {AWS: "arn:...", Service: "*"} was. Everything the old test reported is still reported.
+  #
+  # A value, or an entry of a list, is not always text. A Ref to a parameter arrives as a
+  # Hash, because ASH gives cfn-model no parameter values, and an Fn::Sub that names a
+  # parameter arrives with its ${Name} in it. AccessPolicyReading.read_principal reads
+  # those through the parameter's Default and AllowedValues, as the verb rule reads an
+  # action, so a parameter whose Default is "*" is reported. A principal that is itself a
+  # Hash holding one intrinsic function (Principal: {Ref: P}) is one such value, not a map
+  # of names to values. What cannot be read is added to unread, and audit_impl writes a
+  # line to stderr for it.
+  def public_principal?(cfn_model, principal, unread)
+    if principal.is_a?(Hash) && !AccessPolicyReading.intrinsic?(principal) then
+      principal.values.map { |value| star_or_list_holding_star?(cfn_model, value, unread) }.any?
+    else
+      star_or_list_holding_star?(cfn_model, principal, unread)
+    end
+  end
+
+  # True when a value is "*" or a list holding "*" once its parameters are read. Every entry
+  # is read, so a line is written for each entry that cannot be, even after a "*" is found.
+  def star_or_list_holding_star?(cfn_model, value, unread)
+    entries = value.is_a?(Array) ? value : [value]
+    entries.map do |entry|
+      texts, shape = AccessPolicyReading.read_principal(cfn_model, entry)
+      unread << shape unless shape.nil?
+      texts.include?("*")
+    end.any?
   end
 end

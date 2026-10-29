@@ -19,6 +19,8 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.undecodable_text import recorded
 from pydantic import Field
 from typing import Annotated
 
@@ -107,7 +109,9 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # SARIF cannot even be enumerated -- is distinguishable from a failure
         # transforming one result.
         try:
-            all_results = model.sarif.get_all_results() if model.sarif else []
+            # Read field by field below, so a name set on a result after it was
+            # validated is read from a copy in the record form.
+            all_results = recorded(model.sarif).get_all_results() if model.sarif else []
         except Exception as e:
             ASH_LOGGER.error(f"Failed to read SARIF results: {str(e)}")
             return self._failure_report(
@@ -186,25 +190,11 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
 
         ASH_LOGGER.trace(f"Processing result: {rule_id}")
 
-        # Determine severity
-        severity = None
-        if result.level:
-            # Read `.value` before str(): Level is a (str, Enum) mixin, so
-            # str(Level.error) is "Level.error", no branch below matches, severity
-            # stays None, and the `if severity:` guard further down drops the key
-            # entirely -- the vulnerability reaches the GitLab Security Dashboard
-            # with nothing to triage or gate on. The field holds a member whenever
-            # it was not validated, which includes every result that omitted the
-            # optional level key.
-            level_str = str(getattr(result.level, "value", result.level)).lower()
-            if level_str == "error":
-                severity = "High"
-            elif level_str == "warning":
-                severity = "Medium"
-            elif level_str == "note":
-                severity = "Low"
-            elif level_str == "none":
-                severity = None
+        # Determine severity: the gate's reading (issue_severity, else the level,
+        # error being Critical), in GitLab's spelling, so the Security Dashboard
+        # shows a finding at the band the scan failed it at, and a severity a
+        # scanner declared counts.
+        severity = result_severity(result).title()
 
         # Suppressed findings: downgrade to Info with solution
         suppression_solution = None

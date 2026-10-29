@@ -145,6 +145,24 @@ def test_gem_present_declares_the_pinned_install(context):
     assert "--bindir" in argv
 
 
+def test_without_a_bin_directory_the_command_only_refuses(context, monkeypatch):
+    """No absolute ASH_BIN_PATH and no usable home directory: no --bindir to give.
+
+    The command says why and exits 1, rather than naming a directory under the
+    working directory or the text "None".
+    """
+    from automated_security_helper.utils import download_utils
+
+    monkeypatch.setattr(download_utils, "ASH_BIN_PATH", None)
+    monkeypatch.delenv("ASH_BIN_PATH", raising=False)
+
+    commands = _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc")
+
+    assert len(commands) == 1
+    assert commands[0][2] == "import sys; sys.exit(sys.argv[1])", commands[0]
+    assert "--bin-path" in commands[0][3]
+
+
 def test_the_pinned_version_is_the_one_the_gemfile_declares(context):
     """One version, one source of truth.
 

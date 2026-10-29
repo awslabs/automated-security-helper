@@ -355,7 +355,10 @@ class TestScannerStatisticsFlow:
             assert scanner_name in text_output, (
                 f"{scanner_name} not found in text output"
             )
-            assert scanner_name in markdown_output, (
+            # The markdown report writes a scanner's name as inert text, escaping
+            # its markup characters (markdown_reporter._text), so an underscore
+            # comes out as a backslash and the underscore.
+            assert scanner_name.replace("_", "\\_") in markdown_output, (
                 f"{scanner_name} not found in markdown output"
             )
             assert any(

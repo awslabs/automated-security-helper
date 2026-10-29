@@ -23,6 +23,7 @@ import functools
 import hashlib
 import io
 import json
+import re
 import subprocess
 import zipfile
 from pathlib import Path
@@ -35,6 +36,7 @@ from tests.snapshot.mcp.mcp_snapshot_support import make_ctx, record
 
 _BAD_SESSION = {"mcp-session-id": "../escape"}
 _SESSION = {"mcp-session-id": "session-a"}
+_STAGING_SUFFIX = re.compile(r"\.source\.incoming-[0-9a-f]{32}")
 
 
 async def _call(tool: str, *args, headers=None, **kwargs) -> Dict[str, Any]:
@@ -78,10 +80,14 @@ def fake_git(monkeypatch):
 
     behavior = {"returncode": 0, "stderr": ""}
     calls = []
+    # The resolved path is machine-specific, so the recorded argv keeps "git" in
+    # its place. The resolution itself is tested in
+    # tests/unit/cli/mcp/test_source_delivery.py.
+    monkeypatch.setattr(source_delivery, "_git_executable", lambda: "git")
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
-        if behavior["returncode"] == 0 and cmd[:2] == ["git", "clone"]:
+        if behavior["returncode"] == 0 and cmd[0] == "git" and "clone" in cmd:
             target = Path(cmd[-1])
             target.mkdir(parents=True, exist_ok=True)
             (target / "README.md").write_text("# cloned\n", encoding="utf-8")
@@ -89,13 +95,16 @@ def fake_git(monkeypatch):
             cmd, behavior["returncode"], "", behavior["stderr"]
         )
 
-    monkeypatch.setattr(source_delivery.subprocess, "run", fake_run)
+    # _run_git is the one place source delivery starts git.
+    monkeypatch.setattr(source_delivery, "_run_git", fake_run)
     behavior["calls"] = calls
     return behavior
 
 
 @pytest.mark.asyncio
-async def test_set_source_git(fake_git, snapshot):
+async def test_set_source_git(fake_git, snapshot, monkeypatch):
+    # The tool clones only from hosts the operator lists.
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
     cloned = await _call(
         "set_source_git", url="https://example.com/org/repo.git", headers=_SESSION
     )
@@ -105,7 +114,13 @@ async def test_set_source_git(fake_git, snapshot):
         ref="v1.2.3",
         headers=_SESSION,
     )
-    git_argv = [list(cmd) for cmd in fake_git["calls"]]
+    # A clone is made in a staging directory beside source/, named with a random
+    # suffix per delivery, and swapped in once it has worked; the suffix is masked
+    # so the recorded argv is the same on every run.
+    git_argv = [
+        [_STAGING_SUFFIX.sub(".source.incoming-<ID>", arg) for arg in cmd]
+        for cmd in fake_git["calls"]
+    ]
 
     fake_git["returncode"] = 128
     fake_git["stderr"] = (

@@ -32,20 +32,16 @@ renaming one band in one copy -- produces no error there, just findings quietly
 resolving differently. Nothing else in the suite compares the copies, which is
 why a silent divergence could land.
 
-What must NOT be collapsed
---------------------------
-The SARIF level-to-severity MAP also has three copies, and they are not all the
-same table. ``severity_ladder._SARIF_LEVEL_TO_SEVERITY`` and the inline map in
-``result_filters._get_finding_severity`` both map ``error`` to CRITICAL and are
-genuine duplication. ``flat_vulnerability._LEVEL_TO_SEVERITY`` maps ``error`` to
-**HIGH**, and that is a deliberate fork documented in a comment at
-``flat_vulnerability.py`` lines 38-40: it preserves the historical
-``to_flat_vulnerabilities()`` mapping, and changing it would alter reporter
-output for every existing scanner. Deduplicating it would be a behavior change
-wearing deduplication's clothes. :func:`test_the_documented_error_to_high_fork_survives`
-and :func:`test_the_fork_is_observable_in_flattened_output` pin it so a future
-consolidation has to break a test that explains itself rather than silently
-shifting every reporter's severities.
+The level-to-severity map
+-------------------------
+There is one: ``severity_ladder._SARIF_LEVEL_TO_SEVERITY``, read through
+``severity_ladder.result_severity``. ``flat_vulnerability`` and ``result_filters``
+call the ladder and keep no copy of their own: a copy mapping ``error`` to HIGH
+would grade every flattened ``error`` finding one band below the summary and the
+exit code, and a reader triaging from CSV or flat-json could not tell which
+findings had failed the scan.
+:func:`test_flat_vulnerability_grades_as_the_gate` and
+:func:`test_result_filters_grades_as_the_gate` pin the agreement.
 """
 
 from automated_security_helper.core.constants import VALID_SEVERITY_VALUES
@@ -53,7 +49,6 @@ from automated_security_helper.core.resource_management.result_filters import (
     _get_finding_severity,
 )
 from automated_security_helper.models.flat_vulnerability import (
-    _LEVEL_TO_SEVERITY,
     _SEVERITY_ORDER,
     _VALID_ISSUE_SEVERITIES,
     FlatVulnerability,
@@ -126,33 +121,21 @@ def test_the_inline_copy_in_result_filters_accepts_exactly_these_names():
         )
 
 
-def test_the_documented_error_to_high_fork_survives():
-    """flat_vulnerability maps error->HIGH on purpose; the other two map CRITICAL.
+def test_flat_vulnerability_grades_as_the_gate():
+    """flat_vulnerability reads severities through the ladder, every level."""
+    from automated_security_helper.models.flat_vulnerability import _resolve_severity
 
-    This asserts the DIVERGENCE, so a well-meaning deduplication that points
-    flat_vulnerability at the ladder's table fails here rather than silently
-    re-grading every ``error``-level finding from every scanner.
-    """
-    assert _LEVEL_TO_SEVERITY["error"] == "HIGH", (
-        "the documented fork at flat_vulnerability.py:38-40 has been collapsed; "
-        "error->HIGH preserves historical to_flat_vulnerabilities() output and "
-        "changing it alters reporter output for every existing scanner"
-    )
-    assert _SARIF_LEVEL_TO_SEVERITY["error"] == "CRITICAL"
-
-    # Everything OTHER than `error` is identical across the two tables, which is
-    # what makes `error` a fork rather than two unrelated maps.
-    for level in ("warning", "note", "none"):
-        assert _LEVEL_TO_SEVERITY[level] == _SARIF_LEVEL_TO_SEVERITY[level]
-    assert set(_LEVEL_TO_SEVERITY) == set(_SARIF_LEVEL_TO_SEVERITY)
+    for level, severity in _SARIF_LEVEL_TO_SEVERITY.items():
+        result = Result(ruleId="r", level=level, message=Message(text="x"))
+        assert _resolve_severity(result) == severity, level
 
 
-def test_the_fork_is_observable_in_flattened_output():
-    """The fork's consequence, not just its table.
+def test_an_error_flattens_to_critical():
+    """The consequence, not just the table.
 
     A constant can be checked and still be unused. This runs an ``error``-level
     result with no ``issue_severity`` through the real factory and pins the
-    severity a reporter would actually see.
+    severity a reporter would actually see: CRITICAL, as in the summary.
     """
     flat = FlatVulnerability.from_sarif_result(
         result=Result(
@@ -164,17 +147,12 @@ def test_the_fork_is_observable_in_flattened_output():
         tool_name="bandit",
         tool_type="SAST",
     )
-    assert flat.severity == "HIGH", (
+    assert flat.severity == "CRITICAL", (
         "an error-level SARIF result now flattens to "
-        f"{flat.severity!r}; the documented error->HIGH fork has been changed"
+        f"{flat.severity!r}, which is not the summary's and the gate's CRITICAL"
     )
 
 
-def test_result_filters_maps_error_to_critical_not_high():
-    """The other side of the fork, asserted behaviorally.
-
-    ``result_filters`` is one of the two copies that DOES map error to CRITICAL.
-    Pinning both sides is what makes the fork legible: if a future change unifies
-    them, exactly one of these two tests fails and names the direction.
-    """
+def test_result_filters_grades_as_the_gate():
+    """``result_filters`` (the MCP findings list) agrees too, asserted behaviorally."""
     assert _get_finding_severity({"level": "error"}) == "CRITICAL"

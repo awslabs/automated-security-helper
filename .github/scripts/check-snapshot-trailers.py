@@ -106,21 +106,25 @@ ZERO_SHA = "0" * 40
 # * automated_security_helper/schemas/*.json: the published config and results JSON
 #   schemas. Written whole by `python -m automated_security_helper.schemas.generate_schemas`;
 #   the lint job regenerates them and fails on any difference.
-# * docs/content/docs/cli-reference-generated.md: written whole by
-#   scripts/generate_cli_docs.py; tests/unit/test_generated_docs_freshness.py regenerates
-#   and diffs it.
 # * ash-agent-plugins/.../transpiler/_base/references/tool-reference.md: written whole by
 #   scripts/generate_mcp_tool_reference.py (its editorial notes live in that script, not
 #   in the file); the same freshness test runs its --check.
+# * docs/content/reference/<page>.md for each generated reference page: written whole by
+#   the scripts/generate_*.py named in the page's banner; the same freshness test runs
+#   each one's --check. Listed by name rather than as reference/*.md, because a
+#   hand-written page added to that directory later is not golden.
 #
 # Out, deliberately:
 # * The per-backend copies of tool-reference.md under ash-agent-plugins/.../plugins/ and
 #   skills/ash-mcp/references/: byte copies of the _base file, held equal by the
 #   transpiler's own byte-compare gate. The _base change is where the reason belongs;
 #   requiring it again on each copy adds annotations and no information.
-# * Pages with regions maintained by scripts/generate_reporter_docs.py (output-formats.md,
-#   plugins/**.md): only the marker-delimited regions are generated, the rest is prose,
-#   so a whole-file rule would demand a trailer for a typo fix.
+# * docs/content/docs/cli-reference-generated.md: the CLI reference's previous location.
+#   Nothing writes it since scripts/generate_cli_docs.py moved to
+#   docs/content/reference/cli.md, and the docs rewrite deletes it.
+# * output-formats.md and the plugins/ pages that once held regions written by
+#   scripts/generate_reporter_docs.py: it writes only docs/content/reference/reporters.md
+#   now, and the docs rewrite replaces those pages.
 # * docs/content/docs/cli-reference.md: hand-written.
 # * ash-agent-plugins/.../transpiler/generated_models/*.py: generated code, not output a
 #   user sees.
@@ -129,11 +133,20 @@ GOLDEN: tuple[tuple[str, str], ...] = (
     ("__snapshots__", "syrupy snapshot"),
     (".github/actions/validate-mcp/*.golden.json", "MCP tool-surface golden"),
     ("automated_security_helper/schemas/*.json", "generated JSON schema"),
-    ("docs/content/docs/cli-reference-generated.md", "generated CLI reference"),
     (
         "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md",
         "generated MCP tool reference",
     ),
+    ("docs/content/reference/cli.md", "generated CLI reference"),
+    ("docs/content/reference/configuration.md", "generated configuration reference"),
+    ("docs/content/reference/converters.md", "generated converter reference"),
+    (
+        "docs/content/reference/environment-variables.md",
+        "generated environment variable reference",
+    ),
+    ("docs/content/reference/mcp-tools.md", "generated MCP tool reference page"),
+    ("docs/content/reference/reporters.md", "generated reporter reference"),
+    ("docs/content/reference/scanners.md", "generated scanner reference"),
 )
 
 
@@ -517,6 +530,52 @@ def run_check(repo: Path, rng: Range) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _snapshot_dirs(root: Path) -> list[Path]:
+    """Every ``__snapshots__`` directory under ``root/tests`` that git counts as the tree.
+
+    Taken from git, not a walk of the filesystem, because git does not enter an
+    ignored directory. tests/pytest-temp is one, and the unit tests run this on the
+    real checkout while other test workers create and remove directories there; a
+    walk of ``tests`` descended into it, raised FileNotFoundError when a directory
+    went away mid-walk, and reported the workers' own empty ``__snapshots__`` as
+    orphans.
+
+    Tracked files give the directories already committed; an untracked file in one
+    is still checked, because ``find_orphans`` lists each directory it is given. An
+    untracked directory, empty or not, is one entry in ``--directory``'s report, and
+    those entries are walked here with every directory git reports as ignored pruned
+    before the walk can enter it. Empty directories, which this check exists to
+    find, hold no file for git to list, so they arrive only that way.
+    """
+
+    def listing(*args: str) -> list[str]:
+        out = git(root, "ls-files", "-z", *args, "--", "tests")
+        return [entry for entry in out.split("\0") if entry]
+
+    found: set[Path] = set()
+    for entry in listing("--cached"):
+        for parent in PurePosixPath(entry).parents:
+            if parent.name == "__snapshots__":
+                found.add(root / parent)
+
+    ignored = {
+        entry.rstrip("/")
+        for entry in listing(
+            "--others", "--ignored", "--exclude-standard", "--directory"
+        )
+    }
+    for entry in listing("--others", "--exclude-standard", "--directory"):
+        if not entry.endswith("/"):
+            continue
+        for dirpath, dirnames, _files in os.walk(root / entry):
+            here = Path(dirpath)
+            prefix = here.relative_to(root).as_posix()
+            dirnames[:] = [d for d in dirnames if f"{prefix}/{d}" not in ignored]
+            if here.name == "__snapshots__":
+                found.add(here)
+    return sorted(found)
+
+
 def find_orphans(root: Path) -> list[str]:
     """Problems with snapshot files under ``root/tests`` that syrupy cannot report.
 
@@ -524,9 +583,12 @@ def find_orphans(root: Path) -> list[str]:
     ``<mod>.py`` next to the ``__snapshots__`` directory, and no ``__snapshots__``
     directory (or per-module directory inside one) may be empty: an empty one is what a
     deleted snapshot leaves behind locally.
+
+    ``root`` must be a git work tree; see ``_snapshot_dirs`` for why and for what that
+    leaves out, which is ignored directories and nothing else.
     """
     problems = []
-    for snapdir in sorted((root / "tests").rglob("__snapshots__")):
+    for snapdir in _snapshot_dirs(root):
         if not snapdir.is_dir():
             continue
         rel = snapdir.relative_to(root).as_posix()
@@ -693,13 +755,13 @@ def _case_renamed_golden_with_trailer(r: _Repo) -> list[str]:
 
 def _case_schema_and_generated_doc(r: _Repo) -> list[str]:
     r.write("automated_security_helper/schemas/AshConfig.json", "{}\n")
-    r.write("docs/content/docs/cli-reference-generated.md", "x\n")
+    r.write("docs/content/reference/cli.md", "x\n")
     r.write("docs/content/docs/cli-reference.md", "hand-written\n")
     r.commit("docs: regenerate")
     return sorted(
         [
             "automated_security_helper/schemas/AshConfig.json",
-            "docs/content/docs/cli-reference-generated.md",
+            "docs/content/reference/cli.md",
         ]
     )
 
@@ -817,9 +879,16 @@ def _self_test_orphans(tmp: Path) -> list[str]:
     root = tmp / "orphans"
     snaps = root / "tests/snapshot/__snapshots__"
     (snaps / "test_alive").mkdir(parents=True)
+    git(root, "init", "-q")
     (snaps / "test_alive/case.md").write_text("x")
     (snaps / "test_alive.ambr").write_text("x")
     (root / "tests/snapshot/test_alive.py").write_text("")
+    # An ignored directory is outside the check, the way tests/pytest-temp is: an
+    # empty __snapshots__ in it, and a snapshot with no module, are not reported.
+    (root / ".gitignore").write_text("tests/scratch/\n")
+    (root / "tests/scratch/worker/__snapshots__").mkdir(parents=True)
+    (root / "tests/scratch/other/__snapshots__").mkdir(parents=True)
+    (root / "tests/scratch/other/__snapshots__/test_none.ambr").write_text("x")
     clean = find_orphans(root)
     (snaps / "test_gone.ambr").write_text("x")
     (snaps / "test_gone_dir").mkdir()

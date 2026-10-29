@@ -17,6 +17,28 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _no_tool_starts(tmp_path_factory, monkeypatch):
+    """These tests build SARIF from a fixed exit code; none may start a tool.
+
+    Recording stand-ins go first on PATH, and each test fails at teardown if one
+    was started. Left unanswered, building a BanditScanner or CheckovScanner
+    starts ``uv --version`` on the host's uv; the probes are answered as on a
+    host without it (``stub_tool_probes``).
+    """
+    from tests.utils.tool_guard import (
+        install_tool_guard,
+        reset_tool_lookup_caches,
+        stub_tool_probes,
+    )
+
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+    stub_tool_probes(monkeypatch)
+    yield guard
+    reset_tool_lookup_caches()
+    assert guard.started == [], f"the test started tools: {guard.started}"
+
+
 def _extract_execution_successful(sarif_report) -> bool:
     """Pull executionSuccessful from the first invocation of the first run."""
     return sarif_report.runs[0].invocations[0].executionSuccessful

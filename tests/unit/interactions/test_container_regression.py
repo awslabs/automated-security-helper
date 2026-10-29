@@ -74,16 +74,15 @@ class TestBug97TerminateWithoutWait:
     """After terminate(), must wait() and escalate to kill() if needed."""
 
     def test_terminate_has_wait_and_kill_escalation(self):
+        """Since the interrupt is passed on rather than SIGTERMed, the stop lives in
+        _stop_after_interrupt; TestRunCmdDirectInterruption checks it by behavior."""
         from automated_security_helper.interactions.run_ash_container import (
+            _stop_after_interrupt,
             run_cmd_direct,
         )
 
-        source = inspect.getsource(run_cmd_direct)
-        # Find the KeyboardInterrupt handler section
-        interrupt_idx = source.find("KeyboardInterrupt")
-        assert interrupt_idx != -1
-
-        post_interrupt = source[interrupt_idx:]
+        assert "_stop_after_interrupt(process)" in inspect.getsource(run_cmd_direct)
+        post_interrupt = inspect.getsource(_stop_after_interrupt)
         assert "process.wait(" in post_interrupt or ".wait(" in post_interrupt, (
             "After process.terminate(), must call process.wait()"
         )

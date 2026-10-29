@@ -54,6 +54,7 @@ from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
     prewarm_plugin_registry,
+    workspace_plugin_modules,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.resolver import (
@@ -77,11 +78,22 @@ def _acme_is_installed(tmp_path_factory, monkeypatch):
     (package / "__init__.py").write_text("", encoding="utf-8")
     for name in ("plugins", "one", "two", "from_cli"):
         (package / f"{name}.py").write_text("", encoding="utf-8")
+    # An operator-named module must be inside the plugin namespace, or the
+    # pre-warm refuses the run before any import; the CLI test names a module
+    # under this package.
+    namespaced = site / "acme_ash_plugins"
+    namespaced.mkdir()
+    (namespaced / "__init__.py").write_text("", encoding="utf-8")
     monkeypatch.syspath_prepend(str(site))
     yield
     import sys
 
-    for name in [n for n in sys.modules if n == "acme" or n.startswith("acme.")]:
+    for name in [
+        n
+        for n in sys.modules
+        if n in ("acme", "acme_ash_plugins")
+        or n.startswith(("acme.", "acme_ash_plugins."))
+    ]:
         del sys.modules[name]
 
 
@@ -249,19 +261,51 @@ class TestPrewarm:
         plan = self._plan(tmp_path, ("api", []), ("gone", ["does.not.exist"]))
         plan.projects[1].skipped = True
         settings = ProjectScanSettings(output_dir=tmp_path / "out")
-        # A non-importable module would be logged by the loader, not raised; what
-        # matters is that pre-warm does not attempt it at all and still resolves.
+        # Attempting the module would refuse the workspace (it is outside the plugin
+        # namespace and does not import), so resolving at all shows pre-warm never
+        # attempted it.
         assert prewarm_plugin_registry(plan, settings) > 0
 
-    def test_cli_modules_are_included(self, tmp_path):
+    def test_cli_modules_are_included(self, tmp_path, monkeypatch):
         """--ash-plugin-modules is additive to whatever the projects declare."""
+        import sys
+
+        site = tmp_path / "site"
+        (site / "acme_ash_plugins").mkdir(parents=True)
+        (site / "acme_ash_plugins" / "__init__.py").write_text("", encoding="utf-8")
+        (site / "acme_ash_plugins" / "from_cli.py").write_text("", encoding="utf-8")
+        monkeypatch.syspath_prepend(str(site))
         plan = self._plan(tmp_path, ("api", []))
         settings = ProjectScanSettings(
-            output_dir=tmp_path / "out", ash_plugin_modules=("acme.from_cli",)
+            output_dir=tmp_path / "out",
+            ash_plugin_modules=("acme_ash_plugins.from_cli",),
         )
-        # Resolves without raising even though the CLI module does not import;
-        # load_additional_plugin_modules logs and continues.
-        assert prewarm_plugin_registry(plan, settings) > 0
+        # The CLI module is in the set the pre-warm loads, not only counted.
+        assert "acme_ash_plugins.from_cli" in workspace_plugin_modules(plan, settings)
+        try:
+            assert prewarm_plugin_registry(plan, settings) > 0
+            # The set it loads, not only the set it reports: the module was
+            # imported. (A module that fails to import refuses the run instead;
+            # that contract has its own cells.)
+            assert "acme_ash_plugins.from_cli" in sys.modules
+        finally:
+            sys.modules.pop("acme_ash_plugins.from_cli", None)
+            sys.modules.pop("acme_ash_plugins", None)
+
+    def test_a_cli_module_that_does_not_import_refuses_the_workspace(self, tmp_path):
+        """Inside the plugin namespace and not installed: exit 3, as for one scan."""
+        from automated_security_helper.plugins.loader import PluginModuleImportError
+
+        plan = self._plan(tmp_path, ("api", []))
+        settings = ProjectScanSettings(
+            output_dir=tmp_path / "out",
+            ash_plugin_modules=("zzabsent_ash_plugins.from_cli",),
+        )
+
+        with pytest.raises(PluginModuleImportError) as raised:
+            prewarm_plugin_registry(plan, settings)
+
+        assert "zzabsent_ash_plugins.from_cli" in str(raised.value)
 
 
 class TestPrewarmRunsBeforeTheWorkers:

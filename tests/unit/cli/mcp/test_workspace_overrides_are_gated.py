@@ -21,10 +21,22 @@ from automated_security_helper.cli.mcp import workspace as workspace_module
 
 
 @pytest.fixture(autouse=True)
-def _clear_policy_env(monkeypatch):
+def _clear_policy_env(monkeypatch, tmp_path):
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_profile_registry,
+        clear_all_session_state,
+    )
+
     monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
-    monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+    # The session configs select_profile writes go under this test's own
+    # directory, not the user's MCP cache, which concurrent runs share.
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    clear_profile_registry()
+    clear_all_session_state()
+    yield
+    clear_profile_registry()
+    clear_all_session_state()
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -45,11 +57,20 @@ def _with_profile(monkeypatch, tmp_path: Path, allowed_paths, extra: str = "") -
         "      enabled: true\n"
         f"      allowed_paths: {json.dumps(list(allowed_paths))}\n"
     )
-    monkeypatch.setattr(
-        workspace_module,
-        "_resolve_session_config",
-        lambda session_id, profile_name: str(profile),
+    _register_and_bind(profile)
+
+
+def _register_and_bind(profile: Path) -> None:
+    """Register ``profile`` and bind it, so the gate reads the registered policy."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        register_profiles,
+        set_profile_registry,
     )
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    set_profile_registry(register_profiles([f"op={profile}"]))
+    bound = mcp_select_profile("op")
+    assert bound["success"] is True, bound
 
 
 async def _resolve(tmp_path: Path, overrides):
@@ -293,13 +314,10 @@ async def test_an_operator_denial_holds_for_every_mix_of_separators(
         '      allowed_paths: ["/**"]\n'
         '      denied_paths: ["/scanners/trivy-repo/options/ignore_file"]\n'
     )
-    monkeypatch.setattr(
-        workspace_module,
-        "_resolve_session_config",
-        lambda session_id, profile_name: str(profile),
-    )
+    _register_and_bind(profile)
     result = await _resolve(tmp_path, [override])
     assert result["success"] is False, result
+    assert "denied_paths" in result["error"], result
 
 
 @pytest.mark.asyncio
@@ -322,3 +340,171 @@ async def test_a_policy_beside_a_symlinked_definitions_target_is_refused(
     )
     assert result["success"] is False, result
     assert "delivered by an MCP client" in result["error"]
+
+
+_OFF_HOST_REPORTERS = (
+    "aws-security-hub",
+    "bedrock-summary-reporter",
+    "cloudwatch-logs",
+    "s3",
+)
+
+_OPERATORS_S3 = (
+    "reporters:\n"
+    "  s3:\n"
+    "    enabled: true\n"
+    "    options:\n"
+    "      bucket_name: operators-bucket\n"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+async def test_an_override_turning_an_off_host_reporter_off_is_accepted(
+    tmp_path, monkeypatch, reporter
+):
+    """It asks for nothing beyond the session's config, under the default
+    denied_paths. Each project's resolution then takes ``enabled`` from the
+    operator (test_a_clients_workspace_override_does_not_choose_whether_one_runs)."""
+    _with_profile(monkeypatch, tmp_path, ["/**"])
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.enabled=false"])
+    assert result["success"] is True, result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+async def test_an_override_turning_an_off_host_reporter_on_is_refused(
+    tmp_path, monkeypatch, reporter
+):
+    _with_profile(monkeypatch, tmp_path, ["/**"])
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.enabled=true"])
+    assert result["success"] is False, result
+    assert "denied_paths entry" in json.dumps(result), result
+
+
+def _reporter_settings() -> list:
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_DESTINATION_OPTIONS,
+    )
+
+    settings = [
+        (reporter, f"options.{name}=other-value")
+        for reporter in _OFF_HOST_REPORTERS
+        for name in REPORTER_DESTINATION_OPTIONS[reporter]
+    ]
+    # Settings the CLI leaves to a repository's config, denied here with the rest
+    # of the section.
+    return settings + [
+        ("aws-security-hub", "extension=other.asff.json"),
+        ("s3", "options.file_format=yaml"),
+        ("bedrock-summary-reporter", "options.temperature=0.1"),
+    ]
+
+
+#: The profile has a section for each reporter, so each override writes one
+#: field of it rather than adding the section.
+_REPORTER_SECTIONS = "reporters:\n" + "".join(
+    f"  {reporter}:\n    enabled: false\n    options: {{}}\n"
+    for reporter in _OFF_HOST_REPORTERS
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reporter,setting", _reporter_settings(), ids=lambda part: part
+)
+async def test_an_override_setting_an_off_host_reporter_option_is_refused(
+    tmp_path, monkeypatch, reporter, setting
+):
+    _with_profile(monkeypatch, tmp_path, ["/**"], extra=_REPORTER_SECTIONS)
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.{setting}"])
+    assert result["success"] is False, result
+    assert f"matches denied_paths entry '/reporters/{reporter}/" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_turning_an_off_host_reporter_off_is_accepted_and_not_passed_on(
+    tmp_path, monkeypatch, caplog
+):
+    """The overrides reach each project's resolution as the operator's, so one the
+    gate accepts there takes effect: ``reporters.s3.enabled=false`` turned off the
+    operator's upload for the workspace's projects. It is accepted, so a client
+    that sends it does not fail, and left out of what the projects get."""
+    import logging
+
+    _with_profile(monkeypatch, tmp_path, ["/reporters/**"], _OPERATORS_S3)
+    passed_on = []
+    resolve = workspace_module._resolve
+
+    def recording(*args, **kwargs):
+        passed_on.append(list(args[3] or []))
+        return resolve(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_module, "_resolve", recording)
+
+    with caplog.at_level(logging.WARNING):
+        result = await _resolve(tmp_path, ["reporters.s3.enabled=false"])
+
+    assert result["success"] is True, result
+    assert passed_on == [[]], passed_on
+    assert any(
+        "reporters.s3.enabled" in record.getMessage()
+        or "/reporters/s3/enabled" in record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ), [record.getMessage() for record in caplog.records]
+
+
+@pytest.mark.asyncio
+async def test_control_another_override_beside_it_is_passed_on(tmp_path, monkeypatch):
+    _with_profile(monkeypatch, tmp_path, ["/reporters/**"], _OPERATORS_S3)
+    passed_on = []
+    resolve = workspace_module._resolve
+
+    def recording(*args, **kwargs):
+        passed_on.append(list(args[3] or []))
+        return resolve(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_module, "_resolve", recording)
+
+    result = await _resolve(
+        tmp_path, ["reporters.s3.enabled=false", "reporters.markdown.enabled=false"]
+    )
+
+    assert result["success"] is True, result
+    assert passed_on == [["reporters.markdown.enabled=false"]], passed_on
+
+
+@pytest.mark.asyncio
+async def test_pointing_the_operators_reporter_elsewhere_is_refused(
+    tmp_path, monkeypatch
+):
+    _with_profile(monkeypatch, tmp_path, ["/reporters/**"], _OPERATORS_S3)
+    result = await _resolve(tmp_path, ["reporters.s3.options.bucket_name=clients"])
+    assert result["success"] is False, result
+
+
+@pytest.mark.asyncio
+async def test_a_refused_call_logs_no_ignored_turn_off(tmp_path, monkeypatch, caplog):
+    """A turn-off sent with a refused override: the call is refused, so nothing
+    was ignored, and saying so would describe an outcome the call did not have."""
+    import logging
+
+    _with_profile(monkeypatch, tmp_path, ["/reporters/**"], _OPERATORS_S3)
+
+    with caplog.at_level(logging.WARNING):
+        result = await _resolve(
+            tmp_path,
+            [
+                "reporters.s3.enabled=false",
+                "reporters.s3.options.bucket_name=clients",
+            ],
+        )
+
+    assert result["success"] is False, result
+    ignored = [
+        record.getMessage()
+        for record in caplog.records
+        if "Ignoring the config override" in record.getMessage()
+    ]
+    assert ignored == [], ignored

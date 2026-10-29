@@ -60,6 +60,7 @@ from automated_security_helper.utils.tool_downloads import (
     _ASSET_TABLES,
     _DIGESTS,
     _EXECUTABLE_DIGESTS,
+    RULES_BUNDLES,
     TOOL_VERSIONS,
     downloadable_tools,
     get_tool_asset,
@@ -67,6 +68,17 @@ from automated_security_helper.utils.tool_downloads import (
 )
 
 PAYLOAD = b"#!/bin/sh\necho pinned-tool-fixture\n"
+
+pytestmark = pytest.mark.usefixtures("receipt_home")
+
+
+def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
+    """An install writes its receipt under Path.home(), here the test's own home.
+
+    Only some tests here patched Path.home; the rest wrote nine grype.json receipts
+    into the developer's real ~/.ash/install-receipts.
+    """
+    assert receipt_root().is_relative_to(tmp_path), receipt_root()
 
 
 def _make_tarball(path: Path, member_names) -> bytes:
@@ -1147,9 +1159,18 @@ class TestReceiptDirectoryPermissions:
 
 class TestAssetResolution:
     def test_downloadable_tools(self):
-        assert downloadable_tools() == ["grype", "opengrep", "syft", "trivy", "uv"]
+        assert downloadable_tools() == [
+            "actionlint",
+            "cfn-guard",
+            "gitleaks",
+            "grype",
+            "opengrep",
+            "syft",
+            "trivy",
+            "uv",
+        ]
 
-    @pytest.mark.parametrize("tool", ["grype", "opengrep", "syft", "trivy"])
+    @pytest.mark.parametrize("tool", ["gitleaks", "grype", "opengrep", "syft", "trivy"])
     def test_linux_and_darwin_are_provisionable_on_both_arches(self, tool):
         pairs = supported_platforms(tool)
         for target in [
@@ -1208,7 +1229,17 @@ class TestAssetResolution:
         referenced = {
             filename for table in _ASSET_TABLES.values() for filename in table.values()
         }
+        # A rules bundle's digest lives in the same table, so the one suppression
+        # range covers every published checksum; it is referenced by its URL.
+        referenced |= {
+            bundle.url.rsplit("/", 1)[-1] for bundle in RULES_BUNDLES.values()
+        }
         assert sorted(set(_DIGESTS) - referenced) == []
+
+    def test_every_rules_bundle_digest_is_the_table_entry(self):
+        for bundle in RULES_BUNDLES.values():
+            assert bundle.sha256 == _DIGESTS[bundle.url.rsplit("/", 1)[-1]]
+            assert bundle.version in bundle.url
 
     def test_pinned_versions_appear_in_their_asset_filenames(self):
         """A version bump has to move every digest lookup with it.
@@ -1267,25 +1298,29 @@ class TestAssetResolution:
         opens = next(
             i + 1 for i, line in enumerate(source) if line.startswith("_DIGESTS")
         )
-        # The range covers _DIGESTS and _EXECUTABLE_DIGESTS, which sits directly
-        # after it so one suppression can cover both tables.
-        executable_opens = next(
-            i + 1
-            for i, line in enumerate(source)
-            if line.startswith("_EXECUTABLE_DIGESTS")
-        )
-        digests_close = next(
-            i + 1 for i, line in enumerate(source[opens:], opens) if line == "}"
-        )
-        assert executable_opens - digests_close <= 3, (
-            "_EXECUTABLE_DIGESTS no longer follows _DIGESTS directly; the lines "
-            "between them are inside the suppression and would hide a real secret"
-        )
-        closes = next(
-            i + 1
-            for i, line in enumerate(source[executable_opens:], executable_opens)
-            if line == "}"
-        )
+
+        # The range covers _DIGESTS, _EXECUTABLE_DIGESTS and _BUNDLE_CONTENTS_DIGESTS,
+        # each directly after the one before so one suppression covers all three.
+        def table_lines(name: str) -> "tuple[int, int]":
+            start = next(
+                i + 1 for i, line in enumerate(source) if line.startswith(f"{name}:")
+            )
+            end = next(
+                i + 1 for i, line in enumerate(source[start:], start) if line == "}"
+            )
+            return start, end
+
+        tables = [
+            table_lines(name)
+            for name in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS")
+        ]
+        assert tables[0][0] == opens
+        for (_, previous_close), (next_open, _) in zip(tables, tables[1:]):
+            assert next_open - previous_close <= 3, (
+                "the digest tables are no longer adjacent; the lines between them "
+                "are inside the suppression and would hide a real secret"
+            )
+        closes = tables[-1][1]
 
         config = yaml.safe_load(
             (repo_root / ".ash" / ".ash_community_plugins.yaml").read_text(
@@ -1306,15 +1341,102 @@ class TestAssetResolution:
             f"suppression starts at {entry['line_start']} but _DIGESTS opens at {opens}"
         )
         assert entry["line_end"] == closes, (
-            f"suppression ends at {entry['line_end']} but _EXECUTABLE_DIGESTS "
+            f"suppression ends at {entry['line_end']} but _BUNDLE_CONTENTS_DIGESTS "
             f"closes at {closes}"
         )
 
+    def test_every_bundle_contents_digest_belongs_to_a_rules_bundle(self):
+        archives = {bundle.url.rsplit("/", 1)[-1] for bundle in RULES_BUNDLES.values()}
+        assert sorted(tool_downloads._BUNDLE_CONTENTS_DIGESTS) == sorted(archives)
+        for bundle in RULES_BUNDLES.values():
+            archive = bundle.url.rsplit("/", 1)[-1]
+            assert (
+                bundle.contents_sha256
+                == tool_downloads._BUNDLE_CONTENTS_DIGESTS[archive]
+            )
+
     def test_digests_are_well_formed_sha256(self):
-        for filename, digest in {**_DIGESTS, **_EXECUTABLE_DIGESTS}.items():
+        for filename, digest in {
+            **_DIGESTS,
+            **_EXECUTABLE_DIGESTS,
+            **{
+                f"{name} contents": value
+                for name, value in tool_downloads._BUNDLE_CONTENTS_DIGESTS.items()
+            },
+        }.items():
             assert len(digest) == 64, f"{filename} digest is not 64 hex chars"
             assert digest == digest.lower(), f"{filename} digest is not lowercase"
             int(digest, 16)
+
+
+class TestBareBinaryAssets:
+    """opengrep publishes the executable itself; there is no archive to open.
+
+    The pinned digest then covers the bytes that will run, so the install has to
+    verify them, put exactly them at the target, and record that same digest as
+    the installed one.
+    """
+
+    BINARY = b"\x7fELF fake opengrep executable"
+
+    def _filename(self) -> str:
+        return _ASSET_TABLES["opengrep"][("linux", "amd64")]
+
+    def test_the_asset_is_marked_unarchived(self):
+        asset = get_tool_asset("opengrep", "linux", "amd64")
+        assert asset.archive is False
+        assert asset.install_as == "opengrep"
+        assert get_tool_asset("opengrep", "windows", "amd64").install_as == (
+            "opengrep.exe"
+        )
+        assert get_tool_asset("grype", "linux", "amd64").archive is True
+
+    def test_matching_pin_installs_the_bytes_verbatim(self, tmp_path):
+        digest = hashlib.sha256(self.BINARY).hexdigest()
+        bin_dir = tmp_path / "bin"
+        with _pin(self._filename(), digest), _serve(self.BINARY):
+            installed = install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        assert installed == bin_dir / "opengrep"
+        assert installed.read_bytes() == self.BINARY
+        if os.name != "nt":
+            assert os.access(installed, os.X_OK)
+        receipt = read_receipt(bin_dir, "opengrep")
+        assert receipt["sha256"] == digest
+        assert receipt["installed_sha256"] == digest
+        assert receipt["version"] == TOOL_VERSIONS["opengrep"]
+
+    def test_corrupted_pin_is_rejected_and_installs_nothing(self, tmp_path):
+        bin_dir = tmp_path / "bin"
+        with (
+            _pin(self._filename(), "0" * 64),
+            _serve(self.BINARY),
+            pytest.raises(ToolDownloadIntegrityError, match="Refusing to install"),
+        ):
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        assert not (bin_dir / "opengrep").exists()
+        assert read_receipt(bin_dir, "opengrep") is None
+
+    def test_second_install_does_not_download(self, tmp_path):
+        digest = hashlib.sha256(self.BINARY).hexdigest()
+        bin_dir = tmp_path / "bin"
+        with _pin(self._filename(), digest), _serve(self.BINARY):
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        exploding = patch(
+            "automated_security_helper.utils.download_utils.download_file",
+            side_effect=AssertionError("re-downloaded an already-installed tool"),
+        )
+        with _pin(self._filename(), digest), exploding:
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+
+    def test_a_substituted_binary_is_reinstalled_not_trusted(self, tmp_path):
+        digest = hashlib.sha256(self.BINARY).hexdigest()
+        bin_dir = tmp_path / "bin"
+        with _pin(self._filename(), digest), _serve(self.BINARY):
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        (bin_dir / "opengrep").write_bytes(b"substituted")
+        with _pin(self._filename(), digest), _serve(self.BINARY):
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        assert (bin_dir / "opengrep").read_bytes() == self.BINARY
 
 
 class TestReleaseAssetCache:

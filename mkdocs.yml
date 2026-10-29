@@ -1,43 +1,115 @@
 site_name: ASH - Automated Security Helper
-site_description: "Your one-stop shop for code security scanning"
+site_description: "Security scanning for code, infrastructure, secrets, and dependencies."
 site_url: "https://awslabs.github.io/automated-security-helper"
 repo_name: "awslabs/automated-security-helper"
 repo_url: "https://github.com/awslabs/automated-security-helper"
-edit_uri: "edit/main/site/content"
+edit_uri: "edit/main/docs/content/"
 copyright: "&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved."
 docs_dir: "docs/content"
+# The .md.template files are the sources the version bump renders pages from
+# (scripts/version_template_manager.py); they are not pages, so they are not published.
+exclude_docs: |
+  *.template
 site_dir: "public"
 # use_directory_urls: true
 
+# scripts/docs_checks.py check_site_build checks, in the lint job: the validation
+# levels below, the redirect hook, that every external asset a page or the theme
+# loads is in the privacy plugin's assets_exclude (so nothing is downloaded at build
+# time), theme.font, the emoji generator, and that the docs workflow runs
+# `mkdocs build --strict` in a step whose failure fails the job.
+# tests/integration/docs/test_site_builds_offline.py builds the site through a proxy
+# that records every request and requires none.
+
+# Every build is strict, not only the ones that pass --strict: mike runs `mkdocs build`
+# without it when it publishes a version. To preview a page that still has warnings,
+# run `mkdocs serve --no-strict`.
+strict: true
+
+# Moved pages keep their old URLs: docs/redirects.yml maps each old page to its new
+# one, and the redirects hook writes a redirect page at every old URL. The install_refs
+# hook builds the version-pinned pages from their templates when mike builds a version,
+# so the install commands of the main version install main.
+hooks:
+  - docs/hooks/redirects.py
+  - docs/hooks/install_refs.py
+
+# Pages that are built but deliberately left out of the navigation, one gitignore-style
+# pattern per line, each with a comment saying why. A page that is in no .nav.yml and
+# matches nothing here fails the build (validation.nav.omitted_files below).
+not_in_nav: |
+
+# With `mkdocs build --strict` every warning is an error, so these make a broken link,
+# a missing anchor, a link that leaves docs_dir and a page the navigation cannot reach
+# fail the build. mkdocs leaves most of them at info by default.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
 plugins:
+  # The site is published as versions (main, and one per release) by
+  # scripts/docs_versions.py, with mike. mike adds this plugin itself when it is not
+  # listed; it is listed so the two settings below are reviewed here, and so that
+  # extra.docs_version is read when mike builds (mike rewrites a config it adds the
+  # plugin to, and expands !ENV while doing so, in a process that has no version yet).
+  - mike:
+      # latest/ is a full copy of the release, so a /latest/ URL is a page rather than
+      # a redirect to a numbered one, and nothing depends on how the host treats
+      # symbolic links, mike's default.
+      alias_type: copy
+      # Every version names the /latest/ page as canonical, so search engines send
+      # readers to the latest release rather than to whichever version they crawled.
+      canonical_version: latest
+  # The privacy plugin downloads external assets at build time and serves them from
+  # the site. The build must not need the network, so the two assets that cannot be
+  # downloaded offline are left external rather than fetched: mermaid, which the
+  # browser loads from unpkg (the diagrams on the site already depended on unpkg
+  # through mermaid2), and the star-history chart, a live image that a downloaded
+  # copy would freeze and whose server refuses the build anyway (403). Emoji are
+  # written as Unicode characters by the emoji extension below, so nothing else is
+  # fetched.
   - privacy:
       assets_exclude:
         - 'github.com/*/actions/workflows/*'
+        - 'unpkg.com/mermaid@*'
+        - 'api.star-history.com/*'
   - search
   - awesome-nav
   - autorefs
   - mkdocstrings
-  - mermaid2
 
 theme:
   name: material
   custom_dir: docs/overrides
   palette:
-    # Palette toggle for light mode
-    - scheme: dracula
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    # Palette toggle for dark mode
-    - scheme: slate
-      toggle:
-        icon: material/brightness-4
+        icon: phosphor/sun
         name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: phosphor/moon
+        name: Switch to dark mode
   font: false
   language: en
   features:
-    - navigation.instant
     - navigation.indexes
+    - navigation.path
+    - navigation.top
+    - navigation.footer
     - toc.follow
     - content.tabs.link
     - search.share
@@ -47,14 +119,53 @@ theme:
     - content.code.annotate
     - content.code.select
   icon:
-    logo: aws-logo-light
-    repo: fontawesome/brands/github
-  favicon: assets/images/aws-logo-light.svg
+    repo: phosphor/source-branch
+    search: phosphor/magnify
+    close: phosphor/close
+    menu: phosphor/menu
+    previous: phosphor/arrow-left
+    next: phosphor/arrow-right
+    top: phosphor/arrow-up
+    edit: phosphor/pencil
+    view: phosphor/eye
+  favicon: "data:,"
+
+extra_css:
+  - assets/stylesheets/ash.css
+
+extra_javascript:
+  - assets/javascripts/ash.js
+
+extra:
+  generator: false
+
+extra:
+  # Material's version selector, filled from the versions.json that mike writes at the
+  # root of the gh-pages branch. A page of a version without the `default` alias shows
+  # the outdated notice in docs/overrides/main.html.
+  version:
+    provider: mike
+    default: latest
+  # The version mike is building, which it puts in MIKE_DOCS_VERSION, and empty in any
+  # other build. docs/overrides/main.html chooses the notice a page shows from it.
+  docs_version: !ENV [MIKE_DOCS_VERSION, ""]
 
 markdown_extensions:
+  - md_in_html
   - admonition
+  # {#id} after a heading gives it a stable anchor that survives a reworded title.
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  # to_alt writes an emoji shortcode as its Unicode character. The default generator
+  # writes an <img> from a CDN, which the privacy plugin then has to download.
   - pymdownx.emoji:
       emoji_index: !!python/name:pymdownx.emoji.twemoji
+      emoji_generator: !!python/name:pymdownx.emoji.to_alt
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
@@ -62,7 +173,10 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences:
+      # Material renders mermaid fences itself. The mermaid2 plugin did the same job
+      # and checked its script URL over the network on every build, which an
+      # offline build cannot do.
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:mermaid2.fence_mermaid_custom
+          format: !!python/name:pymdownx.superfences.fence_code_format

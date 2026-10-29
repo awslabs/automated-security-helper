@@ -97,6 +97,16 @@ _OPTION_CLASSES = [
     ),
     (
         "scanners",
+        "cfn-lint",
+        "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner.CfnLintScannerConfigOptions",
+    ),
+    (
+        "scanners",
+        "zizmor",
+        "automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner.ZizmorScannerConfigOptions",
+    ),
+    (
+        "scanners",
         "ferret-scan",
         "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScannerConfigOptions",
     ),
@@ -170,15 +180,17 @@ def test_an_operator_override_that_is_not_a_specifier_is_refused_too(
 
 
 @pytest.mark.parametrize("section,name,dotted,default", _OPTIONS)
-def test_a_version_specifier_is_kept_from_any_source(
+def test_a_version_specifier_is_kept_from_the_operator(
     tmp_path, section, name, dotted, default
 ):
+    """A specifier is a valid value; whose it is decides whether it is used.
+
+    From the scanned tree's config it is replaced by the default
+    (test_tool_version_is_the_operators.py); from ``--config-overrides`` it is kept.
+    """
     source, _ = _tree_with_standin(tmp_path)
     _write_config(source, section, name, ">=1.2.0,<9.0.0")
-    assert (
-        _resolved_options(source, section, name, dotted).tool_version
-        == ">=1.2.0,<9.0.0"
-    )
+    assert _resolved_options(source, section, name, dotted).tool_version == default
     assert (
         _resolved_options(
             tmp_path / "elsewhere",

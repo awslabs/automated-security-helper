@@ -7,12 +7,15 @@ Before the fix, the scanner unconditionally invoked ``yarn`` or ``pnpm``
 based on the lock file name.  If the binary was absent the subprocess
 raised ``FileNotFoundError`` (or equivalent), crashing the scan.
 
-The fix checks ``find_executable`` before invoking non-npm binaries and
-logs a warning + skips the lock file when the tool is not installed.
+The fix checks ``find_executable`` before invoking non-npm binaries, so the
+missing tool is never started. The lockfile it would have audited is then a failed
+target named in the scanner's errors: with no other lockfile the executor records
+ERROR, and beside audited lockfiles their findings are kept and the completeness
+gate reports the shortfall, so no empty report reads as a clean audit.
 """
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -20,7 +23,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
 
 
 def _yarn_1_clean(command):
@@ -54,15 +56,14 @@ def _make_project(base: Path, lock_name: str) -> Path:
     return project
 
 
-def test_yarn_lock_skipped_when_yarn_not_installed(npm_scanner, tmp_path):
-    """When yarn.lock exists but ``yarn`` is not installed, the scanner
-    should log a warning and skip that lock file instead of crashing."""
+def test_yarn_lock_is_a_failed_target_when_yarn_not_installed(npm_scanner, tmp_path):
+    """When yarn.lock exists but ``yarn`` is not installed, that lockfile is a failed
+    target named in the errors, not a crash or a clean read."""
     project = _make_project(tmp_path, "yarn.lock")
 
     # Point the scanner context at our temp project
     npm_scanner.context.source_dir = project
 
-    mock_warning = MagicMock()
     with (
         patch(
             "automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.find_executable",
@@ -74,26 +75,22 @@ def test_yarn_lock_skipped_when_yarn_not_installed(npm_scanner, tmp_path):
         ),
         patch.object(npm_scanner, "_pre_scan", return_value=True),
         patch.object(npm_scanner, "_post_scan"),
-        patch.object(ASH_LOGGER, "warning", mock_warning),
     ):
-        result = npm_scanner.scan(target=project, target_type="source")
+        report = npm_scanner.scan(target=project, target_type="source")
 
-    # Must not raise; should return a SARIF report (possibly empty)
-    assert result is not False
-    # A warning about missing yarn should have been logged
-    warning_messages = [str(c) for c in mock_warning.call_args_list]
-    assert any(
-        "yarn" in msg.lower() and "not installed" in msg.lower()
-        for msg in warning_messages
-    ), f"Expected a 'yarn not installed' warning, got: {warning_messages}"
+    assert report is not False
+    assert (npm_scanner.targets_attempted, npm_scanner.targets_failed) == (1, 1)
+    message = " ".join(npm_scanner.errors)
+    assert "yarn is not installed" in message, message
+    assert "yarn.lock" in message, message
 
 
-def test_pnpm_lock_skipped_when_pnpm_not_installed(npm_scanner, tmp_path):
-    """Same as yarn test but for pnpm-lock.yaml when pnpm is missing."""
+def test_pnpm_lock_is_a_failed_target_when_pnpm_not_installed(npm_scanner, tmp_path):
+    """When pnpm-lock.yaml exists but ``pnpm`` is not installed, that lockfile is a
+    failed target named in the errors, not a crash or a clean read."""
     project = _make_project(tmp_path, "pnpm-lock.yaml")
     npm_scanner.context.source_dir = project
 
-    mock_warning = MagicMock()
     with (
         patch(
             "automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.find_executable",
@@ -105,16 +102,14 @@ def test_pnpm_lock_skipped_when_pnpm_not_installed(npm_scanner, tmp_path):
         ),
         patch.object(npm_scanner, "_pre_scan", return_value=True),
         patch.object(npm_scanner, "_post_scan"),
-        patch.object(ASH_LOGGER, "warning", mock_warning),
     ):
-        result = npm_scanner.scan(target=project, target_type="source")
+        report = npm_scanner.scan(target=project, target_type="source")
 
-    assert result is not False
-    warning_messages = [str(c) for c in mock_warning.call_args_list]
-    assert any(
-        "pnpm" in msg.lower() and "not installed" in msg.lower()
-        for msg in warning_messages
-    ), f"Expected a 'pnpm not installed' warning, got: {warning_messages}"
+    assert report is not False
+    assert (npm_scanner.targets_attempted, npm_scanner.targets_failed) == (1, 1)
+    message = " ".join(npm_scanner.errors)
+    assert "pnpm is not installed" in message, message
+    assert "pnpm-lock.yaml" in message, message
 
 
 def test_yarn_lock_scanned_when_yarn_available(npm_scanner, tmp_path):

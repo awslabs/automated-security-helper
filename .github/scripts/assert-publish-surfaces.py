@@ -207,8 +207,8 @@ _UV_CACHE_REASON = (
 _UV_SPLIT_CACHE_REASON = (
     _UV_CACHE_REASON + " Restored with actions/cache/restore except on a tag push, "
     "and saved from a push to main only, in place of setup-uv's own cache, which "
-    "restored on every event and saved from every ref. The workflows that use it "
-    "run on tag pushes, and a tag run reads no cache entry."
+    "restored on every event and saved from every ref. The workflow that uses it "
+    "runs on tag pushes, and a tag run reads no cache entry."
 )
 _NPM_CACHE_REASON = (
     "npm's download cache, keyed on a committed lockfile. Holds third-party "
@@ -406,7 +406,7 @@ ALLOWLIST: tuple[Entry, ...] = (
             "${{ inputs.config-file }}${{ inputs.oci-runner && "
             "format('-{0}', inputs.oci-runner) || '' }}"
             "${{ inputs.offline == 'true' && '-offline' || '' }} "
-            "path=.ash/ash_output"
+            "path=.ash/ash_output/reports|.ash/ash_output/ash_aggregated_results.json"
         ),
         reason=(
             "Scan reports -- SARIF, JSON, HTML -- from scanning this repository's "
@@ -418,12 +418,21 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
-        publishes="name=ash_output path=${{ inputs.output-dir }}",
+        publishes=(
+            "name=${{ steps.inputs.outputs.artifact_name }} "
+            "path=${{ steps.inputs.outputs.output_dir }}/reports"
+            "|${{ steps.inputs.outputs.output_dir }}/ash_aggregated_results.json"
+            "|${{ steps.inputs.outputs.output_dir }}/projects/*/reports"
+            "|${{ steps.inputs.outputs.output_dir }}/projects/*/ash_aggregated_results.json"
+        ),
         reason=(
             "Scan reports, in the reusable workflow consumers call. The bytes "
             "belong to the calling repository's scan and are published into the "
             "caller's run, not this one; on this repository the workflow only "
-            "runs against this public tree."
+            "runs against this public tree. The artifact name is the caller's "
+            "artifact-name input (default ash_output), read as the input check's "
+            "output like every string input, so a matrix or a repeated "
+            "call can give each upload its own name."
         ),
     ),
     Entry(
@@ -433,13 +442,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         publishes=(
             "name=test-results-${{ inputs.os }}-"
             "${{ steps.runner-arch.outputs.label }}-"
-            "py${{ inputs.python-version }} path=test-results/"
+            "py${{ inputs.python-version }}-"
+            "shard${{ inputs.shard }} path=test-results/"
         ),
         reason=(
             "Test results and coverage data. No build output. The arch component "
             "of the name moved from an `arch` input to a label this action derives "
-            "from RUNNER_ARCH, so the same bytes from the same path are published "
-            "under the same names; only the source of the arch string changed."
+            "from RUNNER_ARCH. The shard component was added when the unit-test job "
+            "was split into shards: each shard uploads its own test-results "
+            "directory, and two uploads under one name fail, so the name carries "
+            "the shard (1of1 for a whole-suite run). The bytes and the path are "
+            "the same kind as before."
         ),
     ),
     Entry(
@@ -456,6 +469,33 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-docs-ci-runners.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=docs-ci-runners-${{ matrix.runner }}-${{ strategy.job-index }}"
+            "-attempt-${{ github.run_attempt }} "
+            "path=${{ runner.temp }}/ci-runner-out"
+            "|!${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT].[kK][eE][yY]*"
+            "|!${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT][sS]"
+            "|!${{ runner.temp }}/ci-runner-out/**/[sS][eE][cC][rR][eE][tT][sS]/**"
+            "|!${{ runner.temp }}/ci-runner-out/**/"
+            "[iI][dD][eE][nN][tT][iI][tT][yY].[kK][eE][yY].[eE][nN][cC]"
+            "|!${{ runner.temp }}/ci-runner-out/**/*.[kK][eE][yY]"
+            "|!${{ runner.temp }}/ci-runner-out/**/*.[pP][eE][mM]"
+        ),
+        reason=(
+            "Evidence from the Docs CI Runners legs, which run the CI pages' "
+            "pipelines against the docs fixture: each runner's log, the pipelines "
+            "as run, the rewrite records, the junit files, the pipelines' artifacts "
+            "(ASH's output on the fixture) and the install provenance, kept seven "
+            "days. Logs and reports, not build output: the wheel each leg builds "
+            "stays in the runner's temp directory, outside the uploaded one. "
+            "Hidden files and secret-shaped names are left out, and the job holds "
+            "no secret."
+        ),
+    ),
+    Entry(
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
@@ -468,6 +508,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         action=_UPLOAD,
         publishes="name=integration-suite-report path=test-results/integration.junit.xml",
         reason="One JUnit XML report from the integration suite.",
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes="name=docs-examples-report path=test-results/docs-examples.junit.xml",
+        reason=(
+            "One JUnit XML report from the docs-example runner: page, block line, "
+            "command and output tail of each failing docs example, run in a "
+            "throwaway fixture project with no credentials."
+        ),
     ),
     Entry(
         file=".github/workflows/ash-unified-ci.yml",
@@ -666,12 +717,12 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/actions/setup-ash/action.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes=(
-            "enable-cache=true "
-            "save-cache=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
-        ),
+        publishes=("enable-cache=true save-cache=${{ inputs.save-cache }}"),
         reason=_UV_CACHE_REASON
-        + " Saved from a push to main only; every other ref restores and writes nothing.",
+        + " Saved only by a caller that passes save-cache, which is the ensure-cache"
+        " job in ash-unified-ci.yml; every other caller restores and writes nothing."
+        " ensure-cache syncs without installing ASH itself, so what it saves is the"
+        " packages ASH depends on and nothing ASH builds.",
     ),
     Entry(
         file=".github/workflows/ash-package.yml",
@@ -700,10 +751,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes="enable-cache=true save-cache=${{ github.event_name == 'push' }}",
+        publishes=(
+            "cache-local-path=${{ runner.temp }}/setup-uv-cache "
+            "enable-cache=${{ env.RESTORE_CACHES }} "
+            "save-cache=${{ github.event_name == 'push' }}"
+        ),
         reason=_UV_CACHE_REASON
-        + " Saved from a push only, which narrows who writes the entry: a pull"
-        " request restores its base branch's copy and no longer saves its own.",
+        + " Saved from a push only, which narrows who writes the entry. Not"
+        " restored either on pull_request or merge_group (RESTORE_CACHES), where"
+        " the run's own cache scope can hold entries written by other jobs that"
+        " run the pull request's code. cache-local-path is setup-uv's own default"
+        " on a hosted runner, named so that the checkout's cache-dir is not read.",
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",
@@ -786,53 +844,6 @@ ALLOWLIST: tuple[Entry, ...] = (
             "key=uv-agent-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ash-agent-plugins/agentic-coding/transpiler/uv.lock') }}"
         ),
         reason=_UV_SPLIT_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-cdk-extra-drift.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/restore",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        reason=_UV_SPLIT_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-cdk-extra-drift.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/save",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        reason=_UV_SPLIT_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-repo-docs.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/restore",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        count=2,
-        reason=_UV_SPLIT_CACHE_REASON
-        + (
-            " Twice: build-docs restores it, and deploy-docs only looks the key up"
-            " (lookup-only: true, nothing downloaded) so its save can skip an entry"
-            " main already wrote. deploy-docs publishes the site and restores nothing."
-        ),
-    ),
-    Entry(
-        file=".github/workflows/ash-repo-docs.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/save",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        reason=_UV_SPLIT_CACHE_REASON
-        + " Saved by deploy-docs, the only job here that runs on main.",
     ),
 )
 
@@ -1219,7 +1230,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           enable-cache: true
       - name: Upload the wheel

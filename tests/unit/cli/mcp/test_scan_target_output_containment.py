@@ -46,6 +46,10 @@ from automated_security_helper.cli.mcp.scan_target import (
     validate_output_tree,
     validate_scan_target,
 )
+from tests.utils.scan_task_stubs import (
+    closing_scan_task_start,
+    completed_task_create,
+)
 
 
 @pytest.fixture
@@ -87,7 +91,7 @@ class TestMcpScanDirectoryOutputContainment:
         with patch(
             "automated_security_helper.cli.mcp_tools.asyncio.create_task"
         ) as mock_task:
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await mcp_scan_directory(directory_path=str(permitted))
 
         assert result["success"] is False
@@ -120,7 +124,7 @@ class TestMcpScanDirectoryOutputContainment:
         with patch(
             "automated_security_helper.cli.mcp_tools.asyncio.create_task"
         ) as mock_task:
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await mcp_scan_directory(directory_path=str(permitted))
 
         assert result["success"] is False
@@ -140,7 +144,7 @@ class TestMcpScanDirectoryOutputContainment:
         with patch(
             "automated_security_helper.cli.mcp_tools.asyncio.create_task"
         ) as mock_task:
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await mcp_scan_directory(directory_path=str(project))
 
         assert result["success"] is True
@@ -170,7 +174,7 @@ class TestMcpScanDirectoryOutputContainment:
         with patch(
             "automated_security_helper.cli.mcp_tools.asyncio.create_task"
         ) as mock_task:
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await mcp_scan_directory(directory_path=str(link))
 
         assert result["success"] is True
@@ -188,7 +192,7 @@ class TestMcpScanDirectoryOutputContainment:
         with patch(
             "automated_security_helper.cli.mcp_tools.asyncio.create_task"
         ) as mock_task:
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await mcp_scan_directory(directory_path=str(project))
 
         assert result["success"] is True
@@ -228,7 +232,11 @@ class TestRunAshScanOutputContainment:
     async def test_clean_output_still_removes_a_real_results_file(
         self, tmp_path, monkeypatch, mock_ctx
     ):
-        """Positive control for the assertion above: the real path still gets cleaned."""
+        """Positive control for the assertion above: the real path still gets cleaned.
+
+        Through the real mcp_scan_directory, where clean_output acts once the scan
+        has the directory; only the scan task is not started.
+        """
         project = tmp_path / "project"
         output_dir = project / ".ash" / "ash_output"
         output_dir.mkdir(parents=True)
@@ -239,15 +247,14 @@ class TestRunAshScanOutputContainment:
 
         with (
             patch(
-                "automated_security_helper.cli.mcp_server.mcp_scan_directory",
-                new_callable=AsyncMock,
-                return_value={"success": True, "scan_id": "scan-allowed"},
+                "automated_security_helper.cli.mcp_tools._start_scan_task",
+                side_effect=closing_scan_task_start(),
             ),
             patch(
                 "automated_security_helper.cli.mcp_server.asyncio.create_task"
             ) as mock_task,
         ):
-            mock_task.return_value = MagicMock()
+            mock_task.side_effect = completed_task_create()
             result = await run_ash_scan(
                 ctx=mock_ctx, source_dir=str(project), clean_output=True
             )

@@ -1,12 +1,11 @@
 
  Usage: ash get-genai-guide [OPTIONS]
 
- Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
+ Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.
 
  This guide provides comprehensive instructions for GenAI tools on how to properly
  interact with ASH scan results, including:
  - Correct file formats to use (JSON vs HTML)
- - How to handle severity discrepancies
  - Creating suppressions properly
  - Working with CycloneDX SBOM for dependencies
  - Configuration file schema

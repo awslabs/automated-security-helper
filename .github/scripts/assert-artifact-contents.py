@@ -38,7 +38,7 @@ What it actually is, stated plainly:
 
   * FAIL-CLOSED ALLOWLISTS over every namespace where new payload can hide
     without looking like any of those shapes. Three are pinned MEMBER BY MEMBER:
-    `automated_security_helper/assets/` (17 entries), the wheel's `.dist-info/`
+    `automated_security_helper/assets/` (19 entries), the wheel's `.dist-info/`
     (6), and the files sitting directly in `automated_security_helper/` itself
     (1 -- `__init__.py`). The first two exist to carry data rather than code,
     which is what makes payload dropped into either indistinguishable from what
@@ -86,7 +86,7 @@ built artifacts, not reasoned about.
      `automated_security_helper/__init__.py`. This is the cheapest of the five --
      it needs no new path at all, so it does not even show up in a diff of the
      member list. Digests would close it and are deliberately not used; see
-     ASSETS_ALLOWLIST for why (four of the 17 assets are build-generated, so pinned
+     ASSETS_ALLOWLIST for why (five of the 19 assets are build-generated, so pinned
      digests would fail on ordinary work and the gate would get deleted).
 
   2. LOOSE FILES AT THE SDIST ROOT ARE UNCONSTRAINED, BY DECISION. A third-party
@@ -184,7 +184,7 @@ losing game: the pattern list is finite and the space of filenames is not. The
 fail-closed rules change the default instead of extending the list.
 
   5. Not on the pinned list, in a namespace that is pinned. `assets/` holds
-     17 members in the current wheel and exists precisely to carry non-Python
+     19 members in the current wheel and exists precisely to carry non-Python
      data, which makes it the most comfortable hiding place in the tree -- an
      upstream ruleset or a tool database dropped there looks exactly like the
      ASH-authored data next to it (5a). Same for a brand-new directory anywhere in
@@ -217,14 +217,16 @@ fail-closed rules change the default instead of extending the list.
 
 WHAT IS DELIBERATELY ALLOWED
 ----------------------------
-automated_security_helper/assets/ ships and must keep shipping: 17 members in
+automated_security_helper/assets/ ships and must keep shipping: 19 members in
 the built wheel, all ASH-authored or build-generated, listed one by one in
-ASSETS_ALLOWLIST below. Thirteen are tracked files; four are produced by
+ASSETS_ALLOWLIST below. Fourteen are tracked files; five are produced by
 hatch_build.py during the build: assets/Dockerfile, generated from the root
-Dockerfile; assets/ASH_INSTALLED_REVISION, which holds a branch name; and
-assets/tool_downloads.py plus assets/exceptions.py, flat copies of the pinned tool
-table and its exception module, staged there because the shipped Dockerfile's
-build context is assets/ and cannot COPY from outside it. Sizes
+Dockerfile; assets/ASH_INSTALLED_REVISION, which holds the commit it was built
+from; assets/tool_downloads.py plus assets/exceptions.py, flat copies of the
+pinned tool table and its exception module, staged there because the shipped
+Dockerfile's build context is assets/ and cannot COPY from outside it; and
+assets/genai-steering-guide.md, the docs page `ash get-genai-guide` writes out,
+added so an installed ASH has the guide for its own version. Sizes
 measured from the wheel rather than with `du`, which reports 84K for that
 directory because it counts 4K disk blocks, not content.
 
@@ -238,8 +240,10 @@ Two parts of it look like cfn-nag at a glance and are not:
   why the rules above compare path tokens rather than grepping file content.
 
   assets/appsec_cfn_rules/*.rb are seven ASH-authored rules that
-  `require 'cfn-nag/custom_rules/base'` and subclass it. They consume cfn-nag's
-  plugin API; they are not copies of it.
+  `require 'cfn-nag/custom_rules/base'` and subclass it, and one ASH-authored
+  helper, AccessPolicyReading.rb, which the two resource-policy rules load with
+  `require_relative`. They consume cfn-nag's plugin API; they are not copies of it.
+  The helper is not a rule: cfn-nag runs only the files whose names end in Rule.rb.
 
 An earlier revision carried a DEPENDENCY_DECLARATION_FILENAMES exemption that
 returned early for `Gemfile`, `Gemfile.lock`, `package.json`, `pyproject.toml`
@@ -544,10 +548,15 @@ SCANNER_DIST_NAMES = frozenset(
         "bandit",
         "cdk-nag",
         "cdk_nag",
+        "cfn-guard",
+        "cfn-lint",
         "cfn-model",
         "cfn-nag",
+        "cfn_guard",
+        "cfn_lint",
         "cfn_model",
         "cfn_nag",
+        "cfnlint",
         "checkov",
         "detect-secrets",
         "detect_secrets",
@@ -672,7 +681,7 @@ DISTRIBUTION_ROOT_DIRECTORIES = frozenset({PACKAGE_ROOT})
 ASSETS_PREFIX = f"{PACKAGE_ROOT}/assets/"
 
 # The complete contents of automated_security_helper/assets/ in the built wheel
-# and sdist, verified identical in both: 17 members, no more.
+# and sdist, verified identical in both: 19 members, no more.
 #
 # HOW THIS IS MAINTAINED. Adding a file to assets/ fails this gate until the path
 # is added here. That is the intended cost -- assets/ is where non-Python payload
@@ -686,13 +695,15 @@ ASSETS_PREFIX = f"{PACKAGE_ROOT}/assets/"
 #       if n.startswith('automated_security_helper/assets/'))))"
 #
 # Pinned by path and NOT by SHA256, and that is a considered decision rather than
-# laziness. Four of the 17 are generated at build time: assets/Dockerfile is
+# laziness. Five of the 19 are generated at build time: assets/Dockerfile is
 # derived from the root Dockerfile by hatch_build.py, so its digest changes
 # whenever the root Dockerfile does, and assets/ASH_INSTALLED_REVISION holds the
-# current branch name, so its digest differs on literally every branch.
+# commit id it was built from, so its digest differs on literally every commit.
 # assets/tool_downloads.py and assets/exceptions.py are copies of tracked files,
 # so their digests move with the originals -- pinning them here would put a third
-# copy of all 16 tool checksums in the tree. Pinning
+# copy of all 16 tool checksums in the tree -- and assets/genai-steering-guide.md
+# is docs/content/docs/genai-steering-guide.md, which changes with every edit to
+# that page. Pinning
 # digests would make the gate fail on ordinary work, and a gate that fails on
 # correct configuration is a gate someone deletes.
 #
@@ -719,8 +730,10 @@ ASSETS_ALLOWLIST = frozenset(
         f"{ASSETS_PREFIX}Gemfile",
         f"{ASSETS_PREFIX}Gemfile.lock",
         f"{ASSETS_PREFIX}exceptions.py",
+        f"{ASSETS_PREFIX}genai-steering-guide.md",
         f"{ASSETS_PREFIX}install-pinned-tool.py",
         f"{ASSETS_PREFIX}tool_downloads.py",
+        f"{ASSETS_PREFIX}appsec_cfn_rules/AccessPolicyReading.rb",
         f"{ASSETS_PREFIX}appsec_cfn_rules/IamUserExistsRule.rb",
         f"{ASSETS_PREFIX}appsec_cfn_rules/KeyPairAsCFnParameterRule.rb",
         f"{ASSETS_PREFIX}appsec_cfn_rules/ResourcePolicyStarAccessVerbPolicyRule.rb",
@@ -900,7 +913,7 @@ def normalize_member_path(name: str) -> str:
 
     all shipped, and `pip install` delivered every one to
     site-packages/automated_security_helper/assets/upstream.yaml -- the exact
-    directory the 17-entry allowlist enumerates.
+    directory the 19-entry allowlist enumerates.
 
     The tell was that the identical path inside the SDIST was caught: there the
     wrapper strip rebuilt the string from `parts`, and the `.` vanished on the
@@ -1790,7 +1803,7 @@ def check_artifact(path: str) -> Report:
 FIXTURE_VERSION = "3.7.0"
 
 # Members inside the package, shared by both artifact shapes. Includes the
-# lookalikes the substring approach gets wrong, and all 17 assets/ members rather
+# lookalikes the substring approach gets wrong, and all 19 assets/ members rather
 # than a sample -- which is what makes the clean fixtures the accept-side control
 # for ASSETS_ALLOWLIST: drop any one entry and they are rejected.
 _PACKAGE_MEMBERS = (

@@ -8,6 +8,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     BanditScanner,
     BanditScannerConfig,
     BanditScannerConfigOptions,
+    bandit_excluded_path_globs,
 )
 
 
@@ -70,16 +71,18 @@ def test_process_config_options_exclude_argument_value_is_well_formed(
     ]
     assert exclude_tokens, "Expected at least one --exclude= token"
 
-    # Mirror the source-code construction so the test stays correct under
-    # any future Path-normalization changes: each KNOWN_IGNORE_PATHS item
-    # contributes "{item}/**" plus "**/{item}/**", and each user
-    # excluded_paths entry contributes "**/{path}/**".
+    # Each KNOWN_IGNORE_PATHS item and each user excluded_paths entry
+    # contributes its bandit_excluded_path_globs, anchored at the source
+    # directory. (They were "{item}/**", "**/{item}/**" and "**/{path}/**",
+    # which never skipped a file entry's file and matched the target's own
+    # path.)
+    anchor = Path(test_plugin_context.source_dir).as_posix()
     expected_entries: list[str] = []
     for item in KNOWN_IGNORE_PATHS:
-        expected_entries.append(str(Path(item).joinpath("**")))
-        expected_entries.append(str(Path("**").joinpath(item, "**")))
+        expected_entries.extend(bandit_excluded_path_globs(anchor, item))
     for p in user_paths:
-        expected_entries.append(str(Path("**").joinpath(p, "**")))
+        expected_entries.extend(bandit_excluded_path_globs(anchor, p))
+    assert expected_entries
 
     for token in exclude_tokens:
         value = token[len("--exclude=") :]

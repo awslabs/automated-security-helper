@@ -746,8 +746,20 @@ class TestTheActionWiring:
         ids = [s.get("id") for s in doc["runs"]["steps"]]
         # `report` writes the job-summary hit line every cache restore carries
         # (tests/unit/test_ci_cache_saves_from_main_only.py). It reads the restore's
-        # outputs only and changes nothing the hit or pull steps see.
-        assert ids == ["key", "restore", "report", "hit", "pull", "write", None], ids
+        # outputs only and changes nothing the hit or pull steps see. `inputs` checks
+        # the action's inputs before any step prints one
+        # (tests/unit/test_an_input_cannot_add_a_workflow_command.py); it reads its
+        # environment only.
+        assert ids == [
+            "inputs",
+            "key",
+            "restore",
+            "report",
+            "hit",
+            "pull",
+            "write",
+            None,
+        ], ids
 
     def test_the_hit_step_runs_only_on_an_exact_restore(self, steps):
         assert steps["hit"]["if"].strip() == "steps.restore.outputs.cache-hit == 'true'"

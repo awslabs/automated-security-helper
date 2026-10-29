@@ -18,11 +18,13 @@ The Trivy plugin enables ASH to leverage Trivy's powerful scanning capabilities 
 The plugin requires Trivy CLI to be installed and available in your system PATH.
 
 **macOS (Homebrew)**:
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 brew install trivy
 ```
 
 **Linux**:
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Download and install latest release
 curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
@@ -32,6 +34,7 @@ curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/inst
 
 ### Verify Installation
 
+<!-- doctest: illustrative reason="needs trivy installed on the host" -->
 ```bash
 trivy --version
 ```
@@ -40,23 +43,25 @@ trivy --version
 
 ### Basic Configuration
 
-Add to your `.ash/.ash.yaml`:
+Add to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "MEDIUM"
+    options:
+      severity_threshold: "MEDIUM"
 ```
 
 ### Run Trivy Scan
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Scan current directory
 uv run ash --scanners trivy-repo
 
 # Scan specific directory
-uv run ash --scanners trivy-repo /path/to/project
+uv run ash --scanners trivy-repo --source-dir /path/to/project
 ```
 
 ## Configuration Options
@@ -85,21 +90,29 @@ Available scanner types:
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "HIGH"
     options:
+      severity_threshold: "HIGH"
       scanners: ["vuln", "secret"]
       license_full: true          # Deep license scanning (default: true)
       ignore_unfixed: true        # Only show fixed vulnerabilities (default: true)
       disable_telemetry: true     # Disable usage analytics (default: true)
-      ignore_file: /etc/ash/trivyignore  # Passed as --ignorefile; must be outside the scanned tree
-      secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as --secret-config; same rule
+      ignore_file: /etc/ash/trivyignore  # Passed as trivy --ignorefile; must be outside the scanned tree
+      secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as trivy --secret-config; same rule
 ```
 
-trivy-repo always passes `--ignorefile` and `--secret-config`, so a `.trivyignore` or
+trivy-repo always passes `trivy --config` and `trivy --module-dir`: an empty config file and an
+empty modules directory of ASH's, unless `config_file` and `module_dir` are set
+through `--config-overrides` or a config file outside every git checkout and the
+scanned directory, for paths outside the scanned tree. Without `config_file`,
+`TRIVY_CONFIG` names the config when it is a file outside the scanned tree; a
+relative path in it is taken from the working directory ASH runs in.
+
+trivy-repo always passes `trivy --ignorefile` and `trivy --secret-config`, so a `.trivyignore` or
 `trivy-secret.yaml` committed to the scanned repository is not read. Without the
 options (or `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`), trivy gets files that set
-nothing. Under `--sandbox`, an operator file outside the system paths also has to be
-in `sandbox.extra_read_paths`.
+nothing, which ASH writes in a directory outside the scanned tree and removes when
+the scan ends. Under `--sandbox`, an operator file outside the system paths also has
+to be in `sandbox.extra_read_paths`.
 
 ## Usage Examples
 
@@ -120,8 +133,8 @@ scanners:
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "LOW"
     options:
+      severity_threshold: "LOW"
       scanners: ["secret"]
 ```
 
@@ -138,6 +151,7 @@ scanners:
 
 ### Combined with Other Scanners
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Use Trivy alongside other ASH scanners
 uv run ash --scanners trivy-repo,bandit,semgrep
@@ -164,6 +178,7 @@ Trivy results are integrated into ASH's unified reporting system:
 ### Common Issues
 
 **Trivy not found**:
+<!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
 # Check if Trivy is in PATH
 which trivy
@@ -173,14 +188,26 @@ brew install trivy
 ```
 
 **Database download issues**:
+<!-- doctest: illustrative reason="needs trivy installed on the host" -->
 ```bash
 # Manually update Trivy database
 trivy image --download-db-only
 ```
 
 **Permission errors**:
+
+trivy-repo keeps its scan cache in memory (`trivy --cache-backend=memory`), so an
+offline or sandboxed scan, which does not update the database itself, works from a
+cache directory it may only read, such as one shared between jobs or baked into an
+image. Downloading or updating the database, which an unsandboxed online scan does
+when it is due, needs the cache directory to be writable. That directory is
+`TRIVY_CACHE_DIR` when set, else
+`$XDG_CACHE_HOME/trivy` or `~/.cache/trivy` on Linux, `~/Library/Caches/trivy`
+on macOS, and `%LocalAppData%\trivy` on Windows.
+
+<!-- doctest: illustrative reason="needs trivy installed on the host" -->
 ```bash
-# Ensure Trivy cache directory is writable
+# Ensure the cache directory is writable before updating the database
 ls -la ~/.cache/trivy/
 ```
 
@@ -188,6 +215,7 @@ ls -la ~/.cache/trivy/
 
 Enable verbose logging to troubleshoot issues:
 
+<!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 uv run ash --scanners trivy-repo --log-level DEBUG
 ```
@@ -196,6 +224,7 @@ uv run ash --scanners trivy-repo --log-level DEBUG
 
 ### Pre-commit Hook
 
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 # .pre-commit-config.yaml
 repos:
@@ -210,6 +239,7 @@ repos:
 
 ### CI/CD Pipeline
 
+<!-- doctest: config kind=github-actions runner=none reason="two steps for a job in the reader's own workflow, shown without the workflow around them" -->
 ```yaml
 # GitHub Actions example
 - name: Security Scan with Trivy

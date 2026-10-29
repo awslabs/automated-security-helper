@@ -84,7 +84,9 @@ _EXPECTED_STRATEGIES = {
     FerretScanScanner: OfflineStrategy.BUNDLED,
     CheckovScanner: OfflineStrategy.CACHE_FLAGS,
     GrypeScanner: OfflineStrategy.CACHE_FLAGS,
-    NpmAuditScanner: OfflineStrategy.CACHE_FLAGS,
+    # npm, yarn and pnpm audit by asking the registry, so npm-audit does not run
+    # offline: its dependency check says no there, as snyk-code's does.
+    NpmAuditScanner: OfflineStrategy.SKIP_OFFLINE,
     OpengrepScanner: OfflineStrategy.CACHE_FLAGS,
     SemgrepScanner: OfflineStrategy.CACHE_FLAGS,
     SyftScanner: OfflineStrategy.CACHE_FLAGS,

@@ -1,0 +1,8 @@
+# GitHub only runs workflows directly inside .github/workflows, so ASH does not
+# hand this file to zizmor even though it would be flagged.
+on: pull_request_target
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.event.pull_request.title }}"

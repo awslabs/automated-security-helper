@@ -26,7 +26,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Region,
     Location,
 )
-from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 
 
 def create_test_sarif():
@@ -201,8 +201,9 @@ def test_path_matches_pattern():
     # Non-matching path
     assert path_matches_pattern("other/file.txt", "dir/**") is False
 
-    # Backslash normalization (via ** glob which normalizes separators)
-    assert path_matches_pattern("dir\\file.txt", "dir/**") is True
+    # A backslash is a separator in the pattern only, not in the path
+    assert path_matches_pattern("dir/file.txt", "dir\\**") is True
+    assert path_matches_pattern("dir\\file.txt", "dir/**") is False
 
 
 @patch(
@@ -218,7 +219,7 @@ def test_apply_suppressions_to_sarif(mock_check, test_output_dir):
     plugin_context = MagicMock()
     plugin_context.source_dir = Path("/absolute/path")
     plugin_context.config.global_settings.ignore_paths = [
-        MagicMock(path="**/test.py", reason="Test ignore")
+        IgnorePathWithReason(path="**/test.py", reason="Test ignore")
     ]
     plugin_context.config.global_settings.suppressions = []
     plugin_context.ignore_suppressions = False
@@ -247,7 +248,7 @@ def test_apply_suppressions_with_ignore_flag(mock_check):
     plugin_context = MagicMock()
     plugin_context.source_dir = Path("/absolute/path")
     plugin_context.config.global_settings.ignore_paths = [
-        MagicMock(path="**/test.py", reason="Test ignore")
+        IgnorePathWithReason(path="**/test.py", reason="Test ignore")
     ]
     plugin_context.config.global_settings.suppressions = []
     plugin_context.ignore_suppressions = True

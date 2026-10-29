@@ -24,6 +24,7 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from automated_security_helper.base.plugin_config import plugin_config_key
+from tests.utils.helpers import checkout_env
 from automated_security_helper.cli import dependencies as dependencies_module
 from automated_security_helper.cli.dependencies import (
     DEPRECATED_TOOL_ALIASES,
@@ -160,14 +161,16 @@ class TestDeprecatedToolAliases:
         """Narrowed to scanners, neither spelling of a converter can be selected.
 
         The refusal names the spelling the caller typed, so the message matches
-        the command line rather than a name they never wrote.
+        the command line rather than a name they never wrote, and says the tool is
+        a converter rather than calling a name this ASH has unknown.
         """
         new = self._invoke("--plugin-type", "scanner", "--tool", new_key)
         old = self._invoke("--plugin-type", "scanner", "--tool", old_name)
         assert new.exit_code == old.exit_code == EXIT_BAD_SELECTION
         panels = self.panels.getvalue()
-        assert f"Unknown tool(s): {new_key}" in panels
-        assert f"Unknown tool(s): {old_name}" in panels
+        assert f"{new_key} is a converter plugin" in panels
+        assert f"{old_name} is a converter plugin" in panels
+        assert "Unknown tool(s)" not in panels
         assert self.verdicts == []
 
     @pytest.mark.parametrize(("old_name", "new_key"), ALIASES)
@@ -182,7 +185,7 @@ class TestDeprecatedToolAliases:
         assert self.warnings.getvalue() == ""
 
 
-def test_the_warning_reaches_a_real_stderr(tmp_path):
+def test_the_warning_reaches_a_real_stderr(tmp_path, monkeypatch):
     """Out of process, so the stream the warning lands on is the real one.
 
     The in-process tests pin both consoles to buffers, which proves what was
@@ -191,6 +194,10 @@ def test_the_warning_reaches_a_real_stderr(tmp_path):
     ash = shutil.which("ash")
     if ash is None:
         pytest.skip("the `ash` console script is not on PATH in this environment")
+    # `ash dependencies install` writes install receipts under its HOME, which a child
+    # inherits; tests/conftest.py refuses to start one with the developer's.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     old_name, new_key = ALIASES[0]
     proc = subprocess.run(
         [
@@ -204,6 +211,7 @@ def test_the_warning_reaches_a_real_stderr(tmp_path):
             "--bin-path",
             str(tmp_path / "bin"),
         ],
+        env=checkout_env(),
         capture_output=True,
         text=True,
         encoding="utf-8",

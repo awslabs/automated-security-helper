@@ -318,3 +318,120 @@ def test_a_deselected_scanner_is_still_skipped_not_missing(tmp_path):
     assert entry.status == ScannerStatus.SKIPPED
     assert entry.excluded is True
     assert incomplete_scanners(results) == []
+
+
+def _rebuilt_and_reloaded(results):
+    """The final results as the engine rebuilds them, and as ``ash report`` and
+    ``ash merge`` read them back and rebuild again."""
+    from automated_security_helper.core.unified_metrics import (
+        populate_metrics_from_unified_source,
+    )
+
+    rebuilt = populate_metrics_from_unified_source(aggregated_results=results)
+    reloaded = populate_metrics_from_unified_source(
+        aggregated_results=AshAggregatedResults.model_validate_json(
+            rebuilt.model_dump_json()
+        )
+    )
+    return [("rebuilt", rebuilt), ("reloaded", reloaded)]
+
+
+def test_the_rebuilt_row_keeps_dependencies_satisfied(tmp_path):
+    """The designed state of a filtering failure, through the real writer path to the
+    final row, and the rebuild before the report phase must not undo it.
+
+    Filtering raises before any dependency is checked, ``ScanPhase`` records the
+    scanner MISSING with ``dependencies_satisfied=True`` and a ``missing_reason``
+    naming the failure, and the rebuild carries that pair through
+    (``dependencies_recorded_satisfied``) instead of reading MISSING as "the tool is
+    absent". The rebuild derives the row from the per-target reports, and once the
+    results were written and read back it found this scanner's report (keyed "None")
+    first and read it as an ordinary MISSING one, so the row said its dependencies
+    were unavailable: the advice the triple above exists to avoid.
+
+    Read from the final ``scanner_results`` record, the per-target report the rebuild
+    reads, and the flat row (ash.flat.json), after the rebuild and after a JSON round
+    trip and a second rebuild (what ``ash report`` and ``ash merge`` do). Two mutations
+    break it: dropping the ``dependencies_recorded_satisfied`` term from the rebuilt
+    row's ``dependencies_missing``, and recording the report's
+    ``dependencies_satisfied`` False. The first turns the row's pair into (MISSING,
+    unsatisfied), the second leaves the rebuild nothing to carry. The real validation
+    manager only: the mocked one leaves a MagicMock in the metadata, which does not
+    serialize.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+        ReportContentEmitter,
+    )
+
+    results = _run_phase(
+        tmp_path, [_raising_hook_scanner()], real_validation_manager=True
+    )
+
+    for when, model in _rebuilt_and_reloaded(results):
+        row = model.scanner_results["raises-in-hook"]
+        assert row.status == ScannerStatus.MISSING, (when, row)
+        assert row.dependencies_satisfied is True, (when, row)
+        assert row.excluded is False, (when, row)
+        assert "Scanner filtering raised before this scanner was classified" in (
+            row.missing_reason or ""
+        ), (when, row)
+        (report,) = model.additional_reports["raises-in-hook"].values()
+        assert report["status"] == "MISSING", (when, report)
+        assert report["dependencies_satisfied"] is True, (when, report)
+        (flat,) = [
+            entry
+            for entry in ReportContentEmitter(model).get_scanner_results()
+            if entry["scanner_name"] == "raises-in-hook"
+        ]
+        assert flat["dependencies_missing"] is False, (when, flat)
+        assert flat["status"] == "MISSING", (when, flat)
+        assert flat["missing_reason"] == row.missing_reason, (when, flat)
+        assert incomplete_scanners(model) == [("raises-in-hook", "MISSING")], when
+
+
+def _dependency_missing_scanner(name="tool-gone"):
+    """A scanner that passes every selection test and then fails the dependency check.
+
+    The genuine MISSING: nothing raised, and ``validate_plugin_dependencies`` says the
+    tool is absent, so its rows say the dependencies were unsatisfied.
+    """
+    cls = _healthy_scanner(name)
+
+    def _validate(self):
+        self.dependencies_satisfied = False
+        return False
+
+    cls.validate_plugin_dependencies = _validate
+    return cls
+
+
+def test_a_scanner_whose_dependency_is_genuinely_missing_ends_missing_unsatisfied(
+    tmp_path,
+):
+    """The inverse control: a scanner that raised nothing and found its tool absent.
+
+    Same final status as the filtering failure above, the opposite pair: MISSING with
+    ``dependencies_satisfied`` False, a flat row that says the dependencies are
+    missing, and the gate listing it. A rebuild that carried ``True`` for every MISSING
+    row would pass the cell above and fail this one.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+        ReportContentEmitter,
+    )
+
+    results = _run_phase(
+        tmp_path, [_dependency_missing_scanner()], real_validation_manager=True
+    )
+
+    for when, model in _rebuilt_and_reloaded(results):
+        row = model.scanner_results["tool-gone"]
+        assert row.status == ScannerStatus.MISSING, (when, row)
+        assert row.dependencies_satisfied is False, (when, row)
+        (flat,) = [
+            entry
+            for entry in ReportContentEmitter(model).get_scanner_results()
+            if entry["scanner_name"] == "tool-gone"
+        ]
+        assert flat["dependencies_missing"] is True, (when, flat)
+        assert flat["status"] == "MISSING", (when, flat)
+        assert incomplete_scanners(model) == [("tool-gone", "MISSING")], when

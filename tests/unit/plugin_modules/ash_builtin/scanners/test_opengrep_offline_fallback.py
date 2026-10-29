@@ -25,6 +25,14 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfigOptions,
 )
 from automated_security_helper.core.exceptions import ScannerError
+from tests.utils.tool_guard import stub_tool_probes
+
+
+@pytest.fixture(autouse=True)
+def _no_tool_probe(monkeypatch):
+    """Building the scanner ran ``opengrep --version``; these tests are about the
+    rule cache, and answer the probe as a host without opengrep would."""
+    stub_tool_probes(monkeypatch)
 
 
 def _make_scanner(test_plugin_context):
@@ -83,8 +91,8 @@ def test_opengrep_offline_with_cache_does_not_decline(
 def test_opengrep_offline_no_subprocess_on_failure(test_plugin_context, monkeypatch):
     """_run_subprocess (the actual scan) must never be called when cache is missing.
 
-    Note: subprocess.run may be called for version detection (_get_opengrep_version),
-    which is acceptable.  What must NOT happen is the scan itself being launched.
+    The version probe (_get_opengrep_version) is stubbed for this module, so no
+    process starts at all; what this checks is that the scan is not launched.
     """
     monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
 

@@ -1,6 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import base64
 import html
+from datetime import datetime
+from importlib import resources
+from string import Template
 from typing import Dict, List, Literal, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,6 +25,17 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.report_conte
     ReportContentEmitter,
 )
 from automated_security_helper.core.unified_metrics import format_duration
+from automated_security_helper.utils.severity_ladder import SEVERITIES, result_severity
+from automated_security_helper.utils.terminal_text import (
+    commands_broken,
+    is_shown_as_escape,
+    shown_not_obeyed,
+    shown_on_one_line,
+)
+from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
+
+#: Most severe first, for the "Findings by Severity" list.
+_SEVERITY_ORDER = {name: index for index, name in enumerate(SEVERITIES)}
 
 
 class HTMLReporterConfigOptions(ReporterOptionsBase):
@@ -58,187 +73,285 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         return super().model_post_init(context)
 
     def report(self, model: "AshAggregatedResults") -> str:
-        """Format ASH model as HTML string with comprehensive styling and organization."""
-        # Use the content emitter to get report data
-        emitter = ReportContentEmitter(model)
-
-        # Get metadata and scanner results
+        """Render a self-contained, accessible report that works without a server."""
+        emitter = ReportContentEmitter(model, human_presentation=True)
         metadata = emitter.get_metadata()
-        scanner_results = emitter.get_scanner_results()
+        summary = emitter.get_scan_summary()
+        assets = resources.files(__package__).joinpath("assets")
+        font_faces = []
+        for family, filename, license_name in (
+            ("Open Sans", "open-sans.woff2", "open-sans-OFL.txt"),
+        ):
+            encoded = base64.b64encode(
+                assets.joinpath("fonts", filename).read_bytes()
+            ).decode("ascii")
+            license_text = (
+                assets.joinpath("fonts", license_name)
+                .read_text(encoding="utf-8")
+                .replace("*/", "* /")
+            )
+            font_faces.append(
+                f"/* {family} font license\n{license_text}\n*/\n"
+                "@font-face { "
+                f'font-family: "{family}"; font-style: normal; '
+                "font-weight: 300 800; font-display: swap; "
+                f'src: url("data:font/woff2;base64,{encoded}") format("woff2"); '
+                "}\n"
+            )
+        workspace = html_workspace_section(model)
+        if workspace:
+            workspace = workspace.replace(
+                "<table>",
+                '<div class="table-scroll" role="region" aria-label="Project results" tabindex="0"><table>',
+            ).replace("</table>", "</table></div>")
+            workspace = (
+                f'<div id="projects" class="workspace-section">{workspace}</div>'
+            )
+        counts = "".join(
+            f'<span class="severity-{level}"><strong>{count}</strong> {level.title()}</span>'
+            for level, count in summary["counts"].items()
+        )
+        # A scanner's name can be a results file's text (``ash report`` renders
+        # one a repository committed), so it is one shown line wherever it is
+        # printed. The filter's values are the same shown names the cards'
+        # data-scanner attributes hold, so the filter still matches.
+        scanners = sorted(
+            {str(shown_on_one_line(finding.scanner)) for finding in emitter.flat_vulns}
+        )
+        scanner_options = "".join(
+            f'<option value="{html.escape(scanner, quote=True)}">{html.escape(scanner)}</option>'
+            for scanner in scanners
+        )
+        data = {
+            # The project name and tool version come from the results file,
+            # which a repository can commit: each is one shown line.
+            **{
+                key: html.escape(str(shown_on_one_line(str(metadata[key]))))
+                for key in ("project", "tool_version")
+            },
+            "scan_time": self._format_timestamp(metadata["scan_time"]),
+            "report_time": self._format_timestamp(metadata["report_time"]),
+            "report_css": "".join(font_faces)
+            + assets.joinpath("ash-report.css").read_text(encoding="utf-8"),
+            "report_script": assets.joinpath("ash-report.js").read_text(
+                encoding="utf-8"
+            ),
+            "tone": summary["tone"],
+            "outcome_symbol": {"danger": "!", "warning": "!", "success": "✓"}[
+                summary["tone"]
+            ],
+            "outcome_title": summary["title"],
+            "outcome_description": summary["description"],
+            "next_step": summary["next_step"],
+            "actionable": summary["actionable"],
+            "below_threshold": summary["below_threshold"],
+            "suppressed": summary["suppressed"],
+            "completed": summary["completed"],
+            "scanners": summary["scanners"],
+            "skipped": summary["skipped"],
+            "unavailable": len(summary["unavailable"]),
+            "severity_counts": counts,
+            "coverage_notices": self._format_coverage_notices(summary),
+            "workspace_nav": '<a href="#projects">Projects</a>' if workspace else "",
+            "workspace_section": workspace,
+            "finding_count": len(emitter.flat_vulns),
+            "scanner_options": scanner_options,
+            "finding_cards": self._format_finding_cards(emitter),
+            "scanner_results_table": self._format_scanner_results_table(
+                emitter.get_scanner_results()
+            ),
+            "hotspots_section": self._format_hotspots_section(
+                emitter.get_top_hotspots(10)
+            ),
+            "metadata_section": self._format_metadata(model.metadata),
+            "footer_credit": html.escape(FOOTER_CREDIT),
+        }
+        return Template(
+            assets.joinpath("ash-report.html").read_text(encoding="utf-8")
+        ).substitute(data)
 
-        # Get results from SARIF report for backward compatibility
-        results = model.sarif.get_all_results() if model.sarif else []
+    @staticmethod
+    def _format_timestamp(value: Any) -> str:
+        """Keep the report masthead readable and leave the full scan record intact."""
+        raw = str(value)
+        try:
+            instant = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return html.escape(raw)
+        months = (
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        )
+        zone = instant.tzname()
+        label = (
+            f"{instant.day} {months[instant.month - 1]} {instant.year} at "
+            f"{instant.hour:02}:{instant.minute:02}"
+        )
+        if zone:
+            label += f" {zone}"
+        return html.escape(label)
 
-        # Group results by severity and rule
-        findings_by_severity = self._group_results_by_severity(results)
-        findings_by_type = self._group_results_by_rule(results)
+    @staticmethod
+    def _format_coverage_notices(summary: dict) -> str:
+        notices = []
+        if summary["shortfalls"]:
+            rows = "".join(
+                f"<li><strong>{html.escape(str(shown_on_one_line(scanner)))}</strong>: evaluated {attempted - failed} "
+                f"of {attempted} target(s); {failed} could not be evaluated.</li>"
+                for scanner, attempted, failed in summary["shortfalls"]
+            )
+            notices.append(
+                '<div class="notice"><h3>Incomplete coverage</h3>'
+                "<p>The findings reported are real, but the set is known to be partial.</p>"
+                f"<ul>{rows}</ul></div>"
+            )
+        if summary["unavailable"]:
+            names = ", ".join(
+                html.escape(str(shown_on_one_line(name)))
+                for name in summary["unavailable"]
+            )
+            notices.append(
+                '<div class="notice"><h3>Scanners needing attention</h3>'
+                f"<p>{names}. Check their dependencies and execution logs, then scan again.</p></div>"
+            )
+        if summary["converter_gaps"]:
+            # A converter's name and reason come from the tool that ran, so they
+            # are shown on one line: controls written as escapes, CI commands
+            # broken.
+            rows = "".join(
+                f"<li><strong>{html.escape(str(shown_on_one_line(name)))}</strong>: "
+                f"{html.escape(str(shown_on_one_line(reason)))}</li>"
+                # IncompleteConverter rows carry (name, reason, kinds).
+                for name, reason, *_ in summary["converter_gaps"]
+            )
+            notices.append(
+                '<div class="notice"><h3>Converters needing attention</h3>'
+                "<p>Some inputs could not be prepared for scanning. Resolve these gaps and scan again.</p>"
+                f"<ul>{rows}</ul></div>"
+            )
+        if summary["unevaluated_rules"]:
+            rules = ", ".join(
+                html.escape(str(shown_on_one_line(rule)))
+                for rule in summary["unevaluated_rules"]
+            )
+            notices.append(
+                '<div class="notice"><h3>Rules not evaluated</h3>'
+                f"<p>{rules}. These rules reached no verdict. Review the scanner logs before accepting this scan.</p></div>"
+            )
+        if summary["stale"]:
+            rows = "".join(
+                f"<li><strong>{html.escape(str(shown_on_one_line(record.name)))}</strong> "
+                f"({html.escape(str(shown_on_one_line(record.scanner)))}): "
+                f"{html.escape(str(shown_on_one_line(record.message())))}</li>"
+                for record in summary["stale"]
+            )
+            notices.append(
+                '<div class="notice"><h3>Stale content databases</h3>'
+                "<p>A clean result from these scanners is not evidence of a clean target.</p>"
+                f"<ul>{rows}</ul></div>"
+            )
+        return "".join(notices)
 
-        # Generate HTML sections
-        findings_table = self._format_findings_table(results)
-        severity_summary = self._format_severity_summary(findings_by_severity)
-        type_summary = self._format_type_summary(findings_by_type)
-        metadata_section = self._format_metadata(model.metadata)
-        scanner_results_table = self._format_scanner_results_table(scanner_results)
-
-        # Get top hotspots
-        top_hotspots = emitter.get_top_hotspots(10)
-        hotspots_section = self._format_hotspots_section(top_hotspots)
-
-        # The per-project table, placed after the metadata block and before the
-        # whole-workspace scanner table. Empty string for a single-directory scan,
-        # so that output is unchanged. Every value inside is escaped by the
-        # renderer -- a project label arrives from a project's own config file.
-        workspace_section = html_workspace_section(model)
-
-        template = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ASH Security Scan Results</title>
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 20px;
-            background: #f5f5f5;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        h1, h2, h3 {{
-            color: #333;
-            margin-top: 20px;
-        }}
-        .summary-box {{
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 4px;
-            padding: 15px;
-            margin: 10px 0;
-        }}
-        .severity-error {{ color: #dc3545; }}
-        .severity-warning {{ color: #fd7e14; }}
-        .severity-note {{ color: #ffc107; }}
-        .severity-none {{ color: #28a745; }}
-        .status-passed {{ color: #28a745; font-weight: bold; }}
-        .status-failed {{ color: #dc3545; font-weight: bold; }}
-        .status-error {{ color: #dc3545; font-weight: bold; }}
-        .status-skipped {{ color: #6c757d; font-weight: bold; }}
-        .status-missing {{ color: #fd7e14; font-weight: bold; }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-        }}
-        th, td {{
-            padding: 12px;
-            text-align: left;
-            border: 1px solid #dee2e6;
-        }}
-        th {{
-            background: #f8f9fa;
-            font-weight: bold;
-        }}
-        tr:nth-child(even) {{
-            background: #f8f9fa;
-        }}
-        .metadata-item {{
-            margin: 10px 0;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 4px;
-        }}
-        .help-text {{
-            background: #e9f5ff;
-            border: 1px solid #b8daff;
-            border-radius: 4px;
-            padding: 15px;
-            margin: 15px 0;
-            font-size: 0.9em;
-        }}
-        .help-text h4 {{
-            margin-top: 0;
-            color: #0056b3;
-        }}
-        .help-text ul {{
-            margin-bottom: 0;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>ASH Security Scan Results</h1>
-
-        <div class="metadata-section">
-            <p><strong>Project:</strong> {html.escape(metadata["project"])}</p>
-            <p><strong>Scan executed:</strong> {html.escape(metadata["scan_time"])}</p>
-            <p><strong>Report generated:</strong> {html.escape(metadata["report_time"])}</p>
-            <p><strong>ASH version:</strong> {html.escape(metadata["tool_version"])}</p>
-        </div>
-
-        {workspace_section}
-
-        <h2>Scanner Results</h2>
-        <div class="help-text">
-            <h4>How to read scanner results</h4>
-            <ul>
-                <li><strong>Severity levels:</strong>
-                    <ul>
-                        <li><strong>Suppressed (S):</strong> Findings that have been explicitly suppressed and don't affect scanner status</li>
-                        <li><strong>Critical (C):</strong> Highest severity findings that require immediate attention</li>
-                        <li><strong>High (H):</strong> Serious findings that should be addressed soon</li>
-                        <li><strong>Medium (M):</strong> Moderate risk findings</li>
-                        <li><strong>Low (L):</strong> Lower risk findings</li>
-                        <li><strong>Info (I):</strong> Informational findings with minimal risk</li>
-                    </ul>
-                </li>
-                <li><strong>Duration:</strong> Time taken by the scanner to complete its execution</li>
-                <li><strong>Actionable:</strong> Number of findings at or above the threshold severity level that require attention</li>
-                <li><strong>Result:</strong>
-                    <ul>
-                        <li class="status-passed">PASSED = No findings at or above threshold</li>
-                        <li class="status-failed">FAILED = Findings at or above threshold</li>
-                        <li class="status-missing">MISSING = Required dependencies not available</li>
-                        <li class="status-skipped">SKIPPED = Scanner explicitly disabled</li>
-                        <li class="status-error">ERROR = Scanner execution error</li>
-                    </ul>
-                </li>
-                <li><strong>Threshold:</strong> The minimum severity level that will cause a scanner to fail</li>
-                <li><strong>Statistics calculation:</strong>
-                    <ul>
-                        <li>All statistics are calculated from the final aggregated SARIF report</li>
-                        <li>Suppressed findings are counted separately and do not contribute to actionable findings</li>
-                        <li>Scanner status is determined by comparing actionable findings to the threshold</li>
-                    </ul>
-                </li>
-            </ul>
-        </div>
-        {scanner_results_table}
-
-        <h2>Summary</h2>
-        <div class="summary-box">
-            {severity_summary}
-            {type_summary}
-            {hotspots_section}
-        </div>
-
-        <h2>Detailed Findings</h2>
-        {findings_table}
-
-        <h2>Scan Metadata</h2>
-        {metadata_section}
-    </div>
-</body>
-</html>
-"""
-
-        return template
+    @staticmethod
+    def _format_finding_cards(emitter: ReportContentEmitter) -> str:
+        order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+        findings = sorted(
+            emitter.flat_vulns,
+            key=lambda finding: (
+                finding.is_suppressed,
+                order.get(finding.severity.upper(), 5),
+                finding.file_path or "",
+                finding.line_start or 0,
+                finding.rule_id or "",
+            ),
+        )
+        if not findings:
+            return '<p class="notice">No findings in this report. Check the scan outcome and scanner coverage above.</p>'
+        cards = []
+        for index, finding in enumerate(findings, 1):
+            severity = finding.severity.upper()
+            severity_class = severity.lower() if severity in order else "unknown"
+            if finding.is_suppressed:
+                status, label = "suppressed", "Suppressed"
+            elif emitter.is_finding_actionable(finding):
+                status, label = "actionable", "Actionable"
+            else:
+                status, label = "below-threshold", "Below threshold"
+            location = finding.file_path or "N/A"
+            if finding.line_start is not None:
+                location += f":{finding.line_start}"
+            # The location comes from a file name in the scanned repository and
+            # is offered for copying, so it is one shown line. A name with no
+            # control and no command form is copied as written: showing it
+            # would only double the backslash of text that reads as an escape
+            # (a Windows path's "\x64"), and the copy would name no file.
+            plain = commands_broken(location) == location and not any(
+                is_shown_as_escape(character) for character in location
+            )
+            copied = location if plain else str(shown_on_one_line(location))
+            safe_location = html.escape(copied, quote=True)
+            # Each context value can be the scan's text: the project from the
+            # results, the CVE and CWE from a scanner's report, the package and
+            # its version from the scanned manifests. Each is one shown line.
+            context = "".join(
+                f"<p><strong>{name}:</strong> {html.escape(str(shown_on_one_line(str(value))))}</p>"
+                for name, value in (
+                    ("Project", finding.workspace_project),
+                    ("CVE", finding.cve_id),
+                    ("CWE", finding.cwe_id),
+                    ("Package", finding.package_name),
+                    ("Version", finding.package_version),
+                )
+                if value is not None
+            )
+            snippet = (
+                # Shown, not obeyed: the snippet keeps its lines, and its
+                # controls and CI command forms are written out.
+                f'<pre role="region" tabindex="0" aria-label="Code snippet for finding {index}"><code>{html.escape(str(shown_not_obeyed(finding.code_snippet)))}</code></pre>'
+                if finding.code_snippet
+                else ""
+            )
+            suppression = (
+                '<p class="suppression-reason"><strong>Suppression reason:</strong> '
+                # The reason can come from the scan: shown, keeping its lines.
+                f"{html.escape(str(shown_not_obeyed(finding.suppression_justification or 'No reason provided')))}</p>"
+                if finding.is_suppressed
+                else ""
+            )
+            # The scanner's name, as the filter's options show it.
+            scanner = str(shown_on_one_line(finding.scanner))
+            cards.append(
+                f'<article class="finding-card" aria-labelledby="finding-{index}" '
+                f'data-severity="{severity_class}" data-status="{status}" '
+                f'data-scanner="{html.escape(scanner, quote=True)}">'
+                '<div class="finding-card__inner">'
+                '<div class="finding-top">'
+                f'<span class="pill severity-{severity_class}">{html.escape(severity)}</span>'
+                f'<span class="finding-status">{label}</span>'
+                f'<span class="finding-scanner">{html.escape(scanner)}</span></div>'
+                # The title (the rule ID) and the description come from the
+                # scan: shown, not obeyed, the description keeping its lines.
+                f'<h3 id="finding-{index}">{html.escape(str(shown_on_one_line(finding.title)))}</h3>'
+                '<p class="finding-meta">'
+                f"<code>{html.escape(str(shown_on_one_line(finding.rule_id or 'N/A')))}</code>"
+                f"<span><code>{safe_location}</code> "
+                f'<button type="button" class="quiet-button copy-location js-only" '
+                f'aria-label="Copy location for finding {index}" data-copy-location="{safe_location}">Copy</button></span></p>'
+                f'<details><summary>Finding details</summary><div class="finding-body">'
+                f'<p class="finding-description">{html.escape(str(shown_not_obeyed(finding.description)))}</p>'
+                f"{context}{suppression}{snippet}</div></details></div></article>"
+            )
+        return "\n".join(cards)
 
     def _format_scanner_results_table(
         self, scanner_results: List[Dict[str, Any]]
@@ -250,27 +363,31 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         table = """
         <table>
             <tr>
-                <th>Scanner</th>
-                <th>S</th>
-                <th>C</th>
-                <th>H</th>
-                <th>M</th>
-                <th>L</th>
-                <th>I</th>
-                <th>Duration</th>
-                <th>Actionable</th>
-                <th>Result</th>
-                <th>Threshold</th>
+                <th scope="col">Scanner</th>
+                <th scope="col">S</th>
+                <th scope="col">C</th>
+                <th scope="col">H</th>
+                <th scope="col">M</th>
+                <th scope="col">L</th>
+                <th scope="col">I</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Actionable</th>
+                <th scope="col">Result</th>
+                <th scope="col">Threshold</th>
             </tr>
         """
 
         for result in scanner_results:
             # Format duration
-            duration = format_duration(result.get("duration", 0))
+            duration = html.escape(format_duration(result.get("duration", 0)))
 
             # Format status with appropriate CSS class
             status = result.get("status", "UNKNOWN")
-            status_class = f"status-{status.lower()}"
+            status_class = (
+                f"status-{status.lower()}"
+                if status in {"PASSED", "FAILED", "MISSING", "SKIPPED", "ERROR"}
+                else "status-unknown"
+            )
 
             # Format threshold
             threshold = f"{result.get('threshold', 'UNKNOWN')} ({result.get('threshold_source', 'unknown')})"
@@ -281,7 +398,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
             table += f"""
             <tr>
-                <td>{html.escape(result.get("scanner_name", "Unknown"))}</td>
+                <td>{html.escape(str(shown_on_one_line(result.get("scanner_name", "Unknown"))))}</td>
                 <td>{result.get("suppressed", 0)}</td>
                 <td>{result.get("critical", 0)}</td>
                 <td>{result.get("high", 0)}</td>
@@ -290,7 +407,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 <td>{result.get("info", 0)}</td>
                 <td>{duration}</td>
                 <td class="{actionable_class}">{actionable}</td>
-                <td class="{status_class}">{status}</td>
+                <td class="{status_class}">{html.escape(status)}</td>
                 <td>{html.escape(threshold)}</td>
             </tr>
             """
@@ -303,25 +420,29 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         if not hotspots:
             return ""
 
-        section = f"<h3>Top {len(hotspots)} Hotspots</h3>"
-        section += "<p>Files with the highest number of security findings:</p>"
+        section = f'<div class="hotspots"><h3>Top {len(hotspots)} hotspots</h3>'
+        section += '<p>Files with the most actionable findings.</p><div class="table-scroll" role="region" aria-label="Top hotspots" tabindex="0">'
         section += """
         <table>
             <tr>
-                <th>Finding Count</th>
-                <th>File Location</th>
+                <th scope="col">Finding count</th>
+                <th scope="col">File location</th>
             </tr>
         """
 
         for hotspot in hotspots:
+            # A path from the scanned repository: shown on one line.
+            location = html.escape(
+                str(shown_on_one_line(hotspot.get("location", "Unknown")))
+            )
             section += f"""
             <tr>
                 <td>{hotspot.get("count", 0)}</td>
-                <td>{html.escape(hotspot.get("location", "Unknown"))}</td>
+                <td>{location}</td>
             </tr>
             """
 
-        section += "</table>"
+        section += "</table></div></div>"
         return section
 
     @staticmethod
@@ -342,14 +463,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             if self._is_suppressed(result):
                 severity_groups.setdefault("SUPPRESSED", []).append(result)
                 continue
-            result_level = (
-                result.level.value
-                if result.level and hasattr(result.level, "value")
-                else str(result.level)
-                if result.level
-                else "UNKNOWN"
-            )
-            severity = result_level.upper() if result.level else "UNKNOWN"
+            # The gate's severity, not the SARIF level ("ERROR", "WARNING"), so
+            # the page agrees with the summary counts.
+            severity = result_severity(result)
             if severity not in severity_groups:
                 severity_groups[severity] = []
             severity_groups[severity].append(result)
@@ -379,7 +495,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "<p>Statistics are calculated from the final aggregated SARIF report:</p>"
         )
         summary += "<ul>"
-        for severity, findings in active.items():
+        for severity, findings in sorted(
+            active.items(), key=lambda item: _SEVERITY_ORDER.get(item[0], 99)
+        ):
             severity_class = f"severity-{severity.lower()}"
             summary += f'<li class="{severity_class}"><strong>{severity}</strong>: {len(findings)} finding(s)</li>'
         if suppressed:
@@ -409,10 +527,10 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         table = """
         <table>
             <tr>
-                <th>Severity</th>
-                <th>Rule</th>
-                <th>Message</th>
-                <th>Location</th>
+                <th scope="col">Severity</th>
+                <th scope="col">Rule</th>
+                <th scope="col">Message</th>
+                <th scope="col">Location</th>
             </tr>
         """
 
@@ -424,20 +542,14 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             """
 
         for finding in active:
-            finding_level = (
-                finding.level.value
-                if finding.level and hasattr(finding.level, "value")
-                else str(finding.level)
-            )
-            severity_class = (
-                f"severity-{finding_level.lower() if finding.level else 'none'}"
-            )
+            severity = result_severity(finding)
+            severity_class = f"severity-{severity.lower()}"
 
             location_str = self._location_str(finding)
 
             table += f"""
             <tr>
-                <td class="{severity_class}">{html.escape(finding_level.upper() if finding.level else "NONE")}</td>
+                <td class="{severity_class}">{html.escape(severity)}</td>
                 <td>{html.escape(finding.ruleId or "N/A")}</td>
                 <td>{html.escape((finding.message.root.text if finding.message else None) or "N/A")}</td>
                 <td>{html.escape(location_str)}</td>
@@ -453,23 +565,17 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             <p>These findings have been explicitly suppressed and do not affect the scanner result.</p>
             <table>
                 <tr>
-                    <th>Severity</th>
-                    <th>Rule</th>
-                    <th>Message</th>
-                    <th>Location</th>
-                    <th>Status</th>
-                    <th>Reason</th>
+                    <th scope="col">Severity</th>
+                    <th scope="col">Rule</th>
+                    <th scope="col">Message</th>
+                    <th scope="col">Location</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Reason</th>
                 </tr>
             """
             for finding in suppressed:
-                finding_level = (
-                    finding.level.value
-                    if finding.level and hasattr(finding.level, "value")
-                    else str(finding.level)
-                )
-                severity_class = (
-                    f"severity-{finding_level.lower() if finding.level else 'none'}"
-                )
+                severity = result_severity(finding)
+                severity_class = f"severity-{severity.lower()}"
                 location_str = self._location_str(finding)
                 reason = ""
                 if finding.suppressions:
@@ -480,7 +586,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
                 table += f"""
                 <tr>
-                    <td class="{severity_class}">{html.escape(finding_level.upper() if finding.level else "NONE")}</td>
+                    <td class="{severity_class}">{html.escape(severity)}</td>
                     <td>{html.escape(finding.ruleId or "N/A")}</td>
                     <td>{html.escape((finding.message.root.text if finding.message else None) or "N/A")}</td>
                     <td>{html.escape(location_str)}</td>
@@ -505,14 +611,20 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         return "N/A"
 
     def _format_metadata(self, metadata) -> str:
-        """Format the metadata section."""
+        """Format the metadata section.
+
+        The dump holds the results file's text, extra fields included, so each
+        key and value is one shown line.
+        """
         metadata_dict = metadata.model_dump(by_alias=True)
         formatted = "<div class='metadata-section'>"
 
         for key, value in metadata_dict.items():
+            shown_key = html.escape(str(shown_on_one_line(str(key))))
+            shown_value = html.escape(str(shown_on_one_line(str(value))))
             formatted += f"""
             <div class="metadata-item">
-                <strong>{html.escape(str(key))}:</strong> {html.escape(str(value))}
+                <strong>{shown_key}:</strong> {shown_value}
             </div>
             """
 

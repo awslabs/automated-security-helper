@@ -9,11 +9,14 @@ literal expectation rather than derived from the implementation, so that a
 change in the ladder's internals cannot quietly move the gate.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     SEVERITY_THRESHOLDS,
+    resolve_scanner_threshold,
     sarif_level_fails_threshold,
     severity_fails_threshold,
     stricter_of,
@@ -221,14 +224,24 @@ class TestSarifLevelFailsThreshold:
         for level in ALL_SARIF_LEVELS:
             assert sarif_level_fails_threshold(level, empty) is False
 
-    def test_missing_level_is_treated_as_note(self):
-        """Matches run_ash_scan, which reads a missing level as 'note'."""
-        assert sarif_level_fails_threshold(None, "LOW") is True
-        assert sarif_level_fails_threshold(None, "MEDIUM") is False
+    def test_missing_level_is_treated_as_the_missing_level(self):
+        """MISSING_SARIF_LEVEL, "warning" (MEDIUM), as every grader reads it.
 
-    def test_unrecognised_level_is_treated_as_note(self):
-        assert sarif_level_fails_threshold("wibble", "LOW") is True
-        assert sarif_level_fails_threshold("wibble", "MEDIUM") is False
+        It was "note" here (LOW) while the results model defaulted to "error"
+        (CRITICAL), so one result had two grades.
+        """
+        assert sarif_level_fails_threshold(None, "MEDIUM") is True
+        assert sarif_level_fails_threshold(None, "HIGH") is False
+
+    def test_unrecognised_level_is_treated_as_the_missing_level(self):
+        assert sarif_level_fails_threshold("wibble", "MEDIUM") is True
+        assert sarif_level_fails_threshold("wibble", "HIGH") is False
+
+    def test_the_missing_level_is_sarifs_default(self):
+        """SARIF 2.1.0 3.27.10: with no level from the rule, "SET level to "warning"."""
+        from automated_security_helper.utils.severity_ladder import MISSING_SARIF_LEVEL
+
+        assert MISSING_SARIF_LEVEL == "warning"
 
     def test_accepts_a_sarif_level_enum(self):
         """The reporter reads result.level, which is a str-backed enum."""
@@ -267,3 +280,54 @@ class TestTheTwoViewsAgree:
         """The one documented divergence: a HIGH finding under a CRITICAL gate."""
         assert sarif_level_fails_threshold("error", "CRITICAL") is True
         assert severity_fails_threshold("HIGH", "CRITICAL") is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: the threshold a scanner is graded against always is one
+# ---------------------------------------------------------------------------
+
+
+class TestResolveScannerThreshold:
+    """A threshold of None turns the gate off, so the resolver never returns one."""
+
+    def test_a_scanner_threshold_wins(self):
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold("HIGH", config) == ("HIGH", "config")
+
+    @pytest.mark.parametrize("value", ["${ASH_X}", "bogus", ""])
+    def test_a_scanner_threshold_comes_back_as_given_whatever_it_reads_as(self, value):
+        """The summary row pairs a scanner's own threshold, as written, with the
+        source answered here (ScannerStatisticsCalculator._threshold_resolution
+        guards the pairing); a value off the ladder is returned, never replaced."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold(value, config) == (value, "config")
+
+    def test_the_global_threshold_is_the_fallback(self):
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold(None, config) == ("LOW", "global")
+
+    @pytest.mark.parametrize("configured", [None, 3], ids=["none", "not-a-string"])
+    def test_a_global_threshold_that_is_not_one_reads_as_no_config(self, configured):
+        """A validated config cannot hold either; a config built without validation
+        can, and None would have graded the scanner with no gate at all."""
+        from automated_security_helper.core.constants import (
+            ASH_DEFAULT_SEVERITY_LEVEL,
+        )
+
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold=configured)
+        )
+
+        assert resolve_scanner_threshold(None, config) == (
+            ASH_DEFAULT_SEVERITY_LEVEL,
+            "global",
+        )

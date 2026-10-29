@@ -14,7 +14,18 @@ from automated_security_helper.utils.download_utils import (
     install_binary_from_url,
     create_url_download_command,
     get_opengrep_url,
+    receipt_root,
 )
+
+pytestmark = pytest.mark.usefixtures("receipt_home")
+
+
+def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
+    """An install writes its receipt under Path.home(), here the test's own home.
+
+    This module wrote a receipt into the developer's real ~/.ash/install-receipts.
+    """
+    assert receipt_root().is_relative_to(tmp_path), receipt_root()
 
 
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")
@@ -180,8 +191,9 @@ def test_create_url_download_command(mock_mkdir, mock_exists):
         expected_sha256="A" * 64,
     )
 
-    # Verify mkdir was called
-    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+    # Building a command creates nothing: the install creates the directory when it
+    # runs. OpengrepScanner builds this command when it is constructed.
+    mock_mkdir.assert_not_called()
 
     # Verify result
     assert result.args[0] == sys.executable
@@ -190,12 +202,71 @@ def test_create_url_download_command(mock_mkdir, mock_exists):
     # After the code-injection fix, values are passed as separate args
     # rather than interpolated into the -c script
     assert "https://example.com/file" in result.args
-    assert "/custom/destination" in result.args
+    # The destination is made absolute and written with forward slashes
+    # (create_url_download_command), so on Windows it carries the drive.
+    assert Path("/custom/destination").absolute().as_posix() in result.args
     assert "renamed_file" in result.args
     # Lowercased on the way in, and handed to the verified install as an argument.
     assert "a" * 64 in result.args
     assert "expected_sha256=sys.argv[3]" in result.args[2]
     assert result.shell is False
+
+
+def test_building_the_download_command_creates_no_directory(tmp_path, monkeypatch):
+    """A scan constructs OpengrepScanner, which builds this command for a custom version.
+
+    The builder created current_bin_path() there and then: with ASH_BIN_PATH=newbin
+    a scan made <cwd>/newbin, and in a read-only checkout the scanner's validator
+    raised.
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("ASH_BIN_PATH", "newbin")
+    create_url_download_command(
+        "https://example.com/tool", rename_to="tool", expected_sha256="a" * 64
+    )
+    monkeypatch.setenv("ASH_BIN_PATH", str(work / "absolute-bin"))
+    create_url_download_command(
+        "https://example.com/tool", rename_to="tool", expected_sha256="a" * 64
+    )
+    assert sorted(p.name for p in work.iterdir()) == []
+
+
+def test_the_install_creates_its_directory_when_it_runs(tmp_path):
+    """What the builder leaves undone, the run does."""
+    payload = b"#!/bin/sh\necho tool\n"
+    destination = tmp_path / "not-yet" / "bin"
+    with patch(
+        "automated_security_helper.utils.download_utils.urllib.request.urlopen",
+        return_value=_bytes_response(payload),
+    ):
+        installed = install_binary_from_url(
+            "https://example.com/tool",
+            destination,
+            rename_to="tool",
+            expected_sha256=_sha256(payload),
+        )
+    assert installed == destination / "tool"
+    assert installed.read_bytes() == payload
+
+
+def _sha256(data: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def _bytes_response(data: bytes):
+    class _Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            self.close()
+            return False
+
+    return _Response(data)
 
 
 @pytest.mark.parametrize("digest", [None, "", "a" * 63, "g" * 64])

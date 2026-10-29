@@ -1,5 +1,6 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 fail_on_findings: false
+fail_on_incomplete_scanners: sometimes
 legacy_option: 1
 scanners:
   bandit:
@@ -10,6 +11,8 @@ scanners:
     enabled: true
   npm_audit:
     enabled: false
+  trivy-repo:
+    enabled: true
 reporters:
   html: {}
 converters:
@@ -32,3 +35,7 @@ global_settings:
     rule_id: B107
     expiration: 31/01/2099
     reason: Wrong date format
+  - path: src/app.rb
+    rule_id: B108
+    symbol: Handler.run
+    reason: A file type with no symbol grammar

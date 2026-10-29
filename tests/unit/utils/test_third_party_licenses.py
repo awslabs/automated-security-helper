@@ -190,6 +190,18 @@ class TestEntryShape:
                 f"{tool}: classify {identifier} in COPYLEFT_SPDX or PERMISSIVE_SPDX"
             )
 
+    @pytest.mark.parametrize("tool", ENTRIES)
+    def test_every_license_exception_is_known(self, tool):
+        """The token after WITH is an exception, never a license to classify.
+
+        Known exceptions only, so a typo or a license placed after WITH fails here
+        instead of silently dropping out of the copyleft check.
+        """
+        for exception in THIRD_PARTY_LICENSES[tool].spdx_exceptions:
+            assert exception in tool_downloads.SPDX_EXCEPTIONS, (
+                f"{tool}: {exception} is not a known SPDX exception"
+            )
+
     def test_the_two_classifications_do_not_overlap(self):
         assert not COPYLEFT_SPDX & PERMISSIVE_SPDX
 
@@ -314,6 +326,46 @@ class TestTheDockerfileInstallsEveryEntry:
         )
         assert declared < first_install
 
+    def test_every_uv_install_leaves_no_cache_in_its_layer(self):
+        """uv's cache is only useful to a later install on the same machine.
+
+        In an image layer it is dead weight, so every RUN that installs with uv
+        or runs `ash dependencies install` (which installs uv tools) sets
+        UV_NO_CACHE in that same RUN.
+        """
+        # One logical line per RUN: continuations joined, so a pinned install
+        # written as `RUN pins=... && \` + `UV_NO_CACHE=1 ash ...` is one entry.
+        dockerfile = DOCKERFILE.read_text().replace("\\\n", " ")
+        installs = [
+            line
+            for line in dockerfile.splitlines()
+            if line.startswith("RUN ")
+            and ("ash dependencies install" in line or "uv pip install" in line)
+        ]
+        assert len(installs) >= 3, installs
+        for line in installs:
+            if line.startswith('RUN pins="$(install-pinned-tool --uv-tool-pins)"'):
+                # uv keeps its no-cache cache in a temporary directory, which
+                # `ash dependencies install` left behind in /tmp (about 437 MB a
+                # stage), so these RUNs give it a TMPDIR they remove themselves.
+                assert 'uv_tmp="$(mktemp -d)"' in line, line
+                assert 'TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ' in line, line
+                assert 'rm -rf "${uv_tmp:?}"; exit "${status}"' in line, line
+            else:
+                assert line[len("RUN ") :].startswith("UV_NO_CACHE=1 "), line
+
+    def test_the_rules_bundle_entry_matches_the_pinned_bundle(self):
+        bundle = tool_downloads.RULES_BUNDLES["aws-guard-rules-registry"]
+        assert THIRD_PARTY_LICENSES["aws-guard-rules-registry"].version == (
+            bundle.version
+        )
+
+    def test_probed_entries_are_not_also_executables(self):
+        """A probe replaces the PATH check; naming executables too would be ignored."""
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            if entry.version_probe:
+                assert not entry.executables, tool
+
     def test_verification_runs_after_ash_dependencies_install(self):
         """opengrep only exists once `ash dependencies install` has run."""
         core = _core_stage(DOCKERFILE.read_text())
@@ -402,21 +454,33 @@ class TestThePythonTools:
             semgrep_scanner,
         )
 
-        scanner, config = {
-            "bandit": (
-                bandit_scanner.BanditScanner,
-                bandit_scanner.BanditScannerConfig,
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            cfn_lint_scanner,
+        )
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            zizmor_scanner,
+        )
+
+        def _classic(scanner, config):
+            return scanner._get_tool_version_constraint(
+                SimpleNamespace(config=config())
+            )
+
+        default = {
+            "bandit": lambda: _classic(
+                bandit_scanner.BanditScanner, bandit_scanner.BanditScannerConfig
             ),
-            "checkov": (
-                checkov_scanner.CheckovScanner,
-                checkov_scanner.CheckovScannerConfig,
+            "checkov": lambda: _classic(
+                checkov_scanner.CheckovScanner, checkov_scanner.CheckovScannerConfig
             ),
-            "semgrep": (
-                semgrep_scanner.SemgrepScanner,
-                semgrep_scanner.SemgrepScannerConfig,
+            "semgrep": lambda: _classic(
+                semgrep_scanner.SemgrepScanner, semgrep_scanner.SemgrepScannerConfig
             ),
-        }[tool]
-        default = scanner._get_tool_version_constraint(SimpleNamespace(config=config()))
+            "cfn-lint": lambda: (
+                cfn_lint_scanner.CfnLintScannerConfigOptions().tool_version
+            ),
+            "zizmor": lambda: zizmor_scanner.ZizmorScannerConfigOptions().tool_version,
+        }[tool]()
         assert default, f"{tool} has no default constraint to check the pin against"
         version = THIRD_PARTY_LICENSES[tool].version.lstrip("v")
         assert version in SpecifierSet(default), (
@@ -436,7 +500,7 @@ class TestThePythonTools:
         text = DOCKERFILE.read_text()
         for line in lines:
             assert line.strip() == (
-                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}'
+                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \\'
             ), line
         assert (
             text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
@@ -445,7 +509,7 @@ class TestThePythonTools:
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())
         staged = core.index(
-            "install-pinned-tool --licenses-only bandit checkov semgrep"
+            "install-pinned-tool --licenses-only bandit cfn-lint checkov semgrep zizmor"
         )
         assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
             staged
@@ -507,3 +571,14 @@ class TestTheHashBlock:
             used.add(entry.commit)
             used.update(f.sha256 for f in entry.files if f.sha256)
         assert sorted(set(tool_downloads._THIRD_PARTY_HASHES.values()) - used) == []
+
+
+def test_an_entry_without_a_source_note_is_unchanged():
+    notice = THIRD_PARTY_LICENSES["opengrep"].source_notice()
+    assert "Hackage" not in notice
+
+
+def test_the_release_tag_defaults_to_the_version_as_upstream_spells_it():
+    assert "Release tag:         v1.30.2" in (
+        THIRD_PARTY_LICENSES["opengrep"].source_notice()
+    )

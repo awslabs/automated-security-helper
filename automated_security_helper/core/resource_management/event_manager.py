@@ -44,7 +44,7 @@ class EventSubscriptionManager:
     memory leaks caused by untracked event handlers in the MCP server.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the EventSubscriptionManager."""
         self._subscriptions: Dict[str, EventSubscription] = {}
         self._subscriptions_by_scan: Dict[str, Set[str]] = {}
