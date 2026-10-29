@@ -1135,11 +1135,14 @@ def _marker_at(result: dict, place) -> Any:
 def test_get_config_shows_an_environment_read_option_by_its_reference(
     tmp_path, monkeypatch, option, route
 ):
-    """A checkout's file writes an operator-only option as ${VAR}. get_config
-    shows it ignored, and shows what the file wrote as the reference,
-    `<from ${VAR}>`, never the value the server's environment gave it: through
-    a named file in a checkout the session does not scan, and with no file,
-    ASH_CONFIG naming one inside the searched tree."""
+    """A checkout's file writes an operator-only option as ${VAR}. With no file,
+    ASH_CONFIG naming one inside the searched tree, get_config shows the option
+    ignored and shows what the file wrote as the reference, `<from ${VAR}>`,
+    never the value the server's environment gave it. Through a named file in a
+    checkout the session does not scan, the reference is no longer at the place,
+    so the marker is withdrawn (`_without_environment_read_markers`): the option
+    is left out, or stays at the configuration's own value, and the answer holds
+    no line with the value."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
     from tests.utils.helpers import mark_git_checkout
 
@@ -1165,6 +1168,13 @@ def test_get_config_shows_an_environment_read_option_by_its_reference(
     import json
 
     assert _SERVER_VALUE not in json.dumps(result), result
+    if route == "named-file":
+        if option == "limit":
+            assert _marker_at(result, place) == 256, result
+        else:
+            kind, key, options, name = place
+            assert name not in result[kind][key][options], result
+        return
     marker = _marker_at(result, place)
     assert marker == (
         "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
@@ -1236,24 +1246,25 @@ def test_get_config_never_answers_with_an_in_tree_file_s_read_scope(
         ), options
     if route.startswith("named"):
         # Without the target, the session's stand-in is not the scan's tree:
-        # the file is judged by its own confinement root, and the ignored
-        # option is shown with its reference, never the value.
+        # the file is judged by its own confinement root, and the marker that
+        # would show the option is withdrawn, because the reference is no
+        # longer at the place: the option is left out and the answer holds no
+        # line with the value.
         control = mcp_get_config(config_path=str(named))
         assert _SERVER_VALUE not in json.dumps(control), control
         control_options = control["reporters"]["aws-security-hub"]["options"]
-        assert control_options["findings_scope"] == (
-            "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
-        ), control_options
+        assert "findings_scope" not in control_options, control_options
 
 
 def test_get_config_shows_a_literal_scope_as_written_beside_a_read_value(
     tmp_path, monkeypatch
 ):
     """A checkout's file reads project_name from ${VAR} and writes
-    findings_scope as a literal that happens to be the same text. The marker
-    shows the scope's literal: it is the repository's own text, and no
-    reference sits at the scope. A literal that equals a value read elsewhere
-    stays the literal."""
+    findings_scope as a literal that happens to be the same text. A marker
+    whose text is a value the configuration read from the environment is
+    withdrawn, and a literal that equals one is withheld too
+    (`_without_environment_read_markers` errs toward showing less), so the
+    scope is left out of the answer."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
     from tests.utils.helpers import mark_git_checkout
 
@@ -1275,8 +1286,8 @@ def test_get_config_shows_a_literal_scope_as_written_beside_a_read_value(
 
     result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
 
-    marker = result["reporters"]["aws-security-hub"]["options"]["findings_scope"]
-    assert marker == '<operator only; ignored from this file: "same-text">', marker
+    options = result["reporters"]["aws-security-hub"]["options"]
+    assert "findings_scope" not in options, options
 
 
 def test_get_config_shows_a_literal_written_over_a_read_value_as_the_literal(
@@ -1329,9 +1340,10 @@ def test_a_chain_file_swapped_for_a_link_after_the_resolve_still_answers(
     """The checkout's base file is swapped for a symlink out of the checkout
     right after the resolution reads the chain, as a writer can between the
     read and the answer. get_config answers from that one read: the base's
-    env-read option is marked by its reference, and nothing walks the live
-    filesystem again to raise past the structured refusals or to read what
-    the link points at now."""
+    env-read option is left out, its marker withdrawn because the reference is
+    no longer at the place, and nothing walks the live filesystem again to
+    raise past the structured refusals or to read what the link points at
+    now."""
     import json
 
     from automated_security_helper.cli.mcp_tools import mcp_get_config
@@ -1373,10 +1385,8 @@ def test_a_chain_file_swapped_for_a_link_after_the_resolve_still_answers(
     text = json.dumps(result)
     assert _SERVER_VALUE not in text, result
     assert "swapped-in-after-the-read" not in text, result
-    marker = result["reporters"]["aws-security-hub"]["options"]["findings_scope"]
-    assert marker == (
-        "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
-    ), marker
+    options = result["reporters"]["aws-security-hub"]["options"]
+    assert "findings_scope" not in options, options
 
 
 def test_get_config_shows_an_aliased_environment_value_by_its_reference(
@@ -1384,8 +1394,9 @@ def test_get_config_shows_an_aliased_environment_value_by_its_reference(
 ):
     """A checkout's file reads project_name from ${VAR} under a YAML anchor
     and points findings_scope at it with an alias. The scope holds the value
-    the environment gave: the marker shows the reference, never the value.
-    (A `patch` copy of it is refused at load: copy is not an allowed op.)"""
+    the environment gave: its marker is withdrawn and the scope is left out,
+    never shown as the value. (A `patch` copy of it is refused at load: copy
+    is not an allowed op.)"""
     import json
 
     from automated_security_helper.cli.mcp_tools import mcp_get_config
@@ -1410,8 +1421,8 @@ def test_get_config_shows_an_aliased_environment_value_by_its_reference(
     result = mcp_get_config(config_path=str(checkout / ".ash" / ".ash.yaml"))
 
     assert _SERVER_VALUE not in json.dumps(result), result
-    marker = result["reporters"]["aws-security-hub"]["options"]["findings_scope"]
-    assert marker.startswith("<operator only; ignored from this file: <from "), marker
+    reporter = (result.get("reporters") or {}).get("aws-security-hub") or {}
+    assert "findings_scope" not in (reporter.get("options") or {}), result
 
 
 def _tree_with_ash_config_limit(tmp_path, monkeypatch, body: str) -> Path:
