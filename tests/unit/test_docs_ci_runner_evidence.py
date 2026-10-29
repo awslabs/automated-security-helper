@@ -510,7 +510,9 @@ def test_a_zipped_artifact_is_unpacked_with_its_members_own_mtimes(tmp_path):
     with zipfile.ZipFile(archive, "w") as zipped:
         _zip_member(zipped, "out/ash_aggregated_results.json", b"{}", None)
         _zip_member(zipped, "out/reports/ash.ghas.sarif", SARIF_BYTES, STORED_AT)
-        _zip_member(zipped, "elsewhere/ash_aggregated_results.json", b"{}", None)
+        # A deeper copy, outside the results file's directory: the reader keeps the
+        # shallowest copy only, and the unpack leaves this one in the zip.
+        _zip_member(zipped, "elsewhere/deeper/ash_aggregated_results.json", b"{}", None)
     os.utime(archive, (STORED_AT + 3600, STORED_AT + 3600))
     found = read(store)
     assert found is not None and len(found) == 1, "only the shallowest copy is read"
