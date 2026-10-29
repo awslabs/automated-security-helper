@@ -94,5 +94,48 @@ def test_a_skip_with_a_reason_still_names_it():
     assert _result(model, "docs") == "SKIPPED (no-changes)"
 
 
+def test_a_skipped_project_that_also_carries_an_error_text_reads_skipped():
+    """The recorded status is read ahead of the error text.
+
+    The arms used to read error text before the SKIPPED status, so a skipped
+    project whose record also held an error line read FAILED, a status
+    workspace_exit_code never gave it.
+    """
+    from automated_security_helper.models.workspace import SkippedProjectReason
+
+    model = _model(
+        _project(
+            "docs",
+            status=ProjectRunStatus.SKIPPED,
+            skip_reason=SkippedProjectReason.ERROR,
+            error="the project's config could not be read",
+            severity_threshold=None,
+        )
+    )
+    assert _result(model, "docs") == "SKIPPED (error)"
+
+
+def test_a_failed_project_that_also_carries_a_skip_reason_reads_failed():
+    """The recorded status is read ahead of the skip reason.
+
+    The arms used to read a skip reason before the FAILED status, so a failed
+    project whose record also held one read SKIPPED while workspace_exit_code
+    failed the run for it.
+    """
+    from automated_security_helper.models.workspace import SkippedProjectReason
+
+    model = _model(
+        _project(
+            "svc",
+            status=ProjectRunStatus.FAILED,
+            skip_reason=SkippedProjectReason.NO_CHANGES,
+            error="scanner crashed",
+            severity_threshold=None,
+        )
+    )
+    assert _result(model, "svc") == "FAILED"
+    assert 'class="failed"' in html_workspace_section(model)
+
+
 def test_a_completed_clean_project_still_passes():
     assert _result(_model(_project("svc")), "svc") == "PASSED"

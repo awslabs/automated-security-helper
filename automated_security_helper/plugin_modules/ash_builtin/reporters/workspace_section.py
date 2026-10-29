@@ -147,22 +147,29 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
     rows: List[Dict[str, Any]] = []
     for project in workspace.projects:
         status = getattr(project.status, "value", project.status)
-        if project.skip_reason is not None:
-            # The reason matters more than the word "skipped": a no-changes skip
-            # is a successful optimisation and an error skip is a project that
-            # was not looked at, and they must not read the same.
-            reason = getattr(project.skip_reason, "value", project.skip_reason)
-            result = f"SKIPPED ({reason})"
-        elif project.error or project.status is ProjectRunStatus.FAILED:
-            # The recorded status decides, not the error text's truthiness: a
-            # FAILED project whose error is null or empty was still attempted
-            # and produced no outcome, and workspace_exit_code fails the run for
-            # it. Read from the text alone it fell through to PASSED.
+        # The reason matters more than the word "skipped": a no-changes skip is
+        # a successful optimisation and an error skip is a project that was not
+        # looked at, and they must not read the same.
+        reason = getattr(project.skip_reason, "value", project.skip_reason)
+        if project.status is ProjectRunStatus.FAILED:
+            # The recorded status decides, ahead of every text field: a FAILED
+            # project whose error is null or empty was still attempted and
+            # produced no outcome, and workspace_exit_code fails the run for it.
+            # Read from the text alone it fell through to PASSED; read after the
+            # skip_reason arm, a FAILED project that also carried a skip reason
+            # read SKIPPED.
             result = "FAILED"
         elif project.status is ProjectRunStatus.SKIPPED:
-            # A SKIPPED project with no recorded reason was never scanned; its
-            # counts are zero because nothing ran, not because nothing was found.
-            result = "SKIPPED"
+            # A SKIPPED project was never scanned: its counts are zero because
+            # nothing ran, not because nothing was found. The status decides
+            # ahead of the error text, so a skipped project that also carries an
+            # error text reads SKIPPED, as workspace_exit_code reads it.
+            result = f"SKIPPED ({reason})" if reason else "SKIPPED"
+        elif project.skip_reason is not None:
+            # Fallbacks for a record whose status does not say: the text fields.
+            result = f"SKIPPED ({reason})"
+        elif project.error:
+            result = "FAILED"
         elif project.scan_incomplete:
             # Ahead of the threshold arm, in the order workspace_exit_code reads a
             # project (incomplete before findings, as a single-directory scan
