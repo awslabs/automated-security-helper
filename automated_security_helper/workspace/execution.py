@@ -2315,7 +2315,15 @@ def execute_workspace(
     shapes = shapes_of_secret_values(exposed)
     if exposed:
         for project in plan.projects:
-            if project.key not in collected:
+            run = collected.get(project.key)
+            if run is None:
+                continue
+            if run.outcome.status is not ProjectRunStatus.COMPLETED:
+                # Nothing of this run's is under projects/<key> for a project the
+                # workspace never handed to an orchestrator (an unchanged skip, a
+                # link refusal, a config error, never started, abandoned). What is
+                # there is a previous run's output; rewriting it gave stale results
+                # a fresh mtime and nothing else.
                 continue
             project_output = _project_output_dir(settings, project)
             # The same refusal the scan made before writing there. A project whose

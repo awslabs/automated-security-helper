@@ -137,3 +137,31 @@ def test_the_masking_pass_skips_a_project_whose_output_was_a_refused_link(
     statuses = {p.project: p.status.value for p in outcome.payload.projects}
     assert statuses["linked"] == "failed", statuses
     assert masked == ["api"]
+
+
+def test_the_masking_pass_skips_a_project_this_run_never_scanned(tmp_path, monkeypatch):
+    """A previous run's projects/<key> is not rewritten for a project that failed before scanning."""
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    masked: list = []
+    monkeypatch.setattr(execution, "exposed_secret_values", lambda results: {"hunter2"})
+    monkeypatch.setattr(
+        execution,
+        "_mask_project_output",
+        lambda project_output, values, shapes: masked.append(project_output.name),
+    )
+    _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("broken", "MEDIUM"))
+    FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(count=1)}
+    FakeOrchestrator.behaviour["broken"] = {
+        "raise": ASHConfigValidationError("fixture: the config is invalid")
+    }
+    # What a previous run left under the never-scanned project's output tree.
+    stale = tmp_path / "out" / "projects" / "broken" / "ash_aggregated_results.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("{}", encoding="utf-8")
+
+    outcome = _run(tmp_path, plan)
+
+    statuses = {p.project: p.status.value for p in outcome.payload.projects}
+    assert statuses["broken"] == "failed", statuses
+    assert masked == ["api"]
