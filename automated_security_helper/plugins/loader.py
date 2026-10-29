@@ -1166,9 +1166,14 @@ def load_additional_plugin_modules(
                 if prefix not in modules_before and prefix not in sys.modules:
                     owner = prefix
                     break
+            # Over a snapshot of the keys: another thread importing while this
+            # handler runs resizes sys.modules, and a comprehension iterating
+            # the live dict raised "dictionary changed size during iteration"
+            # from inside the except handler, skipping the record, the undo and
+            # the refusal below.
             for added in [
                 key
-                for key in sys.modules
+                for key in list(sys.modules)
                 if key not in modules_before
                 and (key == owner or key.startswith(owner + "."))
             ]:
@@ -1308,7 +1313,7 @@ def load_additional_plugin_modules(
             # import loaded stays as it was.
             for added in [
                 key
-                for key in sys.modules
+                for key in list(sys.modules)
                 if key not in modules_before
                 and (key == module_path or key.startswith(module_path + "."))
             ]:
