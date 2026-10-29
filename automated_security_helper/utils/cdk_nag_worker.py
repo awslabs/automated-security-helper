@@ -141,8 +141,14 @@ def _shortest_name_relative_to(cwd: Path) -> Callable[["str | Path"], "str | Pat
             return input
         input_posix = probe.absolute().as_posix()
         cwd_posix = cwd.absolute().as_posix()
+        # The working directory as a path prefix: with the separator, so a sibling
+        # directory whose name merely starts with the working directory's name
+        # (``/work2/t.yaml`` beside ``/work``) is not taken for a path inside it.
+        # A bare string prefix test sent such a template into ``relative_to``,
+        # which raised ValueError, and the template was counted as a failed target.
+        cwd_prefix = cwd_posix if cwd_posix.endswith("/") else cwd_posix + "/"
         shortest: "str | Path"
-        if input_posix.startswith(cwd_posix) and input_posix != cwd_posix:
+        if input_posix.startswith(cwd_prefix):
             shortest = probe.absolute().relative_to(cwd)
         else:
             shortest = input
@@ -407,17 +413,43 @@ def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
     unsandboxed parent at another file, or at a device that never ends. A trailing
     line cut short by the child dying is ignored, as is anything after a line that
     does not parse.
+
+    The path is checked to be a regular file BEFORE it is opened, and opened without
+    blocking: an ``O_RDONLY`` open of a FIFO waits for a writer that never comes, and
+    the check that followed the open was never reached, so a FIFO planted at the
+    response path hung the unsandboxed parent. The check is repeated on the opened
+    descriptor, so a file swapped for a FIFO between the two is still refused.
+
+    Past the cap, the complete lines inside it are still read rather than the whole
+    response being dropped: a child that answered every template into a response
+    larger than the cap used to fail the whole batch with "exited 0 before
+    answering", and the answers it had written were lost with it. The answers that
+    fit are kept; the template whose line crosses the cap, and those after it, are
+    the ones the caller fails for want of an answer.
     """
     if not response_path.exists() or response_path.is_symlink():
         return []
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        if not stat.S_ISREG(os.lstat(response_path).st_mode):
+            return []
+    except OSError:
+        return []
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
     fd = os.open(response_path, flags)
     with os.fdopen(fd, "rb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
             return []
         data = handle.read(_MAX_RESPONSE_BYTES + 1)
     if len(data) > _MAX_RESPONSE_BYTES:
-        return []
+        # Only what fits, cut back to the last complete line; the fragment after it
+        # is dropped below as a line cut short.
+        data = data[:_MAX_RESPONSE_BYTES]
+        data = data[: data.rfind(b"\n") + 1]
     lines = data.decode("utf-8", errors="replace").split("\n")
     if not lines:
         return []
@@ -457,12 +489,15 @@ def _run_child(
     cwd: Path,
     timeout: Optional[float],
     values: Sequence[str],
-) -> "tuple[List[Dict[str, Any]], Optional[str], bool]":
+) -> "tuple[List[Dict[str, Any]], Optional[str], bool, Dict[str, Any]]":
     """Evaluate ``templates`` in one child.
 
     Returns the answers it gave, in template order and possibly fewer than asked for;
-    the reason it stopped early, or None; and whether that reason was the timeout.
-    ``values`` are the scan config's environment values: the reason quotes the
+    the reason it stopped early, or None; whether that reason was the timeout; and
+    the runner's response for the child as recorded (its exit code, and the
+    ``could_not_stop`` state of a timeout whose stop failed), so the scanner can
+    record a child that died or could not be stopped the way it records any other
+    tool's run. ``values`` are the scan config's environment values: the reason quotes the
     child's stderr, which can echo one, and it is redacted HERE, before the
     tail is cut from it, because the cut rewrites a value's line breaks as the
     joiner and no later whole-spelling redaction can match that.
@@ -519,8 +554,9 @@ def _run_child(
             values=values,
         )
         answers = _read_answers(response_path)[: len(templates)]
+        recorded = outcome if isinstance(outcome, dict) else {}
         if len(answers) == len(templates):
-            return answers, None, False
+            return answers, None, False, recorded
         if outcome.get("timed_out"):
             # The limit through the one formatter every timeout message uses
             # (error_text.timeout_limit_token), as its own quoted token. With
@@ -544,7 +580,7 @@ def _run_child(
                 "scanners.cdk-nag.options.scan_timeout if these templates "
                 "legitimately need longer."
             )
-            return answers, reason, True
+            return answers, reason, True, recorded
         # Redacted whole BEFORE the split (redact_then_split): the " | " join
         # below rewrites a value's line break, so a redaction after it could
         # not match the value's spelling and both halves would print. Escape
@@ -564,7 +600,7 @@ def _run_child(
             f"the cdk-nag worker process exited {outcome.get('returncode')} "
             f"before answering: {tail}"
         )
-        return answers, reason, False
+        return answers, reason, False, recorded
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
         try:
@@ -595,18 +631,42 @@ class _Batch:
         self.options: Optional[Dict[str, Any]] = None
         self.answers: Dict[str, Dict[str, Any]] = {}
         self.errors: Dict[str, str] = {}
+        # What the scanner records about the children, the way it records any other
+        # tool's run: the runner's response for every child that did not answer
+        # everything it was asked (its exit code, in order), and the response of a
+        # timed-out child whose stop failed, which is still running. Neither used to
+        # leave this module: the child's death reached the scanner as per-template
+        # text only, so the plugin's exit-code record and its could-not-stop state
+        # never saw a worker child, and the run-level could-not-stop gate (which
+        # fail_on_incomplete_scanners does not relax) never fired for cdk-nag.
+        self.failed_child_responses: List[Dict[str, Any]] = []
+        self.could_not_stop_response: Optional[Dict[str, Any]] = None
+
+    def _record_child(self, response: Dict[str, Any]) -> None:
+        from automated_security_helper.utils.subprocess_utils import (
+            response_could_not_stop,
+        )
+
+        self.failed_child_responses.append(response)
+        if self.could_not_stop_response is None and response_could_not_stop(response):
+            self.could_not_stop_response = response
 
     def _evaluate(self, pending: List[str], options: Dict[str, Any]) -> None:
         """Answer or fail every template in ``pending``.
 
-        A child that dies after answering some templates fails only the one it was
-        working on; the rest go to a new child. A child that answered nothing, or ran
-        out of time, fails everything still pending: starting another would repeat
-        the same failure once per template.
+        A child that dies fails only the template it was working on; the rest go to a
+        new child. That holds for a death on the first template too: a crash the first
+        template provokes used to fail every template in the batch, while the same
+        crash on a later template failed only that one. The retry is bounded so a
+        failure every child shares (cdk-nag not importing, node refused) is not paid
+        once per template: a second child in a row that answers nothing fails
+        everything still pending with its reason. A child that ran out of time fails
+        everything still pending at once, as before.
         """
+        answerless_in_a_row = 0
         while pending:
             try:
-                answers, error, timed_out = _run_child(
+                answers, error, timed_out, response = _run_child(
                     pending,
                     options,
                     self.work_root,
@@ -616,15 +676,18 @@ class _Batch:
                 )
             except Exception as exc:
                 answers, error, timed_out = [], f"{type(exc).__name__}: {exc}", False
+                response = {}
             for template, answer in zip(pending, answers):
                 self.answers[template] = answer
             if error is None:
                 return
+            self._record_child(response)
             rest = pending[len(answers) :]
-            if not answers or timed_out:
+            if timed_out or (not answers and answerless_in_a_row > 0):
                 for template in rest:
                     self.errors[template] = error
                 return
+            answerless_in_a_row = answerless_in_a_row + 1 if not answers else 0
             self.errors[rest[0]] = error
             pending = rest[1:]
 
@@ -676,7 +739,7 @@ def cdk_nag_worker_batch(
     timeout: Optional[float] = None,
     *,
     values: Sequence[str],
-) -> Iterator[None]:
+) -> Iterator["_Batch"]:
     """Evaluate ``templates`` in one child, on the first call made inside the block.
 
     ``work_root`` must be a directory the scanner may write, which inside a sandbox
@@ -685,18 +748,21 @@ def cdk_nag_worker_batch(
     environment values, which the worker's failure reasons are redacted with:
     required, with no empty default, so a caller cannot silently run the
     worker with redaction off.
+
+    Yields the batch, so the caller can read ``failed_child_responses`` and
+    ``could_not_stop_response`` after its loop and record a child that died, or one
+    ASH could not stop, on the plugin the way every other scanner's tool run is.
     """
-    token = _ACTIVE_BATCH.set(
-        _Batch(
-            templates,
-            Path(work_root),
-            Path(cwd) if cwd else Path.cwd(),
-            timeout,
-            values=values,
-        )
+    batch = _Batch(
+        templates,
+        Path(work_root),
+        Path(cwd) if cwd else Path.cwd(),
+        timeout,
+        values=values,
     )
+    token = _ACTIVE_BATCH.set(batch)
     try:
-        yield
+        yield batch
     finally:
         _ACTIVE_BATCH.reset(token)
 
