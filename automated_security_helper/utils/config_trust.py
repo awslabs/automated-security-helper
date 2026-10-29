@@ -225,6 +225,28 @@ def _same_value(expected: Any, value: Any) -> bool:
     return expected == value
 
 
+def operator_value(config: Any, key: str) -> Tuple[bool, Any]:
+    """The operator's own value for dotted ``key``, when ``config`` records one.
+
+    ``(True, value)`` when ``config`` carries a provenance whose trusted base plus
+    the operator's ``--config-overrides`` resolves ``key``; ``(False, None)`` when
+    ``config`` carries no provenance, no trusted base, the key is not there, or an
+    override cannot be applied to the bare trusted base. A scanner that ignores a
+    value the repository or an MCP client set takes this value in its place, so a
+    client cannot narrow the operator's choice down to the default by writing the
+    default: ``set_by_operator`` says whether the value about to be used is the
+    operator's, and this says what the operator's is. The value is the trusted
+    base's own object (a model is dumped), so a caller that changes it copies it.
+    """
+    provenance = getattr(config, "_provenance", None)
+    if not isinstance(provenance, ConfigProvenance):
+        return False, None
+    found = provenance.trusted_value(key)
+    if found is _MISSING:
+        return False, None
+    return True, found
+
+
 def set_by_operator(config: Any, key: str, value: Any) -> bool:
     """Whether ``value``, about to be used for dotted ``key``, is the operator's.
 

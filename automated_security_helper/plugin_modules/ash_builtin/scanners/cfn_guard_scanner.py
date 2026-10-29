@@ -123,6 +123,7 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     NOT_THE_OPERATORS,
     operator_paths,
+    operator_value,
     refusal_warning,
     scan_root,
     set_by_operator,
@@ -534,31 +535,46 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         return selected
 
     def _operator_rule_sets(self) -> List[str]:
-        """``rule_sets`` when the operator chose it, else the default set.
+        """``rule_sets`` as the operator chose it.
 
         A narrower set drops findings before ASH sees them, so they are neither
         reported nor counted as suppressed: ``rule_sets: [wa-Reliability-Pillar]``
         in the scanned tree's ``.ash/.ash.yaml`` turned 24 findings on the fixture
         into 9, losing every S3 public-access, encryption and logging finding. A
         value from a config inside a git checkout or the scanned directory, or from
-        an MCP client, is ignored with a warning, as ``rules_paths`` is; one equal to the default is used.
+        an MCP client, is replaced by the operator's own choice (the trusted base
+        with the operator's overrides replayed, ``config_trust.operator_value``),
+        or by the default set when the operator chose none, with a warning when the
+        two differ, as ``rules_paths`` is. A repository value equal to the default
+        used to be taken as it stood, with no provenance check, so a repository
+        could narrow an operator's wider set down to the default by writing the
+        default.
         """
         value = list(self._options().rule_sets)
-        if value == [DEFAULT_RULE_SET] or set_by_operator(
-            self.context.config if self.context is not None else None,
-            "scanners.cfn-guard.options.rule_sets",
-            value,
-        ):
+        config = self.context.config if self.context is not None else None
+        key = "scanners.cfn-guard.options.rule_sets"
+        if set_by_operator(config, key, value):
             return value
+        found, trusted = operator_value(config, key)
+        chosen = (
+            [str(name) for name in trusted]
+            if found and isinstance(trusted, list)
+            else [DEFAULT_RULE_SET]
+        )
+        if value == chosen:
+            return chosen
+        if chosen == [DEFAULT_RULE_SET]:
+            evaluates = f"ASH's default rule set, {DEFAULT_RULE_SET}"
+        else:
+            evaluates = f"the operator's rule sets, {chosen!r}"
         self._warn_rules_once(
             refusal_warning(
                 f"Ignoring scanners.cfn-guard.options.rule_sets ({value!r}): "
-                f"{NOT_THE_OPERATORS}. cfn-guard evaluates ASH's default rule set, "
-                f"{DEFAULT_RULE_SET}.",
+                f"{NOT_THE_OPERATORS}. cfn-guard evaluates {evaluates}.",
                 NOT_THE_OPERATORS,
             )
         )
-        return [DEFAULT_RULE_SET]
+        return chosen
 
     def rule_files(self) -> List[Path]:
         """The rules files cfn-guard will be evaluated with, in order.

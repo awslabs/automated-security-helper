@@ -131,6 +131,7 @@ from automated_security_helper.utils.cfn_template_discovery import (
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     operator_path,
+    operator_value,
     refusal_warning,
     set_by_operator,
 )
@@ -506,39 +507,49 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         return options
 
     def _operator_option(self, name: str) -> Any:
-        """``options.<name>`` when the operator set it, else its default.
+        """``options.<name>`` as the operator chose it.
 
         For the options that decide what cfn-lint reports: ``ignore_checks`` drops
         findings before ASH sees them, so they are neither reported nor counted as
         suppressed (measured: ``ignore_checks: [E, W]`` in the scanned tree's
         ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
         config inside a git checkout or the scanned directory, or from an MCP client,
-        is ignored with a warning,
-        once per scanner, as ``config_file`` is; a value equal to the default is
-        used silently, since using it changes nothing. ``tool_version``, which
-        chooses the release uv installs, is held to the operator's value when the
-        config is resolved instead (``_get_tool_version_constraint``).
+        is replaced by the operator's own value (the trusted base with the
+        operator's overrides replayed, ``config_trust.operator_value``), or by
+        the option's default when the operator set none, with a warning once per
+        option when the two differ, as ``config_file`` is. A repository value equal
+        to the default used to be taken as it stood, with no provenance check, so a
+        repository could undo an operator's ``ignore_checks`` or ``regions`` by
+        writing the default. ``tool_version``, which chooses the release uv
+        installs, is held to the operator's value when the config is resolved
+        instead (``_get_tool_version_constraint``).
         """
         options = self._options()
         value = getattr(options, name)
         default = type(options).model_fields[name].default
-        if value == default or set_by_operator(
-            self.context.config if self.context is not None else None,
-            f"scanners.cfn-lint.options.{name}",
-            value,
-        ):
+        config = self.context.config if self.context is not None else None
+        key = f"scanners.cfn-lint.options.{name}"
+        if set_by_operator(config, key, value):
             return value
+        found, trusted = operator_value(config, key)
+        chosen = copy.deepcopy(trusted if found else default)
+        if value == chosen:
+            return chosen
         if name not in self._refused_options:
             self._refused_options.add(name)
+            if found and chosen != default:
+                uses = f"the operator's value, {chosen!r}"
+            else:
+                uses = f"the default, {default!r}"
             self._plugin_log(
                 refusal_warning(
                     f"Ignoring scanners.cfn-lint.options.{name} ({value!r}): "
-                    f"{NOT_THE_OPERATORS}. cfn-lint uses the default, {default!r}.",
+                    f"{NOT_THE_OPERATORS}. cfn-lint uses {uses}.",
                     NOT_THE_OPERATORS,
                 ),
                 level=logging.WARNING,
             )
-        return copy.deepcopy(default)
+        return chosen
 
     def _get_tool_version_constraint(self) -> str | None:
         """``tool_version``, which only the operator sets.
