@@ -20,10 +20,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "actionlint",
+          "anyOf": [
+            {
+              "const": "actionlint",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "actionlint",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ActionlintScannerConfigOptions",
@@ -100,6 +109,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
@@ -1016,10 +1030,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "archive",
+          "anyOf": [
+            {
+              "const": "archive",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "archive",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ArchiveConverterConfigOptions",
@@ -1444,14 +1467,23 @@
           "description": "Build-time configuration settings"
         },
         "content_db_staleness": {
+          "anyOf": [
+            {
+              "enum": [
+                "fail",
+                "warn"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "fail",
           "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'.",
-          "enum": [
-            "fail",
-            "warn"
-          ],
-          "title": "Content Db Staleness",
-          "type": "string"
+          "title": "Content Db Staleness"
         },
         "content_db_staleness_offline_image_default": {
           "default": true,
@@ -2250,17 +2282,26 @@
           "description": "MCP-server-specific configuration (runtime override allowlist, etc.)."
         },
         "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "MEDIUM",
           "description": "Global minimum severity level to consider findings as failures across all scanners",
-          "enum": [
-            "ALL",
-            "LOW",
-            "MEDIUM",
-            "HIGH",
-            "CRITICAL"
-          ],
-          "title": "Severity Threshold",
-          "type": "string"
+          "title": "Severity Threshold"
         },
         "suppressions": {
           "default": [],
@@ -2657,10 +2698,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "bandit",
+          "anyOf": [
+            {
+              "const": "bandit",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "bandit",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/BanditScannerConfigOptions",
@@ -2772,6 +2822,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -2834,14 +2889,23 @@
       "description": "Configuration model for build-time settings.",
       "properties": {
         "build_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "ONLINE",
+                "OFFLINE"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "ONLINE",
           "description": "Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning.",
-          "enum": [
-            "ONLINE",
-            "OFFLINE"
-          ],
-          "title": "Build Mode",
-          "type": "string"
+          "title": "Build Mode"
         },
         "custom_scanners": {
           "default": [],
@@ -2883,10 +2947,19 @@
           "type": "string"
         },
         "name": {
-          "const": "csv",
+          "anyOf": [
+            {
+              "const": "csv",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "csv",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CSVReporterConfigOptions",
@@ -2971,10 +3044,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "cdk-nag",
+          "anyOf": [
+            {
+              "const": "cdk-nag",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "cdk-nag",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CdkNagScannerConfigOptions",
@@ -3048,6 +3130,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
@@ -3232,10 +3319,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "cfn-guard",
+          "anyOf": [
+            {
+              "const": "cfn-guard",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "cfn-guard",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CfnGuardScannerConfigOptions",
@@ -3310,6 +3406,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3330,10 +3431,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "cfn-lint",
+          "anyOf": [
+            {
+              "const": "cfn-lint",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "cfn-lint",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CfnLintScannerConfigOptions",
@@ -3447,6 +3557,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3480,10 +3595,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "cfn-nag",
+          "anyOf": [
+            {
+              "const": "cfn-nag",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "cfn-nag",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CfnNagScannerConfigOptions",
@@ -3534,6 +3658,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3554,10 +3683,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "checkov",
+          "anyOf": [
+            {
+              "const": "checkov",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "checkov",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CheckovScannerConfigOptions",
@@ -3593,19 +3731,28 @@
           ],
           "description": "List of additional formats to output. Defaults to including CycloneDX JSON",
           "items": {
-            "enum": [
-              "cli",
-              "csv",
-              "cyclonedx",
-              "cyclonedx_json",
-              "json",
-              "junitxml",
-              "github_failed_only",
-              "gitlab_sast",
-              "sarif",
-              "spdx"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "cli",
+                  "csv",
+                  "cyclonedx",
+                  "cyclonedx_json",
+                  "json",
+                  "junitxml",
+                  "github_failed_only",
+                  "gitlab_sast",
+                  "sarif",
+                  "spdx"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "type": "string"
+              }
+            ]
           },
           "title": "Additional Formats",
           "type": "array"
@@ -3633,45 +3780,54 @@
           ],
           "description": "Specific frameworks to include with Checkov. Defaults to `all`.",
           "items": {
-            "enum": [
-              "all",
-              "ansible",
-              "argo_workflows",
-              "arm",
-              "azure_pipelines",
-              "bicep",
-              "bitbucket_pipelines",
-              "cdk",
-              "circleci_pipelines",
-              "cloudformation",
-              "dockerfile",
-              "github_configuration",
-              "github_actions",
-              "gitlab_configuration",
-              "gitlab_ci",
-              "bitbucket_configuration",
-              "helm",
-              "json",
-              "yaml",
-              "kubernetes",
-              "kustomize",
-              "openapi",
-              "sca_package",
-              "sca_image",
-              "secrets",
-              "serverless",
-              "terraform",
-              "terraform_json",
-              "terraform_plan",
-              "sast",
-              "sast_python",
-              "sast_java",
-              "sast_javascript",
-              "sast_typescript",
-              "sast_golang",
-              "3d_policy"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "ansible",
+                  "argo_workflows",
+                  "arm",
+                  "azure_pipelines",
+                  "bicep",
+                  "bitbucket_pipelines",
+                  "cdk",
+                  "circleci_pipelines",
+                  "cloudformation",
+                  "dockerfile",
+                  "github_configuration",
+                  "github_actions",
+                  "gitlab_configuration",
+                  "gitlab_ci",
+                  "bitbucket_configuration",
+                  "helm",
+                  "json",
+                  "yaml",
+                  "kubernetes",
+                  "kustomize",
+                  "openapi",
+                  "sca_package",
+                  "sca_image",
+                  "secrets",
+                  "serverless",
+                  "terraform",
+                  "terraform_json",
+                  "terraform_plan",
+                  "sast",
+                  "sast_python",
+                  "sast_java",
+                  "sast_javascript",
+                  "sast_typescript",
+                  "sast_golang",
+                  "3d_policy"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "type": "string"
+              }
+            ]
           },
           "title": "Frameworks",
           "type": "array"
@@ -3715,6 +3871,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3732,45 +3893,54 @@
           "default": [],
           "description": "Specific frameworks to exclude with Checkov. Defaults to none.",
           "items": {
-            "enum": [
-              "all",
-              "ansible",
-              "argo_workflows",
-              "arm",
-              "azure_pipelines",
-              "bicep",
-              "bitbucket_pipelines",
-              "cdk",
-              "circleci_pipelines",
-              "cloudformation",
-              "dockerfile",
-              "github_configuration",
-              "github_actions",
-              "gitlab_configuration",
-              "gitlab_ci",
-              "bitbucket_configuration",
-              "helm",
-              "json",
-              "yaml",
-              "kubernetes",
-              "kustomize",
-              "openapi",
-              "sca_package",
-              "sca_image",
-              "secrets",
-              "serverless",
-              "terraform",
-              "terraform_json",
-              "terraform_plan",
-              "sast",
-              "sast_python",
-              "sast_java",
-              "sast_javascript",
-              "sast_typescript",
-              "sast_golang",
-              "3d_policy"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "ansible",
+                  "argo_workflows",
+                  "arm",
+                  "azure_pipelines",
+                  "bicep",
+                  "bitbucket_pipelines",
+                  "cdk",
+                  "circleci_pipelines",
+                  "cloudformation",
+                  "dockerfile",
+                  "github_configuration",
+                  "github_actions",
+                  "gitlab_configuration",
+                  "gitlab_ci",
+                  "bitbucket_configuration",
+                  "helm",
+                  "json",
+                  "yaml",
+                  "kubernetes",
+                  "kustomize",
+                  "openapi",
+                  "sca_package",
+                  "sca_image",
+                  "secrets",
+                  "serverless",
+                  "terraform",
+                  "terraform_json",
+                  "terraform_plan",
+                  "sast",
+                  "sast_python",
+                  "sast_java",
+                  "sast_javascript",
+                  "sast_typescript",
+                  "sast_golang",
+                  "3d_policy"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "type": "string"
+              }
+            ]
           },
           "title": "Skip Frameworks",
           "type": "array"
@@ -5359,13 +5529,22 @@
           "type": "string"
         },
         "policy": {
-          "description": "The policy this database is held to while the entry is in effect.",
-          "enum": [
-            "fail",
-            "warn"
+          "anyOf": [
+            {
+              "enum": [
+                "fail",
+                "warn"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
           ],
-          "title": "Policy",
-          "type": "string"
+          "description": "The policy this database is held to while the entry is in effect.",
+          "title": "Policy"
         },
         "reason": {
           "description": "Required. Why this database is held differently.",
@@ -6140,10 +6319,19 @@
           "type": "string"
         },
         "name": {
-          "const": "cyclonedx",
+          "anyOf": [
+            {
+              "const": "cyclonedx",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "cyclonedx",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CycloneDXReporterConfigOptions",
@@ -6731,10 +6919,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "detect-secrets",
+          "anyOf": [
+            {
+              "const": "detect-secrets",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "detect-secrets",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
@@ -6828,6 +7025,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
@@ -8549,10 +8751,19 @@
           "type": "string"
         },
         "name": {
-          "const": "flat-json",
+          "anyOf": [
+            {
+              "const": "flat-json",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "flat-json",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/FlatJSONReporterConfigOptions",
@@ -8783,10 +8994,19 @@
           "type": "string"
         },
         "name": {
-          "const": "github-ghas",
+          "anyOf": [
+            {
+              "const": "github-ghas",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "github-ghas",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GHASReporterConfigOptions",
@@ -8825,10 +9045,19 @@
           "type": "string"
         },
         "name": {
-          "const": "gitlab-cyclonedx",
+          "anyOf": [
+            {
+              "const": "gitlab-cyclonedx",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "gitlab-cyclonedx",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GitLabCycloneDXReporterConfigOptions",
@@ -8910,10 +9139,19 @@
           "type": "string"
         },
         "name": {
-          "const": "gitlab-sast",
+          "anyOf": [
+            {
+              "const": "gitlab-sast",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "gitlab-sast",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GitLabSASTReporterConfigOptions",
@@ -8947,10 +9185,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "gitleaks",
+          "anyOf": [
+            {
+              "const": "gitleaks",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "gitleaks",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GitleaksScannerConfigOptions",
@@ -9056,6 +9303,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
@@ -9431,10 +9683,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "grype",
+          "anyOf": [
+            {
+              "const": "grype",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "grype",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GrypeScannerConfigOptions",
@@ -9503,6 +9764,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -9527,10 +9793,19 @@
           "type": "string"
         },
         "name": {
-          "const": "html",
+          "anyOf": [
+            {
+              "const": "html",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "html",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/HTMLReporterConfigOptions",
@@ -10895,10 +11170,19 @@
           "type": "string"
         },
         "name": {
-          "const": "junitxml",
+          "anyOf": [
+            {
+              "const": "junitxml",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "junitxml",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/JUnitXMLReporterConfigOptions",
@@ -10932,10 +11216,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "jupyter",
+          "anyOf": [
+            {
+              "const": "jupyter",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "jupyter",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/JupyterConverterConfigOptions",
@@ -11567,10 +11860,19 @@
           "type": "string"
         },
         "name": {
-          "const": "markdown",
+          "anyOf": [
+            {
+              "const": "markdown",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "markdown",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/MarkdownReporterConfigOptions",
@@ -12452,10 +12754,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "npm-audit",
+          "anyOf": [
+            {
+              "const": "npm-audit",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "npm-audit",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/NpmAuditScannerConfigOptions",
@@ -12506,6 +12817,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -12531,10 +12847,19 @@
           "type": "string"
         },
         "name": {
-          "const": "ocsf",
+          "anyOf": [
+            {
+              "const": "ocsf",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "ocsf",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/OCSFReporterConfigOptions",
@@ -12641,10 +12966,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "opengrep",
+          "anyOf": [
+            {
+              "const": "opengrep",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "opengrep",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/OpengrepScannerConfigOptions",
@@ -12701,15 +13035,24 @@
           "type": "array"
         },
         "metrics": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "auto",
           "description": "Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is >= 1.7.0.",
-          "enum": [
-            "auto",
-            "on",
-            "off"
-          ],
-          "title": "Metrics",
-          "type": "string"
+          "title": "Metrics"
         },
         "offline": {
           "default": false,
@@ -12744,12 +13087,21 @@
           "default": [],
           "description": "Report findings only from rules matching the supplied severity level.",
           "items": {
-            "enum": [
-              "INFO",
-              "WARNING",
-              "ERROR"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "INFO",
+                  "WARNING",
+                  "ERROR"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "type": "string"
+              }
+            ]
           },
           "title": "Severity",
           "type": "array"
@@ -12767,6 +13119,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -12781,15 +13138,6 @@
           },
           "default": {},
           "description": "SHA256 of the OpenGrep release asset for a custom `version`, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset.",
-          "propertyNames": {
-            "enum": [
-              "linux/amd64",
-              "linux/arm64",
-              "darwin/amd64",
-              "darwin/arm64",
-              "windows/amd64"
-            ]
-          },
           "title": "Sha256",
           "type": "object"
         },
@@ -17485,10 +17833,19 @@
           "type": "string"
         },
         "name": {
-          "const": "sarif",
+          "anyOf": [
+            {
+              "const": "sarif",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "sarif",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/SARIFReporterConfigOptions",
@@ -17518,10 +17875,19 @@
           "type": "string"
         },
         "name": {
-          "const": "spdx",
+          "anyOf": [
+            {
+              "const": "spdx",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "spdx",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/SPDXReporterConfigOptions",
@@ -17560,18 +17926,27 @@
           "type": "array"
         },
         "mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "auto",
+                "bwrap",
+                "firejail",
+                "landlock",
+                "sandbox-exec"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "off",
           "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.",
-          "enum": [
-            "off",
-            "auto",
-            "bwrap",
-            "firejail",
-            "landlock",
-            "sandbox-exec"
-          ],
-          "title": "Mode",
-          "type": "string"
+          "title": "Mode"
         },
         "network_scanners": {
           "anyOf": [
@@ -18011,6 +18386,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
@@ -18591,10 +18971,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "semgrep",
+          "anyOf": [
+            {
+              "const": "semgrep",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "semgrep",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/SemgrepScannerConfigOptions",
@@ -18656,15 +19045,24 @@
           "type": "integer"
         },
         "metrics": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "auto",
           "description": "Configures how usage metrics are sent to the Semgrep server.",
-          "enum": [
-            "auto",
-            "on",
-            "off"
-          ],
-          "title": "Metrics",
-          "type": "string"
+          "title": "Metrics"
         },
         "offline": {
           "default": false,
@@ -18690,12 +19088,21 @@
           "default": [],
           "description": "Report findings only from rules matching the supplied severity level.",
           "items": {
-            "enum": [
-              "INFO",
-              "WARNING",
-              "ERROR"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "INFO",
+                  "WARNING",
+                  "ERROR"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "type": "string"
+              }
+            ]
           },
           "title": "Severity",
           "type": "array"
@@ -18710,6 +19117,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
@@ -20131,10 +20543,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "syft",
+          "anyOf": [
+            {
+              "const": "syft",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "syft",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/SyftScannerConfigOptions",
@@ -20163,17 +20584,26 @@
           ],
           "description": "List of additional formats to output. Defaults to syft-table.",
           "items": {
-            "enum": [
-              "cyclonedx-json",
-              "cyclonedx-xml",
-              "github-json",
-              "spdx-json",
-              "spdx-tag-value",
-              "syft-json",
-              "syft-table",
-              "syft-text"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "cyclonedx-json",
+                  "cyclonedx-xml",
+                  "github-json",
+                  "spdx-json",
+                  "spdx-tag-value",
+                  "syft-json",
+                  "syft-table",
+                  "syft-text"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "type": "string"
+              }
+            ]
           },
           "title": "Additional Outputs",
           "type": "array"
@@ -20234,6 +20664,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
@@ -20582,10 +21017,19 @@
           "type": "string"
         },
         "name": {
-          "const": "text",
+          "anyOf": [
+            {
+              "const": "text",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "text",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/TextReporterConfigOptions",
@@ -21788,10 +22232,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "trivy",
+          "anyOf": [
+            {
+              "const": "trivy",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "trivy",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/TrivyScannerConfigOptions",
@@ -21896,13 +22349,22 @@
           ],
           "description": "Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, any set but the default is ignored with a warning.",
           "items": {
-            "enum": [
-              "vuln",
-              "misconfig",
-              "secret",
-              "license"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "vuln",
+                  "misconfig",
+                  "secret",
+                  "license"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "type": "string"
+              }
+            ]
           },
           "minItems": 1,
           "title": "Scanners",
@@ -21935,6 +22397,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
@@ -22148,10 +22615,19 @@
           "type": "string"
         },
         "name": {
-          "const": "unused-suppressions",
+          "anyOf": [
+            {
+              "const": "unused-suppressions",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "unused-suppressions",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/UnusedSuppressionsReporterConfigOptions",
@@ -23912,10 +24388,19 @@
           "type": "string"
         },
         "name": {
-          "const": "yaml",
+          "anyOf": [
+            {
+              "const": "yaml",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "yaml",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/YAMLReporterConfigOptions",
@@ -23940,10 +24425,19 @@
           "type": "boolean"
         },
         "name": {
-          "const": "zizmor",
+          "anyOf": [
+            {
+              "const": "zizmor",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "zizmor",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ZizmorScannerConfigOptions",
@@ -24009,15 +24503,24 @@
           "type": "boolean"
         },
         "persona": {
+          "anyOf": [
+            {
+              "enum": [
+                "regular",
+                "pedantic",
+                "auditor"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "type": "string"
+            }
+          ],
           "default": "regular",
           "description": "zizmor persona. `regular` reports the fewest false positives; `pedantic` adds code-smell findings; `auditor` reports everything, false positives included.",
-          "enum": [
-            "regular",
-            "pedantic",
-            "auditor"
-          ],
-          "title": "Persona",
-          "type": "string"
+          "title": "Persona"
         },
         "scan_timeout": {
           "anyOf": [
@@ -24043,6 +24546,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
+              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
               "type": "string"
             },
             {
