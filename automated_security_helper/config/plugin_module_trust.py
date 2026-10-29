@@ -122,6 +122,7 @@ from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.sandbox_grants import WalkJudgment
     from automated_security_helper.plugins.loader import PluginModuleError
 
 
@@ -385,11 +386,30 @@ def _is_ash_own_module(name: str) -> bool:
     return True
 
 
+def _judged_against_trees(
+    location: Path, scanned_root: Optional[Path], also_scanned: Sequence[Path]
+) -> "WalkJudgment":
+    """``scanned_tree_judgment`` of ``location`` against the scan root and every
+    ``also_scanned`` root, the first True verdict winning (an undecided True is
+    kept only when no root decides it)."""
+    judgment = scanned_tree_judgment(location, scanned_root)
+    if judgment.verdict and judgment.decided:
+        return judgment
+    for extra in also_scanned:
+        other = scanned_tree_judgment(location, extra)
+        if other.verdict and other.decided:
+            return other
+        if other.verdict and not judgment.verdict:
+            judgment = other
+    return judgment
+
+
 def refusal_reason(
     name: str,
     scanned_root: Optional[Path],
     any_checkout: bool = False,
     root_judged: bool = False,
+    also_scanned: Sequence[Path] = (),
 ) -> Optional[str]:
     """Why ``name`` may not be imported for a config in the scanned tree, or None.
 
@@ -406,7 +426,20 @@ def refusal_reason(
     which such a load declared it does not have. For a scan of a tree (a root,
     neither ``root_judged`` nor ``any_checkout``), a location inside any other
     checkout is refused too, with the reason ``scanned_tree_reason`` gives.
+    ``also_scanned`` are the other roots whose trees the load counts as
+    scanned (``resolve_config``'s ``also_scanned``, the results' repository
+    for ``ash report``); a location inside one of their trees is refused as a
+    location inside the scan root's is.
+
+    ASH's own package is exempt: code inside the running package is already
+    running. The exemption holds for a location that sits inside the package
+    AS NAMED (``_named_within``), not merely one that resolves there: an entry
+    whose spec sits in the scanned tree and reaches the installed package
+    through a link the repository placed is judged by where it sits, under the
+    module name the tree gave it.
     """
+    from automated_security_helper.config.sandbox_grants import _named_within
+
     own = _own_package_dir()
     parts = name.split(".")
     spec: Optional[ModuleSpec] = None
@@ -419,9 +452,13 @@ def refusal_reason(
         if spec is None:
             return "it is not importable from the installed environment"
         for location in _spec_locations(spec):
-            if own is not None and is_within(location, own):
+            if (
+                own is not None
+                and is_within(location, own)
+                and _named_within(location, [own])
+            ):
                 continue
-            tree_judgment = scanned_tree_judgment(location, scanned_root)
+            tree_judgment = _judged_against_trees(location, scanned_root, also_scanned)
             if tree_judgment.verdict:
                 if not tree_judgment.decided:
                     # The fail-closed answer of a walk that never finished:
@@ -556,6 +593,7 @@ def confine_plugin_modules(
     undecided_membership: bool,
     outside_membership: bool = False,
     source: Optional[UntrustedSource] = None,
+    also_scanned: Sequence[Path] = (),
 ) -> None:
     """Drop the entries of ``config.ash_plugin_modules`` an in-tree file may not add.
 
@@ -568,6 +606,10 @@ def confine_plugin_modules(
             trusted list, the same way the sandbox overrides are.
         scanned_root: The scan root; the trees it is checked against are
             ``path_trust.in_scanned_tree``'s.
+        also_scanned: Other roots whose trees the load counts as scanned
+            (``resolve_config``'s ``also_scanned``: the results' repository for
+            ``ash report``). A module location inside one of their trees is
+            refused as one inside the scan root's trees is.
         in_tree: The config files inside the tree, named in the warning.
         environment_paths: Those of them the environment chose, named
             ``<value>`` (``sandbox_grants.described``).
@@ -676,10 +718,15 @@ def confine_plugin_modules(
         # ASH's own modules keep the module docstring's exemption even here:
         # code inside the running package is already running, so refusing it
         # protects nothing, and the defaults name such modules routinely.
+        # The off-host packages are ASH's own modules too, but the own-module
+        # exemption never covers them: a client's config may not add a package
+        # that sends findings off the host unless the trusted list names it,
+        # the same exception the judged path applies below.
         outside = [
             f"'{shown.get(name, name)}'"
             for name in split_plugin_modules(getattr(config, "ash_plugin_modules", []))
-            if name not in trusted_names and not _is_ash_own_module(name)
+            if name not in trusted_names
+            and (not _is_ash_own_module(name) or off_host_package(name) is not None)
         ]
         if outside:
             from automated_security_helper.core.exceptions import (
@@ -731,11 +778,39 @@ def confine_plugin_modules(
             scanned_root,
             any_checkout=rootless,
             root_judged=root_judged,
+            also_scanned=also_scanned,
         )
         if reason is None:
             kept.append(name)
         else:
             refused.append(f"'{shown.get(name, name)}' ({reason})")
+    # The operator's off-host plugin packages stay loaded whatever the config's
+    # own list says: a config the operator did not write may not turn off the
+    # operator's off-host reporters (config/reporter_trust.py), and a list that
+    # leaves their package out would, since a reporter whose module is not
+    # imported never runs. Their references come with them, so an entry the
+    # operator's file read from the environment stays named as it wrote it.
+    carried: List[str] = []
+    if not named_modules_only:
+        carried = [
+            name
+            for name in trusted_list
+            if off_host_package(name) is not None and name not in kept
+        ]
+        if carried:
+            kept.extend(carried)
+            trusted_shown = config_module_names(trusted_config)
+            ASH_LOGGER.warning(
+                shown_on_one_line(
+                    "Keeping the operator's off-host plugin modules "
+                    f"{', '.join(repr(trusted_shown.get(name, name)) for name in carried)}, "
+                    "which the configuration's own ash_plugin_modules leaves out: a "
+                    "configuration the operator did not write may not turn off the "
+                    "reporters that send findings off the host, and a list without "
+                    "their package would."
+                ),
+                extra=NO_MARKUP,
+            )
     if named_modules_only:
         # The merge loads the operator's modules, not the shards': the trusted
         # list, after any entry outside the namespace kept above for the refusal.
@@ -750,7 +825,7 @@ def confine_plugin_modules(
         # log name each as the operator's file wrote it: its references
         # come with them (_carry_trusted_module_references).
         _carry_trusted_module_references(config, trusted_config, loaded)
-    if not refused:
+    if not refused and not carried:
         return
     if not named_modules_only:
         # The list's environment references move WITH the kept entries: a drop
@@ -763,6 +838,10 @@ def confine_plugin_modules(
         # were instead of the new list beside the old indices.
         reindex_plugin_module_references(config, original_entries, kept)
         config.ash_plugin_modules = kept
+        if carried:
+            _carry_trusted_module_references(config, trusted_config, kept, only=carried)
+    if not refused:
+        return
     # The names and paths are the repository's: the whole message is shown, once
     # and on one line, and not read as markup. A repr of a name would write its
     # controls as escapes the sinks then showed again.
@@ -865,7 +944,11 @@ def confine_plugin_modules(
 
 
 def _carry_trusted_module_references(
-    config: "AshConfig", trusted_config: "AshConfig", loaded: Sequence[str]
+    config: "AshConfig",
+    trusted_config: "AshConfig",
+    loaded: Sequence[str],
+    *,
+    only: Optional[Collection[str]] = None,
 ) -> None:
     """Carry the trusted base's ``ash_plugin_modules`` references onto ``config``.
 
@@ -880,9 +963,15 @@ def _carry_trusted_module_references(
     piece, as ``reindex_plugin_module_references`` does. The three lists move
     together. References into other config places are not the list's and stay
     where they are: ``cli/merge.py`` carries those at the write.
+
+    ``only`` restricts the carry to the named pieces: the confinement carries
+    the operator's off-host packages into a list the config itself wrote, and
+    the config's own entries keep the references the load recorded for them.
     """
     entries = list(getattr(trusted_config, "ash_plugin_modules", None) or [])
-    new_index = {name: i for i, name in enumerate(loaded)}
+    new_index = {
+        name: i for i, name in enumerate(loaded) if only is None or name in only
+    }
     for attribute in (
         "_environment_references",
         "_displayed_environment_references",
