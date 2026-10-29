@@ -595,8 +595,11 @@ def materialize_session_binding(
     if patched is not None:
         # The client's copy is built from the registered profile, so it holds the
         # values that profile read from the environment where the client did not
-        # change them; it records them as the profile wrote them.
-        patched._environment_references = registered._environment_references
+        # change them; it records them as the profile wrote them. A patch has
+        # followed them already: one an op wrote over is the client's text, and
+        # one an op moved is at its new entry.
+        if not patched._references_followed:
+            patched._environment_references = registered._environment_references
         config_path = materialize_session_config(
             session_id, patched, client_patched=True
         )
