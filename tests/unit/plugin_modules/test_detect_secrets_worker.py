@@ -353,7 +353,11 @@ def _spawn_pool_run(tmp_path, monkeypatch, refuse_env, verify=False):
     proxy = RecordingProxy()
     route_through(monkeypatch, proxy)
     if refuse_env is None:
-        monkeypatch.delenv(REFUSE_HTTP_ENV, raising=False)
+        # Set, then delete: the set records the key as absent before the test, so
+        # the teardown removes it even if run()'s own restore regresses and leaves
+        # it set; a bare delenv of an absent key records no undo.
+        monkeypatch.setenv(REFUSE_HTTP_ENV, "")
+        monkeypatch.delenv(REFUSE_HTTP_ENV)
     else:
         monkeypatch.setenv(REFUSE_HTTP_ENV, refuse_env)
     secret = "".join(_SECRET_KEY_PARTS)
