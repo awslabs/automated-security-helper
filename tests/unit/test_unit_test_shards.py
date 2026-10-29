@@ -27,7 +27,7 @@ three families of jobs, one job per runner pool so that each pool carries its ow
 Four things have to agree for the unit and integration tiers to run every test exactly
 once:
 
-* the ``shard`` axis in each of the three integration jobs, one literal list whose
+* the ``shard`` axis in each of the six unit and integration jobs, one literal list whose
   entries each carry the total they were cut for (``3of4``);
 * ``tests/utils/sharding.py``, a ``pytest_ignore_collect`` hook that ignores the test
   modules another shard owns, so pytest's own ``testpaths``, ``python_files`` and ignore

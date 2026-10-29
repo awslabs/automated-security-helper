@@ -355,9 +355,12 @@ runs:
       # step above being right. A typo there can only break an artifact name, never silently
       # deselect every leg.
       #
-      # Only for the unit tier: it is the only tier that measures coverage. The unsharded
-      # unit run on this one leg renders the table from its own data, and the unit-coverage
-      # job renders the combined one as well.
+      # Only for the unit tier: it is the only tier that measures coverage. Each of the four
+      # unit shards on this one combination renders a table from its own shard's data (a
+      # quarter of the suite each); the unit-coverage job renders the combined one over the
+      # four. On a pull request this combination does not run at all (the pull-request cover
+      # in ash-unified-ci.yml keeps no ubuntu-latest tier leg), so the combined table is the
+      # one a reader can count on, and only on a push to main or a merge-queue run.
       if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64' && inputs.marker == 'unit'
       run: |
         {
