@@ -122,10 +122,10 @@ def test_zombie_orphans_are_read_from_proc_stat_after_the_command_name(tmp_path)
     me = os.getpid()
     proc = tmp_path / "proc"
     for pid, stat in {
-        "777": f"777 (a (tool) name) Z {me} 4242 4242 0 -1 4194560 0 0\n",
-        "778": f"778 (sleeping) S {me} 4242 4242 0 -1 4194560 0 0\n",
-        "779": f"779 (other parent) Z {me + 1} 4242 4242 0 -1 4194560 0 0\n",
-        "780": f"780 (other group) Z {me} 4243 4243 0 -1 4194560 0 0\n",
+        "777": f"777 (a (tool) name) Z {me} 4242 4242 0 -1 0 0 0\n",
+        "778": f"778 (sleeping) S {me} 4242 4242 0 -1 0 0 0\n",
+        "779": f"779 (other parent) Z {me + 1} 4242 4242 0 -1 0 0 0\n",
+        "780": f"780 (other group) Z {me} 4243 4243 0 -1 0 0 0\n",
     }.items():
         (proc / pid).mkdir(parents=True)
         (proc / pid / "stat").write_text(stat)
