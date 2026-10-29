@@ -29,6 +29,9 @@ from pydantic import ConfigDict, Field, PrivateAttr
 
 from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.config.client_scanner_exclusions import (
+    evaluated_within,
+)
 from automated_security_helper.config.path_trust import (
     derived_roots,
     honored_path,
@@ -1248,6 +1251,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         files: List[str],
         exclude_patterns: List[re.Pattern],
         root: Optional[Path] = None,
+        timeout: Optional[float] = None,
+        source: str = "the should_exclude_file filter of scan_settings.filters_used",
     ) -> List[str]:
         """Filter out files matching any of the exclude patterns.
 
@@ -1255,24 +1260,41 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         (``_root_relative``), the form the baseline's patterns were written
         for; with no root, in the path as given.
 
+        The patterns are the baseline's, so the scanned repository's or a
+        delivered config's, and they run here in ASH's own process, before the
+        worker and its time limit start. ``timeout`` is the scanner's
+        ``scan_timeout``: the whole filter runs under it
+        (``evaluated_within``), and a filter still running at the deadline
+        raises ScannerError naming ``source``. None runs it unbounded, as
+        ``scan_timeout: null`` runs the scan.
+
         Args:
             files: List of file paths to filter.
             exclude_patterns: Compiled regex patterns to match against.
             root: The directory the scan set was enumerated from.
+            timeout: Seconds the filter may take, or None.
+            source: Where the patterns came from, for the error.
 
         Returns:
             Filtered list of file paths.
+
+        Raises:
+            ScannerError: the filter ran past ``timeout``.
         """
         if not exclude_patterns:
             return files
-        return [
-            f
-            for f in files
-            if not any(
-                pattern.search(DetectSecretsScanner._root_relative(f, root))
-                for pattern in exclude_patterns
-            )
-        ]
+
+        def kept() -> List[str]:
+            return [
+                f
+                for f in files
+                if not any(
+                    pattern.search(DetectSecretsScanner._root_relative(f, root))
+                    for pattern in exclude_patterns
+                )
+            ]
+
+        return evaluated_within(timeout, source, kept)
 
     @staticmethod
     def _ensure_fork_multiprocessing() -> None:
@@ -1987,13 +2009,31 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # directory above the checkout matched every file, and a pattern
             # written as one string was read as one pattern per character. The
             # files it would exclude are already gone from the scan set here.
+            #
+            # Bounded by this scanner's scan_timeout, the limit the worker's
+            # own run gets: the patterns are the baseline's, and one that
+            # backtracks heavily held the scan here for as long as it liked,
+            # before the worker's limit ever started.
+            scan_timeout = self.config.options.scan_timeout
             exclude_patterns = self._get_baseline_exclude_patterns(
                 scan_settings_dict, values
             )
             if exclude_patterns:
                 pre_filter_count = len(scannable)
+                pattern_source = (
+                    "the should_exclude_file filter of scan_settings.filters_used"
+                )
+                if self._baseline_in_use():
+                    pattern_source += (
+                        f", loaded with the baseline "
+                        f"{Path(self._baseline_file_path()).as_posix()}"
+                    )
                 scannable = self._apply_file_exclusions(
-                    scannable, exclude_patterns, scan_root
+                    scannable,
+                    exclude_patterns,
+                    scan_root,
+                    timeout=scan_timeout,
+                    source=pattern_source,
                 )
                 excluded_count = pre_filter_count - len(scannable)
                 if excluded_count > 0:
@@ -2057,8 +2097,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 level=logging.VERBOSE,
                 target_type=target_type,
             )
-
-            scan_timeout = self.config.options.scan_timeout
 
             # Refuse to scan with no detectors rather than reporting clean.
             #
