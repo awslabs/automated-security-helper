@@ -268,6 +268,17 @@ class AshPluginManager(BaseModel):
     #: differently-configured scans against it concurrently, so subscribe and
     #: notify cannot both touch the same list unsynchronised.
     _event_lock: Lock = PrivateAttr(default_factory=Lock)
+    #: ``id(callback)`` -> (module path, callback) for every handler a plugin
+    #: module declared through ``ASH_EVENT_HANDLERS`` (the loader subscribes
+    #: those with ``declared_by``). A handler's ``__module__`` says where its
+    #: function was defined, not which plugin module listed it: a plugin module
+    #: may list a function from a helper library, or a functools.partial, and a
+    #: scan's handler filter has to know that such a handler belongs to a plugin
+    #: module (one this scan did or did not name) rather than to the program
+    #: running the scan. The callback is kept beside its owner so a reused id
+    #: is never read as a record of a different object. Guarded by
+    #: ``_event_lock``, with the handler lists it describes.
+    _declared_handler_modules: dict = PrivateAttr(default_factory=dict)
     #: Which registrations an untrusted import made, so a scan is offered only
     #: the classes its own modules load (``plugins_loaded_by``). By plugin type
     #: and name: the module imported for an untrusted source, and the
@@ -298,8 +309,16 @@ class AshPluginManager(BaseModel):
             extra=NO_MARKUP,
         )
 
-    def subscribe(self, event_type, callback):
+    def subscribe(self, event_type, callback, *, declared_by: str | None = None):
         """Subscribe a callback to a specific event type, at most once.
+
+        ``declared_by`` names the plugin module whose ``ASH_EVENT_HANDLERS``
+        listed the callback, when the loader is the caller; it is recorded for
+        :meth:`handler_declared_by`, so a scan's handler filter can tell a
+        handler a plugin module declared (admitted only when the scan names
+        that module, wherever its function was defined) from one the program
+        running the scan subscribed itself. A callback already recorded keeps
+        its first owner.
 
         Idempotent, and locked, because both properties are load-bearing once
         more than one differently-configured scan runs in a process:
@@ -321,6 +340,10 @@ class AshPluginManager(BaseModel):
         Still returns the callback so decorator usage is unchanged.
         """
         with self._event_lock:
+            if isinstance(declared_by, str) and declared_by:
+                self._declared_handler_modules.setdefault(
+                    id(callback), (declared_by, callback)
+                )
             handlers = self.plugin_library.event_handlers.setdefault(event_type, [])
             if callback in handlers:
                 ASH_LOGGER.debug(
@@ -334,6 +357,20 @@ class AshPluginManager(BaseModel):
             f"Subscribed callback to event {event_type}. Total subscribers for this event: {total}"
         )
         return callback  # Return for decorator usage
+
+    def handler_declared_by(self, callback: Any) -> str | None:
+        """The plugin module whose ``ASH_EVENT_HANDLERS`` declared *callback*, or None.
+
+        None for a callback the program running the scan subscribed itself, and
+        for one no loader has subscribed with ``declared_by``. Matched by
+        identity: a record whose callback is a different object with a reused
+        id is no record of this one.
+        """
+        with self._event_lock:
+            entry = self._declared_handler_modules.get(id(callback))
+        if entry is None or entry[1] is not callback:
+            return None
+        return entry[0]
 
     def notify(
         self,
@@ -541,19 +578,34 @@ class AshPluginManager(BaseModel):
                         registry.pop(name, None)
         with self._event_lock:
             handlers_by_event = self.plugin_library.event_handlers
+            removed: List[Any] = []
             for event_type in list(handlers_by_event):
                 kept = events_before.get(event_type, [])
-                handlers_by_event[event_type] = [
-                    callback
-                    for callback in handlers_by_event[event_type]
-                    if any(callback is held for held in kept)
-                    or not _owned_handler(callback)
-                ]
+                remaining = []
+                for callback in handlers_by_event[event_type]:
+                    if any(callback is held for held in kept) or not _owned_handler(
+                        callback
+                    ):
+                        remaining.append(callback)
+                    else:
+                        removed.append(callback)
+                handlers_by_event[event_type] = remaining
                 if (
                     not handlers_by_event[event_type]
                     and event_type not in events_before
                 ):
                     del handlers_by_event[event_type]
+            # The declared-by record of a removed handler goes with it: the
+            # refused module's declarations are undone whole, and a callback
+            # object subscribed again later is recorded again by that load.
+            still_subscribed = {
+                id(callback)
+                for callbacks in handlers_by_event.values()
+                for callback in callbacks
+            }
+            for callback in removed:
+                if id(callback) not in still_subscribed:
+                    self._declared_handler_modules.pop(id(callback), None)
 
     def remove_plugin_module_registration(
         self,

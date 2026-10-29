@@ -166,7 +166,9 @@ def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
                         ASH_LOGGER.debug(
                             f"Registering event callback {callback.__name__} for {event_type}"
                         )
-                        ash_plugin_manager.subscribe(event_type, callback)
+                        ash_plugin_manager.subscribe(
+                            event_type, callback, declared_by=module_name
+                        )
 
             # Per-group import failures the package isolated for us.
             #
@@ -361,21 +363,43 @@ def _bound_in(module_name: str) -> List[Any]:
     return list(vars(module).values())
 
 
+def _listed(value: Any) -> List[Any]:
+    """The entries of a declared list, in the shapes the loader accepts.
+
+    ``load_additional_plugin_modules`` takes any iterable that is not a ``str``
+    or ``bytes`` for ``ASH_CONVERTERS``, ``ASH_SCANNERS``, ``ASH_REPORTERS`` and
+    for each value of ``ASH_EVENT_HANDLERS``: a set, a dict view or a generator
+    as well as a list or tuple. The scan filter reads the same shapes, so a
+    plugin declared through any of them is selected the way it was loaded. A
+    generator is read once by the loader, so one read here finds nothing in
+    it; that is the declaring module's shape, not a selection rule.
+    """
+    if isinstance(value, (str, bytes)) or not isinstance(
+        value, collections.abc.Iterable
+    ):
+        return []
+    try:
+        return list(value)
+    except Exception:  # noqa: BLE001 -- a declaration that cannot be read declares nothing here
+        return []
+
+
 def _declared_by(module_name: str) -> List[Any]:
-    """The plugins and event handlers an imported module declares; imports nothing."""
+    """The plugins and event handlers an imported module declares; imports nothing.
+
+    Reads every declaration shape the loader accepts (``_listed``), and any
+    mapping for ``ASH_EVENT_HANDLERS``, as the loader iterates its ``items()``.
+    """
     module = sys.modules.get(module_name)
     declared: List[Any] = []
     if module is None:
         return declared
     for attr in ("ASH_CONVERTERS", "ASH_SCANNERS", "ASH_REPORTERS"):
-        value = getattr(module, attr, None)
-        if isinstance(value, (list, tuple)):
-            declared.extend(value)
+        declared.extend(_listed(getattr(module, attr, None)))
     handlers = getattr(module, "ASH_EVENT_HANDLERS", None)
-    if isinstance(handlers, dict):
+    if isinstance(handlers, collections.abc.Mapping):
         for callbacks in handlers.values():
-            if isinstance(callbacks, (list, tuple)):
-                declared.extend(callbacks)
+            declared.extend(_listed(callbacks))
     return declared
 
 
@@ -402,6 +426,14 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
 
     Call it after the modules are imported; it reads their namespaces from
     ``sys.modules`` and imports nothing.
+
+    A plugin or handler is judged by the module its function or class was
+    defined in, read never-raising (``callable_module``): a ``functools.partial``
+    is judged by the function it wraps, since the partial itself reports
+    ``functools`` as its module, and a callable whose ``__module__`` read raises
+    or is not a ``str`` is judged by identity alone. Subscriptions are
+    process-wide, so a filter that raised on one odd callback would break every
+    scoped notify of its event, in other runs' scans too.
     """
     modules = frozenset(name for name in plugin_modules if name)
     # Keyed by id for identity matching; the values keep each object alive while
@@ -412,7 +444,7 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
             selected[id(obj)] = obj
 
     def admits(plugin: Any) -> bool:
-        module = getattr(plugin, "__module__", None) or ""
+        module = callable_module(plugin) or ""
         if _is_builtin_plugin_module(module):
             return True
         if module in modules:
@@ -422,7 +454,9 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     return admits
 
 
-def scan_handler_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
+def scan_handler_filter(
+    plugin_modules: Iterable[str], *, manager: Any = None
+) -> Callable[[Any], bool]:
     """Which event handlers a scan naming *plugin_modules* notifies.
 
     The handlers :func:`scan_plugin_filter` selects, plus every handler defined
@@ -431,13 +465,30 @@ def scan_handler_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     program rather than to a plugin module, so it is notified in each scan the
     program runs. A handler defined in a plugin module (one inside the namespace)
     that the scan does not name is not notified.
+
+    Where a handler was defined is read by ``callable_module``: a
+    ``functools.partial`` by the function it wraps (the partial's own module is
+    ``functools``, outside the namespace, which admitted every partial a plugin
+    module declared into every later scan of the process), and a callable whose
+    module cannot be read is left out rather than raising. A handler that a
+    plugin module declared through ``ASH_EVENT_HANDLERS`` (``manager``'s
+    ``handler_declared_by``, the process-wide manager by default) belongs to
+    that module wherever its function was defined, so one defined in a helper
+    library outside the namespace is notified only by a scan naming the
+    declaring module, never as the program's.
     """
     plugins = scan_plugin_filter(plugin_modules)
+    registry = manager if manager is not None else ash_plugin_manager
 
     def admits(callback: Any) -> bool:
         if plugins(callback):
             return True
-        return not _is_allowed_module_path(getattr(callback, "__module__", None) or "")
+        if registry.handler_declared_by(callback) is not None:
+            return False
+        module = callable_module(callback)
+        if module is None:
+            return False
+        return not _is_allowed_module_path(module)
 
     return admits
 
@@ -1229,7 +1280,12 @@ def load_additional_plugin_modules(
                     ASH_LOGGER.debug(
                         f"Registering event callback {display} for {event_type}"
                     )
-                    ash_plugin_manager.subscribe(event_type, callback)
+                    # Declared by this module: the scan handler filter admits
+                    # it for scans that name this module, wherever its
+                    # function was defined, and for no other scan.
+                    ash_plugin_manager.subscribe(
+                        event_type, callback, declared_by=module_path
+                    )
         except Exception as e:  # noqa: BLE001 -- one path for every registration failure
             # The module imported; the loss is in reading or registering what
             # it declares. Recorded apart (stage), so the refusal does not say
@@ -1749,10 +1805,13 @@ def plugins_of(plugin_modules: Iterable[object]) -> Callable[[Any], bool]:
     credentials, or the vendored scanners ``list_scanners`` loads.
 
     The filter keeps a class or handler defined in ASH's built-in plugin package
-    or in one of ``plugin_modules`` (or a module below one of them), and one that
+    or in one of ``plugin_modules`` (or a module below one of them), one that
     one of them exports by name, for a package that re-exports plugins defined
-    elsewhere. ``plugin_modules`` takes the same entries
-    ``load_additional_plugin_modules`` does, comma lists included.
+    elsewhere, and one that one of them lists in its ``ASH_CONVERTERS``,
+    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_EVENT_HANDLERS``, for a module
+    that declares a handler defined elsewhere without binding it by name.
+    ``plugin_modules`` takes the same entries ``load_additional_plugin_modules``
+    does, comma lists included.
     """
     from automated_security_helper.config.plugin_module_trust import (
         split_plugin_modules,
@@ -1766,6 +1825,7 @@ def plugins_of(plugin_modules: Iterable[object]) -> Callable[[Any], bool]:
         for value in vars(module).values()
         if isinstance(value, (type, types.FunctionType))
     }
+    exported.update(id(value) for root in roots for value in _declared_by(root))
 
     def belongs(plugin: Any) -> bool:
         # A functools.partial reports functools as its module; its function is
