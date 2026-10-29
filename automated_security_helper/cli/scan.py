@@ -273,13 +273,17 @@ def _resolved(path: str | Path) -> Path:
 
 
 def _settle_output_dir(
-    source_dir: str, output_dir: str | Path | None, use_existing: bool
+    source_dir: str,
+    output_dir: str | Path | None,
+    use_existing: bool,
+    ignore_suppressions: bool = False,
 ) -> tuple[str | Path, str | None]:
     """The output directory the scan writes to, and the existing results it reads.
 
     Defaults ``output_dir`` to ``<source_dir>/.ash/ash_output``, moves it there when
     it is the source directory itself, refuses one the scan would clear the scanned
-    tree through, refuses one that cannot be written into, and resolves
+    tree through, refuses one that cannot be written into, refuses
+    ``--use-existing`` together with ``--ignore-suppressions``, and resolves
     ``--use-existing`` to the results file or refuses when it is not there. Every
     refusal exits, so the caller gets back only a pair the scan can run with.
 
@@ -333,6 +337,21 @@ def _settle_output_dir(
 
     existing_results = None
     if use_existing:
+        # The stored results were written with ASH's suppressions applied, and a
+        # report made from them cannot lift those suppressions: the scan phase that
+        # --ignore-suppressions changes is the one --use-existing skips. The
+        # combination used to run and keep the stored suppressions while the
+        # command line said they were ignored. A mistake in the command line, so
+        # the usage code, and checked before the on-disk check below: the operator
+        # has to change the command, whatever is in the output directory.
+        if ignore_suppressions:
+            _fail_usage(
+                "--ignore-suppressions cannot be combined with --use-existing: the "
+                "existing results were written with suppressions applied, and a "
+                "report made from them cannot lift those suppressions. Run a new "
+                "scan with --ignore-suppressions, or drop it to report the existing "
+                "results as they are."
+            )
         poss_existing_results = Path(output_dir).joinpath("ash_aggregated_results.json")
         if poss_existing_results.exists():
             existing_results = poss_existing_results.as_posix()
@@ -1428,7 +1447,7 @@ def run_ash_scan_cli_command(
             # real run, after this block; the dry run makes the same checks
             # before it prints its plan.
             before_dry_run_exit=lambda root: _settle_output_dir(
-                root, output_dir, use_existing
+                root, output_dir, use_existing, ignore_suppressions
             ),
         )
         # The workspace root is the scan root: it is what container mode mounts at
@@ -1474,7 +1493,7 @@ def run_ash_scan_cli_command(
     # The output directory's default, the collision adjustment, its refusals and
     # --use-existing, in one place with the workspace dry run's preflight.
     output_dir, existing_results = _settle_output_dir(
-        source_dir, output_dir, use_existing
+        source_dir, output_dir, use_existing, ignore_suppressions
     )
 
     # Apply mode presets if specified (precommit_mode is folded into simple
