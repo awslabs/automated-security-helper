@@ -258,11 +258,44 @@ def test_an_env_read_value_holding_a_quote_is_hidden_in_both_spellings(
     assert "the-value-read-from-the-environment" not in record
 
 
-def test_quoted_spellings_cover_only_values_quoting_rewrites():
+def test_quoted_spellings_cover_only_texts_quoting_rewrites(tmp_path):
     plain = "no-quote-here"
     quoted = "has'quote"
+    sandbox_scope = _scope(tmp_path, environment_values=(plain, quoted, "", quoted))
 
-    spellings = scope._quoted_spellings((plain, quoted, "", quoted))
+    spellings = scope._quoted_spellings(sandbox_scope)
 
     assert spellings == [shlex.quote(quoted)[1:-1]]
     assert "'" in spellings[0] and '"' in spellings[0]
+
+
+def test_a_plugin_input_holding_a_quote_is_hidden_in_both_spellings(
+    tmp_path, debug_record
+):
+    spec = "tool @ git+https://example.invalid/it's-a-spec.git"
+    sandbox_scope = _scope(tmp_path, plugin_inputs=(spec,), command="tool")
+
+    with scope.sandbox_scope(sandbox_scope):
+        scope._plan_spawn(
+            sandbox_scope, ["uv", "tool", "run", "--from", spec], {}, None
+        )
+
+    record = _record(debug_record)
+    assert spec not in record
+    assert shlex.quote(spec)[1:-1] not in record
+    assert "it's-a-spec" not in record and "it'\"'\"'s-a-spec" not in record
+
+
+def test_a_value_that_is_not_text_does_not_stop_the_spawn(tmp_path, debug_record):
+    """A non-text entry is passed over by the quoted-spelling cover, so the
+    record step raises nothing after the plan's registrations are made."""
+    values = (None, 7, "it's-text")
+    sandbox_scope = _scope(tmp_path, environment_values=values)  # type: ignore[arg-type]
+
+    assert scope._quoted_spellings(sandbox_scope) == [shlex.quote("it's-text")[1:-1]]
+
+    with scope.sandbox_scope(sandbox_scope):
+        plan = scope._plan_spawn(sandbox_scope, ["tool", "--x=it's-text"], {}, None)
+
+    assert plan.argv == ["tool", "--x=it's-text"]
+    assert len(debug_record.debug_lines) == 1

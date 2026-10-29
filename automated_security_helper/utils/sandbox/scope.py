@@ -139,7 +139,9 @@ def _probe_reason_is_transient(refusal: SandboxUnavailable) -> bool:
     Read from the reason's text: the backends report a probe that raised as text,
     so the exception class is not available here. Under auto the reason joins
     every backend's, and one transient member makes the whole answer transient,
-    which re-probes the others too; that costs one more probe per scan, where
+    which re-probes the others too. The cost is one more probe per request of
+    ``resolve_backend`` (one per scanner, serialized by the lock, each bounded
+    by the backend's probe timeout) for as long as the condition lasts, where
     remembering a timeout refused or downgraded every later scan in the process.
     """
     reason = str(refusal)
@@ -897,7 +899,7 @@ def _plan_spawn(
                 f"Scanner sandbox ({scope.backend.name}, "
                 f"network={'yes' if policy.network else 'no'}) "
                 f"for {scope.scanner_name}: {_argv_text(plan.argv)}",
-                _quoted_spellings(scope.environment_values),
+                _quoted_spellings(scope),
             )
         )
     return plan
@@ -915,22 +917,28 @@ def _argv_text(argv: Sequence[Any]) -> str:
     return shlex.join(str(arg) for arg in argv)
 
 
-def _quoted_spellings(values: Sequence[str]) -> List[str]:
-    """The spellings ``shlex.quote`` gives ``values`` that differ from the values.
+def _quoted_spellings(scope: SandboxScope) -> List[str]:
+    """The spellings ``shlex.quote`` gives the hidden texts that differ from them.
 
-    ``scope_shown_text`` hides a value by its text. Quoting rewrites only a
-    quote character inside an argument, so a value holding one is spelled
-    differently in the quoted line and would print: its quoted spelling is
-    passed as a value to hide as well. The uv record context's values are
-    merged by ``scope_shown_text`` itself and are covered the same way here.
+    ``scope_shown_text`` hides a value, and a uv run's plugin-built input, by
+    its text. Quoting rewrites only a quote character inside an argument, so a
+    text holding one is spelled differently in the quoted line and would print:
+    its quoted spelling is passed as a value to hide as well. Covers the
+    scope's env-read values and plugin inputs and the uv record context's
+    (``uv_record_inputs``), the same set ``scope_shown_text`` merges. Runs
+    before that function's never-raises wrapper and inside the window after the
+    writable-root registrations, so it raises for nothing: an entry that is
+    not text is passed over (``scope_shown_text`` ignores it the same way).
     """
-    merged = list(values)
+    merged: List[Any] = list(scope.environment_values or ())
+    merged.extend(scope.plugin_inputs or ())
     record = _RECORD_INPUTS.get()
     if record is not None:
         merged.extend(record[0])
-    spellings = []
+        merged.extend(record[1])
+    spellings: List[str] = []
     for value in merged:
-        if value and "'" in value:
+        if isinstance(value, str) and value and "'" in value:
             quoted = shlex.quote(value)[1:-1]
             if quoted not in spellings:
                 spellings.append(quoted)
