@@ -551,7 +551,23 @@ def strip_client_scanner_exclusions(
             # nothing: it kept no file from the scanner.
             is_read = key == read_key
             if spec.kind == "trivy-ignore-file":
-                if value and not _names_an_operator_file(str(value), operator_entries):
+                operator_spelling = (
+                    _names_an_operator_file(str(value), operator_entries)
+                    if value
+                    else None
+                )
+                if value and operator_spelling is not None:
+                    if operator_spelling != str(value):
+                        # Admitted by resolution only: the option names the
+                        # operator's file by the operator's path, not by the
+                        # client's route to it.
+                        _set(options, spec.option, operator_spelling)
+                        warnings.append(
+                            f"{spec.key}: {str(value)!r} resolves to the operator's "
+                            f"ignore file and is replaced by its path "
+                            f"{operator_spelling!r}."
+                        )
+                elif value:
                     trusted = _trusted_ignore_file(base, spec)
                     _set(options, spec.option, trusted)
                     if not is_read:
@@ -813,21 +829,36 @@ def _section_the_scanner_reads(
     return plugin_section_key(keys, reduced_plugin_name(scanner))
 
 
-def _names_an_operator_file(value: str, operator_entries: Mapping[str, Any]) -> bool:
-    """Whether trivy ``ignore_file`` ``value`` is one the operator named.
+def _names_an_operator_file(
+    value: str, operator_entries: Mapping[str, Any]
+) -> Optional[str]:
+    """The spelling the option keeps when trivy ``ignore_file`` ``value`` names an operator file, else None.
 
     The merged config holds the path as the loader anchored it (absolute, from
     the config file's directory), while an operator document holds the text the
     operator wrote, so the two are compared in every spelling: as written, as a
     POSIX path, and resolved. ``operator_entries`` holds, for each operator
     document's value, the text and its resolutions (``_operator_entries``).
+
+    A value that matches as text is the operator's own spelling and is kept.
+    A value that matches only once resolved (a link, or another route to the
+    operator's file) is answered with the operator's resolved path instead:
+    the option then names the operator's file directly, and the tool, which
+    opens the option's value by name later, never follows a path a client
+    chose. Resolving it here and opening the client's spelling later would be
+    a check the client could change between the two.
     """
-    spellings = {value, Path(value).as_posix()}
+    if value in operator_entries:
+        return value
+    if Path(value).as_posix() in operator_entries:
+        return value
     try:
-        spellings.add(Path(value).resolve().as_posix())
+        resolved = Path(value).resolve().as_posix()
     except (OSError, RuntimeError, ValueError):
-        pass
-    return any(candidate in spellings for candidate in operator_entries)
+        return None
+    if resolved in operator_entries:
+        return resolved
+    return None
 
 
 def _operator_entries(

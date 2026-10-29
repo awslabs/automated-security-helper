@@ -28,6 +28,7 @@ said more than the scanner did:
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -262,6 +263,54 @@ def test_an_operators_relative_ignore_file_is_not_taken_for_the_clients(tmp_path
 
     assert options.ignore_file == "/operator/.trivyignore"
     assert config._client_scanner_exclusions == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege")
+def test_a_client_link_to_the_operators_ignore_file_is_replaced_by_its_path(
+    tmp_path,
+):
+    """A client value admitted because it RESOLVES to the operator's file is not
+    left in the option: trivy opens the option's value by name later, so a link
+    the client controls would be a check here and a different file there. The
+    option carries the operator's own resolved path instead."""
+    operator_file = tmp_path / "operator" / ".trivyignore"
+    operator_file.parent.mkdir()
+    operator_file.write_text("CVE-1\n", encoding="utf-8")
+    link = tmp_path / "client-link"
+    link.symlink_to(operator_file)
+    config = AshConfig()
+    options = config.scanners.trivy.options
+    options.ignore_file = str(link)
+    operator = {"scanners": {"trivy": {"options": {"ignore_file": str(operator_file)}}}}
+
+    _strip(config, {}, operator, tmp_path)
+
+    assert options.ignore_file == operator_file.resolve().as_posix()
+    assert options.ignore_file != str(link)
+    assert any(
+        "resolves to the operator's ignore file" in warning
+        for warning in config._resolution_warnings
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege")
+def test_a_client_link_resolving_elsewhere_is_still_stripped(tmp_path):
+    operator_file = tmp_path / "operator" / ".trivyignore"
+    operator_file.parent.mkdir()
+    operator_file.write_text("CVE-1\n", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere.yaml"
+    elsewhere.write_text("vulnerabilities:\n  - id: CVE-2\n", encoding="utf-8")
+    link = tmp_path / "client-link"
+    link.symlink_to(elsewhere)
+    config = AshConfig()
+    options = config.scanners.trivy.options
+    options.ignore_file = str(link)
+    operator = {"scanners": {"trivy": {"options": {"ignore_file": str(operator_file)}}}}
+
+    _strip(config, {}, operator, tmp_path)
+
+    assert options.ignore_file != str(link)
+    assert options.ignore_file != elsewhere.resolve().as_posix()
 
 
 # ---------------------------------------------------------------------------
