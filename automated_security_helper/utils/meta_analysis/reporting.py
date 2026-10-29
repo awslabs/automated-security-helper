@@ -624,11 +624,15 @@ def generate_html_report(
                         "scanners": {scanner},
                         "type": set(),
                         "in_aggregate": False,
+                        "intentionally_excluded": False,
                     }
                 else:
                     all_fields_by_path[path]["scanners"].add(scanner)
 
-    # Then, if field_presence is provided, add or update with that information
+    # Then, if field_presence is provided, add or update with that information.
+    # The intentionally_excluded flag travels with the entry: the row below reads
+    # it, and dropping it here rendered every excluded field as "No" in the
+    # missing (red) style.
     if field_presence:
         for path, info in field_presence.items():
             # Ensure scanners is a list, not a string
@@ -643,8 +647,17 @@ def generate_html_report(
                     "in_aggregate": info.get("in_aggregate", False),
                     "in_flat": info.get("in_flat", {}),
                     "reporter_mappings": info.get("reporter_mappings", {}),
+                    "intentionally_excluded": bool(
+                        info.get("intentionally_excluded", False)
+                    ),
                 }
             else:
+                all_fields_by_path[path]["intentionally_excluded"] = bool(
+                    info.get(
+                        "intentionally_excluded",
+                        all_fields_by_path[path].get("intentionally_excluded", False),
+                    )
+                )
                 all_fields_by_path[path]["scanners"].update(set(scanners))
                 all_fields_by_path[path]["type"].update(set(info.get("type", [])))
                 all_fields_by_path[path]["in_aggregate"] = info.get(

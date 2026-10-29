@@ -121,6 +121,40 @@ def test_markup_in_scanner_names_paths_and_values_is_escaped(tmp_path):
     assert "a&lt;b" in html
 
 
+def test_an_intentionally_excluded_field_is_not_rendered_as_missing(tmp_path):
+    """field_presence carries intentionally_excluded; the table entry dropped it,
+    so every excluded field rendered as "No" in the missing (red) style."""
+    path = "runs[].results[].ruleIndex"
+    report = tmp_path / "report.html"
+
+    generate_html_report(
+        {
+            "missing_fields": {},
+            "match_statistics": {},
+            "summary": {
+                "total_findings": 0,
+                "matched_findings": 0,
+                "critical_missing_fields": 0,
+                "important_missing_fields": 0,
+                "informational_missing_fields": 0,
+            },
+        },
+        str(report),
+        {
+            path: {
+                "type": ["unknown"],
+                "scanners": ["bandit"],
+                "in_aggregate": False,
+                "intentionally_excluded": True,
+            }
+        },
+    )
+
+    html = report.read_text(encoding="utf-8")
+    assert "<td class='informational'>No (Intentionally Excluded)</td>" in html
+    assert "<td class='missing'>No</td>" not in html
+
+
 def test_the_jq_command_quotes_the_query_and_the_scanner_directory(tmp_path):
     """The copyable command is pasted into a shell: a quote in a field key or a
     space in a scanner name must stay inside one argument."""
