@@ -284,6 +284,24 @@ def _command_line_value(value: Any) -> Optional[str]:
     return None
 
 
+#: The failure recorded for a template whose cfn-lint invocation was not started
+#: because an earlier one in the same scan timed out.
+_NOT_STARTED_AFTER_TIMEOUT = (
+    "not started: an earlier cfn-lint invocation of this scan timed out, and the "
+    "scan is discarded after a timeout"
+)
+
+
+def _one_template_can_fail_the_run(response: Dict[str, Any]) -> bool:
+    """Whether a failed batch invocation is worth repeating one template at a time.
+
+    True for an invocation that started and ended on its own: cfn-lint then exited
+    for the whole run on something in one template, or wrote a report ASH could not
+    use. A timeout, or a tool that could not be started, would do the same again.
+    """
+    return bool(response) and not response.get("timed_out") and "error" not in response
+
+
 def _successful_exit(code: object) -> bool:
     try:
         value = int(code)  # type: ignore[call-overload]
@@ -533,7 +551,16 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 "consolidated resolver",
                 level=logging.WARNING,
             )
-        return get_uv_tool_command(_COMMAND) is not None
+        resolved = get_uv_tool_command(_COMMAND)
+        if resolved is None:
+            return False
+        # As the uv-absent branch above: a dependency declared satisfied on a
+        # binary the resolver found on PATH has to run that binary. With
+        # use_uv_tool left True, every scan then went through uv, whose install
+        # had just failed, and refused to start.
+        self.use_uv_tool = resolved[:1] == ["uv"]
+        self.dependencies_satisfied = True
+        return True
 
     def nothing_to_scan_reason(self) -> Optional[str]:
         """Why cfn-lint has nothing to scan in this run, or None.
@@ -590,10 +617,22 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             args.append(
                 f"--config-file={Path(os.path.abspath(config_file)).as_posix()}"
             )
-        if options.regions:
-            args.extend(["--regions", *options.regions])
+        # Through the operator gate like ignore_checks: --regions overrides the
+        # regions a template declares, and a region whose resource types differ
+        # drops region-dependent findings, so a repository's config must not
+        # choose it.
+        regions = list(self._operator_option("regions"))
+        if regions:
+            args.extend(["--regions", *regions])
         ignore_checks = list(self._operator_option("ignore_checks"))
         honor_inline_ignores = self._honor_inline_ignores()
+        if honor_inline_ignores:
+            # Without this, a command-line --ignore-checks replaces a template's
+            # own ignore_checks list (cfn-lint ranks the command line above the
+            # template unless the configurations are merged), so the operator's
+            # ignores silently defeated the option they turned on. Merged, both
+            # apply: the template's lists are added to the operator's.
+            args.append("--merge-configs")
         settings: Dict[str, Any] = {}
         if not honor_inline_ignores and config_file is not None:
             settings = self._config_file_settings(config_file)
@@ -727,12 +766,16 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 "not check."
             ) from exc
         except (OSError, yaml.YAMLError) as exc:
-            self._plugin_log(
-                f"Could not read {Path(config_file).as_posix()} ({exc}); every "
-                "check runs and its configure_rules do not apply.",
-                level=logging.WARNING,
-            )
-            return {}
+            # Closed, not open: the file is still handed to cfn-lint whole, so a
+            # merge_configs it sets would apply with ASH unable to check it, and
+            # cfn-lint would read what ASH could not.
+            raise ScannerError(
+                f"ASH could not read {Path(config_file).as_posix()} "
+                f"({type(exc).__name__}). ASH checks that file for merge_configs "
+                "and passes its ignore_checks and configure_rules itself, and "
+                "cfn-lint would read the rest of it, so cfn-lint is not run with a "
+                "file ASH could not check."
+            ) from exc
         return parsed if isinstance(parsed, dict) else {}
 
     def _configure_rule_args(
@@ -1039,6 +1082,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         self.targets_attempted = 0
         self.targets_failed = 0
         self.exit_code = 0
+        # self.errors too, as cdk_nag_scanner resets it: the converted target's
+        # invocation record carried the source target's error lines.
+        self.errors = []
 
         report = self._empty_report(target)
         if not target.exists() or not any(target.iterdir()):
@@ -1123,60 +1169,22 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 if self._honor_inline_ignores()
                 else self.batches(list(shown_by_argument), budget)
             )
-            for index, arguments in enumerate(groups):
-                batch = [shown_by_argument[argument] for argument in arguments]
-                self.targets_attempted += len(batch)
-                batch_file = results_dir.joinpath(f"cfn-lint.{index}.sarif")
-                command = [
-                    _COMMAND,
-                    "--format",
-                    "sarif",
-                    f"--output-file={batch_file.as_posix()}",
-                    *option_args,
-                    "--",
-                    *[glob.escape(argument) for argument in arguments],
-                ]
-                response = self._run_subprocess(
-                    command=command,
-                    results_dir=results_dir,
-                    stdout_preference="write",
-                    stderr_preference="both",
-                    cwd=cwd,
-                    env=child_env,
-                    timeout=self._effective_scan_timeout(),
-                )
-                failure = self._batch_failure(response, batch_file)
-                batch_report = None
-                if failure is None:
-                    try:
-                        batch_report = SarifReport.model_validate(
-                            json.loads(batch_file.read_text(encoding="utf-8"))
-                        )
-                    except Exception as exc:  # unreadable output is a failed batch
-                        failure = f"cfn-lint output was not valid SARIF ({exc})"
-                if failure is None and batch_report is not None:
-                    config_errors = [
-                        r
-                        for run in batch_report.runs or []
-                        for r in run.results or []
-                        if r.ruleId == _CONFIG_ERROR_RULE
-                    ]
-                    if config_errors:
-                        texts = "; ".join(
-                            (r.message.root.text or "") for r in config_errors
-                        )
-                        failure = f"cfn-lint reported a configuration error: {texts}"
-                if failure is not None or batch_report is None:
+
+            def fold(
+                names: List[str], failure: Optional[str], found: Optional[SarifReport]
+            ) -> None:
+                """Record one invocation: its templates failed, or its results."""
+                if failure is not None or found is None:
                     failure = failure or "cfn-lint output could not be read"
-                    self.targets_failed += len(batch)
-                    self.errors.append(f"{', '.join(batch)}: {failure}")
+                    self.targets_failed += len(names)
+                    self.errors.append(f"{', '.join(names)}: {failure}")
                     self._plugin_log(
-                        f"cfn-lint did not evaluate {len(batch)} template(s): {failure}",
+                        f"cfn-lint did not evaluate {len(names)} template(s): {failure}",
                         target_type=target_type,
                         level=logging.ERROR,
                     )
-                    continue
-                for run in batch_report.runs or []:
+                    return
+                for run in found.runs or []:
                     merged.extend(run.results or [])
                     run_driver = run.tool.driver if run.tool else None
                     if run_driver is not None:
@@ -1184,6 +1192,59 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                             driver.version = run_driver.version
                         for rule in run_driver.rules or []:
                             rules.setdefault(rule.id or "", rule)
+
+            timed_out = False
+            for index, arguments in enumerate(groups):
+                batch = [shown_by_argument[argument] for argument in arguments]
+                self.targets_attempted += len(batch)
+                if timed_out:
+                    # An earlier invocation timed out, and the executor discards
+                    # the whole scan after a recorded timeout, so starting the
+                    # remaining batches, each with a fresh full scan_timeout,
+                    # would only spend their time. Named, not started.
+                    fold(batch, _NOT_STARTED_AFTER_TIMEOUT, None)
+                    continue
+                batch_file = results_dir.joinpath(f"cfn-lint.{index}.sarif")
+                failure, batch_report, response = self._lint_once(
+                    arguments, batch_file, option_args, results_dir, cwd, child_env
+                )
+                timed_out = timed_out or bool(response.get("timed_out"))
+                if (
+                    failure is not None
+                    and len(arguments) > 1
+                    and _one_template_can_fail_the_run(response)
+                ):
+                    # cfn-lint exits for the whole invocation on one template's
+                    # fault (a region its Metadata names that this cfn-lint does
+                    # not know exits 32), so every other template in the batch
+                    # read as not evaluated and its findings were discarded. Each
+                    # is linted on its own instead; only the faulty one fails.
+                    self._plugin_log(
+                        f"cfn-lint did not evaluate {len(batch)} template(s) in one "
+                        f"invocation ({failure}); linting each one on its own.",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                    )
+                    for position, argument in enumerate(arguments):
+                        if timed_out:
+                            fold(
+                                [shown_by_argument[argument]],
+                                _NOT_STARTED_AFTER_TIMEOUT,
+                                None,
+                            )
+                            continue
+                        failure, batch_report, response = self._lint_once(
+                            [argument],
+                            results_dir.joinpath(f"cfn-lint.{index}-{position}.sarif"),
+                            option_args,
+                            results_dir,
+                            cwd,
+                            child_env,
+                        )
+                        timed_out = timed_out or bool(response.get("timed_out"))
+                        fold([shown_by_argument[argument]], failure, batch_report)
+                    continue
+                fold(batch, failure, batch_report)
 
             report.runs[0].results = merged
             driver.rules = list(rules.values()) or None
@@ -1218,6 +1279,59 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             raise ScannerError(f"{self.__class__.__name__} failed: {exc}") from exc
         finally:
             cleanup.close()
+
+    def _lint_once(
+        self,
+        arguments: List[str],
+        batch_file: Path,
+        option_args: List[str],
+        results_dir: Path,
+        cwd: Path,
+        child_env: Dict[str, str],
+    ) -> Tuple[Optional[str], Optional[SarifReport], Dict[str, Any]]:
+        """One cfn-lint invocation over ``arguments``, written to ``batch_file``.
+
+        Returns the failure reason or None, the parsed report or None, and the
+        subprocess response (``{}`` when the runner returned none).
+        """
+        command = [
+            _COMMAND,
+            "--format",
+            "sarif",
+            f"--output-file={batch_file.as_posix()}",
+            *option_args,
+            "--",
+            *[glob.escape(argument) for argument in arguments],
+        ]
+        response = self._run_subprocess(
+            command=command,
+            results_dir=results_dir,
+            stdout_preference="write",
+            stderr_preference="both",
+            cwd=cwd,
+            env=child_env,
+            timeout=self._effective_scan_timeout(),
+        )
+        failure = self._batch_failure(response, batch_file)
+        batch_report = None
+        if failure is None:
+            try:
+                batch_report = SarifReport.model_validate(
+                    json.loads(batch_file.read_text(encoding="utf-8"))
+                )
+            except Exception as exc:  # unreadable output is a failed batch
+                failure = f"cfn-lint output was not valid SARIF ({exc})"
+        if failure is None and batch_report is not None:
+            config_errors = [
+                r
+                for run in batch_report.runs or []
+                for r in run.results or []
+                if r.ruleId == _CONFIG_ERROR_RULE
+            ]
+            if config_errors:
+                texts = "; ".join((r.message.root.text or "") for r in config_errors)
+                failure = f"cfn-lint reported a configuration error: {texts}"
+        return failure, batch_report, response if isinstance(response, dict) else {}
 
     @staticmethod
     def _batch_failure(response: object, batch_file: Path) -> Optional[str]:
