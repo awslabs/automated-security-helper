@@ -47,17 +47,19 @@ comparison is done in memory.
 Where the version comes from
 ----------------------------
 ``[tool.commitizen] version``, not ``version_management.get_version()``.
-``get_version()`` prefers installed package metadata, so in any environment where ASH
-is installed from outside this checkout it returns a version unrelated to the tree
-being tested, and this file would fail for a reason that has nothing to do with
-template drift. ``tests/unit/test_agent_plugin_ash_version.py`` records the same
-hazard and resolves it the same way, and it separately asserts that
-``[project] version`` and ``[tool.commitizen] version`` agree.
+``get_version()`` used to prefer installed package metadata, so in any environment
+where ASH was installed from outside this checkout it returned a version unrelated to
+the tree being tested, and this file would have failed for a reason that has nothing
+to do with template drift. It now reads the checkout's pyproject.toml first, but this
+file keeps reading the file itself: it tests the templates, not the version lookup.
+``tests/unit/test_agent_plugin_ash_version.py`` records the same hazard and resolves
+it the same way, and it separately asserts that ``[project] version`` and
+``[tool.commitizen] version`` agree.
 
-The consequence to be aware of: ``generate`` substitutes ``get_version()``, so this
-file checks what a release *should* produce rather than replaying the substitution
-``generate`` performs. Those coincide whenever the installed distribution is this
-checkout, which is the case in CI.
+The consequence to be aware of: ``generate`` substitutes ``get_version()`` of the
+project root it is given, so this file checks what a release *should* produce rather
+than replaying the substitution ``generate`` performs. Those coincide whenever that
+root is this checkout, which is the case in CI.
 """
 
 from __future__ import annotations

@@ -81,8 +81,13 @@ class VersionBumper:
         self.template_manager = VersionTemplateManager(project_root)
 
     def get_current_version(self) -> str:
-        """Get the current version."""
-        return get_version()
+        """The version of the checkout at project_root, from its pyproject.toml.
+
+        Read from that tree and not from the installed distribution: after a set
+        the metadata still names the version installed, so a bump computed from
+        it repeated or reverted the set, and the docs were regenerated with it.
+        """
+        return get_version(self.project_root)
 
     def set_version(self, new_version: str) -> bool:
         """
@@ -102,19 +107,32 @@ class VersionBumper:
         print(f"Current version: {current_version}")
         print(f"New version: {new_version}")
 
-        # Update version in pyproject.toml
-        if not update_version_in_pyproject(new_version):
+        # Update version in the pyproject.toml of the same checkout whose
+        # templates are regenerated below; --project-root selects both.
+        if not update_version_in_pyproject(new_version, self.project_root):
             print("Error: Failed to update version in pyproject.toml")
             return False
 
         print("Updated pyproject.toml")
 
-        # Regenerate documentation from templates
+        # Regenerate documentation from templates. A template that fails to
+        # render is a failure of the set: generate_from_template reports it and
+        # returns False, so a count short of the templates that exist means a
+        # doc still carries the old version, and saying "successfully updated"
+        # over it is how a half-applied bump reached a release.
+        templates = self.template_manager.list_templates()
         try:
             generated_count = self.template_manager.generate_all_from_templates()
-            print(f"Regenerated {generated_count} documentation files from templates")
         except Exception as e:
-            print(f"Warning: Failed to regenerate some templates: {e}")
+            print(f"Error: Failed to regenerate templates: {e}")
+            return False
+        print(f"Regenerated {generated_count} documentation files from templates")
+        if generated_count < len(templates):
+            print(
+                f"Error: {len(templates) - generated_count} of {len(templates)} "
+                "templates were not regenerated; see the messages above"
+            )
+            return False
 
         print(f"Successfully updated version to {new_version}")
         return True

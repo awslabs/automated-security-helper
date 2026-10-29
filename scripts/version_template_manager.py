@@ -296,8 +296,11 @@ class VersionTemplateManager:
             # mkdocs hook docs/hooks/install_refs.py does) does not import ASH.
             from automated_security_helper.utils.version_management import get_version
 
-            # Replace version placeholder with actual version
-            content = self.render(content, get_version())
+            # Replace version placeholder with the version of the checkout the
+            # templates belong to, read from its pyproject.toml: the installed
+            # distribution's metadata lags a `version_bump.py set` until the
+            # next install, and rendered the old version into every doc.
+            content = self.render(content, get_version(self.project_root))
 
             # Generate output file (remove .template suffix)
             output_path = template_path.with_suffix("")
