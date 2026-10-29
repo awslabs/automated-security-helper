@@ -79,7 +79,12 @@ becomes ``vendor/``) and a suppression keeps its slash.
 
 A ``.`` or empty component (``./api/x.py``, ``api/./x.py``, ``api//x.py``) is
 refused. The top-level matchers read it literally, so it matches no file there,
-while ``PurePosixPath`` folds it away.
+while ``PurePosixPath`` folds it away. A leading separator (``/api/x.py``) is
+refused for the same reason: the matcher reads it literally too (it absorbs one
+only before a leading ``**``, so ``/**/x.py`` is ``**/x.py``), and no
+workspace-relative path starts with one. A non-UTF-8 name's record-form escape
+(``\\udcNN``) is read as its one character before the separators are, as the
+matcher reads it, so such a name stays one component.
 
 Getting this wrong is not symmetric, and the asymmetry runs the opposite way to
 intuition. A suppression that matches TOO MUCH suppresses findings that should
@@ -151,7 +156,13 @@ reasoning about glob semantics alone:
   ``**/src/x.py``. ``?`` and ``[...]`` match a fixed number of characters, so
   the component consumed exactly the prefix; ``**`` would over-suppress
   ``sub/src/x.py``. With ``**`` in the pattern this rule does not apply: there a
-  ``?`` stays inside one component, so ``???/**`` covers nothing in ``a/b``.
+  ``?`` stays inside one component, so ``???/**`` covers nothing in ``a/b``. One
+  that cannot span the prefix (``?pi/src/x.py`` over ``services``: the pattern's
+  separator would have to land on the ``v``), or that alone would match only the
+  bare prefix, is ``None``, like a literal anchored elsewhere. One whose remainder
+  is a glob that does not match its own text (``?pi/[x].py``) is refused: the
+  matcher reads a path equal to a pattern's text as a match before any glob, so
+  project-side ``[x].py`` would also cover the file ``[x].py``.
 * Trailing ``**`` inside the prefix span (``api/**`` over ``api/sub``) -- ``**``,
   from the component walk.
 
@@ -223,6 +234,10 @@ from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.utils.path_matching import (
     _pattern_components,
     ignore_path_pattern,
+)
+from automated_security_helper.utils.undecodable_text import (
+    text_of_undecodable,
+    undecodable_of_text,
 )
 
 PathLike = Union[str, PurePosixPath]
@@ -409,6 +424,33 @@ def _is_fixed_length(component: str) -> bool:
     return "*" not in component
 
 
+def _fixed_width(component: str) -> int:
+    """How many characters a component without ``*`` matches.
+
+    One per literal character, one per ``?`` and one per ``[...]`` class, read as
+    ``fnmatch.translate`` reads them: a ``[`` that no ``]`` closes is a literal
+    ``[``, a ``]`` right after the ``[`` (or after a leading ``!``) is part of the
+    class. So the width is exact for every component ``fnmatchcase`` accepts.
+    """
+    width = 0
+    index, end = 0, len(component)
+    while index < end:
+        char = component[index]
+        index += 1
+        if char == "[":
+            closing = index
+            if closing < end and component[closing] == "!":
+                closing += 1
+            if closing < end and component[closing] == "]":
+                closing += 1
+            while closing < end and component[closing] != "]":
+                closing += 1
+            if closing < end:
+                index = closing + 1
+        width += 1
+    return width
+
+
 def _survives_double_star(rest: tuple) -> bool:
     """True when prefixing *rest* with ``**`` does not change what it matches.
 
@@ -445,11 +487,21 @@ def _unconvertible(
 ) -> WorkspacePatternError:
     """Build the fail-closed error, naming the pattern, the project and the fix."""
     return WorkspacePatternError(
-        f"pattern '{PurePosixPath(*pattern_parts).as_posix()}' cannot be "
+        f"pattern '{_shown(PurePosixPath(*pattern_parts).as_posix())}' cannot be "
         f"rewritten for project '{PurePosixPath(*prefix_parts).as_posix()}': "
         f"{reason}. Write the pattern with explicit '**' components, which mean "
         f"the same thing in both path spaces, or name the project explicitly."
     )
+
+
+def _shown(text: str) -> str:
+    """*text* as a message shows it: each lone surrogate as its record-form escape.
+
+    Down-conversion works on the name a non-UTF-8 file has (each undecodable byte
+    a lone surrogate, as the matcher reads the pattern), and a lone surrogate in
+    an error message cannot be printed by every sink.
+    """
+    return text_of_undecodable(text)
 
 
 def _down_convert_unanchored(
@@ -517,8 +569,40 @@ def _down_convert_unanchored(
     # separator after it in the pattern must be the one after the prefix, so the
     # remainder applies verbatim and no `**` is introduced.
     if _is_fixed_length(leading):
-        if rest and _absorbs(prefix_parts, leading):
-            return PurePosixPath(*rest).as_posix()
+        width = _fixed_width(leading)
+        joined = PurePosixPath(*prefix_parts).as_posix()
+        if width < len(joined) and (
+            joined[width] != "/" or not fnmatch.fnmatchcase(joined[:width], leading)
+        ):
+            # The leading ends inside the prefix. The pattern's separator after
+            # it has to land on the prefix's character at that position, and
+            # the leading has to match the text before it; when either fails,
+            # no path under the prefix matches. (When both hold, the pattern's
+            # separator sits inside the project path, and that is refused below:
+            # the remainder would have to absorb the rest of the prefix.)
+            return None
+        if width == len(joined):
+            if not rest or not fnmatch.fnmatchcase(joined, leading):
+                # The leading alone matches only the bare prefix, which names no
+                # file; a leading that does not match the prefix matches nothing
+                # under it either.
+                return None
+            rewritten = PurePosixPath(*rest).as_posix()
+            if not fnmatch.fnmatchcase(rewritten, rewritten):
+                # The matcher reads a path that equals the pattern's text as a
+                # match before any glob (path_matching._path_pattern_matches),
+                # so project-side the remainder also covers the file spelled
+                # exactly as the remainder ("[x].py"), which the workspace
+                # pattern, whose leading is a glob, never equals. Nothing
+                # subtracts that one file from a glob, so fail closed.
+                raise _unconvertible(
+                    pattern_parts,
+                    prefix_parts,
+                    f"what is left after the leading, '{rewritten}', also "
+                    f"names a file spelled exactly like it project-side, which "
+                    f"the workspace pattern does not match",
+                )
+            return rewritten
         raise _unconvertible(
             pattern_parts,
             prefix_parts,
@@ -654,6 +738,19 @@ def _down_convert_components(
     remainders = [components[index:] for index in sorted(states)]
     if any(_matches_every_path(remainder) for remainder in remainders):
         return _WHOLE_PROJECT
+    # The remainders are suffixes of one component list, so a longer one is some
+    # components followed by a shorter one. A shorter remainder that starts with
+    # "**" therefore covers every longer one: its "**" takes those components. So
+    # the shortest such remainder stands for all the longer ones, and only the
+    # remainders shorter than it are left to disagree with it.
+    covering = [
+        len(remainder) for remainder in remainders if remainder[0] == _WHOLE_PROJECT
+    ]
+    if covering:
+        shortest = min(covering)
+        remainders = [
+            remainder for remainder in remainders if len(remainder) <= shortest
+        ]
     if len(remainders) > 1:
         raise _unconvertible(
             tuple(text.split("/")),
@@ -722,10 +819,10 @@ def _down_convert(text: str, prefix_parts: tuple) -> Optional[str]:
         # rest of the prefix in more than one way, so fail closed. ("api/**" over
         # "api/sub" holds "**" and is converted by _down_convert_components.)
         raise WorkspacePatternError(
-            f"pattern '{PurePosixPath(*pattern_parts).as_posix()}' cannot be "
+            f"pattern '{_shown(PurePosixPath(*pattern_parts).as_posix())}' cannot be "
             f"rewritten for project "
             f"'{PurePosixPath(*prefix_parts).as_posix()}': the wildcard "
-            f"'{pattern_part}' falls inside the project path itself, so how "
+            f"'{_shown(pattern_part)}' falls inside the project path itself, so how "
             f"much of that path it consumes is ambiguous. Anchor the pattern "
             f"with '**/' or name the project path explicitly."
         )
@@ -834,14 +931,33 @@ def to_project_pattern(
         raise WorkspacePatternError("pattern must name at least one component")
 
     raw = str(pattern)
-    # One leading separator at most (_normalise refuses more): workspace-rooted.
-    text = raw.replace("\\", "/").removeprefix("/")
+    # In the matcher's reading order (path_matching._match_form): a non-UTF-8
+    # name's record-form escape ("\udcNN") is read as its one character before
+    # the separators are, so its backslash is part of the name, not a separator,
+    # and such a name stays one component here. The result is written back in
+    # the record form, the form the operator wrote and a report shows.
+    form = undecodable_of_text(raw).replace("\\", "/")
+    if form.startswith("/") and _pattern_components(form)[0] == "":
+        # The matcher reads the separator literally (it absorbs one only before
+        # a leading "**"), and no workspace-relative path starts with one, so the
+        # pattern matches no file at the top level. Converted, it would match
+        # files project-side that it never matched workspace-side.
+        raise WorkspacePatternError(
+            f"pattern '{raw}' starts with '/', which ASH's matcher reads "
+            "literally, so it matches no workspace-relative path; remove the "
+            "leading '/'"
+        )
+    # One leading separator at most (_normalise refuses more).
+    text = form.removeprefix("/")
     _refuse_dot_components(raw, text)
 
     if text.endswith("/"):
         if kind == IGNORE_PATH:
-            return _as_directory_form(
+            converted = _as_directory_form(
                 _down_convert(ignore_path_pattern(text), prefix_parts)
             )
-        return _down_convert_literal_slash(text, prefix_parts)
-    return _down_convert(text, prefix_parts)
+        else:
+            converted = _down_convert_literal_slash(text, prefix_parts)
+    else:
+        converted = _down_convert(text, prefix_parts)
+    return text_of_undecodable(converted) if converted is not None else None

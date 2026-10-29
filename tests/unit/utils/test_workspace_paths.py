@@ -276,7 +276,9 @@ class TestDownConversionAnchored:
             ("project-a/src/x.py", "project-a", "src/x.py"),
             ("project-a/tests/**/*.py", "project-a", "tests/**/*.py"),
             ("apps/web/src/x.py", "apps/web", "src/x.py"),
-            ("/project-a/src/x.py", "project-a", "src/x.py"),
+            # "/project-a/src/x.py" is not here: the matcher reads its leading
+            # separator literally, so it matches no workspace-relative path, and
+            # down-conversion refuses it (test_workspace_paths_down_conversion_edges).
             ("project-a/a/b/c.py", "project-a", "a/b/c.py"),
         ],
     )
