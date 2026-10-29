@@ -1300,15 +1300,14 @@ def _marker_a_slot_would_type(
     so the walk of a model's entries starts over with it False.
 
     Under :data:`_SECTIONS_OPAQUE` a slot annotated as a RedactedSection
-    subclass answers None whatever sits in it: those markers are the
-    section's own validator's to judge.
+    subclass, bare or behind ``Annotated`` or a RootModel, answers None
+    whatever sits in it: those markers are the section's own validator's to
+    judge (its ``_env_scalar_typed_fields`` opt-in among them).
     """
-    if (
-        _SECTIONS_OPAQUE.get()
-        and isinstance(annotation, type)
-        and issubclass(annotation, RedactedSection)
-    ):
-        return None
+    if _SECTIONS_OPAQUE.get():
+        named = _root_annotation(annotation)
+        if isinstance(named, type) and issubclass(named, RedactedSection):
+            return None
     if isinstance(annotation, _AliasSlots):
         for rest, slot in annotation:
             leaf = _value_at(value, rest)
