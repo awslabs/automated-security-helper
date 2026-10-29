@@ -371,6 +371,17 @@ def _apply_config_override(
         return resolved_keys, parsed_value, False
 
 
+def _parsed_list_item(item: str) -> Any:
+    """One item of a bracketed list that is not JSON (``[a, b]``,
+    ``['semgrep']``): a quoted item is its text with the quotes removed, as the
+    Python and shell spellings mean it, and an unquoted one is parsed as a
+    value. The quotes were kept before, so ``['semgrep']`` named a scanner
+    "'semgrep'" that matched nothing."""
+    if len(item) >= 2 and item[0] == item[-1] and item[0] in "'\"":
+        return item[1:-1]
+    return _parse_config_value(item)
+
+
 def _parse_config_value(value: str) -> Any:
     """
     Parse a configuration value string into the appropriate Python type.
@@ -394,8 +405,8 @@ def _parse_config_value(value: str) -> Any:
             return json.loads(bracketed)
         except json.JSONDecodeError:
             # If not valid JSON, try a simpler approach for basic lists
-            items = bracketed[1:-1].split(",")
-            return [_parse_config_value(item.strip()) for item in items if item.strip()]
+            items = [item.strip() for item in bracketed[1:-1].split(",")]
+            return [_parsed_list_item(item) for item in items if item]
 
     # Check for dict syntax: {key1: value1, key2: value2, ...}
     if bracketed.startswith("{") and bracketed.endswith("}"):
@@ -425,6 +436,54 @@ def _parse_config_value(value: str) -> Any:
         except ValueError:
             # Keep as string
             return value
+
+
+def _validated_with_overrides(
+    config_dict: Dict[str, Any],
+    applied: Sequence[Tuple[List[str], Any, bool]],
+    raw_values: Sequence[str],
+) -> AshConfig:
+    """``config_dict`` validated as an AshConfig, with a string field's refusal
+    of an override typed as a number cured by the override's own text.
+
+    _parse_config_value types "123456789012" as an int and "1.10" as a float,
+    so an override could never set a str option to digit text (an account id,
+    a tool version). Where the model refuses such a value as not a string at
+    the place the override landed (``applied``, with the text of each override
+    in ``raw_values``), the value is set back to the text the operator wrote
+    and the document is validated once more. Any other refusal, and a refusal
+    the retyping does not cure, is raised as it is.
+    """
+    try:
+        return AshConfig.model_validate(config_dict)
+    except ValidationError as error:
+        retyped = False
+        for item in error.errors():
+            if item.get("type") != "string_type":
+                continue
+            place = tuple(str(part) for part in item.get("loc", ()))
+            for (segments, parsed, appended), raw in zip(applied, raw_values):
+                if (
+                    appended
+                    or isinstance(parsed, bool)
+                    or not isinstance(parsed, (int, float))
+                    or tuple(segments) != place
+                ):
+                    continue
+                container: Any = config_dict
+                for segment in segments[:-1]:
+                    container = (
+                        container.get(segment) if isinstance(container, dict) else None
+                    )
+                if (
+                    isinstance(container, dict)
+                    and container.get(segments[-1]) == parsed
+                ):
+                    container[segments[-1]] = raw
+                    retyped = True
+        if not retyped:
+            raise
+        return AshConfig.model_validate(config_dict)
 
 
 def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> AshConfig:
@@ -499,6 +558,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     environment_values = config_environment_values(config)
     keys: List[str] = []
     applied: List[Tuple[List[str], Any, bool]] = []
+    raw_values: List[str] = []
     for override in config_overrides:
         key_path, separator, value = override.partition("=")
         if not separator or not key_path.strip():
@@ -531,6 +591,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
             applied.append(
                 _apply_config_override(config_dict, key_path, value, environment_values)
             )
+            raw_values.append(value)
         except ASHConfigValidationError:
             # Already an override refusal whose text names keys only (the
             # respelled-section refusal, resolve_override_segment).
@@ -544,7 +605,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     # Convert back to AshConfig
     try:
-        rebuilt = AshConfig.model_validate(config_dict)
+        rebuilt = _validated_with_overrides(config_dict, applied, raw_values)
     except ValidationError as e:
         # Not chained: see ASHConfigValidationError.validation_error. Without
         # the values and keys the configuration's files read from the
@@ -750,6 +811,25 @@ class ConfigFileRefused(ASHConfigValidationError):
         super().__init__(message, validation_error=validation_error)
         self.document = document
         self.after_overrides = after_overrides
+
+
+def _cached_documents(in_tree: Sequence[Path], reads: Dict[Path, Any]) -> List[Any]:
+    """The documents ``reads`` holds for the files of ``in_tree``, in order.
+
+    The client-overrides sentinel (``CLIENT_OVERRIDES_SOURCE``, a relative
+    path that names no file) is skipped before any path is resolved: resolving
+    a relative path reads the working directory, and with that directory gone
+    (the deleted-cwd case the load supports) it raised FileNotFoundError, so a
+    load with a client's overrides crashed where every file of the chain was
+    fine."""
+    found: List[Any] = []
+    for path in in_tree:
+        if Path(path) == CLIENT_OVERRIDES_SOURCE:
+            continue
+        key = Path(path).resolve()
+        if key in reads:
+            found.append(reads[key])
+    return found
 
 
 def _cached_reader(
@@ -1974,6 +2054,13 @@ def resolve_config(
         untrusted=untrusted_config,
         overrides=list(operator_overrides),
     )
+    if overlay is not None and isinstance(overlay.data, dict):
+        # The overlay's merged document is the operator's by construction
+        # (_refuse_unless_the_operators), whatever the selected chain holds:
+        # a tool path it names is the operator's for every project, the ones
+        # with a config of their own included, which the record above judged
+        # by the selected root's name alone.
+        config._operator_paths.documents.append(overlay.data)
 
     if chain:
         if warn_pending:
@@ -2053,9 +2140,6 @@ def resolve_config(
         mixed_membership = memberships.mixed
         undecided_membership = memberships.undecided
         outside_membership = memberships.outside
-        # The files that are not the operator's, before the client's overrides
-        # are added to them below.
-        untrusted_files = list(in_tree)
         if client_supplied_overrides:
             # Named in the warnings as the source of what is confined, and
             # non-empty so the confinement steps run even over a chain that is
@@ -2153,9 +2237,6 @@ def resolve_config(
         mixed_membership = memberships.mixed
         undecided_membership = memberships.undecided
         outside_membership = memberships.outside
-        # The files that are not the operator's, before the client's overrides
-        # are added to them below.
-        untrusted_files = list(in_tree)
         if client_supplied_overrides:
             # Named in the warnings as the source of what is confined.
             in_tree = [*in_tree, CLIENT_OVERRIDES_SOURCE]
@@ -2343,36 +2424,22 @@ def resolve_config(
                 # above was skipped.
                 undecided=False,
             )
-    # Client-config provenance (utils/config_trust.set_by_operator): the trusted base
-    # as resolved, before the override replays, with the files that are not
-    # the operator's and whose overrides count as the operator's.
-    if untrusted_files:
-        record_provenance(
-            config,
-            in_tree=in_tree,
-            trusted=trusted.model_copy(deep=True),
-            config_overrides=operator_overrides,
-            client_overrides=client_supplied_overrides,
-        )
-    elif client_supplied_overrides:
-        # A chain wholly the operator's own with an MCP client's overrides: no
-        # pre-override resolution is carried on this protocol, so no trusted
-        # view is recorded and set_by_operator answers False, the fail-closed
-        # side.
-        record_provenance(
-            config,
-            in_tree=[],
-            trusted=None,
-            client_overrides=client_supplied_overrides,
-        )
-    # What scanners consult before honoring an option that names code to run
-    # (utils/config_trust.py): the same trusted base, with the overrides replayed
-    # per section when a scanner asks.
+    # Provenance (utils/config_trust.set_by_operator), what scanners consult
+    # before honoring an option that names code to run: the trusted base as
+    # resolved, before the override replays, with the files that are not the
+    # operator's, the operator's own overrides (replayed per section when a
+    # scanner asks) and an MCP client's overrides kept apart. One record: a
+    # config carries one, so a later call replaced an earlier one, and the
+    # record that stood listed every override, a client's included, among the
+    # operator's, so set_by_operator took a client's value for the operator's;
+    # a record with no trusted view, meant for a client's overrides over an
+    # operator-only chain, refused the operator's own file's values instead.
     record_provenance(
         config,
         in_tree=in_tree,
         trusted=trusted.model_copy(deep=True),
-        config_overrides=config_overrides,
+        config_overrides=operator_overrides,
+        client_overrides=client_supplied_overrides,
     )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
@@ -2480,9 +2547,7 @@ def resolve_config(
     # database staleness settings, detect-secrets' scan settings,
     # honor_ignore_files and the archive extraction limits. Each replays its
     # own overrides onto the trusted base itself.
-    tier_two_documents = [
-        reads[Path(path).resolve()] for path in in_tree if Path(path).resolve() in reads
-    ]
+    tier_two_documents = _cached_documents(in_tree, reads)
     tier_two_overrides = list(operator_overrides)
     # The source is recorded on config beside the record, for
     # confine_declared_reporter_destinations, which runs once the plugin modules
@@ -2518,6 +2583,16 @@ def resolve_config(
         in_tree_documents=tier_two_documents,
         environment_paths=environment_paths,
     )
+    # The trusted base is the operator's by definition (the ASH_CONFIG chain,
+    # the operator's own config, or the defaults), so a tool path the step
+    # below copies in from it is the operator's for path_trust.honored_path.
+    # Recorded here because the operator-paths record knows the selected
+    # chain's documents only, which are the repository's in this arm, so a
+    # path kept in another checkout was judged by the repository tier and
+    # refused. Not for a chain the caller marked untrusted, whose record stays
+    # the overrides alone.
+    if config._operator_paths is not None and not untrusted_config:
+        config._operator_paths.documents.append(trusted.model_dump())
     confine_scanner_config_files(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
@@ -3648,16 +3723,36 @@ def _with_reporter_overrides(
             # reporter on while the operator's disable lands as a new extra
             # key, so the scan refuses, as `config get` refuses the same key.
             raise
-        except ASHConfigValidationError as error:
-            # The error can quote a section key the trusted file read from the
-            # environment, so the warning is redacted with that file's values.
-            described = redact_values(str(error), config_environment_values(trusted))
-            ASH_LOGGER.warning(
-                "The --config-overrides under reporters do not apply to the "
-                f"operator's own configuration ({described}), so a reporter that "
-                "sends findings off the host keeps that configuration's settings.",
-                extra=NO_MARKUP,
-            )
+        except ASHConfigValidationError:
+            # One of them does not apply to the trusted base. They are applied
+            # again one at a time below, so the ones that do apply (a disable
+            # of an off-host reporter among them) still reach the view, and
+            # only the ones that do not are dropped, each with its own warning.
+            # Together first: a set that is valid only as a whole stays whole.
+            pass
+        view = trusted.model_copy(deep=True)
+        for override in reporter_overrides:
+            try:
+                view = apply_config_overrides(view, [override])
+            except ASHRespelledOverrideError:
+                raise
+            except ASHConfigValidationError as error:
+                # The error can quote a section key the trusted file read from
+                # the environment, so the warning is redacted with that file's
+                # values; the override is named by its key only (never its
+                # value, which can be a credential), redacted the same way.
+                values = config_environment_values(trusted)
+                described = redact_values(str(error), values)
+                key = redact_values(override.partition("=")[0], values)
+                ASH_LOGGER.warning(
+                    "The --config-overrides under reporters do not apply to the "
+                    f"operator's own configuration for '{key}' ({described}), so "
+                    "a reporter that sends findings off the host keeps that "
+                    "configuration's setting for it; the other reporters "
+                    "overrides still apply.",
+                    extra=NO_MARKUP,
+                )
+        return view
     return trusted.model_copy(deep=True)
 
 
@@ -4824,9 +4919,16 @@ def read_config_document(
             refuse_env=refuse_env,
             anchor_relative_paths=anchor_relative_paths,
         )
-    except (OSError, UnicodeDecodeError, yaml.YAMLError, json.JSONDecodeError) as e:
-        # json.JSONDecodeError and UnicodeDecodeError are ValueErrors, but a bare
-        # ValueError is not caught: pydantic's ValidationError is one too.
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as e:
+        # json.JSONDecodeError, UnicodeDecodeError and a YAML constructor's
+        # ValueError (!!int abc, the int digit limit) are all ValueErrors, and
+        # all parse failures (is_config_parse_error). pydantic's
+        # ValidationError is a ValueError too; the classifier excludes it, so
+        # it is re-raised as it was and never reported as a parse. A bare
+        # except on the two named types let a constructor's ValueError
+        # escape raw, with the file's text in its message.
+        if not isinstance(e, OSError) and not is_config_parse_error(e):
+            raise
         if isinstance(e, OSError) or not (unquoted or _is_a_client_file(path)):
             # A YAML parser's message quotes the file's path as given, so its
             # control characters are escaped there as describe_config_path
@@ -4865,11 +4967,21 @@ def validate_config_document(
         return AshConfig.model_validate(document.data, strict=True)
     except ValidationError as e:
         if unquoted is None:
+            # Not pydantic's own text, which quotes every input: a mapping key
+            # the file read from the environment stands in an error's
+            # location, and a validator's message can repeat the value it
+            # refused. Each problem is given by its place and kind, redacted
+            # with what the chain read from the environment, as every other
+            # consumer of an AshConfig ValidationError gives it
+            # (describe_validation_error). Not chained: the cause would carry
+            # the text to the console, ash.log and an MCP reply.
+            described = describe_validation_error(e, document.environment_values)
             raise ASHConfigValidationError(
                 f"Configuration validation failed for "
-                f"'{describe_config_path(Path(config_path))}': {str(e)}. "
+                f"'{describe_config_path(Path(config_path))}': "
+                f"{described.rstrip('.')}. "
                 "Run 'ash config lint' to identify and fix issues."
-            ) from e
+            ) from None
         refused = _client_validation_error(config_path, e, why=unquoted)
     raise refused
 
