@@ -14,11 +14,15 @@ from automated_security_helper.utils.log import ASH_LOGGER
 class EnginePhase(ABC):
     """Base class for execution engine phases with observer pattern support."""
 
-    #: Which event handlers this phase's events reach: a filter from
-    #: ``loader.plugins_of`` for the run's own plugin modules, which
-    #: ScanExecutionEngine sets on the phases it builds, or that an engine hands
-    #: the constructor as ``plugin_filter``. None, for a phase built outside an
-    #: engine, reaches every subscriber.
+    #: Which event handlers this phase's events reach. An engine hands the
+    #: constructor its scan's ``plugins.loader.scan_handler_filter`` as
+    #: ``plugin_filter``, kept here: the handlers of the run's own plugins plus
+    #: every handler the embedding program subscribed from outside the plugin
+    #: namespace, so a phase event (SCAN_START, *_PHASE_COMPLETE) reaches the
+    #: same handlers the engine's EXECUTION_* events reach. A scope set on the
+    #: phase afterward is combined with the handed filter, so a handler either
+    #: one admits is notified. None, for a phase built outside an engine with no
+    #: filter, reaches every subscriber.
     plugin_scope: Optional[Callable[[Any], bool]] = None
 
     def __init__(
