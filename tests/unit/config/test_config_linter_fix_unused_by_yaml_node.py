@@ -254,6 +254,49 @@ def test_a_dash_on_the_files_last_line_gets_its_own_line(tmp_path):
     assert yaml.safe_load(fixed_content)["global_settings"]["suppressions"] == []
 
 
+@pytest.mark.parametrize(
+    "unused, kept_paths",
+    [
+        pytest.param(
+            [{"path": "src/b.py", "rule_id": "B102", "reason": "two"}],
+            ["src/a.py"],
+            id="the-last-entry",
+        ),
+        pytest.param(
+            [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
+            ["src/b.py"],
+            id="the-first-entry",
+        ),
+    ],
+)
+def test_a_second_entry_whose_dash_is_on_the_files_last_line_is_counted(
+    tmp_path, unused, kept_paths
+):
+    """Red before the end line was settled ahead of the dash collection: the
+    last `-` sat on the unadjusted end line, fell outside the half-open range,
+    the token and node counts disagreed, and nothing was edited or reported
+    (the safe side, but the fix for a file with no final line break did not
+    reach a list whose last entry is written on that line)."""
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/a.py\n"
+        "      rule_id: B101\n"
+        "      reason: one\n"
+        "    - {path: src/b.py, rule_id: B102, reason: two}",
+        unused,
+    )
+
+    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert len(fixed_issues) == 1
+    assert fixed_content.count("# [ash-lint") == 1
+    data = yaml.safe_load(fixed_content)
+    assert [s["path"] for s in data["global_settings"]["suppressions"]] == kept_paths
+
+
 def test_a_repeated_suppressions_key_is_left_alone(tmp_path):
     """The loader keeps the last list, a text walk would edit the first; the
     file is left as it is and nothing is reported commented out."""

@@ -804,6 +804,14 @@ class ConfigLinter:
         column = sequence.start_mark.column
         first_line = sequence.start_mark.line
         end_line = sequence.end_mark.line
+        # A list that runs to the end of a text with no final line break ends
+        # ON the last line (the stream end sits there), not after it; the last
+        # entry's lines then run to the end of the text. Settled before the
+        # dashes are collected, so a last entry whose own `-` sits on that
+        # line is counted (its line is the unadjusted end line, which the
+        # half-open range below would leave out).
+        if sequence.end_mark.index >= len(raw_content) or end_line >= len(lines):
+            end_line = len(lines)
         dash_positions = [
             (token.start_mark.line, token.start_mark.column)
             for token in tokens
@@ -815,11 +823,6 @@ class ConfigLinter:
             # The tokens and the node disagree on the entry count; nothing is
             # edited on a reading this cannot check.
             return None
-        # A list that runs to the end of a text with no final line break ends
-        # ON the last line (the stream end sits there), not after it; the last
-        # entry's lines then run to the end of the text.
-        if sequence.end_mark.index >= len(raw_content) or end_line >= len(lines):
-            end_line = len(lines)
         return key_line, dash_positions, end_line, key_node.start_mark.column
 
     @staticmethod
