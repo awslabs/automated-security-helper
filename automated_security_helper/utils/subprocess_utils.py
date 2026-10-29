@@ -1165,12 +1165,29 @@ def _refusal_text(command: str, path: str, sandbox: bool) -> str:
     )
 
 
+def _own_path(path: str) -> str:
+    """``path`` as the process names it: absolute, case-folded, links kept."""
+    return os.path.normcase(os.path.abspath(path))
+
+
 def _is_running_interpreter(candidate: str) -> bool:
-    """The Python running ASH: already started, so refusing it protects nothing."""
-    try:
-        return os.path.samefile(candidate, sys.executable)
-    except OSError:
+    """The Python running ASH, or a tool installed beside it: the scan already
+    runs from there, so refusing it protects nothing.
+
+    Compared by path, never by inode. A tree's virtual environment links its
+    python to the interpreter running ASH, and ``samefile`` calls the two one
+    file; started through the venv's path, that python reads the tree's
+    pyvenv.cfg and site-packages, so the link is not the running interpreter.
+    The same holds for an in-tree link named after another tool, which would
+    start the interpreter with that tool's arguments. A tool next to the running
+    interpreter (uv installed with ASH, when ASH runs from the scanned
+    repository's own environment) belongs to the environment ASH is running from.
+    """
+    if not sys.executable:
         return False
+    own = _own_path(candidate)
+    running = _own_path(sys.executable)
+    return own == running or os.path.dirname(own) == os.path.dirname(running)
 
 
 def _containing_tree(candidate: str, roots: Sequence[str]) -> Optional[str]:
