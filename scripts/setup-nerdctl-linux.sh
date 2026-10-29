@@ -331,8 +331,16 @@ timeout 60 buildctl debug workers --verbose 2>&1 || true
 # grep over the JSON rather than parsing it: jq is not guaranteed on the runner,
 # and the label names are literal strings in buildkitd's output. The executor
 # label is `org.mobyproject.buildkit.worker.executor`.
-if ! grep -q '"org.mobyproject.buildkit.worker.executor":"containerd"' "${workers_json}"; then
-    echo "ERROR: buildkitd's default worker is not the containerd worker." >&2
+#
+# Two greps, because the output lists EVERY worker and the config above is
+# what makes the OCI worker absent. A no-config buildkitd registers both
+# workers with the OCI one as default, so a grep for the containerd executor
+# alone matched that list too and passed while the toml had not applied -- the
+# exact state this check exists to refuse. The containerd executor must be
+# present AND the OCI executor absent.
+if ! grep -q '"org.mobyproject.buildkit.worker.executor":"containerd"' "${workers_json}" \
+    || grep -q '"org.mobyproject.buildkit.worker.executor":"oci"' "${workers_json}"; then
+    echo "ERROR: buildkitd's default worker is not the containerd worker, or the OCI worker is still registered." >&2
     echo "" >&2
     echo "/etc/buildkit/buildkitd.toml was written above to disable the OCI worker," >&2
     echo "so reading anything other than executor=containerd here means it did not" >&2
