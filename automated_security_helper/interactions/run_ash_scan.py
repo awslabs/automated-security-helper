@@ -4957,25 +4957,11 @@ def _run_container_mode(
         else resolved_fail_on_incomplete_scanners
     )
 
-    # The policy the host resolved for the plan. The container resolves the workspace
-    # again, and on its own it would find only a policy inside the root, so one named
-    # with --workspace-config elsewhere would not apply. It is handed over by the
-    # name it was given or found under, not the resolved path the plan holds, so a
-    # policy named inside the workspace's tree that links out of it is refused as an
-    # in-tree --config that links out is; the mount itself is of the real file.
-    workspace_config = None
-    plan = opts.workspace_plan
-    if plan is not None and plan.workspace_config_source is not None:
-        from automated_security_helper.workspace.policy import (
-            named_workspace_policy_path,
-        )
-
-        named = named_workspace_policy_path(
-            plan.workspace_root, opts.workspace_config_as_named
-        )
-        workspace_config = (
-            named.as_posix() if named is not None else plan.workspace_config_source
-        )
+    # The policy handed to the container is the one _workspace_policy_for_the_container
+    # computed above, checked against the file the plan read. It is not computed
+    # again here: a second computation without that check handed discovery's find
+    # over for a plan built without the as-named spelling, so an ash-workspace.yaml
+    # the repository wrote replaced the operator's policy in the container.
 
     if opts.run:
         # The inputs before the previous run's output: a scan refused for its config
