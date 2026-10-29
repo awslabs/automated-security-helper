@@ -884,10 +884,12 @@ def workspace_exit_code(
         # anything else fails a clean hook run and makes the optimisation worse
         # than not having it.
         #
-        # A workspace whose every project was skipped by ERROR was never looked
-        # at, whatever tolerated it. Exiting 0 there would report a clean result
-        # for code nothing examined.
-        if any(
+        # A project skipped by ERROR was never looked at, whatever tolerated it.
+        # Exiting 0 would report a clean result for code nothing examined, so the
+        # unchanged skips have to be ALL of them: one unchanged project beside an
+        # ERROR skip used to read SUCCESS for a workspace that examined one
+        # project and never looked at the rest.
+        if entries and all(
             entry.skip_reason is SkippedProjectReason.NO_CHANGES for entry in entries
         ):
             return WorkspaceExitCode.SUCCESS
