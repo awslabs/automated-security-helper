@@ -41,7 +41,11 @@ permissions:
 concurrency:
   # One in-flight run per pull request; pushing again supersedes the previous run.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer run on any ref other than main or a tag supersedes the one in progress. This
+  # workflow only runs on pull_request, whose ref is never main or a tag, so every run
+  # here may be superseded; the expression is the one every workflow in this repository
+  # shares, so one test can pin the rule for all of them.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   ash-pr-head:
