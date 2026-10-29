@@ -146,6 +146,12 @@ class FakeOrchestrator:
         # The per-target reports, as ScanResultProcessor serializes them, for a test
         # that needs what a report recorded beyond the row.
         model.additional_reports.update(spec.get("additional_reports") or {})
+        # The scan phase saves the per-project results file itself, before the
+        # workspace layer sees the model (ScanPhase, AshAggregatedResults.save_model).
+        # Off by default so the fixtures that assert the workspace's own write stay
+        # exact; a test about what the scan left behind turns it on.
+        if spec.get("save_results"):
+            model.save_model(self.output_dir)
         return model
 
 

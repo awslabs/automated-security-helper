@@ -1371,6 +1371,11 @@ def _scan_one_project(
             f"timeout; discarding its results rather than contradicting the "
             f"workspace verdict already recorded for it."
         )
+        # Skipping the write below is not enough: the scan phase saved
+        # projects/<key>/ash_aggregated_results.json itself before this check
+        # ran, so that file already holds the findings the verdict says do not
+        # exist. Removed, as the message above says.
+        _discard_project_results(project_output)
         return _failed_outcome(
             project,
             settings,
@@ -2044,6 +2049,30 @@ def _scanner_reasons(results: Any, values: Iterable[str] = ()) -> Dict[str, str]
     return reasons
 
 
+def _discard_project_results(project_output: Path) -> None:
+    """Remove the per-project results file a scan saved before it was abandoned.
+
+    The scan phase writes ``projects/<key>/ash_aggregated_results.json`` on its
+    own (``AshAggregatedResults.save_model``) before ``_scan_one_project`` can
+    see that the project was abandoned, so declining the workspace's own write of
+    the same file left the scan's copy in place: real findings in the project's
+    subtree beside a unified file recording the project FAILED with none. The
+    file is this run's own output under the workspace output directory. A link
+    at its path is left alone, as every other write here refuses to follow one.
+    """
+    path = project_output / RESULTS_FILENAME
+    try:
+        if path.is_symlink():
+            return
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        ASH_LOGGER.warning(
+            f"Could not remove the abandoned project's results file "
+            f"{path}: {error_text(error)}",
+            extra=NO_MARKUP,
+        )
+
+
 def _write_project_results(project_output: Path, results: Any) -> None:
     """Write the project's own ``ash_aggregated_results.json``.
 
@@ -2486,6 +2515,13 @@ def _run_projects(
                     # is decided below, from how many workers are left.
                     continue
                 if now - begin <= timeout:
+                    continue
+                if future.done():
+                    # Finished in the gap between the wait above returning and
+                    # this read of the clock. Its result stands and the next poll
+                    # collects it; abandoning it here recorded a project that had
+                    # completed, and had already written its per-project results,
+                    # as FAILED with no findings.
                     continue
                 elapsed = now - begin
                 stoppable = (cancel_events or {}).get(project.key) is not None
