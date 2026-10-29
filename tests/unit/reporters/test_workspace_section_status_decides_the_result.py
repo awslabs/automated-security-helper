@@ -1,0 +1,98 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A project's recorded status decides its row, not the truthiness of its texts.
+
+``workspace_project_rows`` read FAILED from ``project.error`` and SKIPPED from
+``project.skip_reason`` and never consulted ``project.status``, so a FAILED
+project whose error text was null or empty, and a SKIPPED project with no
+recorded reason, fell through to PASSED with zero counts: the same row a clean
+scan produces, for a project that was never scanned, while workspace_exit_code
+fails the run for the FAILED one.
+"""
+
+import pytest
+
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    WorkspaceProjectResult,
+    WorkspaceResults,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    html_workspace_section,
+    workspace_project_rows,
+)
+
+pytestmark = pytest.mark.unit
+
+
+def _project(key: str, **overrides) -> WorkspaceProjectResult:
+    fields = {
+        "project": key,
+        "relative_path": key,
+        "display_label": key,
+        "status": ProjectRunStatus.COMPLETED,
+        "severity_threshold": "MEDIUM",
+        "output_path": f"projects/{key}",
+    }
+    fields.update(overrides)
+    return WorkspaceProjectResult(**fields)
+
+
+def _model(*projects: WorkspaceProjectResult) -> AshAggregatedResults:
+    model = AshAggregatedResults()
+    model.workspace = WorkspaceResults(
+        workspace_file="/w/.ash-workspace.yaml",
+        workspace_root="/w",
+        exit_code=0,
+        projects=list(projects),
+    )
+    return model
+
+
+def _result(model: AshAggregatedResults, key: str) -> str:
+    return next(
+        row["result"] for row in workspace_project_rows(model) if row["key"] == key
+    )
+
+
+@pytest.mark.parametrize("error", [None, ""], ids=["null-error", "empty-error"])
+def test_a_failed_project_without_an_error_text_reads_failed(error):
+    model = _model(
+        _project(
+            "svc", status=ProjectRunStatus.FAILED, error=error, severity_threshold=None
+        )
+    )
+    assert _result(model, "svc") == "FAILED"
+    assert 'class="failed"' in html_workspace_section(model)
+
+
+def test_a_skipped_project_without_a_reason_reads_skipped():
+    model = _model(
+        _project(
+            "docs",
+            status=ProjectRunStatus.SKIPPED,
+            skip_reason=None,
+            severity_threshold=None,
+        )
+    )
+    assert _result(model, "docs").startswith("SKIPPED")
+
+
+def test_a_skip_with_a_reason_still_names_it():
+    from automated_security_helper.models.workspace import SkippedProjectReason
+
+    model = _model(
+        _project(
+            "docs",
+            status=ProjectRunStatus.SKIPPED,
+            skip_reason=SkippedProjectReason.NO_CHANGES,
+            severity_threshold=None,
+        )
+    )
+    assert _result(model, "docs") == "SKIPPED (no-changes)"
+
+
+def test_a_completed_clean_project_still_passes():
+    assert _result(_model(_project("svc")), "svc") == "PASSED"

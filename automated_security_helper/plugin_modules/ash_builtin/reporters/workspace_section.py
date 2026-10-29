@@ -60,7 +60,10 @@ import html as html_escape
 import re
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
-from automated_security_helper.models.workspace import is_workspace_scan
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    is_workspace_scan,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -123,8 +126,16 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # was not looked at, and they must not read the same.
             reason = getattr(project.skip_reason, "value", project.skip_reason)
             result = f"SKIPPED ({reason})"
-        elif project.error:
+        elif project.error or project.status is ProjectRunStatus.FAILED:
+            # The recorded status decides, not the error text's truthiness: a
+            # FAILED project whose error is null or empty was still attempted
+            # and produced no outcome, and workspace_exit_code fails the run for
+            # it. Read from the text alone it fell through to PASSED.
             result = "FAILED"
+        elif project.status is ProjectRunStatus.SKIPPED:
+            # A SKIPPED project with no recorded reason was never scanned; its
+            # counts are zero because nothing ran, not because nothing was found.
+            result = "SKIPPED"
         elif project.scan_incomplete:
             # Ahead of the threshold arm, in the order workspace_exit_code reads a
             # project (incomplete before findings, as a single-directory scan
