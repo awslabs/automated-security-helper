@@ -409,7 +409,9 @@ def _admits_plain_str(annotation: Any, text: Optional[str] = None) -> bool:
         conditional = [arm for arm in arms if _admits_conditionally(arm)]
         if text is not None and any(_keeps_this_text(arm, text) for arm in conditional):
             return True
-        return not any(_converts_a_plain_str(arm) for arm in unconditional) and any(
+        # Every arm counts as a possible converter, a conditional one too: an
+        # IntEnum arm converts the text it matches by number.
+        return not any(_converts_a_plain_str(arm) for arm in arms) and any(
             _admits_plain_str(arm, text) for arm in conditional
         )
     if origin is Literal:
@@ -1475,16 +1477,18 @@ def _marker_a_slot_would_type(
     if origin in (Union, types.UnionType):
         found = None
         for arm in get_args(annotation):
-            if (
-                arm is type(None)
-                or not _shape_can_hold(arm, value)
-                or not _arm_would_take(arm, value)
-            ):
+            if arm is type(None) or not _shape_can_hold(arm, value):
                 continue
             typed = _marker_a_slot_would_type(arm, value, as_item)
-            if typed is None:
+            if typed is not None:
+                found = found or typed
+            elif _arm_would_take(arm, value):
+                # Only an arm pydantic would accept speaks for every marker
+                # as kept. An arm it would refuse (a fixed tuple of another
+                # length, a model given a key it does not declare) still
+                # refuses a marker at a converting slot it does read, so the
+                # shared prefix of a too-long tuple is read as before.
                 return None
-            found = found or typed
         return found
     if isinstance(value, dict):
         fields = _declared_field_annotations(annotation)
