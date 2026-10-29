@@ -72,6 +72,24 @@ def test_a_mapping_at_a_sequence_item_slot_is_refused_by_name():
     _assert_named_not_echoed(text, "rows")
 
 
+def test_a_container_at_a_path_item_slot_gets_the_container_wording():
+    """The refusal speaks of the container, not the reference: it names what
+    the slot expects and what the field holds, and gives no idiom advice,
+    since a list at a `Path | str` slot would be refused by this rule again."""
+    from pathlib import Path
+
+    class Section(RedactedSection):
+        roots: Optional[Dict[str, Path]] = None
+
+    text = _refusal_text(
+        Section, {"roots": {"a": [env_resolved_scalar(CANARY, VARIABLE)]}}
+    )
+    _assert_named_not_echoed(text, "roots")
+    assert "holds a list" in text, text
+    assert "Plugin authors" not in text, text
+    assert "Write the value in the file" not in text, text
+
+
 def test_a_container_at_a_slot_that_holds_it_is_still_walked():
     """The control: the inner slot takes a list, so its item slot is read and
     the reference there is refused by name as before."""

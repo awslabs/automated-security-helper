@@ -1481,10 +1481,13 @@ def _arm_would_take(arm: Any, value: Any) -> bool:
 
 def _marker_a_slot_would_type(
     annotation: Any, value: Any, as_item: bool = False
-) -> Optional[Tuple["EnvResolvedScalar", Any, bool]]:
+) -> Optional[Tuple[Any, ...]]:
     """The first marker in *value* at a slot that would convert it, with that
     slot's annotation and whether the slot is the item of a sequence or a
-    mapping; None when every marker sits where a plain str lands.
+    mapping, as ``(marker, slot, as_item)``; None when every marker sits
+    where a plain str lands. A container sitting at a slot no arm of which
+    can hold a container comes back as ``(marker, slot, as_item, container)``,
+    so the refusal can speak of the container rather than the reference.
 
     Walks the annotation beside the value: a dict's keys against the key
     argument and its values against the value argument, a sequence's items
@@ -1532,12 +1535,14 @@ def _marker_a_slot_would_type(
         # The slot has no shape for a container at all (an int, a str, a
         # Path, a Literal), so pydantic would refuse the container with its
         # own error, which names no variable and echoes the downcast copy's
-        # resolved text as the input. Refuse by name instead, as the field
-        # itself is refused at the top level (_refuse_container_at_scalar);
-        # where the type check speaks for the slot, as there, it is left to it.
+        # resolved text as the input. Refuse by name instead, in the words the
+        # top level uses for the same shape (_refuse_container_at_scalar): the
+        # container is what the slot cannot take, so neither "write the value
+        # in the file" nor the Path | str idiom would help. Where the type
+        # check speaks for the slot, as there, it is left to it.
         marker = first_env_scalar(value)
         if marker is not None:
-            return marker, annotation, as_item
+            return marker, annotation, as_item, value
     # A RootModel is read through what it wraps, after the scalar check
     # above: a bare marker at the model itself keeps its standing answer.
     annotation = _root_annotation(annotation)
@@ -1773,7 +1778,9 @@ def _refuse_typed_env_reference(
         _SECTIONS_OPAQUE.reset(opaque_token)
         _WALK_CONFIG.reset(token)
     if typed is not None:
-        marker, slot, in_item = typed
+        marker, slot, in_item, *container = typed
+        if container:
+            _refuse_container_at_scalar(marker, container[0], slot, field_name)
         _refuse_env_reference(
             marker,
             _refused_noun(slot),
