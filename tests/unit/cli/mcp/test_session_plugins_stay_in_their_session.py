@@ -62,7 +62,10 @@ from tests.utils.tool_guard import (
     reset_tool_lookup_caches,
 )
 
-pytestmark = pytest.mark.integration
+# e2e, not integration: the module-scoped fixture and the vendored-scanner test run
+# whole child scans through subprocess.run with 900- and 600-second timeouts, the
+# product driven as an operator would drive it.
+pytestmark = pytest.mark.e2e
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
