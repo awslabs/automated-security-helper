@@ -698,7 +698,9 @@ REAL_BLOCK_COUNTS = {
         [("ash", False)],
     ),
     "how-to/scale-large-repos.md": (
-        {"install": 1, "artifact-actions": 2, "serial-matrix": 1, "provenance": 2},
+        # Three artifact steps: the shard upload, the merge job's download and its
+        # upload of the merged output.
+        {"install": 1, "artifact-actions": 3, "serial-matrix": 1, "provenance": 2},
         [("shard", True), ("merge", False)],
     ),
     "how-to/ci/gitlab-ci.md #9": (
@@ -767,22 +769,33 @@ def test_act_runs_the_pages_artifact_steps_on_the_pinned_v4_actions():
     steps = [s for job in _load(result.text)["jobs"].values() for s in job["steps"]]
     upload = [s for s in steps if str(s.get("uses", "")).startswith("actions/upload-")]
     download = [s for s in steps if "download-artifact" in str(s.get("uses", ""))]
-    assert [s["uses"] for s in upload] == [UPLOAD_V4]
+    # Two uploads (each shard's, and the merge job's of the merged output) and the
+    # merge job's one download.
+    assert [s["uses"] for s in upload] == [UPLOAD_V4, UPLOAD_V4]
     assert [s["uses"] for s in download] == [DOWNLOAD_V4]
     assert "# v4.6.2" in result.text and "# v4.3.0" in result.text
-    # Each step keeps its inputs, which v4 reads as v7 and v8 do.
-    original = {
-        s["uses"].split("@")[0]: s
+    # Each step keeps its inputs, which v4 reads as v7 and v8 do; the uploads pair
+    # with the page's by artifact name.
+    original = [
+        s
         for job in _load(body)["jobs"].values()
         for s in job["steps"]
         if "-artifact@" in str(s.get("uses", ""))
+    ]
+    uploads_by_name = {
+        s["with"]["name"]: s for s in original if "upload-artifact@" in s["uses"]
     }
-    assert upload[0]["with"] == original["actions/upload-artifact"]["with"]
-    assert upload[0]["if"] == original["actions/upload-artifact"]["if"]
-    assert download[0]["with"] == original["actions/download-artifact"]["with"]
+    assert sorted(uploads_by_name) == ["ash-merged", "ash-shard-${{ matrix.shard }}"]
+    for step in upload:
+        assert step["with"] == uploads_by_name[step["with"]["name"]]["with"]
+        assert step["if"] == uploads_by_name[step["with"]["name"]]["if"]
+    (original_download,) = [s for s in original if "download-artifact@" in s["uses"]]
+    assert download[0]["with"] == original_download["with"]
+    # The two upload lines are the same release, so the rewrite records them as one
+    # change made twice.
     assert {
         (a.old.split("@")[0], a.count) for a in _applied(result, "artifact-actions")
-    } == {("actions/upload-artifact", 1), ("actions/download-artifact", 1)}
+    } == {("actions/upload-artifact", 2), ("actions/download-artifact", 1)}
 
 
 def test_act_runs_the_pages_matrix_one_entry_at_a_time():
