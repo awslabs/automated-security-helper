@@ -57,6 +57,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
     Kind,
+    Kind1,
     Level,
     Location,
     Message,
@@ -66,6 +67,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     Run,
     SarifReport,
+    Suppression,
     Tool,
     ToolComponent,
 )
@@ -296,6 +298,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     # that is a link to a file outside it is judged where it sits, not where it
     # points. None until a baseline is chosen.
     _baseline_named: Optional[Path] = PrivateAttr(default=None)
+
+    # Whether the chosen baseline came from the baseline_file option rather than
+    # from the tree's own ``.secrets.baseline`` locations. One of the two facts
+    # that decide whether the baseline's entries may leave the report
+    # (_baseline_entries_trusted).
+    _baseline_from_option: bool = PrivateAttr(default=False)
 
     # Whether the settings, as configured, may verify secrets with their issuers.
     # Decided once from where each setting came from (_apply_settings_trust); the scan
@@ -551,6 +559,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         self._configured_baseline_refused = False
         self._chosen_baseline = None
         self._baseline_named = None
+        self._baseline_from_option = False
         possible_baseline_paths = [
             (item, from_option)
             for item, from_option in [
@@ -602,6 +611,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # for the operator-written comparison.
         chosen = None
         chosen_named = None
+        chosen_from_option = False
         option_refused = False
         option_missing = None
         for baseline_path, from_option in possible_baseline_paths:
@@ -669,6 +679,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
                 chosen = resolved_baseline
                 chosen_named = named
+                chosen_from_option = from_option
                 break
             elif from_option:
                 # A missing configured baseline takes no checkout candidate in
@@ -700,6 +711,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 self._chosen_baseline = chosen
                 self._baseline_real = real_baseline
                 self._baseline_named = Path(chosen_named)
+                self._baseline_from_option = chosen_from_option
         elif option_missing is not None:
             # The configured file is not on disk, and no checkout candidate
             # replaces it. The path as the config gave it can be a value the
@@ -1014,6 +1026,41 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             f"the baseline {Path(baseline).as_posix()} was named by a config the "
             f"operator did not write ({record.reason})"
         )
+
+    def _baseline_entries_trusted(self) -> bool:
+        """Whether the baseline in use may take the candidates it lists out of the report.
+
+        A baseline's ``results`` are a suppression surface: every candidate it
+        lists by file, hash and type is one the report will not show. That is
+        the operator's call to make, so the entries are honored as removals only
+        when the operator named the file (``baseline_file`` written by the
+        operator's own settings, ``--config-overrides`` included) or when the
+        file lies outside the scanned tree and the settings-trust rule
+        (``_untrusted_baseline_reason``) finds it the operator's. A baseline the
+        scanned repository controls, its own in-tree ``.secrets.baseline`` or a
+        ``baseline_file`` that a config the operator did not write names, is not
+        trusted for that: a repository could otherwise hide a secret still in
+        its files by listing the hash in a file it commits. Its known entries
+        stay in the report, each marked suppressed with the baseline named as
+        the reason, so the count is visible and the finding can be audited.
+        """
+        if not self._baseline_in_use():
+            return False
+        record = getattr(
+            getattr(self.context, "config", None),
+            "_untrusted_detect_secrets_settings",
+            None,
+        )
+        if self._baseline_from_option and (
+            record is None
+            or same_baseline(
+                record.operator_baseline,
+                self._baseline_file_path(),
+                self.context.source_dir,
+            )
+        ):
+            return True
+        return self._untrusted_baseline_reason(record) is None
 
     def _apply_settings_trust(
         self, *, settings_from_baseline: bool, config_entries: Set[int]
@@ -1783,6 +1830,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 self._secrets_collection = secrets_collection_cls.load_from_baseline(
                     baseline=baseline_document,
                 )
+            # Whether the baseline's listed candidates may leave the report
+            # (_baseline_entries_trusted). When they may not, the worker's
+            # collection is not seeded with them: an entry whose secret has since
+            # left its file is then not reported at a stale line, and an entry
+            # whose secret the scan still finds is reported once, at the scan's
+            # own line, marked suppressed below.
+            known_entries_trusted = self._baseline_entries_trusted()
+            worker_baseline = baseline_document if known_entries_trusted else None
 
             # ``root`` has to be set for every scan, not only for the baseline
             # case above. SecretsCollection.scan_files() has two branches: a
@@ -2039,7 +2094,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 f"Settings: {setting_names(scan_settings_dict)}", extra=NO_MARKUP
             )
             scanned = self._scan_in_worker(
-                baseline=baseline_document,
+                baseline=worker_baseline,
                 scan_paths=scan_paths,
                 scan_settings_dict=scan_settings_dict,
                 work_dir=target_results_dir,
@@ -2055,19 +2110,46 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
 
             # Populate the Results list with findings from the scan. A candidate
-            # the baseline holds is known and leaves the report (_baseline_known):
-            # the baseline's own entries, which the collection carries, and a
-            # secret still in the file the baseline recorded it in. Nothing is
-            # reported at a line the baseline alone names: an entry without a
-            # line number (a --slim baseline's) has none, and a SARIF region
-            # starts at line 1 or later.
+            # the baseline holds is known (_baseline_known). When the baseline is
+            # the operator's (_baseline_entries_trusted) a known candidate leaves
+            # the report: the baseline's own entries, which the collection
+            # carries, and a secret still in the file the baseline recorded it
+            # in. Nothing is reported at a line the baseline alone names: an
+            # entry without a line number (a --slim baseline's) has none, and a
+            # SARIF region starts at line 1 or later. When the baseline is the
+            # scanned repository's, a known candidate the scan found stays in
+            # the report marked suppressed, with the baseline as the reason, so
+            # a repository cannot hide a secret still in its files by listing it.
             known = self._baseline_known(baseline_document, scan_root)
+            baseline_suppression: Optional[Suppression] = None
+            if known and not known_entries_trusted:
+                listed_in = (
+                    self._baseline_named
+                    if self._baseline_named is not None
+                    else self._baseline_file_path()
+                )
+                baseline_suppression = Suppression(
+                    kind=Kind1.external,
+                    justification=text_without_values(
+                        "(ASH) Listed in the detect-secrets baseline "
+                        f"{Path(listed_in).as_posix()}, a file the scanned "
+                        "repository controls; kept in the report as suppressed "
+                        "rather than removed. Name the baseline with "
+                        "scanners.detect-secrets.options.baseline_file in the "
+                        "operator's own config to have its entries removed.",
+                        values,
+                    ),
+                )
+            kept_known = 0
             results: List[Result] = []
             for filename, detections in self._secrets_collection.data.items():
                 uri = self._finding_uri(filename, scan_root)
                 for finding in detections:
-                    if (uri, finding.secret_hash, finding.type) in known:
+                    is_known = (uri, finding.secret_hash, finding.type) in known
+                    if is_known and known_entries_trusted:
                         continue
+                    if is_known:
+                        kept_known += 1
                     rule_id = re.sub(
                         pattern=r"\W+", repl="-", string=finding.type
                     ).upper()
@@ -2077,6 +2159,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             # SARIF Result objects. Reference the current CDK Nag
                             # Scanner/Wrapper for examples on custom SARIF structure.
                             ruleId=f"SECRET-{rule_id}",
+                            suppressions=(
+                                [baseline_suppression]
+                                if is_known and baseline_suppression is not None
+                                else None
+                            ),
                             properties=PropertyBag(
                                 tags=[
                                     "detect-secrets",
@@ -2120,6 +2207,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             ],
                         )
                     )
+            if kept_known:
+                self._plugin_log(
+                    f"{kept_known} candidate(s) listed in the scanned repository's "
+                    "own detect-secrets baseline are reported as suppressed, not "
+                    "removed: only a baseline the operator names may remove them.",
+                    level=logging.INFO,
+                    target_type=target_type,
+                )
             sarif_tool: Tool = Tool(
                 driver=ToolComponent(
                     name="detect-secrets",
