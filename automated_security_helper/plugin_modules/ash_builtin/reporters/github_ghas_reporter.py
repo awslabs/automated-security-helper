@@ -15,35 +15,34 @@ Key differences from the generic SARIF reporter:
    to reduce file size significantly.
 4. Excludes suppressed findings (GitHub has its own dismissal workflow).
 
-Workspace mode: per project, never merged -- and this reporter is the reason the
-whole reporter-behaviour contract exists
+Workspace mode: per project, and every run of a multi-run model is emitted
 --------------------------------------------------------------------------------
-``report()`` reads ``sarif.runs[0]`` and stops. Against the N-run SARIF a
-workspace scan produces, that emits the first project's findings and drops every
-other project: no exception, no warning, just a smaller file that a reviewer has
-no way to tell is incomplete. A security reporter that under-reports in silence
-is the worst thing this feature could ship, and it is why no workspace-level
-report was emitted at all before Phase 2b.
+``report()`` used to read ``sarif.runs[0]`` and stop. Against the N-run SARIF a
+workspace scan produces, that emitted the first project's findings and dropped
+every other project: no exception, no warning, just a smaller file that a
+reviewer had no way to tell was incomplete. A security reporter that
+under-reports in silence is the worst thing this feature could ship.
 
-The fix is not to make it iterate the runs. GitHub code scanning ingests a SARIF
-document against *one* repository root: it resolves every result URI relative to
-the repository the upload is attributed to. A merged document declaring N roots
-either mis-locates results into paths that do not exist in the repo it was
-uploaded for, or is rejected outright. Iterating would have replaced a silent
-false negative with a silently mis-located finding, which is not better.
+The workspace driver declines to invoke this reporter at workspace level and
+writes ``projects/<key>/reports/ash.ghas.sarif`` per project instead, each from
+that project's own single-run scan, each anchored to that project's own root,
+each uploadable on its own; ``tests/unit/workspace/test_workspace_reporting.py``
+pins that declaration. But the declaration is not the only way the reporter is
+reached: ``ash report --format github-ghas --output-dir <workspace output>``
+hands it the unified N-run model directly, and so does any caller that holds
+one. For that input every run is read.
 
-So the correct workspace answer is N documents, one per project, which is what
-``projects/<key>/reports/ash.ghas.sarif`` already is -- each written from that
-project's own single-run scan, each anchored to that project's own root, each
-uploadable on its own. The workspace driver declines to invoke this reporter at
-workspace level and records where the N artefacts are, so the absence of a
-merged file is stated rather than silent.
-
-``runs[0]`` is left in place deliberately. Under this contract the reporter is
-never handed a multi-run model, so the index is correct for every input it can
-receive, and rewriting it would imply a multi-project capability the format does
-not have. ``tests/unit/workspace/test_workspace_reporting.py`` pins the
-declaration, so a future change to MERGED reintroduces the bug loudly.
+GitHub code scanning ingests a SARIF document against *one* repository root and
+resolves every result URI relative to it. A workspace is one such root when it is
+a monorepo, which is the case an operator reporting over a workspace output
+directory is in, so the one-run document this reporter emits for a multi-run
+model carries each location in workspace-relative coordinates: the project's
+path below the workspace root (``properties.workspace_project_path`` on the
+run, which ``workspace/aggregation.py`` stamps) joined with the project-relative
+URI, through the same helper the aggregator uses for
+``properties.workspace_uri``. A URI that cannot be expressed that way (absolute
+and outside its project) is left as the scanner wrote it, which is what the
+aggregator does too.
 """
 
 import json
@@ -112,6 +111,27 @@ def _rule_id(result: Any) -> Optional[str]:
     rule = getattr(result, "rule", None)
     rule = getattr(rule, "root", rule)
     return getattr(rule, "id", None) or None
+
+
+def _run_project_path(run: Any) -> Optional[str]:
+    """The project's path below the workspace root, from the run's properties.
+
+    ``workspace/aggregation.py`` stamps ``workspace_project_path`` on every run
+    it adds to the unified model. A single-directory scan's run carries no such
+    property, so its URIs are left as they are. Read through ``model_extra`` as
+    well as by attribute, because a ``PropertyBag`` allows extras and a key the
+    schema does not declare lands there.
+    """
+    props = getattr(run, "properties", None)
+    if props is None:
+        return None
+    value = getattr(props, "workspace_project_path", None)
+    if value is None:
+        extra = getattr(props, "model_extra", None)
+        value = extra.get("workspace_project_path") if isinstance(extra, dict) else None
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
 
 
 class GHASReporterConfigOptions(ReporterOptionsBase):
@@ -183,13 +203,19 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             if not sarif or not sarif.runs:
                 return self._empty_report()
 
-            run = sarif.runs[0]
+            # Every run. A workspace's unified model carries one run per
+            # project, and reading runs[0] alone emitted the first project's
+            # findings and silently dropped every other project's (see the
+            # module docstring).
+            runs = list(sarif.runs)
 
-            # 1. Collect all rules from driver and extensions, flattened
+            # 1. Collect all rules from every run's driver and extensions,
+            #    flattened
             rules_map: Dict[str, Dict[str, Any]] = {}
-            self._collect_rules(run.tool.driver, rules_map)
-            for ext in run.tool.extensions or []:
-                self._collect_rules(ext, rules_map)
+            for run in runs:
+                self._collect_rules(run.tool.driver, rules_map)
+                for ext in run.tool.extensions or []:
+                    self._collect_rules(ext, rules_map)
 
             # 2. The most severe of each rule's results, as the gate grades them
             #    (issue_severity, else the level), for rules whose scanner gave
@@ -200,24 +226,34 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             #    keeps the score it would have with none (its default level,
             #    else 6.0); no alert in the file carries it.
             rule_level_from_results: Dict[str, str] = {}
-            for result in run.results or []:
-                rule_id = _rule_id(result)
-                if not rule_id or self._left_out(result):
-                    continue
-                severity = result_severity(result)
-                current = rule_level_from_results.get(rule_id)
-                if current is None or SEVERITIES.index(severity) < SEVERITIES.index(
-                    current
-                ):
-                    rule_level_from_results[rule_id] = severity
+            for run in runs:
+                for result in run.results or []:
+                    rule_id = _rule_id(result)
+                    if not rule_id or self._left_out(result):
+                        continue
+                    severity = result_severity(result)
+                    current = rule_level_from_results.get(rule_id)
+                    if current is None or SEVERITIES.index(
+                        severity
+                    ) < SEVERITIES.index(current):
+                        rule_level_from_results[rule_id] = severity
 
             # 3. Build slim results (excluding suppressed if configured). First,
             #    because a result naming a rule the run does not declare adds
             #    that rule to rules_map; the rules were built before it, so the
             #    result reached GitHub with no rule and no security-severity.
-            slim_results = self._build_slim_results(
-                run.results or [], rules_map, rule_level_from_results
-            )
+            #    Each run's results are located against its own project path,
+            #    so a multi-run document reads against the workspace root.
+            slim_results: List[Dict[str, Any]] = []
+            for run in runs:
+                slim_results.extend(
+                    self._build_slim_results(
+                        run.results or [],
+                        rules_map,
+                        rule_level_from_results,
+                        project_path=_run_project_path(run),
+                    )
+                )
 
             # 4. Ensure every rule has security-severity
             slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
@@ -381,8 +417,14 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         results: list,
         rules_map: Dict[str, Dict[str, Any]],
         rule_level_from_results: Dict[str, str],
+        project_path: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Build a minimal list of result objects."""
+        """Build a minimal list of result objects.
+
+        *project_path* is the results' project's path below the workspace root
+        when they come from one run of a workspace's unified model, and None for
+        a single-directory scan; see :meth:`_build_slim_locations`.
+        """
         slim_results = []
 
         for result in results:
@@ -424,7 +466,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 result_dict["message"] = {"text": rule_id or "Finding detected"}
 
             # Locations — only physical location with uri and region
-            locations = self._build_slim_locations(result.locations)
+            locations = self._build_slim_locations(result.locations, project_path)
             if locations:
                 result_dict["locations"] = locations
 
@@ -432,8 +474,17 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
 
         return slim_results
 
-    def _build_slim_locations(self, locations: Optional[list]) -> List[Dict[str, Any]]:
-        """Extract minimal location info."""
+    def _build_slim_locations(
+        self, locations: Optional[list], project_path: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Extract minimal location info.
+
+        With *project_path*, each URI is expressed below the workspace root, the
+        way the aggregator computes ``properties.workspace_uri``, because GitHub
+        resolves every URI of the one document against the one repository it is
+        uploaded for. A URI the helper cannot place (absolute and outside the
+        project) is kept as the scanner wrote it.
+        """
         if not locations:
             return []
 
@@ -452,9 +503,15 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             if not artifact_loc or not artifact_loc.uri:
                 continue
 
-            phys_dict: Dict[str, Any] = {
-                "artifactLocation": {"uri": str(artifact_loc.uri)}
-            }
+            uri = str(artifact_loc.uri)
+            if project_path:
+                from automated_security_helper.workspace.aggregation import (
+                    to_workspace_uri,
+                )
+
+                uri = to_workspace_uri(uri, project_path) or uri
+
+            phys_dict: Dict[str, Any] = {"artifactLocation": {"uri": uri}}
 
             if region:
                 region_dict: Dict[str, Any] = {}
