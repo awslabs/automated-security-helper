@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TARGET="$HOME/.config/goose/config.yaml"
-ASH_FROM='--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0'
+ASH_FROM='--from=git+https://github.com/awslabs/automated-security-helper@v3.7.1'
 mkdir -p "$(dirname "$TARGET")"
 if [[ -f "$TARGET" ]] && grep -q "^extensions:" "$TARGET"; then
   # Only uncommented lines are configuration. Read into a variable rather

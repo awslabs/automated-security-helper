@@ -24,7 +24,7 @@ The buildspec's `env.variables` block sets four variables:
 
 | Name                 | Description                                | Set to                                                     |
 |----------------------|--------------------------------------------|------------------------------------------------------------|
-| `RELEASE_TAG`        | The ASH release tag (or commit) to install | `v3.7.0`                                                   |
+| `RELEASE_TAG`        | The ASH release tag (or commit) to install | `v3.7.1`                                                   |
 | `ASH_MODE`           | The execution mode for ASH                 | `container`                                                |
 | `ASH_REPO_CLONE_URL` | The URL to clone the ASH repository        | `https://github.com/awslabs/automated-security-helper.git` |
 | `COLUMNS`            | Terminal width for better formatting       | `140`                                                      |

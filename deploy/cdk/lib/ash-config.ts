@@ -97,7 +97,7 @@ export const ASH_PARAMETER_NAMES = {
  * never maintained again. tests/unit/deploy/test_deploy_ash_cli_contract.py holds
  * both properties.
  */
-export const DEFAULT_ASH_VERSION = 'v3.7.0';
+export const DEFAULT_ASH_VERSION = 'v3.7.1';
 
 /**
  * Default cadence for the scheduled rebuild that keeps the image patched.
