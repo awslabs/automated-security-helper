@@ -9,6 +9,7 @@ event subscriptions with automatic cleanup to prevent memory leaks.
 """
 
 import asyncio
+import inspect
 from typing import Dict, List, Set, Any, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -137,6 +138,15 @@ class EventSubscriptionManager:
 
         Returns:
             True if unregistration was successful, False if subscription not found
+            or its cleanup raised.
+
+        The subscription is taken out of the registry under the lock, and its
+        cleanup runs after the lock is released. Run under it, a cleanup that
+        called back into this manager deadlocked on the non-reentrant lock, and
+        a slow one stalled every other caller for its duration. The cleanup is
+        awaited whenever what it returns is awaitable: a plain callable that
+        returns a coroutine used to be called and its coroutine dropped, so the
+        cleanup never ran and was reported as a success.
         """
         async with self._subscription_lock:
             subscription = self._subscriptions.get(subscription_id)
@@ -145,31 +155,6 @@ class EventSubscriptionManager:
                     f"Subscription {subscription_id} not found for unregistration"
                 )
                 return False
-
-            # Execute cleanup function if provided
-            cleanup_success = True
-            if subscription.cleanup_func:
-                try:
-                    if asyncio.iscoroutinefunction(subscription.cleanup_func):
-                        await subscription.cleanup_func()
-                    else:
-                        subscription.cleanup_func()
-                    self._logger.debug(
-                        f"Executed cleanup for subscription {subscription_id}"
-                    )
-                except Exception as e:
-                    cleanup_success = False
-                    error_info = {
-                        "subscription_id": subscription_id,
-                        "event_type": subscription.event_type,
-                        "scan_id": subscription.scan_id,
-                        "error": str(e),
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                    self._cleanup_errors.append(error_info)
-                    self._logger.error(
-                        f"Cleanup failed for subscription {subscription_id}: {str(e)}"
-                    )
 
             # Remove from indices
             if (
@@ -192,8 +177,32 @@ class EventSubscriptionManager:
             # Remove subscription
             del self._subscriptions[subscription_id]
 
-            self._logger.debug(f"Unregistered subscription {subscription_id}")
-            return cleanup_success
+        # Execute cleanup function if provided, outside the lock.
+        cleanup_success = True
+        if subscription.cleanup_func:
+            try:
+                outcome = subscription.cleanup_func()
+                if inspect.isawaitable(outcome):
+                    await outcome
+                self._logger.debug(
+                    f"Executed cleanup for subscription {subscription_id}"
+                )
+            except Exception as e:
+                cleanup_success = False
+                error_info = {
+                    "subscription_id": subscription_id,
+                    "event_type": subscription.event_type,
+                    "scan_id": subscription.scan_id,
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat(),
+                }
+                self._cleanup_errors.append(error_info)
+                self._logger.error(
+                    f"Cleanup failed for subscription {subscription_id}: {str(e)}"
+                )
+
+        self._logger.debug(f"Unregistered subscription {subscription_id}")
+        return cleanup_success
 
     async def cleanup_subscriptions_by_scan(self, scan_id: str) -> Dict[str, Any]:
         """Clean up all subscriptions for a specific scan.
