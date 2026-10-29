@@ -239,12 +239,14 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
             # scan's values, the buckets counted findings below the threshold
             # beside a total that counted only the actionable ones.
             kept_counts = dict.fromkeys(_SEVERITY_KEYS, 0)
+            # A workspace document's per-project gates; empty for a single scan.
+            projects = _workspace_project_gates(filtered_results["raw_results"])
             for run in sarif["runs"]:
                 if "results" in run and run["results"]:
                     run["results"] = [
                         r
                         for r in run["results"]
-                        if _counts_toward_exit_2(r, _threshold_for(r, thresholds))
+                        if _actionable_in_view(r, thresholds, projects)
                     ]
                     for r in run["results"]:
                         bucket = _get_finding_severity(r).lower()
@@ -291,19 +293,129 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     return filtered_results
 
 
+#: The ``properties.origin`` value the workspace executor writes on a finding from
+#: a scanner only the workspace policy added (``workspace.execution.POLICY_ORIGIN``,
+#: spelled here so this module does not import the executor).
+_POLICY_ORIGIN = "workspace-policy"
+
+
+def _workspace_project_gates(raw_results: Any) -> Dict[str, Dict[str, Any]]:
+    """Per workspace project key, the gates its verdict graded its findings by.
+
+    Read off ``raw_results["workspace"]["projects"]``, which a workspace results
+    document carries (``get_scan_results`` dumps the whole model but the config
+    and the reports) and a single scan's does not. Each entry holds the project's
+    gate threshold (``severity_threshold``), its recorded per-scanner thresholds
+    (``scanner_thresholds``) and whether a policy scanner's findings decided its
+    verdict (``policy_scanners_gate``), as ``WorkspaceProjectResult`` records
+    them. Empty for a single scan, so every reader of it falls through to the
+    scanner-keyed ``severity_thresholds`` map.
+
+    Why this is needed: ``severity_thresholds`` is resolved from the results'
+    ``ash_config``, which a workspace's unified file does not carry, so for that
+    file every entry reads ASH's default and every project's findings were judged
+    by one threshold while each project's verdict used its own.
+    """
+    if not isinstance(raw_results, dict):
+        return {}
+    workspace = raw_results.get("workspace")
+    if not isinstance(workspace, dict):
+        return {}
+    gates: Dict[str, Dict[str, Any]] = {}
+    for entry in workspace.get("projects") or []:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("project")
+        if not isinstance(key, str) or not key:
+            continue
+        threshold = entry.get("severity_threshold")
+        scanners = entry.get("scanner_thresholds")
+        gates[key] = {
+            "threshold": threshold
+            if isinstance(threshold, str) and threshold
+            else None,
+            "scanners": {
+                str(name): value
+                for name, value in (
+                    scanners.items() if isinstance(scanners, dict) else ()
+                )
+                if isinstance(value, str) and value
+            },
+            "policy_gate": bool(entry.get("policy_scanners_gate", False)),
+        }
+    return gates
+
+
+def _project_of(result: Dict[str, Any]) -> Optional[str]:
+    """The workspace project *result* is attributed to, or None."""
+    props = result.get("properties")
+    project = props.get("workspace_project") if isinstance(props, dict) else None
+    return project if isinstance(project, str) and project else None
+
+
 def _threshold_for(
-    result: Dict[str, Any], thresholds: Dict[str, Optional[str]]
+    result: Dict[str, Any],
+    thresholds: Dict[str, Optional[str]],
+    projects: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Optional[str]:
     """The threshold *result* was judged by, from ``severity_thresholds``.
 
     Keyed by scanner name, ``""`` for a result that names none, which is the
     global threshold. A name missing from the map is judged by that too, as
     ``_compute_exit_code`` judges a scanner with no threshold of its own.
+
+    *projects* is :func:`_workspace_project_gates`. A result attributed to one
+    of its projects is judged as that project's verdict judged it: by the
+    scanner's recorded own threshold when the project recorded one, else by the
+    project's gate; the scanner-keyed map is read only for a result no project
+    claims, or a project whose entry recorded no gate.
     """
     props = result.get("properties")
     name = props.get("scanner_name") if isinstance(props, dict) else None
     key = name if isinstance(name, str) else ""
+    if projects:
+        project = _project_of(result)
+        gate = projects.get(project) if project is not None else None
+        if gate is not None:
+            own = gate["scanners"].get(key) if key else None
+            if own:
+                return own
+            if gate["threshold"]:
+                return gate["threshold"]
     return thresholds[key] if key in thresholds else thresholds.get("")
+
+
+def _excluded_by_policy(
+    result: Dict[str, Any], projects: Optional[Dict[str, Dict[str, Any]]]
+) -> bool:
+    """Whether *result*'s project excluded it from its verdict as a policy finding.
+
+    A finding from a scanner only the workspace policy added carries
+    ``properties.origin: workspace-policy``; with the project's
+    ``policy_scanners_gate`` off, the verdict reported it and left it out of
+    ``actionable_finding_count`` (``execution.py``'s gating results). The
+    actionable view follows the verdict, so such a finding is not kept. A result
+    whose project the workspace block does not list is judged as before.
+    """
+    if not projects:
+        return False
+    props = result.get("properties")
+    if not isinstance(props, dict) or props.get("origin") != _POLICY_ORIGIN:
+        return False
+    project = _project_of(result)
+    gate = projects.get(project) if project is not None else None
+    return gate is not None and not gate["policy_gate"]
+
+
+def _actionable_in_view(
+    result: Dict[str, Any],
+    thresholds: Dict[str, Optional[str]],
+    projects: Optional[Dict[str, Dict[str, Any]]],
+) -> bool:
+    """Whether the actionable view keeps *result*: exit 2's test, by its own gates."""
+    if _excluded_by_policy(result, projects):
+        return False
+    return _counts_toward_exit_2(result, _threshold_for(result, thresholds, projects))
 
 
 def _counts_toward_exit_2(result: Dict[str, Any], threshold: Optional[str]) -> bool:
@@ -492,11 +604,12 @@ def apply_content_filters(
                 "severity_thresholds"
             )
             if isinstance(thresholds, dict):
+                projects = _workspace_project_gates(filtered_results.get("raw_results"))
                 summary_stats["actionable"] = sum(
                     1
                     for run in sarif.get("runs") or []
                     for result in run.get("results") or []
-                    if _counts_toward_exit_2(result, _threshold_for(result, thresholds))
+                    if _actionable_in_view(result, thresholds, projects)
                 )
                 if "actionable_findings" in filtered_results:
                     filtered_results["actionable_findings"] = summary_stats[
