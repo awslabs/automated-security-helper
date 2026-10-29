@@ -105,11 +105,16 @@ def test_an_integration_test_is_still_marked_slow(modify_items, config, name):
     Without this, removing the heuristic entirely would satisfy the test above --
     and the integration suite would lose the ``--run-slow`` gate that keeps a
     default run fast.
+
+    The tier marker lives on each test file under the contract in
+    tests/NAMING_CONVENTIONS.md, so the hook adds ``slow`` (and ``mcp``) by path and
+    never a tier. A hook that added a tier by directory would give the e2e-marked
+    files there two tiers.
     """
     item = _FakeItem(REPO_ROOT / "tests" / "integration" / "cli" / "test_x.py", name)
     modify_items(config, [item])
     assert "slow" in item.applied
-    assert "integration" in item.applied
+    assert "integration" not in item.applied
 
 
 def test_a_unit_test_named_after_mcp_is_not_marked_mcp(modify_items, config):
