@@ -190,6 +190,7 @@ from automated_security_helper.core.previous_results import SettleHandoff
 from automated_security_helper.core.exceptions import (
     ASHConfigEnvNotResolvedError,
     ASHConfigInputNotPermittedError,
+    ASHConfigSourceError,
     ASHConfigValidationError,
     ScannerSelectionError,
     WorkspaceDefinitionError,
@@ -1263,10 +1264,6 @@ def _project_outputs(
             settings.output_dir, project_output, remedy=MCP_WORKSPACE_OUTPUT_REMEDY
         )
         outputs[project.key] = project_output
-    # A project at the workspace root would read every project's output below it;
-    # see ignore_output_dir_in_git. A link at the name raises OutputLinkRefused,
-    # an OutputDirLinkRefused too.
-    ignore_output_dir_in_git(plan.workspace_root, settings.output_dir)
     return outputs
 
 
@@ -1360,6 +1357,53 @@ def _restore_unfinished_projects(
             entry.output_holds_previous_results = holds_restored_results(project_output)
 
 
+def _refuse_outputs_another_scan_writes(
+    registry: Any, plan: WorkspacePlan, project_outputs: Dict[str, Path]
+) -> None:
+    """Refuse a workspace scan whose output directory a live scan is writing.
+
+    The registry refuses a second active scan of one DIRECTORY, by its canonical
+    path, and admits two workspace scans whose projects differ but whose output
+    directories resolve to one place: both then wrote their spool and unified
+    results into it, each run's cleanup removing the other's. The same question
+    is asked of each project's output directory here, before anything is
+    registered, against every scan that still occupies its directory.
+    """
+    requested = {}
+    for project in plan.active_projects:
+        output = project_outputs[project.key]
+        try:
+            requested[output.resolve()] = project.key
+        except OSError:
+            requested[output] = project.key
+    for entry in registry.list_scans():
+        if entry.get("status") not in ("pending", "running", "cancelled"):
+            continue
+        other = entry.get("output_directory")
+        if not other:
+            continue
+        try:
+            other_path = Path(other).resolve()
+        except OSError:
+            other_path = Path(other)
+        key = requested.get(other_path)
+        if key is None:
+            continue
+        raise MCPResourceError(
+            f"Output directory for project {key!r} is being written by another "
+            f"scan: {other}",
+            context={
+                "project_key": key,
+                "output_directory": str(other),
+                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                "suggestions": [
+                    "Wait for the other scan to complete",
+                    "Use a different output_dir for this workspace scan",
+                ],
+            },
+        )
+
+
 def _register_projects(
     plan: WorkspacePlan,
     project_outputs: Dict[str, Path],
@@ -1405,6 +1449,7 @@ def _register_projects(
     would report a scan at a threshold it is not being judged against.
     """
     registry = get_scan_registry()
+    _refuse_outputs_another_scan_writes(registry, plan, project_outputs)
     registered: Dict[str, str] = {}
     slot = str(uuid.uuid4())
     try:
@@ -1827,37 +1872,56 @@ async def _execute(
     """
     starts = handoff if handoff is not None else SettleHandoff()
 
+    settled = {"done": False}
+
+    def _settle_once() -> None:
+        # Before the claim is given back (below): settling puts previous results
+        # back under the session's tree, and a claim released first let the
+        # session end, and its workspace be removed, while the settle wrote there.
+        if settle is not None and not settled["done"]:
+            settled["done"] = True
+            settle()
+
     def _run() -> Optional[WorkspaceRunResult]:
-        if not starts.thread_starts():
-            return None
         try:
-            if claim is not None and not claim.worker_starts():
-                raise RuntimeError("the workspace scan was cancelled before it started")
+            if not starts.thread_starts():
+                return None
             try:
-                if on_thread_start is not None:
-                    on_thread_start()
-                claimed = claim is not None and bool(claim.claimed)
-                with ScanPresence(session_id if claimed else None):
-                    # A session that delivered nothing has no tree of its own for
-                    # the scan to hold, so the scan takes neither its claim nor
-                    # its lock, and the session may deliver one meanwhile.
-                    with cancel_scope(stop) if stop is not None else nullcontext():
-                        if claimed:
-                            return _under_session_lock(
-                                session_id,
-                                plan,
-                                settings,
-                                cancel_events=cancel_events,
+                if claim is not None and not claim.worker_starts():
+                    raise RuntimeError(
+                        "the workspace scan was cancelled before it started"
+                    )
+                try:
+                    claimed = claim is not None and bool(claim.claimed)
+                    with ScanPresence(session_id if claimed else None):
+                        # A session that delivered nothing has no tree of its own
+                        # for the scan to hold, so the scan takes neither its
+                        # claim nor its lock, and the session may deliver one
+                        # meanwhile.
+                        with cancel_scope(stop) if stop is not None else nullcontext():
+                            if claimed:
+                                # The clock starts once the session's lock is
+                                # held (_under_session_lock), not while waiting
+                                # for it.
+                                return _under_session_lock(
+                                    session_id,
+                                    plan,
+                                    settings,
+                                    cancel_events=cancel_events,
+                                    on_locked=on_thread_start,
+                                )
+                            if on_thread_start is not None:
+                                on_thread_start()
+                            return _offline_aware(
+                                plan, settings, cancel_events=cancel_events
                             )
-                        return _offline_aware(
-                            plan, settings, cancel_events=cancel_events
-                        )
+                finally:
+                    _settle_once()
             finally:
                 if claim is not None:
                     claim.worker_returns()
         finally:
-            if settle is not None:
-                settle()
+            _settle_once()
 
     monitor: Optional["asyncio.Task[None]"] = None
     if progress_reporter is not None and project_outputs:
@@ -1878,12 +1942,19 @@ def _under_session_lock(
     plan: WorkspacePlan,
     settings: ProjectScanSettings,
     cancel_events: Optional[Mapping[str, CancelEvent]] = None,
+    on_locked: Optional[Callable[[], None]] = None,
 ) -> WorkspaceRunResult:
     """``execute_workspace``, holding the session's scan lock when there is a session.
 
     ``ASH_OFFLINE`` is set once the lock is held, not before: a workspace scan
     waiting behind another scan of its session would otherwise hold the
     process-wide variable for that scan's duration too.
+
+    ``on_locked`` runs once the lock is held, right before the run: it is where
+    the scan's own clock starts (``_execute``'s ``on_thread_start``). Started
+    before the wait, a scan queued behind another scan of its session spent its
+    ``scan_timeout_seconds`` waiting and timed out, every project FAILED, having
+    scanned nothing, while the call overran its own limit by the wait.
 
     The in-memory session only (``session_for``): taking its lock creates nothing
     under the workspace root. A caller with no session the server issued
@@ -1892,9 +1963,13 @@ def _under_session_lock(
     (``sessions.sessionless_scan_count``).
     """
     if session_id is None or session_id == UNIDENTIFIED_SESSION_ID:
+        if on_locked is not None:
+            on_locked()
         return _offline_aware(plan, settings, cancel_events=cancel_events)
 
     with get_default_registry().session_for(session_id).lock:
+        if on_locked is not None:
+            on_locked()
         return _offline_aware(plan, settings, cancel_events=cancel_events)
 
 
@@ -1984,7 +2059,15 @@ async def mcp_resolve_workspace(
 
     try:
         session_config, trusted_config = _resolve_session_config(session_id, profile)
-    except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
+    except (
+        ProfileNotRegisteredError,
+        # ASH_CONFIG names a file that cannot be read or parsed: the server's
+        # own config is refused with exit 3, as a project's is, instead of the
+        # tool raising.
+        ASHConfigSourceError,
+        OSError,
+        RuntimeError,
+    ) as exc:
         return _error_response(
             exc,
             "resolve_workspace",
@@ -2127,7 +2210,15 @@ async def _scan_workspace(
 
     try:
         session_config, trusted_config = _resolve_session_config(session_id, profile)
-    except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
+    except (
+        ProfileNotRegisteredError,
+        # ASH_CONFIG names a file that cannot be read or parsed: the server's
+        # own config is refused with exit 3, as a project's is, instead of the
+        # tool raising.
+        ASHConfigSourceError,
+        OSError,
+        RuntimeError,
+    ) as exc:
         return _error_response(
             exc,
             "scan_workspace",
@@ -2352,29 +2443,37 @@ async def _scan_workspace(
     thread_share["held"] = True
     try:
         try:
-            settings = build_project_scan_settings(
-                _scan_options(
-                    plan,
-                    output_dir=output_dir,
-                    config_overrides=config_overrides,
-                    scanners=scanners,
-                    excluded_scanners=excluded_scanners,
-                    offline=offline,
-                    allow_missing_projects=allow_missing_projects,
-                    config_path=session_config,
-                    client_config_rules=rules,
-                    trusted_config_path=trusted_config,
-                    remote_client=caller_is_remote(session_id),
-                    config_base_gate=config_base_gate(session_id),
+
+            def _resolve_and_refuse() -> Tuple[ProjectScanSettings, Dict[str, Path]]:
+                resolved_settings = build_project_scan_settings(
+                    _scan_options(
+                        plan,
+                        output_dir=output_dir,
+                        config_overrides=config_overrides,
+                        scanners=scanners,
+                        excluded_scanners=excluded_scanners,
+                        offline=offline,
+                        allow_missing_projects=allow_missing_projects,
+                        config_path=session_config,
+                        client_config_rules=rules,
+                        trusted_config_path=trusted_config,
+                        remote_client=caller_is_remote(session_id),
+                        config_base_gate=config_base_gate(session_id),
+                    )
                 )
-            )
-            # A file where an output directory goes, exit 5, then committed
-            # files where the scan writes, exit 3: both before any directory is
-            # created or any previous results are set aside.
-            _refuse_output_files(plan, settings)
-            _refuse_committed_output(plan, settings)
-            settings = _bounded_parallelism(settings)
-            project_outputs = _project_outputs(plan, settings)
+                # A file where an output directory goes, exit 5, then committed
+                # files where the scan writes, exit 3: both before any directory
+                # is created or any previous results are set aside.
+                _refuse_output_files(plan, resolved_settings)
+                _refuse_committed_output(plan, resolved_settings)
+                resolved_settings = _bounded_parallelism(resolved_settings)
+                return resolved_settings, _project_outputs(plan, resolved_settings)
+
+            # Off the event loop: the settings read every project's config and
+            # the committed-output check runs one git subprocess per existing
+            # project output directory (30 s timeout each), which on the loop
+            # stalled every other MCP session for the whole of it.
+            settings, project_outputs = await asyncio.to_thread(_resolve_and_refuse)
 
             # The selection pre-check, before any output or registry work: a
             # refused command line registers nothing, creates nothing and sets
@@ -2398,6 +2497,13 @@ async def _scan_workspace(
             # Failing here closes the entries and, the thread never having
             # started, releases them (_settle) in the handler below.
             _create_project_outputs(project_outputs)
+            # Once the output directory exists: ignore_output_dir_in_git writes
+            # nothing into a directory that is not there yet, and before the
+            # move a first workspace scan never wrote the .gitignore. A project
+            # at the workspace root would read every project's output below
+            # it; see ignore_output_dir_in_git. A link at the name raises
+            # OutputLinkRefused, an OutputDirLinkRefused too.
+            ignore_output_dir_in_git(plan.workspace_root, settings.output_dir)
             registry = get_scan_registry()
             for key, scan_id in registered.items():
                 entry = registry.get_scan(scan_id)
