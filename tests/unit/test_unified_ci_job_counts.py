@@ -16,14 +16,25 @@ chain is anchored on.
 
 This expands each job's matrix the way GitHub does and holds the comments to it: the
 per-job list names every job with its leg count, the totals are its sum, and the
-pull-request figures leave out the jobs whose ``if`` runs them only on a push.
+merge-queue figures leave out the jobs whose ``if`` runs them only on a push.
+
+The pull-request figures are smaller still. Several matrices carry an ``exclude``
+overlay whose entries are ``${{ github.event_name == 'pull_request' && '<value>' || ''
+}}``: on a pull request the entry is the value and drops the combinations it matches, on
+every other event it is the empty string and matches no combination (the note on
+ensure-cache in the workflow). ``_cells`` resolves that overlay for the event it is asked about, so the push
+and merge-queue counts read the static axes as before and the pull-request counts read
+the cover that actually runs there.
 
 What it does not cover
 ----------------------
 These are derived counts. GitHub's own job census for a run is the measurement, and
 the comments say which link of the chain was measured. A job whose ``if`` depends on
 something other than the event, such as required-checks' ``always()`` or a
-``needs`` output, is counted as running.
+``needs`` output, is counted as running. Whether GitHub evaluates the overlay the way
+this file does is a property of the hosted run, not of this file; if it did not, the
+string would match no combination and the full matrix would run, so the failure
+direction is a slower pull request rather than a missing leg.
 """
 
 from __future__ import annotations
@@ -57,13 +68,36 @@ def _jobs(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
 
 
-def _cells(job: dict[str, Any]) -> list[dict[str, Any]]:
+#: The one shape of event-conditioned matrix entry this workflow uses: the value on a
+#: pull request, the empty string (matching no combination) on every other event.
+PULL_REQUEST_OVERLAY = re.compile(
+    r"^\$\{\{ github\.event_name == 'pull_request' && '([^']*)' \|\| '' \}\}$"
+)
+
+
+def _resolve(value: Any, event: str) -> Any:
+    """The value a matrix entry has under ``event``; None when the entry is void.
+
+    A plain value is itself on every event. The overlay expression is its quoted value
+    on a pull request and void everywhere else, because GitHub evaluates it to '' there
+    and no combination has an empty axis value.
+    """
+    if isinstance(value, str):
+        match = PULL_REQUEST_OVERLAY.match(value)
+        if match:
+            return match.group(1) if event == "pull_request" else None
+    return value
+
+
+def _cells(job: dict[str, Any], event: str = "push") -> list[dict[str, Any]]:
     """The jobs GitHub creates for one entry under ``jobs:``, as matrix cells.
 
     The axes' product, less the cells an ``exclude`` entry matches. An ``include``
     entry merges into every cell whose axis values it matches, adding none, and is a
     cell of its own only when it matches none (the matrix rules in GitHub's workflow
-    syntax reference). A job with no matrix is one empty cell.
+    syntax reference). A job with no matrix is one empty cell. Exclude entries are
+    resolved for ``event`` first (see ``_resolve``); an entry with a void value matches
+    nothing, which is what the empty string does on GitHub.
     """
     matrix = (job.get("strategy") or {}).get("matrix")
     if not matrix:
@@ -78,8 +112,11 @@ def _cells(job: dict[str, Any]) -> list[dict[str, Any]]:
         else []
     )
     for excluded in matrix.get("exclude") or []:
+        resolved = {k: _resolve(v, event) for k, v in excluded.items()}
+        if any(v is None for v in resolved.values()):
+            continue
         cells = [
-            c for c in cells if not all(c.get(k) == v for k, v in excluded.items())
+            c for c in cells if not all(c.get(k) == v for k, v in resolved.items())
         ]
     added = []
     for included in matrix.get("include") or []:
@@ -95,9 +132,9 @@ def _cells(job: dict[str, Any]) -> list[dict[str, Any]]:
     return cells + added
 
 
-def _legs(job: dict[str, Any]) -> int:
-    """How many jobs GitHub creates for one entry under ``jobs:``."""
-    return len(_cells(job))
+def _legs(job: dict[str, Any], event: str = "push") -> int:
+    """How many jobs GitHub creates for one entry under ``jobs:`` on ``event``."""
+    return len(_cells(job, event))
 
 
 def _push_only(job: dict[str, Any]) -> bool:
@@ -143,7 +180,20 @@ COMMENT_LEGS = {
     "unit-test": UNIT_TEST_LEGS,
 }
 ON_PUSH = sum(LEGS.values())
-ON_PULL_REQUEST = sum(n for name, n in LEGS.items() if not _push_only(JOBS[name]))
+#: A merge_group run: the static matrices less the push-only jobs.
+ON_MERGE_QUEUE = sum(n for name, n in LEGS.items() if not _push_only(JOBS[name]))
+#: A pull_request run: the overlay resolved, the push-only jobs left out.
+PR_LEGS = {
+    name: _legs(job, "pull_request")
+    for name, job in JOBS.items()
+    if not _push_only(job)
+}
+PR_COMMENT_LEGS = {
+    **{name: n for name, n in PR_LEGS.items() if name not in UNIT_TEST_JOB_IDS},
+    "unit-test": sum(PR_LEGS[name] for name in UNIT_TEST_JOB_IDS),
+}
+ON_PULL_REQUEST = sum(PR_LEGS.values())
+PR_PYTEST_CHECK_RUNS = sum(PR_LEGS[name] for name in PYTEST_JOB_IDS)
 COMMENTS = _comment_text(UNIFIED_CI)
 
 
@@ -203,6 +253,129 @@ class TestTheExpansion:
         ]
 
 
+#: What a pull request keeps of each pool: the arm64 Linux image, the newer macOS
+#: image, the one Windows image, and the lowest, the coverage-gated and the highest
+#: Python. The saturated hosted labels (ubuntu-latest, macos-14) and Python 3.11 and
+#: 3.13 run on the merge-queue entry and on the push to main instead.
+PR_COVER_IMAGES = {"ubuntu-24.04-arm", "macos-latest", "windows-latest"}
+PR_COVER_PYTHONS = {"3.10", "3.12", "3.14"}
+TIER_JOB_IDS = [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
+
+
+class TestThePullRequestCover:
+    """The overlay thins a pull request to one leg per pool and leaves every other event whole."""
+
+    def test_the_overlay_resolves_for_a_pull_request_and_is_void_elsewhere(self):
+        """Positive control on `_resolve`: the one shape the workflow uses."""
+        expr = "${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}"
+        assert _resolve(expr, "pull_request") == "ubuntu-latest"
+        assert _resolve(expr, "push") is None
+        assert _resolve(expr, "merge_group") is None
+        assert _resolve("ubuntu-latest", "pull_request") == "ubuntu-latest"
+        assert _resolve("${{ matrix.os }}", "pull_request") == "${{ matrix.os }}"
+
+    def test_the_overlay_drops_cells_only_on_a_pull_request(self):
+        """Positive control on `_cells`: an event-conditioned exclude thins one event."""
+        job = {
+            "strategy": {
+                "matrix": {
+                    "os": ["a", "b"],
+                    "exclude": [
+                        {
+                            "os": "${{ github.event_name == 'pull_request' && 'a' || '' }}"
+                        }
+                    ],
+                }
+            }
+        }
+        assert _legs(job, "push") == 2
+        assert _legs(job, "merge_group") == 2
+        assert _legs(job, "pull_request") == 1
+        assert _cells(job, "pull_request") == [{"os": "b"}]
+
+    def test_every_overlay_entry_in_the_workflow_has_the_one_shape(self):
+        """An exclude value with an expression is either the overlay or a defect."""
+        for name, job in JOBS.items():
+            matrix = (job.get("strategy") or {}).get("matrix") or {}
+            for entry in matrix.get("exclude") or []:
+                for key, value in entry.items():
+                    if isinstance(value, str) and "${{" in value:
+                        assert PULL_REQUEST_OVERLAY.match(value), (name, key, value)
+
+    def test_the_static_matrices_run_whole_on_a_push_and_in_the_merge_queue(self):
+        """The overlay is void off a pull request, so those counts read the static axes."""
+        for name, job in JOBS.items():
+            assert _legs(job, "merge_group") == LEGS[name], name
+            assert _legs(job, "workflow_dispatch") == LEGS[name], name
+
+    @pytest.mark.parametrize("job_id", TIER_JOB_IDS)
+    def test_a_tier_job_keeps_one_image_per_pool_on_a_pull_request(self, job_id):
+        cells = _cells(JOBS[job_id], "pull_request")
+        assert cells, job_id
+        images = {c["os"] for c in cells}
+        assert images <= PR_COVER_IMAGES, (job_id, images)
+        assert len(images) == 1, (job_id, images)
+        pythons = {str(c["python-version"]) for c in cells if "python-version" in c}
+        assert pythons in ({*PR_COVER_PYTHONS}, set()), (job_id, pythons)
+        # The shard axis is untouched: every shard of a kept combination still runs.
+        shards = {c["shard"] for c in cells if "shard" in c}
+        assert shards == {
+            str(s) for s in JOBS[job_id]["strategy"]["matrix"].get("shard", [])
+        }
+
+    def test_the_pull_request_tiers_add_up(self):
+        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == 3 * 3
+        assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == 3 * 3 * 4
+        assert [PR_LEGS[n] for n in E2E_TEST_JOB_IDS] == [1, 1, 1]
+        assert PR_PYTEST_CHECK_RUNS == 9 + 36 + 3
+
+    def test_ensure_cache_runs_on_the_two_labels_with_headroom_on_a_pull_request(self):
+        """The fan-out waits for this job, so on a pull request it must not touch a saturated label."""
+        images = {c["os"] for c in _cells(JOBS["ensure-cache"], "pull_request")}
+        assert images == {"ubuntu-24.04-arm", "windows-latest"}
+        # Every pull-request leg of a tier still runs on an image the job covers, or on
+        # macos-latest, which reads main's cache instead (the note on ensure-cache).
+        tier_images = {
+            c["os"] for j in TIER_JOB_IDS for c in _cells(JOBS[j], "pull_request")
+        }
+        assert tier_images - images == {"macos-latest"}, tier_images
+
+    def test_unit_coverage_gates_only_the_images_the_unit_tier_runs_on_a_pull_request(
+        self,
+    ):
+        gated = {c["os"] for c in _cells(JOBS["unit-coverage"], "pull_request")}
+        tested = {
+            c["os"] for j in UNIT_TEST_JOB_IDS for c in _cells(JOBS[j], "pull_request")
+        }
+        assert gated == tested, (gated, tested)
+        # 3.12 stays in every pool's cover because this job combines its data.
+        for job_id in UNIT_TEST_JOB_IDS:
+            pythons = {
+                str(c["python-version"]) for c in _cells(JOBS[job_id], "pull_request")
+            }
+            assert "3.12" in pythons, job_id
+
+    def test_install_validation_keeps_its_container_legs_on_a_pull_request(self):
+        cells = _cells(JOBS["install-validation"], "pull_request")
+        by_method = Counter(c["method"] for c in cells)
+        full = Counter(c["method"] for c in _cells(JOBS["install-validation"], "push"))
+        # The x86-only container runtimes are not thinned.
+        for method in ("podman", "finch", "nerdctl"):
+            assert by_method[method] == full[method], (method, by_method, full)
+        # The bundle keeps one leg per pool on the three cover Pythons.
+        bundle = [c for c in cells if c["method"] == "bundle"]
+        assert {c["os"] for c in bundle} == PR_COVER_IMAGES
+        assert {str(c["python-version"]) for c in bundle} == PR_COVER_PYTHONS
+        assert len(bundle) == 9
+        # Homebrew on macOS still runs here on macos-latest (and in homebrew-macos).
+        assert [c["os"] for c in cells if c["method"] == "homebrew"] == ["macos-latest"]
+        assert PR_LEGS["install-validation"] == 14
+
+    def test_the_pull_request_total_is_smaller_than_the_merge_queue_total(self):
+        assert ON_PULL_REQUEST < ON_MERGE_QUEUE < ON_PUSH
+        assert ON_PUSH - ON_MERGE_QUEUE == LEGS["warm-image-layers"]
+
+
 class TestTheCommentsMatchTheWorkflow:
     def test_the_per_job_list_names_every_job_with_its_legs(self):
         match = _one(
@@ -217,20 +390,40 @@ class TestTheCommentsMatchTheWorkflow:
         assert listed == COMMENT_LEGS
         assert int(match.group(1)) == ON_PUSH
 
-    def test_the_cost_note_prices_both_runs_of_a_queued_merge(self):
+    def test_the_per_job_list_for_a_pull_request_names_every_job_that_runs_there(self):
         match = _one(
-            r"this workflow expands to (\d+) jobs on a push to main and (\d+) on a "
-            r"pull request or a merge-queue run, where warm-image-layers does not run, "
-            r"and ash-iac-drift\.yml to (\d+), so a queued merge that also pushes to "
-            r"main is ~(\d+) runner jobs instead of ~(\d+)\.",
+            r"Where (\d+) comes from, per job, on a pull request \(the pull-request "
+            r"cover, the note on ensure-cache\): (.+?)\. warm-image-layers is push-only",
             COMMENTS,
         )
-        on_push, on_queue, iac, both, queue_only = map(int, match.groups())
+        listed = {
+            name: int(count)
+            for name, count in re.findall(r"([a-z][a-z0-9-]*) (\d+)", match.group(2))
+        }
+
+        assert listed == PR_COMMENT_LEGS
+        assert int(match.group(1)) == ON_PULL_REQUEST
+
+    def test_the_cost_note_prices_both_runs_of_a_queued_merge(self):
+        match = _one(
+            r"this workflow expands to (\d+) jobs on a push to main, (\d+) on a "
+            r"merge-queue run, where warm-image-layers does not run, and (\d+) on a "
+            r"pull request, where the matrices run the pull-request cover \(the note on "
+            r"ensure-cache\), and ash-iac-drift\.yml to (\d+), so a queued merge that "
+            r"also pushes to main is ~(\d+) runner jobs instead of ~(\d+)\.",
+            COMMENTS,
+        )
+        on_push, on_queue, on_pr, iac, both, queue_only = map(int, match.groups())
         iac_jobs = len(_jobs(IAC_DRIFT))
 
-        assert (on_push, on_queue, iac) == (ON_PUSH, ON_PULL_REQUEST, iac_jobs)
-        assert both == ON_PUSH + ON_PULL_REQUEST + 2 * iac_jobs
-        assert queue_only == ON_PULL_REQUEST + iac_jobs
+        assert (on_push, on_queue, on_pr, iac) == (
+            ON_PUSH,
+            ON_MERGE_QUEUE,
+            ON_PULL_REQUEST,
+            iac_jobs,
+        )
+        assert both == ON_PUSH + ON_MERGE_QUEUE + 2 * iac_jobs
+        assert queue_only == ON_MERGE_QUEUE + iac_jobs
 
     def test_the_check_run_note_adds_the_junit_runs_to_the_jobs(self):
         match = _one(
@@ -240,10 +433,26 @@ class TestTheCommentsMatchTheWorkflow:
         )
         check_runs, jobs, junit = map(int, match.groups())
 
-        assert (jobs, junit) == (ON_PULL_REQUEST, PYTEST_CHECK_RUNS)
+        assert (jobs, junit) == (ON_PULL_REQUEST, PR_PYTEST_CHECK_RUNS)
         assert check_runs == jobs + junit
         assert re.search(
-            rf"this workflow contributes {check_runs} check runs to a pull request",
+            rf"this workflow contributes {check_runs} check runs to a pull request "
+            rf"\({ON_MERGE_QUEUE + PYTEST_CHECK_RUNS} to a merge-queue run",
+            COMMENTS,
+        )
+
+    def test_the_check_run_note_prices_the_merge_queue_run_too(self):
+        match = _one(
+            r"A merge-queue run, which runs the full matrices, is (\d+): the (\d+) jobs "
+            r"that run there plus (\d+) check runs",
+            COMMENTS,
+        )
+        check_runs, jobs, junit = map(int, match.groups())
+        assert (jobs, junit) == (ON_MERGE_QUEUE, PYTEST_CHECK_RUNS)
+        assert check_runs == jobs + junit
+        assert re.search(
+            rf"the {check_runs} above is the current merge-queue figure and "
+            rf"{ON_PULL_REQUEST + PR_PYTEST_CHECK_RUNS} the pull-request one",
             COMMENTS,
         )
 
@@ -281,6 +490,10 @@ class TestTheCommentsMatchTheWorkflow:
             "expands to 316 jobs",
             "contributes 544 check",
             "544 is this",
+            # Before the pull-request cover, a pull request ran the merge-queue shape.
+            "214 on a pull request",
+            "contributes 344 check",
+            "344 is this",
         ):
             assert stale not in COMMENTS
 
@@ -343,7 +556,11 @@ class TestEnsureCache:
         images = set().union(*(_runner_images(JOBS[n]) for n in SETUP_ASH_CALLERS))
         job = JOBS[ENSURE_CACHE]
         matrix = job["strategy"]["matrix"]
-        assert sorted(matrix) == ["os"], "a second axis would write a key twice"
+        axes = [k for k in matrix if k not in ("include", "exclude")]
+        assert axes == ["os"], "a second axis would write a key twice"
+        assert "include" not in matrix, (
+            "an include would add a leg the callers do not use"
+        )
         assert sorted(matrix["os"]) == sorted(images)
         assert LEGS[ENSURE_CACHE] == len(images)
         assert job["strategy"]["max-parallel"] == len(images)

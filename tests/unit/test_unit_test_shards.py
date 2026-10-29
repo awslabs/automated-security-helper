@@ -101,6 +101,37 @@ COVERAGE_RUNNERS = [
 ]
 COVERAGE_PYTHON = "3.12"
 
+#: The one event-conditioned matrix entry the workflow uses: on a pull_request event it
+#: is the quoted value and drops the combinations it matches; on every other event it is
+#: the empty string and matches no combination (the note on ensure-cache in the workflow).
+PULL_REQUEST_COVER_PREFIX = "${{ github.event_name == 'pull_request' && '"
+PULL_REQUEST_COVER_SUFFIX = "' || '' }}"
+
+
+def _static_axes(matrix: dict[str, Any]) -> list[str]:
+    """The axes GitHub takes the product of: every key but include and exclude."""
+    return [k for k in matrix if k not in ("include", "exclude")]
+
+
+def _assert_only_the_pull_request_cover(job_id: str, matrix: dict[str, Any]) -> None:
+    """Every exclude entry on a tier job is the pull-request cover and nothing else.
+
+    A static exclude would change the leg count on every event, and the job counts in
+    the workflow comments are checked against the static axes; the cover changes it on a
+    pull request only, where tests/unit/test_unified_ci_job_counts.py resolves it.
+    """
+    for entry in matrix.get("exclude") or []:
+        for key, value in entry.items():
+            assert (
+                isinstance(value, str)
+                and value.startswith(PULL_REQUEST_COVER_PREFIX)
+                and value.endswith(PULL_REQUEST_COVER_SUFFIX)
+            ), (
+                f"{job_id} carries a static exclude ({key}: {value!r}); only the "
+                "pull-request cover is admitted on a tier job"
+            )
+
+
 #: The shard axis of the integration tier. Four is a reading from the real classification
 #: and the per-file medians of one run of the earlier layout (eight was the figure before
 #: the tests were classified), so the first run of the tier jobs is what may move it; the
@@ -248,7 +279,11 @@ class TestTheShardAxis:
     @pytest.mark.parametrize("job_id", E2E_TEST_JOB_IDS)
     def test_the_e2e_jobs_run_one_python_and_are_not_sharded(self, job_id):
         job = _workflow_job(job_id)
-        assert sorted(job["strategy"]["matrix"]) == ["os"], job["strategy"]
+        assert sorted(_static_axes(job["strategy"]["matrix"])) == ["os"], job[
+            "strategy"
+        ]
+        assert "include" not in job["strategy"]["matrix"], job["strategy"]
+        _assert_only_the_pull_request_cover(job_id, job["strategy"]["matrix"])
         assert "shard" not in job["name"]
         uses = _uses_the_action(job_id)
         assert uses["with"]["python-version"] == "3.12"
@@ -2335,9 +2370,9 @@ class TestTheUnitTestMatrixIsSplitByOs:
         first = values[UNIT_TEST_JOB_IDS[0]]
         assert all(value == first for value in values.values()), values
 
-    def test_the_matrices_have_the_same_axes_and_no_include_or_exclude(self):
+    def test_the_matrices_have_the_same_axes_and_no_static_include_or_exclude(self):
         keys = {
-            job_id: sorted(job["strategy"]["matrix"])
+            job_id: sorted(_static_axes(job["strategy"]["matrix"]))
             for job_id, job in self._jobs().items()
         }
         first = keys[UNIT_TEST_JOB_IDS[0]]
@@ -2345,10 +2380,17 @@ class TestTheUnitTestMatrixIsSplitByOs:
         assert first == ["os", "python-version"], (
             "the unit tier is unsharded, so its matrix is the OS and Python axes only"
         )
-        assert not {"include", "exclude"} & set(first), (
-            "an include or an exclude changes the leg count, and the job counts in the "
-            f"workflow comments are checked against it: {keys}"
-        )
+        for job_id, job in self._jobs().items():
+            matrix = job["strategy"]["matrix"]
+            assert "include" not in matrix, (
+                "an include changes the leg count, and the job counts in the workflow "
+                f"comments are checked against it: {job_id}"
+            )
+            # The one exclude admitted is the pull-request cover: every entry carries the
+            # event-conditioned expression, so the push and merge-queue counts the
+            # comments state are the static axes, and test_unified_ci_job_counts.py
+            # resolves the overlay for the pull-request figures.
+            _assert_only_the_pull_request_cover(job_id, matrix)
 
     def test_the_steps_are_the_same_in_all_three(self):
         steps = {job_id: job["steps"] for job_id, job in self._jobs().items()}
