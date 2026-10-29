@@ -1091,15 +1091,28 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
         return False
 
+    def _ignore_paths_skipping_scanning(self) -> List[IgnorePathWithReason]:
+        """The ignore paths that keep an archive, or a member of one, out of the scan.
+
+        One reading for the archive itself (_skipped) and for its members
+        (inspect_members): an expired entry no longer applies
+        (active_ignore_paths); of the rest, only the entries the operator supplied
+        skip extraction, and --ignore-suppressions lifts them all
+        (ignore_paths_that_skip_scanning). A client-supplied entry is left to the
+        SARIF step, which keeps a finding under it as a marked, suppressed result,
+        so the results show what the client's config hid.
+        """
+        return ignore_paths_that_skip_scanning(
+            active_ignore_paths(self.context.config.global_settings.ignore_paths),
+            ignore_suppressions=self.context.ignore_suppressions,
+        )
+
     def _skipped(self, path: str) -> bool:
         """Whether ``path`` from the scan set is a directory or under an ignore path."""
         if Path(path).is_dir():
             ASH_LOGGER.debug(f"Skipping directory: {path}")
             return True
-        for ignore_path in ignore_paths_that_skip_scanning(
-            active_ignore_paths(self.context.config.global_settings.ignore_paths),
-            ignore_suppressions=self.context.ignore_suppressions,
-        ):
+        for ignore_path in self._ignore_paths_skipping_scanning():
             rel_path = Path(path).relative_to(self.context.source_dir).as_posix()
             if ignore_path_matches(rel_path, ignore_path.path):
                 ASH_LOGGER.debug(
@@ -1393,9 +1406,12 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             return results
 
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        ignore_paths = active_ignore_paths(
-            self.context.config.global_settings.ignore_paths
-        )
+        # The members are filtered by the same ignore paths as the archives
+        # themselves (_skipped): a client-supplied entry and, under
+        # --ignore-suppressions, every entry leaves a member in, so its findings
+        # are reported, marked suppressed where an entry names them, instead of
+        # the member never reaching a scanner.
+        ignore_paths = self._ignore_paths_skipping_scanning()
         # Shared by every tar this conversion lists, so many small compressed
         # tars that each decompress to one listing's limit of blocks cost what a
         # few do.
@@ -1471,11 +1487,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         and head[:2] == b"\x1f\x8b"
                         and not _gzip_holds_a_tar(archive_handle)
                     ):
-                        # One compressed file, not an archive of files.
+                        # One compressed file, not an archive of files. Its one
+                        # member is named by the ignore paths as any other is,
+                        # by the archive's path and then its own
+                        # (member_source_path), so an entry written for the
+                        # decompressed file keeps it out of the scan.
                         if not self.inspect_members(
                             [plain_gzip],
                             target_path=target_path,
                             archive=archive_display,
+                            ignore_paths=ignore_paths,
                         ):
                             continue
                         target_path.mkdir()
