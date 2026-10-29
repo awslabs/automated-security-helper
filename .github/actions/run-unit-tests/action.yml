@@ -175,7 +175,13 @@ runs:
         ASH_TEST_SHARD: ${{ inputs.shard }}
         MARKER: ${{ inputs.marker }}
       run: |
-        args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml)
+        # A tier run, and each shard of the integration tier, sees only part of the
+        # suite, so the snapshots that belong to the other tiers' and the other shards'
+        # tests are unused by construction. syrupy fails a session that has unused
+        # snapshots unless it is told to warn, and that failed legs with no failing test.
+        # The flag is passed here and not in pytest.ini's addopts, so a contributor's run
+        # of the whole suite keeps syrupy's unused-snapshot check.
+        args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml --snapshot-warn-unused)
         if [ "$MARKER" = "unit" ]; then
           args+=(--cov=automated_security_helper --cov-config=.coveragerc --cov-report=)
         else

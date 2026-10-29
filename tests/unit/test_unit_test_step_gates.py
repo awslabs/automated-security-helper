@@ -14,7 +14,9 @@ This file holds both sides:
 * The cdk guard skips without the variable and fails with it.
 * The step runs one tier of the suite: ``-m <marker>``, with ``--run-integration
   --run-slow --no-cov`` for the integration and e2e tiers and coverage measured, with
-  no threshold, for the unit tier. The step's own script is run here under bash with
+  no threshold, for the unit tier. Every tier also gets ``--snapshot-warn-unused``,
+  since a tier or a shard leaves the other tests' snapshots unused. The step's own
+  script is run here under bash with
   ``uv`` replaced by a function that prints its arguments, so the argument list pinned
   is the one the shell builds and not a substring of the YAML.
 * The 80% threshold is not the step's. It is passed by the ``unit-coverage`` job in
@@ -396,6 +398,20 @@ class TestTheStepBuildsTheRightArgumentsForEachTier:
         argv = _pytest_argv(marker)
         assert argv[:2] == ["-m", marker], argv
         assert "--junit-xml=test-results/pytest.junit.xml" in argv, argv
+
+    @pytest.mark.parametrize("marker", TIERS)
+    def test_it_warns_instead_of_failing_on_snapshots_the_tier_leaves_unused(
+        self, marker
+    ):
+        """A tier or a shard sees part of the suite, so the rest's snapshots are unused.
+
+        Without the flag syrupy fails the session on them even when every test passed.
+        It is passed by the step and not through pytest.ini's addopts, so a whole-suite
+        run on a contributor's machine keeps the unused-snapshot check.
+        """
+        assert "--snapshot-warn-unused" in _pytest_argv(marker)
+        ini = PYTEST_INI.read_text(encoding="utf-8")
+        assert "snapshot-warn-unused" not in ini
 
     @pytest.mark.parametrize("marker", TIERS)
     def test_it_names_no_test_path(self, marker):
