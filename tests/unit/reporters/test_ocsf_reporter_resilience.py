@@ -590,17 +590,15 @@ class TestReportDegradation:
         assert isinstance(payload, list) and len(payload) == 1
         (error,) = payload
         assert error["error"] == "All findings failed to process"
-        # Pins a real defect in the statistics, not the intended numbers. This
-        # call site passes total_results_count into the processed_count
-        # parameter, so an "everything failed" response claims 2 processed, a
-        # total of 4 against 2 real inputs, and a 50% success rate when nothing
-        # succeeded. The error message is right; the counts are not. Fixing the
-        # call site to pass 0 will turn this test red, which is the point.
+        # The statistics count each input once. The call site used to pass
+        # total_results_count into the processed_count parameter, so an
+        # "everything failed" response claimed 2 processed, a total of 4 against
+        # 2 real inputs, and a 50% success rate when nothing succeeded.
         stats = error["processing_statistics"]
-        assert stats["processed_results_count"] == 2
+        assert stats["processed_results_count"] == 0
         assert stats["failed_results_count"] == 2
-        assert stats["total_results_count"] == 4
-        assert stats["success_rate_percent"] == 50.0
+        assert stats["total_results_count"] == 2
+        assert stats["success_rate_percent"] == 0
 
     def test_a_partial_failure_still_reports_the_findings_that_worked(
         self, reporter, monkeypatch

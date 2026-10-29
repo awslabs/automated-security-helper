@@ -97,6 +97,11 @@ def test_a_single_directory_model_adds_nothing(test_plugin_context):
 
 
 def test_the_scans_own_sarif_is_left_alone(model, test_plugin_context):
+    before = [run.invocations for run in model.sarif.runs]
+
     SarifReporter(context=test_plugin_context).report(model)
 
-    assert model.sarif.runs[1].invocations is None
+    # The invocation is written into the emitted document only; the model's
+    # own runs keep whatever they held (the Run default is an empty list).
+    assert [run.invocations for run in model.sarif.runs] == before
+    assert not model.sarif.runs[1].invocations
