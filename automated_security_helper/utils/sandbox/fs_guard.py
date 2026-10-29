@@ -333,6 +333,14 @@ def _sweep_tree(
             "scanner may have left below it could not be removed",
         ) from error
 
+    try:
+        os.lstat(root)
+    except FileNotFoundError:
+        # A sandboxed scanner that wrote nothing created no results directory:
+        # nothing is below it to remove. Both walks would raise at the root
+        # (fwalk) or pass over it in silence (walk); the sweep reads it as empty,
+        # as refuse_links_below reads a missing root.
+        return removed
     if not hasattr(os, "fwalk"):
         for dirpath, dirnames, filenames in os.walk(
             root, onerror=unlistable, followlinks=False
@@ -725,6 +733,27 @@ def replace_without_following(
 
 #: A staging file: created, never opened if anything is already at its name.
 _STAGING_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY
+#: The longest entry name the filesystems ASH writes to accept, in bytes (NAME_MAX
+#: on Linux and macOS; NTFS counts 255 characters, which is never fewer bytes).
+_NAME_MAX = 255
+
+
+def _staging_name(name: str) -> str:
+    """The name of the staging file open_for_atomic_write writes ``name`` through.
+
+    A dot, the target's name, the pid and 32 hex digits of randomness, then
+    ``.tmp``. The target's name is shortened, from its end, until the whole fits
+    in _NAME_MAX bytes: the suffix alone is about 46 bytes, so a target whose name
+    a plain open accepts could otherwise fail with ENAMETOOLONG at the staging
+    open. Uniqueness is the pid and the random digits, which are always kept.
+    secrets, not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter that
+    report ids are built from, and a staging name only has to be unique.
+    """
+    suffix = f".{os.getpid()}.{secrets.token_hex(16)}.tmp"
+    stem = name
+    while stem and len(os.fsencode(f".{stem}{suffix}")) > _NAME_MAX:
+        stem = stem[:-1]
+    return f".{stem}{suffix}"
 
 
 @contextmanager
@@ -773,9 +802,7 @@ def open_for_atomic_write(
     path = Path(os.path.abspath(path))
     guard = _guard_root(path, root)
     relative = path.relative_to(guard).parts if guard is not None else ()
-    # secrets, not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter that
-    # report ids are built from, and a staging name only has to be unique.
-    staging = f".{path.name}.{os.getpid()}.{secrets.token_hex(16)}.tmp"
+    staging = _staging_name(path.name)
     dir_fd: Optional[int] = None
     if guard is not None and _HAS_DIR_FD:
         dir_fd = _open_dir_beneath(guard, relative[:-1], path)
