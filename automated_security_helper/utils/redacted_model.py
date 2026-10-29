@@ -355,6 +355,11 @@ def _admits_plain_str(annotation: Any, text: Optional[str] = None) -> bool:
     admits only when no other arm converts a str (:func:`_converts_a_plain_str`):
     ``Literal["all"] | int`` is refused, because a lax union turns "067" into 67
     through the int arm, and ``Literal["all"] | List[int]`` still admits.
+    A str-valued Enum arm and a constrained str arm are read the same way
+    in a union (:func:`_admits_conditionally`): each keeps SOME text and
+    refuses the rest, and the rest falls to a sibling, so ``int | StrEnum``
+    admits only text that equals a member value, and ``int | Annotated[str,
+    Field(pattern=...)]`` is refused outright, since the pattern is not read.
     Path and URL types stay refused: their normalization
     rewrites the spelling ("./x" to "x", "a//b" to "a/b", a lowercased
     scheme and host), which the redaction needle then fails to match; a
@@ -366,22 +371,26 @@ def _admits_plain_str(annotation: Any, text: Optional[str] = None) -> bool:
         return True
     origin = get_origin(annotation)
     if origin in (Union, types.UnionType):
-        arms = [
-            _unwrap_annotated(arg)
-            for arg in get_args(annotation)
-            if arg is not type(None)
-        ]
-        # A Literal arm keeps the text only when the text equals one of its
-        # constants. Any other text falls through to a sibling arm, and a
-        # smart-mode union lets a sibling that converts a str take it (the
-        # int arm of Literal["all"] | int turns "067" into 67). So a Literal
-        # arm admits only when no sibling converts; a sibling that holds a
-        # container takes no scalar text and does not count.
-        plain = [arm for arm in arms if get_origin(arm) is not Literal]
-        if any(_admits_plain_str(arm, text) for arm in plain):
+        arms = [arg for arg in get_args(annotation) if arg is not type(None)]
+        # An arm that keeps ANY str (str, Any, SecretStr, a union of those)
+        # admits the text whatever it is. An arm that keeps the text only
+        # when it matches (a Literal's constants, an Enum's member values, a
+        # constrained str's pattern or length) is conditional: text that
+        # fails it falls through to a sibling arm, and a smart-mode union
+        # lets a sibling that converts a str take it (the int arm of
+        # Literal["all"] | int turns "067" into 67; int | StrEnum types a
+        # non-member "067" the same way). So a conditional arm admits only
+        # when the text is known to equal one of its constants, or when no
+        # sibling converts; a sibling that holds a container takes no scalar
+        # text and does not count.
+        unconditional = [arm for arm in arms if not _admits_conditionally(arm)]
+        if any(_admits_plain_str(arm, text) for arm in unconditional):
             return True
-        return not any(_converts_a_plain_str(arm) for arm in plain) and any(
-            _admits_plain_str(arm) for arm in arms if get_origin(arm) is Literal
+        conditional = [arm for arm in arms if _admits_conditionally(arm)]
+        if text is not None and any(_keeps_this_text(arm, text) for arm in conditional):
+            return True
+        return not any(_converts_a_plain_str(arm) for arm in unconditional) and any(
+            _admits_plain_str(arm, text) for arm in conditional
         )
     if origin is Literal:
         return any(isinstance(arg, str) for arg in get_args(annotation))
@@ -419,6 +428,65 @@ def _admits_plain_str(annotation: Any, text: Optional[str] = None) -> bool:
         except TypeError:
             return False
     return origin is None
+
+
+def _admits_conditionally(annotation: Any) -> bool:
+    """Whether *annotation* keeps a plain str only when the text satisfies it:
+    a Literal (its constants), an Enum (its member values), a str under
+    ``Annotated`` metadata that may refuse some text (a pattern, a length, a
+    validator), or a str subclass, which pydantic checks by isinstance so a
+    plain str never satisfies it. Such an arm keeps SOME strings and not
+    others, and in a union the text it refuses falls to a sibling arm."""
+    metadata: List[Any] = []
+    while get_origin(annotation) is Annotated:
+        annotation, *more = get_args(annotation)
+        metadata.extend(more)
+    annotation = _unwrap_annotated(annotation)
+    if get_origin(annotation) is Literal:
+        return True
+    if annotation is str:
+        return any(_may_refuse_some_text(item) for item in metadata)
+    if isinstance(annotation, type):
+        try:
+            return issubclass(annotation, (enum.Enum, str))
+        except TypeError:
+            return False
+    return False
+
+
+def _may_refuse_some_text(item: Any) -> bool:
+    """Whether an ``Annotated`` metadata *item* on a str may refuse some text:
+    anything but a ``Field(...)`` that carries no constraint of its own (a
+    description, a title, an alias add no check)."""
+    if isinstance(item, FieldInfo):
+        return bool(item.metadata)
+    return True
+
+
+def _keeps_this_text(annotation: Any, text: str) -> bool:
+    """Whether a conditional arm (:func:`_admits_conditionally`) is known to
+    keep *text* as it is: a Literal that lists it, or an Enum whose members
+    are all str and one of whose values is exactly *text* (found before any
+    ``_missing_`` hook runs). A constrained str's constraint is not read, so
+    it answers False and the arm admits only when no sibling converts."""
+    annotation = _unwrap_annotated(annotation)
+    if get_origin(annotation) is Literal:
+        return any(isinstance(arg, str) and arg == text for arg in get_args(annotation))
+    if isinstance(annotation, type):
+        try:
+            if issubclass(annotation, enum.Enum) and not issubclass(
+                annotation, enum.Flag
+            ):
+                return (
+                    all(
+                        isinstance(member.value, str)
+                        for member in annotation.__members__.values()
+                    )
+                    and text in annotation._value2member_map_
+                )
+        except TypeError:
+            return False
+    return False
 
 
 def _converts_a_plain_str(annotation: Any) -> bool:
