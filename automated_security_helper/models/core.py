@@ -47,6 +47,22 @@ if TYPE_CHECKING:
 #: TOLERATE_STORED_CONFIG. No value: the reader of a results file names where the
 #: entry is (models/asharp_model.py), since the value is the file's data.
 UNREADABLE_EXPIRATION_NOTE = "an expiration that is not a YYYY-MM-DD date"
+#: The note a results file's kept suppression gets when its ``symbol`` is the
+#: environment reference the config wrote (``${VAR}``), which the scan read and the
+#: record stores as written. The entry is kept, and never applied.
+UNREADABLE_SYMBOL_NOTE = "a symbol that is a reference to the environment"
+
+
+def _is_environment_reference(value: Any) -> bool:
+    """Whether ``value`` is the text of an environment reference as a config
+    writes it (``${VAR}``, with or without the ``!ENV`` tag), the form a results
+    file records for a value the scan read from the environment."""
+    # Lazy: config.ash_config imports this module.
+    from automated_security_helper.config.ash_config import ENV_REFERENCE_PATTERN
+
+    if not isinstance(value, str):
+        return False
+    return ENV_REFERENCE_PATTERN.match(value.removeprefix("!ENV ")) is not None
 
 
 class ToolExtraArg(BaseModel):
@@ -710,16 +726,27 @@ class AshSuppression(IgnorePathWithReason):
 
     @field_validator("symbol", mode="before")
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol(cls, v, info: ValidationInfo):
         """Reject a symbol that is not a dotted qualified name.
 
         A malformed name could never equal a parsed definition's name, so the
         entry would silently match nothing. Before the field's own ``str`` check,
         so a number gets this message too, not pydantic's string error. The rule
         alone, for text and for anything else: the value is not quoted.
+
+        Under the TOLERATE_STORED_CONFIG context (utils/unknown_keys.py) a
+        symbol a results file recorded as the environment reference its config
+        wrote (``${VAR}``) is kept and noted rather than refused: the scan read
+        the reference, the record stores it, and refusing it made the scan's
+        own results file unreadable. ``matches`` never applies such an entry.
         """
         if v is None:
             return v
+        if isinstance(v, str) and not is_valid_symbol(v):
+            notes = tolerated_notes(info)
+            if notes is not None and _is_environment_reference(v):
+                notes.append(UNREADABLE_SYMBOL_NOTE)
+                return v
         if not isinstance(v, str) or not is_valid_symbol(v):
             raise ValueError(SYMBOL_RULE)
         return v
@@ -774,6 +801,11 @@ class AshSuppression(IgnorePathWithReason):
         file the resolver cannot parse.
         """
         if self.is_expired or self.has_unknown_keys:
+            return False
+        # A symbol kept from a results file as the environment reference its
+        # config wrote (validate_symbol under the tolerance) names no definition,
+        # so the entry does not apply, as the load warning says.
+        if self.symbol is not None and not is_valid_symbol(self.symbol):
             return False
 
         if self.rule_id:

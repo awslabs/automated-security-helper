@@ -1185,6 +1185,22 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             command_line, recorded_arguments = redacted_command_record(
                 final_args, redact_values
             )
+        # What the tool's own invocations said is carried into ASH's: the
+        # toolExecutionNotifications (semgrep reports a rule file it cannot read
+        # there, and run_ash_scan's unevaluated-rules gate reads them) and an
+        # executionSuccessful the tool set to false. Replacing the list outright
+        # discarded both, so a run the tool itself called unsuccessful read as a
+        # complete one with no notifications.
+        tool_notifications: List[Any] = []
+        tool_said_unsuccessful = False
+        for own in sarif_report.runs[0].invocations or []:
+            notes = getattr(own, "toolExecutionNotifications", None)
+            if notes:
+                tool_notifications.extend(notes)
+            if getattr(own, "executionSuccessful", None) is False:
+                tool_said_unsuccessful = True
+        if tool_notifications and "toolExecutionNotifications" not in extras:
+            extras = {**extras, "toolExecutionNotifications": tool_notifications}
         sarif_report.runs[0].invocations = [
             Invocation(  # type: ignore[call-arg]
                 commandLine=command_line,
@@ -1199,6 +1215,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 executionSuccessful=(
                     self._exit_code_accepted(success_codes)
                     and self._sarif_execution_successful()
+                    and not tool_said_unsuccessful
                 ),
                 exitCode=self.exit_code,
                 exitCodeDescription="\n".join(self.errors) if self.errors else "",

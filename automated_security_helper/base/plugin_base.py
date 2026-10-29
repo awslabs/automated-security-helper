@@ -1072,6 +1072,20 @@ class PluginBase(UVToolMixin, BaseModel):
         ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
         return self
 
+    def _tool_text_for_records(self, text: Any, stream: str) -> Any:
+        """The text of a tool's ``stream`` ("stdout" or "stderr") as the records keep it.
+
+        A hook for a plugin whose tool prints a finding's OWN secret in its
+        output: actionlint's JSON carries a credentials finding's hard-coded
+        password as its snippet, and a failed run's stdout reached the recorded
+        ``output`` lines, and from there the results file's raw_results, with
+        only the environment-value redaction applied. The default keeps the
+        text as it is; an override returns the text with such values removed
+        before the lines are split and recorded. Called with whatever the
+        response holds (None included), and must return the same kind.
+        """
+        return text
+
     def _process_command_response(self, response: dict) -> None:
         """Accumulate stdout, stderr, and exit code from a subprocess response.
 
@@ -1092,8 +1106,8 @@ class PluginBase(UVToolMixin, BaseModel):
             inputs_getter = getattr(self, "_uv_run_inputs_for_records", None)
             if callable(inputs_getter):
                 plugin_inputs = tuple(inputs_getter() or ())
-        stdout_text = response.get("stdout")
-        stderr_text = response.get("stderr")
+        stdout_text = self._tool_text_for_records(response.get("stdout"), "stdout")
+        stderr_text = self._tool_text_for_records(response.get("stderr"), "stderr")
         # _values_to_redact is an overridable hook, called once for both
         # streams and guarded: without the values nothing can be redacted,
         # so a raising hook loses the lines (a value-free note takes their

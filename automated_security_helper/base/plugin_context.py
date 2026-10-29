@@ -1,5 +1,6 @@
 """Module containing the PluginContext class for sharing context between plugins."""
 
+import os
 import secrets
 import threading
 import warnings
@@ -187,6 +188,17 @@ class PluginContext(BaseModel):
         assigns ``work_dir`` itself on every context built without one, which is
         every context ASH builds.
         """
+        # The directory fields are typed Path, but the model does not validate
+        # assignments, so a str assigned to one (``context.work_dir = "/tmp/x"``)
+        # was stored as a str and every later plugin that called a Path method
+        # on it crashed. Coerced here, as validation would have at construction.
+        if (
+            name in ("source_dir", "output_dir", "work_dir", "workspace_output_dir")
+            and value is not None
+            and not isinstance(value, Path)
+            and isinstance(value, (str, os.PathLike))
+        ):
+            value = Path(value)
         if name == "work_dir":
             current = getattr(self, name, None)
             if current is not None and _repoints(current, value):
@@ -312,12 +324,18 @@ def _resolve_forward_refs() -> None:
     if _forward_refs_resolved:
         return
 
+    # The import runs OUTSIDE the lock, as models/asharp_model.py's resolver
+    # does. config/ash_config.py calls this function as it finishes importing,
+    # so a thread importing that module held its import lock and then asked
+    # for this one, while a thread that first built a PluginContext held this
+    # lock and asked for the import lock: a deadlock on the first import.
+    try:
+        from automated_security_helper.config.ash_config import AshConfig
+    except ImportError:
+        return
+
     with _forward_refs_lock:
         if _forward_refs_resolved:
-            return
-        try:
-            from automated_security_helper.config.ash_config import AshConfig
-        except ImportError:
             return
 
         globals()["AshConfig"] = AshConfig
