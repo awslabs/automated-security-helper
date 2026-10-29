@@ -20,7 +20,6 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
     BedrockSummaryReporter,
     BedrockSummaryReporterConfig,
-    BedrockSummaryReporterConfigOptions,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -38,21 +37,20 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
+    FALLBACK_ONE,
+    FALLBACK_TWO,
+    MODULE,
+    PRIMARY_MODEL,
+    make_reporter,
+)
 
 pytestmark = pytest.mark.unit
 
-MODULE = (
-    "automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter"
-)
-
-AshAggregatedResults.model_rebuild()
-BedrockSummaryReporterConfig.model_rebuild()
-BedrockSummaryReporter.model_rebuild()
-
-# Opaque placeholders. The reporter only ever compares or forwards these.
-PRIMARY_MODEL = "test-vendor.test-model-primary-v1:0"
-FALLBACK_ONE = "test-vendor.test-model-fallback-1-v1:0"
-FALLBACK_TWO = "test-vendor.test-model-fallback-2-v1:0"
+# make_reporter, MODULE and the model placeholders are this directory's shared
+# doubles (bedrock_reporter_doubles.py); the other modules here import them from
+# this module as well as from there.
+__all__ = ["FALLBACK_ONE", "FALLBACK_TWO", "MODULE", "PRIMARY_MODEL", "make_reporter"]
 
 
 class RuntimeDouble:
@@ -78,16 +76,6 @@ class RuntimeDouble:
 @pytest.fixture
 def context(test_plugin_context):
     return test_plugin_context
-
-
-def make_reporter(context, **option_overrides):
-    """Build a reporter with boto3.Session patched out at construction."""
-    options = BedrockSummaryReporterConfigOptions(
-        aws_region="us-east-1", model_id=PRIMARY_MODEL, **option_overrides
-    )
-    return BedrockSummaryReporter(
-        context=context, config=BedrockSummaryReporterConfig(options=options)
-    )
 
 
 def sarif_model(results):
