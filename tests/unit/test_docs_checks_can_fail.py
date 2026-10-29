@@ -1076,12 +1076,12 @@ CONFIG_DEFECTS = [
     (
         "invented option",
         f"{FENCE}yaml\nscanners:\n  bandit:\n    options:\n      severity_level: HIGH\n{FENCE}\n",
-        "scanners.bandit.options.severity_level is not a field of BanditScannerConfigOptions",
+        "scanners.bandit.options: Value error, Unknown key 'severity_level'",
     ),
     (
         "ignored list item key",
         f"{FENCE}yaml\nglobal_settings:\n  ignore_paths:\n    - path: a/**\n      reason: r\n      why: nobody reads this\n{FENCE}\n",
-        "global_settings.ignore_paths[0].why",
+        "global_settings.ignore_paths.0: Value error, Unknown key 'why'",
     ),
     (
         "wrong type",
@@ -1091,7 +1091,7 @@ CONFIG_DEFECTS = [
     (
         "generic key on a reporter",
         f"{FENCE}yaml\nreporters:\n  sarif:\n    options:\n      offline: true\n{FENCE}\n",
-        "reporters.sarif.options.offline is not a field",
+        "reporters.sarif.options: Value error, Unknown key 'offline'",
     ),
     (
         "unknown scanner",
@@ -2243,7 +2243,9 @@ def test_the_real_mkdocs_config_is_strict_and_offline():
 # Assembled, so this file holds no install reference for the tree walk in
 # test_agent_plugin_ash_version.py to read as a pin.
 _REPO_URL = "https://github.com/awslabs/automated-security-" + "helper"
-_TEMPLATE = "docs/content/how-to/install.md.template"
+# The check reads only the templates of the manager's target_files, so the planted
+# template sits at one of those targets.
+_TEMPLATE = "docs/content/docs/advanced-usage.md.template"
 
 # Every place the release placeholder is allowed: a text sample, a sentence that is
 # not a command, and a table row, next to an install command that uses {{VERSION}}.
@@ -2610,7 +2612,7 @@ CLEAN_SECTIONS = """# Sections read from code
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `source_dir` | string \\| null | not set | x |
-| `severity_threshold` | string | `"MEDIUM"` | x |
+| `severity_threshold` | string \\| null | `null` | x |
 | `config_path` | string \\| null | `null` | x |
 | `clean_output` | boolean | `true` | x |
 

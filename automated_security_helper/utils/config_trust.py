@@ -318,11 +318,15 @@ def operator_path(
     source_dir: PathLike,
     *,
     outside_tree: bool = True,
+    operator_wrote: bool = False,
 ) -> OperatorPath:
     """``value`` as the path a tool will read, when the operator chose it.
 
     The one rule for a scanner option that names a file or directory a tool reads:
-    used only when ``set_by_operator`` accepts ``value`` for ``key`` and, with
+    used only when ``set_by_operator`` accepts ``value`` for ``key`` (or the
+    caller says the operator wrote it, ``operator_wrote``: a scanner configuration
+    the embedding caller built itself, judged by
+    ``operator_only_options.operator_wrote_value``) and, with
     ``outside_tree``, when it resolves outside the scanned tree
     (``config/path_trust.in_scanned_tree``, from ``scan_root``). The path returned
     is ``path_trust.resolved_path`` of ``value`` (``~`` expanded, relative to
@@ -346,7 +350,11 @@ def operator_path(
     turns that refusal into its own failure instead of ignoring the option.
     """
     return _operator_candidate(
-        config, value, source_dir, set_by_operator(config, key, value), outside_tree
+        config,
+        value,
+        source_dir,
+        operator_wrote or set_by_operator(config, key, value),
+        outside_tree,
     )
 
 

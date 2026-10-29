@@ -37,11 +37,16 @@ def environment(tmp_path, monkeypatch):
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    return tmp_path
+    yield tmp_path
+    from automated_security_helper.cli.mcp import profile_registry
+
+    profile_registry.clear_profile_registry()
+    profile_registry.clear_all_session_state()
 
 
-def _allowing(paths: list) -> str:
+def _allowing(paths: list, replace_default_denied_paths: bool = False) -> str:
     listed = "".join(f"        - {path}\n" for path in paths)
+    replaced = "      replace_default_denied_paths: true\n"
     return (
         "global_settings:\n"
         "  mcp:\n"
@@ -50,12 +55,19 @@ def _allowing(paths: list) -> str:
         "      allowed_paths:\n"
         f"{listed}"
         "      denied_paths: []\n"
+        f"{replaced if replace_default_denied_paths else ''}"
     )
 
 
 def _select(tmp_path: Path, profile_text: str, ops) -> dict:
     """select_profile for a profile, as a client calls it, and the session
-    config's path when it was written."""
+    config's path when it was written.
+
+    The session stays bound until the test ends, as it does for a client: a
+    patched copy holds each reference as quoted text, and get_config shows it
+    against the operator's copy, which the binding records
+    (``resolve_session_trusted_config_path``).
+    """
     from automated_security_helper.cli.mcp import profile_registry
     from automated_security_helper.cli.mcp_tools import mcp_select_profile
 
@@ -66,16 +78,10 @@ def _select(tmp_path: Path, profile_text: str, ops) -> dict:
     profile_registry.set_profile_registry(
         profile_registry.register_profiles([f"op={profile}"])
     )
-    try:
-        result = mcp_select_profile("op", patch_ops=ops, session_id="session-a")
-        if result["success"]:
-            result["path"] = Path(
-                profile_registry.resolve_session_config_path("session-a")
-            )
-        return result
-    finally:
-        profile_registry.clear_profile_registry()
-        profile_registry.clear_all_session_state()
+    result = mcp_select_profile("op", patch_ops=ops, session_id="session-a")
+    if result["success"]:
+        result["path"] = Path(profile_registry.resolve_session_config_path("session-a"))
+    return result
 
 
 @pytest.mark.parametrize(
@@ -143,10 +149,13 @@ LIST = ("external_reports_to_include:\n  - ${ASH_PN}\n  - other.sarif\n") + _all
 # section) makes every patch of the profile refused
 # (test_runtime_patch_refuses_a_profile_whose_key_can_name_a_built_in.py). The
 # variable is ASH_KEY_NAME: a name ending in _KEY is secret-shaped
-# (core/constants.py, ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES) and never read.
+# (core/constants.py, ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES) and never read. The
+# default denied paths include one inside every scanner's options
+# (/scanners/*/options/offline), and a patch that replaces the whole mapping
+# writes over it, so the profile sets its own.
 KEYED = (
     "scanners:\n  customx:\n    enabled: true\n    options:\n      ${ASH_KEY_NAME}: x\n"
-) + _allowing(["/scanners/customx/options"])
+) + _allowing(["/scanners/customx/options"], replace_default_denied_paths=True)
 
 
 def _session(environment, monkeypatch, profile_text, ops) -> dict:

@@ -103,6 +103,7 @@ def _argv(
                 enabled=True,
                 options=TrivyScannerConfigOptions(offline=False, **{option: value}),
             ),
+            config_from_context=True,
         )
         final_args, _, _ = fs._execute_scan(source, "source", [])
         return [str(a) for a in final_args]
@@ -111,6 +112,7 @@ def _argv(
         config=TrivyRepoScannerConfig(
             options=TrivyRepoScannerConfigOptions(**{option: value})
         ),
+        config_from_context=True,
     )
     repo.dependencies_satisfied = True
     with (

@@ -57,7 +57,7 @@ Showing 4 of 4 actionable findings, highest severity first.
 - Rule ID: credentials
 - Location: .github/workflows/vulnerable.yml:17
 
-&quot;password&quot; section in &quot;db&quot; service should be specified via secrets. do not put password value directly
+"password" section in "db" service should be specified via secrets. do not put password value directly
 
 </details>
 
@@ -71,7 +71,7 @@ Showing 4 of 4 actionable findings, highest severity first.
 - Rule ID: expression
 - Location: .github/workflows/vulnerable.yml:20
 
-&quot;github.event.issue.title&quot; is potentially untrusted. avoid using it directly in inline scripts. instead, pass it through an environment variable. see https://docs.github.com/en/actions/reference/security/secure-use\#good-practices-for-mitigating-script-injection-attacks for more details
+"github.event.issue.title" is potentially untrusted. avoid using it directly in inline scripts. instead, pass it through an environment variable. see https://docs.github.com/en/actions/reference/security/secure-use\#good-practices-for-mitigating-script-injection-attacks for more details
 
 Code snippet:
 
@@ -92,7 +92,7 @@ run: echo "${{ github.event.issue.title }}"
 - Rule ID: deprecated-commands
 - Location: .github/workflows/vulnerable.yml:24
 
-workflow command &quot;set-env&quot; was deprecated. use \`echo &quot;\{name\}=\{value\}&quot; &gt;&gt; $GITHUB\_ENV\` instead: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
+workflow command "set-env" was deprecated. use \`echo "\{name\}=\{value\}" &gt;&gt; $GITHUB\_ENV\` instead: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
 
 Code snippet:
 
@@ -113,7 +113,7 @@ run: echo "::set-env name=MODE::fast"
 - Rule ID: if-cond
 - Location: .github/workflows/vulnerable.yml:26
 
-if: condition &quot;$\{\{ github.event\_name == &\#x27;issues&\#x27; \}\} &amp;&amp; false&quot; is always evaluated to true because extra characters are around $\{\{ \}\}
+if: condition "$\{\{ github.event\_name == 'issues' \}\} &amp;&amp; false" is always evaluated to true because extra characters are around $\{\{ \}\}
 
 Code snippet:
 

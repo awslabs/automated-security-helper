@@ -760,7 +760,7 @@ def test_act_runs_the_pages_artifact_steps_on_the_pinned_v4_actions():
     body, result = _scale_rewrite()
     # The page keeps naming the current releases for the people who use GitHub.
     assert "actions/upload-artifact@043fb46d" in body
-    assert "actions/download-artifact@3e5f45b2" in body
+    assert "actions/download-artifact@9000827c" in body
     assert result.original == body
     steps = [s for job in _load(result.text)["jobs"].values() for s in job["steps"]]
     upload = [s for s in steps if str(s.get("uses", "")).startswith("actions/upload-")]
@@ -3063,9 +3063,9 @@ def test_a_scan_workflow_uv_call_with_another_source_is_refused(run, named):
     assert named in message and UV_CALL_REFUSAL in message, message
 
 
-@pytest.mark.parametrize("option,expected", [("--from", 5), ("--with", 4)])
+@pytest.mark.parametrize("option,expected", [("--from", 7), ("--with", 5)])
 def test_each_uv_call_of_the_real_scan_workflow_is_read(option, expected):
-    """The control for the rule above: the real workflow's five uvx calls and four
+    """The control for the rule above: the real workflow's seven uvx calls and five
     uv run calls each pass it, and each is refused once its source names a
     release."""
     rewrite_called = _api("rewrite", "rewrite_called_workflow")
@@ -3219,7 +3219,6 @@ OUTSIDE_A_UV_CALL = "other than as the command of a uvx or uv run call"
         ("pip --version", OUTSIDE_A_UV_CALL),
         ("pip list", OUTSIDE_A_UV_CALL),
         ("pipx list", OUTSIDE_A_UV_CALL),
-        ('echo "run ash scan to see the findings"', OUTSIDE_A_UV_CALL),
         ("uv --quiet tool --offline list", OUTSIDE_A_UV_CALL),
         ('uv -qn --cache-dir "$RUNNER_TEMP/uv-cache" cache dir', OUTSIDE_A_UV_CALL),
         (
@@ -3253,7 +3252,6 @@ OUTSIDE_A_UV_CALL = "other than as the command of a uvx or uv run call"
         "pip --version",
         "pip list",
         "pipx list",
-        "a print that names ash",
         "uv with global flags before and inside a group",
         "uv with clustered flags and a global option's value",
         "pip with general options before its command",
@@ -3262,8 +3260,9 @@ OUTSIDE_A_UV_CALL = "other than as the command of a uvx or uv run call"
 )
 def test_a_scan_workflow_line_that_names_ash_or_an_installer_is_refused(line, named):
     """Every word of ash or of an installer in the real workflow's scripts is the
-    command of a uvx or uv run call, so any other one is refused, wherever it stands
-    and however it is quoted. A word glued from quoted parts, or after an assignment
+    command of a uvx or uv run call, or text an echo or printf prints, so any other
+    one is refused, wherever it stands and however it is quoted. A word glued from
+    quoted parts, or after an assignment
     with a quoted value, is read as the command name bash reads; a word the checks do
     not read as one can still be one to bash (after a prefix that takes a value, or
     after eval); and a command that installs nothing is refused with the rest."""
@@ -3570,6 +3569,127 @@ def test_a_bump_of_the_scan_workflow_s_action_pins_is_kept(pin):
     with pytest.raises(error) as raised:
         rewrite_called("run-ash-security-scan.yml", tagged, where="tagged")
     assert f"uses {name}@v1, an action other than" in str(raised.value)
+
+
+def _here_document_step(opening: str) -> str:
+    return (
+        f"      - run: |\n          {opening}\n          ash scan\n          PY\n"
+        f"          {SCAN_LINE}\n"
+    )
+
+
+def test_a_quoted_here_document_fed_to_python_is_not_read_as_commands():
+    """The body of ``python3 -I - <<'PY'`` is Python's input, as the real workflow's
+    helper steps use it, so a line of it that would be a command in a shell (here
+    ``ash scan``) is not one. The same body is refused for a shell, for an unquoted
+    delimiter, and where a shell is also a word of the command."""
+    rewrite_called = _api("rewrite", "rewrite_called_workflow")
+    error = _api("rewrite", "RewriteError")
+    kept = rewrite_called(
+        "run-ash-security-scan.yml",
+        _scan_workflow(_here_document_step("python3 -I - <<'PY'")),
+        where="scan workflow",
+    )
+    assert [a.rule for a in kept.applied] == ["called-provenance"]
+    for opening in ("bash <<'PY'", "python3 -I - <<PY", "bash -s python3 <<'PY'"):
+        with pytest.raises(error) as raised:
+            rewrite_called(
+                "run-ash-security-scan.yml",
+                _scan_workflow(_here_document_step(opening)),
+                where="scan workflow",
+            )
+        assert "runs ash other than through uvx" in str(raised.value), opening
+
+
+def test_a_message_that_names_ash_is_kept_and_a_substitution_in_it_is_read():
+    """``echo`` and ``printf`` run nothing they print, so the real workflow's messages
+    that say ``ash dependencies install`` pass. A command substitution inside one runs,
+    so ``$(ash scan)`` there is refused, and so is the same words in any other
+    command."""
+    rewrite_called = _api("rewrite", "rewrite_called_workflow")
+    error = _api("rewrite", "RewriteError")
+
+    def run(line: str):
+        step = f"      - run: |\n          {line}\n          {SCAN_LINE}\n"
+        return rewrite_called(
+            "run-ash-security-scan.yml", _scan_workflow(step), where="scan workflow"
+        )
+
+    for line in (
+        'echo "This ASH installs tools with ash dependencies install --tool."',
+        "printf '%s\\n' \"run ash dependencies install\"",
+    ):
+        assert [a.rule for a in run(line).applied] == ["called-provenance"], line
+    for line in (
+        'echo "result: $(ash scan)"',
+        'timeout 10m ash scan "run ash dependencies install"',
+        'grep "ash dependencies install" notes.txt',
+    ):
+        with pytest.raises(error) as raised:
+            run(line)
+        assert "ash" in str(raised.value), line
+
+
+def test_the_yaml_tag_named_env_is_kept_and_an_env_assignment_is_not():
+    """A script that writes the YAML tag ``!ENV`` as a string, as the real workflow's
+    config step does, passes; ``ENV=./setup.sh`` in the same place is refused."""
+    rewrite_called = _api("rewrite", "rewrite_called_workflow")
+    error = _api("rewrite", "RewriteError")
+    tag = f"      - run: |\n          echo '!ENV' > /dev/null\n          {SCAN_LINE}\n"
+    kept = rewrite_called(
+        "run-ash-security-scan.yml", _scan_workflow(tag), where="scan workflow"
+    )
+    assert [a.rule for a in kept.applied] == ["called-provenance"]
+    assignment = tag.replace("echo '!ENV' > /dev/null", "export ENV=./setup.sh")
+    with pytest.raises(error) as raised:
+        rewrite_called(
+            "run-ash-security-scan.yml",
+            _scan_workflow(assignment),
+            where="scan workflow",
+        )
+    assert "names BASH_ENV or ENV" in str(raised.value)
+
+
+PIN_STEP_HEAD = "      - name: Pin the ASH ref to a commit\n        id: ash-pin\n"
+PIN_WRITE = (
+    '            echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ '
+    'git+https://github.com/${ASH_REPO}@${COMMIT}"\n'
+)
+THIRD_WRITER = (
+    "      - name: Write the source again\n"
+    '        run: echo "ASH_UVX_SOURCE=automated-security-helper==3.7.0" '
+    '>> "${GITHUB_ENV}"\n'
+)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        # The pin step's statement, written for another ref.
+        lambda text: text.replace(PIN_WRITE, PIN_WRITE.replace("${COMMIT}", "main")),
+        # The same statement in a step with another id.
+        lambda text: text.replace(PIN_STEP_HEAD, PIN_STEP_HEAD.replace("ash-pin", "x")),
+        # A third step that writes the source.
+        lambda text: text.replace(PIN_STEP_HEAD, THIRD_WRITER + PIN_STEP_HEAD),
+    ],
+    ids=["another ref", "another step id", "a third writer"],
+)
+def test_only_the_two_steps_that_pin_the_source_may_write_it(edit):
+    """The real workflow replaces ASH_UVX_SOURCE through GITHUB_ENV in two steps, by
+    id, with the exact statements the rewrite allows them (_SOURCE_WRITERS). A changed
+    statement, one in a step with another id, and a further writer are each refused,
+    where the real workflow passes."""
+    rewrite_called = _api("rewrite", "rewrite_called_workflow")
+    error = _api("rewrite", "RewriteError")
+    text = SCAN_WORKFLOW.read_text(encoding="utf-8")
+    assert PIN_STEP_HEAD in text and PIN_WRITE.strip() in text
+    changed = edit(text)
+    assert changed != text, "the edit changed nothing"
+    with pytest.raises(error) as raised:
+        rewrite_called("run-ash-security-scan.yml", changed, where="copied scan")
+    message = str(raised.value)
+    assert "in a script of the job ash" in message, message
+    assert "ASH_UVX_SOURCE" in message, message
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,9 @@ it makes: a relative link must name a tracked path, and a link into the publishe
 docs site must name a page that the site is built from. A version segment (``latest``
 or a release such as ``v3.8.0``) is required when mkdocs.yml publishes the site with
 mike, which puts one in every URL, and refused when it does not, since such a URL
-would not exist. Today it does not, so the README links the unversioned path.
+would not exist. mkdocs.yml now publishes with mike, so the README links the
+``latest/`` path. The quick start page is getting-started/local.md; docs/redirects.yml
+maps the old docs/quick-start-guide.md to it.
 """
 
 from __future__ import annotations
@@ -91,9 +93,9 @@ def _assert_site_page(target: str, versioned: bool) -> None:
 @pytest.mark.parametrize(
     ("target", "versioned"),
     [
-        (f"{SITE}docs/quick-start-guide/", False),
-        (f"{SITE}latest/docs/quick-start-guide/", True),
-        (f"{SITE}v3.8.0/docs/quick-start-guide/", True),
+        (f"{SITE}getting-started/local/", False),
+        (f"{SITE}latest/getting-started/local/", True),
+        (f"{SITE}v3.8.0/getting-started/local/", True),
     ],
 )
 def test_a_site_link_names_its_page(target, versioned):
@@ -104,8 +106,8 @@ def test_a_site_link_names_its_page(target, versioned):
     ("target", "versioned", "message"),
     [
         (f"{SITE}docs/no-such-page/", False, "names no page"),
-        (f"{SITE}latest/docs/quick-start-guide/", False, "has a version segment"),
-        (f"{SITE}docs/quick-start-guide/", True, "has no version segment"),
+        (f"{SITE}latest/getting-started/local/", False, "has a version segment"),
+        (f"{SITE}getting-started/local/", True, "has no version segment"),
     ],
 )
 def test_a_site_link_that_would_not_resolve_is_refused(target, versioned, message):

@@ -134,7 +134,13 @@ def test_the_materialized_session_config_holds_the_patched_reference(
 
     text = session.read_text(encoding="utf-8")
     assert CANARY not in text, text
-    assert yaml.safe_load(text)["project_name"] == VALUE
+    # The session config marks a recorded reference with the ``!ENV`` tag. The
+    # product's own loader keeps that scalar as its text and reads nothing from
+    # the environment, so the loaded value is the reference itself.
+    from automated_security_helper.config.ash_config import _KeepsEnvReferences
+
+    data = yaml.load(text, Loader=_KeepsEnvReferences)  # nosec B506 - a SafeLoader
+    assert data["project_name"] == VALUE
 
 
 def test_a_value_an_operation_appends_is_recorded_at_its_entry(tmp_path):

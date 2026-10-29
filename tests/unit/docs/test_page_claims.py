@@ -3829,6 +3829,8 @@ def _runtime_calls(record: Path) -> List[Any]:
 
 def _make_unreadable(path: Path) -> None:
     """Write a config at ``path`` that this user cannot read."""
+    if os.name != "nt" and os.geteuid() == 0:
+        pytest.skip("root ignores file modes, so no file is unreadable to it")
     path.write_text("project_name: locked\n", encoding="utf-8")
     if os.name == "nt":
         # Everyone (S-1-1-0) denied reading the file's data.

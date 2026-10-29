@@ -512,6 +512,12 @@ GITLAB_PAGE = "docs/content/how-to/ci/gitlab-ci.md"
 OTHER_PAGE = "docs/content/how-to/ci/other-ci.md"
 EXPORT_PAGE = "docs/content/how-to/export-reports.md"
 CODEBUILD_EXAMPLE = "examples/AWSCodeBuild/README.md"
+ADVANCED_PAGE = "docs/content/docs/advanced-usage.md"
+FERRET_PAGE = "docs/content/docs/plugins/community/ferret-scan-plugin.md"
+SNYK_PAGE = "docs/content/docs/plugins/community/snyk-plugin.md"
+TRIVY_PAGE = "docs/content/docs/plugins/community/trivy-plugin.md"
+SNYK_README = "automated_security_helper/plugin_modules/ash_snyk_plugins/README.md"
+TRIVY_README = "automated_security_helper/plugin_modules/ash_trivy_plugins/README.md"
 
 #: Leg -> its blocks, as (ordinal of the block among the page's CI blocks, kind,
 #: ordinal of the block it extends, event, scans changed files only).
@@ -538,7 +544,23 @@ EXPECTED_LEGS = {
     ("circleci", OTHER_PAGE): [(4, "circleci", None, None, False)],
 }
 #: (page, ordinal, kind) of the blocks marked runner=none, and of the static-only ones.
+#: The census lists pages in path order, and the blocks of a page in page order. The
+#: plugin pages show a workflow or pipeline for the reader's own repository, which no
+#: runner runs.
 EXPECTED_RUNNER_NONE = [
+    (SNYK_README, 1, "github-actions"),
+    (SNYK_README, 2, "gitlab-ci"),
+    (TRIVY_README, 1, "github-actions"),
+    (ADVANCED_PAGE, 1, "github-actions"),
+    (ADVANCED_PAGE, 2, "gitlab-ci"),
+    (FERRET_PAGE, 1, "github-actions"),
+    (FERRET_PAGE, 2, "gitlab-ci"),
+    (SNYK_PAGE, 1, "github-actions"),
+    (SNYK_PAGE, 2, "gitlab-ci"),
+    (TRIVY_PAGE, 1, "github-actions"),
+    (TRIVY_PAGE, 2, "github-actions"),
+    (TRIVY_PAGE, 3, "github-actions"),
+    (TRIVY_PAGE, 4, "gitlab-ci"),
     (EXPORT_PAGE, 1, "github-actions"),
     (CODEBUILD_EXAMPLE, 1, "buildspec"),
 ]

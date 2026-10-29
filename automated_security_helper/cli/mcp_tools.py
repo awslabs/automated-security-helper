@@ -5439,8 +5439,27 @@ def _validated_document_denials(
         env_refused_for,
         environment_read_refusals,
     )
+    from automated_security_helper.config.operator_only_options import (
+        repository_settings_for_root,
+    )
+    from automated_security_helper.config.sandbox_grants import working_directory
 
-    rules = _session_client_rules(session_id)
+    # The rules' trusted default config is the file ASH_CONFIG names, read with
+    # the settings the validator's own load of it uses (it roots them at the
+    # working directory: check_config_file is given no source directory), so a
+    # value that load leaves out never makes the rules unreadable. With the
+    # working directory deleted the root is None and the read confines
+    # fail-closed. The settings walk the directory's git checkouts, and a walk
+    # that fails is a check that cannot finish, which refuses (as get_config
+    # does for the same walk) rather than raising out of the tool.
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    try:
+        rules = _session_client_rules(
+            session_id, repository_settings_for_root(working_directory())
+        )
+    except (ASHConfigValidationError, OSError) as exc:
+        return [_unchecked_against_policy(exc)]
     checked = (
         caller_is_remote(session_id)
         if config_content is not None
@@ -5524,14 +5543,42 @@ def _validated_document_denials(
             ]
     except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
         return problems + [_unchecked_against_policy(exc)]
+    shown = _plugin_modules_shown(check)
     return problems + [
         _config_problem(
             key,
-            f"{key} may not be set by a config an MCP client delivers: {reason}",
+            "{} may not be set by a config an MCP client delivers: {}".format(
+                key, _with_modules_shown(reason, shown)
+            ),
             "denied_by_runtime_policy",
         )
         for key, reason in found
     ]
+
+
+def _plugin_modules_shown(check: "ConfigCheck") -> Dict[str, str]:
+    """How a denial names each ``ash_plugin_modules`` module of ``check``'s config:
+    one the config read from the environment as ``<value>``, the others as written
+    (``plugin_module_trust.shown_module_names``)."""
+    from automated_security_helper.config.plugin_module_trust import (
+        shown_module_names,
+    )
+
+    resolved, shown = check.resolved_data, check.shown_resolved
+    if not isinstance(resolved, dict) or not isinstance(shown, dict):
+        return {}
+    return shown_module_names(
+        resolved.get("ash_plugin_modules"), shown.get("ash_plugin_modules")
+    )
+
+
+def _with_modules_shown(reason: str, shown: Dict[str, str]) -> str:
+    """``reason`` with each quoted module name of ``shown`` written as it is shown,
+    so a denial never quotes a module name the environment supplied."""
+    for name, as_shown in shown.items():
+        if as_shown != name:
+            reason = reason.replace(repr(name), repr(as_shown))
+    return reason
 
 
 def _block_yaml_one_line_per_key(data: Dict[str, Any]) -> str:

@@ -67,12 +67,12 @@ Generated with Amazon Bedrock. Verify suggestions against the source findings.
 | Index | Rule ID | Severity | File | Line range | Description |
 |-------|---------|----------|------|------------|-------------|
 | 1 | B602 | HIGH | app/app.py | 9 | subprocess call with shell=True identified, sec... |
-| 2 | B105 | LOW | app/app.py | 5 | Possible hardcoded password: &\#x27;hu\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*... |
+| 2 | B105 | LOW | app/app.py | 5 | Possible hardcoded password: 'hu\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*... |
 | 3 | CKV\_AWS\_20 | HIGH | infra/main.tf | 6-9 | S3 Bucket has an ACL defined which allows publi... |
 | 4 | CKV\_AWS\_18 | MEDIUM | infra/main.tf | 2-4 | Ensure the S3 bucket has access logging enabled |
 | 5 | CKV\_DOCKER\_8 | MEDIUM | Dockerfile | 5 | Ensure the last USER is not root |
 | 6 | CKV\_DOCKER\_2 | LOW | Dockerfile | 1-6 | Ensure that HEALTHCHECK instructions have been ... |
-| 7 | dockerfile.security.last-user-is-root.last-user-is-root | LOW | Dockerfile | 5 | The last user in the container is &\#x27;root&\#x27;. Switc... |
+| 7 | dockerfile.security.last-user-is-root.last-user-is-root | LOW | Dockerfile | 5 | The last user in the container is 'root'. Switc... |
 | 8 | python.lang.best-practice.unpinned-shell-command | INFO | app/app.py | 9 | Command string built with an f-string; prefer a... |
 | 9 | SECRET-SECRET-KEYWORD | HIGH | app/app.py | 5 | Secret of type Secret Keyword detected in file ... |
 | 10 | CVE-2018-18074-requests | CRITICAL | requirements.txt | 1 | A critical vulnerability in requests 2.19.1 (fi... |
@@ -147,7 +147,7 @@ subprocess call with shell=True identified, security issue.
 
 Location: app/app.py (lines 5-5)
 
-Possible hardcoded password: &\#x27;hu\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*t&\#x27;
+Possible hardcoded password: 'hu\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*t'
 
 </details>
 
@@ -343,7 +343,7 @@ Ensure that HEALTHCHECK instructions have been added to container images
 
 Location: Dockerfile (lines 5-5)
 
-The last user in the container is &\#x27;root&\#x27;. Switch back to an unprivileged user.
+The last user in the container is 'root'. Switch back to an unprivileged user.
 
 </details>
 

@@ -615,10 +615,10 @@ def test_ash_config_update_keeps_the_reference(tmp_path, probe_env):
     assert "edit it by hand" in output, output
     assert path.read_bytes() == before
     as_written = _as_written(path.read_text(encoding="utf-8"))
+    # The file is left exactly as written: the tagged reference keeps its tag and
+    # the plain one stays plain.
     assert as_written["project_name"] == "!ENV ${ASH_PROBE_CANARY}"
-    assert (
-        _gitlab_options(as_written)["language_override"] == "!ENV ${ASH_PROBE_CANARY}"
-    )
+    assert _gitlab_options(as_written)["language_override"] == "${ASH_PROBE_CANARY}"
     reloaded = AshConfig.from_file(path)
     assert reloaded.project_name == CANARY
     assert reloaded.reporters.gitlab_cyclonedx.options.language_override == CANARY

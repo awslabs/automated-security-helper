@@ -336,6 +336,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 source_dir=Path(self.context.source_dir),
                 key="TRIVY_CONFIG",
                 config=getattr(self.context, "config", None),
+                # The environment is the operator's own write, as for the input
+                # files (_trivy_input_file).
+                operator_written=True,
             )
             if path is not None:
                 return "TRIVY_CONFIG", variable, path
@@ -442,6 +445,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 # The value is the environment's: the refusal names the variable
                 # and shows the path as <value> (path_trust._named).
                 env_named=True,
+                # And the environment is the operator's own write, so a work
+                # product the operator names there is not refused as one the
+                # repository chose (path_trust.refused_derived_product).
+                operator_written=True,
             )
             if path is not None:
                 return _existing_file(env, from_env, path)
@@ -607,7 +614,30 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         name = self.config.name if self.config is not None else "trivy"
         key = f"scanners.{name}.options.{option}"
-        chosen = operator_path(self.context.config, key, value, self.context.source_dir)
+        # A configuration the embedding caller built is the operator's own write,
+        # as for syft, bandit, checkov and grype (operator_wrote_value): the
+        # repository cannot have written it. One read from the context is judged
+        # by set_by_operator alone, as before.
+        from automated_security_helper.config.operator_only_options import (
+            operator_wrote_value,
+        )
+
+        caller_built = not self._config_from_context
+        callers_own_write = caller_built and operator_wrote_value(
+            self.context.config,
+            "scanner",
+            name,
+            ("options", option),
+            value,
+            config_from_context=False,
+        )
+        chosen = operator_path(
+            self.context.config,
+            key,
+            value,
+            self.context.source_dir,
+            operator_wrote=callers_own_write,
+        )
         if chosen.path is not None:
             return chosen.path
         reason = chosen.refusal
