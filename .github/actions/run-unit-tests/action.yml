@@ -71,6 +71,35 @@ runs:
         echo "label=${label}" >> "$GITHUB_OUTPUT"
         echo "runner.arch=${RUNNER_ARCH} -> ${label}"
 
+    # WHY A SELF-HOSTED RUNNER IS CHECKED AGAINST ITS IMAGE LABEL
+    #
+    # The Linux tier jobs in ash-unified-ci.yml can route their legs to self-hosted runners
+    # whose label encodes the architecture (ash-ci-linux-x64, ash-ci-linux-arm64), chosen from
+    # `matrix.os`. A host registered under the wrong label would run, say, the ubuntu-latest
+    # legs on an arm64 machine. Nothing above would catch that: the artifact name carries
+    # `inputs.os` and the arch the runner reports, so the upload is unique and the leg passes;
+    # only the py3.12 unit leg fails later, when unit-coverage rebuilds the x86_64 name. So a
+    # self-hosted Linux runner is refused up front when `runner.arch` is not what `inputs.os`
+    # implies: an `-arm` image means ARM64, any other Linux image means X64. GitHub-hosted
+    # runners are not checked; the image label is the runner there, and `runner.environment`
+    # is `github-hosted`. The error line carries no value, so a value cannot add a workflow
+    # command through it; the values are on the plain line before it.
+    - name: Refuse a self-hosted runner whose architecture is not its image label's
+      if: runner.environment == 'self-hosted' && runner.os == 'Linux'
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.os }}
+      run: |
+        case "${IMAGE}" in
+          *-arm*) expected=ARM64 ;;
+          *) expected=X64 ;;
+        esac
+        echo "image=${IMAGE} expected=${expected} runner.arch=${RUNNER_ARCH}"
+        if [ "${RUNNER_ARCH}" != "${expected}" ]; then
+          echo "::error::this self-hosted runner's architecture is not the one its image label implies; the line above names both. Register the runner under the label of its own architecture."
+          exit 1
+        fi
+
     # Fails closed on a marker that is not one of the three tiers. A typo here would
     # otherwise reach pytest as `-m <typo>`, which selects nothing and exits 5, or worse,
     # a misspelling that matches a different marker would run the wrong population under
