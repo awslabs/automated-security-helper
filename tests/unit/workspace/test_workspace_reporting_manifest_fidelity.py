@@ -1,0 +1,276 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The manifest describes this run, not what an earlier run left on disk.
+
+``test_workspace_reporting.py`` pins the four behaviours. This file pins what
+the report step says about files it did not write: a per-project report that a
+previous run wrote for a project this run did not complete is not this run's;
+a workspace-level report a previous run wrote for a reporter this run skips, or
+that raises or returns nothing, does not outlive this run; a reporter whose
+output cannot be written does not take the manifest down with it; and the
+pre-scan link check builds the same reporter set the report step builds.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
+)
+from automated_security_helper.workspace import reporting
+from automated_security_helper.workspace.aggregation import WorkspaceAggregator
+from automated_security_helper.workspace.reporting import (
+    MANIFEST_FILENAME,
+    REPORTS_DIR_NAME,
+    emit_workspace_reports,
+    refuse_linked_workspace_report_paths,
+)
+from tests.unit.workspace.test_workspace_reporting import (
+    FakeMergedReporter,
+    FakePerProjectReporter,
+    FakeRaisingReporter,
+    FakeWorkspaceScopedReporter,
+    _outcome,
+    _plan,
+    _run,
+)
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    """A written two-project workspace, as the sibling file builds it."""
+    root = tmp_path / "ws"
+    output_dir = tmp_path / "out"
+    plan = _plan(root, "api", "web")
+
+    aggregator = WorkspaceAggregator(plan=plan, output_dir=output_dir)
+    for project, rule in zip(plan.projects, ("RULE-API", "RULE-WEB")):
+        aggregator.add(
+            _outcome(project),
+            _run(project.key, rule=rule, uri=f"src/{project.key}.py"),
+            project,
+        )
+    results_path = aggregator.write(exit_code=2, wall_clock_seconds=1.5)
+
+    for project in plan.projects:
+        reports = output_dir / "projects" / project.key / REPORTS_DIR_NAME
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "ash.ghas.sarif").write_text("{}", encoding="utf-8")
+
+    return plan, output_dir, results_path
+
+
+def _emit(workspace, *reporter_classes, **kwargs):
+    plan, output_dir, results_path = workspace
+    return emit_workspace_reports(
+        plan=plan,
+        output_dir=output_dir,
+        results_path=results_path,
+        reporter_classes=list(reporter_classes),
+        **kwargs,
+    )
+
+
+def _manifest(output_dir: Path) -> dict:
+    return json.loads(
+        (output_dir / REPORTS_DIR_NAME / MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+
+
+class _EmptyConfig(ReporterPluginConfigBase):
+    name: str = "fake-empty"
+    extension: str = "empty.txt"
+    enabled: bool = True
+
+
+class FakeEmptyReporter(ReporterPluginBase[_EmptyConfig]):
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _EmptyConfig()
+        return super().model_post_init(context)
+
+    def report(self, model) -> str:
+        return ""
+
+
+class _NotTextConfig(ReporterPluginConfigBase):
+    name: str = "fake-not-text"
+    extension: str = "nottext.json"
+    enabled: bool = True
+
+
+class FakeNotTextReporter(ReporterPluginBase[_NotTextConfig]):
+    """Returns a dict where the contract says str: the write raises TypeError."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _NotTextConfig()
+        return super().model_post_init(context)
+
+    def report(self, model):
+        return {"not": "text"}
+
+
+class TestAPerProjectArtefactBelongsToTheRunThatWroteIt:
+    def _results_with(self, tmp_path, statuses):
+        results = tmp_path / "results.json"
+        results.write_text(
+            json.dumps(
+                {
+                    "workspace": {
+                        "projects": [
+                            {"project": key, "status": status}
+                            for key, status in statuses.items()
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        return results
+
+    def test_a_file_for_a_project_that_did_not_complete_is_missing(
+        self, workspace, tmp_path
+    ):
+        """``web`` failed before its own output was set up; the ghas file in its
+        reports directory is an earlier run's and was listed as this run's."""
+        plan, output_dir, _ = workspace
+        results = self._results_with(tmp_path, {"api": "completed", "web": "failed"})
+
+        emit_workspace_reports(
+            plan=plan,
+            output_dir=output_dir,
+            results_path=results,
+            reporter_classes=[FakePerProjectReporter],
+        )
+
+        entry = _manifest(output_dir)["reporters"]["fake-per-project"]
+        assert [item["project"] for item in entry["per_project_artifacts"]] == [
+            "api",
+            "web",
+        ]
+        assert entry["missing_per_project_artifacts"] == ["web"]
+
+    def test_a_file_for_a_skipped_project_is_missing_too(self, workspace, tmp_path):
+        plan, output_dir, _ = workspace
+        results = self._results_with(tmp_path, {"api": "completed"})
+
+        emit_workspace_reports(
+            plan=plan,
+            output_dir=output_dir,
+            results_path=results,
+            reporter_classes=[FakePerProjectReporter],
+        )
+
+        entry = _manifest(output_dir)["reporters"]["fake-per-project"]
+        assert entry["missing_per_project_artifacts"] == ["web"]
+
+    def test_a_completed_project_with_its_file_is_present(self, workspace):
+        _, output_dir, _ = workspace
+
+        _emit(workspace, FakePerProjectReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-per-project"]
+        assert entry["missing_per_project_artifacts"] == []
+
+
+class TestAPreviousRunsWorkspaceReportDoesNotOutliveThisRun:
+    def _stale(self, output_dir: Path, name: str) -> Path:
+        reports = output_dir / REPORTS_DIR_NAME
+        reports.mkdir(parents=True, exist_ok=True)
+        path = reports / name
+        path.write_text("from an earlier run", encoding="utf-8")
+        return path
+
+    def test_a_reporter_that_raises_leaves_no_earlier_file(self, workspace):
+        _, output_dir, _ = workspace
+        stale = self._stale(output_dir, "ash.raising.txt")
+
+        outcome = _emit(workspace, FakeRaisingReporter)
+
+        assert not stale.exists()
+        assert "fake-raising" in outcome.failed_reporters
+
+    def test_a_reporter_that_returns_nothing_leaves_no_earlier_file(self, workspace):
+        _, output_dir, _ = workspace
+        stale = self._stale(output_dir, "ash.empty.txt")
+
+        _emit(workspace, FakeEmptyReporter)
+
+        assert not stale.exists()
+        entry = _manifest(output_dir)["reporters"]["fake-empty"]
+        assert entry["error"] == "the reporter returned no content"
+
+    def test_a_reporter_this_run_does_not_select_leaves_no_earlier_file(
+        self, workspace
+    ):
+        _, output_dir, _ = workspace
+        stale = self._stale(output_dir, "ash.scoped.json")
+
+        _emit(
+            workspace,
+            FakeMergedReporter,
+            FakeWorkspaceScopedReporter,
+            output_formats=["fake-merged"],
+        )
+
+        assert not stale.exists()
+        assert (output_dir / REPORTS_DIR_NAME / "ash.merged.txt").is_file()
+        entry = _manifest(output_dir)["reporters"]["fake-workspace-scoped"]
+        assert entry["skipped"] == reporting.SKIP_NOT_REQUESTED
+
+    def test_this_runs_file_replaces_an_earlier_one(self, workspace):
+        _, output_dir, _ = workspace
+        path = self._stale(output_dir, "ash.merged.txt")
+
+        _emit(workspace, FakeMergedReporter)
+
+        content = path.read_text(encoding="utf-8")
+        assert "from an earlier run" not in content
+        assert "RULE-API" in content
+
+
+class TestAWriteThatFailsDoesNotSinkTheManifest:
+    def test_a_non_text_report_is_a_recorded_failure(self, workspace):
+        """``write_text_atomically`` raises TypeError for a dict; the step used
+        to abort there with no manifest and the other reports unwritten."""
+        _, output_dir, _ = workspace
+
+        outcome = _emit(workspace, FakeNotTextReporter, FakeMergedReporter)
+
+        assert outcome.manifest_path is not None
+        assert (output_dir / REPORTS_DIR_NAME / "ash.merged.txt").is_file()
+        assert not (output_dir / REPORTS_DIR_NAME / "ash.nottext.json").exists()
+        assert "TypeError" in outcome.failed_reporters["fake-not-text"]
+        entry = _manifest(output_dir)["reporters"]["fake-not-text"]
+        assert "TypeError" in entry["error"]
+        assert outcome.failed
+
+
+class TestThePreScanLinkCheckBuildsTheSameReporterSet:
+    def test_plugin_modules_reach_the_reporter_selection(self, workspace, monkeypatch):
+        plan, output_dir, _ = workspace
+        seen = {}
+
+        def selected(**kwargs):
+            seen.update(kwargs)
+            return iter(())
+
+        monkeypatch.setattr(reporting, "_selected_reporters", selected)
+
+        refuse_linked_workspace_report_paths(
+            plan, output_dir, plugin_modules=["my_org.ash_plugins"]
+        )
+
+        assert seen["plugin_modules"] == ["my_org.ash_plugins"]

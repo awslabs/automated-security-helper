@@ -127,6 +127,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
+    ReportPathRefused,
     ensure_reports_dir,
     refuse_colliding_report_names,
     refuse_linked_report_paths,
@@ -316,8 +317,40 @@ def _load_workspace_model(results_path: Path):
     )
 
 
+def _projects_with_a_completed_run(results_path: Path) -> Optional[set]:
+    """The keys of the projects the results file records a completed scan for.
+
+    ``None`` when the file says nothing about projects (an older or foreign
+    results file), so the caller judges by the filesystem alone. Read with
+    ``json`` rather than through the model, so a per-project-only run never
+    materialises the whole model for one field.
+
+    Why: a per-project report present on disk belongs to this run only when this
+    run's scan of that project completed. Nothing clears ``projects/`` between
+    runs into one output directory, so a file an earlier run wrote was listed as
+    this run's for a project this run skipped, or that failed before its own
+    output was set up.
+    """
+    try:
+        document = json.loads(Path(results_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    workspace = document.get("workspace") if isinstance(document, dict) else None
+    projects = workspace.get("projects") if isinstance(workspace, dict) else None
+    if not isinstance(projects, list):
+        return None
+    return {
+        entry.get("project")
+        for entry in projects
+        if isinstance(entry, dict) and entry.get("status") == "completed"
+    }
+
+
 def _per_project_artifacts(
-    plan: WorkspacePlan, output_dir: Path, filename: str
+    plan: WorkspacePlan,
+    output_dir: Path,
+    filename: str,
+    completed: Optional[set] = None,
 ) -> Tuple[List[Dict[str, str]], List[str]]:
     """Where a per-project reporter's N artefacts are, and which are missing.
 
@@ -326,6 +359,10 @@ def _per_project_artifacts(
     missing list is what distinguishes "this project was skipped" from "the
     manifest is pointing at nothing", which an operator would otherwise have to
     resolve by checking the filesystem by hand.
+
+    *completed*, when given, is the set of project keys this run's scan
+    completed (:func:`_projects_with_a_completed_run`): a project outside it is
+    missing whatever is on disk, because a file there is an earlier run's.
     """
     entries: List[Dict[str, str]] = []
     missing: List[str] = []
@@ -334,17 +371,44 @@ def _per_project_artifacts(
             Path(PROJECTS_DIR_NAME) / project.key / REPORTS_DIR_NAME / filename
         ).as_posix()
         entries.append({"project": project.key, "path": relative})
-        if not (output_dir / relative).is_file():
+        ran = completed is None or project.key in completed
+        if not ran or not (output_dir / relative).is_file():
             missing.append(project.key)
     return entries, missing
 
 
 def _present_per_project_artifacts(
-    plan: WorkspacePlan, output_dir: Path, filename: str
+    plan: WorkspacePlan,
+    output_dir: Path,
+    filename: str,
+    completed: Optional[set] = None,
 ) -> List[Dict[str, str]]:
-    """The per-project artefacts of ``filename`` that exist on disk, in plan order."""
-    entries, missing = _per_project_artifacts(plan, output_dir, filename)
+    """The per-project artefacts of ``filename`` that this run wrote, in plan order."""
+    entries, missing = _per_project_artifacts(plan, output_dir, filename, completed)
     return [entry for entry in entries if entry["project"] not in missing]
+
+
+def _remove_previous_workspace_reports(reports_dir: Path, selection) -> None:
+    """Remove the workspace-level files of every reporter in *selection* that an
+    earlier run into this output directory left in *reports_dir*.
+
+    Nothing clears ``reports/`` before this step, so a file a previous run wrote
+    for a reporter that this run skips, that raises, or that returns nothing
+    stayed beside this run's manifest and read as this run's. Only a regular
+    file at a reporter's own name is removed; a link there was refused before
+    this ran, and the manifest is written after.
+    """
+    for instance, _behaviour, _skipped in selection:
+        for name in reporter_file_names(instance):
+            path = reports_dir / name
+            if Path(name).name != name or path.is_symlink() or not path.is_file():
+                continue
+            try:
+                path.unlink()
+            except OSError as exc:
+                ASH_LOGGER.warning(
+                    f"Could not remove the previous run's report {path}: {exc}"
+                )
 
 
 def _default_reporter_classes(plugin_modules: Sequence[str] = ()) -> List[type]:
@@ -555,8 +619,15 @@ def refuse_linked_workspace_report_paths(
     output_formats: Sequence[str] = (),
     python_based_plugins_only: bool = False,
     reporter_classes: Optional[Sequence[type]] = None,
+    plugin_modules: Sequence[str] = (),
 ) -> None:
     """Refuse the run when a workspace report would be written through a link.
+
+    *plugin_modules* are the workspace's plugin modules, as
+    :func:`unsupported_reporter_names` and :func:`emit_workspace_reports` take
+    them: without them only the built-in reporters are built here, and a
+    plugin-module reporter's bad file name, collision or link was refused only
+    after every project had been scanned.
 
     Run before any project is scanned, for the reason
     :func:`unsupported_reporter_names` is: nothing gets scanned or written, so the
@@ -590,6 +661,7 @@ def refuse_linked_workspace_report_paths(
             python_based_plugins_only=python_based_plugins_only,
             reporter_classes=reporter_classes,
             check_dependencies=False,
+            plugin_modules=plugin_modules,
         )
     )
     refuse_report_names_outside(
@@ -758,6 +830,18 @@ def emit_workspace_reports(
     )
     refuse_colliding_report_names(reports_dir, _workspace_report_writers(selection))
     refuse_linked_report_paths(reports_dir, _workspace_report_file_names(selection))
+    # After the refusals, so nothing is removed on a run that writes nothing, and
+    # before any reporter writes, so a previous run's file never outlives it.
+    _remove_previous_workspace_reports(reports_dir, selection)
+
+    # Which projects this run scanned to completion, read once from the results
+    # file on the first per-project reporter that needs it.
+    completed_runs: List[Optional[set]] = []
+
+    def completed() -> Optional[set]:
+        if not completed_runs:
+            completed_runs.append(_projects_with_a_completed_run(Path(results_path)))
+        return completed_runs[0]
 
     for instance, behaviour, skipped in selection:
         name = _reporter_name(instance)
@@ -782,7 +866,9 @@ def emit_workspace_reports(
             # projects whose config enabled it, so list what they wrote rather
             # than call it disabled. A project with no artefact is not missing
             # one: its config may simply leave the reporter off.
-            present = _present_per_project_artifacts(plan, output_dir, filename)
+            present = _present_per_project_artifacts(
+                plan, output_dir, filename, completed()
+            )
             if present:
                 per_project.append(name)
                 entry["considered"] = True
@@ -818,7 +904,9 @@ def emit_workspace_reports(
 
         if behaviour is ReporterWorkspaceBehaviour.PER_PROJECT:
             per_project.append(name)
-            entries, missing = _per_project_artifacts(plan, output_dir, filename)
+            entries, missing = _per_project_artifacts(
+                plan, output_dir, filename, completed()
+            )
             entry["per_project_artifacts"] = entries
             entry["missing_per_project_artifacts"] = missing
             ASH_LOGGER.verbose(
@@ -864,7 +952,28 @@ def emit_workspace_reports(
             ASH_LOGGER.verbose(f"Reporter {name} returned no content")
             continue
 
-        target = write_report_file(reports_dir, filename, content)
+        from automated_security_helper.utils.output_dir_links import (
+            OutputDirLinkRefused,
+        )
+
+        try:
+            target = write_report_file(reports_dir, filename, content)
+        except (OutputDirLinkRefused, ReportPathRefused):
+            # A link at the file's name, or a name that is not a file in
+            # reports/: refused as every output file is, with nothing written.
+            raise
+        except Exception as exc:  # noqa: BLE001 -- one reporter's write must not sink the rest, or the manifest
+            # write_report_file returns None for an OSError; anything else (a
+            # reporter returning a non-str, a filesystem error outside OSError)
+            # used to abort the step here, with no manifest to say what happened.
+            failures[name] = (
+                f"report file {filename!r} could not be written in {reports_dir}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            entry["error"] = failures[name]
+            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}")
+            ASH_LOGGER.debug(f"Reporter write traceback: {traceback.format_exc()}")
+            continue
         if target is None:
             failures[name] = (
                 f"report file {filename!r} could not be written in {reports_dir}"
