@@ -18,7 +18,7 @@ under such a key escaped the typed-slot refusal and was typed silently.
 from __future__ import annotations
 
 import dataclasses
-from typing import Annotated, Optional
+from typing import Annotated, Dict, NamedTuple, Optional, Union
 
 import pydantic.dataclasses
 import pytest
@@ -175,6 +175,67 @@ def test_a_stdlib_dataclass_field_default_alias_is_a_typed_slot():
         Section, {"limits": {"max": env_resolved_scalar(CANARY, VARIABLE)}}
     )
     _assert_named_not_echoed(text, "limits")
+
+
+class _DefaultedTuple(NamedTuple):
+    """The NamedTuple spelling of :class:`_Defaulted`: pydantic builds a
+    NamedTuple's parameters from ``_field_defaults`` through
+    ``FieldInfo.from_annotated_attribute``, so a ``Field(...)`` default names
+    the key here too, and this one carries a default, so the field is
+    optional."""
+
+    limit: int = Field(0, alias="max")
+
+
+class _RequiredTuple(NamedTuple):
+    """A ``Field(...)`` default that carries no default of its own: pydantic
+    keeps the field required although ``_field_defaults`` lists it."""
+
+    limit: int = Field(alias="max")
+    other: str = ""
+
+
+def test_a_named_tuple_field_default_alias_is_a_typed_slot():
+    """Read off the Annotated metadata only, the alias was missed: the key
+    landed in the extras branch, no extras type refused it, and the reference
+    was downcast and typed to int silently, as for the dataclass above."""
+
+    class Section(RedactedSection):
+        limits: Optional[_DefaultedTuple] = None
+
+    text = _refusal_text(
+        Section, {"limits": {"max": env_resolved_scalar(CANARY, VARIABLE)}}
+    )
+    _assert_named_not_echoed(text, "limits")
+
+
+def test_a_named_tuple_field_a_field_default_leaves_required_is_counted():
+    """Counted by the defaults dict alone, ``limit`` read as optional, the
+    NamedTuple arm vouched for a dict pydantic refuses (no ``max``), and the
+    converting sibling typed the reference silently; the arm is now read as
+    pydantic reads it, so the sibling's typing is refused by name."""
+
+    class Section(RedactedSection):
+        value: Optional[Union[_RequiredTuple, Dict[str, int]]] = None
+
+    text = _refusal_text(
+        Section, {"value": {"other": env_resolved_scalar(CANARY, VARIABLE)}}
+    )
+    _assert_named_not_echoed(text, "value")
+
+
+def test_pydantic_reads_the_field_default_alias_of_a_named_tuple():
+    """The positive control: pydantic reads the key the walk refuses, and
+    requires the field whose Field default carries none."""
+
+    class Section(RedactedSection):
+        limits: Optional[_DefaultedTuple] = None
+        strict: Optional[_RequiredTuple] = None
+
+    assert Section.model_validate({"limits": {"max": "5"}}).limits.limit == 5
+    assert Section.model_validate({"strict": {"max": 3}}).strict == _RequiredTuple(3)
+    with pytest.raises(ValidationError):
+        Section.model_validate({"strict": {"other": "x"}})
 
 
 def test_pydantic_reads_the_annotated_alias_of_a_stdlib_dataclass():

@@ -1324,7 +1324,9 @@ def _typed_container_fields(annotation: Any) -> Optional[Dict[Any, Any]]:
             aliases: Tuple[Any, ...] = (generated.get(name),)
         else:
             try:
-                info = FieldInfo.from_annotation(declared.get(name, Any))
+                info = _typed_container_field_info(
+                    annotation, name, declared.get(name, Any)
+                )
             except Exception:  # metadata pydantic would refuse as well
                 continue
             aliases = (info.alias, info.validation_alias)
@@ -1332,6 +1334,42 @@ def _typed_container_fields(annotation: Any) -> Optional[Dict[Any, Any]]:
             for path in _alias_paths(alias):
                 _add_alias_slot(by_name, path, own[name])
     return by_name
+
+
+def _named_tuple_field_default(holder: Any, name: str) -> Any:
+    """The default the NamedTuple *holder* gives its field *name*, or
+    ``dataclasses.MISSING`` when the field has none."""
+    return getattr(holder, "_field_defaults", {}).get(name, dataclasses.MISSING)
+
+
+def _typed_container_field_info(holder: Any, name: str, hint: Any) -> FieldInfo:
+    """pydantic's ``FieldInfo`` for the field *name* of the TypedDict or
+    NamedTuple *holder* annotated *hint* (the hint with its ``Annotated``
+    metadata): off the metadata, and, for a NamedTuple, off a ``Field(...)``
+    given as the field's default, which pydantic reads the same way it reads a
+    stdlib dataclass's (:func:`_dataclass_field_info`): its parameter schema
+    takes ``_field_defaults[name]`` through ``FieldInfo.from_annotated_attribute``,
+    so ``limit: int = Field(0, alias="max")`` is read under the key ``max``.
+    Raises what pydantic raises for metadata it refuses."""
+    default = (
+        _named_tuple_field_default(holder, name)
+        if _is_named_tuple(holder)
+        else dataclasses.MISSING
+    )
+    if isinstance(default, FieldInfo):
+        return FieldInfo.from_annotated_attribute(hint, default)
+    return FieldInfo.from_annotation(hint)
+
+
+def _named_tuple_field_is_required(holder: Any, name: str) -> bool:
+    """Whether pydantic requires the NamedTuple field *name* of *holder*: it
+    has no default, or its default is a ``Field(...)`` that carries none (a
+    ``Field(alias="max")`` leaves the field required, as it does on a stdlib
+    dataclass, :func:`_dataclass_field_is_required`)."""
+    default = _named_tuple_field_default(holder, name)
+    if isinstance(default, FieldInfo):
+        return default.is_required()
+    return default is dataclasses.MISSING
 
 
 def _dataclass_field_info(dc_field: Any, hint: Any) -> FieldInfo:
@@ -1658,8 +1696,14 @@ def _required_field_keys(holder: Any) -> Optional[List[Set[Any]]]:
     if typing_extensions.is_typeddict(holder):
         names = list(getattr(holder, "__required_keys__", ()))
     elif _is_named_tuple(holder):
-        defaults = getattr(holder, "_field_defaults", {})
-        names = [name for name in holder._fields if name not in defaults]
+        # A Field(...) default with no default of its own leaves the field
+        # required, as pydantic reads it (_named_tuple_field_is_required);
+        # counted by the defaults dict alone, such a field read as optional.
+        names = [
+            name
+            for name in holder._fields
+            if _named_tuple_field_is_required(holder, name)
+        ]
     else:
         return None
     try:
@@ -1669,7 +1713,7 @@ def _required_field_keys(holder: Any) -> Optional[List[Set[Any]]]:
     required = []
     for name in names:
         try:
-            info = FieldInfo.from_annotation(declared.get(name, Any))
+            info = _typed_container_field_info(holder, name, declared.get(name, Any))
         except Exception:  # metadata pydantic would refuse as well
             return None
         required.append(_keys_for(name, info.alias, info.validation_alias))
@@ -1767,10 +1811,10 @@ def _arm_structurally_takes(arm: Any, value: Any) -> bool:
             args = get_args(arm)
             return not args or Ellipsis in args or len(args) == len(value)
         if _is_named_tuple(holder):
-            defaults = getattr(holder, "_field_defaults", {})
-            return (
-                len(holder._fields) - len(defaults) <= len(value) <= len(holder._fields)
+            required = sum(
+                _named_tuple_field_is_required(holder, name) for name in holder._fields
             )
+            return required <= len(value) <= len(holder._fields)
         return True
     if not isinstance(value, dict):
         return True
