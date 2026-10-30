@@ -37,6 +37,7 @@ from automated_security_helper.core.exceptions import (
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.workspace.policy import (
     ceiling_unreachable_counts,
+    discover_workspace_policy_file,
     load_workspace_policy,
     named_workspace_policy_path,
     policy_for_project,
@@ -140,6 +141,39 @@ class TestReadingThePolicyFile:
 
         with pytest.raises(ASHConfigInputNotPermittedError):
             resolve_workspace_policy(root, explicit=link, permit_base=permit)
+
+    @pytest.mark.parametrize("target_kind", ["missing", "directory", "file"])
+    def test_discovery_judges_the_target_before_its_kind_is_read(
+        self, tmp_path, target_kind
+    ):
+        """Discovery gated the link's own name and then read what it reaches:
+        a missing target said 'not there', a directory 'is a directory', a file
+        was refused by the resolver's gate. Three answers about a target outside
+        the permitted root, the probe the explicit-path reorder closed. One
+        refusal now, whatever the target is."""
+        root = tmp_path / "ws"
+        root.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        target = elsewhere / "target"
+        if target_kind == "directory":
+            target.mkdir()
+        elif target_kind == "file":
+            target.write_text(POLICY_YAML, encoding="utf-8")
+        _symlink_or_skip(root / "ash-workspace.yaml", target)
+
+        def permit(path: Path) -> bool:
+            return path == root or root in path.parents
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            discover_workspace_policy_file(root, permit=permit)
+
+        message = str(excinfo.value)
+        assert "outside the directories" in message
+        assert "ash-workspace.yaml" in message
+        for told in ("not there", "is a directory, not a file", "not a regular file"):
+            assert told not in message, message
+        assert isinstance(excinfo.value.__cause__, ASHConfigInputNotPermittedError)
 
     def test_an_explicit_path_outside_the_root_is_named_as_given(self, tmp_path):
         root = tmp_path / "ws"

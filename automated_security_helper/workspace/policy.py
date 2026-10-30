@@ -603,11 +603,12 @@ def discover_workspace_policy_file(
     *permit* is the caller's gate on config it may read (an MCP session's
     ``config_base_gate``). Every candidate name that exists as an entry, a link to
     a file that is not there included, must pass it before anything is read, as
-    config discovery checks its candidates: a link to a missing file outside is
-    refused as one to a present file, so the answer says nothing about the
-    outside path. A ``.ash`` that is a link must pass it too, before any name in
-    it is looked at, so the answer says nothing about what the directory it leads
-    to holds.
+    config discovery checks its candidates, and so must the file the name
+    reaches, before the entry's kind is read: a link to a missing file outside is
+    refused as one to a present file, a directory or a FIFO, so the answer says
+    nothing about the outside path. A ``.ash`` that is a link must pass it too,
+    before any name in it is looked at, so the answer says nothing about what the
+    directory it leads to holds.
 
     Returns:
         The path the file was found at, made absolute but not resolved (see "A
@@ -649,8 +650,17 @@ def discover_workspace_policy_file(
                     f"examined ({exc.strerror or type(exc).__name__}); a policy "
                     f"file that cannot be read is not treated as no policy"
                 ) from exc
-            if permit is not None and not permit(candidate):
-                raise _policy_not_permitted(candidate, directory)
+            if permit is not None:
+                if not permit(candidate):
+                    raise _policy_not_permitted(candidate, directory)
+                # The file the name reaches too, before its kind is read: the
+                # kind check follows a link, and its refusals (not there, a
+                # directory, not a regular file, unreadable) would each say
+                # what sits at a target outside the permitted directories,
+                # the probe resolve_workspace_policy closes for an explicit
+                # path. One refusal for every kind of outside target.
+                if not permit(_resolved(candidate)):
+                    raise _policy_not_permitted(candidate, directory)
             _refuse_unless_a_file(candidate)
             candidates.append(candidate)
 
