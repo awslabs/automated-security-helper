@@ -332,6 +332,14 @@ class TestRunAshScan:
         }
 
         with (
+            # The directory this test names does not exist on every runner
+            # (/tmp is no directory on Windows); the source directory check has
+            # its own tests, and this one is about the refusal mcp_scan_directory
+            # gives, so the check is stood down as the start tests above do.
+            patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
             patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
@@ -350,6 +358,13 @@ class TestRunAshScan:
         from automated_security_helper.cli.mcp_server import run_ash_scan
 
         with (
+            # As in test_scan_start_failure: /tmp is no directory on Windows,
+            # and the exception under test is mcp_scan_directory's, so the
+            # source directory check is stood down.
+            patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
             patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
