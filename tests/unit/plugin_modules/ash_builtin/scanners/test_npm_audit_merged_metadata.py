@@ -202,6 +202,16 @@ def test_an_npm_and_a_pnpm_lockfile_in_one_scan_both_report(plugin_context):
     vulnerabilities = pnpm_metadata["vulnerabilities"]
     assert metadata["vulnerabilities"]["high"] == 1 + vulnerabilities["high"]
     assert metadata["vulnerabilities"]["critical"] == vulnerabilities["critical"]
+    # pnpm writes no total; the merged total is the sum of the merged
+    # counters, not npm's own total carried over.
+    merged = metadata["vulnerabilities"]
+    assert merged["total"] == sum(
+        merged[name] for name in ("info", "low", "moderate", "high", "critical")
+    ), merged
+    assert merged["total"] == 1 + sum(
+        vulnerabilities.get(name, 0)
+        for name in ("info", "low", "moderate", "high", "critical")
+    ), merged
     assert metadata["dependencies"]["prod"] == 3
     assert metadata["dependencies"]["total"] == 3 + pnpm_metadata["dependencies"]
 
@@ -312,6 +322,25 @@ def test_merge_metadata_by_type():
         "ok": True,
         "note": "first",
         "devDependencies": 0,
+    }, into
+
+
+def test_merge_metadata_recounts_the_total_from_the_severity_counters():
+    """npm writes a total beside its counters, pnpm writes the counters only;
+    adding what both carry kept npm's total under the summed counters."""
+    into = {"vulnerabilities": {"high": 1, "moderate": 0, "total": 1}}
+
+    NpmAuditScanner._merge_metadata(
+        into,
+        {"vulnerabilities": {"high": 3, "critical": 3, "moderate": 4}},
+        "pnpm-lock.yaml",
+    )
+
+    assert into["vulnerabilities"] == {
+        "high": 4,
+        "moderate": 4,
+        "critical": 3,
+        "total": 11,
     }, into
 
 

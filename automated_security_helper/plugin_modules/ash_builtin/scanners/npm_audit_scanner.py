@@ -2080,6 +2080,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 current = into[key] = {"total": current}
             if isinstance(current, dict) and isinstance(incoming, dict):
                 cls._merge_metadata(current, incoming, lock_file)
+                if key == "vulnerabilities":
+                    cls._recount_total(current)
             elif cls._is_number(current) and cls._is_number(incoming):
                 into[key] = current + incoming
             elif isinstance(current, list) and isinstance(incoming, list):
@@ -2091,6 +2093,25 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     f"merged value ({type(current).__name__}); keeping the first",
                     extra=NO_MARKUP,
                 )
+
+    @classmethod
+    def _recount_total(cls, counters: Dict[str, Any]) -> None:
+        """Set the merged severity counters' ``total`` to their sum.
+
+        npm 7+ writes a ``total`` beside its per-severity counters; pnpm's v1
+        report writes the counters only. Adding what both sides carry kept
+        npm's total while the counters summed both reports, so an npm + pnpm
+        scan read, for example, high 4 and critical 3 with total 1. Recomputed
+        whenever any counter is present, so the two agree whichever reports
+        take part.
+        """
+        counted = [
+            counters[name]
+            for name in _SEVERITY_LEVEL
+            if cls._is_number(counters.get(name))
+        ]
+        if counted:
+            counters["total"] = sum(counted)
 
     @staticmethod
     def _is_number(value: Any) -> bool:
