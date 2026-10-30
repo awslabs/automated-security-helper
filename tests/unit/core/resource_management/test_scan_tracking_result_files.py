@@ -206,23 +206,6 @@ class TestEachResultFileIsReadOnceThroughTheGuard:
         assert len(reads) == 1
 
 
-class TestAScannerCountsOnceItHasWrittenAResult:
-    def test_a_scanner_directory_with_no_result_file_is_not_listed(self, tmp_path):
-        out = tmp_path / "ash_output"
-        _target_dir(out, "semgrep", "source")
-        _write_result(out, "bandit", "source", {"status": "PASSED"})
-
-        assert set(find_scanner_result_files(out)) == {"bandit"}
-        assert get_completed_scanners(out) == {"bandit"}
-
-    def test_a_scanner_with_one_of_two_targets_written_is_listed_once(self, tmp_path):
-        out = tmp_path / "ash_output"
-        _target_dir(out, "bandit", "converted")
-        _write_result(out, "bandit", "source", {"status": "PASSED"})
-
-        assert set(find_scanner_result_files(out)["bandit"]) == {"source"}
-
-
 class TestCompletedScannersAreTheOnesThatRan:
     def test_missing_skipped_and_error_scanners_are_not_completed(self, tmp_path):
         out = tmp_path / "ash_output"

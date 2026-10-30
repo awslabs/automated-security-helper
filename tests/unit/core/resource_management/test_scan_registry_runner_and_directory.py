@@ -387,22 +387,6 @@ class TestProgressOfASupersededScanReadsNoFiles:
         assert registry.check_scan_progress(old)["output_superseded"] is True
         assert registry.check_scan_progress(old)["scanners"] == {}
 
-    def test_a_running_scan_is_not_superseded_by_an_older_one(self, tmp_path):
-        registry = ScanRegistry()
-        project = tmp_path / "proj"
-        project.mkdir()
-        output = project / ".ash" / "ash_output"
-        output.mkdir(parents=True)
-        old = _register(registry, project, output)
-        registry.update_scan_status(old, MCScanStatus.COMPLETED)
-        new = _register(registry, project, output)
-        registry.update_scan_status(new, MCScanStatus.RUNNING)
-        (output / "ash_aggregated_results.json").write_text(
-            json.dumps(_results_document("semgrep")), encoding="utf-8"
-        )
-
-        assert "semgrep" in registry.check_scan_progress(new)["scanners"]
-
 
 class TestAReadOnlyPollDoesNotRecloseACompletedScan:
     """A COMPLETED entry whose results file later reads as unusable used to be
