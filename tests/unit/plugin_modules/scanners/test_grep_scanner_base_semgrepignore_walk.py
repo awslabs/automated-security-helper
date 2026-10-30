@@ -116,7 +116,11 @@ def test_a_file_above_a_scanned_directory_outside_any_repository_is_not_noted(
 
     SemgrepScanner(
         context=context,
-        config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False)),
+        # Enabled on every platform: the default turns semgrep off on Windows, and a
+        # disabled scanner writes no note.
+        config=SemgrepScannerConfig(
+            enabled=True, options=SemgrepScannerConfigOptions(offline=False)
+        ),
     )
 
     assert not [w for w in config._resolution_warnings if ".semgrepignore" in w], (
@@ -148,7 +152,11 @@ def test_the_note_is_logged_when_the_config_keeps_no_warnings_list(
 
     SemgrepScanner(
         context=test_plugin_context,
-        config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False)),
+        # Enabled on every platform: the default turns semgrep off on Windows, and a
+        # disabled scanner writes no note.
+        config=SemgrepScannerConfig(
+            enabled=True, options=SemgrepScannerConfigOptions(offline=False)
+        ),
     )
 
     assert any(
@@ -187,7 +195,11 @@ def test_an_enabled_scanner_records_the_note(test_plugin_context):
 
     SemgrepScanner(
         context=test_plugin_context,
-        config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False)),
+        # Enabled on every platform: the default turns semgrep off on Windows, and a
+        # disabled scanner writes no note.
+        config=SemgrepScannerConfig(
+            enabled=True, options=SemgrepScannerConfigOptions(offline=False)
+        ),
     )
 
     assert [w for w in warnings if (source / ".semgrepignore").as_posix() in w], (
