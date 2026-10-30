@@ -1682,9 +1682,20 @@ def test_fix_unused_help_says_which_files_it_leaves_alone():
 )
 def test_the_toml_refusal_says_what_each_flag_rewrites(tmp_path, flags):
     """The refusal said "--fix and --fix-unused rewrite YAML and JSON", but
-    --fix-unused refuses JSON too."""
+    --fix-unused refuses JSON too. The file holds something --fix would rewrite
+    (a suppression with line_start and no line_end): --fix refuses a TOML file
+    only when it has a fix to make, since a clean one passes."""
     config_path = tmp_path / ".ashrc.toml"
-    config_path.write_text('project_name = "t"\n', encoding="utf-8")
+    config_path.write_text(
+        'project_name = "t"\n'
+        "\n"
+        "[[global_settings.suppressions]]\n"
+        'rule_id = "B101"\n'
+        'path = "a.py"\n'
+        "line_start = 3\n"
+        'reason = "r"\n',
+        encoding="utf-8",
+    )
 
     result = CliRunner().invoke(
         config_app,
