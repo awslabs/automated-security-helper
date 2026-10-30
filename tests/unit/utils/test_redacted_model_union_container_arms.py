@@ -25,7 +25,8 @@ from __future__ import annotations
 from typing import ClassVar, Dict, FrozenSet, List, Optional, Tuple, Union
 
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, ValidationInfo
+from pydantic import model_validator
 from typing_extensions import TypedDict
 
 from automated_security_helper.utils.redacted_model import (
@@ -247,6 +248,39 @@ def test_a_section_arm_is_validated_with_the_loads_context():
         Section,
         {"value": {"scan_timeout": env_resolved_scalar(CANARY, VARIABLE)}},
         context={"strict_file_load": True},
+    )
+    _assert_named_not_echoed(text, "value")
+
+
+class _Picky(RedactedSection):
+    """A section arm that refuses its value when the load's context carries a
+    key of its own, as a plugin option model reads keys beside
+    ``strict_file_load``."""
+
+    other: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_when_the_context_says_so(cls, value, info: ValidationInfo):
+        if info.context and info.context.get("ash_test_refuse_picky"):
+            raise ValueError("refused by the load's context")
+        return value
+
+
+def test_a_section_arm_is_validated_with_every_key_of_the_loads_context():
+    """The arm read carried only ``strict_file_load``; under a context with
+    another key the arm vouched for a value the real load refuses, and the
+    converting sibling typed the reference silently. The load's context is now
+    carried whole (a shallow copy), so the arm refuses in the read as it does
+    in the load, and the sibling's typing is refused by name."""
+
+    class Section(RedactedSection):
+        value: Optional[Union[_Picky, Dict[str, int]]] = None
+
+    text = _refusal_text(
+        Section,
+        {"value": {"other": env_resolved_scalar(CANARY, VARIABLE)}},
+        context={"ash_test_refuse_picky": True},
     )
     _assert_named_not_echoed(text, "value")
 

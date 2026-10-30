@@ -276,3 +276,63 @@ def test_a_container_whose_copy_is_itself_is_rebuilt_as_its_base_and_left_as_giv
     assert type(rebuilt) is dict
     assert type(rebuilt["deep"]) is str
     assert rebuilt["deep"] == "loose-text"
+
+
+@dataclasses.dataclass
+class _ClingingBag:
+    """A dataclass whose copy protocol answers with the object itself."""
+
+    payload: Any = None
+
+    def __copy__(self):
+        return self
+
+
+def test_a_dataclass_whose_copy_is_itself_is_refused_not_written_into():
+    """A dataclass instance has no base class to rebuild as, so a copy that is
+    the object given is refused by name (pydantic turns the error into the
+    field's), and the caller's instance keeps its marker where it was; before,
+    the rebuild wrote the plain text into the caller's own instance."""
+
+    class Section(RedactedSection):
+        value: Optional[Dict[str, Union[_Closed, Any]]] = None
+
+    marker = env_resolved_scalar("loose-text", VARIABLE)
+    bag = _ClingingBag(payload=marker)
+    with pytest.raises(ValidationError) as refused:
+        Section.model_validate({"value": {"free": bag}})
+    text = " ".join(error["msg"] for error in refused.value.errors())
+    assert "copy is the object itself" in text, text
+    assert "loose-text" not in text, text
+    assert bag.payload is marker
+
+
+def test_the_downcast_of_a_validated_value_refuses_a_value_that_holds_itself():
+    """The downcast of a validated value refuses a cycle with the plain walk's
+    own words instead of leaving the container with its markers: an Any slot
+    returns the caller's own object, so a cycle a Python caller built does
+    reach it."""
+    marker = env_resolved_scalar("loose-text", VARIABLE)
+    knot: Dict[str, Any] = {"deep": marker}
+    knot["loop"] = knot
+    with pytest.raises(ValueError, match="contains itself"):
+        _downcast_what_validation_kept(knot)
+    assert knot["deep"] is marker
+
+
+def test_a_value_that_holds_itself_beside_a_section_arm_is_refused_not_kept():
+    """Through a section: the cyclic payload under the dict arm is refused by
+    validation (by whichever of the module's refusals meets it first), never
+    kept with its marker class, and the caller's object is left as given."""
+
+    class Section(RedactedSection):
+        value: Optional[Union[_Closed, Dict[str, Any]]] = None
+
+    marker = env_resolved_scalar("loose-text", VARIABLE)
+    knot: Dict[str, Any] = {"deep": marker}
+    knot["loop"] = knot
+    with pytest.raises(ValidationError) as refused:
+        Section.model_validate({"value": {"free": knot}})
+    text = " ".join(error["msg"] for error in refused.value.errors())
+    assert "loose-text" not in text, text
+    assert knot["deep"] is marker

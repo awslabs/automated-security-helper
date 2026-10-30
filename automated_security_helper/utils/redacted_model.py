@@ -1168,6 +1168,16 @@ _OPERATOR_ROUTE: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "_OPERATOR_ROUTE", default=False
 )
 
+#: The validation context of the load whose value is being walked, as a
+#: shallow copy, carried into the speculative arm validations
+#: (:func:`_arm_validates`) so a validator that reads the context there sees
+#: what the real load gives it, every key and not the one this module reads;
+#: None when the caller passed none, where :data:`_OPERATOR_ROUTE` alone
+#: decides.
+_LOAD_CONTEXT: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = (
+    contextvars.ContextVar("_LOAD_CONTEXT", default=None)
+)
+
 
 @contextlib.contextmanager
 def _config_in_force(annotation: Any) -> Iterator[None]:
@@ -1779,9 +1789,15 @@ def _arm_validates(arm: Any, value: Any) -> bool:
             and issubclass(named, RedactedSection)
         )
         given = value if opaque else without_env_scalars(value)
+        load_context = _LOAD_CONTEXT.get()
+        if load_context is not None:
+            context: Optional[Dict[str, Any]] = dict(load_context)
+        elif _OPERATOR_ROUTE.get():
+            context = {"strict_file_load": True}
+        else:
+            context = None
         adapter.validate_python(
-            [given] if config is not None else given,
-            context={"strict_file_load": True} if _OPERATOR_ROUTE.get() else None,
+            [given] if config is not None else given, context=context
         )
     except ValidationError:
         return False
@@ -2127,6 +2143,7 @@ def _refuse_typed_env_reference(
     config: Optional[Any] = None,
     metadata: Iterable[Any] = (),
     sections_opaque: bool = False,
+    load_context: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Refuse the first reference in *value* that sits at a slot of
     *annotation* that would convert its text, naming *field_name* and the
@@ -2175,6 +2192,9 @@ def _refuse_typed_env_reference(
     token = _WALK_CONFIG.set(config)
     opaque_token = _SECTIONS_OPAQUE.set(sections_opaque)
     route_token = _OPERATOR_ROUTE.set(operator_route)
+    context_token = _LOAD_CONTEXT.set(
+        dict(load_context) if load_context is not None else None
+    )
     try:
         typed = _marker_a_slot_would_type(annotation, value)
     except RecursionError:
@@ -2184,6 +2204,7 @@ def _refuse_typed_env_reference(
         # the answer for a value whose references cannot be placed.
         _refuse_value_nested_too_deeply(value, field_name)
     finally:
+        _LOAD_CONTEXT.reset(context_token)
         _OPERATOR_ROUTE.reset(route_token)
         _SECTIONS_OPAQUE.reset(opaque_token)
         _WALK_CONFIG.reset(token)
@@ -2518,8 +2539,12 @@ def _downcast_what_validation_kept(value: Any) -> Any:
     another field, would then see plain text where a typed slot has to be
     refused by name). A section is left alone: its own validator downcast what
     it holds. A container that holds no marker comes back as it is, the same
-    object. Iterative, in post-order, and cycle-safe like the walks above: a
-    container that holds itself (no validated value does) is left as it is."""
+    object. Iterative, in post-order, and cycle-checked like
+    :func:`without_env_scalars`: a container that holds itself is refused with
+    the same ValueError, which pydantic turns into the field's ValidationError.
+    An Any slot returns the caller's own object, so a cycle a Python caller
+    built does reach this walk; left as it was, it kept its markers where the
+    plain walk had refused it."""
     done: Dict[int, Any] = {}
     in_progress: Set[int] = set()
     stack: List[Tuple[Any, bool]] = [(value, False)]
@@ -2533,8 +2558,11 @@ def _downcast_what_validation_kept(value: Any) -> Any:
             done[id(node)] = node
         elif not entries_done:
             if id(node) in in_progress:
-                done[id(node)] = node
-                continue
+                raise ValueError(
+                    "the value contains itself, so no downcast copy of it "
+                    "can be built. A config file cannot write such a value; "
+                    "pass an acyclic structure."
+                )
             in_progress.add(id(node))
             stack.append((node, True))
             stack.extend((entry, False) for entry in _kept_entries(node))
@@ -2592,7 +2620,7 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
                     changed = True
         if not changed:
             return node
-        fresh = node.model_copy()
+        fresh = _copied_for_rebuild(node, node.model_copy)
         for entries in (fresh.__dict__, fresh.__pydantic_extra__):
             for name, entry in list((entries or {}).items()):
                 replacement = done.get(id(entry), entry)
@@ -2610,12 +2638,18 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
         ):
             return node
         fresh = _shallow_copy_of(node, dict)
-        fresh.clear()
         # One item at a time: a Counter's update() counts an iterable's
         # elements, a defaultdict's and an OrderedDict's take pairs; setting
         # each key is the one spelling every dict reads as a mapping write.
-        for key, entry in items:
-            fresh[key] = entry
+        # A subclass that refuses the writes (an immutable mapping) is
+        # rebuilt as a plain dict; the writes land on the copy, never on
+        # the object given.
+        try:
+            fresh.clear()
+            for key, entry in items:
+                fresh[key] = entry
+        except Exception:
+            return dict(items)
         return fresh
     if isinstance(node, (list, tuple, set, frozenset, collections.deque)):
         given = list(node)
@@ -2624,40 +2658,55 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
             return node
         if isinstance(node, list):
             fresh = _shallow_copy_of(node, list)
-            fresh[:] = entries
+            try:
+                fresh[:] = entries
+            except Exception:  # an immutable list subclass
+                return list(entries)
             return fresh
         if isinstance(node, set):
             fresh = _shallow_copy_of(node, set)
-            fresh.clear()
-            fresh.update(entries)
+            try:
+                fresh.clear()
+                fresh.update(entries)
+            except Exception:  # an immutable set subclass
+                return set(entries)
             return fresh
         if isinstance(node, collections.deque):
             fresh = _shallow_copy_of(node, collections.deque)
-            fresh.clear()
-            fresh.extend(entries)
+            try:
+                fresh.clear()
+                fresh.extend(entries)
+            except Exception:  # an immutable deque subclass
+                return collections.deque(entries)
             return fresh
-        kind = type(node)
+        # The class is read with the builtin hasattr, which the package's
+        # shown-text guard admits (the rule is that test module's).
+        value_class = type(node)
         if isinstance(node, tuple):
-            # Read with a builtin hasattr, not through _is_named_tuple: the
-            # shown-text guard (tests/unit/utils/test_shown_text_is_shown_once.py)
-            # refuses a class taken from a value handed to any call but a
-            # check or a constant-name getattr/hasattr. The class is asked,
-            # not the instance, so an instance attribute named _fields on a
-            # tuple subclass does not send it to a _make it has not got.
-            if hasattr(kind, "_fields"):  # a NamedTuple class
-                return kind._make(entries)
-            if kind is tuple:
+            if hasattr(value_class, "_fields"):  # a NamedTuple class
+                return value_class._make(entries)
+            if value_class is tuple:
                 return tuple(entries)
             try:
-                return kind(entries)
+                fresh = value_class(entries)
             except Exception:  # a tuple subclass with a constructor of its own
                 return tuple(entries)
-        if kind is frozenset:
+            if len(fresh) != len(entries) or any(
+                item is not entry for item, entry in zip(fresh, entries)
+            ):
+                # A constructor that takes its items one by one wrapped the
+                # list as a single item.
+                return tuple(entries)
+            return fresh
+        if value_class is frozenset:
             return frozenset(entries)
         try:
-            return kind(entries)
+            fresh = value_class(entries)
         except Exception:  # a frozenset subclass with a constructor of its own
             return frozenset(entries)
+        if fresh != frozenset(entries):
+            return frozenset(entries)
+        return fresh
     replacements = {}
     for field in dataclasses.fields(node):
         entry = getattr(node, field.name, _ABSENT)
@@ -2668,11 +2717,35 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
             replacements[field.name] = replacement
     if not replacements:
         return node
-    fresh = copy.copy(node)
+    fresh = _copied_for_rebuild(node, lambda: copy.copy(node))
     for name, replacement in replacements.items():
         # Past the dataclass's own validation, a frozen one included: the
         # text is unchanged, only its class.
         object.__setattr__(fresh, name, replacement)
+    return fresh
+
+
+def _copied_for_rebuild(node: Any, make_copy: Any) -> Any:
+    """The copy of the model or dataclass instance *node* that *make_copy*
+    gives, for the rebuild to write into. A copy that is *node* itself, or a
+    copy that cannot be made, is refused with a ValueError: the rebuild never
+    writes into the object it was given, and a model or a dataclass instance
+    has no base class to rebuild as (:func:`_shallow_copy_of` has one for the
+    containers). pydantic turns the error into the field's ValidationError;
+    the message names no value."""
+    try:
+        fresh = make_copy()
+    except Exception:
+        raise ValueError(
+            "the value holds an object that cannot be copied for its downcast; "
+            "write the value in the file instead."
+        ) from None
+    if fresh is node:
+        raise ValueError(
+            "the value holds an object whose copy is the object itself, so no "
+            "downcast copy of it can be built; write the value in the file "
+            "instead."
+        )
     return fresh
 
 
@@ -2821,6 +2894,7 @@ class RedactedSection(BaseModel):
                 key if type(key) is str else "an extra",
                 operator_route=operator_route,
                 config=cls.model_config,
+                load_context=info.context,
             )
         return data
 
@@ -2912,6 +2986,7 @@ class RedactedSection(BaseModel):
                     config=cls.model_config,
                     metadata=cls.model_fields[field_name].metadata,
                     sections_opaque=True,
+                    load_context=info.context,
                 )
                 return _downcast_outside_sections(annotation, value)
             _refuse_typed_env_reference(
@@ -2921,6 +2996,7 @@ class RedactedSection(BaseModel):
                 operator_route=operator_route,
                 config=cls.model_config,
                 metadata=cls.model_fields[field_name].metadata,
+                load_context=info.context,
             )
             return without_env_scalars(value)
         return value
