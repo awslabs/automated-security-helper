@@ -3147,12 +3147,29 @@ def test_an_output_named_like_the_resource_does_not_take_the_finding(
 
 
 def _declaration_line(template, resource_log_id, response):
+    """The line that declares the id under the TOP-LEVEL ``Resources`` key.
+
+    Read from the top-level key onward, not from the file's start: these templates
+    put an Output or a nested key of the same spelling before the section on purpose,
+    and the first such line in the file is the decoy, not the declaration.
+    """
     lines = template.read_text(encoding="utf-8").splitlines()
+    # Unindented, with a JSON object's opening brace allowed before the key, so that
+    # ``{"Resources": {`` on line 1 and a bare ``"Resources": {`` both read as the key.
+    resources_at = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if line == line.lstrip()
+        and line.lstrip("{").lstrip().startswith(("Resources:", '"Resources":'))
+    )
     declaration = next(
         i
         for i, line in enumerate(lines, start=1)
-        if line.strip().startswith(f"{resource_log_id}:")
-        or line.strip().startswith(f'"{resource_log_id}":')
+        if i > resources_at
+        and (
+            line.strip().startswith(f"{resource_log_id}:")
+            or line.strip().startswith(f'"{resource_log_id}":')
+        )
     )
     region = _only_finding(response).locations[0].physicalLocation.root.region
     return declaration, region.startLine, lines
