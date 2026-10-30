@@ -41,7 +41,10 @@ name. A baseline's entries are in the collection too. When the request marks the
 baseline trusted (the operator named it), one the baseline's audit marked
 ``is_secret: false`` (accepted as not a secret) is left out of OUTPUT; otherwise every
 entry is reported, because a baseline the scanned repository wrote itself (the in-tree
-file the scanner loads by default) may mark a finding but may not remove it.
+file the scanner loads by default) may mark a finding but may not remove it. Trusted
+or not, the baseline's copy of a secret the scan found again is left out, since the
+scanned copy reports it once. A baseline with no ``results`` mapping holds no
+entries. OUTPUT is created with mode 0600, as the request file is.
 
 A secret found by this scan also carries ``ash_start_column``, the 1-based column its
 value starts at in its line, when the value is found there. detect-secrets reports no
@@ -116,8 +119,42 @@ def _start_column(
         lines_by_file[filename] = lines
     if lines is None or line_number > len(lines):
         return None
-    index = lines[line_number - 1].find(value)
+    index = _value_index(lines[line_number - 1], value)
     return index + 1 if index >= 0 else None
+
+
+def _is_name_character(character: str) -> bool:
+    return character.isalnum() or character == "_"
+
+
+def _value_index(line: str, value: str) -> int:
+    """Where *value* starts in *line*, or -1.
+
+    Of the places the value occurs, the first that is a whole token is taken: not
+    inside a longer run of letters, digits and underscores, and not followed by
+    ``=`` or ``:``, which make it a key rather than a value. The first occurrence
+    of any kind is the fallback. The first occurrence alone gave the wrong column
+    when the value was the start of a longer secret earlier in the line, or
+    spelled the same as the variable it is assigned to (``password=password``),
+    and two secrets of one type on one line then shared a column.
+    """
+    whole_tokens = []
+    start = line.find(value)
+    while start != -1:
+        end = start + len(value)
+        before = line[start - 1] if start > 0 else ""
+        after = line[end] if end < len(line) else ""
+        bounded = not (before and _is_name_character(before)) and not (
+            after and _is_name_character(after)
+        )
+        if bounded:
+            if after not in ("=", ":"):
+                return start
+            whole_tokens.append(start)
+        start = line.find(value, start + 1)
+    if whole_tokens:
+        return whole_tokens[0]
+    return line.find(value)
 
 
 def _with_column(
@@ -220,7 +257,6 @@ def _is_accepted(accepted: _Accepted, key: str, secret: Any, root: str) -> bool:
 
 
 def run(request: Dict[str, Any]) -> List[List[Any]]:
-    from detect_secrets.core.secrets_collection import SecretsCollection
     from detect_secrets.settings import transient_settings
 
     refusing = request.get("verify") is not True
@@ -246,12 +282,7 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
             except RuntimeError:
                 pass
 
-        baseline = request.get("baseline")
-        collection = (
-            SecretsCollection.load_from_baseline(baseline=baseline)
-            if baseline is not None
-            else SecretsCollection()
-        )
+        collection = _collection_from(request.get("baseline"))
         collection.root = request["root"]
         # A baseline the operator named may drop what its audit accepted. One the
         # scanned repository wrote (the in-tree default) is untrusted: it may mark
@@ -262,27 +293,90 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
             accepted = _accepted_by_the_baseline(collection)
         with transient_settings(request["settings"]):
             _scan_files(collection, request["paths"])
-        return [
-            [key, _records_of(key, secrets, accepted, collection.root)]
-            for key, secrets in collection.data.items()
-        ]
+        return _output_of(collection, accepted)
     finally:
         if refusing:
             restore_environ(previous)
 
 
-def _records_of(key: str, secrets: Any, accepted: _Accepted, root: str) -> List[Any]:
+def _collection_from(baseline: Optional[Dict[str, Any]]) -> Any:
+    """A SecretsCollection holding *baseline*'s results, or an empty one.
+
+    ``load_from_baseline`` reads the ``results`` mapping and nothing else, and
+    raises KeyError for a baseline without one: a settings-only baseline (one
+    ``detect-secrets scan`` wrote with nothing found, or one kept for its plugins
+    and filters alone), which failed the whole source scan. Such a baseline holds
+    no results, so the collection starts empty, as with no baseline at all.
+    """
+    from detect_secrets.core.secrets_collection import SecretsCollection
+
+    if baseline is None:
+        return SecretsCollection()
+    results = baseline.get("results") if isinstance(baseline, dict) else None
+    if not isinstance(results, dict):
+        return SecretsCollection()
+    return SecretsCollection.load_from_baseline(baseline=baseline)
+
+
+def _output_of(collection: Any, accepted: _Accepted) -> List[List[Any]]:
+    """The OUTPUT pairs for *collection*: one record per secret, in key order.
+
+    A secret that is both in the baseline and still in the code is in the
+    collection twice: the baseline's copy carries the file name the baseline
+    wrote, and the scanned copy the absolute name the scan was given, and
+    detect-secrets compares file names, so the two are distinct set elements
+    (under one key, or under a relative and an absolute spelling of the same
+    key). Reported twice, the finding was counted twice. The baseline's copy is
+    left out wherever the scan found the same secret (same type and hash, same
+    file relative to ``root``); the scanned copy is the one with a column.
+    """
+    root = collection.root
+    found_again = {
+        (_relative_key(key, root), secret.type, secret.secret_hash)
+        for key, secrets in collection.data.items()
+        for secret in secrets
+        if getattr(secret, "secret_value", None)
+    }
+    return [
+        [key, _records_of(key, secrets, accepted, root, found_again)]
+        for key, secrets in collection.data.items()
+    ]
+
+
+def _relative_key(key: str, root: str) -> str:
+    """*key* relative to *root*, for an absolute key (a lone file's)."""
+    if root and os.path.isabs(key):
+        return os.path.relpath(key, root)
+    return key
+
+
+def _records_of(
+    key: str,
+    secrets: Any,
+    accepted: _Accepted,
+    root: str,
+    found_again: Optional[Set[Tuple[str, str, str]]] = None,
+) -> List[Any]:
     """The OUTPUT records of the secrets keyed by *key*, each with its column.
 
-    The lines read for the column are cached for this key only: every secret under
-    one key is in one file, so a cache shared by every key held every finding
-    file's lines for the whole collection, and is released with the key's records.
+    A secret the baseline accepted as not a secret is left out, and so is a
+    baseline copy (no value) of a secret the scan found again (*found_again*:
+    the relative key, type and hash of each scanned secret). The lines read for
+    the column are cached for this key only: every secret under one key is in
+    one file, so a cache shared by every key held every finding file's lines for
+    the whole collection, and is released with the key's records.
     """
     lines_by_file: Dict[str, Optional[List[str]]] = {}
+    relative = _relative_key(key, root)
     return [
         _with_column(secret, lines_by_file)
         for secret in secrets
         if not _is_accepted(accepted, key, secret, root)
+        and not (
+            found_again
+            and not getattr(secret, "secret_value", None)
+            and (relative, secret.type, secret.secret_hash) in found_again
+        )
     ]
 
 
@@ -306,12 +400,23 @@ def main(argv: List[str]) -> int:
         os.unlink(request_path)
     except OSError:
         pass
-    result = run(request)
-    # Created, never opened: ASH removes the path before it starts the worker, so
-    # anything there now, a symlink included, was put there by something else.
-    with open(output_path, "x", encoding="utf-8") as f:
-        json.dump(result, f)
+    _write_output(output_path, run(request))
     return 0
+
+
+def _write_output(output_path: str, result: List[List[Any]]) -> None:
+    """Write *result* as OUTPUT: a new file this account alone can read.
+
+    Created, never opened: ASH removes the path before it starts the worker, so
+    anything there now, a symlink included, was put there by something else.
+    Mode 0600, as the caller makes the request file: OUTPUT holds every finding's
+    hashed secret, file name and line, in the results directory, and the default
+    mode let every account on the host read it.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(output_path, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(result, f)
 
 
 # Only as the worker itself (``python -m``) or as a spawned pool process, which
