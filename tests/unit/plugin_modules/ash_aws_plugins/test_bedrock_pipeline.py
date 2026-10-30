@@ -12,6 +12,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline i
     BedrockModelClient,
     BedrockPromptBuilder,
     BedrockReportPipeline,
+    CallOutcome,
     ReportSection,
 )
 
@@ -361,7 +362,7 @@ class TestBedrockReportPipeline:
     ):
         if client is None:
             client = MagicMock()
-            client.try_call.return_value = "section content"
+            client.call.return_value = CallOutcome("section content", ok=True)
         if prompt_builder is None:
             prompt_builder = MagicMock()
             prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
@@ -385,10 +386,10 @@ class TestBedrockReportPipeline:
 
         def capture_call(prompt, system_prompt):
             call_order.append(system_prompt)
-            return "content"
+            return CallOutcome("content", ok=True)
 
         client = MagicMock()
-        client.try_call.side_effect = capture_call
+        client.call.side_effect = capture_call
         prompt_builder = MagicMock()
         prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
 
@@ -416,10 +417,12 @@ class TestBedrockReportPipeline:
 
         def fail_b(prompt, system_prompt):
             if "sys-B" in system_prompt:
-                return "*Error: model failed*"
-            return "ok content"
+                return CallOutcome(
+                    "*Error: model failed*", ok=False, model_specific=True
+                )
+            return CallOutcome("ok content", ok=True)
 
-        client.try_call.side_effect = fail_b
+        client.call.side_effect = fail_b
         prompt_builder = MagicMock()
         prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
 
@@ -442,12 +445,12 @@ class TestBedrockReportPipeline:
         assert results["a"] == "ok content"
         assert results["c"] == "ok content"
         # All three sections were attempted
-        assert client.try_call.call_count == 3
+        assert client.call.call_count == 3
 
     def test_caching_returns_same_result_on_second_call(self):
         """With caching enabled, second call for same key skips client."""
         client = MagicMock()
-        client.try_call.return_value = "cached content"
+        client.call.return_value = CallOutcome("cached content", ok=True)
         prompt_builder = MagicMock()
         prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
 
@@ -465,11 +468,11 @@ class TestBedrockReportPipeline:
         pipeline.run({"a": "prompt"})
 
         # Client only called once due to caching
-        assert client.try_call.call_count == 1
+        assert client.call.call_count == 1
 
     def test_caching_disabled_calls_client_each_time(self):
         client = MagicMock()
-        client.try_call.return_value = "fresh content"
+        client.call.return_value = CallOutcome("fresh content", ok=True)
         prompt_builder = MagicMock()
         prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
 
@@ -485,7 +488,7 @@ class TestBedrockReportPipeline:
         pipeline.run({"a": "prompt"})
         pipeline.run({"a": "prompt"})
 
-        assert client.try_call.call_count == 2
+        assert client.call.call_count == 2
 
 
 # ---------------------------------------------------------------------------

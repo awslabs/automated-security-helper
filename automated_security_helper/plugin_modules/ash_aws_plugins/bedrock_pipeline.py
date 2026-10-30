@@ -10,6 +10,7 @@ Three focused classes replace the monolithic reporter internals:
 """
 
 import copy
+import hashlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -81,6 +82,18 @@ def _drop_parameter(converse_args: Dict[str, Any], name: str) -> bool:
                 converse_args.pop(container_key, None)
             return True
     return False
+
+
+_BACKTICK_RUN = re.compile(r"`+")
+
+
+def _fenced(code: str) -> str:
+    """*code* in a Markdown fence longer than any backtick run it holds, so a
+    snippet that holds a fence of its own cannot close the block early and put
+    the rest of the snippet in the prompt as text."""
+    longest = max((len(run) for run in _BACKTICK_RUN.findall(code)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}\n{code}\n{fence}"
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +241,23 @@ class BedrockModelClient:
             max_retries=self._max_retries,
             base_delay=self._base_delay,
             max_delay=self._max_delay,
+            values=self._values,
+        )
+
+    def with_max_tokens(self, max_tokens: int) -> "BedrockModelClient":
+        """A client identical to this one whose calls ask for at most
+        *max_tokens*: what a report section with a limit of its own is
+        generated with."""
+        return BedrockModelClient(
+            bedrock_runtime=self._runtime,
+            model_id=self._model_id,
+            temperature=self._temperature,
+            max_tokens=max_tokens,
+            top_p=self._top_p,
+            max_retries=self._max_retries,
+            base_delay=self._base_delay,
+            max_delay=self._max_delay,
+            model_label=self._model_label,
             values=self._values,
         )
 
@@ -419,8 +449,31 @@ class BedrockPromptBuilder:
     for analysis."), which the reporter sent to the model as the prompt, so a
     secrets-only scan got risk, compliance and technical sections that were a
     model's reply to a placeholder, and the compliance one said no frameworks
-    were specified when they were.
+    were specified when they were. ``recommendations`` had no such answer and
+    sent a finding-less template for a secrets-only scan; it answers ``""`` too.
+
+    A builder that carries at most ``max_findings`` sample findings takes them
+    from the most severe down (``most_severe_first``): sliced in scan order,
+    the cut left out critical findings that came late in the scan while the
+    prompt carried low ones.
     """
+
+    #: The severities from the most severe down, the order a sample is cut in.
+    _SEVERITY_ORDER = {
+        severity: rank
+        for rank, severity in enumerate(("critical", "high", "medium", "low", "info"))
+    }
+
+    def most_severe_first(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """*findings* from the most severe down, scan order within a severity
+        (the sort is stable), so a slice of the front holds the worst."""
+        unranked = len(self._SEVERITY_ORDER)
+        return sorted(
+            findings,
+            key=lambda finding: self._SEVERITY_ORDER.get(
+                self._extract_severity(finding), unranked
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Prompt builders
@@ -526,19 +579,13 @@ class BedrockPromptBuilder:
         findings: List[Dict[str, Any]],
         max_findings: int,
     ) -> str:
+        if not findings:
+            return ""
+
         severity_counts = self._severity_counts(findings)
 
         # Prioritise most severe findings first
-        severity_order = {
-            severity: rank
-            for rank, severity in enumerate(
-                ("critical", "high", "medium", "low", "info")
-            )
-        }
-        severe = sorted(
-            findings,
-            key=lambda finding: severity_order[self._extract_severity(finding)],
-        )
+        severe = self.most_severe_first(findings)
 
         counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         lines = [
@@ -581,7 +628,7 @@ class BedrockPromptBuilder:
         lines = [
             "Generate a detailed technical analysis of the following security findings:\n"
         ]
-        for i, finding in enumerate(findings[:max_findings]):
+        for i, finding in enumerate(self.most_severe_first(findings)[:max_findings]):
             msg = self._extract_message(finding)
             rule_id = self._extract_rule_id(finding)
             level = finding.get("level", "none")
@@ -600,7 +647,7 @@ class BedrockPromptBuilder:
             )
             if code_snippets and include_code_snippets:
                 lines.append(
-                    "- Code Snippet:\n```\n" + "\n".join(code_snippets[:3]) + "\n```\n"
+                    "- Code Snippet:\n" + _fenced("\n".join(code_snippets[:3])) + "\n"
                 )
 
         lines.append(
@@ -634,7 +681,7 @@ class BedrockPromptBuilder:
                 "Sample findings:\n"
             )
         ]
-        for i, finding in enumerate(findings[:max_findings]):
+        for i, finding in enumerate(self.most_severe_first(findings)[:max_findings]):
             msg = self._extract_message(finding)
             rule_id = self._extract_rule_id(finding)
             level = finding.get("level", "none")
@@ -681,7 +728,7 @@ class BedrockPromptBuilder:
                 "Sample findings:\n"
             )
         ]
-        for i, finding in enumerate(findings[:max_findings]):
+        for i, finding in enumerate(self.most_severe_first(findings)[:max_findings]):
             msg = self._extract_message(finding)
             rule_id = self._extract_rule_id(finding)
             level = finding.get("level", "none")
@@ -719,7 +766,7 @@ class BedrockPromptBuilder:
                 "FINDINGS SUMMARY:\n"
             )
         ]
-        for i, finding in enumerate(findings[:max_findings]):
+        for i, finding in enumerate(self.most_severe_first(findings)[:max_findings]):
             msg = self._extract_message(finding)
             rule_id = self._extract_rule_id(finding)
             level = finding.get("level", "none")
@@ -848,6 +895,13 @@ class BedrockReportPipeline:
     """
     Iterates a list of ReportSection configs, calls the client for each,
     and accumulates results keyed by cache_key.
+
+    The cache is keyed by the section's ``cache_key`` and a digest of the
+    prompt and system prompt sent, so a different prompt for the same section
+    is generated, not served the earlier answer. Only an answer is cached:
+    whether a call answered is the outcome's ``ok``, never its text, and a
+    failure's "*Error ...*" text is returned for this run and asked again on
+    the next. A section's ``max_tokens`` bounds its own call.
     """
 
     def __init__(
@@ -876,15 +930,22 @@ class BedrockReportPipeline:
             prompt = prompts.get(key)
             if not prompt:
                 continue
-            content = self._get_or_generate(key, prompt, section.system_prompt)
+            content = self._get_or_generate(section, prompt)
             results[key] = content
         return results
 
-    def _get_or_generate(self, key: str, prompt: str, system_prompt: str) -> str:
+    def _get_or_generate(self, section: ReportSection, prompt: str) -> str:
+        digest = hashlib.sha256(
+            f"{section.system_prompt}\x00{prompt}".encode("utf-8")
+        ).hexdigest()
+        key = f"{section.cache_key}:{digest}"
         if self._enable_caching and key in self._cache:
-            ASH_LOGGER.debug(f"Cache hit for section {key!r}")
+            ASH_LOGGER.debug(f"Cache hit for section {section.cache_key!r}")
             return self._cache[key]
-        result = self._client.try_call(prompt, system_prompt)
-        if self._enable_caching:
-            self._cache[key] = result
-        return result
+        client = self._client
+        if section.max_tokens is not None:
+            client = client.with_max_tokens(section.max_tokens)
+        outcome = client.call(prompt, section.system_prompt)
+        if self._enable_caching and outcome.ok:
+            self._cache[key] = outcome.text
+        return outcome.text
