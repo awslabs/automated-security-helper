@@ -368,7 +368,7 @@ def validate_contained_path(
             candidate,
             root,
             f"'{_display(candidate)}' does not exist as a directory "
-            f"under '{_display(resolved_root)}'",
+            f"under '{_display(root)}'",
         )
 
     return PathContainmentResult(resolved=resolved)
