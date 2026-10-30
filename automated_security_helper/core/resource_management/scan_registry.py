@@ -18,6 +18,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from threading import Event, Lock
+from time import monotonic
 
 from automated_security_helper.core.cancellation import CancelEvent
 from automated_security_helper.core.constants import ASH_EXIT_CODES
@@ -509,11 +510,20 @@ def _slot_of(entry: "ScanRegistryEntry") -> Tuple[str, str]:
     return ("own", entry.scan_id)
 
 
+#: How long ``register_scan`` waits, in all, for a removal of the requested
+#: output tree to end before it refuses the scan. The wait runs on the caller's
+#: thread, which for the MCP tools is the event-loop thread, so it is short: a
+#: tree that takes longer to delete is a refusal the client retries, not a
+#: server that answers nothing meanwhile. Before this bound the wait had none.
+OUTPUT_REMOVAL_WAIT_SECONDS = 5.0
+
+
 class _OutputRemovalInProgress(Exception):
     """register_scan's locked attempt met an output tree being removed.
 
-    Carries the removal's Event; the caller waits on it off the lock and tries
-    again. Never leaves ScanRegistry.
+    Carries the removal's Event; the caller waits on it off the lock, within
+    ``OUTPUT_REMOVAL_WAIT_SECONDS`` in all, and tries again. Never leaves
+    ScanRegistry.
     """
 
     def __init__(self, removal: Event) -> None:
@@ -542,6 +552,7 @@ class ScanRegistry:
         slot: Optional[str] = None,
         requested_severity_threshold: Optional[str] = None,
         environment_values: Iterable[str] = (),
+        removal_wait_seconds: Optional[float] = None,
     ) -> str:
         """Register a new scan in the registry; see :meth:`_register_scan_once`.
 
@@ -553,7 +564,20 @@ class ScanRegistry:
         which held a synchronous caller on the event-loop thread (get_scan,
         list_scans, cancel_scan, this method) for as long as the tree took to
         remove.
+
+        The wait is bounded: ``removal_wait_seconds`` in all (None for
+        :data:`OUTPUT_REMOVAL_WAIT_SECONDS`), across every removal of the tree
+        met meanwhile, and a scan still waiting at the bound is refused with an
+        ``MCPResourceError`` in the ``operation_timeout`` category, naming the
+        output directory and asking the client to try again. The wait itself
+        runs on the caller's thread, so a caller on an event loop is held for at
+        most the bound; ``0`` waits for nothing and refuses at once, for a caller
+        that would rather retry on its own schedule. Before the bound a slow
+        delete held the caller, and the loop it ran on, for as long as it took.
         """
+        if removal_wait_seconds is None:
+            removal_wait_seconds = OUTPUT_REMOVAL_WAIT_SECONDS
+        deadline = monotonic() + removal_wait_seconds
         while True:
             try:
                 return self._register_scan_once(
@@ -569,7 +593,34 @@ class ScanRegistry:
                     environment_values=environment_values,
                 )
             except _OutputRemovalInProgress as in_progress:
-                in_progress.removal.wait()
+                # wait() returns the flag: True once the removal ended (try
+                # again, against the registry as it is now), False at the
+                # bound. A deadline already passed waits for nothing.
+                remaining = max(0.0, deadline - monotonic())
+                if in_progress.removal.wait(timeout=remaining):
+                    continue
+                # Imported here as _register_scan_once imports it: the module
+                # loads error_handling lazily.
+                from automated_security_helper.core.resource_management.error_handling import (
+                    ErrorCategory,
+                )
+
+                raise MCPResourceError(
+                    f"Output directory {output_directory} is being removed by a "
+                    "cleanup of an earlier scan's results, and the removal did "
+                    f"not end within {removal_wait_seconds:g} seconds. Try again "
+                    "once it has.",
+                    context={
+                        "directory_path": directory_path,
+                        "output_directory": output_directory,
+                        "waited_seconds": removal_wait_seconds,
+                        "error_category": ErrorCategory.OPERATION_TIMEOUT.value,
+                        "suggestions": [
+                            "Retry the scan in a few seconds",
+                            "Check the earlier scan's cleanup if the refusal repeats",
+                        ],
+                    },
+                )
 
     def _register_scan_once(
         self,
@@ -749,8 +800,8 @@ class ScanRegistry:
                 ):
                     # The tree is being deleted off the lock
                     # (remove_output_of_scan). register_scan waits for that to
-                    # end and tries again, so the new scan is not registered
-                    # into a tree being removed from under it. Decided under
+                    # end, within its bound, and tries again, so the new scan is
+                    # not registered into a tree being removed from under it. Decided under
                     # the lock, so a removal that starts after this attempt
                     # found none sees this entry as an occupant instead.
                     raise _OutputRemovalInProgress(entry.output_removal)
@@ -1020,10 +1071,11 @@ class ScanRegistry:
         (``ScanRegistryEntry.output_removal``) under the lock, the lock is
         released, the remover runs, and the mark is cleared under the lock
         again, whatever the remover did. A ``register_scan`` of the same output
-        tree meanwhile waits on the mark's event and then proceeds against the
-        registry as it is after the delete, so it is not registered into a tree
-        being removed from under it; a second removal of the tree meanwhile is
-        refused. The delete used to run with the lock held, which held every
+        tree meanwhile waits on the mark's event (for at most
+        ``OUTPUT_REMOVAL_WAIT_SECONDS``, then it is refused) and then proceeds
+        against the registry as it is after the delete, so it is not registered
+        into a tree being removed from under it; a second removal of the tree
+        meanwhile is refused. The delete used to run with the lock held, which held every
         synchronous registry caller, on the event-loop thread included
         (get_scan, list_scans, cancel_scan, register_scan), for as long as the
         tree took to remove. The remover still runs on the caller's thread;

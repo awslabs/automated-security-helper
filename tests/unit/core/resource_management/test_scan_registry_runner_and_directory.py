@@ -27,6 +27,7 @@ Five mechanisms, each pinned against the behavior it replaced:
 import json
 import os
 import threading
+import time
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -47,10 +48,10 @@ pytestmark = pytest.mark.unit
 _MODULE = "automated_security_helper.core.resource_management.scan_registry"
 
 
-def _register(registry, directory, output=None):
+def _register(registry, directory, output=None, **options):
     output = output if output is not None else directory / ".ash" / "ash_output"
     return registry.register_scan(
-        directory_path=str(directory), output_directory=str(output)
+        directory_path=str(directory), output_directory=str(output), **options
     )
 
 
@@ -455,6 +456,91 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
             registry.get_scan(new), lambda: True
         )
         assert (reason, removed) == (None, True)
+
+    def test_a_registration_still_waiting_at_the_bound_is_refused(self, tmp_path):
+        """The wait runs on the caller's thread, which for the MCP tools is the
+        event-loop thread, so it is bounded: a removal still running at the
+        bound refuses the scan with an error the client can retry on, instead
+        of holding the caller, and the loop it runs on, for as long as the
+        delete takes. The wait used to have no limit."""
+        registry = ScanRegistry()
+        _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        removing, release = self._removal_in_progress(registry, new)
+        try:
+            started = time.monotonic()
+            with pytest.raises(MCPResourceError) as refused:
+                _register(registry, tmp_path / "proj", removal_wait_seconds=0.2)
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+            removing.join(timeout=10)
+
+        assert "being removed" in str(refused.value)
+        assert refused.value.context["error_category"] == "operation_timeout"
+        assert refused.value.context["output_directory"] == str(
+            tmp_path / "proj" / ".ash" / "ash_output"
+        )
+        assert refused.value.context["waited_seconds"] == 0.2
+        # Waited about the bound, not the delete's 10 s (the floor is loose
+        # for timer granularity).
+        assert 0.1 <= elapsed < 5
+        # Nothing was registered by the refused call; with the delete over, the
+        # tree can be registered again.
+        assert registry.get_scan_count() == 2
+        assert registry.get_scan(_register(registry, tmp_path / "proj")) is not None
+
+    def test_a_registration_whose_wait_ends_within_the_bound_proceeds(self, tmp_path):
+        registry = ScanRegistry()
+        _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        removing, release = self._removal_in_progress(registry, new)
+        outcome = {}
+
+        registering = threading.Thread(
+            target=lambda: outcome.setdefault(
+                "scan_id",
+                _register(registry, tmp_path / "proj", removal_wait_seconds=10),
+            )
+        )
+        registering.start()
+        registering.join(timeout=0.3)
+        assert registering.is_alive()
+
+        release.set()
+        removing.join(timeout=10)
+        registering.join(timeout=10)
+        assert registry.get_scan(outcome["scan_id"]) is not None
+        assert registry.get_scan_count() == 3
+
+    def test_a_zero_wait_refuses_at_once(self, tmp_path):
+        """For a caller that would rather retry on its own schedule than hold
+        its thread at all."""
+        registry = ScanRegistry()
+        _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        removing, release = self._removal_in_progress(registry, new)
+        try:
+            started = time.monotonic()
+            with pytest.raises(MCPResourceError, match="being removed"):
+                _register(registry, tmp_path / "proj", removal_wait_seconds=0)
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+            removing.join(timeout=10)
+        assert elapsed < 1
+
+    def test_the_default_bound_is_the_module_constant(self, tmp_path):
+        """A caller that names no bound gets OUTPUT_REMOVAL_WAIT_SECONDS, read
+        at call time, so the wait is bounded for every existing caller."""
+        registry = ScanRegistry()
+        _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        removing, release = self._removal_in_progress(registry, new)
+        try:
+            with patch(f"{_MODULE}.OUTPUT_REMOVAL_WAIT_SECONDS", 0.2):
+                with pytest.raises(MCPResourceError) as refused:
+                    _register(registry, tmp_path / "proj")
+        finally:
+            release.set()
+            removing.join(timeout=10)
+        assert refused.value.context["waited_seconds"] == 0.2
 
 
 class TestProgressOfASupersededScanReadsNoFiles:
