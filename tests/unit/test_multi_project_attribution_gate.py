@@ -237,6 +237,12 @@ def healthy(workspace_root, output_dir):
             "exit_code": 2,
             "projects": projects,
             "unconvertible_finding_paths": 0,
+            # The execution knobs the root config sets, as the real payload
+            # reports them (WorkspaceResults.max_parallel_projects /
+            # project_timeout): check_execution_knobs_reached_the_run reads
+            # them on every evaluation, so a healthy file has to carry them.
+            "max_parallel_projects": gate.ROOT_MAX_PARALLEL_PROJECTS,
+            "project_timeout": float(gate.ROOT_PROJECT_TIMEOUT_SECONDS),
         },
         "scanner_results": {
             scanner: {"status": "PASSED", **counts}
@@ -738,7 +744,13 @@ class TestSuppressionScopeRegression:
                 if entry["ruleId"] != gate.SUPPRESSED_RULE_ID
             ]
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
-        assert any("no longer fires" in v for v in outcome.violations)
+        # The message names the rule as absent "neither live nor suppressed" and
+        # tells the reader which of the two causes to check; "no longer fires"
+        # is the comment's phrase for one of them, not the message's.
+        assert any(
+            "does not appear in" in v and "neither live nor suppressed" in v
+            for v in outcome.violations
+        ), outcome.violations
 
 
 #: Every rule the healthy results show in the suppressing project besides the one

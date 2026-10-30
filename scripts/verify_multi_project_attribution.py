@@ -480,7 +480,8 @@ class RunEvidence:
     #: every raw artifact uri seen, in encounter order
     raw_uris: Tuple[str, ...] = ()
     #: every originalUriBaseIds entry of the run: base id -> uri. ``uri_base`` is
-    #: the first of them; a result names its own with artifactLocation.uriBaseId.
+    #: the PROJECTROOT entry's uri, else the first of them (collect_runs); a
+    #: result names its own with artifactLocation.uriBaseId.
     uri_bases: Dict[str, str] = field(default_factory=dict)
     #: the uriBaseId each raw uri was anchored to, parallel to ``raw_uris``; None
     #: for a location that names none.
@@ -1291,8 +1292,9 @@ def check_result_paths_resolve_against_their_run_root(
 
     Each location is resolved against the base its own ``uriBaseId`` names. A
     location anchored to a base the run does not declare is dangling and is
-    reported; one that names no base resolves against the run's first declared
-    base, as every location used to. "Under the root" is checked after a strict
+    reported; one that names no base resolves against the run's root base (the
+    PROJECTROOT entry, else the first declared one, as ``collect_runs`` picks
+    it), as every location used to. "Under the root" is checked after a strict
     resolution, so an absolute URI or one that climbs out with ``..`` is refused
     even when the file it reaches exists: joining and testing existence alone
     accepted both.
