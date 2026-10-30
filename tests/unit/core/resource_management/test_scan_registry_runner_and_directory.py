@@ -400,6 +400,46 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert the_old_one[1] is False
         assert ran == []
 
+    def test_cleanup_keeps_an_entry_whose_output_is_being_removed(self, tmp_path):
+        """The mark lives on the registry entry and register_scan's wait is
+        keyed on entries in the registry. cleanup_scan and the age sweep
+        dropped a marked entry (a second cleanup of the same scan during the
+        first's delete, whose refused removal is a warning to its caller; a
+        COMPLETED entry under removal does not occupy its directory), so a
+        registration of the tree arriving after the drop found no mark and did
+        not wait: the window the lock-held delete closed, re-opened."""
+        registry = ScanRegistry()
+        _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)
+        entry = registry.get_scan(new)
+        entry.end_time = entry.end_time - timedelta(days=2)
+        removing, release = self._removal_in_progress(registry, new)
+
+        # The second cleanup of the same scan, and the age sweep, during the
+        # first's delete.
+        assert registry.cleanup_scan(new) is False
+        assert registry.cleanup_completed_scans(max_age_hours=1) == 0
+        assert registry.get_scan(new) is entry
+
+        # So a registration of the tree arriving now still waits.
+        outcome = {}
+        registering = threading.Thread(
+            target=lambda: outcome.setdefault(
+                "scan_id", _register(registry, tmp_path / "proj")
+            )
+        )
+        registering.start()
+        registering.join(timeout=0.5)
+        assert registering.is_alive()
+        assert "scan_id" not in outcome
+
+        release.set()
+        removing.join(timeout=10)
+        registering.join(timeout=10)
+        assert registry.get_scan(outcome["scan_id"]) is not None
+        # With the delete finished, the entry is removable again.
+        assert registry.cleanup_scan(new) is True
+        assert registry.get_scan(new) is None
+
     def test_a_remover_that_raises_clears_the_mark(self, tmp_path):
         registry = ScanRegistry()
         _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)

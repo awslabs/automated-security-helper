@@ -1188,8 +1188,8 @@ class ScanRegistry:
                 session's id is treated as not found.
 
         Returns:
-            True if the scan was removed, False if not found, or if its runner
-            has not finished.
+            True if the scan was removed, False if not found, if its runner
+            has not finished, or if its output tree is being removed.
 
         An entry whose runner is still stopping is kept. The entry is what makes
         ``register_scan`` refuse a second scan of the directory and count the
@@ -1207,6 +1207,21 @@ class ScanRegistry:
                 self._logger.warning(
                     f"Scan {scan_id} is kept in the registry: its runner has not "
                     "finished settling the output directory"
+                )
+                return False
+            if entry.output_removal is not None:
+                # The entry carries the mark register_scan waits on while its
+                # output tree is being deleted off the lock
+                # (remove_output_of_scan). Dropped here, the mark went with it:
+                # a second cleanup of the same scan during the first's delete
+                # (its refused removal is a warning to the caller, which then
+                # unregisters) removed the entry, and a registration of the
+                # same output tree arriving after that found no mark, did not
+                # wait, and was registered into a tree being removed from
+                # under it. The entry stays until the remover has returned.
+                self._logger.warning(
+                    f"Scan {scan_id} is kept in the registry: its output directory "
+                    "is being removed"
                 )
                 return False
             del self._registry[scan_id]
@@ -1230,7 +1245,13 @@ class ScanRegistry:
 
             for scan_id, entry in self._registry.items():
                 # A closed entry whose runner is still stopping stays, as in
-                # cleanup_scan: it still holds its directory.
+                # cleanup_scan: it still holds its directory. So does one whose
+                # output tree is being removed off the lock: its mark is what a
+                # registration of the tree waits on, and a COMPLETED entry
+                # under removal does not occupy its directory, so the age
+                # sweep reached it.
+                if entry.output_removal is not None:
+                    continue
                 if not entry.occupies_its_directory():
                     # Check if the scan is old enough to be removed
                     end_time = entry.end_time or entry.start_time
