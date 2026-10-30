@@ -4,7 +4,10 @@
 """Reporter for identifying unused suppressions."""
 
 import json
+import re
 from typing import Literal, TYPE_CHECKING, Any, ClassVar, Dict, List, Tuple
+
+from pydantic import field_validator
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -14,16 +17,24 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
-from automated_security_helper.models.workspace import is_workspace_scan
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    is_workspace_scan,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.models.core import (
     PACKAGE_SUPPRESSION_FIELDS,
     AshSuppression,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.suppression_matcher import (
     recorded_suppressions,
     written_suppression_id,
 )
+
+
+#: The values of ``output_format``.
+_OUTPUT_FORMATS = ("json", "markdown", "both")
 
 
 def _one_line(text: str | None) -> str:
@@ -43,13 +54,42 @@ def _one_line(text: str | None) -> str:
     str.split() with no argument splits on newlines, carriage returns and tabs,
     so this handles a CRLF config as well as a YAML block scalar.
     """
-    return " ".join((text or "").split())
+    return " ".join(str(text or "").split())
+
+
+def _code_span(value: Any) -> str:
+    """``value`` as an inline code span on one line.
+
+    A field the config wrote is interpolated as it is, and one that holds a
+    newline ends its bullet, and one that holds a backtick ends its span. The
+    value is flattened (``_one_line``) and fenced with more backticks than it
+    contains in a row, padded by a space when it starts or ends with one.
+    """
+    text = _one_line(None if value is None else str(value))
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
 
 
 class UnusedSuppressionsReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Unused Suppressions reporter."""
 
     output_format: str = "both"  # "json", "markdown", or "both"
+
+    @field_validator("output_format", mode="before")
+    @classmethod
+    def _output_format_is_one_of_the_three(cls, value: Any) -> Any:
+        """Read the case of the name away, and refuse any other.
+
+        ``report`` took every value but ``both`` and ``markdown`` for ``json``,
+        so ``md``, ``Both`` and ``MARKDOWN`` were silently the JSON-only report.
+        The message names the allowed values and not the one given: it can be a
+        value read from the environment.
+        """
+        if isinstance(value, str) and value.strip().lower() in _OUTPUT_FORMATS:
+            return value.strip().lower()
+        raise ValueError("output_format must be one of: json, markdown, both")
 
 
 class UnusedSuppressionsReporterConfig(ReporterPluginConfigBase):
@@ -285,6 +325,8 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 "against that project's own config, and are reported under "
                 "per_project_reports."
             )
+            # Only a project that completed wrote a report. A skipped or failed
+            # one has no file at the path, which a listing here would name.
             report_data["per_project_reports"] = [
                 {
                     "project": project.project,
@@ -293,6 +335,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                     ),
                 }
                 for project in workspace_results.projects
+                if project.status == ProjectRunStatus.COMPLETED
             ]
 
         # Check if we should generate both formats
@@ -315,7 +358,17 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
                 report_dir = Path(self.context.output_dir) / "reports"
                 report_dir.mkdir(parents=True, exist_ok=True)
-                write_report_file(report_dir, self.MARKDOWN_FILE_NAME, markdown_output)
+                written = write_report_file(
+                    report_dir, self.MARKDOWN_FILE_NAME, markdown_output
+                )
+                if written is None:
+                    # write_report_file has said why. What it cannot say is that
+                    # a copy an earlier scan left there is not this scan's.
+                    ASH_LOGGER.warning(
+                        f"The markdown copy of the unused-suppressions report was "
+                        f"not written, so {self.MARKDOWN_FILE_NAME} in "
+                        f"{report_dir}, if one is there, is from an earlier scan."
+                    )
 
             # Return JSON as the primary output
             return json_output
@@ -425,6 +478,10 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             if summary["unused_suppressions"] == 0:
                 lines.append("✅ **No workspace-level suppression is unused.**")
                 lines.append("")
+        elif summary["total_suppressions"] == 0:
+            # Nothing is configured, so nothing is "being used".
+            lines.append("**No suppressions are configured.**")
+            lines.append("")
         elif summary["unused_suppressions"] == 0:
             lines.append("✅ **All suppressions are being used!**")
             lines.append("")
@@ -457,9 +514,9 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 shown = UnusedSuppressionsReporter._suppression_to_dict(
                     suppression, (recorded or {}).get(id(suppression))
                 )
-                lines.append(f"### {i}. {shown['path']}")
+                lines.append(f"### {i}. {_one_line(shown['path'])}")
                 lines.append("")
-                lines.append(f"- **Rule ID**: `{shown['rule_id'] or 'Any'}`")
+                lines.append(f"- **Rule ID**: {_code_span(shown['rule_id'] or 'Any')}")
 
                 if suppression.line_start is not None:
                     if (
@@ -481,12 +538,12 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                     ("symbol", "Symbol"),
                 ):
                     if field in shown:
-                        lines.append(f"- **{label}**: `{shown[field]}`")
+                        lines.append(f"- **{label}**: {_code_span(shown[field])}")
 
                 lines.append(f"- **Reason**: {_one_line(shown['reason'])}")
 
                 if suppression.expiration:
-                    lines.append(f"- **Expiration**: {shown['expiration']}")
+                    lines.append(f"- **Expiration**: {_one_line(shown['expiration'])}")
 
                 lines.append("")
 
@@ -523,6 +580,11 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 "No workspace-level suppression is unused. Each project's own "
                 "suppressions are reported in that project's report."
             )
+            lines.append("")
+        elif summary["total_suppressions"] == 0:
+            lines.append("## Details")
+            lines.append("")
+            lines.append("No suppressions are configured, so none can be unused.")
             lines.append("")
         else:
             lines.append("## Details")
