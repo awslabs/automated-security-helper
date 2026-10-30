@@ -170,6 +170,39 @@ def test_a_scope_built_in_a_scan_carries_its_roots(trees):
     assert _scope(_Recorder(), source, output).scanned_trees == ()
 
 
+def test_the_scope_factory_carries_the_scans_roots(trees, monkeypatch):
+    """scanner_sandbox_scope, the production constructor, reads the active roots.
+
+    A nested tree scope adds its root to the enclosing one's, so a scope built
+    under both carries both. The backend is a recorder; nothing is probed.
+    """
+    from types import SimpleNamespace
+
+    from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
+
+    source, output, other = trees
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: _Recorder())
+    context = SimpleNamespace(
+        config=AshConfig(sandbox=SandboxConfig(mode="bwrap")),
+        source_dir=source,
+        output_dir=output,
+    )
+    plugin = SimpleNamespace(
+        config=SimpleNamespace(name="probe"),
+        sandbox_requirements=SandboxRequirements(),
+        results_dir=None,
+    )
+
+    with subprocess_utils.scanning_tree(source), subprocess_utils.scanning_tree(other):
+        scope = scope_module.scanner_sandbox_scope(plugin, context, source)
+
+    assert scope is not None
+    assert _real(scope.scanned_trees) == {
+        Path(os.path.realpath(source)),
+        Path(os.path.realpath(other)),
+    }
+
+
 def test_the_plan_is_built_with_the_scopes_roots(trees):
     """_plan_spawn passes the scope's roots, so the backend's policy has them."""
     source, output, other = trees

@@ -236,17 +236,33 @@ def test_the_staging_grant_ends_with_the_dry_run(
     assert Path(os.path.realpath(staged_metadata)) not in readable
 
 
-def test_a_dry_run_without_a_target_grants_no_directory(homes, tool, recorded):
-    """The control: the plain dry run's reads are the interpreter's and uv's."""
+def test_a_dry_run_without_a_target_grants_no_directory(
+    homes, tool, recorded, staged_metadata
+):
+    """The control: with no --target, no directory is granted and none is held.
+
+    The staging directory exists on disk, so a grant of it would show in the
+    policy; and the grants the spawn sees are read at plan time, so a grant left
+    over from an earlier dry run would show there.
+    """
     uv, interpreter, venv, _python_root = tool
+    grants_at_spawn = []
+    plan = recorded.plan
+
+    def plan_and_record_grants(argv, env, policy):
+        grants_at_spawn.append(scope_module._READ_GRANTS.get())
+        return plan(argv, env, policy)
+
+    recorded.plan = plan_and_record_grants
 
     pre_installed_tool._dry_run(str(uv), str(interpreter), "faketool")
 
     policy = recorded.policies[-1]
+    staged = Path(os.path.realpath(staged_metadata))
     assert Path(os.path.realpath(venv)) in _real(policy.read_only)
-    assert not any(
-        Path(p).name.startswith("ash-nix-metadata-") for p in policy.read_only
-    )
+    assert staged not in _real(policy.read_only)
+    assert staged not in _real(policy.scan_data)
+    assert grants_at_spawn == [()]
 
 
 def test_a_named_executable_gets_argv0s_breadth_filter(homes, recorded, tmp_path):
