@@ -2254,9 +2254,16 @@ def get_opengrep_url(
         elif arch == "arm64" or arch == "aarch64":
             return f"{base_url}/opengrep_osx_arm64"
     elif target_platform == "windows":
-        # opengrep publishes one Windows build, for x86-64; an arm64 request used
-        # to get that URL and install a binary the machine cannot run.
-        if arch == "amd64" or arch == "x86_64":
+        # opengrep publishes one Windows build, for x86-64. Windows 11 on ARM
+        # runs x86-64 executables under emulation, so an arm64 request gets that
+        # build too, said once: refusing it here failed a working install, and
+        # did so where the scanner builds its install commands.
+        if arch in ("amd64", "x86_64", "arm64", "aarch64"):
+            if arch in ("arm64", "aarch64"):
+                ASH_LOGGER.info(
+                    "opengrep has no Windows arm64 build; installing its x86-64 "
+                    "build, which Windows on ARM runs under emulation"
+                )
             return f"{base_url}/opengrep_windows_x86.exe"
 
     # Default case

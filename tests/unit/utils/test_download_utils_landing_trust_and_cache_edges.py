@@ -34,7 +34,8 @@ Properties of ``utils/download_utils.py`` that nothing else pins:
   cache entry;
 - the install command carries an absent rename as an empty argument, keeps a
   POSIX backslash, and refuses a digest that is not plain hex;
-- opengrep has no Windows arm64 build.
+- opengrep on Windows arm64 gets the x86-64 build Windows on ARM runs under
+  emulation, said once, instead of a refusal.
 """
 
 from __future__ import annotations
@@ -764,11 +765,20 @@ def test_a_backslash_in_a_posix_destination_is_kept(monkeypatch):
     assert du._destination_text("C:\\ash\\bin") == "C:/ash/bin"
 
 
-def test_opengrep_has_no_windows_arm64_build():
+def test_opengrep_on_windows_arm64_gets_the_x86_64_build_it_runs_under_emulation(
+    caplog,
+):
+    """opengrep has no Windows arm64 build, and Windows 11 on ARM runs x86-64
+    executables under emulation: the arm64 request gets that build, with a line
+    saying so. A ValueError here failed a working install at scanner construction."""
+    with caplog.at_level(logging.INFO):
+        url = du.get_opengrep_url("windows", "arm64")
+    assert url.endswith("opengrep_windows_x86.exe")
+    assert "emulation" in caplog.text
+    # The control: the one Windows build it has, asked for by its own name.
+    assert du.get_opengrep_url("windows", "amd64") == url
     with pytest.raises(ValueError):
-        du.get_opengrep_url("windows", "arm64")
-    # The control: the one Windows build it has.
-    assert du.get_opengrep_url("windows", "amd64").endswith("opengrep_windows_x86.exe")
+        du.get_opengrep_url("windows", "mips")
 
 
 def test_platform_module_is_the_one_patched():
