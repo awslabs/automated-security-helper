@@ -180,9 +180,13 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
         # ``metadata`` is None, read as a mapping) or no Name raises TypeError
         # or KeyError out of it, which is the sibling's defect, not this
         # install's, and the install-location strategy below reads no sibling.
+        # The cause goes with the record (``exc_info``), which the log handler
+        # formats once, rather than quoted into the message: a message that
+        # quoted the error showed its text twice.
         ASH_LOGGER.debug(
-            f"Could not enumerate the distributions providing {root_package!r} "
-            f"({exc}); trying the install-location strategy instead."
+            f"Could not enumerate the distributions providing {root_package!r}; "
+            "trying the install-location strategy instead.",
+            exc_info=exc,
         )
         mapped = []
     # A dist-info with a top_level.txt or RECORD but no METADATA maps the package
@@ -406,7 +410,8 @@ def _requirements_declared(dist_name: str) -> List[Optional[List[str]]]:
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             ASH_LOGGER.debug(
                 f"Could not read requirements from a distribution named "
-                f"{dist_name!r} ({exc}); skipping that copy."
+                f"{dist_name!r}; skipping that copy.",
+                exc_info=exc,
             )
     return declared
 
@@ -444,7 +449,8 @@ def extra_requirements_from_metadata(extra: str) -> Optional[List[str]]:
         except (PackageNotFoundError, OSError, ValueError) as exc:
             ASH_LOGGER.debug(
                 f"Could not read requirements from distribution {dist_name!r} "
-                f"providing {_ROOT_PACKAGE!r} ({exc}); skipping it."
+                f"providing {_ROOT_PACKAGE!r}; skipping it.",
+                exc_info=exc,
             )
             continue
         for declared in declared_lists:

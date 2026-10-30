@@ -899,11 +899,23 @@ def checked_requirement(
         # text reaches logs, and neither this function nor the runner holds
         # the values to redact it with. ``naming`` is the caller's own fixed
         # words, never the spec; callers that know the tool name it there.
-        raise UVToolRunnerError(
-            f"Refusing to pass {naming} to uv: it must be a package "
-            "name with optional extras and a PEP 440 version specifier"
-        ) from None
+        raise UVToolRunnerError(requirement_refusal(naming)) from None
     return spec
+
+
+def requirement_refusal(naming: str) -> str:
+    """The text of checked_requirement's refusal of *naming*.
+
+    One builder for the raise and for the log lines of the callers that catch
+    it: those lines say the refusal in these words rather than quoting the
+    caught error, because an error's text is shown once, by whoever prints it
+    on, and a log line that quoted it showed it a second time. Fixed words:
+    nothing of the spec is in them.
+    """
+    return (
+        f"Refusing to pass {naming} to uv: it must be a package name with "
+        "optional extras and a PEP 440 version specifier"
+    )
 
 
 def _type_keeping_the_flag(
@@ -1554,12 +1566,16 @@ class UVToolRunner:
             except UVToolRunnerError as error:
                 from automated_security_helper.utils.log import ASH_LOGGER
 
-                # The refusal's text carries no part of the spec (its message
-                # is fixed), so a plugin-built constraint holding a value the
-                # config read from the environment is never logged here. The
-                # tool's name comes from this call's own argument, plugin
-                # code, never the spec.
-                ASH_LOGGER.warning(f"{tool_name}: {error}")
+                # The refusal is logged in this call's own fixed words, not by
+                # quoting the error: its text is shown once by the caller that
+                # records it (``outcome``), and a log line quoting it showed it
+                # twice. Nothing here carries a part of the spec, so a
+                # plugin-built constraint holding a value the config read from
+                # the environment is never logged. The tool's name comes from
+                # this call's own argument, plugin code, never the spec.
+                ASH_LOGGER.warning(
+                    f"{tool_name}: {requirement_refusal('the package spec')}"
+                )
                 outcome["error"] = str(error)
                 return None
 
@@ -1899,15 +1915,19 @@ class UVToolRunner:
             tool_name, version_constraint, package_extras, with_dependencies
         )
         tool_spec = install_inputs.spec
+        # Which requirement is being checked, for the refusal's log line: the
+        # name is bound before each check so the handler names the one that
+        # was refused without quoting the error (as get_tool_version's does).
+        naming = "the tool spec"
         try:
-            checked_requirement(tool_spec, "the tool spec", package=tool_name)
+            checked_requirement(tool_spec, naming, package=tool_name)
             for position, dep in enumerate(with_dependencies or [], start=1):
-                checked_requirement(dep, f"--with dependency {position}")
-        except UVToolRunnerError as error:
-            # As get_tool_version's refusal: the error's text is fixed and
-            # carries no part of the spec, and the tool's name comes from
-            # this call's own argument.
-            ASH_LOGGER.warning(f"{tool_name}: {error}")
+                naming = f"--with dependency {position}"
+                checked_requirement(dep, naming)
+        except UVToolRunnerError:
+            # As get_tool_version's refusal: fixed words that carry no part of
+            # the spec, and the tool's name comes from this call's own argument.
+            ASH_LOGGER.warning(f"{tool_name}: {requirement_refusal(naming)}")
             return False
 
         # Build command with offline support
@@ -3578,12 +3598,16 @@ def get_uv_tool_command(
             checked_requirement(
                 from_spec, f"the --from spec for {tool_name}", package=package
             )
-        except UVToolRunnerError as error:
+        except UVToolRunnerError:
             from automated_security_helper.utils.log import ASH_LOGGER
 
-            # The refusal's text carries no part of the spec (see
-            # checked_requirement); the tool's name is this call's own argument.
-            ASH_LOGGER.warning(f"{tool_name}: {error}")
+            # The refusal in its own fixed words, not the caught error's text
+            # (see requirement_refusal); the tool's name is this call's own
+            # argument.
+            ASH_LOGGER.warning(
+                f"{tool_name}: "
+                f"{requirement_refusal(f'the --from spec for {tool_name}')}"
+            )
             return None
     binary = fallback_binary or tool_name
     lookup = _lookup_key(binary)
