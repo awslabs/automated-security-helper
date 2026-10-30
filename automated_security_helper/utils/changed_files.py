@@ -62,12 +62,21 @@ def _location_readings(uri: str) -> List[str]:
     the lone surrogate ``\\udce9``, which is the name git and ``os.fsdecode`` give
     the file, so the reading resolves to it.
     """
+    texts = [uri]
     if uri.startswith("file://"):
-        uri = _file_uri_path(uri)
-    readings = [uri]
-    decoded = unquote(uri, errors="surrogateescape")
-    if decoded != uri:
-        readings.append(decoded)
+        texts = [_file_uri_path(uri)]
+        # ``file://lib/helper.js`` is not a standard URI, but a scanner writes it for
+        # a path relative to the scan root, and then "lib" is a directory, not a host.
+        # Both are read, host and relative: the result is kept when either names a
+        # changed file, so no tool's spelling is dropped for the other's.
+        authority = urlparse(uri).netloc
+        if authority:
+            texts.append(uri[len("file://") :])
+    readings: List[str] = []
+    for text in texts:
+        for reading in (text, unquote(text, errors="surrogateescape")):
+            if reading not in readings:
+                readings.append(reading)
     return readings
 
 

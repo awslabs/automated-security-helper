@@ -720,6 +720,37 @@ class TestFileUriForms:
         assert _location_readings("file:///C:/proj/a.py") == ["C:/proj/a.py"]
         assert _location_readings("file:///srv/proj/a.py") == ["/srv/proj/a.py"]
 
+    def test_a_relative_file_uri_is_also_read_with_its_first_segment_as_a_directory(
+        self, tmp_path
+    ):
+        """``file://lib/helper.js`` is what some scanners write for a path relative to
+        the scan root. Read only as a host and a path it named ``/helper.js``, and the
+        finding in ``lib/helper.js`` was dropped though that file had changed."""
+        from automated_security_helper.utils.changed_files import _location_readings
+
+        assert _location_readings("file://lib/helper.js") == [
+            "/helper.js",
+            "lib/helper.js",
+        ]
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "lib" / "helper.js").resolve()}
+        other = {(source_dir / "lib" / "other.js").resolve()}
+
+        kept = filter_results_to_changed_files(
+            _make_results_with_sarif([_make_result("file://lib/helper.js")]),
+            changed,
+            source_dir,
+        )
+        dropped = filter_results_to_changed_files(
+            _make_results_with_sarif([_make_result("file://lib/helper.js")]),
+            other,
+            source_dir,
+        )
+
+        assert len(kept.sarif.runs[0].results) == 1
+        assert len(dropped.sarif.runs[0].results) == 0
+
     @pytest.mark.parametrize(
         "uri",
         [
