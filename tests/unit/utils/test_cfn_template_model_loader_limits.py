@@ -167,14 +167,17 @@ def test_a_mapping_merged_several_times_is_flattened_once():
 
 
 def test_a_wide_merge_past_the_bound_is_refused_at_the_first_alias_that_passes_it():
-    """``{<<: [*a15 x 400]}``: a15 holds 32,768 pairs, so the fourth alias passes
-    the 100,000 bound. At the previous tip every one of the 400 aliases flattened
-    a15 again (about 65,000 Python steps each) before the bound was compared; now
-    a15 is flattened once and the refusal comes at the fourth alias."""
+    """``{<<: [*a15 x 400]}``: a15 holds 32,768 pairs, and the chain a1..a15 has
+    already added 65,534 to the document's sum, so the second alias passes the
+    100,000 bound (65,534 + 2 x 32,768 = 131,070). At the previous tip every one of
+    the 400 aliases flattened a15 again (about 65,000 Python steps each) before the
+    bound was compared; now a15 is flattened once and the refusal comes at the
+    second alias, which the sum named in the error pins."""
     aliases = ", ".join(["*a15"] * 400)
     text = _chain_then(15, f"x: {{<<: [{aliases}]}}\nResources: {{}}\n")
     calls, refused = _base_flatten_calls(text)
     assert refused is not None and "would expand this mapping" in str(refused)
+    assert "(131070 added by this document's merges)" in str(refused), str(refused)
     # The document root and the chain's 16 mappings, each flattened once by the
     # base class; the wide merge adds no run of its own before it is refused.
     assert calls == 17, calls
