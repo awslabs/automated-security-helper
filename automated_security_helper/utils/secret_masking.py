@@ -318,11 +318,11 @@ _PLACEHOLDER = re.compile(
 )
 
 #: Fields that name things rather than hold text a finding reports: identifiers,
-#: every GUID a SARIF log carries, the fingerprints that are a result's identity
-#: (``utils/finding_identity.py``), and ASH's own bookkeeping on a result
-#: (``scanner_name`` and ``scanner_version``, which decide the result's tool
-#: type). A shape of the right length matched a GUID or a fingerprint and wrote a
-#: value its pattern refuses, or changed what identified the finding.
+#: and ASH's own bookkeeping on a result (``scanner_name`` and
+#: ``scanner_version``, which decide the result's tool type). The fingerprint and
+#: GUID fields are not among them: they are masked like any other text, because
+#: masking is the side that fails closed and a hash-shaped field can hold a value
+#: a scanner matched.
 _SKIPPED_FIELDS = frozenset(
     {
         "uri",
@@ -330,13 +330,6 @@ _SKIPPED_FIELDS = frozenset(
         "ruleId",
         "guid",
         "correlationGuid",
-        "baselineGuid",
-        "runGuid",
-        "firstDetectionRunGuid",
-        "lastDetectionRunGuid",
-        "deprecatedGuids",
-        "fingerprints",
-        "partialFingerprints",
         "baselineState",
         "scanner_name",
         "scanner_version",
@@ -671,26 +664,22 @@ _IAC_CREDENTIAL = re.compile(
     r"|\bcredentials in the template\b"
 )
 
-#: The tool type of the scanners whose rules and messages describe a credential
-#: this way (``utils/scanner_names.SCANNER_TOOL_TYPES``). A dependency scanner's
-#: rule whose CVE text mentions a hard-coded key, or a code scanner's message that
-#: names a ``hardcoded-secrets`` path, is not such a rule or message, and classed
-#: as one it masked the finding's file from its line to the end.
-_IAC_TOOL_TYPE = "IAC"
-
 
 def _describes_a_credential_in_code(text: Any) -> bool:
+    """Whether a text describes a credential written into code.
+
+    The description counts for a finding of any scanner type. A code scanner
+    (semgrep, opengrep) writes the value its rule matched into its message, so
+    "describes a credential without quoting it" is not a property of a scanner's
+    type, and reading it only for infrastructure scanners left such a finding's
+    value unmasked. Masking a file from the finding's line to its end for a
+    description that names no credential is the side that fails closed.
+    """
     if not isinstance(text, str):
         return False
     if _HARD_CODED.search(text) and _CREDENTIAL_WORD.search(text):
         return True
     return bool(_IAC_CREDENTIAL.search(text))
-
-
-def _may_describe_credentials(tool_types: AbstractSet[str]) -> bool:
-    """Whether a description of a credential in code counts for a scanner of these
-    types: an infrastructure scanner's, or one whose type is unknown."""
-    return not tool_types or _IAC_TOOL_TYPE in tool_types
 
 
 def _has_columns(region: Any) -> bool:
@@ -707,21 +696,14 @@ def _has_columns(region: Any) -> bool:
 def _rule_ids_described(sarif_report: Any) -> Set[str]:
     """IDs of rules whose name or description is about a credential in code.
 
-    Read from the rules of the runs whose results come from an infrastructure
-    scanner, or from scanners of no known type (``_may_describe_credentials``).
+    Read from the rules of every run, whatever scanner wrote it
+    (``_describes_a_credential_in_code``).
     """
-    from automated_security_helper.utils.scanner_tool_types import result_tool_types
-
     found: Set[str] = set()
     containers = list(getattr(sarif_report, "runs", None) or []) + list(
         _external_properties_of(sarif_report)
     )
     for container in containers:
-        tool_types: Set[str] = set()
-        for result in getattr(container, "results", None) or []:
-            tool_types |= result_tool_types(result)
-        if not _may_describe_credentials(tool_types):
-            continue
         components: List[Any] = [
             getattr(getattr(container, "tool", None), "driver", None),
             getattr(container, "driver", None),
@@ -825,7 +807,7 @@ def is_secret_finding(
     if SECRETS_TOOL_TYPE in tool_types:
         return True
     text = _text_of(getattr(result, "message", None)) or ""
-    return _text_reports_a_secret(text, _may_describe_credentials(tool_types))
+    return _text_reports_a_secret(text)
 
 
 def _is_secret_rule_id(rule_id: Any) -> bool:
@@ -837,12 +819,10 @@ def _is_secret_rule_id(rule_id: Any) -> bool:
     )
 
 
-def _text_reports_a_secret(text: Any, may_describe: bool = True) -> bool:
-    """Whether a message quotes a value or, when ``may_describe``, describes a
-    credential in code (``_may_describe_credentials``)."""
+def _text_reports_a_secret(text: Any) -> bool:
+    """Whether a message quotes a value or describes a credential in code."""
     return isinstance(text, str) and (
-        bool(_quoted_values(text))
-        or (may_describe and _describes_a_credential_in_code(text))
+        bool(_quoted_values(text)) or _describes_a_credential_in_code(text)
     )
 
 
@@ -1298,8 +1278,6 @@ def _region_last_line(region: Any, start: int) -> int:
 
 
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
-    from automated_security_helper.utils.scanner_tool_types import result_tool_types
-
     _resolve_artifact_uris(sarif_report)
     index = _SecretIndex()
     rule_ids = secret_rule_ids(sarif_report)
@@ -1315,14 +1293,9 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
         # cfn-nag reports a credential rule at its resource's first line only; the
         # property holding the value is somewhere after it. A finding that quotes
         # its value (bandit's "Possible hardcoded password: '...'") names the
-        # line itself and is not one of these; and the description counts for an
-        # infrastructure scanner's finding only (_may_describe_credentials).
+        # line itself and is not one of these.
         resource_only = not quoted and (
-            _rule_id_of(result) in described
-            or (
-                _may_describe_credentials(result_tool_types(result))
-                and _describes_a_credential_in_code(text)
-            )
+            _rule_id_of(result) in described or _describes_a_credential_in_code(text)
         )
         exposed: List[str] = []
         for value_start, value_end in quoted:
@@ -2353,10 +2326,7 @@ def _additional_entry_is_secret(entry: Dict[str, Any], scanner_name: Any) -> boo
     tags = entry.get("tags")
     if isinstance(tags, list) and any(_is_secret_tag(tag) for tag in tags):
         return True
-    may_describe = _may_describe_credentials({tool_type} if tool_type else set())
-    return any(
-        _text_reports_a_secret(entry.get(name), may_describe) for name in _ENTRY_TEXTS
-    )
+    return any(_text_reports_a_secret(entry.get(name)) for name in _ENTRY_TEXTS)
 
 
 #: The text fields of an additional-report entry the flat model shows.

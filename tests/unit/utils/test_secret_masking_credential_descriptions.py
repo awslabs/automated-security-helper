@@ -2,10 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Which rules and messages describe a credential in code, and in what time.
 
-A dependency scanner's rule whose CVE text mentioned a hard-coded key, and a code
-scanner's message that named a ``hardcoded-secrets`` path, were classed as secret
-rules and findings, which masked their files from the finding's line to the end.
-The pattern that read such a description joined its two words with ``.*`` and
+A rule or a message that describes a credential in code counts for a finding of
+any scanner type. A code scanner's message can hold the value its rule matched
+without quoting it, so a rule or message of a dependency scanner or a code
+scanner that reads like such a description is classed as a secret rule or
+finding, which masks the value and the file from the finding's line to the end:
+masking is the side that fails closed.
+The pattern that reads such a description joined its two words with ``.*`` and
 backtracked over the whole text for every credential word in it; and the pattern
 that read the string literals of a matched line restarted at every quote of a
 line of escaped quotes.
@@ -23,9 +26,11 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils import secret_masking
 from automated_security_helper.utils.secret_masking import (
+    MASKED_LINE,
     _describes_a_credential_in_code,
     _matched_values,
     is_secret_finding,
+    mask_secrets_in_results,
     secret_rule_ids,
 )
 
@@ -71,7 +76,7 @@ def _run(scanner, rule_id, description, *results):
 
 
 class TestWhichRulesDescribeACredential:
-    def test_a_dependency_scanners_cve_rule_is_not_a_secret_rule(self):
+    def test_a_dependency_scanners_rule_that_describes_one_is_a_secret_rule(self):
         report = _report(
             _run(
                 "grype",
@@ -81,7 +86,32 @@ class TestWhichRulesDescribeACredential:
             )
         )
 
-        assert "CVE-2024-0001" not in secret_rule_ids(report)
+        assert "CVE-2024-0001" in secret_rule_ids(report)
+
+    def test_a_code_scanners_rule_that_describes_one_is_a_secret_rule(self):
+        report = _report(
+            _run(
+                "semgrep",
+                "rule.a",
+                CVE_TEXT,
+                _result("rule.a", "found", "semgrep"),
+            )
+        )
+
+        assert "rule.a" in secret_rule_ids(report)
+
+    def test_a_rule_that_describes_nothing_of_the_kind_is_not(self):
+        """Control."""
+        report = _report(
+            _run(
+                "semgrep",
+                "rule.b",
+                "Use of a deprecated function",
+                _result("rule.b", "found", "semgrep"),
+            )
+        )
+
+        assert "rule.b" not in secret_rule_ids(report)
 
     def test_an_infrastructure_scanners_rule_is(self):
         report = _report(
@@ -110,9 +140,22 @@ class TestWhichRulesDescribeACredential:
 
 
 class TestWhichMessagesDescribeACredential:
-    def test_a_code_scanners_message_naming_a_path_is_not_a_secret_finding(self):
+    def test_a_code_scanners_message_that_describes_one_is_a_secret_finding(self):
         report = _report(
             _run("semgrep", "x", "", _result("rule.a", PATH_TEXT, "semgrep"))
+        )
+
+        assert is_secret_finding(report.runs[0].results[0])
+
+    def test_a_code_scanners_message_that_describes_nothing_of_the_kind_is_not(self):
+        """Control."""
+        report = _report(
+            _run(
+                "semgrep",
+                "x",
+                "",
+                _result("rule.a", "Use of a deprecated function", "semgrep"),
+            )
         )
 
         assert not is_secret_finding(report.runs[0].results[0])
@@ -132,6 +175,81 @@ class TestWhichMessagesDescribeACredential:
         )
 
         assert is_secret_finding(report.runs[0].results[0])
+
+
+#: A value a code scanner's rule matched; an ordinary-looking token, no credential.
+MATCHED = "k7q2m9zx4t"
+
+
+def _model_with_matched_value(message):
+    """One semgrep finding whose region covers a line that holds ``MATCHED`` and
+    whose message holds it too, without a quote around it."""
+    line = f'secret = "{MATCHED}"'
+    model = AshAggregatedResults()
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "semgrep"}},
+                    "results": [
+                        {
+                            "ruleId": "rule.a",
+                            "level": "warning",
+                            "message": {"text": message},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": "app.py"},
+                                        "region": {
+                                            "startLine": 5,
+                                            "endLine": 5,
+                                            "startColumn": 1,
+                                            "endColumn": len(line) + 1,
+                                            "snippet": {"text": line + "\n"},
+                                        },
+                                    }
+                                }
+                            ],
+                            "properties": {
+                                "scanner_name": "semgrep",
+                                "tags": ["semgrep"],
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    return model
+
+
+class TestACodeScannersMatchedValueIsMasked:
+    """A code scanner's message that describes a credential holds the value its
+    rule matched, and the finding is a secret finding whatever the scanner's type."""
+
+    def test_the_value_in_the_message_and_the_snippet_are_masked(self):
+        model = _model_with_matched_value(f"Hard-coded secret found: {MATCHED}")
+        result = model.sarif.runs[0].results[0]
+        assert is_secret_finding(result)
+
+        mask_secrets_in_results(model)
+
+        region = result.locations[0].physicalLocation.root.region
+        assert MATCHED not in result.message.root.text
+        assert region.snippet.text == MASKED_LINE + "\n"
+
+    def test_a_message_that_describes_nothing_of_the_kind_is_left_alone(self):
+        """Control: the same finding with an ordinary message is no secret finding,
+        so its message and snippet are as the scanner wrote them."""
+        message = f"Use of a deprecated function, see {MATCHED}"
+        model = _model_with_matched_value(message)
+        result = model.sarif.runs[0].results[0]
+        assert not is_secret_finding(result)
+
+        mask_secrets_in_results(model)
+
+        assert result.message.root.text == message
 
 
 class TestTheDescriptionReadIsLinear:

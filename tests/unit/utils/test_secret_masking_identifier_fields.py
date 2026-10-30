@@ -1,12 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Masking leaves a result's identifiers alone, and reads a rule named by reference.
+"""Masking treats the fingerprint and GUID fields as text, and reads a rule named
+by reference.
 
-A shape of the right length matched the GUID fields the skip list did not name
-(``baselineGuid``, ``runGuid``, ``firstDetectionRunGuid``) and the fingerprints
-that are a finding's identity, so a masked token stood where the schema wants a
-GUID and the finding's identity changed. A result that names its rule through
-``result.rule.id`` instead of ``ruleId`` was never matched to a secret rule.
+A fingerprint or GUID field is not on the skip list: a value a scanner matched
+can sit in a hash-shaped field, and masking is the side that fails closed. A
+result that names its rule through ``result.rule.id`` instead of ``ruleId`` was
+never matched to a secret rule.
 
 Every value here is derived at import time; none is a credential.
 """
@@ -62,10 +62,8 @@ def _guid(label):
     )
 
 
-#: A GUID-shaped text, and a value of the same length that shares its visible
-#: prefix and suffix, so the value's shape matches the GUID.
+#: A GUID-shaped text.
 GUID = _guid("identifier-fields-guid")
-GUID_SHAPED_VALUE = GUID[:2] + _derived("guid-shaped-body", 33) + GUID[-1]
 
 
 def _result(rule_id, line, message, uri="app.py", scanner="bandit", **extra):
@@ -100,7 +98,7 @@ def _results(*results, run_extra=None):
 
 
 class TestFingerprintsAndGuidsOfAPlainJsonReport:
-    def test_identifier_keys_are_left_alone(self):
+    def test_identifier_keys_are_masked_like_any_text(self):
         shape = SecretValueShape(prefix=GUID[:2], suffix=GUID[-1], length=36)
         tree = {
             "runGuid": GUID,
@@ -113,56 +111,51 @@ class TestFingerprintsAndGuidsOfAPlainJsonReport:
 
         mask_secret_values_in_tree(tree, [VALUE], [shape])
 
-        assert tree["runGuid"] == GUID
-        assert tree["baselineGuid"] == GUID
-        assert tree["provenance"]["firstDetectionRunGuid"] == GUID
-        assert tree["fingerprints"]["primaryLocationLineHash"] == VALUE
-        assert tree["partialFingerprints"]["primaryLocationLineHash"] == VALUE
-        # Control: the same tokens are masked where they are text.
+        assert VALUE not in tree["fingerprints"]["primaryLocationLineHash"]
+        assert VALUE not in tree["partialFingerprints"]["primaryLocationLineHash"]
+        assert tree["runGuid"] != GUID
+        assert tree["baselineGuid"] != GUID
+        assert tree["provenance"]["firstDetectionRunGuid"] != GUID
+        # Control: the same tokens are masked where they are message text.
         assert VALUE not in tree["message"]["text"]
         assert GUID not in tree["message"]["text"]
 
 
-class TestFingerprintsAndGuidsOfAModel:
-    def test_fingerprints_and_guids_are_left_alone(self):
+class TestFingerprintsOfAModel:
+    def test_a_fingerprint_holding_a_value_is_masked(self):
         neighbor = _result(
             "B404",
             9,
             "import " + VALUE,
             fingerprints={"primaryLocationLineHash": VALUE},
             partialFingerprints={"primaryLocationLineHash": VALUE},
-            provenance={"firstDetectionRunGuid": GUID, "lastDetectionRunGuid": GUID},
         )
-        model = _results(
-            _result("B105", 5, HARDCODED + f"'{VALUE}'"),
-            _result("B105", 6, HARDCODED + f"'{GUID_SHAPED_VALUE}'"),
-            neighbor,
-            run_extra={"baselineGuid": GUID},
-        )
+        model = _results(_result("B105", 5, HARDCODED + f"'{VALUE}'"), neighbor)
 
         mask_secrets_in_results(model)
 
-        run = model.sarif.runs[0]
-        result = run.results[2]
-        assert run.baselineGuid == GUID
-        assert result.fingerprints == {"primaryLocationLineHash": VALUE}
-        assert result.partialFingerprints == {"primaryLocationLineHash": VALUE}
-        assert result.provenance.firstDetectionRunGuid == GUID
-        assert result.provenance.lastDetectionRunGuid == GUID
-        # Control: the value is masked in the neighbor's message.
-        assert result.message.root.text == "import " + _mask_secret_value(VALUE)
+        masked = _mask_secret_value(VALUE)
+        result = model.sarif.runs[0].results[1]
+        assert result.fingerprints == {"primaryLocationLineHash": masked}
+        assert result.partialFingerprints == {"primaryLocationLineHash": masked}
+        # Control: the value is masked in the neighbor's message the same way.
+        assert result.message.root.text == "import " + masked
 
-    def test_the_masked_results_validate_when_loaded_back(self):
-        model = _results(
-            _result("B105", 6, HARDCODED + f"'{GUID_SHAPED_VALUE}'"),
-            _result("B404", 9, "import", provenance={"firstDetectionRunGuid": GUID}),
-            run_extra={"baselineGuid": GUID},
+    def test_a_fingerprint_holding_nothing_secret_is_kept(self):
+        """Control: a hash that is no exposed value is not touched."""
+        other = _value("identifier-fields-other", 40)
+        neighbor = _result(
+            "B404",
+            9,
+            "import",
+            fingerprints={"primaryLocationLineHash": other},
         )
+        model = _results(_result("B105", 5, HARDCODED + f"'{VALUE}'"), neighbor)
 
         mask_secrets_in_results(model)
-        loaded = AshAggregatedResults.model_validate_json(model.model_dump_json())
 
-        assert loaded.sarif.runs[0].baselineGuid == GUID
+        result = model.sarif.runs[0].results[1]
+        assert result.fingerprints == {"primaryLocationLineHash": other}
 
 
 class TestARuleNamedByReference:
