@@ -348,6 +348,20 @@ def test_the_sarif_upload_is_expected_from_the_planned_jobs():
     always = off.replace("    needs: ash\n", "    needs: ash\n    if: always()\n")
     assert expected(plan(load(always), called), "push") is True
     assert expected(plan(load(STEPS_JOB), {}), "pull_request") is False
+    # The sharded page's merge job uploads the SARIF itself, as a step of the block's
+    # own job; the block names no reusable workflow, so the plan entry has none.
+    uploads = SHARDED + (
+        "      - uses: github/codeql-action/upload-sarif@"
+        "9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1\n"
+        "        if: ${{ !cancelled() }}\n"
+        "        with:\n"
+        "          sarif_file: .ash/ash_output/reports/ash.ghas.sarif\n"
+    )
+    assert expected(plan(load(uploads), {}), "push", load(uploads)) is True
+    assert expected(plan(load(SHARDED), {}), "push", load(SHARDED)) is False
+    assert expected(plan(load(uploads), {}), "push") is False, (
+        "without the block's workflow the step cannot be seen"
+    )
 
 
 @pytest.mark.unit

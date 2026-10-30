@@ -1494,7 +1494,7 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
     # An upload is expected from the jobs the plan expects to run: a block whose SARIF
     # job calls upload-ash-sarif.yml behind an ``if`` act cannot satisfy, or whose scan
     # call turns collect-sarif-report off, uploads nothing under act.
-    if reports.sarif_upload_expected(plan, prepared.run.event):
+    if reports.sarif_upload_expected(plan, prepared.run.event, workflow):
         sarif = output / "reports" / "ash.ghas.sarif"
         uploads = [path for path, _ in _stub_records(prepared, "upload-sarif")]
         if not uploads:

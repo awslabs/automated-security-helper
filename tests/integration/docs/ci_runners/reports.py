@@ -866,11 +866,31 @@ def uploaded_artifact_names(
     return names
 
 
-def sarif_upload_expected(plan: Mapping[str, JobPlan], event: str | None) -> bool:
-    """Whether the planned run uploads ASH's SARIF report: a job of the SARIF upload
-    workflow is planned, or a call of the scan workflow leaves ``collect-sarif-report``
-    on and the event is a pull request, the one event its own upload step runs on."""
-    for entry in plan.values():
+#: The code scanning upload action, as a step of the block's own job or of the SARIF
+#: upload workflow.
+_UPLOAD_SARIF_ACTION = "github/codeql-action/upload-sarif@"
+
+
+def sarif_upload_expected(
+    plan: Mapping[str, JobPlan],
+    event: str | None,
+    workflow: Mapping[str, Any] | None = None,
+) -> bool:
+    """Whether the planned run uploads ASH's SARIF report: a planned job of the block
+    itself runs the upload action as a step (the sharded page's merge job), a job of
+    the SARIF upload workflow is planned, or a call of the scan workflow leaves
+    ``collect-sarif-report`` on and the event is a pull request, the one event its own
+    upload step runs on."""
+    jobs = (workflow or {}).get("jobs") or {}
+    for job_id, entry in plan.items():
+        if entry.workflow is None:
+            job = jobs.get(job_id)
+            if isinstance(job, Mapping) and any(
+                str(step.get("uses", "")).startswith(_UPLOAD_SARIF_ACTION)
+                for step in _steps(job)
+            ):
+                return True
+            continue
         if entry.workflow == SARIF_WORKFLOW:
             return True
         if entry.workflow == SCAN_WORKFLOW and event == "pull_request":
