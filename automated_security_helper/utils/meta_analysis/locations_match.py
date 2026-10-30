@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 
 def locations_match(loc1: Dict, loc2: Dict) -> bool:
@@ -10,6 +10,12 @@ def locations_match(loc1: Dict, loc2: Dict) -> bool:
     - Line ranges can overlap or be exact matches
     - Missing fields are handled gracefully
     - Locations with no common fields can match
+
+    A SARIF location whose ``physicalLocation``, ``artifactLocation`` or
+    ``region`` is JSON null is read as one without that part; line numbers given
+    as digit strings are read as the integers they spell. Both forms reach this
+    function from scanner reports and raised TypeError out of the whole
+    aggregation check.
 
     Args:
         loc1: First location (can be SARIF format or simple format)
@@ -51,6 +57,12 @@ def locations_match(loc1: Dict, loc2: Dict) -> bool:
     return _line_ranges_compatible(start1, end1, start2, end2)
 
 
+def _mapping(value) -> Dict:
+    """*value* when it is a mapping, else an empty one: a SARIF sub-object given as
+    JSON null has no fields."""
+    return value if isinstance(value, dict) else {}
+
+
 def _has_common_fields(loc1: Dict, loc2: Dict) -> bool:
     """Check if two locations have any common fields."""
     # Get all possible field names from both locations
@@ -58,29 +70,18 @@ def _has_common_fields(loc1: Dict, loc2: Dict) -> bool:
     fields2 = set()
 
     # SARIF format fields
-    if "physicalLocation" in loc1:
-        fields1.add("physicalLocation")
-        phys_loc = loc1["physicalLocation"]
-        if "artifactLocation" in phys_loc and "uri" in phys_loc["artifactLocation"]:
-            fields1.add("file_path")
-        if "region" in phys_loc:
-            region = phys_loc["region"]
-            if "startLine" in region:
-                fields1.add("start_line")
-            if "endLine" in region:
-                fields1.add("end_line")
-
-    if "physicalLocation" in loc2:
-        fields2.add("physicalLocation")
-        phys_loc = loc2["physicalLocation"]
-        if "artifactLocation" in phys_loc and "uri" in phys_loc["artifactLocation"]:
-            fields2.add("file_path")
-        if "region" in phys_loc:
-            region = phys_loc["region"]
-            if "startLine" in region:
-                fields2.add("start_line")
-            if "endLine" in region:
-                fields2.add("end_line")
+    for location, fields in ((loc1, fields1), (loc2, fields2)):
+        if "physicalLocation" not in location:
+            continue
+        fields.add("physicalLocation")
+        phys_loc = _mapping(location["physicalLocation"])
+        if "uri" in _mapping(phys_loc.get("artifactLocation")):
+            fields.add("file_path")
+        region = _mapping(phys_loc.get("region"))
+        if "startLine" in region:
+            fields.add("start_line")
+        if "endLine" in region:
+            fields.add("end_line")
 
     # Simple format fields
     for field in ["file_path", "start_line", "end_line"]:
@@ -112,11 +113,21 @@ def _line_ranges_compatible(start1, end1, start2, end2) -> bool:
     if (start1 is None and end1 is None) or (start2 is None and end2 is None):
         return True  # File-level match
 
-    # Handle null values - treat None as a wildcard that matches anything
+    # A side with an end line and no start line is read as that one line. It
+    # was read as a wildcard that matched any range, so two ranges whose only
+    # known lines were far apart were compatible.
     if start1 is None or start2 is None:
-        # If one start line is None, they can still match
-        return True
-    elif start1 != start2:
+        point, low, high = (
+            (end1, start2, end2) if start1 is None else (end2, start1, end1)
+        )
+        if low is None:
+            # Both sides are a lone end line.
+            return point == high or abs(point - high) <= 5
+        if high is None:
+            high = low
+        return low <= point <= high or abs(point - low) <= 5
+
+    if start1 != start2:
         # If both have start lines and they're different, check for overlap
         if end1 is not None and end2 is not None:
             # Check for overlapping ranges
@@ -148,8 +159,15 @@ def _normalize_file_path(path: str) -> str:
     text = str(path).replace("\\", "/")
     if text.startswith("file://"):
         text = text[len("file://") :]
-        # file:///C:/x -> C:/x
-        if len(text) > 2 and text[0] == "/" and text[2] == ":":
+        # file:///C:/x -> C:/x. Only a drive letter: a POSIX path such as
+        # /a:/file keeps its leading slash.
+        if (
+            len(text) > 2
+            and text[0] == "/"
+            and text[2] == ":"
+            and text[1].isascii()
+            and text[1].isalpha()
+        ):
             text = text[1:]
     while text.startswith("./"):
         text = text[2:]
@@ -187,11 +205,11 @@ def _extract_file_path(location: Dict) -> str:
     """Extract file path from location object."""
     # SARIF format
     if "physicalLocation" in location:
-        phys_loc = location["physicalLocation"]
-        if "artifactLocation" in phys_loc:
-            artifact = phys_loc["artifactLocation"]
-            if "uri" in artifact:
-                return artifact["uri"]
+        artifact = _mapping(
+            _mapping(location["physicalLocation"]).get("artifactLocation")
+        )
+        if "uri" in artifact:
+            return artifact["uri"]
 
     # Simple format
     if "file_path" in location:
@@ -200,18 +218,30 @@ def _extract_file_path(location: Dict) -> str:
     return None
 
 
+def _line_number(value) -> Optional[int]:
+    """*value* as a line number: an integer as given, a string of digits as the
+    integer it spells, anything else (a bool, a float, text) as no line."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def _extract_line_range(location: Dict) -> tuple:
     """Extract start and end line from location object."""
     # SARIF format
     if "physicalLocation" in location:
-        phys_loc = location["physicalLocation"]
+        phys_loc = _mapping(location["physicalLocation"])
         if "region" in phys_loc:
-            region = phys_loc["region"]
-            start_line = region.get("startLine")
-            end_line = region.get("endLine")
-            return start_line, end_line
+            region = _mapping(phys_loc["region"])
+            return _line_number(region.get("startLine")), _line_number(
+                region.get("endLine")
+            )
 
     # Simple format
-    start_line = location.get("start_line")
-    end_line = location.get("end_line")
-    return start_line, end_line
+    return _line_number(location.get("start_line")), _line_number(
+        location.get("end_line")
+    )
