@@ -246,12 +246,20 @@ def test_the_reaper_sees_the_whole_tree_not_only_direct_children():
 
     from automated_security_helper.utils.sandbox import landlock_exec
 
+    def direct_children() -> list:
+        # The wrapper's own children, read the way the walk reads one level:
+        # the children files, or the one /proc listing where a kernel has none.
+        found = landlock_exec._children_files()
+        if found is None:
+            found = landlock_exec._parent_map().get(os.getpid(), [])
+        return found
+
     tree = subprocess.Popen(  # nosec B603 - fixed argv
         ["/bin/sh", "-c", "sh -c 'sh -c \"sleep 30\" & wait' & wait"]
     )
     try:
         time.sleep(1)
-        direct = landlock_exec._children()
+        direct = direct_children()
         everything = landlock_exec._descendants()
         assert tree.pid in direct
         assert len(everything) >= 3, everything

@@ -576,20 +576,6 @@ def _parent_map(
     return parents
 
 
-def _children(pid: int = 0) -> List[int]:
-    """Processes whose parent is ``pid`` (this process when 0).
-
-    A test helper: the wrapper itself walks with ``_descendants``, which reads the
-    children files or one /proc listing for the whole tree. Kept for
-    tests/integration/sandbox/test_landlock_timeout.py, which compares the direct
-    children of a real tree with the whole walk.
-    """
-    found = _children_files(pid)
-    if found is not None:
-        return found
-    return _parent_map().get(pid or os.getpid(), [])
-
-
 def _parent_pid(pid: int) -> Optional[int]:
     """The parent of ``pid`` from /proc/<pid>/stat, or None when it is gone or unreadable."""
     try:
