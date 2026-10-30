@@ -1163,25 +1163,24 @@ def _semgrepignore_files(directory: Path, exists=os.path.lexists) -> List[Path]:
 
 
 def _parts_below(path: str, target: Path) -> tuple[str, ...]:
-    """The components of a path the tool reported, below the project root the tools
-    anchor their patterns at; the directories above that root never count.
+    """The components of a path the tool reported, below the target or the project
+    root; the directories above them never count.
 
     The tools report a path as given or relative to their project root, so a
-    relative path is taken as it is. An absolute one is made relative to the project
-    root (``_pattern_anchor``: the nearest ``.git`` at or above the target, else the
-    target itself), so a target that sits under ``tests/``, ``build/`` or ``vendor/``
-    inside a git work tree keeps those components, which the tools' own default
-    ignores match and leave the whole target out; the root is tried before the
-    target because the target is at or below it, and a path relative to the target
-    alone would drop exactly the components the tools matched. One under neither
-    keeps only its file name, so no directory above the project root can match a
-    directory pattern.
+    relative path is taken as it is. An absolute one is made relative to the target,
+    else to the project root (``_pattern_anchor``); one under neither keeps only its
+    file name, so no directory above the scan can match a directory pattern. The
+    target's own components below the project root (``tests/``, ``build/`` or
+    ``vendor/`` in a git work tree, which the tools' default ignores match) are not
+    this function's to add: ``_left_out_by_ash`` prefixes them once, from
+    ``_parts_of_target_below_root``, so the target is tried first here and an
+    absolute path under it contributes only what lies below the target.
     """
     reported = Path(path)
     if not reported.is_absolute():
         return reported.parts
     target_abs = Path(os.path.abspath(target))
-    for root in (_pattern_anchor(target_abs), target_abs):
+    for root in (target_abs, _pattern_anchor(target_abs)):
         try:
             return reported.relative_to(root).parts
         except ValueError:

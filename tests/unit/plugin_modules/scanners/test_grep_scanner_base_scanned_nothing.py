@@ -158,12 +158,14 @@ def test_a_target_nested_under_a_default_ignore_inside_a_git_work_tree_grades_sk
     anchor their patterns at the repository root, so ``--exclude tests/`` (ASH's
     re-passed default) leaves out every file of the target, and the files are
     reported under it. The ``tests`` component sits between the project root and
-    the target, so it is read and the target grades SKIPPED, as the tools graded
-    it; nothing here was the operator's exclude.
+    the target; ``_left_out_by_ash`` prefixes the target's own components below the
+    project root (``_parts_of_target_below_root``) to the reported path's
+    components below the target, so it is read once and the target grades SKIPPED,
+    as the tools graded it; nothing here was the operator's exclude.
 
-    Fails at the tip that read the path relative to the target first: the
-    component above the target was dropped and the scan raised ScannerError
-    blaming the operator's patterns.
+    A membership pin on that grading, green since the prefix was added, not a red
+    at the base: it holds whichever side supplies the component, and it fails if
+    the prefix is dropped without ``_parts_below`` reading the root itself.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     repo = tmp_path / "repo"
