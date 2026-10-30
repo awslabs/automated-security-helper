@@ -99,6 +99,7 @@ from automated_security_helper.core.resource_management.scan_tracking import (
     restored_results_refusal,
 )
 from automated_security_helper.core.resource_management.result_filters import (
+    ResultFilterInputError,
     filter_summary,
     filter_minimal,
     filter_actionable_only,
@@ -1766,6 +1767,26 @@ async def get_scan_results(
                 ),
             )
             return results
+
+    except ResultFilterInputError as e:
+        # The client's own input: an unknown scanner or severity name in the
+        # filters. It used to reach the handler below and leave as a server
+        # fault, logged as unexpected and with no category a client could
+        # branch on. The response names its category (the filter class
+        # carries it) and the server log does not record it as its own error.
+        message = raw_controls_on_one_line(
+            f"Error getting scan results: {error_text(e)}"
+        )
+        try:
+            await _tell_client_error(ctx, message)
+        except Exception:
+            logger.error(f"Failed to send error message to client: {error_text(e)}")
+        return {
+            "success": False,
+            "error": message,
+            "error_type": type(e).__name__,
+            "error_category": e.error_category,
+        }
 
     except Exception as e:
         log_unexpected_error(logger, e, "Error in get_scan_results")

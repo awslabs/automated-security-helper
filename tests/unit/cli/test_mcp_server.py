@@ -725,6 +725,63 @@ class TestGetScanResults:
         assert "semgrep" not in result["raw_results"]["scanner_results"]
 
     @pytest.mark.asyncio
+    async def test_an_unknown_scanner_name_is_the_clients_input_error(
+        self, mock_ctx, sample_full_results
+    ):
+        """A filter naming a scanner the results do not hold is the client's
+        input error (ResultFilterInputError, category invalid_parameter). It
+        used to fall through to the unexpected-error handler: logged as a server
+        fault, returned with no category a client could branch on."""
+        from automated_security_helper.cli.mcp_server import get_scan_results
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_results",
+                new_callable=AsyncMock,
+                return_value=sample_full_results,
+            ),
+            patch(
+                "automated_security_helper.cli.mcp_server.log_unexpected_error"
+            ) as unexpected,
+            patch("pathlib.Path.cwd", return_value=Path("/workspace")),
+        ):
+            result = await get_scan_results(
+                ctx=mock_ctx,
+                output_dir="/workspace/.ash/ash_output",
+                scanners="nope",
+            )
+
+        assert result["success"] is False
+        assert result["error_type"] == "ResultFilterInputError"
+        assert result["error_category"] == "invalid_parameter"
+        assert "Unknown scanner" in result["error"]
+        unexpected.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_severity_name_is_the_clients_input_error(
+        self, mock_ctx, sample_full_results
+    ):
+        from automated_security_helper.cli.mcp_server import get_scan_results
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_results",
+                new_callable=AsyncMock,
+                return_value=sample_full_results,
+            ),
+            patch("pathlib.Path.cwd", return_value=Path("/workspace")),
+        ):
+            result = await get_scan_results(
+                ctx=mock_ctx,
+                output_dir="/workspace/.ash/ash_output",
+                severities="urgent",
+            )
+
+        assert result["success"] is False
+        assert result["error_category"] == "invalid_parameter"
+        assert "Unknown severity" in result["error"]
+
+    @pytest.mark.asyncio
     async def test_results_error_from_upstream(self, mock_ctx):
         """When mcp_get_scan_results returns error, it is propagated."""
         from automated_security_helper.cli.mcp_server import get_scan_results
