@@ -63,7 +63,13 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sarif_utils import suppressions_in_effect
+from automated_security_helper.utils.sarif_utils import (
+    DEFAULT_RESULT_KIND,
+    result_kind,
+    result_rule_id,
+    result_scanner_name,
+    suppressions_in_effect,
+)
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     effective_sarif_level,
@@ -169,38 +175,6 @@ def _level_value(level: Any) -> str:
     return str(getattr(level, "value", level))
 
 
-def _rule_id(result: Any) -> Optional[str]:
-    """The id of the rule *result* names: its ruleId, else its rule.id.
-
-    SARIF 2.1.0 lets a result name its rule either way (3.27.5, 3.27.7). Read
-    as ruleId alone, a result naming it as rule.id was emitted with neither,
-    and with no rule entry.
-    """
-    if result.ruleId:
-        return result.ruleId
-    rule = getattr(result, "rule", None)
-    rule = getattr(rule, "root", rule)
-    return getattr(rule, "id", None) or None
-
-
-def _result_scanner(result: Any) -> Optional[str]:
-    """The scanner that produced *result*, from ``properties.scanner_name``.
-
-    Read by attribute and through ``model_extra``, because a ``PropertyBag``
-    allows extras and a key the schema does not declare lands there.
-    """
-    props = getattr(result, "properties", None)
-    if props is None:
-        return None
-    value = getattr(props, "scanner_name", None)
-    if value is None:
-        extra = getattr(props, "model_extra", None)
-        value = extra.get("scanner_name") if isinstance(extra, dict) else None
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
 def _scanner_identity(name: Any) -> str:
     """*name* as the identity every spelling of one scanner shares.
 
@@ -234,10 +208,10 @@ def _component_scanner(component: Any) -> str:
     return str(getattr(component, "name", None) or "")
 
 
-def _result_kind(result: Any) -> str:
-    """*result*'s SARIF ``kind`` as text; an absent kind is ``fail`` (3.27.9)."""
-    kind = getattr(result, "kind", None)
-    return str(getattr(kind, "value", kind) or "fail")
+#: The kinds whose results a reader still has to judge (SARIF 3.27.9). A result of
+#: either is left out of this file with every other non-failing kind; the count
+#: per kind is logged, because OCSF keeps them.
+_UNJUDGED_KINDS = ("open", "review")
 
 
 def _string_map(value: Any) -> Dict[str, str]:
@@ -443,6 +417,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             uri_bases = self._merged_uri_base_ids(runs, project_paths)
             if uri_bases is None:
                 return None
+            self._log_unjudged_kinds(runs)
 
             # 1. Collect all rules from every run's driver and extensions,
             #    flattened. Two scanners can declare one rule id (grype and
@@ -740,6 +715,33 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         return out
 
     @staticmethod
+    def _log_unjudged_kinds(runs: list) -> None:
+        """Say how many results of each kind a reader still has to judge are left
+        out of the file (:data:`_UNJUDGED_KINDS`).
+
+        ``_left_out`` drops every result whose kind is not ``fail``, ``open`` and
+        ``review`` included, while the OCSF report keeps them; the file said
+        nothing, so a reviewer comparing the two found findings in one and not the
+        other. Only the count is logged: whether those kinds belong in the file is
+        a decision this method does not take.
+        """
+        counts = dict.fromkeys(_UNJUDGED_KINDS, 0)
+        for run in runs:
+            for result in run.results or []:
+                kind = result_kind(result)
+                if kind in counts:
+                    counts[kind] += 1
+        found = {kind: count for kind, count in counts.items() if count}
+        if found:
+            listed = ", ".join(
+                f"{count} of kind '{kind}'" for kind, count in found.items()
+            )
+            ASH_LOGGER.warning(
+                f"GHAS report: {listed} left out of the file, as every result whose "
+                "kind is not 'fail' is; the OCSF report keeps them"
+            )
+
+    @staticmethod
     def _merged_uri_base_ids(
         runs: list, project_paths: Dict[int, Optional[str]]
     ) -> Optional[Dict[str, Dict[str, str]]]:
@@ -797,10 +799,10 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
     ) -> Optional[str]:
         """The rule id *result* is emitted under: its own, or the qualified id
         its scanner's colliding rule was declared under (:meth:`_collect_rules`)."""
-        rule_id = _rule_id(result)
+        rule_id = result_rule_id(result)
         if not rule_id or not qualified:
             return rule_id
-        scanner = _result_scanner(result)
+        scanner = result_scanner_name(result)
         if scanner is None:
             return rule_id
         return qualified.get((_scanner_identity(scanner), rule_id), rule_id)
@@ -1011,7 +1013,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         ``underReview`` has not taken effect (SARIF 3.35.4), the gate still fails
         the scan on the finding, and the file kept it out as if it were dismissed.
         """
-        if _result_kind(result) != "fail":
+        if result_kind(result) != DEFAULT_RESULT_KIND:
             return True
         return bool(
             self.config
@@ -1052,7 +1054,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 level_val = effective_sarif_level(result)
                 rules_map[rule_id] = {
                     "id": rule_id,
-                    "component": _result_scanner(result) or "",
+                    "component": result_scanner_name(result) or "",
                     "security_severity": None,
                     "default_level": None,
                     "short_description": None,
