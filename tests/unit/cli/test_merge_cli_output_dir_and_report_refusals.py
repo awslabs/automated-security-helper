@@ -139,6 +139,28 @@ class TestARefusedReportLeavesNoMergedFile:
             "ash.sarif"
         ]
 
+    def test_an_earlier_runs_results_file_is_removed_with_the_refusal(self, tmp_path):
+        """A reused output directory: the earlier run's file would otherwise be
+        read by a later ``ash report`` as this merge's."""
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(2))
+        output_dir = tmp_path / "merged"
+        (output_dir / "reports").mkdir(parents=True)
+        earlier = output_dir / RESULTS_FILE_NAME
+        earlier.write_text("{}", encoding="utf-8")
+        outside = tmp_path / "outside.sarif"
+        outside.write_text("unchanged", encoding="utf-8")
+        (output_dir / "reports" / "ash.sarif").symlink_to(outside)
+
+        result = _MergeCli()._invoke(_args(shard_paths, output_dir))
+
+        assert result.exit_code == 1, result.output
+        assert not earlier.exists(), result.output
+        console = "".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        assert "".join(f"An earlier run's {RESULTS_FILE_NAME} at".split()) in console, (
+            result.output
+        )
+        assert "wasremoved" in console, result.output
+
 
 class TestTheRelocatedOutputDirIsCheckedAgain:
     def test_a_cwd_inside_the_relocation_target_is_relocated_further(

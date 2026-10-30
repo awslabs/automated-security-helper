@@ -3382,12 +3382,13 @@ def merge_command(
         # Refused before any reporter wrote: a link at the reports directory or at
         # a report file, or a report file name outside it. Printed like the other
         # refusals here, without a traceback. The merged results file is written
-        # only below, so a refused merge leaves none, as every refusal before it
-        # leaves none, and a later ``ash report`` does not read a file that
-        # records no refusal as a completed merge.
+        # only below, so a refused merge leaves none of its own; one an earlier
+        # run left in a reused output directory is removed, or named when it
+        # cannot be, so a later ``ash report`` does not read it as this merge's.
+        earlier = _remove_an_earlier_results_file(merged_file)
         print(
             f"[red]Refusing to write reports: {escape_markup(str(exc))} No merged "
-            f"{RESULTS_FILE_NAME} was written.[/red]"
+            f"{RESULTS_FILE_NAME} was written.{escape_markup(earlier)}[/red]"
         )
         raise typer.Exit(1)
 
@@ -3595,6 +3596,33 @@ def _relocate_colliding_output_dir(output_dir: Path) -> Path:
         f"{escape_markup(Path(relocated).as_posix())}[/bold yellow]"
     )
     return relocated
+
+
+def _remove_an_earlier_results_file(merged_file: Path) -> str:
+    """Remove a results file an earlier run left at *merged_file*; say what happened.
+
+    Called on a refusal in the report phases, when this run has written no
+    results file of its own. A file from an earlier run in a reused output
+    directory would otherwise be read by a later ``ash report`` as this merge's
+    (the write-then-remove order this replaced removed it as a side effect).
+    Returns the sentence for the refusal text: empty when there was no file; a
+    file that cannot be removed is named rather than raised over, so the
+    refusal is still printed as a refusal.
+    """
+    if not merged_file.exists():
+        return ""
+    try:
+        merged_file.unlink()
+    except OSError as exc:
+        reason = exc.strerror or type(exc).__name__
+        return (
+            f" An earlier run's {RESULTS_FILE_NAME} at {merged_file.as_posix()} "
+            f"could not be removed ({reason}); it is not this merge's."
+        )
+    return (
+        f" An earlier run's {RESULTS_FILE_NAME} at {merged_file.as_posix()} was "
+        "removed."
+    )
 
 
 def _results_file_the_merge_would_overwrite(
