@@ -616,14 +616,16 @@ def config_ignore_patterns(config_path: Path) -> List[str]:
     try:
         text = decode_workflow(config_path.read_bytes())
         document = load_config_yaml(text)
+        paths = document.get("paths") if isinstance(document, dict) else None
+        # The second read of the text (the composed node tree the pattern
+        # texts come from) is held to the same report as the first: a refusal
+        # there is the caller's to warn with, never an exception out of here.
+        patterns = _ignore_pattern_texts(text) if isinstance(paths, dict) else set()
     except yaml.YAMLError as exc:
         raise IgnorePatternsUnlisted(_yaml_problem(exc)) from exc
     except (OSError, ValueError, RecursionError) as exc:
         raise IgnorePatternsUnlisted(str(exc) or exc.__class__.__name__) from exc
-    paths = document.get("paths") if isinstance(document, dict) else None
-    if not isinstance(paths, dict):
-        return []
-    return sorted(_ignore_pattern_texts(text))
+    return sorted(patterns)
 
 
 def _credential_lines(errors: Any) -> Set[Tuple[Any, Any]]:

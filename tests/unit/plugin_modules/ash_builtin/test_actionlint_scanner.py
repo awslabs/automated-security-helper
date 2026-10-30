@@ -1226,6 +1226,28 @@ def test_a_config_ash_cannot_read_is_reported_rather_than_listed_as_empty(
 
 
 @pytest.mark.unit
+def test_a_refusal_on_the_second_read_is_reported_rather_than_raised(
+    tmp_path, monkeypatch
+):
+    """The patterns are listed from a second read of the text (the composed
+    node tree) after the document parsed. A YAML error from that read is
+    reported the way the first read's is, so the caller warns and the scan
+    goes on; before, it escaped config_ignore_patterns as the raw exception."""
+    config = tmp_path / "actionlint.yaml"
+    config.write_text("paths:\n  '**':\n    ignore: [x]\n")
+
+    def refuse(text):
+        raise module.yaml.composer.ComposerError(
+            None, None, "refused on the second read", None
+        )
+
+    monkeypatch.setattr(module, "_ignore_pattern_texts", refuse)
+
+    with pytest.raises(module.IgnorePatternsUnlisted, match="second read"):
+        config_ignore_patterns(config)
+
+
+@pytest.mark.unit
 def test_a_utf16_config_is_read_by_its_byte_order_mark(tmp_path):
     config = tmp_path / "actionlint.yaml"
     body = "paths:\n  '**':\n    ignore: [x]\n"
