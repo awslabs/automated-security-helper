@@ -77,6 +77,139 @@ def test_a_stale_removal_does_not_delete_the_entry_now_at_its_index(tmp_path):
     ]
 
 
+def test_two_fixes_on_one_entry_are_both_applied(tmp_path):
+    """Red before the fixers resolved entries against the list as loaded: the
+    line-range fix set line_end, which changed the entry's id, and the removal
+    for the same entry then found nothing and silently kept the expired entry
+    the operator said yes to removing."""
+    config_path = tmp_path / ".ash.yaml"
+    _write(
+        config_path,
+        [
+            {"path": "src/first.py", "rule_id": "B101", "reason": "keep"},
+            {
+                "path": "src/both.py",
+                "rule_id": "B102",
+                "reason": "old",
+                "line_start": 10,
+                "expiration": "2020-01-01",
+            },
+        ],
+    )
+    issues = ConfigLinter.lint(config_path).fixable_issues
+    assert sorted(i.category for i in issues) == sorted(
+        [LintCategory.SUPPRESSION_LINE_RANGE, LintCategory.SUPPRESSION_EXPIRED]
+    )
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, issues)
+
+    assert sorted(i.category for i in fixed_issues) == sorted(
+        [LintCategory.SUPPRESSION_LINE_RANGE, LintCategory.SUPPRESSION_EXPIRED]
+    )
+    data = yaml.safe_load(fixed_content)
+    assert [s["path"] for s in data["global_settings"]["suppressions"]] == [
+        "src/first.py"
+    ]
+
+
+def test_a_line_range_fix_and_a_reason_fix_on_one_entry_both_land(tmp_path):
+    """Red before the as-loaded resolution: whichever in-place fix ran second
+    no longer found the entry (its id had moved) and was reported not done."""
+    config_path = tmp_path / ".ash.yaml"
+    _write(
+        config_path,
+        [
+            {
+                "path": "src/both.py",
+                "rule_id": "B102",
+                "reason": "two\nlines",
+                "line_start": 10,
+            },
+        ],
+    )
+    issues = ConfigLinter.lint(config_path).fixable_issues
+    assert sorted(i.category for i in issues) == sorted(
+        [LintCategory.SUPPRESSION_LINE_RANGE, LintCategory.SUPPRESSION_MULTILINE_REASON]
+    )
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, issues)
+
+    assert len(fixed_issues) == 2
+    entry = yaml.safe_load(fixed_content)["global_settings"]["suppressions"][0]
+    assert entry["line_end"] == 10
+    assert entry["reason"] == "two lines"
+
+
+def test_a_moved_entry_is_fixed_where_it_is_now(tmp_path):
+    """An entry that changed place between the lint and the confirmation is
+    found by its id, and the entry now at its old index is left alone."""
+    config_path = tmp_path / ".ash.yaml"
+    _write(
+        config_path,
+        [
+            {"path": "src/first.py", "rule_id": "B101", "reason": "keep"},
+            {
+                "path": "src/expired.py",
+                "rule_id": "B102",
+                "reason": "old",
+                "expiration": "2020-01-01",
+            },
+            {"path": "src/keep.py", "rule_id": "B103", "reason": "keep too"},
+        ],
+    )
+    issues = ConfigLinter.lint(config_path).fixable_issues
+    assert [i.path for i in issues] == ["global_settings.suppressions[1]"]
+    _write(
+        config_path,
+        [
+            {
+                "path": "src/expired.py",
+                "rule_id": "B102",
+                "reason": "old",
+                "expiration": "2020-01-01",
+            },
+            {"path": "src/first.py", "rule_id": "B101", "reason": "keep"},
+            {"path": "src/keep.py", "rule_id": "B103", "reason": "keep too"},
+        ],
+    )
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, issues)
+
+    assert [i.category for i in fixed_issues] == [LintCategory.SUPPRESSION_EXPIRED]
+    data = yaml.safe_load(fixed_content)
+    assert [s["path"] for s in data["global_settings"]["suppressions"]] == [
+        "src/first.py",
+        "src/keep.py",
+    ]
+
+
+def test_of_two_entries_with_one_id_only_the_expired_one_is_removed(tmp_path):
+    """Two entries that differ only in expiration carry one id (the id leaves
+    expiration out); the issue's index picks the expired one, and the shared
+    id never makes the other one a match."""
+    config_path = tmp_path / ".ash.yaml"
+    _write(
+        config_path,
+        [
+            {"path": "src/same.py", "rule_id": "B101", "reason": "same"},
+            {
+                "path": "src/same.py",
+                "rule_id": "B101",
+                "reason": "same",
+                "expiration": "2020-01-01",
+            },
+        ],
+    )
+    issues = ConfigLinter.lint(config_path).fixable_issues
+    assert [i.path for i in issues] == ["global_settings.suppressions[1]"]
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, issues)
+
+    assert [i.category for i in fixed_issues] == [LintCategory.SUPPRESSION_EXPIRED]
+    remaining = yaml.safe_load(fixed_content)["global_settings"]["suppressions"]
+    assert remaining == [{"path": "src/same.py", "rule_id": "B101", "reason": "same"}]
+
+
 def test_an_issue_the_file_still_raises_is_applied(tmp_path):
     """The control: nothing changed, so the earlier issue is applied as before."""
     config_path = tmp_path / ".ash.yaml"

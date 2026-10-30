@@ -458,6 +458,14 @@ class ConfigLinter:
 
         fixed_issues: List[LintIssue] = []
 
+        # The suppressions as loaded, each with the id lint would have recorded
+        # for it. Every fixer resolves its entry against this snapshot, never
+        # against the list as the earlier fixers have changed it: a fix that
+        # sets line_end or collapses a reason changes the entry's id, and a
+        # later fix for the same entry (its removal, say) would no longer find
+        # it, or could find another entry that now carries the id it looks for.
+        loaded = cls._loaded_suppressions(config_data)
+
         # Separate removal operations from in-place modifications.
         # Removals must be processed in reverse index order to avoid shifting.
         removal_issues = []
@@ -482,11 +490,11 @@ class ConfigLinter:
                     fixed_issues.append(issue)
 
             elif issue.category == LintCategory.SUPPRESSION_LINE_RANGE:
-                if cls._fix_suppression_line_range(config_data, issue):
+                if cls._fix_suppression_line_range(config_data, issue, loaded):
                     fixed_issues.append(issue)
 
             elif issue.category == LintCategory.SUPPRESSION_MULTILINE_REASON:
-                if cls._fix_suppression_reason_newline(config_data, issue):
+                if cls._fix_suppression_reason_newline(config_data, issue, loaded):
                     fixed_issues.append(issue)
 
             elif issue.category == LintCategory.LEGACY_NAME_VARIANT:
@@ -499,7 +507,7 @@ class ConfigLinter:
         )
         for issue in removal_issues:
             if issue.category == LintCategory.SUPPRESSION_EXPIRED:
-                if cls._fix_expired_suppression(config_data, issue):
+                if cls._fix_expired_suppression(config_data, issue, loaded):
                     fixed_issues.append(issue)
 
         # Generate the fixed content
@@ -2386,11 +2394,14 @@ class ConfigLinter:
 
     @classmethod
     def _fix_suppression_line_range(
-        cls, config_data: Dict[str, Any], issue: LintIssue
+        cls,
+        config_data: Dict[str, Any],
+        issue: LintIssue,
+        loaded: Optional[List[Tuple[Any, Optional[str]]]] = None,
     ) -> bool:
         """Fix a suppression with line_start but missing line_end."""
         suppressions = cls._suppressions_of(config_data)
-        idx = cls._suppression_index_for(suppressions, issue)
+        idx = cls._suppression_index_for(suppressions, issue, loaded)
         if idx is None:
             return False
         suppression = suppressions[idx]
@@ -2400,11 +2411,29 @@ class ConfigLinter:
         return False
 
     @classmethod
+    def _loaded_suppressions(
+        cls, config_data: Dict[str, Any]
+    ) -> List[Tuple[Any, Optional[str]]]:
+        """The suppressions list as loaded, each entry with its id as loaded.
+
+        Taken once, before any fixer runs, so the fixers resolve their entries
+        against the ids lint recorded, not against entries other fixers have
+        changed since (a changed entry has a different id).
+        """
+        return [
+            (entry, cls._entry_id_of(entry))
+            for entry in cls._suppressions_of(config_data)
+        ]
+
+    @classmethod
     def _suppression_index_for(
-        cls, suppressions: List[Any], issue: LintIssue
+        cls,
+        suppressions: List[Any],
+        issue: LintIssue,
+        loaded: Optional[List[Tuple[Any, Optional[str]]]] = None,
     ) -> Optional[int]:
         """The index of the entry ``issue`` is about in ``suppressions``, the
-        list as the file reads now, or None when it cannot be found.
+        list as it is now, or None when it cannot be found.
 
         The issue's path names an index in the list its lint read, and the
         file is read again before the fix, after the caller's confirmation
@@ -2413,22 +2442,34 @@ class ConfigLinter:
         moved is found by that id when exactly one entry carries it; an entry
         that is gone, or an id two entries share, means no fix. An issue made
         without an id (a caller's own) is applied by index as before.
+
+        ``loaded`` is the list as it was loaded with each entry's id at that
+        moment (``_loaded_suppressions``). Given, the ids are compared against
+        it, so an entry an earlier fixer changed in place (its id has moved)
+        is still found, and the result is that entry's index in
+        ``suppressions`` now (an entry an earlier removal popped is gone).
+        Without it the ids are computed from ``suppressions`` as they are.
         """
         idx = cls._parse_suppression_index(issue.path)
         if idx is None:
             return None
         if issue.entry_id is None:
             return idx if idx < len(suppressions) else None
-        if idx < len(suppressions) and cls._entry_id_of(suppressions[idx]) == (
-            issue.entry_id
-        ):
-            return idx
-        matches = [
-            i
-            for i, entry in enumerate(suppressions)
-            if cls._entry_id_of(entry) == issue.entry_id
-        ]
-        return matches[0] if len(matches) == 1 else None
+        if loaded is None:
+            loaded = [(entry, cls._entry_id_of(entry)) for entry in suppressions]
+        if idx < len(loaded) and loaded[idx][1] == issue.entry_id:
+            found = loaded[idx][0]
+        else:
+            matches = [
+                entry for entry, entry_id in loaded if entry_id == issue.entry_id
+            ]
+            if len(matches) != 1:
+                return None
+            found = matches[0]
+        for current_index, entry in enumerate(suppressions):
+            if entry is found:
+                return current_index
+        return None
 
     @classmethod
     def _entry_id_of(cls, entry: Any) -> Optional[str]:
@@ -2448,11 +2489,14 @@ class ConfigLinter:
 
     @classmethod
     def _fix_suppression_reason_newline(
-        cls, config_data: Dict[str, Any], issue: LintIssue
+        cls,
+        config_data: Dict[str, Any],
+        issue: LintIssue,
+        loaded: Optional[List[Tuple[Any, Optional[str]]]] = None,
     ) -> bool:
         """Collapse a multi-line suppression reason onto a single line."""
         suppressions = cls._suppressions_of(config_data)
-        idx = cls._suppression_index_for(suppressions, issue)
+        idx = cls._suppression_index_for(suppressions, issue, loaded)
         if idx is None:
             return False
 
@@ -2475,11 +2519,14 @@ class ConfigLinter:
 
     @classmethod
     def _fix_expired_suppression(
-        cls, config_data: Dict[str, Any], issue: LintIssue
+        cls,
+        config_data: Dict[str, Any],
+        issue: LintIssue,
+        loaded: Optional[List[Tuple[Any, Optional[str]]]] = None,
     ) -> bool:
         """Remove an expired suppression."""
         suppressions = cls._suppressions_of(config_data)
-        idx = cls._suppression_index_for(suppressions, issue)
+        idx = cls._suppression_index_for(suppressions, issue, loaded)
         if idx is None:
             return False
         suppressions.pop(idx)
