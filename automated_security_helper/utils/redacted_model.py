@@ -2625,11 +2625,19 @@ class RedactedSection(BaseModel):
         (``revalidate_instances="never"``), and this validator then runs on it.
         A stand-in that passes the instance check without being one of these
         models (a ``MagicMock`` built with ``spec=``) has no class attributes
-        and no extras dict to read, so it is left as given."""
-        cls = type(self)
-        if not (isinstance(cls, type) and issubclass(cls, RedactedSection)):
+        and no extras dict to read, so it is left as given.
+
+        The class is read as ``type(self)`` at each use and never bound to a
+        name: the package's shown-text guard
+        (tests/unit/utils/test_shown_text_is_shown_once.py) treats a name bound
+        to a class taken from a value as that class everywhere in the module,
+        so a ``cls`` bound here would make every classmethod's ``cls`` argument
+        in this file read as a class from a value."""
+        if not (
+            isinstance(type(self), type) and issubclass(type(self), RedactedSection)
+        ):
             return self
-        if cls._downcast_extras:
+        if type(self)._downcast_extras:
             extras = self.__pydantic_extra__
             if extras and _holds_env_scalar(extras):
                 downcast = without_env_scalars(extras)
