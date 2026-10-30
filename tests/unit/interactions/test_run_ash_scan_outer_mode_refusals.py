@@ -270,6 +270,117 @@ def test_the_actionability_check_reads_the_scanners_own_threshold(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _results_with_the_file_apart_from_the_model(tmp_path, in_model, in_file):
+    """A results model holding *in_model* while the report this run wrote
+    (reports/ash.sarif) holds *in_file*: the shape of a report phase over saved
+    results, and of a container's or a shell's inner run writing the file."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.models.asharp_model import (
+        AshAggregatedResults,
+        ScannerStatusInfo,
+    )
+    from automated_security_helper.schemas.sarif_schema_model import (
+        Result,
+        Run,
+        SarifReport,
+        Tool,
+        ToolComponent,
+    )
+
+    AshConfig.model_rebuild()
+    AshAggregatedResults.model_rebuild()
+    results = AshAggregatedResults()
+    results.ash_config = AshConfig.model_validate(
+        {
+            "project_name": "min-severity",
+            "global_settings": {"severity_threshold": "LOW"},
+            "scanners": {"bandit": {"options": {"severity_threshold": "CRITICAL"}}},
+        }
+    )
+    results.sarif = SarifReport(
+        version="2.1.0",
+        runs=[
+            Run(
+                tool=Tool(driver=ToolComponent(name="ASH", version="1.0")),
+                results=[Result.model_validate(finding) for finding in in_model],
+            )
+        ],
+    )
+    results.scanner_results["bandit"] = ScannerStatusInfo()
+    results.scanner_results["semgrep"] = ScannerStatusInfo()
+    sarif_file = tmp_path / "out" / "reports" / "ash.sarif"
+    sarif_file.parent.mkdir(parents=True, exist_ok=True)
+    sarif_file.write_text(
+        json.dumps(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "ASH", "version": "1.0"}},
+                        "results": list(in_file),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return results
+
+
+def test_a_count_taken_from_the_written_report_is_judged_on_that_report(tmp_path):
+    """The model holds only a MEDIUM bandit finding its scanner's CRITICAL
+    threshold makes non-actionable; the report this run wrote holds an
+    actionable HIGH semgrep finding. The count (1) comes from the file, so the
+    --min-severity question is answered on the file too: exit 2. Judging the
+    model's results against the file's count read the run as having no
+    qualifying finding and exited 0."""
+    results = _results_with_the_file_apart_from_the_model(
+        tmp_path,
+        in_model=[_finding("bandit", "warning", "MEDIUM")],
+        in_file=[_finding("semgrep", "error", "HIGH")],
+    )
+
+    assert (
+        ras._compute_exit_code(
+            results, _opts(tmp_path, "low"), report_sarif_written_this_run=True
+        )
+        == 2
+    )
+
+
+def test_a_written_report_with_no_actionable_finding_still_exits_0(tmp_path):
+    """Control: the file decides, and it holds only the non-actionable finding."""
+    results = _results_with_the_file_apart_from_the_model(
+        tmp_path,
+        in_model=[_finding("semgrep", "error", "HIGH")],
+        in_file=[_finding("bandit", "warning", "MEDIUM")],
+    )
+
+    assert (
+        ras._compute_exit_code(
+            results, _opts(tmp_path, "low"), report_sarif_written_this_run=True
+        )
+        == 0
+    )
+
+
+def test_the_minimum_is_read_on_the_written_report_too(tmp_path):
+    """The file's one actionable finding is LOW; with --min-severity medium
+    nothing qualifies, as the model-side rule already read it."""
+    results = _results_with_the_file_apart_from_the_model(
+        tmp_path,
+        in_model=[],
+        in_file=[_finding("semgrep", "note", "LOW")],
+    )
+
+    assert (
+        ras._compute_exit_code(
+            results, _opts(tmp_path, "medium"), report_sarif_written_this_run=True
+        )
+        == 0
+    )
+
+
 def test_a_workspace_plan_in_nix_mode_runs_inside_the_shell(tmp_path, monkeypatch):
     plan = _workspace_plan(tmp_path)
     entered = {}

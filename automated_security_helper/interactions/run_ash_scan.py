@@ -5436,12 +5436,14 @@ def _run_nix_mode(
     # The two refusals of Nix mode (`nix` missing, the recursion guard) are asked
     # first: a refused run starts no shell, so it must not delete the reports of a
     # run that did. run_ash_nix asks them again for a caller that reaches it directly.
-    from automated_security_helper.interactions.run_ash_nix import (
-        nix_executable_for_this_run,
-    )
+    # They are read off the runner this function will call (run_ash_nix.preflight),
+    # not imported beside it: a stand-in runner that starts no shell carries no
+    # preflight and is asked nothing about a `nix` it will not use.
+    preflight = getattr(run_ash_nix, "preflight", None)
 
     try:
-        nix_executable_for_this_run()
+        if callable(preflight):
+            preflight()
         sweep_leftovers_before_run(opts.oci_runner)
         sweep_env_dirs()
         _discard_prior_run_artifacts(opts, logger)
@@ -6815,6 +6817,13 @@ def _compute_exit_code(
     # container and nix mode another process wrote.
     from automated_security_helper.base.reporter_plugin import confined_report_path
 
+    # Indexed, not .get() with a default: ScanOptions only holds a ranked value.
+    min_sev_rank = _SEVERITY_RANK[opts.min_severity.lower()]
+    # Set when the count below is taken from the written report: whether that
+    # report holds a counted result at or above --min-severity. None when the
+    # count comes from the model's own results, which are then judged instead.
+    counted_in_file: Optional[bool] = None
+
     sarif_file = confined_report_path(reports_dir, sarif_name) if sarif_name else None
     if (
         sarif_file is not None
@@ -6851,6 +6860,13 @@ def _compute_exit_code(
                 return _threshold_cache[key]
 
             sarif_active = 0
+            # The --min-severity question is answered on the file the count is
+            # taken from. The model's own results can hold other findings: a
+            # report phase over saved results writes this run's report from
+            # them, and in container and Nix mode the inner run wrote the file.
+            # Judging the model's results against a count made from the file
+            # read a run whose only finding sat in the file as having none.
+            file_has_qualifying = False
             for sarif_run in sarif_json.get("runs", []):
                 for r in sarif_run.get("results", []):
                     if r.get("suppressions"):
@@ -6865,38 +6881,54 @@ def _compute_exit_code(
                         else ""
                     )
                     if issue_severity in SEVERITIES:
-                        if severity_fails_threshold(issue_severity, threshold):
-                            sarif_active += 1
-                    elif sarif_level_fails_threshold(r.get("level"), threshold):
-                        sarif_active += 1
+                        counted = severity_fails_threshold(issue_severity, threshold)
+                    else:
+                        counted = sarif_level_fails_threshold(r.get("level"), threshold)
+                    if not counted:
+                        continue
+                    sarif_active += 1
+                    # Rank as _severity_filters_finding ranks a model result:
+                    # the one severity rule (utils.severity_ladder.result_severity)
+                    # reads a result's JSON form too.
+                    if (
+                        _SEVERITY_RANK.get(_resolve_result_severity(r), 1)
+                        >= min_sev_rank
+                    ):
+                        file_has_qualifying = True
             actionable_findings = sarif_active
+            counted_in_file = file_has_qualifying
         except Exception:  # nosec B110
             pass  # Fall through to the unified-metrics count
 
-    # Indexed, not .get() with a default: ScanOptions only holds a ranked value.
-    min_sev_rank = _SEVERITY_RANK[opts.min_severity.lower()]
     if min_sev_rank > 0 and actionable_findings > 0:
-        has_qualifying = False
-        try:
-            sarif = getattr(results, "sarif", None)
-            if sarif is None or not getattr(sarif, "runs", None):
-                has_qualifying = True
-            for run in getattr(sarif, "runs", []) if not has_qualifying else []:
-                for result in getattr(run, "results", []):
-                    # A qualifying result is an ACTIONABLE one at or above the
-                    # minimum: one its own scanner's threshold made
-                    # non-actionable is not counted above, so it cannot be the
-                    # reason the count stands, and reading it as qualifying kept
-                    # exit 2 for actionable findings below --min-severity.
-                    if _severity_filters_finding(
-                        result, min_sev_rank
-                    ) and _actionable_under_its_scanner_threshold(result, results):
-                        has_qualifying = True
+        if counted_in_file is not None:
+            # The count came from the written report, and so does the answer:
+            # every counted result there passed its own scanner's threshold,
+            # so a counted one at or above the minimum is a qualifying one.
+            has_qualifying = counted_in_file
+        else:
+            has_qualifying = False
+            try:
+                sarif = getattr(results, "sarif", None)
+                if sarif is None or not getattr(sarif, "runs", None):
+                    has_qualifying = True
+                for run in getattr(sarif, "runs", []) if not has_qualifying else []:
+                    for result in getattr(run, "results", []):
+                        # A qualifying result is an ACTIONABLE one at or above
+                        # the minimum: one its own scanner's threshold made
+                        # non-actionable is not counted above, so it cannot be
+                        # the reason the count stands, and reading it as
+                        # qualifying kept exit 2 for actionable findings below
+                        # --min-severity.
+                        if _severity_filters_finding(
+                            result, min_sev_rank
+                        ) and _actionable_under_its_scanner_threshold(result, results):
+                            has_qualifying = True
+                            break
+                    if has_qualifying:
                         break
-                if has_qualifying:
-                    break
-        except Exception:
-            has_qualifying = True
+            except Exception:
+                has_qualifying = True
         if not has_qualifying:
             actionable_findings = 0
 

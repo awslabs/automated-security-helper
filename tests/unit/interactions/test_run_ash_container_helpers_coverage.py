@@ -1584,7 +1584,9 @@ class TestExecuteContainer:
         result = _execute_container(["docker", "run"], debug=True)
 
         assert result is failure
-        assert "Container execution failed with error:" in capfd.readouterr().out
+        # The line names the status, not the raw command (its override values
+        # are shown by key elsewhere).
+        assert "Container execution failed with code 2" in capfd.readouterr().out
 
     def test_without_debug_nothing_extra_is_printed(self, monkeypatch, capfd):
         expected = create_completed_process(args=["docker"], returncode=0)

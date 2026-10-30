@@ -246,3 +246,25 @@ def test_a_host_without_nix_keeps_the_previous_runs_output(tmp_path, monkeypatch
     assert refused.value.code == 1
     assert prior.exists(), "the previous run's report was cleared before the refusal"
     assert (out / "ash_aggregated_results.json").exists()
+
+
+def test_a_stand_in_runner_is_asked_nothing_about_nix(launched, tmp_path, monkeypatch):
+    """The refusals travel with the runner: a recorder in run_ash_nix's place
+    starts no shell, so a host without `nix` is no reason to refuse before it.
+    Asked beside the runner instead, the check refused every such run on a
+    host without nix before the recorder was reached."""
+    from automated_security_helper.interactions import run_ash_nix
+
+    monkeypatch.setattr(run_ash_nix, "find_executable", lambda _name: None)
+
+    _run(tmp_path)
+
+    assert launched.get("argv") is not None, "the stand-in runner was never reached"
+
+
+def test_the_real_runner_carries_the_refusals():
+    """Control for the test above: the real runner's preflight is the check
+    the entry point asks before clearing the previous run's output."""
+    from automated_security_helper.interactions import run_ash_nix
+
+    assert run_ash_nix.run_ash_nix.preflight is run_ash_nix.nix_executable_for_this_run

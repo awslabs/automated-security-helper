@@ -283,6 +283,15 @@ def run_ash_nix(
     return _enter_shell(cmd, env=env)
 
 
+# The refusals travel with the runner. The scan entry point asks
+# ``run_ash_nix.preflight()`` before it clears the previous run's output, so a
+# refused run never deletes the reports of one that ran; it reads the attribute
+# off whatever ``run_ash_nix`` is bound to, so a stand-in runner that starts no
+# shell (a test's recorder, a caller's own launcher) is asked nothing about a
+# ``nix`` it will not use.
+run_ash_nix.preflight = nix_executable_for_this_run  # type: ignore[attr-defined]
+
+
 def _enter_shell(cmd: List[str], env: Dict[str, str]) -> subprocess.CompletedProcess:
     """Run the Nix shell, passing Ctrl-C on to it as container mode does its runtime.
 
