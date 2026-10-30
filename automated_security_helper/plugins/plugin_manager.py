@@ -550,6 +550,17 @@ class AshPluginManager(BaseModel):
         callable whose attribute reads make a filter raise used to abort the
         whole notification for every subscriber of the event; such a callback
         is left out of this notification instead, and the failure is logged.
+
+        The callbacks are called under a guard of the same shape: one raising
+        subscriber used to end the notification there, so every subscriber
+        after it in the list missed the event (a second plugin package's
+        completion logger, say, when the first package's handler raised). Now
+        every admitted subscriber is called; a raising one is logged at
+        WARNING by name, and the first exception is re-raised once the rest
+        have run, so a caller that reads a handler's failure as its own (a
+        *_PHASE_START notification ends the run with what the handler raised)
+        still does, and a caller that logs and moves on (the scan executor,
+        ``_notify_phase_complete``) still logs the same error.
         """
         event_type = declared_event_type(event_type)
         if not hasattr(self.plugin_library, "event_handlers"):
@@ -590,11 +601,23 @@ class AshPluginManager(BaseModel):
 
         ASH_LOGGER.debug(f"Notifying {len(handlers)} subscribers of event {event_type}")
         results = []
+        first_error: BaseException | None = None
         for callback in handlers:
             ASH_LOGGER.debug(
                 f"Calling subscriber callback {callback_display_name(callback)}"
             )
-            results.append(callback(*args, **kwargs))
+            try:
+                results.append(callback(*args, **kwargs))
+            except Exception as handler_error:  # noqa: BLE001 -- the other subscribers still get the event
+                ASH_LOGGER.warning(
+                    f"Subscriber {callback_display_name(callback)} of event "
+                    f"{event_type} raised; the remaining subscribers are still "
+                    f"notified: {handler_error!r}"
+                )
+                if first_error is None:
+                    first_error = handler_error
+        if first_error is not None:
+            raise first_error
 
         return results
 
