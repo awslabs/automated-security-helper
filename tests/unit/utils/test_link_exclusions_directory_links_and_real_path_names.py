@@ -125,6 +125,30 @@ def test_a_link_to_an_ignored_directory_from_a_scanned_one_is_hidden_itself(tmp_
     assert values == ["./src/vendored/**", "./third_party/**"]
 
 
+def test_a_link_to_a_directory_the_walk_found_no_file_in_is_not_hidden(tmp_path):
+    """``third_party/hub`` holds no file of its own, only a link on to scanned
+    files; a link to it proves nothing ignored and must not be written as
+    ``./src/vendored/**``, which would hide those files from syft."""
+    tree = Path(os.path.realpath(tmp_path))
+    target = tree / "proj"
+    (target / "third_party" / "hub").mkdir(parents=True)
+    (target / "third_party" / "vendor.py").write_text("", encoding="utf-8")
+    (target / "other" / "lib").mkdir(parents=True)
+    (target / "other" / "lib" / "x.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "third_party" / "hub" / "lib").symlink_to(
+        target / "other" / "lib", target_is_directory=True
+    )
+    (target / "src").mkdir()
+    (target / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "src" / "vendored").symlink_to(
+        target / "third_party" / "hub", target_is_directory=True
+    )
+
+    values = syft_excludes(target, target, _ignore("third_party/"))
+
+    assert values == ["./third_party/vendor.py"]
+
+
 def _aliased(tmp_path, ignored_name: str):
     """A target reached through ``alias``, really at ``real/proj``, holding one
     ignored file named *ignored_name* at its root and one scanned file."""

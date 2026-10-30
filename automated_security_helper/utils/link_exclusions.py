@@ -229,11 +229,14 @@ def ignored_entries(
     leading to a directory that holds a walked file the patterns do not ignore
     keeps every directory holding the link, at any depth, from being returned
     whole, since ``./<dir>/**`` would tell the tool to skip those files with the
-    rest; the ignored files there are returned one by one instead. A link leading
-    to a directory whose walked files are all ignored (a pnpm ``node_modules/foo``
-    leading into ``node_modules/.pnpm``) is itself returned with a trailing ``/``,
-    unless a directory holding it is, so the tool skips the ignored files under
-    the link's name as well as under their own.
+    rest; the ignored files there are returned one by one instead. So does a link
+    leading to a directory the walk found no file in: nothing behind it is proven
+    ignored, and such a directory can hold a further link to scanned files, which
+    the walk does not enter. A link leading to a directory whose walked files are
+    all ignored (a pnpm ``node_modules/foo`` leading into ``node_modules/.pnpm``)
+    is itself returned with a trailing ``/``, unless a directory holding it is, so
+    the tool skips the ignored files under the link's name as well as under their
+    own.
 
     Empty when ``target`` is not ``source_dir`` or a directory below it (ASH's work
     directory for converted files): the patterns name paths below the source
@@ -282,12 +285,15 @@ def ignored_entries(
     whole = {
         directory for directory, count in total.items() if hit.get(directory) == count
     }
-    # A link whose destination holds a walked file that is not ignored: no
-    # directory holding the link is whole. Any other link leads only to ignored
-    # files (or to none the walk found) and is skipped under its own name.
+    # A link whose destination holds a walked file that is not ignored, or no
+    # walked file at all (nothing proven ignored; a nested link to scanned files
+    # may sit there, unentered): no directory holding the link is whole. A link
+    # whose destination's walked files are all ignored is skipped under its own
+    # name.
     links_to_ignored: List[str] = []
     for link, leads_to in directory_links.items():
-        if total.get(leads_to, 0) > hit.get(leads_to, 0):
+        walked = total.get(leads_to, 0)
+        if walked == 0 or walked > hit.get(leads_to, 0):
             parts = link.split("/")
             for depth in range(1, len(parts)):
                 whole.discard("/".join(parts[:depth]))
