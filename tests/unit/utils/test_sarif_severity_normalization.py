@@ -220,6 +220,35 @@ def test_an_explicit_null_level_is_counted_medium_not_info():
     assert counts.info == 0
 
 
+def test_a_null_level_given_in_the_document_is_counted_medium_not_info():
+    """The same result built the way a scanner's file reaches ASH: through
+    ``model_validate`` with ``"level": null`` in the document, so the field is
+    set to None by validation rather than assigned after construction."""
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "bandit"}},
+                    "results": [
+                        {
+                            "ruleId": "B105",
+                            "level": None,
+                            "message": {"text": "hardcoded password string"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert report.runs[0].results[0].level is None
+
+    counts = get_severity_metrics_from_sarif(report, MagicMock())
+
+    assert counts.medium == 1
+    assert counts.info == 0
+
+
 def test_a_padded_issue_severity_is_written_back_canonical():
     """result_severity strips and upper-cases on its read, but the gate counters
     and junitxml compare the stored value as written, so " high " was HIGH in the

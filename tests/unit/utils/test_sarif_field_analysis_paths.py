@@ -79,10 +79,13 @@ def _sarif(rule_id: str = "R1", **extra) -> str:
 
 
 def _run(sarif_dir: Path, output_dir: Path) -> dict:
+    """The fields the run wrote. The run exits 1 for a field missing from the
+    aggregate or a file it could not read; these tests read the attribution in
+    the written output, so the exit is not the thing asserted here."""
     try:
         analyze_sarif_fields(sarif_dir=str(sarif_dir), output_dir=str(output_dir))
     except typer.Exit:
-        pass  # exit 1 only signals unexpectedly missing fields
+        pass
     return json.loads((output_dir / "sarif_fields.json").read_text(encoding="utf-8"))
 
 
@@ -168,11 +171,12 @@ def test_a_sarif_file_that_is_a_link_is_not_followed(tmp_path, monkeypatch, caps
     os.symlink(outside, sarif_dir / "scanners" / "bandit" / "bandit.sarif")
 
     output_dir = tmp_path / "out"
-    try:
+    with pytest.raises(typer.Exit) as raised:
         analyze_sarif_fields(sarif_dir=str(sarif_dir), output_dir=str(output_dir))
-    except typer.Exit:
-        pass
 
+    # The refused read is a failed file, so the run fails rather than reporting a
+    # clean, empty analysis.
+    assert raised.value.exit_code == 1
     fields = json.loads((output_dir / "sarif_fields.json").read_text("utf-8"))
     assert fields == {}
     assert "Error processing" in capsys.readouterr().out

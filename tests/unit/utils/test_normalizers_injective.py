@@ -11,7 +11,7 @@ character that is not a plain word character is escaped behind ``_``, and a
 literal ``_`` is escaped too, so the escaped form can always be read back.
 """
 
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 import re
 
 import pytest
@@ -147,3 +147,20 @@ def test_all_inputs_in_a_corpus_get_unique_names():
 def test_a_pure_path_is_normalized_like_its_string():
     path = PurePosixPath("dir/nb.ipynb")
     assert get_normalized_filename(str(path)) == "dir_snb__ipynb"
+    # The pure path itself, not only its string: a PurePosixPath is not a Path,
+    # so it is escaped as its text, with no shortest-name step.
+    assert get_normalized_filename(path) == "dir_snb__ipynb"
+
+
+def test_a_pure_windows_path_is_escaped_as_written_backslash_included():
+    """Only a concrete ``Path`` goes through get_shortest_name; a PureWindowsPath
+    is text to the normalizer, so its backslash is escaped as the byte ``_x5c``
+    and reads back to the same spelling. Whether separators should be folded
+    first is a design question, pinned here as the behavior it has."""
+    path = PureWindowsPath("dir\\nb.ipynb")
+
+    name = get_normalized_filename(path)
+
+    assert name == "dir_x5cnb__ipynb"
+    assert decode(name) == "dir\\nb.ipynb"
+    assert name != get_normalized_filename(PurePosixPath("dir/nb.ipynb"))

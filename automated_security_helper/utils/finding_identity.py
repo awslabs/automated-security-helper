@@ -32,16 +32,19 @@ The key of a result is:
   those findings apart. The same value in another file or from another scanner
   does not count: the rest of the key tells those findings apart, and fixing one
   of them would otherwise re-key the other;
-* without fingerprints, its start and end line. Results of the run that share all
-  of that (two secrets on one line) each get an ``occurrence``: the first 8 hex
-  digits of ``sha256(json.dumps([start column or -1, message]))``, with ``json``'s
-  default separators, where the message is the masked one (with a converted
-  file's path replaced by the key's file). Taken from the finding's own content,
-  so a newcomer never takes an existing finding's id and removing one never hands
-  its id to another. Exact duplicates, with the same column and message, also get
-  an ``ordinal`` in the order the scanner listed them: none for the first, then 1,
-  2. A finding alone with its key carries no occurrence, so rewording its message
-  does not re-key it.
+* without fingerprints, its start and end line.
+
+Results of the run that share all of the above, fingerprinted or not (two secrets
+on one line; two results of one scanner and rule carrying one fingerprint value at
+one place), each get an ``occurrence``: the first 8 hex digits of
+``sha256(json.dumps([start column or -1, message]))``, with ``json``'s default
+separators, where the message is the masked one (with a converted file's path
+replaced by the key's file). Taken from the finding's own content, so a newcomer
+never takes an existing finding's id and removing one never hands its id to
+another. Exact duplicates, with the same column and message, also get an
+``ordinal`` in the order the scanner listed them: none for the first, then 1, 2.
+A finding alone with its key carries no occurrence, so rewording its message does
+not re-key it.
 
 The project is the result's workspace project, or failing that the one the run's
 results were written for.
@@ -300,11 +303,11 @@ def identity_keys(
 
     Returned in the order given. The run matters three times: a fingerprint value
     that results with the same scanner, rule, file, package, project and tree
-    carry at more than one location counts as absent, results keyed by their
-    lines that share a key get an ``occurrence``, and exact duplicates among
-    those an ``ordinal``. *default_project* is the workspace project the run's
-    results were written for, used for a result that names none, before the
-    fingerprint values are counted.
+    carry at more than one location counts as absent, results that share a key,
+    fingerprinted or keyed by their lines, get an ``occurrence``, and exact
+    duplicates among those an ``ordinal``. *default_project* is the workspace
+    project the run's results were written for, used for a result that names
+    none, before the fingerprint values are counted.
     """
     bases: List[Dict[str, Any]] = []
     for identity in identities:

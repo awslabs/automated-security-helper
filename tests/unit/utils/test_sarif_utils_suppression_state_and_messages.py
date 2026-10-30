@@ -119,6 +119,32 @@ class TestSuppressionState:
         assert counts.suppressed == 1
         assert counts.critical == 0
 
+    @pytest.mark.parametrize(
+        ("states", "suppressed"),
+        [
+            ([State.rejected, None], True),
+            ([State.underReview, State.accepted], True),
+            ([None, State.rejected], True),
+            ([State.rejected, State.underReview], False),
+        ],
+        ids=["rejected+stateless", "review+accepted", "stateless+rejected", "none"],
+    )
+    def test_a_mixed_list_is_in_effect_when_any_one_suppression_is(
+        self, states, suppressed
+    ):
+        """The rule is ANY: one suppression in effect suppresses the result
+        whatever records sit beside it, and a list of rejected and under-review
+        records alone does not. The pass itself builds such lists (a scanner's
+        rejected record kept beside ASH's own)."""
+        result = _result(
+            suppressions=[Suppression(kind=Kind1.inSource, state=s) for s in states]
+        )
+
+        assert is_result_suppressed(result) is suppressed
+        counts = get_severity_metrics_from_sarif(_report(result), MagicMock())
+        assert counts.suppressed == (1 if suppressed else 0)
+        assert counts.critical == (0 if suppressed else 1)
+
 
 def test_the_markdown_form_of_a_message_is_masked_too():
     text = "Possible hardcoded password: 'hunter2'"  # pragma: allowlist secret
@@ -363,6 +389,55 @@ def test_the_written_spelling_is_probed_only_under_the_scan_root(tmp_path):
         "fixtures/a/../b.json",
     )
     assert _matched_path_text("C:x%2Fb.json", root) == "C:x/b.json"
+
+
+def _suppressing(path: str) -> AshConfig:
+    return AshConfig(
+        project_name="u28",
+        global_settings={
+            "suppressions": [
+                AshSuppression(rule_id="RULE-1", path=path, reason="known")
+            ]
+        },
+    )
+
+
+def test_a_result_with_only_logical_locations_does_not_stop_the_pass(tmp_path):
+    """A result whose every location names no file (a logical location alone)
+    has no path for a config suppression to match; the pass passes it over and
+    still suppresses the located result beside it."""
+    logical = _result(uri=None, locations=[Location(message=Message(text="handler"))])
+    located = _result()
+
+    report = apply_suppressions_to_sarif(
+        _report(logical, located), _context(tmp_path, _suppressing("app.py"))
+    )
+
+    assert not report.runs[0].results[0].suppressions
+    assert report.runs[0].results[1].suppressions
+
+
+def test_a_percent_encoded_space_matches_the_decoded_suppression_path(tmp_path):
+    """``my%20app/a.py`` in the SARIF names ``my app/a.py``; the config names the
+    file as a person spells it."""
+    report = apply_suppressions_to_sarif(
+        _report(_result(uri="my%20app/a.py")),
+        _context(tmp_path, _suppressing("my app/a.py")),
+    )
+
+    assert report.runs[0].results[0].suppressions
+
+
+def test_a_uri_holding_an_encoded_nul_does_not_stop_the_pass(tmp_path):
+    """``%00`` decodes to a NUL, which no path on disk can hold; the pass neither
+    raises on it nor matches it, and the located result beside it is suppressed."""
+    report = apply_suppressions_to_sarif(
+        _report(_result(uri="app%00.py"), _result()),
+        _context(tmp_path, _suppressing("app.py")),
+    )
+
+    assert not report.runs[0].results[0].suppressions
+    assert report.runs[0].results[1].suppressions
 
 
 def test_the_evaluation_budget_is_closed_when_the_pass_raises(tmp_path, monkeypatch):

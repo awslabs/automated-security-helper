@@ -119,6 +119,31 @@ def test_markup_in_scanner_names_paths_and_values_is_escaped(tmp_path):
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<img src=x>" not in html
     assert "a&lt;b" in html
+    # The raw key is not in the page anywhere: not in the row, not in the JQ
+    # command built from it.
+    assert "a<b" not in html
+
+
+def test_a_quote_in_a_key_reaches_the_page_escaped_everywhere(tmp_path):
+    """The JQ command quotes the key and the shell quotes the command, so a key
+    holding a quote and a bracket puts both into the command; the command sits in
+    a ``<code>`` element whose text must still be data."""
+    scanner = "s"
+    path = 'runs[].results[].a"b<c'
+    report = tmp_path / "report.html"
+
+    generate_html_report(
+        _results_for(scanner, path, 1),
+        str(report),
+        {path: {"type": ["int"], "scanners": [scanner], "in_aggregate": True}},
+    )
+
+    html = report.read_text(encoding="utf-8")
+    # Not in the row, and not in the JQ command whatever quoting the command
+    # wraps around the key: the raw characters never reach the page.
+    assert 'a"b<c' not in html
+    assert '"b<c' not in html
+    assert "a&quot;b&lt;c" in html
 
 
 def test_an_intentionally_excluded_field_is_not_rendered_as_missing(tmp_path):
@@ -173,6 +198,11 @@ def test_the_jq_command_quotes_the_query_and_the_scanner_directory(tmp_path):
     # The command is HTML-escaped in the page; read it back as the shell would see
     # it once copied. shlex.quote closes and reopens the quotes around the
     # apostrophe, and the scanner directory is quoted while the glob stays bare.
-    page = html_module.unescape(report.read_text(encoding="utf-8"))
+    raw = report.read_text(encoding="utf-8")
+    page = html_module.unescape(raw)
     assert "it'\"'\"'s" in page
     assert ".ash/ash_output/scanners/'my scanner'/**/*.sarif" in page
+    # In the page itself the quotes are escaped: the shell text above is what a
+    # reader copies, not what the HTML carries.
+    assert "it'\"'\"'s" not in raw
+    assert "it&#x27;" in raw
