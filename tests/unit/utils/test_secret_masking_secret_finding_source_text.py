@@ -422,3 +422,76 @@ class TestAnOverlappingFindingsSourceText:
 
         text = model.sarif.runs[0].results[1].message.root.text
         assert text == "import\n\n```python\n" + OTHER_LINE + "```"
+
+    def test_a_snippet_with_more_lines_than_its_region_is_masked_whole(self):
+        """A tool's properties.snippet can carry context lines above the region;
+        numbered from the region's first line the secret line escapes the range,
+        so a snippet that cannot be placed is masked whole when any line it could
+        cover is one a secret finding reports."""
+        placeholder_line = WORD + " = " + PLAINTEXT + "\n"
+        model = _results(
+            self._secret(),
+            _result(
+                "B404",
+                "app.py",
+                3,
+                "import",
+                "bandit",
+                extra={
+                    "properties": {"snippet": OTHER_LINE + placeholder_line + "x = 1\n"}
+                },
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        neighbor = model.sarif.runs[0].results[1]
+        assert getattr(neighbor.properties, "snippet") == (MASKED_LINE + "\n") * 3
+
+    def test_a_snippet_with_more_lines_than_its_region_away_from_the_secret_is_kept(
+        self,
+    ):
+        """Control: every line the snippet could cover is away from the reported one."""
+        snippet = OTHER_LINE + "x = 1\n" + "y = 2\n"
+        model = _results(
+            self._secret(),
+            _result(
+                "B404",
+                "app.py",
+                9,
+                "import",
+                "bandit",
+                extra={"properties": {"snippet": snippet}},
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        neighbor = model.sarif.runs[0].results[1]
+        assert getattr(neighbor.properties, "snippet") == snippet
+
+    def test_a_snippet_is_placed_by_the_first_location_only(self):
+        """The snippet is the first location's code; a later location in a file
+        with a secret finding says nothing about where the snippet's lines are."""
+        result = _result(
+            "B404",
+            "lib.py",
+            4,
+            "import",
+            "bandit",
+            extra={"properties": {"snippet": OTHER_LINE}},
+        )
+        result["locations"].append(
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "app.py"},
+                    "region": {"startLine": 2, "endLine": 2},
+                }
+            }
+        )
+        model = _results(self._secret(), result)
+
+        mask_secrets_in_results(model)
+
+        neighbor = model.sarif.runs[0].results[1]
+        assert getattr(neighbor.properties, "snippet") == OTHER_LINE

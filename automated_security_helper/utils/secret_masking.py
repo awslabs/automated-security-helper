@@ -2043,28 +2043,41 @@ def _mask_tree(
                             (True, _LineRanges()),
                         )
         elif "ruleId" in fields and "locations" in fields:
-            # A result's properties.snippet is its first location's code.
+            # A result's properties.snippet is its first location's code, numbered
+            # from that location's first line when it spans no more lines than
+            # the region does. A snippet with more lines than the region (context
+            # lines above it) cannot be placed: the secret line could be any of
+            # them, so it is masked whole when any line it could cover is one a
+            # secret finding reports.
             properties = getattr(node, "properties", None)
             snippet = _extra_of(properties).get("snippet")
-            if isinstance(snippet, str):
-                for physical in _physical_locations_of(node):
-                    placed = index.lines_for(
-                        getattr(
-                            getattr(physical, "artifactLocation", None), "uri", None
-                        )
-                    )
-                    if placed is None:
-                        continue
+            physical = next(iter(_physical_locations_of(node)), None)
+            if isinstance(snippet, str) and physical is not None:
+                placed = index.lines_for(
+                    getattr(getattr(physical, "artifactLocation", None), "uri", None)
+                )
+                if placed is not None:
                     whole, lines = placed
-                    first = getattr(
-                        getattr(physical, "region", None), "startLine", None
+                    region = getattr(physical, "region", None)
+                    first = getattr(region, "startLine", None)
+                    last = getattr(region, "endLine", None)
+                    count = len(_split_lines(snippet))
+                    span = (
+                        max(last, first) - first + 1
+                        if isinstance(first, int) and isinstance(last, int)
+                        else 1
                     )
-                    _set_extra(
-                        properties,
-                        "snippet",
-                        _mask_lines(snippet, first, whole, lines),
-                    )
-                    break
+                    if (
+                        not whole
+                        and isinstance(first, int)
+                        and count > span
+                        and lines.overlaps(first - (count - span), first + count - 1)
+                    ):
+                        masked = _mask_text_whole(snippet)
+                    else:
+                        masked = _mask_lines(snippet, first, whole, lines)
+                    if masked != snippet:
+                        _set_extra(properties, "snippet", masked)
             # A fenced code block in the message of a finding that overlaps a
             # secret finding's lines is that finding's excerpt of the same
             # lines, with no line numbers to place it by: masked whole, as its
