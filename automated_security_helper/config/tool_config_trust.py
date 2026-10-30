@@ -914,13 +914,20 @@ def confine_tool_versions(
                             # pin; the plugin will refuse it when it reads its
                             # options, and the operator's pin is not in force
                             # until then, so say so rather than drop it
-                            # silently. The key is the file's text, shown on
-                            # one line with its controls escaped.
+                            # silently. The key is the file's text, so the
+                            # whole message is shown on one line, with the
+                            # key's controls escaped, and handed to the log as
+                            # the shown text: a message built by embedding a
+                            # shown key in an f-string is a plain str again,
+                            # which the console shows a second time, doubling
+                            # the backslash of every escape.
                             ASH_LOGGER.warning(
-                                f"{segment}.{shown_on_one_line(key)}.options is "
-                                f"not a mapping, so the operator's {name} pin "
-                                "cannot be restored into it; the plugin reads "
-                                "its options from this value as written.",
+                                shown_on_one_line(
+                                    f"{segment}.{key}.options is not a mapping, "
+                                    f"so the operator's {name} pin cannot be "
+                                    "restored into it; the plugin reads its "
+                                    "options from this value as written."
+                                ),
                                 extra=NO_MARKUP,
                             )
                 continue

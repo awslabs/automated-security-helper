@@ -111,18 +111,34 @@ def test_a_non_mapping_options_value_is_named_in_a_warning_and_left(
     """A plugin section whose ``options`` is not a mapping cannot hold the pin.
     The value is left as written for the plugin to refuse, and a warning names
     the section, as the repository spelled it, and the pin, so the omission is
-    not silent."""
+    not silent.
+
+    The warning quotes the repository's key, so it is shown once, whole: the
+    record's message is the ShownText the call site made, with no arguments
+    left to fill in, and the console passes it through as it is. A message
+    that embedded a shown key in a plain f-string would be a plain str, shown
+    a second time by the console with the backslash of every escape doubled.
+    """
+    from automated_security_helper.utils.log import console_text
+    from automated_security_helper.utils.terminal_text import ShownText
+
     config = AshConfig.model_validate({"scanners": {spelling: {"options": "oops"}}})
 
     confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
 
     section = (config.scanners.model_extra or {})[spelling]
     assert section.get("options") == "oops", section
-    warnings = [r.getMessage() for r in ash_log if r.levelno == logging.WARNING]
-    assert any(
-        f"scanners.{spelling}.options is not a mapping" in w and "tool_version" in w
-        for w in warnings
-    ), warnings
+    records = [
+        r
+        for r in ash_log
+        if r.levelno == logging.WARNING
+        and f"scanners.{spelling}.options is not a mapping" in r.getMessage()
+        and "tool_version" in r.getMessage()
+    ]
+    assert len(records) == 1, [r.getMessage() for r in ash_log]
+    record = records[0]
+    assert isinstance(record.msg, ShownText) and not record.args, record.msg
+    assert console_text(record, record.getMessage()) == record.msg
 
 
 def test_the_operators_pin_is_restored_when_the_section_is_absent(tmp_path):
