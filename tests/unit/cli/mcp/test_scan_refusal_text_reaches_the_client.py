@@ -45,11 +45,13 @@ from tests.unit.test_committed_output_when_git_cannot_answer import (
     _no_orchestrator,
 )
 
-# Marked per test. A test that hands run_ash_scan a scan (through _cli, or through
-# _mcp with no `ended`) is integration: the scan path starts scanners on any outcome
-# the refusal or the patched orchestrator leaves open, and _repo and _broken_repo
-# also run git in a child process. A test that hands _mcp an `ended` exit replaces
-# run_ash_scan with a raise and stays in-process, so it is unit.
+# Marked per test. A test is unit only if it never calls _cli AND hands _mcp an
+# `ended` exit: that pair replaces run_ash_scan with a raise and stays in-process.
+# Any other test is integration, whichever of the two paths it also takes: a call
+# of _cli, or of _mcp with no `ended`, hands run_ash_scan a scan, and the scan path
+# starts scanners on any outcome the refusal or the patched orchestrator leaves
+# open; _repo and _broken_repo also run git in a child process. A test that calls
+# _cli and also hands _mcp an `ended` exit is therefore integration.
 
 #: Rich markup, a terminal control and a CI command, in text the scan quotes.
 #: The control is a lone ESC plus "c" (reset), not a complete CSI or OSC
