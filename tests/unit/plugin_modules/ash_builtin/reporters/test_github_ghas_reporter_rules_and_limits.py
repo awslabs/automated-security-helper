@@ -307,6 +307,39 @@ class TestUploadLimits:
 
         assert [r["ruleId"] for r in doc["results"]] == ["CRITICAL-ONE"]
 
+    def test_a_rule_whose_results_were_all_cut_is_not_scored_from_them(
+        self, reporter, monkeypatch
+    ):
+        monkeypatch.setattr(github_ghas_reporter, "_MAX_RESULTS_PER_RUN", 1)
+        results = [
+            Result(
+                ruleId="CUT",
+                level=Level.error,
+                message=Message(text="h"),
+                properties=PropertyBag(issue_severity="HIGH"),
+            ),
+            Result(
+                ruleId="KEPT",
+                level=Level.error,
+                message=Message(text="c"),
+                properties=PropertyBag(issue_severity="CRITICAL"),
+            ),
+        ]
+        extensions = [
+            ToolComponent(name="a", rules=[_rule("CUT", "c"), _rule("KEPT", "k")])
+        ]
+
+        doc = json.loads(reporter.report(_model(_run(results, extensions))))["runs"][0]
+
+        assert [r["ruleId"] for r in doc["results"]] == ["KEPT"]
+        scores = {
+            rule["id"]: rule["properties"]["security-severity"]
+            for rule in doc["tool"]["driver"]["rules"]
+        }
+        # CUT has no result in the file and no scanner score or default level,
+        # so it takes the fallback, not the 8.0 its cut HIGH result would give.
+        assert scores == {"KEPT": "9.5", "CUT": "6.0"}
+
     def test_rules_no_result_names_go_first_past_the_cap(self, reporter, monkeypatch):
         monkeypatch.setattr(github_ghas_reporter, "_MAX_RULES_PER_RUN", 2)
         run = _run(

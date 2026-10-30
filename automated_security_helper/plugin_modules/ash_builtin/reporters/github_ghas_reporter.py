@@ -230,9 +230,9 @@ def _string_map(value: Any) -> Dict[str, str]:
 
 def _most_severe(
     graded: List[Tuple[str, Dict[str, Any]]], count: int
-) -> List[Dict[str, Any]]:
-    """The slim results of the *count* most severe of *graded*, in their
-    original order within a severity (a stable sort).
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """The *count* most severe of *graded* (severity, slim result) pairs, in
+    their original order within a severity (a stable sort).
 
     *graded* pairs each slim result with the severity the gate grades the
     source result at (:func:`result_severity`, which reads ``issue_severity``
@@ -241,7 +241,21 @@ def _most_severe(
     them and could drop a later CRITICAL while an earlier HIGH stays.
     """
     ranked = sorted(graded, key=lambda item: SEVERITIES.index(item[0]))
-    return [slim for _, slim in ranked[:count]]
+    return ranked[:count]
+
+
+def _rule_severities(graded: List[Tuple[str, Dict[str, Any]]]) -> Dict[str, str]:
+    """The most severe grade among the results of each emitted rule id in
+    *graded*."""
+    levels: Dict[str, str] = {}
+    for severity, slim in graded:
+        rule_id = slim.get("ruleId")
+        if not rule_id:
+            continue
+        current = levels.get(rule_id)
+        if current is None or SEVERITIES.index(severity) < SEVERITIES.index(current):
+            levels[rule_id] = severity
+    return levels
 
 
 #: The base id the aggregator anchors each project's run to; the same spelling as
@@ -493,7 +507,12 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                     f"{len(slim_results) - _MAX_RESULTS_PER_RUN} least severe are "
                     "left out of the upload and are in the other reports"
                 )
-                slim_results = _most_severe(graded, _MAX_RESULTS_PER_RUN)
+                kept = _most_severe(graded, _MAX_RESULTS_PER_RUN)
+                slim_results = [slim for _, slim in kept]
+                # Scored from the results still in the file, as step 2 says: a
+                # rule whose results were all cut keeps the score it would
+                # have with none, not the one its cut results gave it.
+                rule_level_from_results = _rule_severities(kept)
 
             # 4. Ensure every rule has security-severity
             slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
