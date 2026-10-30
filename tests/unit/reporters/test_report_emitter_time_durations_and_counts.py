@@ -393,6 +393,21 @@ class TestASnippetIsFoundWhereSarifPutsIt:
     def test_a_result_with_no_snippet_is_none(self):
         assert self._snippet({"locations": [{"physicalLocation": {}}]}) is None
 
+    def test_a_fenced_message_yields_the_code_without_its_info_string(self):
+        """The fence's language name is not code. The flattener's reader leaves it
+        out; the emitter's own read of the same message kept it, and the trailing
+        newline with it, so a report built from a record flattened without a
+        snippet showed ``python`` as the first line of the code."""
+        raw = {"message": {"text": "Found:\n```python\neval(user_input)\n```\n"}}
+        assert self._snippet(raw) == "eval(user_input)"
+
+    def test_a_bare_fence_yields_its_stripped_block(self):
+        raw = {"message": {"text": "```\neval(user_input)\n```"}}
+        assert self._snippet(raw) == "eval(user_input)"
+
+    def test_a_message_with_one_fence_marker_is_none(self):
+        assert self._snippet({"message": {"text": "unterminated ``` here"}}) is None
+
 
 class TestANegativeLimitListsNone:
     def test_a_negative_limit_does_not_slice_from_the_end(self):

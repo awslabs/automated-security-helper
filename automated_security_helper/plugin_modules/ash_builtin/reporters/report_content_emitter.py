@@ -6,7 +6,10 @@ import json
 import re
 from typing import Dict, List, Any, TYPE_CHECKING
 
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.flat_vulnerability import (
+    FlatVulnerability,
+    _extract_snippet_from_message,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.unified_metrics import get_unified_scanner_metrics
 from automated_security_helper.core.scanner_statistics_calculator import (
@@ -695,13 +698,15 @@ class ReportContentEmitter:
                                     if found:
                                         return found
 
-            # Check in message
+            # Check in message: the same reader the flattener uses, so the
+            # fence's info string (the language name) and the block's own
+            # newlines are left out here as they are there. This branch's own
+            # split returned the raw block, so a report built from a record
+            # flattened without a snippet showed "python" as its first line.
             if "message" in raw_data and "text" in raw_data["message"]:
                 message_text = raw_data["message"]["text"]
-                if isinstance(message_text, str) and "```" in message_text:
-                    parts = message_text.split("```")
-                    if len(parts) >= 3:  # Has at least one code block
-                        return parts[1]
+                if isinstance(message_text, str):
+                    return _extract_snippet_from_message(message_text)
 
         except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
             # If we can't parse the raw data or find a snippet, return None
