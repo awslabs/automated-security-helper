@@ -18,6 +18,7 @@ spawn for that call only instead of memoizing absence.
 from __future__ import annotations
 
 import stat
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -104,12 +105,14 @@ def test_the_answer_is_per_scan_scope(two_uvs, tmp_path):
         assert find_uv_or_none() == in_tree
 
 
-def test_a_refused_in_tree_uv_is_not_remembered_as_absent(two_uvs):
+def test_a_refused_in_tree_uv_is_not_remembered_as_absent(two_uvs, monkeypatch):
     """A runner given an in-tree uv has its probe refused by the spawn layer.
 
     The refusal is this scan's, not uv's absence: the answer is False with the
     refusal as its failure, and nothing is memoized, so a later call in another
-    scope probes again.
+    scope probes again. The second half is read as the docstring promises it,
+    through the probe itself, not through the one private slot: outside the
+    scope the same runner asks uv again and takes its answer.
     """
     tree, in_tree, _outside = two_uvs
     runner = UVToolRunner(uv_executable=in_tree)
@@ -118,3 +121,13 @@ def test_a_refused_in_tree_uv_is_not_remembered_as_absent(two_uvs):
     assert available is False
     assert failure is not None and "scanned tree" in failure, failure
     assert runner._uv_available_cache is None
+
+    probes = []
+
+    def _spawn_run(command, **kwargs):
+        probes.append(list(command))
+        return subprocess.CompletedProcess(command, 0, "uv 0.5.0\n", "")
+
+    monkeypatch.setattr(uv_tool_runner, "spawn_run", _spawn_run)
+    assert runner.uv_availability() == (True, None)
+    assert probes == [[in_tree, "--version"]], probes
