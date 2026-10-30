@@ -131,10 +131,11 @@ def test_the_root_lookup_and_the_diff_keep_a_work_tree_the_caller_names(
 ):
     """The tree a bare repository is deployed to holds no ``.git`` entry, so git
     discovers nothing there; the variables the caller set are what name the
-    repository and its top, and they are passed through as they are."""
+    repository and its top, and for a directory inside that tree they are passed
+    through as they are."""
     bare, tree = _name_a_deployed_tree(tmp_path, monkeypatch)
 
-    ask(tmp_path)
+    ask(Path(tree))
 
     assert recorded, "git was not started"
     for _argv, kwargs in recorded:

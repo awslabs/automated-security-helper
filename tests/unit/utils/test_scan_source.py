@@ -1063,6 +1063,43 @@ def test_git_dir_alone_is_kept_when_the_repository_names_its_own_work_tree(
 
 
 @pytest.mark.integration
+def test_a_work_tree_named_without_its_repository_is_not_honored(
+    isolated_tmp, monkeypatch
+):
+    """GIT_WORK_TREE alone makes git discover the repository from the directory it
+    is started in and still report the named directory as the top, so the root
+    and the diff's names described two trees. Only a pair (GIT_DIR too) names a
+    layout; alone, the variable is dropped and the root is the discovered one."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    monkeypatch.setenv("GIT_WORK_TREE", tree.as_posix())
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    assert git_repository_root(source / "src") == source.resolve()
+
+
+@pytest.mark.integration
+def test_a_pair_whose_tree_does_not_hold_the_scanned_directory_is_not_honored(
+    isolated_tmp, monkeypatch
+):
+    """A pair left exported for another checkout names a tree the scanned directory
+    is not in; honored, the scan read that checkout's root and changes, the
+    changed set intersected to nothing, and every finding was discarded at exit
+    0. The pair is honored only when the scanned directory is at or below the
+    named tree; otherwise discovery answers for the directory itself."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    monkeypatch.setenv("GIT_DIR", bare.as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", tree.as_posix())
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    assert git_repository_root(source / "src") == source.resolve()
+    changed = get_changed_files("HEAD~1", cwd=source / "src")
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
 def test_a_hooks_relative_git_dir_names_the_repository_it_was_exported_in(
     isolated_tmp, monkeypatch
 ):
@@ -2924,6 +2961,20 @@ class TestTheGitEntryWalkStopsWhereGitsDiscoveryStops:
         (source.parents[1] / ".git").mkdir()
 
         assert not self._walks_to_git(monkeypatch, source, [source.parent, tmp_path])
+
+    def test_a_work_tree_alone_in_the_environment_does_not_start_git(
+        self, tmp_path, monkeypatch
+    ):
+        """GIT_WORK_TREE without GIT_DIR points git at no repository: the root
+        lookup drops it and git discovers from the directory, so the walk decides
+        and finds nothing here. GIT_DIR alone still does, so git is started."""
+        source = self._tree(tmp_path)
+        elsewhere = {"GIT_WORK_TREE": str(tmp_path / "elsewhere")}
+
+        assert not self._walks_to_git(monkeypatch, source, [tmp_path], elsewhere)
+        assert self._walks_to_git(
+            monkeypatch, source, [tmp_path], {"GIT_DIR": str(tmp_path / "r.git")}
+        )
 
     def test_a_ceiling_naming_the_source_itself_does_not_stop_the_walk(
         self, tmp_path, monkeypatch

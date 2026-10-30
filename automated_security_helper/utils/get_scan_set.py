@@ -2211,9 +2211,16 @@ def _core_worktree_names_a_tree(git_dir: str) -> bool:
 def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     """The environment of the repository-root lookup and the diff started in *cwd*.
 
-    :func:`_git_environ`, unless the caller names the work tree: with GIT_WORK_TREE
-    set to an existing directory, the location variables are passed through, each
-    relative one made absolute first. A relative value means "relative to the
+    :func:`_git_environ`, unless the caller names the layout: with GIT_DIR set and
+    GIT_WORK_TREE set to an existing directory that holds *cwd*, the location
+    variables are passed through, each relative one made absolute first. GIT_DIR
+    is required because GIT_WORK_TREE alone makes git discover the repository from
+    *cwd* and still report the named directory as the top, so the root and the
+    diff's names would describe two trees; *cwd* must be at or below the named
+    tree because a pair left exported for another checkout (``GIT_DIR=~/.cfg
+    GIT_WORK_TREE=~/other``) would otherwise make the scan of an unrelated
+    directory read that checkout's root and changes, intersect to nothing, and
+    discard every finding at exit 0. A relative value means "relative to the
     directory of the process that exported it", and that is this process's own
     directory: receive-pack starts a post-receive hook inside the repository with
     ``GIT_DIR=.`` exported, and a hook that then exports ``GIT_WORK_TREE=/srv/app``
@@ -2247,11 +2254,29 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
             environ[name] = os.path.abspath(value)
     work_tree = environ.get("GIT_WORK_TREE")
     git_dir = environ.get("GIT_DIR")
-    if work_tree and os.path.isdir(work_tree):
+    started_in = os.getcwd() if cwd is None else os.path.abspath(cwd)
+    if (
+        git_dir
+        and work_tree
+        and os.path.isdir(work_tree)
+        and _is_at_or_below(started_in, work_tree)
+    ):
         return environ
     if git_dir and not work_tree and _core_worktree_names_a_tree(git_dir):
         return environ
     return _git_environ()
+
+
+def _is_at_or_below(path: str, root: str) -> bool:
+    """Whether *path* is *root* or inside it, both read through their real paths.
+
+    ``os.path.normcase`` on both, so a volume that ignores case compares as git
+    does there; ``is_relative_to`` rather than ``os.path.commonpath``, which
+    raises on two Windows paths with no drive in common.
+    """
+    real_path = Path(os.path.normcase(os.path.realpath(path)))
+    real_root = Path(os.path.normcase(os.path.realpath(root)))
+    return real_path == real_root or real_path.is_relative_to(real_root)
 
 
 def git_repository_root(path: Path, *, values: Iterable[str] = ()) -> Optional[Path]:

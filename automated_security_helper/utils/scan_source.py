@@ -897,8 +897,8 @@ def _a_git_entry_may_exist(source_dir: Path | str, environ: Mapping[str, str]) -
     """Whether git could find a repository for *source_dir* at all.
 
     True with a ``.git`` entry (of any kind: directory, file, symlink) in the
-    directory or one of its parents, with GIT_DIR or GIT_WORK_TREE in *environ*,
-    which point git at a repository wherever it runs, or whenever the walk cannot
+    directory or one of its parents, with GIT_DIR in *environ*, which points git
+    at a repository wherever it runs, or whenever the walk cannot
     be sure: a directory that cannot be resolved, or a parent whose ``.git``
     entry cannot be checked, is no proof that there is none, and git is asked as
     before. Only a walk that saw every level and found nothing returns False, and
@@ -911,7 +911,10 @@ def _a_git_entry_may_exist(source_dir: Path | str, environ: Mapping[str, str]) -
     entry ``_ceiling_entries`` cannot resolve is dropped, which hides fewer
     levels here too and errs toward starting git, never past it.
     """
-    if "GIT_DIR" in environ or "GIT_WORK_TREE" in environ:
+    # GIT_DIR points git at a repository wherever it runs (alone, or with the work
+    # tree it names). GIT_WORK_TREE alone does not: the root lookup drops it and
+    # git discovers from the directory, so the walk below is what decides.
+    if "GIT_DIR" in environ:
         return True
     try:
         current = Path(source_dir).resolve()
