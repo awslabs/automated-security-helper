@@ -38,9 +38,11 @@ reach them. They run from a working directory outside the scanned tree
 with an explicit config file (``-c`` for grype, ``--config`` for trivy) so neither
 tool looks for one in the working directory, the home directory or anywhere else:
 ``EMPTY_TOOL_CONFIG`` (``utils/content_db_shared.py``, which the staleness probes
-share), or for trivy the operator's ``trivy.yaml`` once the caller has checked it is
-the operator's and outside the scanned tree (``config_file``), so a database mirror
-it names applies to the update too. The cache directory is passed explicitly. The
+share), or the operator's own config file (trivy's ``trivy.yaml``, grype's
+``.grype.yaml``) once the caller has checked it is the operator's and outside the
+scanned tree (``config_file``), so a database mirror or CA it names applies to the
+update too; ``prepare_content_db`` refuses a config file inside the scanned tree
+itself, whatever a caller passes. The cache directory is passed explicitly. The
 environment is the operator's own (``snapshot_environ``), not anything a scanner
 derived from the scanned tree. They scan nothing but an empty directory ASH creates
 for the purpose.
@@ -111,7 +113,10 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import yaml
 
-from automated_security_helper.config.path_trust import cwd_outside_scanned_tree
+from automated_security_helper.config.path_trust import (
+    cwd_outside_scanned_tree,
+    in_scanned_tree,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.file_lock import exclusive_lock
@@ -514,6 +519,17 @@ def prepare_content_db(
     operator_config = (
         Path(os.path.abspath(config_file)) if config_file is not None else None
     )
+    if operator_config is not None and in_scanned_tree(operator_config, source_dir):
+        # Defense in depth behind the callers' own check: this update runs outside
+        # the sandbox and writes the shared cache, so a config the scanned
+        # repository could have written (a database mirror, a CA) never reaches
+        # it, whatever a caller passes.
+        raise ValueError(
+            f"the {tool} config file given to the database refresh, "
+            f"{operator_config.as_posix()}, is inside the scanned tree "
+            f"{Path(source_dir).as_posix()}; the refresh takes only the operator's "
+            "own config, outside the tree it scans"
+        )
     key = (
         tool,
         cache.as_posix(),

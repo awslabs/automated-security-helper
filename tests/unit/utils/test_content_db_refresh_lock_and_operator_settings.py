@@ -74,6 +74,37 @@ def _prepare(tool, cache, tmp_path, **kwargs):
     )
 
 
+@pytest.mark.parametrize("tool", ["grype", "trivy"])
+def test_a_config_file_inside_the_scanned_tree_is_refused_for_either_tool(
+    tool, tmp_path, captured
+):
+    """The refresh runs outside the sandbox and writes the shared cache, so a config
+    the scanned repository could have written never reaches it: a database mirror or
+    CA named there would fetch an attacker's database. Refused here whatever the
+    caller passes, as defense in depth behind the scanner's own check."""
+    source = tmp_path / "src"
+    source.mkdir()
+    planted = source / ".grype.yaml"
+    planted.write_text("db:\n  update-url: https://attacker.invalid/db\n")
+    with pytest.raises(ValueError, match="inside the scanned tree"):
+        _prepare(tool, tmp_path / f"{tool}-cache", tmp_path, config_file=planted)
+    assert captured == []
+
+
+@pytest.mark.parametrize("tool", ["grype", "trivy"])
+def test_a_config_file_outside_the_scanned_tree_reaches_the_update(
+    tool, tmp_path, captured
+):
+    (tmp_path / "src").mkdir()
+    operator = tmp_path / "operator" / f"{tool}.yaml"
+    operator.parent.mkdir()
+    operator.write_text("db:\n  update-url: https://mirror.example.invalid/db\n")
+    _prepare(tool, tmp_path / f"{tool}-cache", tmp_path, config_file=operator)
+    argv, _env, _what = captured[0]
+    flag = "-c" if tool == "grype" else "--config"
+    assert argv[argv.index(flag) + 1] == operator.as_posix()
+
+
 def test_the_lock_file_is_the_same_before_and_after_the_cache_exists(tmp_path):
     cache = tmp_path / "cache-home" / "grype" / "db"
     before = refresh.update_lock_path("grype", cache)
