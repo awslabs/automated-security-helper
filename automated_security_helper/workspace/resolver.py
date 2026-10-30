@@ -118,8 +118,13 @@ Failure modes and known limitations
   together (``scanner_pins.compare_pin_set``), since three pins can be
   satisfiable two at a time and jointly not. The message names the pairs that
   clash, or the whole set, not a minimal explanation of the clash.
-* Only an enabled scanner's pin is recorded and compared. A disabled scanner's
-  tool does not run, so its pin cannot conflict with another project's.
+* Only an enabled DECLARED scanner's pin is recorded and compared: its tool does
+  not run, so its pin cannot conflict with another project's. An extra,
+  plugin-provided section is read by a reduced name, and which of its spellings
+  a plugin's registered name selects is unknown here, so the section the lookup
+  reads records its pin whether or not it is on, and a pair the plan cannot
+  resolve records one only when every section of it sets the same pin
+  (``_scanner_state``).
 * A refusal for a remote MCP client names a folder entry as the client wrote it
   and the rule it broke, never the real path it resolved to, which a client
   that supplies the workspace file could otherwise learn for any server path.
