@@ -166,9 +166,17 @@ def test_a_nul_in_the_ignore_file_value_is_read_as_unreadable(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _operator_document(tmp_path: Path) -> Path:
+    """Where the operator's document sits for these tests: a directory under
+    the test's own path, so a relative value in it anchors the same way on
+    every platform (a fixed ``/operator`` resolved to ``C:/operator`` on Windows
+    and matched nothing)."""
+    return tmp_path / "operator" / "ash.yaml"
+
+
 def _strip(config, delivered: dict, operator: dict | None, tmp_path: Path):
     documents = {
-        Path("/operator/ash.yaml"): operator or {},
+        _operator_document(tmp_path): operator or {},
         tmp_path / "c.yaml": delivered,
     }
     return strip_client_scanner_exclusions(
@@ -256,12 +264,13 @@ def test_an_operators_relative_ignore_file_is_not_taken_for_the_clients(tmp_path
     alone, the anchored value looked like the client's and was replaced."""
     config = AshConfig()
     options = config.scanners.trivy.options
-    options.ignore_file = "/operator/.trivyignore"
+    anchored = str(_operator_document(tmp_path).parent / ".trivyignore")
+    options.ignore_file = anchored
     operator = {"scanners": {"trivy": {"options": {"ignore_file": ".trivyignore"}}}}
 
     _strip(config, {}, operator, tmp_path)
 
-    assert options.ignore_file == "/operator/.trivyignore"
+    assert options.ignore_file == anchored
     assert config._client_scanner_exclusions == []
 
 
