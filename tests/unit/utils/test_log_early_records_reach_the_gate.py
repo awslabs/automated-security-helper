@@ -35,22 +35,16 @@ class _Recording(logging.Handler):
 @pytest.fixture
 def logger_before_get_logger(monkeypatch):
     """The "ash" logger as a process has it before get_logger runs: no level of
-    its own, the root logger at WARNING, and no handler on it."""
+    its own and the root logger at WARNING."""
     root = logging.getLogger()
     root_level = root.level
     ash_level = ASH_LOGGER.level
-    held_back = list(ASH_LOGGER.handlers)
-    for handler in held_back:
-        ASH_LOGGER.removeHandler(handler)
     monkeypatch.setattr(ASH_LOGGER, "propagate", False)
     root.setLevel(logging.WARNING)
     ASH_LOGGER.setLevel(logging.NOTSET)
     yield
     ASH_LOGGER.setLevel(ash_level)
     root.setLevel(root_level)
-    for handler in held_back:
-        if handler not in ASH_LOGGER.handlers:
-            ASH_LOGGER.addHandler(handler)
 
 
 def test_an_info_line_logged_early_reaches_a_level_set_to_info(
@@ -59,8 +53,19 @@ def test_an_info_line_logged_early_reaches_a_level_set_to_info(
     ash_log.configure_last_resort_level(logging.INFO)
     recording = _Recording()
     monkeypatch.setattr(ash_log, "_LAST_RESORT", recording)
-
-    ASH_LOGGER.info("an early info line")
+    # Taken off in the test body, not in the fixture: pytest puts its capture
+    # handlers on a logger that does not propagate when the test's call starts,
+    # and a handler on the way is a home for the record, so the last resort
+    # would never see it. A real process has none before get_logger runs.
+    held_back = list(ASH_LOGGER.handlers)
+    for handler in held_back:
+        ASH_LOGGER.removeHandler(handler)
+    try:
+        ASH_LOGGER.info("an early info line")
+    finally:
+        for handler in held_back:
+            if handler not in ASH_LOGGER.handlers:
+                ASH_LOGGER.addHandler(handler)
 
     assert recording.records == ["an early info line"]
 
