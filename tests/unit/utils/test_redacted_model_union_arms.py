@@ -20,7 +20,7 @@ from __future__ import annotations
 import decimal
 import enum
 from pathlib import Path
-from typing import Annotated, List, Optional, Union
+from typing import Annotated, List, Optional, Union, get_args
 
 import pytest
 from pydantic import Field, ValidationError
@@ -131,17 +131,33 @@ def test_an_enum_member_text_an_earlier_converting_arm_takes_is_refused():
     assert "0080" not in text.replace("port", ""), text
 
 
+class _FirstPort(str, enum.Enum):
+    """The Enum of the must-not-flag control, its own class and not
+    :class:`_Port`: ``Optional[Union[X, int]]`` is ``Union[Union[X, int], None]``,
+    and typing's cache keys the outer Union on its arms, which compare equal
+    whatever their order, so once ``Optional[Union[int, _Port]]`` has been
+    built in this process, ``Optional[Union[_Port, int]]`` comes back as that
+    cached object with the int arm FIRST (measured on Python 3.12.15: the
+    control read the refusal worded "integer or _port", the earlier test's
+    order). A distinct member class shares no cache entry."""
+
+    DEFAULT = "0080"
+
+
 def test_an_enum_member_text_with_no_earlier_converting_arm_is_admitted():
     """The must-not-flag control for the order rule: the Enum arm comes first,
     so no converting arm takes the text ahead of it, and the member spells the
     text. A check that read every sibling instead of the earlier ones would
-    refuse this."""
+    refuse this. The order is asserted on the field's own annotation first,
+    because typing can hand back an equal union with the arms swapped (see
+    :class:`_FirstPort`)."""
 
     class Section(RedactedSection):
-        port: Optional[Union[_Port, int]] = None
+        port: Optional[Union[_FirstPort, int]] = None
 
+    assert get_args(Section.model_fields["port"].annotation)[:2] == (_FirstPort, int)
     section = Section.model_validate({"port": env_resolved_scalar("0080", VARIABLE)})
-    assert section.port is _Port.DEFAULT
+    assert section.port is _FirstPort.DEFAULT
 
 
 def test_a_constrained_str_match_wins_over_a_converting_arm_before_it():

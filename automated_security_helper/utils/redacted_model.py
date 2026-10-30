@@ -2880,9 +2880,12 @@ class RedactedSection(BaseModel):
         the validated model, which fails a config dump. The sections built in
         the value have downcast their own, so what is left sits outside them:
         it is downcast here, in containers and in the plain models the value
-        holds."""
+        holds. The value is read for every shape the downcast walks into
+        (:func:`_is_kept_container`): a deque or a dataclass instance at the
+        top of the value kept its marker while this guard listed the shapes
+        itself and left those two out."""
         if (
-            not isinstance(value, (list, tuple, set, frozenset, dict, BaseModel))
+            not _is_kept_container(value)
             or info.field_name is None
             or not _annotation_reaches_a_section(
                 cls.model_fields[info.field_name].annotation
