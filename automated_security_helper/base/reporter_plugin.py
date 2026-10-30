@@ -606,10 +606,12 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         ``is True``, so a reporter declaring ``sends_off_host = 1`` or ``"yes"``
         was run as a local one, without ``enabled: true``, and its destination
         options were not confined. Declared as the bool at class creation, the
-        declaration is read the same way at every one of those sites.
+        declaration is read the same way at every one of those sites. Read off
+        the class, not its ``__dict__``: a plain mixin's ``sends_off_host = 1``
+        is inherited, and is converted here and set on this class.
         """
         super().__pydantic_init_subclass__(**kwargs)
-        declared = cls.__dict__.get("sends_off_host", False)
+        declared = getattr(cls, "sends_off_host", False)
         if not isinstance(declared, bool):
             cls.sends_off_host = bool(declared)
 
