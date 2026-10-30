@@ -4041,11 +4041,16 @@ class TestShardContributionIsRefused:
     def _entry_with_counts(status, attempted=10, failed=4):
         from types import SimpleNamespace
 
+        # The report names its scanner, as every report ScanResultProcessor writes
+        # does: target_counts reads only the reports that are the scanner's own
+        # (unified_metrics.own_target_reports), so a nameless report counts for
+        # nothing and a fixture without the name measured no partial audit at all.
         return SimpleNamespace(
             scanner_results={"bandit": SimpleNamespace(status=status)},
             additional_reports={
                 "bandit": {
                     "source": {
+                        "scanner_name": "bandit",
                         "targets_attempted": attempted,
                         "targets_failed": failed,
                     }
