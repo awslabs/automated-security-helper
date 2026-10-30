@@ -24,10 +24,13 @@ Decisions, and why
    ignore rules. ASH instead takes every ``*.yml``/``*.yaml`` file whose parent
    directory is ``.github/workflows`` from the scan set, which applies ``.gitignore``
    and ``.ignore`` files and leaves ASH's own output directory out (keeping the
-   files git tracks there), then drops ``global_settings.ignore_paths`` matches
-   and anything under a ``KNOWN_IGNORE_PATHS`` directory (``node_modules``,
-   ``.venv``, ``venv``), so it lints the workflows zizmor audits. The scan root's own name counts, so a source
-   directory that is ``.github`` or ``.github/workflows`` has its workflows linted.
+   files git tracks there; the scan set does that in every ``honor_ignore_files``
+   mode, and the scanner adds no second filter of its own), then drops
+   ``global_settings.ignore_paths`` matches and anything under a
+   ``KNOWN_IGNORE_PATHS`` directory (``node_modules``, ``.venv``, ``venv``). The
+   zizmor scanner selects its inputs by the same rules, so the two audit the same
+   workflows. The scan root's own name counts, so a source directory that is
+   ``.github`` or ``.github/workflows`` has its workflows linted.
    A workflow that is a symlink resolving outside the scan root is skipped with a
    warning, because actionlint follows it and copies its lines into the report, and
    so is one that resolves to no file (a missing target, or a loop), on which

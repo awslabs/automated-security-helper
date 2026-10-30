@@ -733,6 +733,27 @@ def test_the_gitignore_applies_as_the_config_says(tmp_path, repo, honor):
     assert ".github/workflows/clean.yml" in linted
 
 
+@pytest.mark.parametrize("honor", [True, False])
+@pytest.mark.unit
+def test_an_untracked_workflow_under_the_output_directory_is_not_linted(repo, honor):
+    """The scanner adds no filter of its own for ASH's output directory and relies
+    on the scan set to leave it out (keeping only what git tracks there). That
+    premise is read through the real scan set here, in both honor_ignore_files
+    modes and on a source that is no git checkout: a converted archive's workflow
+    under output/converted/ is not this project's source and is not linted."""
+    output = repo / ".ash" / "ash_output"
+    converted = output / "converted" / "sample.zip" / ".github" / "workflows"
+    converted.mkdir(parents=True)
+    (converted / "inside-archive.yml").write_text("on: push\n")
+    scanner = _scanner(repo, output=output)
+    scanner.context.config.honor_ignore_files = honor
+
+    linted = scanner._workflow_files(repo, "source", [])
+
+    assert ".github/workflows/clean.yml" in linted
+    assert not [path for path in linted if path.startswith(".ash/ash_output/")]
+
+
 @pytest.mark.unit
 def test_a_workflow_path_starting_with_a_dash_is_after_the_separator(
     tmp_path, monkeypatch, on_path
