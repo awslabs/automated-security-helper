@@ -68,13 +68,16 @@ class TestTheLabelIsShownNotObeyed:
         assert "\x1b" not in text
         assert not any(line.startswith("## injected") for line in lines)
         (row,) = [line for line in lines if "injected" in line]
+        # The label's own pipe is written escaped (a backslash before it) and is
+        # not a column edge; every other pipe is one.
         assert (
-            row.count("|")
+            row.replace("\\|", "").count("|")
             == len(
                 ("Project", "Status", "Findings", "Actionable", "Threshold", "Result")
             )
             + 1
         )
+        assert "web\\|x" in row, row
         assert "\\*bold\\*" in row, row
         assert "&lt;b&gt;" in row, row
 
