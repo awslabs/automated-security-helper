@@ -1284,8 +1284,13 @@ def _client_exclusion_for(
     exclusions: List[Any],
     normalize: Callable[[str], str],
     source_dir: Path,
+    budget: Any = None,
 ) -> Any:
-    """The client-supplied scanner exclusion that would have kept ``result`` out, if any."""
+    """The client-supplied scanner exclusion that would have kept ``result`` out, if any.
+
+    ``budget`` is the pass's ``EvaluationBudget``: every bounded search of a
+    client's checkov pattern in this pass shares its one ``scan_timeout``.
+    """
     from automated_security_helper.config.client_scanner_exclusions import (
         matching_exclusion,
     )
@@ -1314,6 +1319,7 @@ def _client_exclusion_for(
             relative=uri,
             absolute=absolute,
             rule_id=result.ruleId,
+            budget=budget,
         )
         if found is not None:
             return found
@@ -1607,6 +1613,15 @@ def apply_suppressions_to_sarif(
     client_exclusions = list(
         getattr(plugin_context.config, "_client_scanner_exclusions", None) or []
     )
+    # One time budget for every bounded search those exclusions make in this
+    # pass: a client's checkov pattern gets the scanner's scan_timeout once over
+    # the whole run, as checkov would have, not once per finding
+    # (config/client_scanner_exclusions.EvaluationBudget).
+    from automated_security_helper.config.client_scanner_exclusions import (
+        EvaluationBudget,
+    )
+
+    evaluation_budget = EvaluationBudget()
 
     ignore_suppressions = (
         hasattr(plugin_context, "ignore_suppressions")
@@ -1767,6 +1782,7 @@ def apply_suppressions_to_sarif(
                         _source_dir_basename,
                     ),
                     _resolved_source,
+                    budget=evaluation_budget,
                 )
                 if excluded_by is not None:
                     _add_client_suppression(result, excluded_by.justification())

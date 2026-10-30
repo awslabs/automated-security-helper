@@ -22,6 +22,13 @@ call never returned, so each test that runs it runs it inside a child of its own
 (``_outcome_of``) and reads back what the call did, within a limit of its own:
 at the deadline a killed search reads ``ScannerError``, a search the bound could
 not end reads as no answer within the limit.
+
+A suppression pass asks every entry about every finding, so the bound is spent
+once over the pass, not once per call: ``EvaluationBudget`` opens one deadline
+per ``scan_timeout`` the first time it is used, hands each later search what is
+left, and remembers an entry that ran out so it is not searched again. The SARIF
+pass creates one budget and hands it down through ``matching_exclusion`` and
+``hides``; the tests here pin each hop with a budget that records what it saw.
 """
 
 from __future__ import annotations
@@ -41,8 +48,11 @@ import automated_security_helper.config.client_scanner_exclusions as exclusions_
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_scanner_exclusions import (
     ClientScannerExclusion,
+    EvaluationBudget,
+    EvaluationTimedOut,
     checkov_skips,
     evaluated_within,
+    matching_exclusion,
     strip_client_scanner_exclusions,
 )
 from automated_security_helper.core.exceptions import ScannerError
@@ -287,6 +297,214 @@ def test_the_evaluation_child_is_a_fork_on_linux():
     if not sys.platform.startswith("linux"):
         pytest.skip("the fork is chosen on Linux only")
     assert exclusions_module._process_context().get_start_method() == "fork"
+
+
+# ---------------------------------------------------------------------------
+# One deadline per suppression pass
+# ---------------------------------------------------------------------------
+
+
+class _RecordingBudget(EvaluationBudget):
+    """A budget that notes each key it is asked about and answers inline."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.keys: list = []
+
+    def evaluate(self, timeout, source, key, function, *args):
+        self.keys.append(key)
+        return function(*args)
+
+
+def test_a_budget_spends_one_deadline_over_a_pass():
+    budget = EvaluationBudget()
+    started = time.monotonic()
+
+    budget.evaluate(1.0, "first", "k1", time.sleep, 0.6)
+    with pytest.raises(ScannerError) as second:
+        budget.evaluate(1.0, "second", "k2", time.sleep, 0.6)
+    spent_at = time.monotonic() - started
+    with pytest.raises(ScannerError) as repeated:
+        budget.evaluate(1.0, "second again", "k2", _five)
+    # Past the deadline for certain, whichever side of it the kill landed on.
+    time.sleep(0.05)
+    with pytest.raises(ScannerError) as late:
+        budget.evaluate(1.0, "third", "k3", _five)
+
+    assert spent_at < 1.5
+    assert time.monotonic() - started - spent_at < 0.3
+    assert "second" in str(second.value)
+    assert "scan_timeout" in str(second.value)
+    assert "not searched again" in str(repeated.value)
+    assert "spent" in str(late.value)
+    assert budget.timed_out == ("k2", "k3")
+
+
+def test_a_budget_remembers_an_entry_that_ran_out(monkeypatch):
+    calls: list = []
+
+    def running_out(wait, timeout, source, function, args):
+        calls.append(source)
+        raise EvaluationTimedOut("ran out")
+
+    monkeypatch.setattr(exclusions_module, "_evaluated_in_a_child", running_out)
+    budget = EvaluationBudget()
+
+    with pytest.raises(EvaluationTimedOut):
+        budget.evaluate(5.0, "s", "k", _five)
+    with pytest.raises(ScannerError) as repeated:
+        budget.evaluate(5.0, "s", "k", _five)
+
+    assert calls == ["s"]
+    assert "not searched again" in str(repeated.value)
+    assert budget.timed_out == ("k",)
+
+
+def test_a_budget_opens_one_deadline_per_scan_timeout():
+    budget = EvaluationBudget()
+
+    first = budget.remaining(10.0)
+    time.sleep(0.05)
+    again = budget.remaining(10.0)
+    other = budget.remaining(3.0)
+
+    assert again < first
+    assert 2.9 < other <= 3.0
+
+
+def test_a_budget_with_no_bound_runs_inline():
+    budget = EvaluationBudget()
+
+    assert budget.evaluate(None, "s", "k", os.getpid) == os.getpid()
+    assert budget.timed_out == ()
+
+
+def test_the_skip_path_search_is_charged_to_the_budget_by_its_pattern():
+    budget = _RecordingBudget()
+
+    assert (
+        checkov_skips(
+            "vend.r", "/scan/vendor/x.tf", "vendor/x.tf", timeout=5, budget=budget
+        )
+        is True
+    )
+    assert (
+        checkov_skips(
+            "vendor", "/scan/vendor/x.tf", "vendor/x.tf", timeout=5, budget=budget
+        )
+        is True
+    )
+
+    assert budget.keys == ["skip_path:vend.r"]
+
+
+def test_hides_and_matching_exclusion_hand_the_budget_down():
+    budget = _RecordingBudget()
+    entry = ClientScannerExclusion(
+        scanner="checkov",
+        option="skip_path",
+        kind="checkov",
+        pattern="vend.r",
+        reason="r",
+        scan_timeout=5,
+    )
+
+    assert (
+        entry.hides(
+            relative="vendor/x.tf",
+            absolute="/scan/vendor/x.tf",
+            rule_id=None,
+            budget=budget,
+        )
+        is True
+    )
+    assert (
+        matching_exclusion(
+            [entry],
+            scanner_name="checkov",
+            relative="vendor/x.tf",
+            absolute="/scan/vendor/x.tf",
+            rule_id=None,
+            budget=budget,
+        )
+        is entry
+    )
+
+    assert budget.keys == ["skip_path:vend.r", "skip_path:vend.r"]
+
+
+def _report_of(uris: list) -> Any:
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {"name": "AWS Labs - Automated Security Helper"}
+                    },
+                    "results": [
+                        {
+                            "ruleId": "CKV_1",
+                            "message": {"text": "finding"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": uri},
+                                        "region": {"startLine": 1},
+                                    }
+                                }
+                            ],
+                            "properties": {"scanner_name": "checkov"},
+                        }
+                        for uri in uris
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def test_the_suppression_pass_shares_one_budget_across_its_findings(
+    tmp_path, monkeypatch
+):
+    """``apply_suppressions_to_sarif`` creates one budget and hands it to every
+    client-exclusion question of the pass."""
+    import automated_security_helper.utils.sarif_utils as sarif_utils
+    from automated_security_helper.base.plugin_context import PluginContext
+
+    seen: list = []
+
+    def recording(result, run, exclusions, normalize, source_dir, budget=None):
+        seen.append(budget)
+        return None
+
+    monkeypatch.setattr(sarif_utils, "_client_exclusion_for", recording)
+    config = AshConfig()
+    config._client_scanner_exclusions = [
+        ClientScannerExclusion(
+            scanner="checkov",
+            option="skip_path",
+            kind="checkov",
+            pattern="vend.r",
+            reason="r",
+            scan_timeout=5,
+        )
+    ]
+    source = tmp_path / "src"
+    source.mkdir()
+    context = PluginContext(
+        source_dir=source, output_dir=tmp_path / "out", config=config
+    )
+
+    sarif_utils.apply_suppressions_to_sarif(
+        _report_of(["vendor/x.tf", "src/y.tf"]), context
+    )
+
+    assert len(seen) == 2
+    assert isinstance(seen[0], EvaluationBudget)
+    assert seen[0] is seen[1]
 
 
 # ---------------------------------------------------------------------------

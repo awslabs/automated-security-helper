@@ -129,8 +129,10 @@ Known limitations
   two are one directory when the scanned tree is the repository's root.
 * A regular expression is bounded by running it in a child process that is
   killed at the deadline (``evaluated_within``): one process start per
-  bounded search, which on Linux is a fork of ASH's own process. The scan it
-  was part of fails at the deadline.
+  bounded search, which on Linux is a fork of ASH's own process. A suppression
+  pass spends one ``scan_timeout`` over all of its searches, not one per
+  finding, and does not search again an entry that ran out
+  (``EvaluationBudget``). The scan it was part of fails at the deadline.
 
 Rejected alternatives
 ---------------------
@@ -150,6 +152,7 @@ import multiprocessing
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -246,7 +249,14 @@ class ClientScannerExclusion(BaseModel):
             return False
         return _reduced(scanner_name) == _reduced(self.scanner)
 
-    def hides(self, *, relative: str, absolute: str, rule_id: Optional[str]) -> bool:
+    def hides(
+        self,
+        *,
+        relative: str,
+        absolute: str,
+        rule_id: Optional[str],
+        budget: Optional["EvaluationBudget"] = None,
+    ) -> bool:
         """Whether the scanner would have left out a finding at this location.
 
         ``relative`` is the finding's path from the scan root. The SARIF step
@@ -257,6 +267,11 @@ class ClientScannerExclusion(BaseModel):
         ``relative`` was matched as a run of directories, so an unanchored
         glob or a checkov substring took the directories above the scan root.
 
+        ``budget`` is the suppression pass's ``EvaluationBudget``: a checkov
+        regular expression of this entry is searched within what is left of
+        the pass's one ``scan_timeout`` (``checkov_skips``); with none, each
+        call is bounded on its own.
+
         Raises:
             ScannerError: a checkov regular expression of this entry ran past
                 ``scan_timeout`` (``checkov_skips``).
@@ -266,7 +281,11 @@ class ClientScannerExclusion(BaseModel):
         outside = Path(relative).is_absolute()
         if self.kind == "checkov":
             return not outside and checkov_skips(
-                self.pattern, absolute, relative, timeout=self.scan_timeout
+                self.pattern,
+                absolute,
+                relative,
+                timeout=self.scan_timeout,
+                budget=budget,
             )
         if self.kind == "glob":
             return not outside and any(
@@ -387,21 +406,100 @@ def evaluated_within(
     paths): they cross to the child, which on platforms without ``fork`` is a
     fresh interpreter that imports this module by name (``_process_context``).
     """
-    if timeout is None:
-        return function(*args)
-    return _evaluated_in_a_child(timeout, source, function, args)
+    return EvaluationBudget().evaluate(timeout, source, source, function, *args)
+
+
+class EvaluationTimedOut(ScannerError):
+    """A bounded evaluation ran to its deadline and was stopped there."""
+
+
+class EvaluationBudget:
+    """One deadline for every bounded search of a suppression pass, with a memory.
+
+    A pass over a SARIF run asks each client-supplied exclusion about each
+    finding (``matching_exclusion`` -> ``hides`` -> ``checkov_skips``). Bounded
+    per call, one entry could spend a whole ``scan_timeout`` on every finding,
+    so a run of a thousand findings waited a thousand timeouts before the pass
+    failed, where checkov itself would have been killed once. The budget starts
+    one deadline per distinct ``scan_timeout`` the first time an entry with it
+    is evaluated, and every later evaluation under that timeout gets what is
+    left of it. An entry whose search ran to the deadline is remembered by its
+    ``key``, and a later question about it fails at once with the same answer
+    instead of starting another child; so does any evaluation once the
+    deadline has passed. The pass creates one budget and hands it down
+    (``utils/sarif_utils.apply_suppressions_to_sarif``); ``evaluated_within``
+    is one evaluation under a budget of its own, which is how a caller with no
+    pass (the detect-secrets scanner's one filter) uses the bound.
+    """
+
+    def __init__(self) -> None:
+        self._deadlines: Dict[float, float] = {}
+        self._timed_out: Dict[str, str] = {}
+
+    def remaining(self, timeout: float) -> float:
+        """Seconds left of the deadline ``timeout`` opened, opening it now if new."""
+        now = time.monotonic()
+        deadline = self._deadlines.setdefault(timeout, now + timeout)
+        return deadline - now
+
+    @property
+    def timed_out(self) -> Tuple[str, ...]:
+        """The keys whose evaluation ran to the deadline, in that order."""
+        return tuple(self._timed_out)
+
+    def evaluate(
+        self,
+        timeout: Optional[float],
+        source: str,
+        key: str,
+        function: Callable[..., T],
+        *args: Any,
+    ) -> T:
+        """``function(*args)`` within what is left of ``timeout``, or a ScannerError.
+
+        ``timeout`` None runs inline, unbounded. ``key`` names the entry for
+        the memory (the pattern as the option holds it); ``source`` names it
+        for the error.
+        """
+        if timeout is None:
+            return function(*args)
+        if key in self._timed_out:
+            raise ScannerError(
+                f"A regular expression from {source} already ran past {timeout} "
+                "seconds, the scanner's scan_timeout, earlier in this pass. It is "
+                "not searched again, and the scan fails."
+            )
+        remaining = self.remaining(timeout)
+        if remaining <= 0:
+            self._timed_out[key] = source
+            raise ScannerError(
+                f"The scanner's scan_timeout of {timeout} seconds was spent on "
+                f"earlier regular expressions of this pass before one from {source} "
+                "could be searched. The scan fails rather than run past it."
+            )
+        try:
+            return _evaluated_in_a_child(remaining, timeout, source, function, args)
+        except EvaluationTimedOut:
+            self._timed_out[key] = source
+            raise
 
 
 def _evaluated_in_a_child(
-    timeout: float, source: str, function: Callable[..., T], args: Tuple[Any, ...]
+    wait: float,
+    timeout: float,
+    source: str,
+    function: Callable[..., T],
+    args: Tuple[Any, ...],
 ) -> T:
-    """``function(*args)`` in a child process, killed when ``timeout`` seconds pass.
+    """``function(*args)`` in a child process, killed when ``wait`` seconds pass.
 
-    The child sends the result, or the exception, back over a pipe; the parent
-    waits for it up to ``timeout`` and kills the child when nothing has arrived
-    by then. A child that ends without answering (killed from outside, or its
-    answer could not be sent) fails the evaluation too, named as such, so the
-    scan never guesses at a match it did not see.
+    ``wait`` is what is left of ``timeout``, the scanner's ``scan_timeout``,
+    which the error names. The child sends the result, or the exception, back
+    over a pipe; the parent waits for it up to ``wait`` and kills the child
+    when nothing has arrived by then (``EvaluationTimedOut``). A child that
+    ends without answering (killed from outside, or its answer could not be
+    sent) fails the evaluation too, named as such, so the scan never guesses
+    at a match it did not see.
     """
     context = _process_context()
     receiving, sending = context.Pipe(duplex=False)
@@ -414,8 +512,8 @@ def _evaluated_in_a_child(
     child.start()
     sending.close()
     try:
-        if not receiving.poll(timeout):
-            raise ScannerError(
+        if not receiving.poll(wait):
+            raise EvaluationTimedOut(
                 f"A regular expression from {source} did not finish matching within "
                 f"{timeout} seconds, the scanner's scan_timeout. Its evaluation was "
                 "stopped, and the scan fails rather than wait on it."
@@ -512,7 +610,11 @@ _REGEX_SYNTAX = re.compile(r"[.*+?^$|()\[\]{}\\]")
 
 
 def checkov_skips(
-    pattern: str, absolute: str, relative: str, timeout: Optional[float] = None
+    pattern: str,
+    absolute: str,
+    relative: str,
+    timeout: Optional[float] = None,
+    budget: Optional[EvaluationBudget] = None,
 ) -> bool:
     """Whether checkov's ``--skip-path`` ``pattern`` leaves out the file at ``absolute``.
 
@@ -523,9 +625,13 @@ def checkov_skips(
     that is not a valid regular expression is used only as a substring.
 
     ``timeout`` is the scanner's ``scan_timeout``: a pattern with
-    regular-expression syntax is searched under it (``evaluated_within``), and a
+    regular-expression syntax is searched under it, in a child process, and a
     search still running at the deadline raises ScannerError naming the option.
-    None, a literal pattern, or one that did not compile is searched inline.
+    With a ``budget`` (the suppression pass's, ``EvaluationBudget``) the search
+    gets what is left of the pass's one deadline and an entry that ran out is
+    not searched again; without one the search is bounded on its own
+    (``evaluated_within``). None, a literal pattern, or one that did not
+    compile is searched inline.
     """
     candidates = [absolute]
     parts = [part for part in _slashed(relative).split("/") if part]
@@ -536,13 +642,14 @@ def checkov_skips(
 
     if compiled is None or timeout is None or _REGEX_SYNTAX.search(pattern) is None:
         return _checkov_search(pattern, candidates)
-    return evaluated_within(
-        timeout,
+    source = (
         "scanners.checkov.options.skip_path, an entry of a config an MCP client "
-        "delivered",
-        _checkov_search,
-        pattern,
-        candidates,
+        "delivered"
+    )
+    if budget is None:
+        return evaluated_within(timeout, source, _checkov_search, pattern, candidates)
+    return budget.evaluate(
+        timeout, source, f"skip_path:{pattern}", _checkov_search, pattern, candidates
     )
 
 
@@ -1652,11 +1759,16 @@ def matching_exclusion(
     relative: str,
     absolute: str,
     rule_id: Optional[str],
+    budget: Optional[EvaluationBudget] = None,
 ) -> Optional[ClientScannerExclusion]:
-    """The first of ``exclusions`` that would have kept this finding from its scanner."""
+    """The first of ``exclusions`` that would have kept this finding from its scanner.
+
+    ``budget`` is the suppression pass's ``EvaluationBudget``, handed to each
+    entry's ``hides`` so every bounded search of the pass shares one deadline.
+    """
     for exclusion in exclusions:
         if exclusion.applies_to(scanner_name) and exclusion.hides(
-            relative=relative, absolute=absolute, rule_id=rule_id
+            relative=relative, absolute=absolute, rule_id=rule_id, budget=budget
         ):
             return exclusion
     return None
