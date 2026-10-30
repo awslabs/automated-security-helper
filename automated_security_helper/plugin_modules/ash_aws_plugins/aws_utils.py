@@ -356,6 +356,12 @@ class AvailableModels(List[Dict[str, Any]]):
     #: Whether the profile listing failed on the client side (a botocore error
     #: with no service answer), as ``ModelCheck.listing_client_side`` reads it.
     profile_listing_client_side: bool = False
+    #: Whether the profile listing's failure was logged when this list was
+    #: made (``get_available_models`` logs it once, at warning the first time a
+    #: walk sees it and at debug when the walk's wrapper hands it back). A
+    #: check that names the failure again for one candidate logs it at debug,
+    #: so one failed profile listing is one warning, not one per candidate.
+    profile_listing_reported: bool = False
 
     def __init__(
         self,
@@ -368,6 +374,7 @@ class AvailableModels(List[Dict[str, Any]]):
         profile_listing_failure: Optional[str] = None,
         profile_listing_transient: bool = False,
         profile_listing_client_side: bool = False,
+        profile_listing_reported: bool = False,
     ):
         super().__init__(models)
         self.failed = failed
@@ -382,6 +389,7 @@ class AvailableModels(List[Dict[str, Any]]):
         self.profile_listing_failure = profile_listing_failure
         self.profile_listing_transient = profile_listing_transient
         self.profile_listing_client_side = profile_listing_client_side
+        self.profile_listing_reported = profile_listing_reported
 
 
 def failure_is_transient(
@@ -712,6 +720,10 @@ def get_available_models(
             profile_listing_failure=failure,
             profile_listing_transient=transient,
             profile_listing_client_side=client_side,
+            # Logged just above (at warning, or at debug for a failure the
+            # walk's wrapper already reported): a check that names it for one
+            # candidate logs it quietly.
+            profile_listing_reported=True,
         )
     except KeptListingFailure as kept:
         # The failure was reported when it first came; this call only reads it.
@@ -983,13 +995,23 @@ def _profile_listing_failed(
     """The check's answer for a model the on-demand list does not name while
     the inference profile listing failed: a listing failure about the check
     (the model may be routed by a profile nobody could list), named by how that
-    listing failed, never "not found in available models"."""
+    listing failed, never "not found in available models".
+
+    Logged at debug when the listing already reported the failure
+    (``profile_listing_reported``), so a walk over a chain of profile models
+    logs one failed listing once, not once per candidate; at warning only for a
+    list that never reported it."""
     failure = getattr(available_models, "profile_listing_failure", None)
     reason = (
         f"Model {shown} is not an on-demand model in this region and the "
         f"inference profile listing failed: {failure}"
     )
-    ASH_LOGGER.warning(text_without_values(reason, values))
+    log = (
+        ASH_LOGGER.debug
+        if getattr(available_models, "profile_listing_reported", False)
+        else ASH_LOGGER.warning
+    )
+    log(text_without_values(reason, values))
     return ModelCheck(
         False,
         text_without_values(reason, values),

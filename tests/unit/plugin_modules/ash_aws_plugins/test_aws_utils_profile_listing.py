@@ -15,12 +15,14 @@ No test here calls AWS: the control plane is a MagicMock whose two listings
 answer by plan.
 """
 
+import logging
 from unittest.mock import MagicMock
 
 import botocore.exceptions
 import pytest
 
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    ListingsOnce,
     check_is_transient,
     check_listing_failure,
     get_available_models,
@@ -139,6 +141,36 @@ def test_a_model_the_on_demand_list_lacks_is_unchecked_when_profiles_failed():
     assert "inference profile listing failed: AccessDeniedException" in check[1]
     assert check_listing_failure(check) == "AccessDeniedException"
     assert not check_is_transient(check)
+
+
+def test_one_failed_profile_listing_is_one_warning_over_a_walk(caplog):
+    """A walk over a chain of profile models asks one listing (ListingsOnce) and
+    checks each candidate against it. The listing's failure is logged once, at
+    warning, when it comes; each candidate's "the profile listing failed" answer
+    then names it at debug, so one denied ListInferenceProfiles is one warning in
+    ash.log, not one per candidate."""
+    listings = ListingsOnce(_client(profile_error=_refused("AccessDeniedException")))
+
+    with caplog.at_level(logging.DEBUG):
+        first = validate_bedrock_model(listings, PROFILED)
+        second = validate_bedrock_model(listings, US_PROFILE)
+
+    assert first[0] is False and second[0] is False, (first, second)
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ]
+    assert len(warnings) == 1, warnings
+    assert "AccessDeniedException" in warnings[0], warnings
+    # The control: each candidate's answer still names the failure, quietly.
+    named = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "inference profile listing failed" in record.getMessage()
+    ]
+    assert len(named) == 2, named
 
 
 def test_a_throttled_profile_listing_leaves_the_missing_model_transient():
