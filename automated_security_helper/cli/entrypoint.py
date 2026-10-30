@@ -290,7 +290,12 @@ def _write_raw(text: str) -> bool:
             _flush_quietly(getattr(sys, "stdout", None))
         try:
             while payload:
-                payload = payload[os.write(fd, payload) :]
+                count = os.write(fd, payload)
+                if count == 0:
+                    # Accepted nothing and raised nothing: repeated, this
+                    # would never end. Handed on as a failed write is.
+                    raise OSError(errno.EIO, "write of 0 bytes")
+                payload = payload[count:]
             return True
         except OSError:
             continue

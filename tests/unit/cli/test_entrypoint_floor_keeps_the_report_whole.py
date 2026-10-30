@@ -120,6 +120,27 @@ def test_a_descriptor_that_fails_part_way_hands_the_rest_on(monkeypatch):
     assert writes.written[1] == b"stdout-2"
 
 
+def test_a_descriptor_that_takes_nothing_is_handed_on(monkeypatch):
+    """A descriptor whose os.write returned 0 without raising left the payload
+    whole on every turn, and the raw floor never returned."""
+    writes = _Writes(limit=100)
+    turns: list[int] = []
+
+    def write(fd: int, payload: bytes) -> int:
+        turns.append(fd)
+        if len(turns) > 50:
+            raise AssertionError("the raw floor is spinning on descriptor 2")
+        return 0 if fd == 2 else writes(fd, payload)
+
+    monkeypatch.setattr(entrypoint.os, "write", write)
+    monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    assert entrypoint._write_raw("report\n") is True
+    assert turns == [2, 1]
+    assert writes.written == {1: b"report\n"}
+
+
 def test_a_descriptor_closed_at_start_is_never_written(monkeypatch):
     """Found closed by ensure_std_streams, descriptor 2 can since have been
     given to a file the run opened; the report must not land in it."""
