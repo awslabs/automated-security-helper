@@ -40,12 +40,19 @@ def _declares_name(mock_plugin_class: MagicMock, name: str) -> None:
     back to the lowercased class name only when none is declared. A bare
     MagicMock declares none, so it answered to ``mockreporterplugin`` and the
     command refused the requested format as unknown before it read anything.
+
+    The reporter the class builds declares no companion files. A MagicMock is an
+    ``os.PathLike`` (it answers ``__fspath__``), so the one its
+    ``companion_file_names()`` returned was read as a file named
+    ``MagicMock/mock().companion_file_names()/...``, which the pre-write check
+    refused as a name outside the reports directory before ``report`` ran.
     """
     config_class = MagicMock()
     config_class.model_fields = {"name": SimpleNamespace(default=name)}
     mock_plugin_class.model_fields = {
         "config": SimpleNamespace(annotation=config_class)
     }
+    mock_plugin_class.return_value.companion_file_names.return_value = ()
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
