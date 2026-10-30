@@ -1340,6 +1340,20 @@
 
 ### Behavior changes
 
+- `./ash scan -v` and `./ash report -v` now reach the subcommand as its `--verbose`,
+  as the CLI defines `-v`; the wrapper read `-v` anywhere on the line as its own
+  `--version` and exited without scanning. `./ash -v` with no subcommand before it
+  still prints the version and exits, so a habit or a health check never builds an
+  image. The wrapper also takes its own value options in both spellings
+  (`--source-dir=DIR` as well as `--source-dir DIR`, and `-oRUNNER`, `-uUID`,
+  `-gGID` as well as the spaced short forms), accepts the CLI's `--oci` and
+  `--runner` aliases for `--oci-runner`, exits 5 (the usage-error code) for a value
+  option given no value, writes its own status lines and the image build's output to
+  stderr so that `./ash report ... > file` holds the report alone, places the default
+  output directory under the scanned directory (`<source>/.ash/ash_output`) rather
+  than under the working directory, and keeps the container's stdin open only for
+  `mcp` and `inspect`, the two subcommands that read it. `Invoke-ASH` exits 5 for a
+  parameter given an empty or blank value, as `./ash` does.
 - Redaction matches a value's JSON spelling with non-ASCII kept raw as well: a
   message that embeds a value as a JSON body written with `ensure_ascii=False`
   (an HTTP client quoting the body it could not send) escapes the value's

@@ -285,6 +285,22 @@ def test_dash_v_is_the_scans_verbose_not_the_wrappers_version(runner, tmp_path):
     assert _inner(run) == ["ash", "scan", *SANDBOX_OFF, "-v"], run
 
 
+@pytest.mark.skipif(shutil.which("python") is None, reason="./ash -v runs python")
+def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(runner, tmp_path):
+    """`./ash -v`, with no subcommand before it, prints the version on the host and
+    exits, as it always did: a habit or a health check must never fall through to a
+    build and a verbose scan of the working directory."""
+    source, out = _dirs(tmp_path)
+    result, calls = _run(
+        runner,
+        ["--no-build", "--source-dir", str(source), "--output-dir", str(out), "-v"],
+    )
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    assert "awslabs/automated-security-helper v" in result.stdout, shown
+    assert calls == [], "the version is printed on the host; no image is built or run"
+
+
 @pytest.mark.skipif(
     shutil.which("python") is None, reason="./ash --version runs python"
 )

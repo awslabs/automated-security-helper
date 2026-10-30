@@ -893,6 +893,9 @@ CONFIG_GIVEN="NO"
 CONFIG_PATH=""
 CONFIG_INLINE="NO"
 INNER_VALUE_PENDING="NO"
+# YES once a word naming an ash subcommand has been read: -v before any subcommand is
+# this script's --version, -v after one is the subcommand's --verbose.
+SUBCOMMAND_SEEN="NO"
 while (("$#")); do
   # Each of this script's own value options takes both spellings, `--opt value` and
   # `--opt=value`, as the CLI inside does; --oci and --runner are the CLI's own
@@ -965,10 +968,11 @@ while (("$#")); do
     # run from a scanned checkout it would import that checkout's package under the
     # CLI's name. From ASH_ROOT_DIR the module is this repository's own.
     #
-    # -v is not this script's --version: the CLI inside, whose help --help prints,
-    # defines -v as --verbose on ash, scan and report, so `./ash scan -v` printed a
-    # version and exited without scanning. It is forwarded to the scan like any other
-    # word of ash's.
+    # -v before any subcommand is this script's --version, as it always was:
+    # `./ash -v` prints the version and exits, so a habit or a health check never
+    # builds an image. After a subcommand it is that command's --verbose, which the
+    # CLI inside defines on ash, scan and report: `./ash scan -v` scans, verbosely,
+    # where it once printed a version and exited.
     --help | -h)
       (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --help)
       exit 0
@@ -976,6 +980,14 @@ while (("$#")); do
     --version)
       (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --version)
       exit 0
+      ;;
+    -v)
+      if [[ "${SUBCOMMAND_SEEN}" = "YES" ]]; then
+        ASH_ARGS="${ASH_ARGS} $1"
+      else
+        (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --version)
+        exit 0
+      fi
       ;;
     --no-color | -c)
       COLOR_OUTPUT="false"
@@ -1019,6 +1031,8 @@ while (("$#")); do
       # prints text.
       if [[ "${INNER_VALUE_PENDING}" = "YES" ]]; then
         INNER_VALUE_PENDING="NO"
+      elif [[ " ${ASH_SUBCOMMANDS} " == *" $1 "* ]]; then
+        SUBCOMMAND_SEEN="YES"
       elif [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" $1 "* ]]; then
         INNER_VALUE_PENDING="YES"
       elif [[ "$1" == -[!-]?* ]]; then
