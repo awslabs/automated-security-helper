@@ -123,6 +123,22 @@ def _opts(tmp_path: Path, **overrides) -> ScanOptions:
     return ScanOptions(source_dir=source, output_dir=tmp_path / "out", **overrides)
 
 
+def _quiet_container_side_effects(monkeypatch) -> None:
+    """Stand-ins for what a container run does beside the runtime itself.
+
+    The sweeps of an earlier run's leftovers read the state directory and may ask
+    a container runtime; the record repair after the read-back asks the image's
+    revision; the sandbox report resolves the config. None of that is under test
+    here, and none of it may start a process on the test host.
+    """
+    monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
+    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    monkeypatch.setattr(
+        ras, "_take_own_values_for_record", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(ras, "_sandbox_modes_requested", lambda opts: [])
+
+
 # ---------------------------------------------------------------------------
 # _print_summary: a config_warning checkpoint without a message
 # ---------------------------------------------------------------------------
@@ -385,7 +401,7 @@ def test_the_second_container_input_check_carries_the_reads_record(
         return None if len(calls) == 1 else "refused\nsecond line"
 
     monkeypatch.setattr(ras, "container_input_refusal", recording_refusal)
-    monkeypatch.setattr(ras, "_sandbox_modes_requested", lambda opts: [])
+    _quiet_container_side_effects(monkeypatch)
     monkeypatch.setattr(
         ras,
         "run_ash_container",
@@ -422,7 +438,7 @@ def test_a_findings_exit_from_the_container_is_not_logged_as_a_failure(
         )
 
     monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)
-    monkeypatch.setattr(ras, "_sandbox_modes_requested", lambda opts: [])
+    _quiet_container_side_effects(monkeypatch)
     logger = _Logger()
 
     results = _run_container_mode(opts, logger)
