@@ -1818,11 +1818,17 @@ def _merge_converter_rows(
             update["candidate_inputs"] = None
         else:
             update["candidate_inputs"] = max(c for c in counts if c is not None)
+        # Read back as its parts, as the failures are: a row already the union
+        # of earlier shards holds its reasons joined, and deduplicating against
+        # the joined text appended a reason folded in once again from the third
+        # shard on.
         reasons = list(
             dict.fromkeys(
-                row.dependency_unavailable_reason
+                part
                 for row in unavailable
                 if row.dependency_unavailable_reason
+                for part in row.dependency_unavailable_reason.split(_FAILURE_JOIN)
+                if part
             )
         )
         # From the rows that ran it alone: with none recorded, the merged row has

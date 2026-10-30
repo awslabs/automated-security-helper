@@ -205,6 +205,21 @@ class TestConverterRowsAcrossThreeShards:
         assert row.dependencies_satisfied is False
         assert row.dependency_unavailable_reason == "jupyter nbconvert is not installed"
 
+    def test_a_reason_folded_in_once_is_not_repeated_by_a_third_shard(self):
+        """The reasons join as the failures do, so they are read back the same way."""
+        rows = [
+            ConverterStatusInfo(
+                dependencies_satisfied=False,
+                candidate_inputs=1,
+                dependency_unavailable_reason=reason,
+            )
+            for reason in ("nbconvert missing", "pandoc missing", "nbconvert missing")
+        ]
+
+        row = _merge_converter_rows(_merge_converter_rows(rows[0], rows[1]), rows[2])
+
+        assert row.dependency_unavailable_reason == "nbconvert missing; pandoc missing"
+
     def test_an_excluded_shard_does_not_mark_a_converter_that_ran_unavailable(self):
         excluded = ConverterStatusInfo(
             excluded=True,
