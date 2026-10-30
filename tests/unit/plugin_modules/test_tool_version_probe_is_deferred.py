@@ -156,6 +156,11 @@ def recorders(monkeypatch):
         return f"{tool_name} 0.0.0"
 
     monkeypatch.setattr(uv_tool_runner.UVToolRunner, "get_tool_version", _probe)
+    # The mixin asks uv_availability() first; the tool guard answers it as a host
+    # without uv, which would end the probe before the recorder sees it.
+    monkeypatch.setattr(
+        uv_tool_runner.UVToolRunner, "uv_availability", lambda self: (True, None)
+    )
     monkeypatch.setattr(
         uv_tool_runner.UVToolRunner, "is_uv_available", lambda self: True
     )
