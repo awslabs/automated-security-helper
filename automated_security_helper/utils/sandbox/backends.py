@@ -1235,7 +1235,11 @@ class LandlockBackend(SandboxBackend):
         # checkout under $HOME, is not. Caches keep read and exec: a tool's
         # installed environment can live in one.
         programs = {os.path.realpath(p) for p in policy.executable}
-        exec_paths = [p for p in policy.read_only if os.path.realpath(p) in programs]
+        # The executable paths as the policy lists them: build_scanner_policy draws
+        # them from read_only, so this is the same set it would be filtered to, and
+        # a policy built by hand with an executable path outside read_only gets the
+        # exec grant it asks for rather than none.
+        exec_paths = list(policy.executable)
         data_paths = [
             p for p in policy.read_only if os.path.realpath(p) not in programs
         ]

@@ -636,6 +636,31 @@ def test_landlock_grants_the_scans_data_read_without_exec(layout, monkeypatch):
 
 
 @POSIX
+def test_landlock_grants_exec_on_the_policys_executable_paths_as_listed(
+    layout, monkeypatch
+):
+    """An executable path the policy lists outside its read paths is still granted.
+
+    build_scanner_policy draws ``executable`` from ``read_only``, so for its
+    policies the two readings agree; a policy built by hand with a tool prefix in
+    ``executable`` alone used to get no grant for it at all.
+    """
+    monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
+    tool = layout.tmp / "opt" / "tool"
+    tool.mkdir(parents=True)
+    policy = _policy(layout, read_only=(layout.system,), executable=(tool,))
+
+    plan = LandlockBackend().plan(["/bin/true"], {}, policy)
+    try:
+        document = _landlock_document(plan)
+        assert _real(tool).as_posix() in document["read_only"]
+        assert _real(tool).as_posix() not in document["read_data"]
+        assert _real(layout.system).as_posix() in document["read_data"]
+    finally:
+        plan.run_cleanup()
+
+
+@POSIX
 def test_landlock_links_nothing_into_the_private_home_for_a_root_home(
     layout, monkeypatch
 ):
