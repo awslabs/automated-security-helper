@@ -34,6 +34,7 @@ from typing import (
     Iterator,
     List,
     Literal,
+    NoReturn,
     Optional,
     Set,
     Tuple,
@@ -56,8 +57,10 @@ from pydantic import (
     SecretBytes,
     SecretStr,
     TypeAdapter,
+    ValidationError,
     ValidationInfo,
     field_validator,
+    model_validator,
 )
 from pydantic.errors import PydanticSchemaGenerationError
 from pydantic.fields import FieldInfo
@@ -166,14 +169,23 @@ class _EnvironmentRecord:
 
     __hash__ = None  # type: ignore[assignment]
 
-    def __getstate__(self) -> Tuple[str, ...]:
-        return self.values
-
-    def __setstate__(self, state: Tuple[str, ...]) -> None:
-        self.values = state
+    def __reduce__(self) -> Tuple[Any, ...]:
+        # Rebuilt through the constructor and not through a state: pickle
+        # protocols 0 and 1 skip __setstate__ when __getstate__ is falsy, and
+        # a record with no values (the empty tuple) is, so its only slot stayed
+        # unset and reading it raised AttributeError.
+        return (_EnvironmentRecord, (self.values,))
 
     def __repr__(self) -> str:
         return "_EnvironmentRecord(...)"
+
+
+def _merged_values(held: Tuple[str, ...], values: Tuple[str, ...]) -> Tuple[str, ...]:
+    """*held* followed by the entries of *values* it does not hold yet."""
+    if not held:
+        return values
+    added = tuple(value for value in values if value not in held)
+    return held + added if added else held
 
 
 def _no_rich_repr(model: Any) -> Any:
@@ -260,11 +272,12 @@ def env_resolved_scalar(
     the class); *from_environment* is False when the reference's default
     supplied the text because the variable was unset. A caller that has only
     the name (the test fixtures) leaves both out and gets the bare
-    ``${variable}`` form of a variable that was read.
+    ``${variable}`` form of a variable that was read. Leaving *shown* out is
+    None: an empty string given on purpose is the form to show, and is kept.
     """
     resolved = EnvResolvedScalar(text)
     resolved.variable = variable
-    resolved.shown = shown or "${" + variable + "}"
+    resolved.shown = shown if shown is not None else "${" + variable + "}"
     resolved.from_environment = from_environment
     return resolved
 
@@ -354,9 +367,25 @@ def _admits_plain_str(annotation: Any, text: Optional[str] = None) -> bool:
     typed silently by a lax model, converting the env-read text into a
     spelling the redaction needle never matches ("067" read as 67). A slot
     that cannot keep the text would convert it, so it refuses; a shape this
-    reader cannot interpret (a TypeVar, a protocol, an unparameterized
-    container at the slot) admits, which keeps the downcast the default
-    where nothing is known to convert.
+    reader cannot interpret (a forward reference, an unparameterized container
+    at the slot) admits, which keeps the downcast the default where nothing is
+    known to convert. A TypeVar is read as pydantic validates it: through its
+    bound, or as the union of its constraints, and as anything when it has
+    neither. A class that the subclass check refuses to read (a TypedDict, a
+    Protocol that is not runtime-checkable) is the one refused shape that is
+    not a converter: no str can land in it, since pydantic checks the first
+    as a mapping and cannot build a schema for the second without
+    ``arbitrary_types_allowed``, whose isinstance check then raises on every
+    value. A refusal by name is the better answer there than the error
+    pydantic would give.
+
+    A slot whose ``Annotated`` metadata is not known to leave the text alone
+    (a validator, a ``StringConstraints`` that lowers or strips, a
+    ``union_mode``, a pattern) is read by validating *text* through the
+    whole annotation: the text is refused when the validation gives back
+    something else (:func:`_text_survives`). Reading the underlying type alone
+    admitted a str slot that re-spells the text, which then printed in a
+    spelling the needle never matched.
 
     Two typed families admit although they convert. SecretStr and
     SecretBytes mask their value in repr and str, so the converted value
@@ -386,9 +415,51 @@ def _admits_plain_str(annotation: Any, text: Optional[str] = None) -> bool:
     ``Path | str`` (or ``AnyUrl | str``) option accepts a reference through
     the union's str arm.
     """
-    annotation = _unwrap_annotated(annotation)
+    metadata = _annotated_metadata(annotation)
+    admitted = _admits_unwrapped_str(_unwrap_annotated(annotation), text)
+    if (
+        admitted
+        and text is not None
+        and any(not _inert_metadata(item) for item in metadata)
+    ):
+        return _text_survives(annotation, text)
+    return admitted
+
+
+def _annotated_metadata(annotation: Any) -> List[Any]:
+    """The metadata of the ``Annotated`` layers around *annotation*, outermost
+    layer first; empty when it has none."""
+    metadata: List[Any] = []
+    while get_origin(annotation) is Annotated:
+        annotation, *more = get_args(annotation)
+        metadata.extend(more)
+    return metadata
+
+
+def _typevar_bound(annotation: Any) -> Any:
+    """What pydantic validates an unparameterized TypeVar as: its bound, or the
+    union of its constraints; None when it has neither (it validates anything)
+    or when a lazily evaluated bound cannot be read."""
+    try:
+        bound = annotation.__bound__
+        constraints = annotation.__constraints__
+    except Exception:  # a bound or constraint that names something undefined
+        return None
+    if bound is not None:
+        return bound
+    if constraints:
+        return Union[constraints]
+    return None
+
+
+def _admits_unwrapped_str(annotation: Any, text: Optional[str]) -> bool:
+    """:func:`_admits_plain_str` for an *annotation* whose ``Annotated`` layers,
+    NewTypes and aliases are already unwrapped."""
     if annotation is Any or annotation is object or annotation is str:
         return True
+    if isinstance(annotation, TypeVar):
+        bound = _typevar_bound(annotation)
+        return bound is None or _admits_plain_str(bound, text)
     origin = get_origin(annotation)
     if origin in (Union, types.UnionType):
         arms = [arg for arg in get_args(annotation) if arg is not type(None)]
@@ -457,10 +528,23 @@ def _admits_plain_str(annotation: Any, text: Optional[str] = None) -> bool:
                 if missing_func is not None and missing_func is base_missing_func:
                     return True
                 return text is not None and text in annotation._value2member_map_
-            return issubclass(str, annotation) or issubclass(
-                annotation, (str, SecretStr, SecretBytes)
-            )
+            if issubclass(annotation, (SecretStr, SecretBytes)):
+                return True
+            if issubclass(annotation, str):
+                # A str subclass that builds its own core schema may re-spell
+                # the text it is given (a normalizing type), and what it does
+                # cannot be read from the class: the container walk fails
+                # closed on the same classes (_has_opaque_schema), and here
+                # the text is validated and refused when it comes back as
+                # something else.
+                if text is not None and _has_opaque_schema(annotation):
+                    return _text_survives(annotation, text)
+                return True
+            return issubclass(str, annotation)
         except TypeError:
+            # Only a class the subclass check refuses to read lands here (a
+            # TypedDict, a Protocol that is not runtime-checkable): no str
+            # lands in either, so the slot refuses (see the docstring).
             return False
     return origin is None
 
@@ -536,6 +620,40 @@ def _arm_accepts(annotation: Any, text: str) -> bool:
     return True
 
 
+def _text_survives(annotation: Any, text: str) -> bool:
+    """Whether pydantic validates *text* at *annotation* and gives it back as
+    it went in, which is what a slot must do for the text to print in the
+    spelling the redaction needle matches.
+
+    Read for a slot the type alone cannot answer for: ``Annotated`` metadata
+    that may re-spell the text (a validator, ``StringConstraints(to_lower=True)``,
+    a ``union_mode`` that lets an earlier arm convert it) and a str subclass
+    that builds its own core schema. The answer is the validation's own, so no
+    list of metadata kinds has to be kept. A secret type masks what it holds,
+    so it counts as keeping the text; an Enum member counts through its value.
+
+    Only a validation that succeeds and gives back something else makes the
+    text unsafe: that is the conversion the refusal exists for. Text the slot
+    refuses is admitted, because nothing is converted: pydantic fails the load
+    there with an error of its own, and the printers of ASH never quote an
+    error's input. A validation that raises anything else (a validator that
+    needs the surrounding model's data, say) cannot be read, and the text is
+    admitted as for any shape this reader cannot interpret. The text is handed
+    over as a plain str, as the downcast hands it to the model."""
+    adapter = _arm_adapter(annotation)
+    if adapter is None:
+        return True
+    try:
+        result = adapter.validate_python(str(text))
+    except Exception:  # refused by the slot, or a validator that cannot be run
+        return True
+    if isinstance(result, (SecretStr, SecretBytes)):
+        return True
+    if isinstance(result, enum.Enum):
+        result = result.value
+    return isinstance(result, str) and result == text
+
+
 def _is_enum_arm(annotation: Any) -> bool:
     annotation = _unwrap_annotated(annotation)
     try:
@@ -593,6 +711,9 @@ def _converts_a_plain_str(annotation: Any) -> bool:
     which matches :func:`_admits_plain_str`'s default for one.
     """
     annotation = _root_annotation(annotation)
+    if isinstance(annotation, TypeVar):
+        bound = _typevar_bound(annotation)
+        return bound is not None and _converts_a_plain_str(bound)
     origin = get_origin(annotation)
     if origin in (Union, types.UnionType):
         return any(
@@ -679,6 +800,11 @@ def _idiom_sentence(annotation: Any, in_item: bool = False) -> str:
 def _refused_noun(annotation: Any) -> str:
     """The refusal message's noun for *annotation*, pydantic's where known."""
     annotation = _unwrap_annotated(annotation)
+    if isinstance(annotation, TypeVar):
+        # Worded by what pydantic validates it as: its bound, or its constraints.
+        bound = _typevar_bound(annotation)
+        if bound is not None:
+            return _refused_noun(bound)
     origin = get_origin(annotation)
     if origin in (Union, types.UnionType):
         nouns = [
@@ -697,12 +823,13 @@ def _refused_noun(annotation: Any) -> str:
 
 def _listed_values(annotation: Any) -> Optional[List[Any]]:
     """The constants a Literal or an Enum *annotation* lists, in order; None
-    for any other shape."""
+    for any other shape, and for an Enum with no members, which lists nothing
+    to say (the caller words it by its name, as any other class)."""
     annotation = _unwrap_annotated(annotation)
     if get_origin(annotation) is Literal:
-        return list(get_args(annotation))
+        return list(get_args(annotation)) or None
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
-        return [member.value for member in annotation]
+        return [member.value for member in annotation] or None
     return None
 
 
@@ -1337,13 +1464,20 @@ def _declared_field_annotations(annotation: Any) -> Optional[Dict[Any, Any]]:
         # Own names first, alias keys second, as _dataclass_fields does: in
         # one pass a later field's own-name write replaced the _AliasSlots an
         # earlier field's alias had put under the shared key, so the refusal
-        # depended on declaration order.
-        for name, field in annotation.model_fields.items():
-            fields[name] = field.annotation
+        # depended on declaration order. Each annotation is rebuilt with the
+        # field's own metadata (``Field(pattern=...)``, ``union_mode``, a
+        # validator), which pydantic moves out of ``field.annotation``: a
+        # reader of the bare annotation took a str slot that re-spells its
+        # text for one that keeps it.
+        own = {
+            name: field.rebuild_annotation()
+            for name, field in annotation.model_fields.items()
+        }
+        fields.update(own)
         for name, field in annotation.model_fields.items():
             for alias in (field.alias, field.validation_alias):
                 for path in _alias_paths(alias):
-                    _add_alias_slot(fields, path, field.annotation)
+                    _add_alias_slot(fields, path, own[name])
         return fields
     if dataclasses.is_dataclass(annotation):
         return _dataclass_fields(annotation, {})
@@ -1439,6 +1573,55 @@ def _required_field_keys(holder: Any) -> Optional[List[Set[Any]]]:
 
 
 def _arm_would_take(arm: Any, value: Any) -> bool:
+    """Whether a union *arm* that can hold the container *value* would also
+    accept it as pydantic validates it: by the shape it can read
+    (:func:`_arm_structurally_takes`) and by validating the value at the arm
+    (:func:`_arm_validates`)."""
+    return _arm_structurally_takes(arm, value) and _arm_validates(arm, value)
+
+
+def _arm_validates(arm: Any, value: Any) -> bool:
+    """Whether pydantic validates the container *value* at the union *arm* at
+    all, which the arm must do before it can speak for the value's markers.
+
+    The shape test cannot see a rest of the value that the arm refuses: an
+    arm ``List[str]`` keeps a marker as text yet fails on a sibling item that
+    is a number, and then the union hands the whole list to ``List[int]``,
+    which types the marker. Likewise a ``List[Literal["a"]]`` arm admits any
+    text at its item slot while pydantic refuses text that is no constant. So
+    the value goes through the arm's own validation, with the markers downcast
+    as the validator hands them on, and an arm that raises a ValidationError
+    does not vouch. A section arm under :data:`_SECTIONS_OPAQUE` is handed the
+    value with its markers, since its own before-validator is what refuses
+    the ones it cannot keep: a section that refuses the value is no arm for it
+    either, and the sibling's finding is the union's answer.
+
+    A value that holds no marker has nothing for the arm to vouch for, and an
+    arm pydantic cannot build, or whose validation raises anything but a
+    ValidationError, cannot be read: both answer True, as before this read."""
+    if not isinstance(value, (list, tuple, set, frozenset, dict)):
+        return True
+    if not _holds_env_scalar(value):
+        return True
+    adapter = _arm_adapter(arm)
+    if adapter is None:
+        return True
+    try:
+        named = _root_annotation(arm)
+        opaque = (
+            _SECTIONS_OPAQUE.get()
+            and isinstance(named, type)
+            and issubclass(named, RedactedSection)
+        )
+        adapter.validate_python(value if opaque else without_env_scalars(value))
+    except ValidationError:
+        return False
+    except Exception:  # an arm whose validation this reader cannot run
+        return True
+    return True
+
+
+def _arm_structurally_takes(arm: Any, value: Any) -> bool:
     """Whether a union *arm* that can hold the container *value* would also
     accept it as pydantic validates it, as far as this reader can tell.
 
@@ -1574,13 +1757,26 @@ def _marker_a_slot_would_type(
             # a section's own validator would walk it, except that a
             # section's _env_scalar_typed_fields opt-in is not honored (see
             # _declared_field_annotations). An entry no field names is left
-            # to the model's own extra-key policy.
+            # to the model's own extra-key policy, which reads it against
+            # the model's declared ``__pydantic_extra__`` type when there is
+            # one (_typed_extras_annotation).
             with _config_in_force(annotation):
+                extras_annotation: Any = _ABSENT
                 for key, item in value.items():
                     if key in fields:
                         typed = _marker_a_slot_would_type(fields[key], item)
-                        if typed is not None:
-                            return typed
+                    elif _holds_env_scalar(item):
+                        if extras_annotation is _ABSENT:
+                            extras_annotation = _typed_extras_annotation(annotation)
+                        typed = (
+                            None
+                            if extras_annotation is None
+                            else _marker_a_slot_would_type(extras_annotation, item)
+                        )
+                    else:
+                        typed = None
+                    if typed is not None:
+                        return typed
             return None
     holder, bindings = _typed_container_class(annotation)
     if isinstance(value, (list, tuple)) and _is_named_tuple(holder):
@@ -1616,7 +1812,14 @@ def _marker_a_slot_would_type(
         return None
     if isinstance(value, dict):
         key_annotation = args[0]
-        value_annotation = args[1] if len(args) > 1 else Any
+        if len(args) > 1:
+            value_annotation = args[1]
+        elif isinstance(origin, type) and issubclass(origin, collections.Counter):
+            # A Counter names its keys only: pydantic validates its values as
+            # int, so the walk reads them as int and not as anything.
+            value_annotation = int
+        else:
+            value_annotation = Any
         for key, item in value.items():
             typed = _marker_a_slot_would_type(
                 key_annotation, key, True
@@ -1634,15 +1837,25 @@ def _marker_a_slot_would_type(
             # for a list as for a tuple. On a length mismatch zip pairs the
             # shared prefix: the model's own validation owns the length error.
             pairs: Iterable[Tuple[Any, Any]] = zip(args, value)
-        elif origin is tuple and Ellipsis not in args:
-            # A set or frozenset at a fixed tuple (a Python caller's value):
-            # pydantic lands its members by iteration order, which a set does
-            # not fix, so any member may reach any positional slot. Each
-            # member is read against every slot, and a marker is admitted
-            # only where every slot would keep it.
-            pairs = ((arg, item) for item in value for arg in args)
         else:
-            pairs = ((args[0], item) for item in value)
+            # A set has no order of its own: its members are read references
+            # first, by variable name (_set_member_order), so the reference a
+            # refusal names is the same on every run and not the one a hash
+            # seed put first.
+            members = (
+                sorted(value, key=_set_member_order)
+                if isinstance(value, (set, frozenset))
+                else value
+            )
+            if origin is tuple and Ellipsis not in args:
+                # A set or frozenset at a fixed tuple (a Python caller's
+                # value): pydantic lands its members by iteration order, which
+                # a set does not fix, so any member may reach any positional
+                # slot. Each member is read against every slot, and a marker
+                # is admitted only where every slot would keep it.
+                pairs = ((arg, item) for item in members for arg in args)
+            else:
+                pairs = ((args[0], item) for item in members)
         for item_annotation, item in pairs:
             typed = _marker_a_slot_would_type(item_annotation, item, True)
             if typed is not None:
@@ -1719,6 +1932,23 @@ def _refuse_container_at_scalar(
     )
 
 
+def _refuse_value_nested_too_deeply(value: Any, field_name: str) -> NoReturn:
+    """Refuse a value whose nesting ran the typed walk past the interpreter's
+    recursion limit, naming the field and the variable of the first reference
+    it holds (:func:`first_env_scalar` is iterative, so it still answers) and
+    never the value. The walk re-raises when the value holds no reference: the
+    error was not this rule's to turn into a refusal."""
+    marker = first_env_scalar(value)
+    if marker is None:
+        raise RecursionError("maximum recursion depth exceeded")
+    raise ValueError(
+        f"Input is nested too deeply to check: {field_name} holds a value "
+        "nested deeper than a reference in it can be placed against the "
+        f"field's type; it holds a reference to {marker.variable}. Write the "
+        "value in the file, or write it with less nesting."
+    )
+
+
 def _refuse_typed_env_reference(
     annotation: Any,
     value: Any,
@@ -1777,6 +2007,12 @@ def _refuse_typed_env_reference(
     opaque_token = _SECTIONS_OPAQUE.set(sections_opaque)
     try:
         typed = _marker_a_slot_would_type(annotation, value)
+    except RecursionError:
+        # The walk descends once per nesting level of the value, beside a
+        # recursive annotation, so a value nested past the interpreter's limit
+        # ends here. It cannot be read, so it is refused by name, which is
+        # the answer for a value whose references cannot be placed.
+        _refuse_value_nested_too_deeply(value, field_name)
     finally:
         _SECTIONS_OPAQUE.reset(opaque_token)
         _WALK_CONFIG.reset(token)
@@ -1818,6 +2054,14 @@ def without_env_scalars(value: Any) -> Any:
     per nesting level crashed with a RecursionError past the interpreter's
     limit (the shape config_validator's _string_leaves already walks
     iteratively for the same reason).
+
+    Each container comes back as its base type (list, tuple, set, frozenset,
+    dict), and a subclass (an OrderedDict, a NamedTuple, a list subclass) is
+    no exception. That is the plain-builtin view a config file would have
+    given, since no parser produces anything else, and it is what a dump
+    needs: PyYAML's SafeDumper has a representer for the base types and none
+    for a subclass, as it has none for a str subclass. A value that has to stay
+    an instance of its own class is not passed through here.
 
     Two kinds of caller. The section base's validator calls it for a field
     whose annotation reaches no section (the section's own validator must
@@ -1886,15 +2130,21 @@ def without_env_scalars(value: Any) -> Any:
 def _set_member_order(member: Any) -> Tuple[int, str]:
     """Sort key for the members of a set: references first, by variable name.
 
-    Every other member (a plain str, or a tuple that may hold a reference)
-    sorts after the references and ties with its peers, so those keep the
-    set's own iteration order among themselves. A set of references, which is
-    what a YAML ``!!set`` of environment references loads as, is fully
-    ordered.
+    A member that holds a reference (a tuple or frozenset with one inside)
+    sorts after the bare references, by the variable of the first reference it
+    holds. Every other member (a plain str) sorts last and ties with its
+    peers, so those keep the set's own iteration order among themselves; none
+    holds a reference, so nothing that is read or named depends on it. A set
+    of references, which is what a YAML ``!!set`` of environment references
+    loads as, is fully ordered, and so is a set of tuples that hold some.
     """
     if isinstance(member, EnvResolvedScalar):
         return (0, member.variable)
-    return (1, "")
+    if isinstance(member, (tuple, frozenset)):
+        held = first_env_scalar(member)
+        if held is not None:
+            return (1, held.variable)
+    return (2, "")
 
 
 def first_env_scalar(value: Any) -> Optional["EnvResolvedScalar"]:
@@ -2067,6 +2317,72 @@ def _downcast_outside_sections(annotation: Any, value: Any) -> Any:
     return value
 
 
+def _downcast_what_validation_kept(value: Any) -> Any:
+    """*value*, validated, with every EnvResolvedScalar still in it downcast to
+    plain str: in its lists, tuples, sets, frozensets and dicts (keys too) and
+    in the attributes and extras of the plain models it holds.
+
+    A section is left alone: its own validator downcast what it holds. A plain
+    model's attributes are rewritten in place, past its own validation, which
+    is the point: the marker is a str subclass its field kept because the field
+    accepts anything. The text is unchanged, so equality, hashing and the
+    model's dump are not. Iterative and cycle-safe like the walks above."""
+    if isinstance(value, (list, tuple, set, frozenset, dict)) and _holds_env_scalar(
+        value
+    ):
+        value = without_env_scalars(value)
+    seen: Set[int] = set()
+    stack: List[Any] = [value]
+    while stack:
+        node = stack.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, RedactedSection):
+            continue
+        if isinstance(node, BaseModel):
+            for entries in (node.__dict__, node.__pydantic_extra__):
+                for name, entry in list((entries or {}).items()):
+                    if _holds_env_scalar(entry):
+                        entry = entries[name] = without_env_scalars(entry)  # type: ignore[index]
+                    stack.append(entry)
+        elif isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, (list, tuple, set, frozenset)):
+            stack.extend(node)
+    return value
+
+
+#: The value annotation a model's declared ``__pydantic_extra__`` gives its
+#: extras, by model; None for a model that declares none. Cleared at 256.
+_EXTRAS_ANNOTATIONS: Dict[Any, Any] = {}
+
+
+def _typed_extras_annotation(model: Any) -> Any:
+    """The annotation pydantic validates each extra of *model* against: X of a
+    ``__pydantic_extra__: Dict[str, X]`` declared on a model with
+    ``extra="allow"``. None for a model that declares none, for one that
+    declares a bare mapping (nothing is typed), and for a declaration that
+    cannot be resolved (a forward reference to a local name)."""
+    if not (isinstance(model, type) and issubclass(model, BaseModel)):
+        return None
+    if model in _EXTRAS_ANNOTATIONS:
+        return _EXTRAS_ANNOTATIONS[model]
+    found: Any = None
+    if model.model_config.get("extra") == "allow":
+        try:
+            declared = typing_extensions.get_type_hints(model).get("__pydantic_extra__")
+        except Exception:  # an annotation that names something undefined
+            declared = None
+        if declared is not None:
+            args = get_args(_unwrap_annotated(declared))
+            found = args[1] if len(args) == 2 else None
+    if len(_EXTRAS_ANNOTATIONS) >= 256:
+        _EXTRAS_ANNOTATIONS.clear()
+    _EXTRAS_ANNOTATIONS[model] = found
+    return found
+
+
 class RedactedSection(BaseModel):
     """A model a configuration holds: its repr and str redact the values the
     configuration read from the environment.
@@ -2119,6 +2435,56 @@ class RedactedSection(BaseModel):
     #: survives validation either way.
     _env_scalar_typed_fields: ClassVar[FrozenSet[str]] = frozenset()
 
+    #: Whether the section's extras (``extra="allow"``) are downcast as its
+    #: fields are: every EnvResolvedScalar an extra holds, a mapping key
+    #: included, leaves the validated model as a plain str. False by default,
+    #: because a segment model keeps an external plugin's raw config as an
+    #: extra, and that config must still hold its markers when the plugin's own
+    #: model validates it (a typed field there names the variable). A section
+    #: whose extras are validated data, never a plugin's raw section, sets it
+    #: True: a marker left in one is a str subclass in a validated model, which
+    #: fails a config dump (SafeDumper has no representer for one).
+    _downcast_extras: ClassVar[bool] = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _env_resolved_text_in_typed_extras(cls, data: Any, info: ValidationInfo) -> Any:
+        """Refuse a reference at an extra whose declared type would convert it.
+
+        The field validator below sees declared fields only. A section that
+        declares ``__pydantic_extra__: Dict[str, X]`` with ``extra="allow"``
+        has pydantic validate each extra as X, so an X that converts the text
+        (an int, a Path) typed an env-read value silently, in a spelling the
+        redaction needle never matched. Each extra that holds a reference is
+        walked against X as a field's value is, and refused by name where X
+        cannot keep the text. A section with no declared extras type, or one
+        whose X keeps the text (Any, str, a union with such an arm), is left
+        as it was."""
+        if not isinstance(data, dict):
+            return data
+        annotation = _typed_extras_annotation(cls)
+        if annotation is None:
+            return data
+        operator_route = bool((info.context or {}).get("strict_file_load"))
+        declared: Optional[Dict[Any, Any]] = None
+        for key, item in data.items():
+            if not _holds_env_scalar(item):
+                continue
+            if declared is None:
+                declared = _declared_field_annotations(cls) or {}
+            if key in declared:
+                continue
+            _refuse_typed_env_reference(
+                annotation,
+                item,
+                # A key that is itself a reference prints as its text, which
+                # is the value: name no key then.
+                key if type(key) is str else "an extra",
+                operator_route=operator_route,
+                config=cls.model_config,
+            )
+        return data
+
     @field_validator("*", mode="before")
     @classmethod
     def _env_resolved_text_reads_as_the_field_type(
@@ -2164,7 +2530,8 @@ class RedactedSection(BaseModel):
         # the reference, and cannot retype a plugin's field: no hint there.
         operator_route = bool((info.context or {}).get("strict_file_load"))
         if isinstance(value, EnvResolvedScalar):
-            annotation = cls.model_fields[field_name].annotation
+            field = cls.model_fields[field_name]
+            annotation = field.annotation
             hint = None if operator_route else annotation
             if field_name in cls._env_scalar_typed_fields:
                 # A config FILE cannot put a reference at a typed field even
@@ -2178,7 +2545,10 @@ class RedactedSection(BaseModel):
                         value, _refused_noun(annotation), field_name, hint
                     )
                 return value
-            if _admits_plain_str(annotation, str(value)):
+            # The field's own metadata is read with the type: it may re-spell
+            # the text (a pattern, a validator, a union_mode), and pydantic
+            # keeps it apart from ``field.annotation``.
+            if _admits_plain_str(field.rebuild_annotation(), str(value)):
                 return str(value)
             _refuse_env_reference(value, _refused_noun(annotation), field_name, hint)
         if isinstance(value, (list, tuple, set, frozenset, dict)) and _holds_env_scalar(
@@ -2215,6 +2585,45 @@ class RedactedSection(BaseModel):
             )
             return without_env_scalars(value)
         return value
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _env_resolved_text_validation_kept_reads_as_text(
+        cls, value: Any, info: ValidationInfo
+    ) -> Any:
+        """Downcast the references that validation of a section-reaching field
+        left in its value.
+
+        A value under a field that reaches a section is handed to pydantic with
+        its markers (the before-validator above), so the sections in it receive
+        them. A slot beside a section that keeps its input as it is (an Any or
+        object slot, a dict arm of a union with a section) keeps the marker
+        too, and a union that picks the sibling arm leaves a str subclass in
+        the validated model, which fails a config dump. The sections built in
+        the value have downcast their own, so what is left sits outside them:
+        it is downcast here, in containers and in the plain models the value
+        holds."""
+        if (
+            not isinstance(value, (list, tuple, set, frozenset, dict, BaseModel))
+            or info.field_name is None
+            or not _annotation_reaches_a_section(
+                cls.model_fields[info.field_name].annotation
+            )
+        ):
+            return value
+        return _downcast_what_validation_kept(value)
+
+    @model_validator(mode="after")
+    def _env_resolved_text_in_extras_reads_as_text(self) -> "RedactedSection":
+        """Downcast the references an extra holds, for a section that sets
+        :attr:`_downcast_extras`. The extras dict is changed in place."""
+        if type(self)._downcast_extras:
+            extras = self.__pydantic_extra__
+            if extras and _holds_env_scalar(extras):
+                downcast = without_env_scalars(extras)
+                extras.clear()
+                extras.update(downcast)
+        return self
 
     def redaction_values(self) -> Tuple[str, ...]:
         """The values this section's repr and str are redacted with: the
@@ -2268,10 +2677,27 @@ class RedactedSection(BaseModel):
 
     __rich_repr__ = NO_RICH_REPR
 
+    def __pretty__(self, fmt: Any, **kwargs: Any) -> Any:
+        """The pretty printer of devtools, which pydantic serves with each
+        field's raw value taken from ``__repr_args__``, without the redaction
+        :meth:`__repr_str__` applies to the text. It gets the redacted repr, as
+        Rich does through :data:`NO_RICH_REPR`."""
+        yield repr(self)
+
     def __setattr__(self, name: str, value: Any) -> None:
         super().__setattr__(name, value)
         if name in type(self).model_fields:
-            carry_environment_values(value, self._redaction_values())
+            # What the section now holds, not the argument: a model that
+            # validates assignment stores a new object built from it (a dict
+            # becomes a section), and the argument is not what it prints.
+            stored = self.__dict__.get(name, value)
+        else:
+            # An extra (extra="allow") is stored beside the fields.
+            extras = self.__pydantic_extra__
+            if not extras or name not in extras:
+                return
+            stored = extras[name]
+        carry_environment_values(stored, self._redaction_values())
 
     def model_copy(self, *, update: Any = None, deep: bool = False) -> Any:
         copied = super().model_copy(update=update, deep=deep)
@@ -2285,8 +2711,15 @@ def carry_environment_values(value: Any, values: Iterable[str]) -> None:
     """Give every section in *value* the environment values *values*.
 
     Walks models of this kind and the lists, tuples, sets and dicts their
-    fields and extras hold; another model is left alone, a plugin among them,
-    which takes its context's values itself.
+    fields and extras hold, and a RootModel's root (a wrapper that holds one
+    section and nothing else); another model is left alone, a plugin among
+    them, which takes its context's values itself.
+
+    A section keeps the values it already carries and takes *values* beside
+    them. A section put into a holder with fewer values, or none, or into a
+    second holder, would otherwise cease to redact what the first holder gave
+    it, and its text would print the value again. The cost of keeping a value
+    the holder no longer reads is a needle that redacts nothing.
     """
     record_values = environment_strings(values)
     pending: List[Any] = [value]
@@ -2298,11 +2731,20 @@ def carry_environment_values(value: Any, values: Iterable[str]) -> None:
         seen.add(id(item))
         if isinstance(item, RedactedSection):
             # A record of its own, not one shared with a copy of the model.
+            held = getattr(item, "_environment_record", None)
             BaseModel.__setattr__(
-                item, "_environment_record", _EnvironmentRecord(record_values)
+                item,
+                "_environment_record",
+                _EnvironmentRecord(
+                    _merged_values(
+                        held.values if held is not None else (), record_values
+                    )
+                ),
             )
             pending.extend(item.__dict__.values())
             pending.extend((item.__pydantic_extra__ or {}).values())
+        elif isinstance(item, RootModel):
+            pending.append(item.root)
         elif isinstance(item, (list, tuple, set, frozenset)):
             pending.extend(item)
         elif isinstance(item, dict):
