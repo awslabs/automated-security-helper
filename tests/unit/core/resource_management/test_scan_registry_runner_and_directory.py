@@ -796,6 +796,76 @@ class TestAReadOnlyPollDoesNotRecloseACompletedScan:
         assert progress["total_findings"] == 0
         assert progress["scanners"] == {}
 
+    def test_a_completed_scan_whose_output_directory_is_gone_has_no_results(
+        self, tmp_path
+    ):
+        """The directory gone (removed since, or never created), nothing was
+        read and the poll no longer raised; but the COMPLETED arm then marked the
+        empty progress completed, so the response read results_available True,
+        total_findings 0, coverage_complete True from the recorded coverage and
+        error_message None: a clean scan that found nothing, with no field
+        saying the directory is missing."""
+        registry = ScanRegistry()
+        scan_id, results_file = self._closed_scan(
+            tmp_path,
+            registry,
+            coverage={
+                "incomplete_scanners": [],
+                "no_scanner_ran": False,
+                "incomplete_converters": [],
+                "unevaluated_rules": [],
+                "stale_content_databases": [],
+                "could_not_stop": [],
+            },
+        )
+        output = results_file.parent
+        output.rmdir()
+        entry = registry.get_scan(scan_id)
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "completed"
+        assert progress["is_complete"] is True
+        assert progress["results_available"] is False
+        assert progress["coverage_complete"] is None
+        assert progress["total_findings"] == 0
+        assert progress["scanners"] == {}
+        assert progress["error_message"]
+        assert str(output) in progress["error_message"]
+        # The entry is not re-closed and carries no reason of its own.
+        assert entry.status is MCScanStatus.COMPLETED
+        assert entry.error_message is None
+        # The recorded gap lists still describe the run.
+        assert progress["incomplete_scanners"] == []
+
+    def test_a_superseded_scan_has_no_results_of_its_own(self, tmp_path):
+        """output_superseded said the files are a later scan's; results_available
+        still said True beside total_findings 0, the same clean-scan reading."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+        new = _register(registry, project, output)
+        registry.update_scan_status(new, MCScanStatus.RUNNING)
+
+        progress = registry.check_scan_progress(old)
+
+        assert progress["output_superseded"] is True
+        assert progress["superseded_by"] == [new]
+        assert progress["results_available"] is False
+        assert progress["coverage_complete"] is None
+        assert progress["status"] == "completed"
+        # The later scan's own results are still its own.
+        assert registry.check_scan_progress(new)["results_available"] is False
+        registry.update_scan_status(new, MCScanStatus.COMPLETED)
+        assert registry.check_scan_progress(new)["results_available"] is True
+
     def test_recorded_coverage_does_not_make_unreadable_results_complete(
         self, tmp_path
     ):

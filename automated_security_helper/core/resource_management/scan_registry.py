@@ -1848,6 +1848,25 @@ class ScanRegistry:
                     entry.status in FINISHED_WITH_RESULTS
                     and scan_progress.status == "failed"
                 )
+                # A finished scan with no results of its own to read for the
+                # other two reasons nothing was read above: its output directory
+                # is gone (never created, or removed since), or a later scan has
+                # taken the one output tree over (output_superseded). Both left
+                # the response at status completed / results_available True /
+                # total_findings 0 / error_message None, the same clean-scan
+                # reading the unreadable-file case had, and a client checking
+                # results_available found nothing wrong. The directory that is
+                # gone is named in error_message when the entry carries no
+                # reason of its own; a superseded scan is named by superseded_by.
+                results_absent = entry.status in FINISHED_WITH_RESULTS and (
+                    output_missing or superseded
+                )
+                results_unavailable = results_unreadable or results_absent
+                output_missing_message = (
+                    f"Output directory {output_dir} does not exist"
+                    if output_missing and entry.status in ENDED
+                    else None
+                )
 
                 # Convert scan progress to dictionary
                 progress_dict = scan_progress.to_dict()
@@ -1886,7 +1905,7 @@ class ScanRegistry:
                 if (
                     entry.status in FINISHED_WITH_RESULTS
                     and coverage is not None
-                    and not results_unreadable
+                    and not results_unavailable
                 ):
                     coverage_complete = not coverage_has_gap(coverage)
 
@@ -1931,10 +1950,12 @@ class ScanRegistry:
                     # The entry's reason when it has one; else, for an ended
                     # scan, what the file read found, so a finished scan whose
                     # results file is now unreadable says so without the entry
-                    # being re-closed. A running scan's file is partial by
-                    # nature and carries no such message.
+                    # being re-closed; else, for an ended scan whose output
+                    # directory is gone, that it is. A running scan's file is
+                    # partial by nature and carries no such message.
                     "error_message": entry.error_message
-                    or (scan_progress.error_message if entry.status in ENDED else None),
+                    or (scan_progress.error_message if entry.status in ENDED else None)
+                    or output_missing_message,
                     # The CLI's code for a scan ASH ended with an exit, so a client
                     # can branch on why it failed as a script branches on the
                     # CLI's status. None for any other ending.
@@ -1953,10 +1974,12 @@ class ScanRegistry:
                     # whether they cover everything is `coverage_complete`.
                     "is_complete": entry.status in ENDED,
                     # False for a finished scan whose results file is now
-                    # unusable (results_unreadable above): the status says the
-                    # scan finished, this says its results cannot be read.
+                    # unusable (results_unreadable above), whose output
+                    # directory is gone, or whose output tree a later scan
+                    # holds (results_absent above): the status says the scan
+                    # finished, this says its results cannot be read.
                     "results_available": entry.status in FINISHED_WITH_RESULTS
-                    and not results_unreadable,
+                    and not results_unavailable,
                     "output_holds_previous_results": previous_only,
                     # True once a later scan of the same directory has taken the
                     # one output tree over: nothing below is read from the files,
