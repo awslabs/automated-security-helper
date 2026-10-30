@@ -215,12 +215,20 @@ GATE_SCANNERS: Tuple[str, ...] = ("bandit", "checkov")
 # The job that runs this script sets timeout-minutes: 30 (1800s). The default here
 # must stay below that budget, or GitHub cancels the job first and the operator gets
 # no summary table, no rule evidence and no log tail -- only a cancellation notice.
-# The 600 s between the two is what the job's setup before the scan (checkout, the
-# ASH install, the tool downloads, the fixture build) runs in; at 25 minutes that
-# margin was 300 s, which a cold Windows runner's setup can use up.
+# What the job spends besides the scan comes out of the difference: the setup before
+# the scan (checkout, the ASH install, the tool downloads, the fixture build) and,
+# after a timed-out scan, the stop and the drain of the child (up to
+# 2 * (SHUTDOWN_GRACE_SECONDS + DRAIN_SECONDS), 60 s). So the default leaves the
+# setup 540 s; at 25 minutes it left 240 s, which a cold Windows runner used up.
+# --timeout is checked when parsed against MAX_SCAN_TIMEOUT_SECONDS, the budget less
+# a setup floor and the shutdown, rather than against the bare budget: 1700 stayed
+# under 1800 and was accepted, and GitHub then cancelled the job before this
+# script's diagnostics could print.
 # The workflow also passes --timeout explicitly so both numbers are visible together.
 JOB_TIMEOUT_BUDGET_SECONDS = 1800.0
 DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
+#: The least the job's steps before the scan are given, whatever --timeout says.
+SETUP_MARGIN_SECONDS = 300.0
 
 # Log tail printed when something fails. Enough to see the scanner errors without
 # dumping the whole Rich-rendered scan output into the job log.
@@ -1332,6 +1340,16 @@ SHUTDOWN_GRACE_SECONDS = 15.0
 #: Seconds to keep reading the child's output once it has been stopped.
 DRAIN_SECONDS = 15.0
 
+#: The most --timeout may ask for: the job budget less the setup floor and the
+#: shutdown a timed-out scan costs (the stop waits the grace period twice, and
+#: the drain waits its deadline twice). Above it the scan can still be stopped
+#: in time, but the job is cancelled before the tables print.
+MAX_SCAN_TIMEOUT_SECONDS = (
+    JOB_TIMEOUT_BUDGET_SECONDS
+    - SETUP_MARGIN_SECONDS
+    - 2 * (SHUTDOWN_GRACE_SECONDS + DRAIN_SECONDS)
+)
+
 
 def _kill_process_group(process: Any) -> None:
     """SIGKILL the child's process group, or the child alone without groups."""
@@ -1482,12 +1500,16 @@ def load_results(output_dir: Path) -> Any:
 
 
 def _scan_timeout(text: str) -> float:
-    """The ``--timeout`` value: a finite number of seconds, positive and under the job budget.
+    """The ``--timeout`` value: a finite number of seconds, positive and within the job budget.
 
     ``type=float`` alone accepted 0, a negative number, ``nan`` and ``inf``,
     none of which stops a hung scan before the job's own cancellation, and a
     value at or above JOB_TIMEOUT_BUDGET_SECONDS, which the help text said must
-    stay under the budget but nothing enforced.
+    stay under the budget but nothing enforced. Checking against the bare budget
+    was not enough either: the setup steps and the shutdown after a timeout
+    spend from the same budget, so a value that stayed under it by less than
+    their sum was accepted and lost the race it was meant to win. The bound is
+    MAX_SCAN_TIMEOUT_SECONDS, which takes both off.
     """
     try:
         seconds = float(text)
@@ -1497,10 +1519,13 @@ def _scan_timeout(text: str) -> float:
         raise argparse.ArgumentTypeError(
             f"the timeout must be a positive, finite number of seconds, not {text!r}"
         )
-    if seconds >= JOB_TIMEOUT_BUDGET_SECONDS:
+    if seconds > MAX_SCAN_TIMEOUT_SECONDS:
         raise argparse.ArgumentTypeError(
-            f"the timeout must stay under the job's {JOB_TIMEOUT_BUDGET_SECONDS:g}s "
-            f"budget so this script's diagnostics win the race, not {text!r}"
+            f"the timeout may be at most {MAX_SCAN_TIMEOUT_SECONDS:g}s: the job's "
+            f"{JOB_TIMEOUT_BUDGET_SECONDS:g}s budget less {SETUP_MARGIN_SECONDS:g}s "
+            f"for the steps before the scan and "
+            f"{2 * (SHUTDOWN_GRACE_SECONDS + DRAIN_SECONDS):g}s to stop and drain a "
+            f"timed-out scan, so this script's diagnostics win the race; not {text!r}"
         )
     return seconds
 
@@ -1597,9 +1622,11 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         default=DEFAULT_SCAN_TIMEOUT_SECONDS,
         help=(
             "seconds to allow the scan subprocess (default: "
-            f"{DEFAULT_SCAN_TIMEOUT_SECONDS:g}; a positive finite number under the "
-            f"job's {JOB_TIMEOUT_BUDGET_SECONDS:g}s timeout-minutes budget so this "
-            "script's own diagnostics win the race)"
+            f"{DEFAULT_SCAN_TIMEOUT_SECONDS:g}; a positive finite number of at most "
+            f"{MAX_SCAN_TIMEOUT_SECONDS:g}, which is the job's "
+            f"{JOB_TIMEOUT_BUDGET_SECONDS:g}s timeout-minutes budget less the setup "
+            "steps and the shutdown of a timed-out scan, so this script's own "
+            "diagnostics win the race)"
         ),
     )
     parser.add_argument(
