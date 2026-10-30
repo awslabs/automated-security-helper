@@ -164,11 +164,17 @@ def test_one_failed_profile_listing_is_one_warning_over_a_walk(caplog):
     assert len(warnings) == 1, warnings
     assert "AccessDeniedException" in warnings[0], warnings
     # The control: each candidate's answer still names the failure, quietly.
+    # The filter is the candidate answer's own text: the second walk call also
+    # re-describes the kept failure at debug ("the inference profile listing
+    # failed, so models reachable only ..."), which is the listing's line, not
+    # a candidate's, so a filter on "inference profile listing failed" alone
+    # would count three records here.
     named = [
         record.getMessage()
         for record in caplog.records
         if record.levelno == logging.DEBUG
-        and "inference profile listing failed" in record.getMessage()
+        and "is not an on-demand model" in record.getMessage()
+        and "AccessDeniedException" in record.getMessage()
     ]
     assert len(named) == 2, named
 
