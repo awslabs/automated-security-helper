@@ -20,8 +20,8 @@ A Nix-wrapped program's check stages its distribution metadata into a directory
 under TMPDIR and hands uv ``--target <that directory>``. Neither uv's grant nor the
 interpreter's reaches it, so under every backend the dry run could not read what
 it was asked about. The dry run grants that one directory for its own spawn
-(``scope.reads_directory``), as data: readable, never executable, and gone once
-the dry run returns.
+(``scope.reads_directory``), as data: readable, not executable under sandbox-exec
+(the one backend that restricts exec), and gone once the dry run returns.
 """
 
 from __future__ import annotations
@@ -205,7 +205,8 @@ def staged_metadata(tmp_path):
 def test_the_nix_dry_run_sees_its_staging_directory(
     homes, tool, recorded, staged_metadata
 ):
-    """With --target, the staged metadata is readable and never executable."""
+    """With --target, the staged metadata is readable, and under sandbox-exec not
+    executable."""
     uv, interpreter, _venv, _python_root = tool
 
     status, _output = pre_installed_tool._dry_run(

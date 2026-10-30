@@ -79,7 +79,10 @@ def test_a_scanned_root_is_data_and_not_a_read_grant(trees):
 
 
 def test_an_import_entry_in_a_scanned_root_is_read_as_source(trees, monkeypatch):
-    """An import entry of ASH's interpreter inside a scanned root is never executable."""
+    """An import entry of ASH's interpreter inside a scanned root is not executable.
+
+    ``executable`` is read by sandbox-exec, the one backend that restricts exec.
+    """
     source, output, other = trees
     entry = other / "lib"
     entry.mkdir()

@@ -112,9 +112,10 @@ class SandboxScope:
     #: records fall back to ``scanner_name``.
     command: str = ""
     #: The roots of the active scan, the repository's own directories: the policy
-    #: takes them as data it may read as source and never run from, like
-    #: ``source_dir``, so a tool installed in a scanned tree is not made
-    #: executable by a path that happens to reach it. Not a read grant.
+    #: takes them as data, like ``source_dir``, so under sandbox-exec (the one
+    #: backend that restricts exec) a root is not made executable by a path that
+    #: happens to reach it, and a tool given a staged copy does not read one.
+    #: Not a read grant.
     scanned_trees: Tuple[Path, ...] = field(default_factory=_active_scanned_trees)
 
 
@@ -944,9 +945,10 @@ def reads_directory(directory: "str | Path") -> Iterator[None]:
     TMPDIR and asks ``uv pip install --dry-run --target <directory>`` about it;
     a policy grants argv0's paths and the interpreter's (``also_runs``), none of
     which reach a directory under TMPDIR, so under every backend the dry run
-    could not read what it was asked about. The grant is the one directory as
-    named, read-only and never executable (it joins the policy's ``scan_data``),
-    for the spawns of this block alone. One directory per call: no pattern, no
+    could not read what it was asked about. The grant is the one directory,
+    resolved, read-only and, under sandbox-exec, not executable (it joins the
+    policy's ``scan_data``; the other backends do not restrict exec), for the
+    spawns of this block alone. One directory per call: no pattern, no
     expansion, no parent; a path that is not an existing directory is refused
     (``NotADirectoryError``).
 

@@ -239,11 +239,13 @@ class SandboxPolicy:
     scan's own data, so the system and tool paths. Programs run from there, and from
     the spawn's private uv cache, which the backend adds because ``uv tool run``
     keeps the environments of tools it was not asked to install there. ``scan_data`` is the scan's data
-    (the source tree, the output directory, the scan target, the working
-    directory, the directories ``read_path_env`` names, and the directory of config
-    files ASH wrote for the tool), which stays non-executable even where a tool path
-    contains it, so a repository checked out under ``/opt`` cannot have its own
-    binaries run.
+    (the source tree, the output directory, every other root of the active scan,
+    the scan target, the working directory, the directories ``read_path_env``
+    names, the directory of config files ASH wrote for the tool, and the
+    directories ASH's own code granted the spawn for reading through
+    ``scope.reads_directory``), which stays non-executable under sandbox-exec even
+    where a tool path contains it, so a repository checked out under ``/opt``
+    cannot have its own binaries run. The other backends do not restrict exec.
     """
 
     scanner_name: str
@@ -269,7 +271,8 @@ class SandboxPolicy:
     #: lock changes nothing a later run reads.
     uv_tool_locks: Tuple[Path, ...] = ()
     #: Directories the tool may not read even where a path the policy shows holds
-    #: them: the source and output directories of a tool given a staged copy
+    #: them: the source and output directories, and every other root of the active
+    #: scan, of a tool given a staged copy
     #: (``SandboxRequirements.staged_input_only``). bwrap mounts an empty directory
     #: over each that a wider mount would show, and sandbox-exec denies reading
     #: them after the reads it allows; both give back what the policy lists inside
@@ -1488,15 +1491,17 @@ def build_scanner_policy(
         scanned_trees: The roots of the active scan
             (``subprocess_utils.scanned_trees()``), which the scanned repository
             writes: data, like ``source_dir``, and never a grant. Each root joins
-            ``scan_data``, so a backend that limits where programs run from runs
-            none from it; an import entry of ASH's interpreter inside one is read
-            as source, not run from; and a tool given a staged copy does not read
-            one. A root is not added to ``read_only``: what a spawn may read is
-            decided by the other arguments.
+            ``scan_data``, so under sandbox-exec, the one backend that restricts
+            where programs run from, nothing runs from it and an import entry of
+            ASH's interpreter inside one is read as source, not run from; and a
+            tool given a staged copy does not read one (``unread``). A root is
+            not added to ``read_only``: what a spawn may read is decided by the
+            other arguments.
         read_grants: Directories ASH's own code granted this spawn for reading
-            (``scope.reads_directory``): each is readable and joins ``scan_data``,
-            so nothing in it is executable. The pre-installed tool check's staged
-            Nix metadata under TMPDIR is the one such directory.
+            (``scope.reads_directory``), already resolved: each is readable and
+            joins ``scan_data``, so under sandbox-exec nothing in it is executable
+            (the other backends do not restrict exec). The pre-installed tool
+            check's staged Nix metadata under TMPDIR is the one such directory.
     """
     real_home = _policy_home()
     read_granted = not requirements.read_paths_require_grant or scanner_name in set(
@@ -1613,8 +1618,9 @@ def build_scanner_policy(
     # An import entry of ASH's interpreter inside the scanned tree, the output
     # directory or another root of the scan (PYTHONPATH=src), and an ASH bin
     # directory there, are the repository's to write and are read as data, not
-    # run from: readable, and never executable, like the tree. ASH's interpreter
-    # and link directories stay executable wherever they are. A tool given a
+    # run from: readable, and under sandbox-exec not executable, like the tree.
+    # ASH's interpreter and link directories stay executable wherever they are
+    # (the other backends do not restrict exec at all). A tool given a
     # staged copy, which reads none of the scan's trees, does not read such an
     # entry either: hidden with the tree it sits in, the policy would give it
     # back as a listed path.
