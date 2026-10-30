@@ -80,6 +80,7 @@ import argparse
 import asyncio
 import difflib
 import inspect
+import re
 import sys
 from pathlib import Path
 
@@ -442,10 +443,25 @@ TOOL_NOTES: dict[str, dict] = {
             "SARIF, CSV, or markdown directly with file tools instead of pulling JSON over MCP."
         ),
         "params": {"output_dir": {"notes": "Absolute path"}},
-        "caveats": ["Returns a dict mapping format names to absolute paths."],
+        "caveats": [
+            (
+                "Returns `output_dir`, `reports_dir` and `files`, a dict keyed by "
+                "format name (`sarif`, `flat_json`, `html`, `csv`, `markdown`, "
+                "`text`, `ocsf`, `cyclonedx`, `junit_xml`, `gitlab_sast`, "
+                "`aggregated_results`) whose values are objects with the absolute "
+                "`path`, whether the file `exists`, and its `size_bytes`; a report "
+                "the scan did not write is listed with `exists: false`. When the "
+                "output directory holds a `scanners/` tree, `scanners_dir` and "
+                "`scanner_results` (per scanner, per target) are added."
+            )
+        ],
     },
     "list_active_scans": {
-        "intro": "All scans the server tracks (active + recently completed).",
+        "intro": (
+            "This session's scans, active and recently completed. Only scans this "
+            "session started are listed; another session's scans are not visible, "
+            "and the statistics count only this session's."
+        ),
         "no_params_sentence": "No parameters. Returns a list of scan summaries.",
     },
     "cancel_scan": {
@@ -712,22 +728,66 @@ TOOL_NOTES: dict[str, dict] = {
 }
 
 
-def _type_name(schema: dict) -> str:
+def _cell(text: str) -> str:
+    """``text`` with every bare pipe escaped, so it stays in one markdown table column."""
+    return text.replace(r"\|", "|").replace("|", r"\|")
+
+
+def _resolve_ref(ref: str, root: dict | None) -> dict | None:
+    """The schema a local ``$ref`` (``#/$defs/Name``) points at in ``root``."""
+    if root is None or not ref.startswith("#/"):
+        return None
+    node: object = root
+    for part in ref[2:].split("/"):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node if isinstance(node, dict) else None
+
+
+def _enum_type_name(values: list) -> str:
+    """The type of an enum by its declared type or, failing that, its values.
+
+    Every enum used to render as ``string``, which mislabelled an integer or a
+    boolean enum.
+    """
+    kinds = {type(v) for v in values if v is not None}
+    if kinds == {bool}:
+        return "boolean"
+    if kinds == {int}:
+        return "integer"
+    if kinds <= {int, float} and kinds:
+        return "number"
+    return "string"
+
+
+def _type_name(schema: dict, root: dict | None = None) -> str:
     """Render a JSON-schema fragment the way this document spells types.
 
     Unions are written `string \\| null` with an escaped pipe, because the value
     lands in a markdown table cell where a bare pipe would end the column.
+    ``root`` is the tool's whole input schema, so a ``$ref`` into its ``$defs``
+    (an Enum or model parameter) is rendered by what it points at rather than
+    as ``any``.
     """
-    if "anyOf" in schema:
-        parts = [_type_name(s) for s in schema["anyOf"]]
-        seen: list[str] = []
-        for part in parts:
-            if part not in seen:
-                seen.append(part)
-        return r" \| ".join(seen)
-    if "enum" in schema:
-        return "string"
+    if "$ref" in schema:
+        target = _resolve_ref(str(schema["$ref"]), root)
+        if target is not None:
+            return _type_name(target, root)
+        return "object"
+    for union_key in ("anyOf", "oneOf", "allOf"):
+        if union_key in schema:
+            parts = [_type_name(s, root) for s in schema[union_key]]
+            seen: list[str] = []
+            for part in parts:
+                if part not in seen:
+                    seen.append(part)
+            return r" \| ".join(seen)
     declared = schema.get("type")
+    if "enum" in schema:
+        if isinstance(declared, str):
+            return declared
+        return _enum_type_name(list(schema["enum"]))
     if isinstance(declared, list):
         return r" \| ".join(str(d) for d in declared)
     if declared == "array":
@@ -736,7 +796,11 @@ def _type_name(schema: dict) -> str:
 
 
 def _default_display(schema: dict, required: bool) -> str:
-    """The schema's default as the docs checks read it: a phrase or one JSON span."""
+    """The schema's default as the docs checks read it: a phrase or one JSON span.
+
+    A pipe inside the JSON is escaped, as the type names are: the span lands in
+    a table column.
+    """
     import json
 
     if required:
@@ -746,7 +810,12 @@ def _default_display(schema: dict, required: bool) -> str:
     value = schema["default"]
     if value is None:
         return "not set"
-    return f"`{json.dumps(value)}`"
+    return _cell(f"`{json.dumps(value)}`")
+
+
+def _plural(count: int, noun: str) -> str:
+    """``one tool``, ``two tools``: the spelled count with the noun agreeing."""
+    return f"{_spell(count)} {noun}{'' if count == 1 else 's'}"
 
 
 #: The docs checks compare each tool's parameter table with the tool's input schema.
@@ -754,43 +823,75 @@ def _options_marker(tool: str) -> str:
     return f"<!-- doctest: options of=mcp.{tool} -->"
 
 
-def _docstring_arg_notes(func) -> dict[str, str]:
+#: A Google-style section header on its own line (``Returns:``, ``Note:``).
+_SECTION_HEADER = re.compile(
+    r"^\s*(?:Returns?|Raises?|Yields?|Examples?|Notes?|Attributes|See Also|"
+    r"Warnings?|Todo)\s*:\s*$"
+)
+#: A parameter head: an identifier, an optional ``(type)``, a colon.
+_PARAM_HEAD = re.compile(
+    r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*:\s*(?P<tail>.*)$"
+)
+
+
+def parse_arg_notes(doc: str) -> dict[str, str]:
     """Per-parameter descriptions parsed out of a Google-style ``Args:`` block.
 
-    Used as the fallback for the Notes column so a tool with no ``TOOL_NOTES``
-    entry still gets populated cells rather than blank ones. Continuation lines
-    are folded into the preceding parameter, because several of these docstrings
-    wrap a long description over two or three lines.
+    The block is the lines after ``Args:`` up to the next section header on a
+    line of its own, or the first dedented line (a paragraph after the block). A
+    parameter head is an identifier, with an optional ``(type)``, and a colon, at
+    the block's parameter indentation; a line indented deeper is a continuation
+    of the parameter above it, whatever words or colons it holds.
+
+    The old parser cut the block at the first ``Note:`` or ``Example:`` anywhere
+    in the text, so one such word inside a description blanked every later
+    parameter's note; it read any ``Word:`` line as a new parameter, so a wrapped
+    line that began that way became a phantom parameter; it did not recognize a
+    ``name (type):`` head, so such a parameter's text was appended to the one
+    before it; and it folded every paragraph between the block and ``Returns:``
+    into the last parameter.
     """
-    doc = inspect.getdoc(func) or ""
-    if "Args:" not in doc:
+    lines = doc.splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip() == "Args:")
+    except StopIteration:
         return {}
-    section = doc.split("Args:", 1)[1]
-    for terminator in ("Returns:", "Raises:", "Example:", "Examples:", "Note:"):
-        if terminator in section:
-            section = section.split(terminator)[0]
 
     found: dict[str, str] = {}
     current: str | None = None
-    for raw in section.splitlines():
-        line = raw.strip()
-        if not line:
+    param_indent: int | None = None
+    for raw in lines[start + 1 :]:
+        if not raw.strip():
+            # A blank line ends the block unless more parameter lines follow at
+            # the parameter indentation; decided by the next non-blank line.
             continue
-        head, sep, tail = line.partition(":")
-        candidate = head.strip()
-        if (
-            sep
-            and candidate
-            and candidate.replace("_", "").isalnum()
-            and " " not in candidate
-        ):
-            current = candidate
-            found[current] = tail.strip()
-        elif current:
-            found[current] = f"{found[current]} {line}".strip()
+        if _SECTION_HEADER.match(raw):
+            break
+        indent = len(raw) - len(raw.lstrip())
+        if param_indent is None:
+            param_indent = indent
+        if indent < param_indent:
+            break
+        if indent == param_indent:
+            head = _PARAM_HEAD.match(raw.strip())
+            if head is None:
+                # Prose at the parameter indentation after the block: the
+                # block is over.
+                break
+            current = head.group("name")
+            found[current] = head.group("tail").strip()
+        elif current is not None:
+            found[current] = f"{found[current]} {raw.strip()}".strip()
 
     # A pipe would end the markdown table column early.
-    return {k: v.replace("|", r"\|") for k, v in found.items()}
+    return {k: _cell(v) for k, v in found.items()}
+
+
+def _docstring_arg_notes(func) -> dict[str, str]:
+    """``parse_arg_notes`` of ``func``'s docstring; empty when there is none."""
+    if func is None:
+        return {}
+    return parse_arg_notes(inspect.getdoc(func) or "")
 
 
 def _response_keys(contract, wanted: set[str]) -> set[str]:
@@ -859,13 +960,25 @@ def _render_tool(
 
     intro = notes.get("intro")
     if not intro:
-        doc = inspect.getdoc(func) or description or ""
+        # A tool registered under a name that is not a module attribute has no
+        # function to read; its registered description stands in.
+        doc = (inspect.getdoc(func) if func is not None else None) or description or ""
         intro = " ".join(doc.split("\n\n")[0].split()).strip()
     lines += [intro, ""]
 
     properties: dict = schema.get("properties", {})
     required = set(schema.get("required", []))
     param_notes: dict = notes.get("params", {})
+
+    # A TOOL_NOTES note for a parameter the tool no longer has is as stale as a
+    # note for a tool that is gone, which _render_parts refuses; a renamed
+    # parameter used to drop its note silently.
+    stale_params = sorted(set(param_notes) - set(properties))
+    if stale_params:
+        raise SystemExit(
+            f"ERROR: TOOL_NOTES[{name!r}]['params'] names parameters the tool does "
+            f"not have: {stale_params}. Rename them or remove them."
+        )
 
     if not properties:
         lines += [notes.get("no_params_sentence", "No parameters."), ""]
@@ -890,13 +1003,16 @@ def _render_tool(
         else:
             lines += ["| Param | Type | Notes |", "|-------|------|-------|"]
         for key, spec in properties.items():
-            note = param_notes.get(key, {}).get("notes") or doc_notes.get(key, "")
+            # Editorial notes go through the same pipe escaping as the
+            # docstring notes; only the latter were escaped before.
+            note = _cell(
+                param_notes.get(key, {}).get("notes") or doc_notes.get(key, "")
+            )
+            type_name = _type_name(spec, schema)
             if show_default:
-                lines.append(
-                    f"| `{key}` | {_type_name(spec)} | {defaults[key]} | {note} |"
-                )
+                lines.append(f"| `{key}` | {type_name} | {defaults[key]} | {note} |")
             else:
-                lines.append(f"| `{key}` | {_type_name(spec)} | {note} |")
+                lines.append(f"| `{key}` | {type_name} | {note} |")
         lines.append("")
 
     if notes.get("pre_returns"):
@@ -1095,11 +1211,27 @@ def _adapt_markdown(lines: list[str], strip_bold: bool) -> list[str]:
     return out
 
 
+def _resource_uri(resource) -> str:
+    """A resource's URI, or a template resource's URI template, as text."""
+    uri = getattr(resource, "uri", None)
+    if uri is None:
+        uri = getattr(resource, "uriTemplate", None) or getattr(
+            resource, "uri_template", ""
+        )
+    return str(uri)
+
+
 def _render_parts() -> tuple[list[str], list[str]]:
     from automated_security_helper.cli import mcp_server
 
     tools = asyncio.run(mcp_server.mcp.list_tools())
-    resources = asyncio.run(mcp_server.mcp.list_resources())
+    resources = list(asyncio.run(mcp_server.mcp.list_resources()))
+    # list_resources() returns the fixed-URI resources only; a resource
+    # registered with a URI template is listed by list_resource_templates(), so
+    # without this call the count and the Resources section left those out.
+    list_templates = getattr(mcp_server.mcp, "list_resource_templates", None)
+    if list_templates is not None:
+        resources += list(asyncio.run(list_templates()))
 
     contracts = _tool_contracts(tools)
     stale_notes = sorted(set(TOOL_NOTES) - {t.name for t in tools})
@@ -1139,8 +1271,8 @@ def _render_parts() -> tuple[list[str], list[str]]:
     header_length = len(lines)
     lines += [
         (
-            f"The ASH MCP server exposes {_spell(len(tools))} tools and "
-            f"{_spell(len(resources))} resources."
+            f"The ASH MCP server exposes {_plural(len(tools), 'tool')} and "
+            f"{_plural(len(resources), 'resource')}."
         ),
         "",
     ]
@@ -1150,15 +1282,17 @@ def _render_parts() -> tuple[list[str], list[str]]:
             tool.name,
             tool.description or "",
             tool.input_schema or {},
-            getattr(mcp_server, tool.name),
+            # None for a tool registered under a custom name: _render_tool then
+            # reads the registered description instead of a function docstring.
+            getattr(mcp_server, tool.name, None),
             contracts[tool.name],
         )
 
     lines += ["## Resources", ""]
-    for resource in sorted(resources, key=lambda r: str(r.uri)):
+    for resource in sorted(resources, key=_resource_uri):
         summary = " ".join((resource.description or "").split())
         summary = summary.rstrip(".")
-        lines.append(f"- `{resource.uri}` — {summary}")
+        lines.append(f"- `{_resource_uri(resource)}` — {summary}")
     lines += [
         "",
         "Read these via the standard MCP resource read mechanism for context-free help.",
