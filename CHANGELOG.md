@@ -5661,9 +5661,11 @@
   member written to the same path as an earlier one (`vendor//m.js` after
   `vendor/m.js`, a tar's repeated name, or two spellings of one name on a
   case-insensitive filesystem) used to be refused, so the bytes one unpacker produces
-  were never scanned. It is written beside the earlier member under a numbered name
-  (`vendor/m~2.js`) that no member of the archive is named by, with a warning naming
-  both; past the first 20 in one archive, one line counts the rest. An environment
+  were never scanned. It is written in a numbered directory beside the earlier member
+  with its file name kept (`vendor/m~2/m.js`), a placement no member of the archive is
+  named by, so a scanner that finds a manifest, a lockfile or a Dockerfile by its name
+  still reads the later copy, with a warning naming both; past the first 20 in one
+  archive, one line counts the rest. An environment
   file with a stage suffix (`.env.local`, `.env.production`) is extracted as `.env`
   is. A notebook member whose name is written in another case, or that cannot be
   encoded by the filesystem, keeps a distinct converted output.
