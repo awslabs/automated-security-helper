@@ -26,6 +26,7 @@ Five mechanisms, each pinned against the behavior it replaced:
 
 import json
 import os
+import threading
 
 import pytest
 
@@ -75,6 +76,31 @@ def _symlink_or_skip(link, target):
         pytest.skip(f"this platform refuses to create a symlink: {e}")
 
 
+def _returns_within(seconds, function):
+    """Run ``function`` on a thread and return its result, or fail at the bound.
+
+    The FIFO tests below assert that a reader returns at all; a regression that
+    opens the FIFO blocks forever, and a hung test is a slower, less legible
+    failure than a timed one.
+    """
+    outcome = {}
+
+    def run():
+        try:
+            outcome["value"] = function()
+        except BaseException as e:  # noqa: BLE001 -- re-raised on the test thread
+            outcome["error"] = e
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        pytest.fail(f"did not return within {seconds}s: the FIFO was opened")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
 class TestOnlyARegularResultFileIsRead:
     def test_a_regular_file_is_read(self, tmp_path):
         out = tmp_path / "ash_output"
@@ -104,10 +130,13 @@ class TestOnlyARegularResultFileIsRead:
         os.mkfifo(fifo)
 
         # Reading a FIFO with no writer blocks; a progress view that opened it
-        # would never return, so this returning at all is the assertion.
-        assert is_regular_result_file(fifo) is False
-        assert find_scanner_result_files(out) == {}
-        progress = create_scan_progress_from_files("scan-1", out)
+        # would never return, so returning at all is the assertion, and the
+        # bound turns a regression into a failure instead of a hang.
+        assert _returns_within(5, lambda: is_regular_result_file(fifo)) is False
+        assert _returns_within(5, lambda: find_scanner_result_files(out)) == {}
+        progress = _returns_within(
+            5, lambda: create_scan_progress_from_files("scan-1", out)
+        )
         assert progress.total_scanners == 0
 
     def test_a_missing_file_is_not_regular(self, tmp_path):
@@ -142,10 +171,12 @@ class TestTheAggregatedResultsFileGetsTheSameGuard:
         out.mkdir()
         os.mkfifo(out / "ash_aggregated_results.json")
 
-        # Opening a FIFO with no writer blocks; returning at all is the assertion.
-        assert summarize_scanner_statuses(out)["scanner_statuses"] == {}
+        # Opening a FIFO with no writer blocks; returning at all is the
+        # assertion, bounded so a regression fails instead of hanging.
+        statuses = _returns_within(5, lambda: summarize_scanner_statuses(out))
+        assert statuses["scanner_statuses"] == {}
         with pytest.raises(MCPResourceError, match="not a regular file"):
-            parse_aggregated_results(out)
+            _returns_within(5, lambda: parse_aggregated_results(out))
 
     def test_a_large_regular_aggregated_file_is_still_read(self, tmp_path):
         """The per-scanner size bound does not apply to the aggregated file."""
