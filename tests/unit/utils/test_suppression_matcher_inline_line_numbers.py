@@ -173,6 +173,18 @@ def test_a_cr_right_after_the_marker_is_no_directive(tmp_path, directive):
     assert found == []
 
 
+@pytest.mark.parametrize("marker", ["#", "//"], ids=["hash", "slash"])
+def test_a_cr_between_the_comment_marker_and_the_word_is_no_directive(tmp_path, marker):
+    """Red at the base: ``\\s*`` between the marker and ``ash-ignore`` matched
+    the CR, so a bare comment marker ending one CR-line and a directive-shaped
+    text on the next were read as one directive."""
+    source = _write(tmp_path, f"x = 1  {marker}\rash-ignore: R1 why\ny = 2\n")
+
+    found = find_inline_suppressions(source)
+
+    assert found == []
+
+
 # --- the quoted-string scan is linear in the line ---
 
 # The expression the scan replaced, kept here as the reference for what a

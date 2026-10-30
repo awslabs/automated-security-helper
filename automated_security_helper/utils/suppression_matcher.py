@@ -45,18 +45,21 @@ from automated_security_helper.utils.symbol_spans import SymbolResolver
 # count a lone CR is inside the line, so ``# ash-ignore: R1\r...`` had its
 # reason start after the CR (the text of the next CR-line, which ``_reason``
 # then could not cut) and ``# ash-ignore:\rR1`` took ``R1`` from the next
-# CR-line as its rule id. A directive ends at the CR either way.
+# CR-line as its rule id. A directive ends at the CR either way, and the blank
+# between the comment marker and the word is the same class: ``#\rash-ignore:``
+# is a bare ``#`` on one CR-line and a directive-shaped text on the next, not a
+# comment that holds a directive.
 _HASH_INLINE_PATTERN = re.compile(
-    r"#\s*ash-ignore:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
+    r"#[ \t]*ash-ignore:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
 )
 _HASH_NEXT_LINE_PATTERN = re.compile(
-    r"#\s*ash-ignore-next-line:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
+    r"#[ \t]*ash-ignore-next-line:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
 )
 _SLASH_INLINE_PATTERN = re.compile(
-    r"//\s*ash-ignore:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
+    r"//[ \t]*ash-ignore:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
 )
 _SLASH_NEXT_LINE_PATTERN = re.compile(
-    r"//\s*ash-ignore-next-line:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
+    r"//[ \t]*ash-ignore-next-line:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
 )
 
 _INLINE_PATTERNS = [_HASH_INLINE_PATTERN, _SLASH_INLINE_PATTERN]
