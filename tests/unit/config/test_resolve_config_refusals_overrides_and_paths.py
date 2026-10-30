@@ -165,6 +165,28 @@ def test_a_disable_lands_although_its_sections_sibling_override_fails():
     assert _security_hub_enabled(view) is False, view.reporters
 
 
+@pytest.mark.parametrize("spelling", ["0", "no", "off", "NO", "f", "False"])
+def test_every_false_spelling_the_field_reads_lands_as_a_disable(spelling):
+    """The model's ``enabled`` is a lax bool, so the section-wide application
+    read these as a disable; the always-apply arm admits the same set."""
+    from automated_security_helper.config.resolve_config import _with_reporter_overrides
+
+    trusted = AshConfig.model_validate(
+        {"project_name": "op", "reporters": {"aws-security-hub": {"enabled": True}}}
+    )
+
+    view = _with_reporter_overrides(
+        trusted,
+        [
+            "reporters.aws-security-hub.options=notamapping",
+            f"reporters.aws-security-hub.enabled={spelling}",
+        ],
+        trusted,
+    )
+
+    assert _security_hub_enabled(view) is False, view.reporters
+
+
 def test_another_sections_overrides_still_apply_when_one_section_fails():
     from automated_security_helper.config.resolve_config import _with_reporter_overrides
 

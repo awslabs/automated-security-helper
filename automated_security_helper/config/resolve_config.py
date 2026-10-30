@@ -3899,10 +3899,11 @@ def _with_reporter_overrides(
     ``enabled=true`` never lands without the destination override written
     beside it (which would send findings to the base's or the default
     destination), and the other sections' overrides still apply. A
-    ``reporters.<section>.enabled=false`` is applied whatever else its section
-    asked for: a disable fails closed both ways. For a dropped section the
-    off-host reporter keeps the base's settings, off unless the base turns it
-    on.
+    ``reporters.<section>.enabled=<false>``, in every spelling the field reads
+    as False (``false``, ``0``, ``off``, ``no``, ``f``, ``n``), is applied
+    whatever else its section asked for: a disable fails closed both ways. For
+    a dropped section the off-host reporter keeps the base's settings, off
+    unless the base turns it on.
     """
     reporter_overrides = [
         override
@@ -3987,20 +3988,34 @@ def _reporter_overrides_by_section(overrides: List[str]) -> List[List[str]]:
     return list(groups.values())
 
 
+#: The strings pydantic's lax ``bool`` reads as False (pydantic 2.13.5,
+#: ``PluginConfigBase.enabled`` is a plain ``bool`` under a model with no
+#: ``strict`` setting), compared lower-cased and stripped; the ints 0 and 0.0
+#: are read as False too.
+_FALSE_SPELLINGS = frozenset({"0", "off", "f", "false", "n", "no"})
+
+
 def _disables_a_reporter(override: str) -> bool:
     """Whether a ``reporters`` override sets one section's ``enabled`` to false:
-    ``reporters.<section>.enabled=false``, with either separator spelling of
-    the key and any spelling ``_parse_config_value`` reads as False."""
+    ``reporters.<section>.enabled=<false>``, with either separator spelling of
+    the key and any value the model's ``enabled`` field reads as False
+    (``false`` in any case, ``0``, ``off``, ``no``, ``f``, ``n``): exactly the
+    values the override would set the field to, so the always-apply arm admits
+    every disable the section-wide application would have applied."""
     key, separator, value = override.partition("=")
     if not separator or key.endswith("+"):
         return False
     segments = [segment.strip().replace("-", "_") for segment in key.split(".")]
-    return (
-        len(segments) == 3
-        and segments[0] == "reporters"
-        and segments[2] == "enabled"
-        and _parse_config_value(value) is False
-    )
+    if not (
+        len(segments) == 3 and segments[0] == "reporters" and segments[2] == "enabled"
+    ):
+        return False
+    parsed = _parse_config_value(value)
+    if isinstance(parsed, bool):
+        return parsed is False
+    if isinstance(parsed, (int, float)):
+        return parsed == 0
+    return isinstance(parsed, str) and parsed.strip().lower() in _FALSE_SPELLINGS
 
 
 def _with_operator_chain_scanners(
