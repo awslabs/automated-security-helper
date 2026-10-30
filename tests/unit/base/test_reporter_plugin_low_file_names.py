@@ -135,6 +135,13 @@ def test_a_name_with_a_colon_is_not_written(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_a_name_with_a_nul_is_not_written(tmp_path):
+    # The link checks run before the name is confined; a NUL in the name must
+    # be refused by the name rule first, not raise from the file-system probe.
+    assert write_report_file(tmp_path, "ash.a\x00b", "content") is None
+    assert list(tmp_path.iterdir()) == []
+
+
 @needs_symlinks
 def test_a_reports_directory_that_is_a_link_is_refused_not_skipped(tmp_path):
     real = tmp_path / "real"

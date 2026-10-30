@@ -1383,9 +1383,14 @@ class AshAggregatedResults(RecordModel):
         return config
 
     @field_serializer("used_suppressions", when_used="json")
-    def _used_suppressions_in_order(self, value: set) -> List[str]:
+    def _used_suppressions_in_order(self, value: set) -> Any:
         """The ids in order, so identical scans and merges write one file: a set
-        iterates in the order of the process's string hashes."""
+        iterates in the order of the process's string hashes.
+
+        The return type is ``Any`` on purpose: a serializer with a concrete
+        return type replaces the field's own schema in the serialization-mode
+        JSON schema, which would drop the ``uniqueItems`` the committed schema
+        file records for this set."""
         return sorted(value)
 
     @field_serializer("ash_config", mode="wrap")

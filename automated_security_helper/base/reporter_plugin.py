@@ -235,13 +235,19 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
     """
     from automated_security_helper.utils.atomic_write import write_text_atomically
     from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
-    from automated_security_helper.utils.report_path_links import link_kind
+    from automated_security_helper.utils.report_path_links import (
+        is_report_file_name,
+        link_kind,
+    )
     from automated_security_helper.utils.sandbox.fs_guard import OutputLinkRefused
 
     directory = Path(report_dir)
     named = directory / filename
     links = [directory]
-    if Path(filename).name == filename:
+    # The run's own name rule, not a path-shape test: a name holding a NUL would
+    # reach ``link_kind``'s lstat, which raises ValueError before
+    # ``confined_report_path`` can refuse the name.
+    if is_report_file_name(filename):
         links.append(named)
     for link in links:
         kind = link_kind(link)
