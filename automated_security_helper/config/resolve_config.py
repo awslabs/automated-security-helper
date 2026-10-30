@@ -35,6 +35,8 @@ import yaml
 from automated_security_helper.config.ash_config import (
     AshConfig,
     SandboxConfig,
+    plugin_key_lookup_names,
+    reduced_plugin_name,
     sandbox_mode_in_document,
 )
 from automated_security_helper.config.plugin_section_names import (
@@ -82,6 +84,7 @@ from automated_security_helper.config.confinement_remedy import (
     LET_THE_WALK_FINISH,
 )
 from automated_security_helper.config.operator_paths import (
+    SCANNER_RULES_OPTIONS,
     anchor_override_paths,
     anchor_relative_paths as anchor_document_paths,
     the_operators_files,
@@ -303,12 +306,61 @@ def _needs_a_working_directory(override: str) -> bool:
     the placeholder roots it names nothing and comes back as written. The two
     probes are compared with the written override, not with each other: a
     value that climbs out of its root (``../bandit.yaml``) normalizes to the
-    same path under both roots and still needs the directory.
+    same path under both roots and still needs the directory. A rules value
+    that is a relative path and no registry form needs the directory too
+    (``_rules_value_needs_the_directory``): under a live directory the probe
+    reads the disk for it, and under a gone one there is no disk to read.
     """
     probe = [override]
-    return any(
-        anchor_override_paths(probe, root) != probe for root in _PLACEHOLDER_ROOTS
-    )
+    if any(anchor_override_paths(probe, root) != probe for root in _PLACEHOLDER_ROOTS):
+        return True
+    return _rules_value_needs_the_directory(override)
+
+
+#: Rules values a grep scanner resolves without a file: the ``auto`` policy
+#: and a registry ruleset, rule or snippet (``p/ci``, ``r/<id>``, ``s/<id>``).
+_REGISTRY_RULES = re.compile(r"^(?:auto$|[prs]/)")
+
+
+def _rules_value_needs_the_directory(override: str) -> bool:
+    """Whether a ``--config-overrides`` entry sets a grep scanner's rules
+    option (``operator_paths.SCANNER_RULES_OPTIONS``: semgrep's and opengrep's
+    ``config``) to a relative path, which only the working directory places.
+
+    A rules value is a file when one is there under the directory and a
+    registry entry otherwise, so with the directory live the anchoring reads
+    the disk. With the directory gone nothing is there to read, and a relative
+    value left as written reaches the scanner, which joins it to the scanned
+    tree: the repository's file in the operator's place, the case
+    ``_anchored_operator_overrides`` refuses. Admitted as written: a registry
+    ruleset, rule or snippet (``p/``, ``r/``, ``s/``), ``auto``, a URL, an
+    absolute or ``~`` path and a value holding ``$``, the shapes
+    ``operator_paths.anchored_path`` never rewrites.
+    """
+    key, separator, raw = override.partition("=")
+    if not separator or key.endswith("+"):
+        return False
+    segments = [segment.strip() for segment in key.split(".")]
+    if len(segments) != 4 or segments[0] != "scanners":
+        return False
+    if segments[2].replace("-", "_") != "options":
+        return False
+    option = segments[3].replace("-", "_")
+    names = plugin_key_lookup_names(segments[1])
+    if not any(
+        (segments[1] == scanner or reduced_plugin_name(scanner) in names)
+        and option in {name.replace("-", "_") for name in rules_options}
+        for scanner, rules_options in SCANNER_RULES_OPTIONS.items()
+    ):
+        return False
+    value = _parse_config_value(raw)
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if value.startswith("~") or "$" in value or "://" in value or "\x00" in value:
+        return False
+    if os.path.isabs(value) or value[:1] in ("/", "\\"):
+        return False
+    return _REGISTRY_RULES.match(value) is None
 
 
 def _override_key_as_written(override: str) -> str:

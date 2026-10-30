@@ -487,21 +487,57 @@ def test_an_appending_override_is_named_as_written_with_no_working_directory(
     assert "zz-own" not in text, text
 
 
-def test_a_rules_name_that_names_a_host_directory_passes_with_no_working_directory(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("scanner", ["semgrep", "opengrep"])
+def test_a_relative_rules_file_is_refused_with_no_working_directory(
+    tmp_path, monkeypatch, scanner
 ):
-    """semgrep's ``config`` is anchored only when it names a file under the
-    directory; ``etc`` names none under a working directory, so with a live one
-    it passes as written, and the probe for a gone one must agree."""
+    """A grep scanner's ``config`` is a file when one is there under the
+    working directory and a registry entry otherwise. With the directory gone
+    nothing is there to read, and left as written a relative value would reach
+    the scanner, which joins it to the scanned tree (the repository's file in
+    the operator's place), so it is refused, naming the key and not the value.
+    ``etc``, a name of a host directory, is such a relative value too."""
     from automated_security_helper.config.resolve_config import (
         _anchored_operator_overrides,
     )
 
     _delete_the_working_directory(tmp_path, monkeypatch)
 
-    assert _anchored_operator_overrides(["scanners.semgrep.options.config=etc"]) == [
-        "scanners.semgrep.options.config=etc"
-    ]
+    with pytest.raises(ASHConfigValidationError) as refused:
+        _anchored_operator_overrides(
+            [f"scanners.{scanner}.options.config=rules/zz-own.yml"]
+        )
+
+    text = str(refused.value)
+    assert f"scanners.{scanner}.options.config" in text, text
+    assert "zz-own" not in text, text
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "p/ci",
+        "r/python.lang.security.audit.exec-detected",
+        "s/zz-snippet",
+        "auto",
+        "https://zz.example.invalid/rules.yml",
+        "/zz-elsewhere/rules.yml",
+    ],
+)
+def test_a_registry_rules_name_passes_with_no_working_directory(
+    tmp_path, monkeypatch, value
+):
+    """A registry ruleset, rule or snippet, the ``auto`` policy, a URL and an
+    absolute path name no file under the gone directory, so they pass as
+    written: the refusal is for a relative path only."""
+    from automated_security_helper.config.resolve_config import (
+        _anchored_operator_overrides,
+    )
+
+    _delete_the_working_directory(tmp_path, monkeypatch)
+    override = f"scanners.semgrep.options.config={value}"
+
+    assert _anchored_operator_overrides([override]) == [override]
 
 
 def test_a_path_that_climbs_out_of_its_root_is_refused_with_no_working_directory(
