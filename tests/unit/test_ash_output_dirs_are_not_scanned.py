@@ -711,12 +711,20 @@ def test_the_drop_does_not_follow_a_linked_output_dir_into_the_tree(tmp_path):
     ASH's writes below it never follow a link, so the directory is refused when
     the context registers it (base/plugin_context.py, ``_guard_output_dir``, and
     utils/sandbox/fs_guard.py, ``register_writable_root``), and no drop runs. The
-    link itself names nothing, so a drop given it would keep every finding."""
-    from pydantic import ValidationError
+    link itself names nothing, so a drop given it would keep every finding.
+
+    The refusal reaches the caller as the exit-3 class itself: ``PluginContext``
+    unwraps a single link refusal from pydantic's ``ValidationError`` and raises
+    it (``base/plugin_context.py``, ``_raise_link_refusal``), so a caller handling
+    ``OutputDirLinkRefused`` sees a refused output directory the way it sees a
+    refused write below one."""
+    from automated_security_helper.utils.output_dir_links import (
+        OutputDirLinkRefused,
+    )
 
     source = _linked_tree(tmp_path, "out", "src")
 
-    with pytest.raises(ValidationError, match="symlink"):
+    with pytest.raises(OutputDirLinkRefused, match="symlink"):
         _context(source, source / "out")
 
     assert named_output_dirs(source, source / "out") == []
