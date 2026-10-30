@@ -105,10 +105,13 @@ def test_the_values_hook_is_read_once_for_a_note_and_a_log(tmp_path):
     assert read.call_count == 1, read.call_args_list
 
 
-def test_a_values_hook_that_raises_keeps_the_note_and_names_the_log(tmp_path):
+def test_a_values_hook_that_raises_withholds_the_note_and_names_the_log(tmp_path):
+    # ``_plugin_log`` stores a note as written, so one that names a configured
+    # value holds it in clear; with no values to hide it with, the note is left
+    # out as the log's text is, and the log is named.
     scanner = _scanner(_context(tmp_path, [CANARY]))
     results = _results_file(tmp_path, f"cannot read {CANARY} here\n")
-    scanner._plugin_log("a note of ASH's", level=logging.ERROR)
+    scanner._plugin_log(f"a note of ASH's about {CANARY}", level=logging.ERROR)
 
     def _raising_hook(*_args, **_kwargs):
         raise RuntimeError("hook broke")
@@ -116,7 +119,7 @@ def test_a_values_hook_that_raises_keeps_the_note_and_names_the_log(tmp_path):
     with patch.object(scanner, "_values_to_redact", side_effect=_raising_hook):
         detail = scanner._describe_scan_failure(RuntimeError("broke"), results)
 
-    assert "a note of ASH's" in detail, detail
+    assert "a note of ASH's" not in detail, detail
     assert "Stderr could not be shown; see" in detail, detail
     assert "StubScanner.stderr.log" in detail, detail
     assert "cannot read" not in detail, detail
