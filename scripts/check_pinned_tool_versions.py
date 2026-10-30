@@ -1654,22 +1654,23 @@ def render_apt_report(results: list[AptResult], markdown: bool = False) -> str:
         out.append("|" + "|".join("---" for _ in columns) + "|")
         out += ["| " + " | ".join(row) + " |" for row in rows]
     else:
-        widths = [
-            max(len(c), *(len(row[i]) for row in rows)) for i, c in enumerate(columns)
-        ]
+        widths = _column_widths(columns, rows)
         fmt = "  ".join(f"{{:<{w}}}" for w in widths)
         out.append(fmt.format(*columns))
         out.append(fmt.format(*("-" * w for w in widths)))
         out += [fmt.format(*row).rstrip() for row in rows]
 
     bullet = "- " if markdown else "  - "
-    seen: set[tuple[str, str]] = set()
+    # One bullet per pin, candidate and status. The status is part of the key: an
+    # architecture where the pin is gone has to be told apart from one where it is
+    # merely behind, even when both name the same newest version.
+    seen: set[tuple[str, str | None, str]] = set()
     for r in results:
         if r.status not in ("unavailable", "outdated"):
             continue
-        if (r.pin.package, r.candidate) in seen:
+        if (r.pin.package, r.candidate, r.status) in seen:
             continue
-        seen.add((r.pin.package, r.candidate))
+        seen.add((r.pin.package, r.candidate, r.status))
         lines = ", ".join(f"Dockerfile:{n}" for n in r.pin.lines)
         if r.candidate is None:
             edit = f"{r.pin.package}={r.pin.version}"
@@ -1686,9 +1687,8 @@ def render_apt_report(results: list[AptResult], markdown: bool = False) -> str:
         )
     for r in results:
         if r.status == "error":
-            out.append(
-                f"{bullet}{r.pin.package} ({r.arch}): lookup failed ({r.detail})"
-            )
+            detail = _escape_markdown(r.detail) if markdown else r.detail
+            out.append(f"{bullet}{r.pin.package} ({r.arch}): lookup failed ({detail})")
     if all(r.status == "current" for r in results):
         out.append("\nEvery apt pin is the version apt would choose today.")
     return "\n".join(out) + "\n"
@@ -1740,9 +1740,7 @@ def render_table(results: list[Result], markdown: bool = False) -> str:
         ]
         lines += ["| " + " | ".join(row) + " |" for row in rows]
         return "\n".join(lines)
-    widths = [
-        max(len(c), *(len(row[i]) for row in rows)) for i, c in enumerate(_COLUMNS)
-    ]
+    widths = _column_widths(_COLUMNS, rows)
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
     lines = [fmt.format(*_COLUMNS), fmt.format(*("-" * w for w in widths))]
     lines += [fmt.format(*row) for row in rows]
@@ -1750,11 +1748,32 @@ def render_table(results: list[Result], markdown: bool = False) -> str:
 
 
 def _escape_markdown(text: str) -> str:
-    """Escape ``_`` outside code spans, so ``_DIGESTS`` is not read as emphasis."""
+    """Escape what Markdown would misread, outside code spans.
+
+    ``_`` is escaped so ``_DIGESTS`` is not read as emphasis. ``<`` is escaped
+    because text shaped like a tag (``<new commit>``, urllib's ``<urlopen error timed
+    out>``) is read as raw HTML, and GitHub's job summary drops it; ``&`` so that
+    ``&lt;`` in a message is shown as written. A code span prints all of them as they
+    are.
+    """
     parts = text.split("`")
     return "`".join(
-        part if i % 2 else part.replace("_", "\\_") for i, part in enumerate(parts)
+        part
+        if i % 2
+        else part.replace("&", "&amp;").replace("<", "&lt;").replace("_", "\\_")
+        for i, part in enumerate(parts)
     )
+
+
+def _column_widths(columns: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[int]:
+    """The width of each column: its title or its longest entry, whichever is wider.
+
+    A table with no rows is as wide as its titles.
+    """
+    return [
+        max([len(title)] + [len(row[index]) for row in rows])
+        for index, title in enumerate(columns)
+    ]
 
 
 def render_report(pins: Any, results: list[Result], markdown: bool = False) -> str:
@@ -1792,15 +1811,25 @@ def render_report(pins: Any, results: list[Result], markdown: bool = False) -> s
             "of these is pinned and how each value was taken."
         )
     for r in errors:
-        out.append(f"\n{r.pin.tool}: lookup failed ({r.detail})")
+        detail = _escape_markdown(r.detail) if markdown else r.detail
+        out.append(f"\n{r.pin.tool}: lookup failed ({detail})")
     if not outdated and not errors:
-        out.append("\nEvery pin is at its upstream's latest release.")
+        if noted or any(r.status == "ahead" for r in results):
+            # Nothing is behind, but a pin newer than upstream's latest, or a newer
+            # release the image cannot use, is not "at its upstream's latest release".
+            out.append(
+                "\nNo pin is behind its upstream, but not every pin is at its "
+                "upstream's latest release; see the ahead rows and the notes above."
+            )
+        else:
+            out.append("\nEvery pin is at its upstream's latest release.")
     return "\n".join(out) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__.split("\n\n", 1)[0],
+        # Under python -OO there is no module docstring.
+        description=(__doc__ or "").split("\n\n", 1)[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -1827,11 +1856,30 @@ def main(argv: list[str] | None = None) -> int:
     except PinEnumerationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    except Exception as exc:  # a pins module that does not import, a missing file
+        # Uncaught, this ends as a traceback with exit status 1, which this script
+        # means as "a pin is behind".
+        print(
+            f"error: could not read the pins: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
 
     results = check(pin_list, ruby=ruby)
     apt_results = check_apt(apt_pins, indexes, APT_INDEX_FETCHER)
-    sys.stdout.write(render_report(pins, results, markdown=args.markdown))
-    sys.stdout.write(render_apt_report(apt_results, markdown=args.markdown))
+    try:
+        report = render_report(pins, results, markdown=args.markdown)
+        apt_report = render_apt_report(apt_results, markdown=args.markdown)
+    except Exception as exc:  # bump steps that cannot be built for an outdated pin
+        print(
+            f"error: could not render the report: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        # The lookups are done: give the table, and the exit status of a script fault.
+        sys.stdout.write(render_table(results, markdown=args.markdown) + "\n")
+        return EXIT_ERROR
+    sys.stdout.write(report)
+    sys.stdout.write(apt_report)
     # The worse of the two, where an error (2) outranks a failing pin (1).
     return max(
         exit_code(results, args.fail_on_outdated),
