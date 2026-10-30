@@ -236,7 +236,7 @@ def build_ash_image_cli_command(
             # poll. A SIGTERM that lands where nothing polls (between the image
             # build and the run, in a build step, after a --no-run build) lets
             # run_ash_scan return as if nothing happened, and the command then
-            # exited 0 after a stop. The exit says what the handler saw.
+            # exited 0 after a termination. The exit says what the handler saw.
             if shutdown_requested():
                 raise ScanCancelled(
                     "SIGTERM landed where nothing in the run polled the event"
@@ -268,7 +268,7 @@ def build_ash_image_cli_command(
         # is cancelled before the exit or that thread keeps running a scan the
         # operator stopped. A normal thread frame, so the real set calls are safe
         # here where the signal handler's are not. With --no-run there was no
-        # scan, so no verdict was owed.
+        # scan, so no outcome was owed.
         cancel_event.stop_promptly = True
         cancel_event.set()
         message = "ASH build-image interrupted before it finished"

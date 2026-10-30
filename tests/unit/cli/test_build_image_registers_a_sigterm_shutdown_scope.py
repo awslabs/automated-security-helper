@@ -121,7 +121,7 @@ def test_a_sigterm_nothing_polled_still_ends_the_command_terminated(
     """The handler sets the event and the phases raise on their next poll. A
     SIGTERM that lands where nothing polls (between the build and the run, or
     after a --no-run build) let the scan return as if nothing happened, and the
-    command exited 0 after a stop."""
+    command exited 0 after a termination."""
 
     def stand_in_scan(**kwargs):
         monkeypatch.setattr(cancellation, "_SHUTDOWN_REQUESTED", True)
