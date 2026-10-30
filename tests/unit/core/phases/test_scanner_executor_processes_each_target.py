@@ -45,6 +45,9 @@ from automated_security_helper.core.enums import (
 )
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.scan_results_container import (
+    ScanResultsContainer,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -156,6 +159,60 @@ def _run(
         executor.run_sequential(AshAggregatedResults())
     executor.events = events
     return seen, executor
+
+
+def _run_with_substituted_runner(plugin_context, tmp_path, parallel: bool):
+    """Run one scanner whose ``_execute_scanner`` is replaced by a fake that hands
+    the processor a plain string instead of a results row; the processor raises on
+    it. Returns the containers the processor saw and the executor."""
+    seen: list = []
+
+    def process(container, aggregated):
+        seen.append(container)
+        if not isinstance(container, ScanResultsContainer):
+            raise ValueError("not a results row")
+        return aggregated
+
+    scanner = CleanScanner(config=_Config(), context=plugin_context)
+    targets = [{"path": Path(plugin_context.source_dir), "type": "source"}]
+    executor = ScannerExecutor(
+        plugin_context=plugin_context,
+        progress_display=MagicMock(),
+        scanner_tasks=[("shape-tool", scanner, targets)],
+        process_results_fn=process,
+        notify_fn=lambda event_type, **kwargs: None,
+    )
+
+    def fake_execute(scanner_name, scanner_plugin, scan_targets):
+        # _safe_execute_scanner wraps this in its (results, succeeded) pair.
+        return ["not-a-results-row"]
+
+    executor._execute_scanner = fake_execute  # type: ignore[method-assign]
+    if parallel:
+        executor.run_parallel(AshAggregatedResults())
+    else:
+        executor.run_sequential(AshAggregatedResults())
+    return seen, executor
+
+
+@pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+def test_a_failure_on_an_item_that_is_no_row_is_filed_as_a_fresh_failure_row(
+    plugin_context, tmp_path, parallel
+):
+    """``_execute_scanner`` builds one row per target, but a substituted runner
+    (a test's fake, a plugin stand-in) can hand the processor anything. When the
+    processor raises on such an item, the handler cannot refile it as the
+    target's row (it has none); it files a fresh failure row instead of raising
+    on the item's missing ``add_error``. tests/unit/core/phases/
+    test_cancel_reaches_the_real_engine.py's cancelled-run test fakes the runner
+    this way and pins that the failed scanner counts as a completion."""
+    seen, executor = _run_with_substituted_runner(plugin_context, tmp_path, parallel)
+
+    assert seen[0] == "not-a-results-row"
+    assert isinstance(seen[-1], ScanResultsContainer), seen
+    assert seen[-1].scanner_name == "shape-tool"
+    assert seen[-1].status == ScannerStatus.ERROR
+    assert executor.completed_scanners == []
 
 
 def _scan_complete_events(executor) -> list:

@@ -909,7 +909,9 @@ class ScannerExecutor:
                 f"{log_head}: {scanner_name} - {described}", extra=NO_MARKUP
             )
             container = later.container
-            if container is None:
+            if not isinstance(container, ScanResultsContainer):
+                # Logged above; only a row can be refiled (a substituted runner
+                # can hand the processor anything, see the first-failure path).
                 continue
             container.add_error(f"{row_head}: {described}")
             container.set_exception(later, environment_values)
@@ -2394,7 +2396,9 @@ class ScannerExecutor:
                 ASH_LOGGER.error(
                     f"Scanner failed: {scanner_name} - {described}", extra=NO_MARKUP
                 )
-                if isinstance(e, ResultsProcessingFailed) and e.container is not None:
+                if isinstance(e, ResultsProcessingFailed) and isinstance(
+                    e.container, ScanResultsContainer
+                ):
                     # A results-processing failure carries the target's own row:
                     # it is filed again with the failure added, so the report
                     # keeps what the scan recorded (its errors, its counts, its
@@ -2402,7 +2406,10 @@ class ScannerExecutor:
                     # ERROR, it names why it could not be merged, and it never
                     # replaces a merged target's file. By type, not by a
                     # ``container`` attribute: a plugin's own exception class may
-                    # carry one.
+                    # carry one. Only a row is refiled: _execute_scanner builds
+                    # one per target, but a substituted runner (a test's fake, a
+                    # plugin stand-in) can hand the processor anything, and that
+                    # item is filed below as a fresh failure row instead.
                     failure_container = e.container
                     failure_container.add_error(
                         f"Scanner {scanner_name} failed: {described}"
@@ -2732,13 +2739,13 @@ class ScannerExecutor:
                         f"Scanner execution failed in thread pool: {scanner_name} - {described}",
                         extra=NO_MARKUP,
                     )
-                    if (
-                        isinstance(e, ResultsProcessingFailed)
-                        and e.container is not None
+                    if isinstance(e, ResultsProcessingFailed) and isinstance(
+                        e.container, ScanResultsContainer
                     ):
                         # See run_sequential: a results-processing failure
                         # carries the target's own row, filed again with the
-                        # failure added; matched by type, not by attribute.
+                        # failure added; matched by type, not by attribute, and
+                        # only a row is refiled (anything else gets a fresh one).
                         failure_container = e.container
                         failure_container.add_error(
                             f"Scanner {scanner_name} failed in thread pool: {described}"
