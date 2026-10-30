@@ -644,7 +644,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # name a ``~`` directory inside the scanned tree. Only a path that
             # is absolute as typed, or GITLEAKS_CONFIG_TOML (the config's text,
             # not a path), is left to gitleaks as before.
-            given = os.environ.get("GITLEAKS_CONFIG")
+            given = self._config_env_value()
             if given and not os.path.isabs(given):
                 anchored = self._anchored_config_env(given)
                 ASH_LOGGER.debug(
@@ -674,6 +674,21 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             DEFAULT_RULES_CONFIG,
             context=self.context,
         ).resolve()
+
+    @staticmethod
+    def _config_env_value() -> Optional[str]:
+        """``GITLEAKS_CONFIG`` as the operator set it, or None.
+
+        The one place this module reads the variable's value: the first run's
+        anchoring (``_resolve_config_file``) and the re-scan's environment
+        (``_rescan_env``) both go through it, so the builtin environment-read
+        audit (tests/unit/utils/test_uv_tool_runner.py) counts one read site
+        for this variable, as it did before the anchoring. The value is a path
+        for the gitleaks binary, which is not installed through uv, so it never
+        reaches a uv install input and is not added to ``_environment_values()``;
+        the debug line that mentions it names the variable, never the value.
+        """
+        return os.environ.get("GITLEAKS_CONFIG")
 
     @staticmethod
     def _anchored_config_env(given: str) -> Path:
@@ -1455,7 +1470,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         """
         if any(arg.startswith("--config=") for arg in final_args):
             return None
-        value = os.environ.get("GITLEAKS_CONFIG")
+        value = self._config_env_value()
         if not value or os.path.isabs(value):
             return None
         return {
