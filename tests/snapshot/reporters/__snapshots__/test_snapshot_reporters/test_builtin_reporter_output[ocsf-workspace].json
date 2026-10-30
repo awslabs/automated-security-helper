@@ -1,7 +1,7 @@
 [
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -40,10 +40,6 @@
             "start_line": 7
           }
         ],
-        "cve": {
-          "desc": "subprocess call with shell=True identified, security issue.",
-          "uid": "B602"
-        },
         "desc": "subprocess call with shell=True identified, security issue.",
         "severity": "HIGH",
         "title": "B602"
@@ -52,7 +48,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -91,10 +87,6 @@
             "start_line": 1
           }
         ],
-        "cve": {
-          "desc": "S3 Bucket has an ACL defined which allows public READ access.",
-          "uid": "CKV_AWS_20"
-        },
         "desc": "S3 Bucket has an ACL defined which allows public READ access.",
         "severity": "HIGH",
         "title": "CKV_AWS_20"
@@ -103,7 +95,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -142,10 +134,6 @@
             "start_line": 2
           }
         ],
-        "cve": {
-          "desc": "Bucket name is hardcoded; derive it from a variable.",
-          "uid": "terraform.aws.best-practice.s3-bucket-name-hardcoded"
-        },
         "desc": "Bucket name is hardcoded; derive it from a variable.",
         "severity": "MEDIUM",
         "title": "terraform.aws.best-practice.s3-bucket-name-hardcoded"
