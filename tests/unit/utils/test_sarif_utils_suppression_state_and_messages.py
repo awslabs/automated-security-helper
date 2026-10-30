@@ -354,8 +354,13 @@ def test_the_written_spelling_is_probed_only_under_the_scan_root(tmp_path):
     if os.name != "nt":
         (tmp_path / "fixtures" / "a\\..%2Fb.json").write_text("{}", encoding="utf-8")
         (tmp_path / "C:x%2Fb.json").write_text("{}", encoding="utf-8")
-    assert (
-        _matched_path_text("fixtures/a\\..%2Fb.json", root) == "fixtures/a\\../b.json"
+    # Decoded, never kept as written; the reading's sanitize step then treats the
+    # literal backslash as a separator under a Windows scan root
+    # (uri_separators.sanitized_uri_text), so the decoded text keeps the backslash
+    # on POSIX and shows a slash on Windows.
+    assert _matched_path_text("fixtures/a\\..%2Fb.json", root) in (
+        "fixtures/a\\../b.json",
+        "fixtures/a/../b.json",
     )
     assert _matched_path_text("C:x%2Fb.json", root) == "C:x/b.json"
 
