@@ -114,17 +114,26 @@ def test_a_config_file_outside_the_scanned_tree_reaches_the_update(
 
 
 def test_the_real_lock_is_taken_under_a_cache_whose_parents_do_not_exist(
-    tmp_path, captured
+    tmp_path, monkeypatch
 ):
     """``exclusive_lock`` creates the lock's missing parents, so a first refresh of a
-    cache three levels deep runs with the lock inside the cache it created."""
+    cache three levels deep runs with the lock inside the cache it created. The
+    fake ``_run`` reads the lock file WHILE the command runs: a read after the run
+    only showed that ``exclusive_lock`` leaves the file behind."""
     cache = tmp_path / "a" / "b" / "c"
+    lock = cache / ".ash-grype-update.lock"
+    seen = []
+
+    def _run(argv, env, cwd, what, values=()):
+        seen.append((what, lock.is_file()))
+
+    monkeypatch.setattr(refresh, "_run", _run)
     _prepare("grype", cache, tmp_path)
     # ``_run`` is told what it updates as "<tool> <what>" (the label the refresh
     # logs), not the bare ``_commands`` key; the auto-update tests in this file
     # read the same label.
-    assert [what for _argv, _env, what in captured] == ["grype database"]
-    assert (cache / ".ash-grype-update.lock").is_file()
+    assert seen == [("grype database", True)]
+    assert lock.is_file()
 
 
 def test_a_regular_file_at_the_caches_path_sends_the_lock_to_the_temp_dir(tmp_path):
@@ -219,12 +228,36 @@ def test_a_grype_config_turning_auto_update_off_leaves_the_update_out(
     assert captured == []
 
 
-def test_grype_db_auto_update_true_or_unset_runs_the_update(
-    tmp_path, captured, monkeypatch
+@pytest.mark.parametrize(
+    "value, skips",
+    [
+        # Read as viper reads it for grype (strconv.ParseBool): these are false.
+        ("false", True),
+        ("False", True),
+        ("FALSE", True),
+        ("f", True),
+        ("F", True),
+        ("0", True),
+        # Not false to ParseBool, so not an opt-out: grype's default (on) holds.
+        ("no", False),
+        ("off", False),
+        ("true", False),
+        ("1", False),
+        # An empty value is unset.
+        ("", False),
+        # Unset: the fixture clears it; nothing is set here.
+        (None, False),
+    ],
+)
+def test_grype_db_auto_update_turns_the_update_off_only_when_it_reads_as_false(
+    tmp_path, captured, monkeypatch, value, skips
 ):
-    monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "true")
+    if value is not None:
+        monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", value)
     _prepare("grype", tmp_path / "grype-db", tmp_path)
-    assert [what for _argv, _env, what in captured] == ["grype database"]
+    ran = [what for _argv, _env, what in captured]
+    assert (ran == []) is skips
+    assert (ran == ["grype database"]) is not skips
 
 
 def test_the_checks_bundle_fetch_pins_its_report_format_and_output(tmp_path):

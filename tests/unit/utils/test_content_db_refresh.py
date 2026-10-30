@@ -43,7 +43,7 @@ from tests.utils.helpers import importing_this_checkout
 #: cleared so a developer's or a CI shell cannot change what these tests see
 #: (GRYPE_DB_AUTO_UPDATE=false is a common grype-caching recipe, and read as it
 #: is, it left every grype refresh here out, so the grype cases saw no call).
-_TRIVY_UPDATE_ENV = (
+_TOOL_UPDATE_OPT_OUT_ENV = (
     "TRIVY_SKIP_DB_UPDATE",
     "TRIVY_SKIP_UPDATE",
     "TRIVY_SKIP_JAVA_DB_UPDATE",
@@ -53,7 +53,7 @@ _TRIVY_UPDATE_ENV = (
 
 @pytest.fixture(autouse=True)
 def _fresh_memo(monkeypatch):
-    for name in _TRIVY_UPDATE_ENV:
+    for name in _TOOL_UPDATE_OPT_OUT_ENV:
         monkeypatch.delenv(name, raising=False)
     refresh.forget_prepared()
     yield

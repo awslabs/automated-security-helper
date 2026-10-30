@@ -64,7 +64,14 @@ class _Response:
             self.length = length
 
     def read(self, amount=-1):
-        return self._body.read(amount)
+        chunk = self._body.read(amount)
+        # As http.client does: ``length`` is the number of bytes still to read, so
+        # it goes down with every read and is 0 after a whole body. A fake that
+        # kept it constant would have let the product read the field during or
+        # after its loop and still pass here.
+        if getattr(self, "length", None) is not None:
+            self.length -= len(chunk)
+        return chunk
 
     def __enter__(self):
         return self
