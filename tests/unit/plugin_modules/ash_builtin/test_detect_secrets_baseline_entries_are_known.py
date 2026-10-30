@@ -479,6 +479,83 @@ def test_a_baseline_in_an_enclosing_checkout_is_read_relative_to_its_own_directo
     ]
 
 
+def test_an_operator_baseline_beside_the_tree_is_read_relative_to_the_scanned_directory(
+    tmp_path, monkeypatch
+):
+    """The operator names a baseline that sits in the directory ABOVE the scanned
+    tree, keyed as the known-entries tests key it: relative to the scanned
+    directory (``settings.py``), with an exclude pattern anchored there too
+    (``^tests/``). Its known candidate leaves the report and the pattern takes
+    ``tests/fixture.py`` out of the scan paths. Only a baseline the scan FOUND in
+    the tree, read through a link into the enclosing checkout, is re-anchored to
+    its own directory; a first cut re-anchored this one as well, and its
+    candidate was reported as new."""
+    from detect_secrets.core.potential_secret import PotentialSecret
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        SHOULD_EXCLUDE_FILE_FILTER,
+        _detect_secrets_api,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "tests").mkdir()
+    (source / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
+    (source / "tests" / "fixture.py").write_text(
+        f"KEY = '{NEW_SECRET}'\n", encoding="utf-8"
+    )
+    document = _baseline(
+        {
+            "settings.py": [
+                {
+                    "type": SECRET_TYPE,
+                    "hashed_secret": _hash(KEPT_SECRET),
+                    "line_number": 1,
+                    "is_secret": False,
+                }
+            ]
+        }
+    )
+    document["filters_used"] = [
+        {"path": SHOULD_EXCLUDE_FILE_FILTER, "pattern": ["^tests/"]}
+    ]
+    baseline = tmp_path / "operator.baseline"
+    baseline.write_text(json.dumps(document), encoding="utf-8")
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(baseline))
+        ),
+    )
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_entries_trusted() is True
+
+    seen: dict = {}
+
+    def scanned(self, *, baseline, scan_paths, scan_settings_dict, **kwargs):
+        seen["paths"] = list(scan_paths)
+        collection_cls, _, _ = _detect_secrets_api()
+        collection = collection_cls()
+        collection.root = self._secrets_collection.root
+        collection["settings.py"].add(
+            PotentialSecret(
+                SECRET_TYPE, "settings.py", secret=KEPT_SECRET, line_number=1
+            )
+        )
+        return collection
+
+    monkeypatch.setattr(type(scanner), "_scan_in_worker", scanned)
+
+    report = scanner.scan(target=source, target_type="source")
+
+    assert _findings(report) == []
+    assert seen["paths"], seen
+    assert not any(Path(path).name == "fixture.py" for path in seen["paths"]), seen[
+        "paths"
+    ]
+
+
 def test_without_a_baseline_every_secret_is_reported(tmp_path, monkeypatch):
     """Control: the known set is empty when no baseline is in use."""
     monkeypatch.chdir(tmp_path)
