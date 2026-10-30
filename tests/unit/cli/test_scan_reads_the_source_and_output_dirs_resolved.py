@@ -274,6 +274,32 @@ class TestAnOutputDirectoryThatWouldClearTheScannedTreeIsRefused:
         assert refusal in err, err
         assert "cannot be read" not in err, err
 
+    def test_a_refused_tree_directory_is_not_probed_for_writing_first(self, tmp_path):
+        """The output directory's own refusal probes a directory that exists by
+        making and removing a file in it. A directory of the tree's that the scan
+        refuses to clear is refused before that probe, so nothing is written into
+        the tree, not even for a moment; a path that is not a directory (a file in
+        the tree) is still asked of the probe first, which refuses it as a file."""
+        docs = tmp_path / "src" / "docs"
+        (docs / "reports").mkdir(parents=True)
+        (docs / "reports" / "index.md").write_text("# docs\n")
+        (tmp_path / "src" / "afile").write_text("not a directory\n")
+        probed: list[str] = []
+
+        def recording(output_dir):
+            probed.append(str(output_dir))
+            return "Output directory is not a directory: afile"
+
+        with patch("automated_security_helper.cli.scan.output_dir_refusal", recording):
+            assert _refused(source_dir="src", output_dir="src/docs") == (
+                ASH_EXIT_USAGE_ERROR
+            )
+            assert probed == [], probed
+            assert _refused(source_dir="src", output_dir="src/afile") == (
+                ASH_EXIT_USAGE_ERROR
+            )
+            assert probed == ["src/afile"], probed
+
     def test_the_default_output_directory_with_old_results_is_not_refused(
         self, tmp_path
     ):
