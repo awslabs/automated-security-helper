@@ -190,7 +190,9 @@ def _version_in_range(version: Any, vulnerable_range: Any) -> bool | None:
     not certain: no version, a version or comparator that does not parse
     (``^``, ``~``, ``x`` ranges, hyphen ranges), or a prerelease version or
     bound, whose place in a range npm's semver decides by rules not reproduced
-    here. A bound's suffix is never handed to packaging: semver reads
+    here. An alternative that does not parse leaves the answer uncertain only
+    when no readable alternative covers the copy: one that does settles it
+    (True), as the union's meaning says. A bound's suffix is never handed to packaging: semver reads
     ``2.0.0-0`` (the upper bound node's semver writes for ``^1``) as a
     prerelease below 2.0.0, while packaging reads it as a post-release above
     it, so ``>=2.0.0-0`` against an installed 2.0.0 would have read False and
@@ -216,20 +218,27 @@ def _version_in_range(version: Any, vulnerable_range: Any) -> bool | None:
     text = vulnerable_range.strip()
     if text in ("", "*"):
         return True
+    # Three-valued over the alternatives: one that covers the copy decides
+    # (True), whatever the others read; an alternative the grammar does not
+    # read makes the answer uncertain (None) only when no other covers the
+    # copy. Returning None at the first unreadable alternative read
+    # ``<0.2.4 || ^1.0.0`` against 0.1.0 as uncertain, which the readable
+    # branch had already settled.
     outcome = False
+    uncertain = False
     for alternative in text.split("||"):
-        holds = True
+        holds: bool | None = True
         for comparator in alternative.split():
             match = _RANGE_COMPARATOR.match(comparator)
-            if match is None:
-                return None
+            if match is None or match.group(3):
+                holds = None
+                break
             operator, bound_text = match.group(1) or "=", match.group(2)
-            if match.group(3):
-                return None
             try:
                 bound = Version(bound_text)
             except InvalidVersion:
-                return None
+                holds = None
+                break
             if operator == "<":
                 holds = holds and installed < bound
             elif operator == "<=":
@@ -240,8 +249,13 @@ def _version_in_range(version: Any, vulnerable_range: Any) -> bool | None:
                 holds = holds and installed >= bound
             else:
                 holds = holds and installed == bound
+        if holds is None:
+            uncertain = True
+            continue
         outcome = outcome or holds
-    return outcome
+    if outcome:
+        return True
+    return None if uncertain else False
 
 
 def _grade_properties(severity: str) -> Dict[str, str]:
@@ -1683,43 +1697,54 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 emitted[(vuln_id, uri, version)] = result
                 results.append(result)
 
-    def _every_copy_excluded(
+    def _disagreeing_copies(
         self,
         pkg_name: str,
         vuln_info: Dict[str, Any],
         via_items: List[Any],
         lock_rel: str | None,
         lock_index: NpmLockIndex | None,
-    ) -> bool:
-        """Whether every installed copy of an npm entry falls outside every
-        range of its advisories, by the lockfile's versions.
+    ) -> Set[Any]:
+        """The listed copies of an npm entry that fall outside EVERY range of
+        its advisories, by the lockfile's versions.
 
-        True only when the entry lists copies and advisories with ranges and
-        each pairing answers False; an uncertain pairing (no version, an
-        unreadable range) or an advisory without a range keeps the entry on
-        the ordinary path. A True is logged: npm listed the advisories for
-        these copies and this reading of the lockfile says none is affected,
-        so the two disagree and the results are kept rather than dropped.
+        npm 7+ (arborist) adds a copy to an entry's ``nodes`` only when one of
+        the entry's advisories covers that copy's version, so a listed copy no
+        range covers is not a fixed copy carried along: it is a copy npm's
+        reading of the install and this reading of the lockfile disagree on (a
+        stale lockfile, a wrong index lookup, a copy resolved to another
+        entry's version). Such a copy keeps a result for every advisory, and
+        the disagreement is logged once per entry naming the copies; dropping
+        it silently left a copy npm counted with no result. A copy is in the
+        set only when every ranged advisory answers False for it; an uncertain
+        pairing (no version, an unreadable range) keeps it on the ordinary
+        path. Empty when the entry lists no copy or no advisory with a range.
         """
         nodes = vuln_info.get("nodes") or []
         advisories = [
             via for via in via_items if isinstance(via, dict) and via.get("range")
         ]
         if not nodes or not advisories:
-            return False
+            return set()
+        disagreeing: Set[Any] = set()
         for node_path in nodes:
             _, identity = self._node_place(pkg_name, node_path, lock_rel, lock_index)
             version = identity.get(PACKAGE_VERSION_KEY)
-            for via in advisories:
-                if _version_in_range(version, via.get("range")) is not False:
-                    return False
-        ASH_LOGGER.debug(
-            f"npm-audit: every installed copy of {pkg_name} falls outside every "
-            f"range of its {len(advisories)} advisory(ies) by the lockfile's "
-            "versions, while npm reported them; the results are kept",
-            extra=NO_MARKUP,
-        )
-        return True
+            if all(
+                _version_in_range(version, via.get("range")) is False
+                for via in advisories
+            ):
+                disagreeing.add(node_path)
+        if disagreeing:
+            named = ", ".join(sorted(str(path) for path in disagreeing))
+            ASH_LOGGER.debug(
+                f"npm-audit: {len(disagreeing)} of {len(nodes)} listed copy(ies) "
+                f"of {pkg_name} fall outside every range of its "
+                f"{len(advisories)} advisory(ies) by the lockfile's versions, "
+                f"while npm listed them ({named}); their results are kept",
+                extra=NO_MARKUP,
+            )
+        return disagreeing
 
     @staticmethod
     def _widen_result(
@@ -1960,14 +1985,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     via_items = [via_items]
 
                 has_dict_via = False
-                # The per-copy range exclusion below is switched off for an
-                # entry whose EVERY copy falls outside EVERY range of its
-                # advisories: such an entry would yield no result while npm
-                # counted its advisories in the report's metadata, so npm's
-                # reading of the lockfile and this one disagree (a stale
-                # lockfile, a wrong index lookup), which is uncertainty, and
-                # an uncertain answer keeps the result. Logged once per entry.
-                exclude_by_range = not self._every_copy_excluded(
+                # The per-copy range exclusion below is switched off for a
+                # copy that falls outside EVERY range of the entry's
+                # advisories: npm lists a copy under an entry only when an
+                # advisory covers it, so such a copy is one npm's reading of
+                # the install and this reading of the lockfile disagree on (a
+                # stale lockfile, a wrong index lookup), which is uncertainty,
+                # and an uncertain answer keeps the result. Dropping it (per
+                # copy, silently) left a copy npm counted with no result; the
+                # all-copies case was already kept. Logged once per entry.
+                disagreeing = self._disagreeing_copies(
                     pkg_name, vuln_info, via_items, lock_rel, lock_index
                 )
                 for via in via_items:
@@ -2053,13 +2080,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         )
                         # A copy whose installed version the lockfile gives,
                         # and which this advisory's own range excludes, is
-                        # not affected by it: npm lists every installed copy
-                        # under each advisory of the package, so a fixed copy
-                        # carried another copy's advisory and a GHSA split
-                        # into several ranges was reported once per range on
-                        # every copy. An uncertain answer keeps the result.
+                        # not affected by it: npm lists the entry's copies
+                        # under each of its advisories, so a copy another
+                        # advisory covers carried this one too, and a GHSA
+                        # split into several ranges was reported once per
+                        # range on every copy. An uncertain answer keeps the
+                        # result, and so does a copy no range covers (above).
                         if (
-                            exclude_by_range
+                            node_path not in disagreeing
                             and via.get("range")
                             and _version_in_range(
                                 identity.get(PACKAGE_VERSION_KEY), via_range
@@ -2274,16 +2302,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         Two dicts merge recursively, two numbers add, two lists join with each
         item once, so the per-severity ``vulnerabilities`` counters sum across lockfiles (a
-        ``dict.update`` kept only the last lockfile's). A number that meets a
-        dict is read as that dict's ``total`` (pnpm's integer is npm's map's
-        total), so the two merge and the shape is the map whichever lockfile
-        comes first; keeping the first dropped pnpm's count when npm's lockfile
-        was walked first, and left a bare integer where readers of
-        ``["dependencies"]["total"]`` expect the map when pnpm's was. Two
+        ``dict.update`` kept only the last lockfile's). A v1 report's dependency
+        counts are read into npm's map first (``_npm_dependency_counts``): its
+        ``dependencies`` integer is the PRODUCTION count, with
+        ``devDependencies``, ``optionalDependencies`` and ``totalDependencies``
+        beside it, so reading the integer as the map's ``total`` dropped pnpm's
+        dev and optional counts from the total, left pnpm out of ``prod``, and
+        kept the three v1 integers as top-level keys beside the map, two
+        "total" counts in one document. With both sides in the map shape the two
+        merge whichever lockfile comes first, and ``["dependencies"]["total"]``
+        reads the map for a pnpm- or yarn-only scan too. A number that still
+        meets a dict under another key is read as that dict's ``total``. Two
         values of other kinds cannot be combined: the first stays and the
         disagreement is logged once, since it is a count across tools and not
         a finding.
         """
+        if cls._is_number(into.get("dependencies")):
+            mapped = cls._npm_dependency_counts(into)
+            into.clear()
+            into.update(mapped)
+        value = cls._npm_dependency_counts(value)
         for key, incoming in value.items():
             if key not in into:
                 into[key] = copy.deepcopy(incoming)
@@ -2308,6 +2346,40 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     f"merged value ({type(current).__name__}); keeping the first",
                     extra=NO_MARKUP,
                 )
+
+    #: npm's v1 report (pnpm, yarn 2 and 3) counts dependencies in four integers
+    #: beside each other; npm 7+ counts them in one map under these keys.
+    _V1_DEPENDENCY_COUNTS: ClassVar[Dict[str, str]] = {
+        "dependencies": "prod",
+        "devDependencies": "dev",
+        "optionalDependencies": "optional",
+        "totalDependencies": "total",
+    }
+
+    @classmethod
+    def _npm_dependency_counts(cls, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """``metadata`` with v1 dependency counts read into npm's map, else as given.
+
+        A metadata dict whose ``dependencies`` is a number is a v1 report's: the
+        number is the production count, and ``devDependencies``,
+        ``optionalDependencies`` and ``totalDependencies`` sit beside it. The
+        four become ``{"prod", "dev", "optional", "total"}`` under
+        ``dependencies``, each only when present and numeric; a v1 key holding
+        something else is kept as it is. A dict already in npm's shape, or with
+        no ``dependencies`` number, is returned unchanged (the same object).
+        """
+        if not cls._is_number(metadata.get("dependencies")):
+            return metadata
+        counts: Dict[str, Any] = {}
+        shaped: Dict[str, Any] = {}
+        for key, item in metadata.items():
+            target = cls._V1_DEPENDENCY_COUNTS.get(key)
+            if target is not None and cls._is_number(item):
+                counts[target] = item
+            else:
+                shaped[key] = item
+        shaped["dependencies"] = counts
+        return shaped
 
     @classmethod
     def _recount_total(cls, counters: Dict[str, Any]) -> None:

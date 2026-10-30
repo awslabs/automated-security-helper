@@ -4,15 +4,21 @@
 """Merging several lockfiles' audit metadata must combine, never raise or overwrite.
 
 npm 7+ counts its dependencies in a dict (``"dependencies": {"prod": 1, ...}``)
-where pnpm's v1 report counts them in an integer (``"dependencies": 5``). The merge
-read the incoming value's type alone: a dict was ``update``d into whatever was
-there, a number was ``+=``d onto it. With one lockfile of each kind in a scan the
-second merge raised (``dict.update`` on an integer, ``int += dict``), the raise was
-recorded as a failed audit, and two valid reports failed the whole scan. Keeping
-the first of the pair instead made the saved shape depend on the walk order:
-pnpm's count was dropped, or a bare integer stood where the map's readers look
-for ``["dependencies"]["total"]``. The integer is read as the map's total, so
-the two merge whichever lockfile comes first.
+where pnpm's v1 report counts them in four integers: ``"dependencies": 5`` is the
+PRODUCTION count, with ``devDependencies``, ``optionalDependencies`` and
+``totalDependencies`` beside it. The merge read the incoming value's type alone:
+a dict was ``update``d into whatever was there, a number was ``+=``d onto it.
+With one lockfile of each kind in a scan the second merge raised (``dict.update``
+on an integer, ``int += dict``), the raise was recorded as a failed audit, and
+two valid reports failed the whole scan. Keeping the first of the pair instead
+made the saved shape depend on the walk order: pnpm's count was dropped, or a
+bare integer stood where the map's readers look for ``["dependencies"]["total"]``.
+Reading the integer as the map's ``total`` merged the two, but counted pnpm's
+production dependencies as its total (its dev and optional counts gone), left
+pnpm out of ``prod``, and kept the other three integers as top-level keys beside
+the map, two "total" counts in one document. The four v1 integers are read into
+npm's map first (``prod``, ``dev``, ``optional``, ``total``), so the two merge
+whichever lockfile comes first, key for key.
 
 The per-severity ``vulnerabilities`` counters are dicts on both sides, and
 ``dict.update`` kept only the last lockfile's counts, so the merged run's metrics
@@ -196,8 +202,9 @@ def test_an_npm_and_a_pnpm_lockfile_in_one_scan_both_report(plugin_context):
         r.properties.model_extra["package_name"] for r in report.runs[0].results
     }
     assert {"left-pad", "lodash", "minimist"} <= packages, packages
-    # Each side's counts combine: pnpm's one integer is read as npm's map's
-    # total, so the saved shape is the map whichever lockfile came first.
+    # Each side's counts combine key for key: pnpm's four v1 integers are read
+    # into npm's map, so the saved shape is the map whichever lockfile came
+    # first, and no v1 integer is left beside it.
     saved = json.loads(
         scanner.results_dir.joinpath("converted", "results.json").read_text()
     )
@@ -216,8 +223,26 @@ def test_an_npm_and_a_pnpm_lockfile_in_one_scan_both_report(plugin_context):
         vulnerabilities.get(name, 0)
         for name in ("info", "low", "moderate", "high", "critical")
     ), merged
-    assert metadata["dependencies"]["prod"] == 3
-    assert metadata["dependencies"]["total"] == 3 + pnpm_metadata["dependencies"]
+    # The fixture's v1 counts: dependencies (production) 5, devDependencies 0,
+    # optionalDependencies 0, totalDependencies 5.
+    assert pnpm_metadata["dependencies"] == 5
+    assert pnpm_metadata["totalDependencies"] == 5
+    assert metadata["dependencies"] == {
+        "prod": 3 + pnpm_metadata["dependencies"],
+        "dev": pnpm_metadata["devDependencies"],
+        "optional": pnpm_metadata["optionalDependencies"],
+        "peer": 0,
+        "peerOptional": 0,
+        "total": 3 + pnpm_metadata["totalDependencies"],
+    }, metadata["dependencies"]
+    for v1_key in ("devDependencies", "optionalDependencies", "totalDependencies"):
+        assert v1_key not in metadata, metadata
+
+
+def _saved_metadata(scanner) -> dict:
+    return json.loads(
+        scanner.results_dir.joinpath("converted", "results.json").read_text()
+    )["metadata"]
 
 
 @pytest.mark.parametrize("first", ["npm", "pnpm"])
@@ -262,6 +287,20 @@ def test_the_merge_combines_whichever_report_comes_first(plugin_context, first):
     assert scanner.errors == [], scanner.errors
     assert (scanner.targets_attempted, scanner.targets_failed) == (2, 0)
     assert len(report.runs[0].results) > 1
+    # The saved shape is the same in both orders: the map, with both sides'
+    # counts in it, and the severity counters summed. A "keep the first value"
+    # merge raises nothing, so the assertions above held for it in both orders;
+    # these do not.
+    metadata = _saved_metadata(scanner)
+    pnpm_metadata = json.loads(pnpm["stdout"])["metadata"]
+    assert isinstance(metadata["dependencies"], dict), metadata
+    assert metadata["dependencies"]["prod"] == 3 + pnpm_metadata["dependencies"]
+    assert metadata["dependencies"]["total"] == (3 + pnpm_metadata["totalDependencies"])
+    counters = metadata["vulnerabilities"]
+    assert counters["high"] == 1 + pnpm_metadata["vulnerabilities"]["high"]
+    assert counters["total"] == sum(
+        counters[name] for name in ("info", "low", "moderate", "high", "critical")
+    ), counters
 
 
 def test_merged_metrics_sum_every_lockfiles_counters(plugin_context):
@@ -306,9 +345,10 @@ def test_merged_metrics_sum_every_lockfiles_counters(plugin_context):
 
 
 def test_merge_metadata_by_type():
-    """The unit itself: dicts recurse, numbers add, lists join, a number that
-    meets a dict is read as the dict's total, the rest keeps the first value,
-    and a bool is never added as a number."""
+    """The unit itself: dicts recurse, numbers add, lists join, a v1 report's
+    dependency integers are read into the map by key (``dependencies`` is the
+    production count, not the total), the rest keeps the first value, and a
+    bool is never added as a number."""
     into = {
         "vulnerabilities": {"high": 1, "total": 1},
         "dependencies": {"prod": 2},
@@ -324,19 +364,38 @@ def test_merge_metadata_by_type():
             "flags": ["a", "b"],
             "ok": False,
             "note": "second",
-            "devDependencies": 0,
+            "devDependencies": 1,
+            "optionalDependencies": 0,
+            "totalDependencies": 6,
         },
         "pnpm-lock.yaml",
     )
 
     assert into == {
         "vulnerabilities": {"high": 3, "moderate": 1, "total": 4},
-        "dependencies": {"prod": 2, "total": 5},
+        "dependencies": {"prod": 7, "dev": 1, "optional": 0, "total": 6},
         "flags": ["a", "b"],
         "ok": True,
         "note": "first",
-        "devDependencies": 0,
     }, into
+
+
+def test_a_v1_report_s_dependency_counts_are_read_into_the_map():
+    """The reading itself, on the captured pnpm report: the four integers
+    become npm's map, the rest of the metadata is kept, and a metadata dict
+    already in npm's shape comes back as the same object."""
+    pnpm = json.loads(PNPM_CAPTURE.read_text(encoding="utf-8"))
+    v1 = json.loads(pnpm["stdout"])["metadata"]
+    assert v1["dependencies"] == 5 and v1["totalDependencies"] == 5
+
+    shaped = NpmAuditScanner._npm_dependency_counts(v1)
+
+    assert shaped["dependencies"] == {"prod": 5, "dev": 0, "optional": 0, "total": 5}
+    assert shaped["vulnerabilities"] == v1["vulnerabilities"]
+    for v1_key in ("devDependencies", "optionalDependencies", "totalDependencies"):
+        assert v1_key not in shaped, shaped
+    npm_shaped = _npm_report(high=1, moderate=0, prod=3)["metadata"]
+    assert NpmAuditScanner._npm_dependency_counts(npm_shaped) is npm_shaped
 
 
 def test_merge_metadata_recounts_the_total_from_the_severity_counters():
@@ -358,22 +417,33 @@ def test_merge_metadata_recounts_the_total_from_the_severity_counters():
     }, into
 
 
-def test_merge_metadata_reads_an_integer_as_the_map_s_total_when_a_dict_arrives():
-    """The other direction of the npm/pnpm pair: pnpm's integer was merged
+def test_merge_metadata_reads_a_v1_report_s_counts_into_the_map_when_a_dict_arrives():
+    """The other direction of the npm/pnpm pair: pnpm's v1 integers were merged
     first, and npm's dict arrives second. ``int.update`` raised here, and
     keeping the integer left a reader of ``["dependencies"]["total"]`` with a
-    TypeError whenever pnpm's lockfile was walked first. The vulnerability
-    counters come back with a recounted ``total`` beside them: the merge
-    recounts it from the severity counters once any counter is present."""
-    into = {"dependencies": 5, "vulnerabilities": {"high": 3}}
+    TypeError whenever pnpm's lockfile was walked first. The merged side is
+    read into the map before the dict is folded in, key for key. The
+    vulnerability counters come back with a recounted ``total`` beside them:
+    the merge recounts it from the severity counters once any counter is
+    present."""
+    into = {
+        "dependencies": 5,
+        "devDependencies": 1,
+        "optionalDependencies": 0,
+        "totalDependencies": 6,
+        "vulnerabilities": {"high": 3},
+    }
 
     NpmAuditScanner._merge_metadata(
         into,
-        {"dependencies": {"prod": 2, "total": 2}, "vulnerabilities": {"high": 1}},
+        {
+            "dependencies": {"prod": 2, "dev": 0, "total": 2},
+            "vulnerabilities": {"high": 1},
+        },
         "package-lock.json",
     )
 
     assert into == {
-        "dependencies": {"total": 7, "prod": 2},
+        "dependencies": {"prod": 7, "dev": 1, "optional": 0, "total": 8},
         "vulnerabilities": {"high": 4, "total": 4},
     }, into

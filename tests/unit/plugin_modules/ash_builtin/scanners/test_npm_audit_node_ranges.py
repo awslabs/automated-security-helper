@@ -3,14 +3,19 @@
 
 """An npm 7+ advisory is reported against the copies its range covers.
 
-npm audit lists every installed copy (node) of a package under each of the
-package's advisories. The conversion paired every node with every advisory,
-so a copy at a fixed version carried another copy's advisory, and one GHSA
-split into several ranges (minimist's ``<0.2.4`` and ``>=1.0.0 <1.2.6``) was
-reported once per range on every copy. When the lockfile gives a copy's
-installed version and the advisory's own range excludes it, no result is
-made; when the answer is uncertain (no version, an unparsable range, a
-prerelease) the result is kept, once per advisory and copy.
+npm audit lists an entry's installed copies (nodes) under each of the entry's
+advisories: a copy is listed when one of them covers its version, and each
+copy then carries every advisory of the entry. The conversion paired every
+node with every advisory, so a copy another advisory covers carried this one
+too, and one GHSA split into several ranges (minimist's ``<0.2.4`` and
+``>=1.0.0 <1.2.6``) was reported once per range on every copy. When the
+lockfile gives a copy's installed version and the advisory's own range
+excludes it, no result is made; when the answer is uncertain (no version, an
+unparsable range, a prerelease) the result is kept, once per advisory and copy.
+A listed copy that NO range covers is not npm's shape: npm's reading of the
+install and this reading of the lockfile disagree on it, so it keeps a result
+for every advisory and the disagreement is logged, where the per-copy
+exclusion dropped it silently.
 """
 
 from __future__ import annotations
@@ -34,9 +39,12 @@ pytestmark = pytest.mark.unit
 GHSA = "https://github.com/advisories/GHSA-xvch-5gv4-984h"
 
 
-def _via(rng):
+def _via(rng, source=1179):
+    """One advisory entry. npm's bulk advisory data gives each range of a
+    multi-range GHSA its own advisory id, so ``_report`` hands each range a
+    different ``source`` with the one URL: the merge keys on the URL."""
     return {
-        "source": 1179,
+        "source": source,
         "name": "minimist",
         "title": "Prototype Pollution in minimist",
         "url": GHSA,
@@ -55,7 +63,7 @@ def _report(nodes, ranges=("<0.2.4", ">=1.0.0 <1.2.6")):
                 "name": "minimist",
                 "severity": "critical",
                 "isDirect": False,
-                "via": [_via(r) for r in ranges],
+                "via": [_via(r, source=1179 + i) for i, r in enumerate(ranges)],
                 "effects": ["mkdirp"],
                 "range": " || ".join(ranges),
                 "nodes": list(nodes),
@@ -112,12 +120,18 @@ def test_each_copy_takes_the_range_that_covers_it(scanner, monkeypatch):
     assert len(report.runs[0].tool.driver.rules) == 1
 
 
-def test_a_fixed_copy_carries_no_advisory_meant_for_another(scanner, monkeypatch):
-    old, fixed = "node_modules/a/node_modules/minimist", "node_modules/minimist"
-    _versions(monkeypatch, {old: "0.0.8", fixed: "1.2.8"})
+def test_a_copy_one_range_covers_carries_no_advisory_meant_for_another(
+    scanner, monkeypatch
+):
+    """npm's real shape for a project with one vulnerable copy and one fixed
+    copy: only the vulnerable copy is listed (npm lists a copy when an
+    advisory covers it). That copy takes the one range that covers it, not
+    both."""
+    old = "node_modules/a/node_modules/minimist"
+    _versions(monkeypatch, {old: "0.0.8", "node_modules/minimist": "1.2.8"})
 
     report = scanner._convert_npm_audit_to_sarif(
-        _report([old, fixed]), scanner.context.source_dir
+        _report([old]), scanner.context.source_dir
     )
 
     assert _rows(report) == [(old, "<0.2.4")]
@@ -132,29 +146,73 @@ class _Messages(logging.Handler):
         self.texts.append(record.getMessage())
 
 
+def _debug_messages(monkeypatch):
+    """ASH's logger at DEBUG for the test, with a handler of our own: the
+    logger does not propagate, so caplog does not see it. ``setLevel`` is used
+    on both sides, never a write to ``.level``: ``Logger.isEnabledFor`` keeps
+    a per-level cache that only ``setLevel`` clears, so a direct write left a
+    stale False (the record never arrived, order-dependent) or a stale True
+    (DEBUG records leaked into later tests)."""
+    messages = _Messages()
+    saved = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(messages)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+
+    def restore():
+        ASH_LOGGER.removeHandler(messages)
+        ASH_LOGGER.setLevel(saved)
+
+    return messages, restore
+
+
 def test_an_entry_whose_every_copy_is_excluded_keeps_its_results(scanner, monkeypatch):
     """Both copies at versions outside both ranges: npm listed the advisory for
     them and counted it in the metadata, so this reading of the lockfile and
     npm's disagree (a stale lockfile, a wrong index lookup). The exclusion is
     then not applied, the entry keeps one result per copy naming both ranges,
-    and the disagreement is logged once; dropping every copy silently left a
-    counted advisory with no result. (ASH's logger does not propagate, so a
-    handler of our own reads it, not caplog.)"""
+    and the disagreement is logged once naming both copies; dropping every
+    copy silently left a counted advisory with no result."""
     old, fixed = "node_modules/a/node_modules/minimist", "node_modules/minimist"
     _versions(monkeypatch, {old: "1.2.8", fixed: "1.3.0"})
-    messages = _Messages()
-    ASH_LOGGER.addHandler(messages)
-    monkeypatch.setattr(ASH_LOGGER, "level", logging.DEBUG)
+    messages, restore = _debug_messages(monkeypatch)
     try:
         report = scanner._convert_npm_audit_to_sarif(
             _report([old, fixed]), scanner.context.source_dir
         )
     finally:
-        ASH_LOGGER.removeHandler(messages)
+        restore()
 
     both = "<0.2.4 || >=1.0.0 <1.2.6"
     assert _rows(report) == sorted([(old, both), (fixed, both)])
-    assert sum("every installed copy of minimist" in m for m in messages.texts) == 1
+    logged = [m for m in messages.texts if "fall outside every range" in m]
+    assert len(logged) == 1, messages.texts
+    assert "2 of 2 listed copy(ies) of minimist" in logged[0], logged[0]
+    assert old in logged[0] and fixed in logged[0], logged[0]
+
+
+def test_a_listed_copy_no_range_covers_is_kept_as_a_disagreement(scanner, monkeypatch):
+    """One copy a range covers beside one that none does. npm lists a copy only
+    when an advisory covers it, so the second is a copy npm and this reading
+    of the lockfile disagree on (the index resolved a nested copy to the
+    hoisted entry's version, say), not a fixed copy carried along. It was
+    dropped per copy with no log, while the all-copies case next to it was
+    kept and logged. The covered copy takes its one range; the other keeps a
+    result naming both, and the disagreement is logged once naming it."""
+    old, odd = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {old: "0.0.8", odd: "1.2.8"})
+    messages, restore = _debug_messages(monkeypatch)
+    try:
+        report = scanner._convert_npm_audit_to_sarif(
+            _report([old, odd]), scanner.context.source_dir
+        )
+    finally:
+        restore()
+
+    assert _rows(report) == sorted([(old, "<0.2.4"), (odd, "<0.2.4 || >=1.0.0 <1.2.6")])
+    logged = [m for m in messages.texts if "fall outside every range" in m]
+    assert len(logged) == 1, messages.texts
+    assert "1 of 2 listed copy(ies) of minimist" in logged[0], logged[0]
+    assert odd in logged[0] and old not in logged[0], logged[0]
 
 
 def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):
@@ -211,6 +269,17 @@ def test_a_prerelease_copy_keeps_the_result(scanner, monkeypatch):
         ("3.0.0", "=3.0.0", True),
         ("3.0.1", "3.0.0", False),
         ("v1.0.0", "<2.0.0", True),
+        # Numeric order, not string order: a string compare reads "4.17.9" as
+        # above "4.17.21" and "1.10.0" as below "1.9.0", and each wrong answer
+        # here drops a vulnerable copy or keeps a fixed one.
+        ("4.17.9", "<4.17.21", True),
+        ("1.10.0", "<1.9.0", False),
+        # The copy exactly on an inclusive bound, each side; and ">", the one
+        # operator the rows above never used.
+        ("1.0.0", ">=1.0.0 <1.2.6", True),
+        ("4.17.23", "<=4.17.23", True),
+        ("1.0.0", ">1.0.0", False),
+        ("1.0.1", ">1.0.0", True),
         ("1.0.0", "*", True),
         ("1.0.0", "", True),
         ("1.0.0", "^1.0.0", None),
@@ -235,7 +304,10 @@ def test_a_prerelease_copy_keeps_the_result(scanner, monkeypatch):
         ("1.2.5", "1.2", None),
         ("4.1.0", ">= 4.0.0 < 4.17.21", None),
         ("1.5.0", "<0.2.4 || ^1.0.0", None),
-        ("0.1.0", "<0.2.4 || ^1.0.0", None),
+        # A union whose readable branch covers the copy is settled by it, True,
+        # whatever the other branch reads (True or unknown is True); an answer
+        # of None here was less than the grammar knew.
+        ("0.1.0", "<0.2.4 || ^1.0.0", True),
         ("not a version", "<2.0.0", None),
         (None, "<2.0.0", None),
         ("1.0.0", None, None),
