@@ -1544,8 +1544,20 @@ class ScanRegistry:
             # since) is not an error of the poll: the entry's status is still
             # the answer, with nothing read from files. Raising here made the
             # failed status and reason of a scan whose directory was gone
-            # unreadable by polling.
-            output_missing = validate_directory_path(output_dir) is not None
+            # unreadable by polling. Only "not there" is read that way: a
+            # directory the process may not read, or one the system could not
+            # examine, is still there with results this poll cannot see, and
+            # that is the caller's error to act on, not a missing tree.
+            output_error = validate_directory_path(output_dir)
+            output_missing = output_error is not None and output_error.context.get(
+                "error_category"
+            ) in (
+                ErrorCategory.FILE_NOT_FOUND.value,
+                ErrorCategory.INVALID_PATH.value,
+            )
+            if output_error is not None and not output_missing:
+                output_error.context.setdefault("scan_id", scan_id)
+                raise output_error
 
             try:
                 # Create scan progress object from files, then reconcile it with
