@@ -623,6 +623,17 @@ class TestThePrintedScanSet:
 
 
 class TestTheCommandLineFilterPattern:
+    def test_a_pattern_anchored_at_the_end_filters_the_real_scan_set(self, tmp_path):
+        """The command line compiles ``\\.py$`` and ``scan_set`` read it with
+        ``re.match``, which only matches at the start of the full path, so the
+        usual spelling filtered out everything with exit 0. The test above mocks
+        ``scan_set`` and cannot see that."""
+        root = _build(tmp_path / "src", {"a.py": "", "b.txt": "", "sub/c.py": ""})
+
+        found = scan_set(source=str(root), filter_pattern=re.compile(r"\.py$"))
+
+        assert _names(root, found) == {"a.py", "sub/c.py"}
+
     @staticmethod
     def _arguments(pattern):
         return SimpleNamespace(
