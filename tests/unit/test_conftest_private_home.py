@@ -280,20 +280,55 @@ def test_the_guard_ignores_writes_under_an_excluded_path(tmp_path):
 
 #: The compound statements whose arms bind names at the level they stand at. A def or
 #: a class binds its own name at that level and is a scope of its own inside.
-_COMPOUND = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try)
+_COMPOUND = (
+    ast.If,
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.With,
+    ast.AsyncWith,
+    ast.Try,
+    ast.Match,
+)
 if hasattr(ast, "TryStar"):  # Python 3.11+
     _COMPOUND = (*_COMPOUND, ast.TryStar)
+
+
+def _exclusive_arms(node) -> list:
+    """The arms of a compound statement of which at most one runs, each the statements
+    that run together when it does.
+
+    An ``if`` runs its body or its else. A ``try`` runs its body, then its else when
+    the body raised nothing, then its finally in any case: those three are ONE arm,
+    run in sequence, and each handler (whose own run is followed by the finally too)
+    is another. A loop's body and its else run in sequence as well. A ``match`` runs
+    one case. A ``with`` has one arm.
+    """
+    if isinstance(node, ast.If):
+        return [node.body, node.orelse]
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+        return [node.body + node.orelse]
+    if isinstance(node, ast.Match):
+        return [case.body for case in node.cases]
+    if hasattr(node, "handlers"):  # Try, TryStar
+        return [node.body + node.orelse + node.finalbody] + [
+            handler.body + node.finalbody for handler in node.handlers
+        ]
+    return [node.body]
 
 
 def _module_level_bindings(statements) -> list:
     """Each ``(name, line)`` a block of statements binds at the module level.
 
     A def, a class, an assignment and an annotated assignment with a value bind at the
-    line they stand on. A compound statement (if, try, with, for, while) binds what its
-    arms bind, at the lines inside it: the arms are read with this same walk, and a
-    name bound in several arms of ONE statement is counted from the arm that binds it
-    most often, since an ``if``/``else`` or a ``try``/``except`` that each bind a name
-    once bind it once at run time, while an arm that binds it twice is two bindings.
+    line they stand on. A compound statement (if, try, with, for, while, match) binds
+    what its arms bind, at the lines inside it: the arms are read with this same walk,
+    and a name bound in several MUTUALLY EXCLUSIVE arms of one statement
+    (:func:`_exclusive_arms`) is counted from the arm that binds it most often, since
+    an ``if``/``else`` or a ``try``/``except`` that each bind a name once bind it once
+    at run time, while an arm that binds it twice is two bindings. Blocks that run in
+    sequence (a try body and its finally, a loop body and its else) are one arm, so a
+    name bound in both is two bindings.
     """
     found = []
     for node in statements:
@@ -309,12 +344,7 @@ def _module_level_bindings(statements) -> list:
             if isinstance(node.target, ast.Name):
                 found.append((node.target.id, node.lineno))
         elif isinstance(node, _COMPOUND):
-            arms = [
-                getattr(node, field)
-                for field in ("body", "orelse", "finalbody")
-                if getattr(node, field, None)
-            ]
-            arms += [handler.body for handler in getattr(node, "handlers", [])]
+            arms = [arm for arm in _exclusive_arms(node) if arm]
             most: dict = {}
             for arm in arms:
                 lines_by_name: dict = {}
@@ -395,6 +425,44 @@ def test_the_binding_walk_counts_an_arm_that_binds_twice_as_twice():
     source = "if x:\n    A = 1\n    A = 2\nelse:\n    A = 3\n"
 
     assert _bound_more_than_once(source) == {"A": [2, 3]}
+
+
+_PLANTED_SEQUENTIAL_ARMS = """\
+try:
+    A = open_it()
+finally:
+    A = None
+
+for item in items:
+    B = item
+else:
+    B = None
+
+try:
+    C = read()
+except OSError:
+    C = None
+else:
+    E = C.strip()
+
+match flavor:
+    case "one":
+        D = 1
+    case _:
+        D = 2
+"""
+
+
+def test_the_binding_walk_sums_the_arms_that_run_in_sequence():
+    """Control: a try body and its finally run one after the other, as a loop body
+    and its else do, so a name each binds once is bound twice at run time; the
+    walk once took the most-binding arm across them and read each as one. A name
+    bound in a try body and in its handler is bound once on either path (the
+    handler replaces a body that raised), the else after the body is a binding of
+    its own, and a match with one binding per case binds once."""
+    twice = _bound_more_than_once(_PLANTED_SEQUENTIAL_ARMS)
+
+    assert twice == {"A": [2, 4], "B": [7, 9]}, twice
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the guard's roots are POSIX paths here")
