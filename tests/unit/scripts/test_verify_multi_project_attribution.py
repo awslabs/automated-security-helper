@@ -302,17 +302,23 @@ class TestChildEnvironment:
 
 
 class _FakeProcess:
-    """A child that has exited, or one that ignores SIGTERM and never exits."""
+    """A child that has exited, or one that ignores SIGTERM and never exits.
+
+    Every ``wait`` deadline is recorded; the group signals are recorded by the
+    ``killed`` fixture.
+    """
 
     def __init__(self, alive: bool):
         self.pid = 4242
         self.alive = alive
+        self.waits: list = []
         self.killed = False
 
     def poll(self):
         return None if self.alive else 0
 
     def wait(self, timeout=None):
+        self.waits.append(timeout)
         if self.alive:
             raise subprocess.TimeoutExpired(cmd="ash", timeout=timeout)
         return 0
@@ -347,8 +353,9 @@ def _timeout(output=None, stderr=None):
 class _FakeScanChild:
     """A scan child that exited while a tool it started still holds the pipes."""
 
+    pid = 4242
+
     def __init__(self, *args, **kwargs):
-        self.pid = 4242
         self.returncode = 0
 
     def __enter__(self):
@@ -381,12 +388,21 @@ class TestStopProcessGroup:
         )
         return calls
 
-    def test_an_exited_child_still_gets_the_group_signal(self, gate, killed):
-        """A tool the child started can outlive it in the group and hold the pipes."""
+    def test_an_exited_child_still_gets_the_group_signals(self, gate, killed):
+        """A tool the child started can outlive it in the group and hold the pipes.
+
+        The group is swept with SIGKILL after the child exits too: before the
+        sweep a tool that trapped SIGTERM was never killed and kept writing into
+        the evidence directory the gate had just reported.
+        """
         process = _FakeProcess(alive=False)
         gate._stop_process_group(process, grace_seconds=0.01)
-        assert killed == [(process.pid, signal.SIGTERM)]
-        assert not process.killed
+        assert killed == [
+            (process.pid, signal.SIGTERM),
+            (process.pid, signal.SIGKILL),
+        ]
+        assert process.waits == [0.01], "one wait, for the grace period"
+        assert not process.killed, "the group kill, never a bare process.kill"
 
     def test_a_child_that_ignores_sigterm_gets_a_group_kill_after_the_grace_period(
         self, gate, killed
@@ -397,6 +413,46 @@ class TestStopProcessGroup:
             (process.pid, signal.SIGTERM),
             (process.pid, signal.SIGKILL),
         ]
+        # The grace period is waited before the kill and again after it.
+        assert process.waits == [0.01, 0.01]
+
+    def test_an_empty_group_is_not_an_error(self, gate, monkeypatch):
+        """The real killpg raises ProcessLookupError once nothing is left."""
+
+        def no_such_group(pgid, signum):
+            raise ProcessLookupError(pgid)
+
+        monkeypatch.setattr(os, "killpg", no_such_group)
+        process = _FakeProcess(alive=False)
+        gate._stop_process_group(process, grace_seconds=0.01)
+        assert process.waits == [0.01]
+
+    def test_an_interrupt_during_the_scan_stops_the_group(
+        self, gate, killed, monkeypatch, tmp_path
+    ):
+        """Ctrl-C reaches only the gate: the child leads its own session.
+
+        Only ``TimeoutExpired`` was caught, and ``Popen.__exit__`` treats a
+        ``KeyboardInterrupt`` as one the child also received: it waits a moment
+        and returns, so the scan and its tools kept running detached.
+        """
+
+        class _Interrupted(_FakeScanChild):
+            def communicate(self, timeout=None):
+                raise KeyboardInterrupt
+
+        stopped: list = []
+        monkeypatch.setattr(gate.subprocess, "Popen", _Interrupted)
+        monkeypatch.setattr(
+            gate, "_stop_process_group", lambda process, **_: stopped.append(process)
+        )
+        with pytest.raises(KeyboardInterrupt):
+            gate.run_scan(
+                tmp_path, tmp_path / "ws.yaml", tmp_path / "out", timeout=0.01
+            )
+        assert len(stopped) == 1
+        assert isinstance(stopped[0], _Interrupted)
+        assert killed == [], "the stop was routed through _stop_process_group"
 
     def test_pipes_that_close_are_read_without_a_kill(self, gate, killed):
         process = _FakePipes(("out", "err"))
@@ -431,6 +487,13 @@ class TestStopProcessGroup:
                 tmp_path, tmp_path / "ws.yaml", tmp_path / "out", timeout=0.01
             )
         assert raised.value.output == "tail"
+        # The stop (SIGTERM, then the sweep) and the drain's own kill all reach
+        # the group; a run_scan that skipped the stop would still raise.
+        assert killed == [
+            (_FakeScanChild.pid, signal.SIGTERM),
+            (_FakeScanChild.pid, signal.SIGKILL),
+            (_FakeScanChild.pid, signal.SIGKILL),
+        ]
 
 
 def _run(gate, index, project, rules=None, **fields):
