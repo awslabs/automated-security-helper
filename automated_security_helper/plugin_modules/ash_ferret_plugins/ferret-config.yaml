@@ -438,9 +438,12 @@ validators:
         - "watch"
         - "playlist"
 
-# Suppression configuration
+# Suppression configuration. ASH manages suppressions centrally
+# (global_settings.suppressions in the ASH config file), so no ferret-scan
+# suppression file is named here: a relative path would be resolved against the
+# working directory ASH runs ferret-scan from, outside the scanned tree, and a
+# file found there would silence findings outside ASH's own suppression record.
 suppressions:
-  file: ".ferret-scan-suppressions.yaml" # Path to suppression configuration file
   generate_on_scan: false # Generate suppression rules for all findings during scan
   show_suppressed: false # Include suppressed findings in output
 
