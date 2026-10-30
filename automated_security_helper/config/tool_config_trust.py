@@ -149,6 +149,25 @@ TIGHTENING_VALUES: Dict[Tuple[str, str], Tuple[Any, ...]] = {
     ("trivy", "disable_telemetry"): (True,),
 }
 
+
+def is_tightening_value(scanner: str, option: str, value: Any) -> bool:
+    """Whether ``value`` is one of the ``TIGHTENING_VALUES`` of ``scanner``'s ``option``.
+
+    Compared as JSON values, not with Python equality: ``1 == True`` and
+    ``1.0 == True`` in Python, so ``disable_telemetry: 1`` is not the listed
+    ``true``. A value that is not JSON data at all (a YAML date) matches none.
+    """
+    from automated_security_helper.config.runtime_patch import _same_json_value
+
+    for listed in TIGHTENING_VALUES.get((scanner, option), ()):
+        try:
+            if _same_json_value(value, listed):
+                return True
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
 #: detect-secrets ``scan_settings`` lists whose entries may name a file the
 #: worker loads code from (``file://<path>``).
 _SETTINGS_FILE_LISTS: Tuple[str, ...] = ("plugins_used", "filters_used")
@@ -436,7 +455,7 @@ def confine_scanner_config_files(
                 written = _get(options, name)
                 current = _or_default(written, default)
                 wrote = _file_wrote(config, ("scanners", key, "options", name), written)
-                if wrote and current in TIGHTENING_VALUES.get((scanner, name), ()):
+                if wrote and is_tightening_value(scanner, name, current):
                     continue
                 if current == _or_default(wanted, default):
                     if written is None and default is not None:
