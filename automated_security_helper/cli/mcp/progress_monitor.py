@@ -80,10 +80,19 @@ async def _fetch_initial_scan_info(
         scan_id=scan_id, **_in_session(session_id)
     )
     if not registry_info.get("success", False):
-        await ctx.error(
-            raw_controls_on_one_line(
-                f"Failed to get scan info: {registry_info.get('error', 'Unknown error')}"
-            )
+        # Through _safe_send like every other send of the monitor: a client that
+        # is gone makes the send raise, and a bare send here landed that failure
+        # in monitor_scan_progress's own handler, which sent a second error to
+        # the same dead client and logged the dead send as a monitor failure.
+        await _safe_send(
+            True,
+            lambda: ctx.error(
+                raw_controls_on_one_line(
+                    "Failed to get scan info: "
+                    f"{registry_info.get('error', 'Unknown error')}"
+                )
+            ),
+            "Failed to send scan-info error",
         )
         return None
 
@@ -450,10 +459,17 @@ async def _run_monitor_loop(
         current_time = asyncio.get_event_loop().time()
 
         if current_time - start_time > _MAX_WAIT_SECONDS:
-            await ctx.warning(
-                raw_controls_on_one_line(
-                    f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
-                )
+            # Honors connection_alive like the loop's other sends: nothing is
+            # sent into a client the loop already knows is gone, and a send that
+            # fails here is one failed send, not a monitor failure.
+            await _safe_send(
+                connection_alive,
+                lambda: ctx.warning(
+                    raw_controls_on_one_line(
+                        f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+                    )
+                ),
+                "Failed to send timeout warning",
             )
             return
 
