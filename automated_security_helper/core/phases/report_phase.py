@@ -102,14 +102,18 @@ _FORMAT_REASON_MESSAGES = {
 }
 
 
-def _entries_under(directory: Path) -> set:
-    """Every path under ``directory``, files and directories, as a set.
+def _entries_under(directory: Path) -> Optional[set]:
+    """Every path under ``directory``, files and directories, as a set, or None
+    when the listing did not complete.
 
     For the report phase's cancel cleanup: what the reports directory held
     before the reporters ran, and what it holds after. An absent directory is
-    an empty set, and a directory that cannot be listed part way gives what was
-    listed. ``rglob`` does not descend into a linked directory, so nothing
-    outside the directory is ever listed, or later removed.
+    an empty set. A listing that raised part way (``exists`` or the walk) is
+    None, never a partial set: the cleanup removes what appeared since the
+    baseline, and a partial baseline would make pre-existing entries (an
+    earlier run's reports kept by ``--use-existing``) look new and be removed.
+    ``rglob`` does not descend into a linked directory, so nothing outside the
+    directory is ever listed, or later removed.
     """
     entries: set = set()
     try:
@@ -119,6 +123,7 @@ def _entries_under(directory: Path) -> set:
             entries.add(path)
     except OSError as e:
         ASH_LOGGER.debug(f"Could not finish listing {directory}: {e}")
+        return None
     return entries
 
 
@@ -435,12 +440,20 @@ class ReportPhase(EnginePhase):
                 )
         # A reporter's own companion files, and any directory it made. Files
         # first, then directories deepest first, so each is empty when its turn
-        # comes. A link is removed as a link, never followed.
-        appeared = [
-            path
-            for path in _entries_under(report_dir)
-            if path not in getattr(self, "_report_dir_before", set())
-        ]
+        # comes. A link is removed as a link, never followed. Only against a
+        # baseline that completed: with none (the before-listing raised, or a
+        # caller ran this without taking one) nothing new can be told from
+        # what was there, and pre-existing entries stay.
+        before = getattr(self, "_report_dir_before", None)
+        after = _entries_under(report_dir) if before is not None else None
+        appeared = (
+            [path for path in after if path not in before] if after is not None else []
+        )
+        if before is None:
+            ASH_LOGGER.debug(
+                f"The listing of {report_dir} before the reporters ran did not "
+                f"complete; only the reports this phase wrote are removed"
+            )
         for path in sorted(appeared, key=lambda p: len(p.parts), reverse=True):
             try:
                 if path.is_dir() and not path.is_symlink():
