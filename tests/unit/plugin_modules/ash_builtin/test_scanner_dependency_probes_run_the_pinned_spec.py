@@ -231,15 +231,9 @@ ROWS = [
         "semgrep>=1.125.0,<2.0.0",
         id="semgrep-uv-absent",
     ),
-    pytest.param(
-        semgrep_scanner,
-        _semgrep,
-        SemgrepScanner,
-        _install_fails,
-        "_validate_tool_dependencies",
-        "semgrep>=1.125.0,<2.0.0",
-        id="semgrep-install-failed",
-    ),
+    # No semgrep install-failed row: after a failed install, semgrep's last resort
+    # looks the binary up on PATH itself and never asks the resolver (its own test
+    # file pins that), so the uv-absent row above is its one resolver call.
     pytest.param(
         zizmor_scanner,
         _zizmor,

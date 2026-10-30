@@ -163,6 +163,43 @@ def test_the_last_resort_after_a_failed_install_is_verified_too(
     assert "0.9.0" in (scanner.dependency_unavailable_reason or "")
 
 
+def test_the_last_resort_after_a_failed_install_never_asks_the_resolver(
+    test_plugin_context, monkeypatch
+):
+    """After uv's install of semgrep failed, the resolver is not consulted at all:
+    it probes uv first and remembers a uv answer per process, so asking it could
+    hide a binary that is on PATH now, or answer the uv route whose install has
+    just failed. The last resort looks the binary up itself; with none on PATH
+    the dependency is missing and the resolver was never asked.
+
+    Pins the route the cross-scanner probe test leaves out for semgrep.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    asked: list[str] = []
+
+    def resolver(name, **kwargs):
+        asked.append(name)
+        return [BINARY]
+
+    monkeypatch.setattr(semgrep_scanner, "get_uv_tool_command", resolver)
+    monkeypatch.setattr(semgrep_scanner, "find_executable", lambda name: None)
+    monkeypatch.setattr(
+        SemgrepScanner, "_validate_uv_tool_availability", lambda self: True
+    )
+    monkeypatch.setattr(
+        SemgrepScanner,
+        "_get_tool_installation_info",
+        lambda self: {"available": False},
+    )
+    monkeypatch.setattr(
+        SemgrepScanner, "_install_uv_tool", lambda self, timeout=300: False
+    )
+    scanner.use_uv_tool = True
+
+    assert scanner._validate_tool_dependencies() is False
+    assert asked == []
+
+
 @pytest.mark.parametrize("own_offline", [True, False])
 def test_the_probe_runs_under_the_scanners_own_offline_mode(
     test_plugin_context, monkeypatch, own_offline
