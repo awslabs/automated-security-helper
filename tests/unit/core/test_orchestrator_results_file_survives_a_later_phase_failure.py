@@ -22,8 +22,8 @@ mutates that model the way the phases do before it raises.
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -165,9 +165,16 @@ def test_a_report_over_existing_results_writes_nothing_on_failure(
 
 
 def test_the_completion_record_is_the_checkpoint_the_validation_manager_names():
-    """The fact the orchestrator reads is the one the scan phase's last step writes."""
-    source = inspect.getsource(ScannerValidationManager.ensure_complete_results)
-    assert f'checkpoint_name="{SCAN_PHASE_COMPLETION_CHECKPOINT}"' in source
+    """The fact the orchestrator reads is the one the scan phase's last step writes.
+
+    Read from the checkpoint the real manager returns, not from its source: the
+    manager's method is a delegate to the checkpointer, so a source read of it
+    never held the literal, and the name is the checkpointer's to change.
+    """
+    manager = ScannerValidationManager(plugin_context=MagicMock())
+    checkpoint = manager.ensure_complete_results(AshAggregatedResults())
+    assert checkpoint.checkpoint_name == SCAN_PHASE_COMPLETION_CHECKPOINT
+    assert manager.checkpoints[-1] is checkpoint
 
     model = AshAggregatedResults()
     assert scan_phase_completed(model) is False
