@@ -3,7 +3,7 @@ import threading
 from typing import Annotated, Any, ClassVar, FrozenSet, Literal, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler
-from pydantic import ValidationInfo, WrapValidator, model_validator
+from pydantic import ValidationError, ValidationInfo, WrapValidator, model_validator
 from pydantic_core import PydanticUseDefault
 
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
@@ -46,9 +46,13 @@ def release_tag(key: str) -> WrapValidator:
     """
 
     def _validate(value: Any, handler: ValidatorFunctionWrapHandler, _info: Any) -> Any:
-        value = handler(value)
-        if isinstance(value, str) and _RELEASE_TAG.fullmatch(value):
-            return value
+        try:
+            typed = handler(value)
+        except ValidationError:
+            # A value of the wrong type (a YAML number) is refused like any other.
+            typed = None
+        if isinstance(typed, str) and _RELEASE_TAG.fullmatch(typed):
+            return typed
         # The key and the rule, not the value: a value can be one read from the
         # environment, and the warning goes to the console and ash.log.
         _warn_once(
@@ -87,10 +91,11 @@ def tool_version_constraint(key: str) -> WrapValidator:
             validate_version_constraint,
         )
 
-        value = handler(value)
         try:
-            return validate_version_constraint(value)
+            return validate_version_constraint(handler(value))
         except ValueError:
+            # The handler's ValidationError is a ValueError too: a value of the
+            # wrong type (a YAML number) is refused like any other.
             # Not the check's message, which quotes the value; see release_tag.
             _warn_once(
                 key,
@@ -119,9 +124,13 @@ def report_file_name(key: str) -> WrapValidator:
             is_report_file_name,
         )
 
-        value = handler(value)
-        if is_report_file_name(value):
-            return value
+        try:
+            typed = handler(value)
+        except ValidationError:
+            # A value of the wrong type is refused like any other; see release_tag.
+            typed = None
+        if is_report_file_name(typed):
+            return typed
         # The key and the rule, not the value; see release_tag.
         _warn_once(
             key,
