@@ -10,10 +10,11 @@ above it was written with a plain open; a component replaced by a link between t
 check and the open surfaced as NotADirectoryError on Linux; two writers creating
 the same component raced into FileExistsError; a chain of directories a few
 hundred deep ended the sweep in RecursionError with nothing said; the Windows
-branch of unlink_beneath passed through a junction; the atomic writer refused a
-multi-name target its rename could not harm and reset the file's mode; its
-refusal classes lacked the base class's remedy; and the operator-destination
-writer had no newline argument. Every test writes under tmp_path.
+branch of unlink_beneath passed through a junction; the atomic writer reset the
+file's mode; its refusal classes lacked the base class's remedy; and the
+operator-destination writer had no newline argument. The atomic writer still
+refuses a multi-name target below a registered root (a tamper signal) and
+replaces one outside every root. Every test writes under tmp_path.
 """
 
 from __future__ import annotations
@@ -181,19 +182,37 @@ def test_replace_without_following_takes_a_newline_argument(tmp_path):
 
 
 @POSIX
-def test_an_atomic_write_replaces_a_multi_name_entry_and_spares_the_other_name(
+def test_an_atomic_write_refuses_a_multi_name_entry_below_a_root_and_replaces_it_outside(
     root, tmp_path
 ):
-    for parent in (root, tmp_path):
-        target = parent / "report.json"
-        target.write_text("old")
-        other = parent / "other-name"
-        os.link(target, other)
+    """Below a registered root a target another name refers to is refused before
+    the staging file is made (the other name may be a scanner's: a tamper signal);
+    outside every root (tmp_path is not one) the entry is replaced and the file the
+    other name refers to is spared."""
+    target = root / "report.json"
+    target.write_text("old")
+    other = root / "other-name"
+    os.link(target, other)
+    with pytest.raises(OutputHardLinkRefused):
         with open_for_atomic_write(target) as handle:
             handle.write("new")
-        assert target.read_text() == "new"
-        assert other.read_text() == "old"
-        assert os.stat(target).st_nlink == 1
+    assert target.read_text() == "old"
+    assert other.read_text() == "old"
+    assert os.stat(target).st_nlink == 2
+    assert sorted(entry.name for entry in root.iterdir()) == [
+        "other-name",
+        "report.json",
+    ]
+
+    target = tmp_path / "report.json"
+    target.write_text("old")
+    other = tmp_path / "other-name"
+    os.link(target, other)
+    with open_for_atomic_write(target) as handle:
+        handle.write("new")
+    assert target.read_text() == "new"
+    assert other.read_text() == "old"
+    assert os.stat(target).st_nlink == 1
 
 
 @POSIX
