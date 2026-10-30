@@ -135,10 +135,18 @@ class TestSeverityCountKeysAreMatchedByName:
         assert counts.high == 1
         assert counts.total == 1
 
-    @pytest.mark.parametrize("value", ["many", -1, True, None, [1]])
+    @pytest.mark.parametrize(
+        "value", ["many", -1, True, None, [1], 0.9, float("inf"), float("nan")]
+    )
     def test_a_value_that_is_not_a_count_is_refused(self, value):
+        """0.9 used to truncate to 0 (a finding gone, the row PASSED) and an infinite
+        float raised OverflowError past the local handler."""
         with pytest.raises(ValueError):
             _severity_counts_from_dict({"high": value})
+
+    @pytest.mark.parametrize("value", [2, 2.0, "2"])
+    def test_a_whole_number_is_the_count_it_spells(self, value):
+        assert _severity_counts_from_dict({"high": value}).high == 2
 
 
 class TestAResultThatCannotBeReadIsThisRowsError:

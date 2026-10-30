@@ -141,9 +141,10 @@ def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:
     count a tool writes under ``HIGH`` or ``High`` reaches the severity gate.
     Validated as before, such a key was kept as a pydantic extra and the field
     stayed 0, and a result with high findings graded PASSED. A key that names no
-    field is left out. A value that is not a count (not a whole number, or
-    negative) raises ValueError: the caller refuses to grade the row rather
-    than inventing a count.
+    field is left out. A value that is not a count (not a whole number, so a
+    fractional, infinite or not-a-number float too; or negative) raises
+    ValueError: the caller refuses to grade the row rather than inventing a
+    count. A whole-number float (``2.0``) is the count it spells.
     """
     if isinstance(raw_counts, ScannerSeverityCount):
         return raw_counts
@@ -158,9 +159,15 @@ def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):
             raise ValueError(f"severity_counts[{key!r}] is not a count: {value!r}")
+        # int() would truncate 0.9 to 0 (a finding gone) and raise OverflowError,
+        # not ValueError, on an infinite float.
+        if isinstance(value, float) and not value.is_integer():
+            raise ValueError(
+                f"severity_counts[{key!r}] is not a whole number: {value!r}"
+            )
         try:
             count = int(value)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(
                 f"severity_counts[{key!r}] is not a count: {value!r}"
             ) from exc
