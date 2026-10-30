@@ -563,6 +563,23 @@ class TestReportDegradation:
             "the ids in must equal the ids out"
         )
 
+    def test_a_sarif_that_cannot_be_enumerated_yields_an_error_response(
+        self, reporter, monkeypatch
+    ):
+        """The read raised out of report(), so no file was written and nothing
+        said why; the GitLab SAST reporter guards the same call."""
+        monkeypatch.setattr(
+            f"{MODULE}.recorded",
+            lambda model: (_ for _ in ()).throw(RuntimeError("cannot enumerate")),
+        )
+
+        payload = json.loads(reporter.report(make_model([good_result()])))
+
+        (error,) = payload
+        assert error["error"].startswith("ASH could not read the SARIF results")
+        assert "cannot enumerate" in error["error"]
+        assert error["processing_statistics"]["total_results_count"] == 0
+
     def test_a_truthy_but_empty_result_set_returns_an_empty_array(
         self, reporter, monkeypatch
     ):

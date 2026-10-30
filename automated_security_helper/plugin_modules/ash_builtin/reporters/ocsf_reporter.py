@@ -33,6 +33,7 @@ from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     StatusId,
 )
 from automated_security_helper.schemas.sarif_schema_model import Result, Suppression
+from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.get_ash_version import get_ash_version
 import json
 import re
@@ -1195,7 +1196,22 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         # name decoded with surrogateescape holds a lone surrogate, which
         # json.dumps wrote as a lone \udcXX escape that strict JSON parsers
         # reject; in the record form it is text every parser reads.
-        all_results = recorded(model.sarif).get_all_results()
+        #
+        # Guarded as the GitLab SAST reporter guards the same call: a model
+        # whose SARIF cannot be enumerated raised out of report(), so no file
+        # was written and nothing said why. The error response says it. The
+        # exception text goes through error_text, because a pydantic error
+        # quotes the input it refused, which can be a scanned file's text.
+        try:
+            all_results = recorded(model.sarif).get_all_results()
+        except Exception as e:  # noqa: BLE001 -- see the comment above
+            ASH_LOGGER.error(f"Failed to read SARIF results: {error_text(e)}")
+            return self._create_error_response(
+                f"ASH could not read the SARIF results: {error_text(e)}",
+                current_time_ms,
+                0,
+                0,
+            )
 
         if not all_results:
             return _only_skipped_projects("No SARIF results found in any run")
