@@ -47,7 +47,10 @@ def _answers(project_name: str, *, keep_existing_modules: int = 0) -> str:
     lines += [REPORTER_ANSWERS.get(alias, "") for _, alias in _get_reporter_names()]
     lines.append("y")  # the ASH_OFFLINE reminder comment
     lines += ["n"] * keep_existing_modules  # drop each module already configured
-    lines += ["my_org.ash_plugins", ""]  # add one module, then finish
+    # A top-level package ending in `_ash_plugins` is inside ASH's plugin namespace
+    # (plugins/loader.py); the wizard now refuses to write a config naming a module
+    # a scan would refuse, exit 3, so the answer names an admitted one.
+    lines += ["my_org_ash_plugins", ""]  # add one module, then finish
     return "\n".join(lines) + "\n"
 
 
@@ -70,7 +73,7 @@ def test_config_wizard_from_defaults(host, project_dir, monkeypatch, text_snapsh
     # With no config yet, the wizard creates ASH_DEFAULT_CONFIG_FILE_NAME.
     written = (project_dir / ".ashrc.yaml").read_text(encoding="utf-8")
     assert "project_name: wizard-demo" in written
-    assert "- my_org.ash_plugins" in written
+    assert "- my_org_ash_plugins" in written
     assert text_snapshot("txt")(name="stdout") == run.document
     assert text_snapshot("yaml")(name="ash-yaml") == written
 
