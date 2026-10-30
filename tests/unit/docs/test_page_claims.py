@@ -10191,10 +10191,12 @@ _SWEEP_COVERS_THE_ENDS_IT_CANNOT_SEE = (
     "(24 hours) by default, which covers sessions whose end it cannot see, such as every "
     "stateless one."
 )
-_A_HELD_SESSION_IS_KEPT = (
-    "A session the server still holds as issued, a stateful session it has not seen end "
-    "or an open event stream, is kept whatever its age: its workspace, with the profile "
-    "copy and the upload in it, ends with the session, not with the sweep."
+_AN_IDLE_STATEFUL_SESSION_IS_SWEPT = (
+    "A stateful session nobody has used for that long is removed like any other, whether "
+    "or not the server has seen it end: the MCP SDK drops an idle stateful session without "
+    "telling the server, so the server cannot keep it on that account. Only a session whose "
+    "SSE event stream is still open is kept whatever its age, and the sweep marks that "
+    "workspace used so another server sharing the root keeps it too."
 )
 #: The sweep's "about a second", and the TTL the sweep tests give the server.
 _SWEEP_LOCK_WAIT_SECONDS = 1
@@ -10529,18 +10531,20 @@ def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
 
 
 @pytest.mark.e2e
-def test_a_session_the_server_still_holds_is_kept_past_the_ttl(tmp_path: Path) -> None:
+def test_an_idle_stateful_session_is_swept_past_the_ttl(tmp_path: Path) -> None:
     """mcp-server.md (Clean up).
 
     A stateful streamable-HTTP server with a one-second ``--session-workspace-ttl``
     issues a session that binds the profile and sends an upload's first chunk, then
     goes unused past the TTL; a new session's first request sets off the sweep. The
-    server still holds the first session as issued (it never saw a ``DELETE``), so the
-    sweep must keep it: the workspace is still there with the profile's copy, and the
-    upload goes on, its next chunk accepted. The control is the stateless case above,
-    where the same idle session is swept because the server holds no session.
+    server still holds the first session as issued (it never saw a ``DELETE``), and
+    that keeps nothing: the SDK drops an idle stateful session without telling the
+    server, so a session kept for being issued stayed until shutdown. The workspace
+    and the profile's copy are gone, and the upload's next chunk is refused, so the
+    client sends it again from its first chunk. Together with the stateless case
+    above, the idle session is swept whichever mode issued it.
     """
-    assert_on_page(MCP_SERVER, _A_HELD_SESSION_IS_KEPT)
+    assert_on_page(MCP_SERVER, _AN_IDLE_STATEFUL_SESSION_IS_SWEPT)
     process, port, lines, root, _profile = _sweep_server(tmp_path)
     chunk = base64.b64encode(_delivery_zip({"app.py": b"x = 1\n"})).decode("ascii")
     try:
@@ -10550,8 +10554,10 @@ def test_a_session_the_server_still_holds_is_kept_past_the_ttl(tmp_path: Path) -
         assert copies, f"no copy of the profile in {workspace}"
         time.sleep(_SWEEP_TTL_SECONDS + 1.5)
         _McpHttpClient(port)
-        assert workspace.is_dir(), f"the sweep removed the held session's {workspace}"
-        assert all(copy.is_file() for copy in copies), f"the copy left {workspace}"
+        assert not workspace.exists(), f"the sweep kept the idle session's {workspace}"
+        assert not any(copy.exists() for copy in copies), (
+            f"a copy stayed in {workspace}"
+        )
         next_chunk = held.tool(
             "set_source_zip_chunk",
             upload_id="page-claims-upload",
@@ -10562,7 +10568,7 @@ def test_a_session_the_server_still_holds_is_kept_past_the_ttl(tmp_path: Path) -
     finally:
         _stop_server(process)
 
-    assert next_chunk.get("success") is True, next_chunk
+    assert next_chunk.get("success") is False, next_chunk
 
 
 @pytest.mark.e2e
