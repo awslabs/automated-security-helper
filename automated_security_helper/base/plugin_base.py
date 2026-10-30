@@ -2344,9 +2344,19 @@ class PluginBase(UVToolMixin, BaseModel):
                 self._could_not_stop_state(post_run)
             return post_run
 
-    def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
-        """Generate installation commands for the specified platform/architecture as arrays of arguments"""
-        commands = []
+    def get_installation_commands(
+        self, platform: str, arch: str
+    ) -> List[List[str] | CustomCommand]:
+        """Generate installation commands for the specified platform/architecture.
+
+        Each declared dependency and uv tool install renders as an array of
+        arguments. A ``custom_install_commands`` entry is returned as the
+        :class:`CustomCommand` it was declared as, so its ``shell`` flag reaches
+        the installer (``cli.dependencies._well_formed_commands`` reads either
+        shape): returned as its bare ``args`` the flag was dropped, and a command
+        declared ``shell=True`` never ran through the shell.
+        """
+        commands: List[List[str] | CustomCommand] = []
 
         # Process standard dependencies
         if platform in self.dependencies and arch in self.dependencies[platform]:
@@ -2394,6 +2404,8 @@ class PluginBase(UVToolMixin, BaseModel):
             and arch in self.custom_install_commands[platform]
         ):
             for cmd in self.custom_install_commands[platform][arch]:
-                commands.append(cmd.args)
+                # The command itself, not its args: the installer runs a
+                # CustomCommand as declared, shell flag included.
+                commands.append(cmd)
 
         return commands
