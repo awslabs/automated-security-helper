@@ -37,9 +37,16 @@ def _no_grant(monkeypatch, tmp_path):
 
 class TestTheTargetIsResolvedOnce:
     def test_the_callers_path_is_resolved_once(self, monkeypatch, tmp_path):
-        """Red at the base: the target's text was resolved twice, once per side."""
+        """Red at the base: the target's text was resolved twice, once per side.
+
+        The expected path is resolved before the recorder is installed, so the
+        count below is the production code's alone: an earlier shape resolved
+        ``target`` inside the assertion while the recorder was live, which added
+        the test's own call to the count it was checking.
+        """
         target = tmp_path / "checkout"
         target.mkdir()
+        expected = target.resolve()
         seen = []
         real_resolve = Path.resolve
 
@@ -53,7 +60,7 @@ class TestTheTargetIsResolvedOnce:
         resolution = resolve_scan_target(target)
 
         assert resolution.error is None
-        assert resolution.resolved == target.resolve()
+        assert resolution.resolved == expected
         assert len(seen) == 1, seen
 
     def test_the_resolved_path_is_the_one_the_sandbox_judged(
