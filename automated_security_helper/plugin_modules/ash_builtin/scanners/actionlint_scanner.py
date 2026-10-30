@@ -182,6 +182,7 @@ import yaml
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.plugin_base import worse_exit_code
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -1611,6 +1612,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             payloads: List[Dict[str, Any]] = []
             sarif_dicts: List[Dict[str, Any]] = []
             final_args: List[str] = common_args
+            # The worst code across the batches, folded as the base class folds
+            # its runs: the invocation record below describes the whole target,
+            # not the last batch. Within the loop self.exit_code is the current
+            # batch's own code, which judges that batch.
+            worst_exit_code: Optional[int] = None
             for batch in workflow_batches(workflows):
                 final_args = [*common_args, *batch]
                 tool_started = True
@@ -1670,6 +1676,16 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 # with some, is a broken run whatever the other runs reported.
                 sarif_dicts.append(build_sarif(payload, self.exit_code, uri_base))
                 payloads.append(payload)
+                if self.exit_code is not None:
+                    worst_exit_code = worse_exit_code(worst_exit_code, self.exit_code)
+
+            # One record for the target: every workflow the batches were given,
+            # and the worst code any batch returned. Recording the last batch's
+            # argv and code put batch-1 findings under an invocation that named
+            # none of their files and could say the run was clean.
+            if len(sarif_dicts) > 1:
+                final_args = [*common_args, *workflows]
+                self.exit_code = worst_exit_code
 
             self._post_scan(target=target, target_type=target_type)
             post_scanned = True

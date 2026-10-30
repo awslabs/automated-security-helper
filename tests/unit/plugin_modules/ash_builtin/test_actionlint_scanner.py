@@ -1355,6 +1355,15 @@ def test_many_workflows_are_linted_in_several_runs_and_one_report(
     )
     assert len(kept["errors"]) == len(EXPECTED_DEFAULT)
     assert "hunter2" not in json.dumps(kept)
+    # The one invocation describes the whole target: the worst code any run
+    # returned (1, the first run's) and every workflow the runs were given, not
+    # the last run's clean 0 and its one file.
+    assert scanner.exit_code == 1
+    invocation = report.runs[0].invocations[0]
+    assert invocation.exitCode == 1
+    recorded = " ".join(invocation.arguments or [])
+    assert ".github/workflows/clean.yml" in recorded
+    assert ".github/workflows/vulnerable.yml" in recorded
 
 
 @pytest.mark.unit
