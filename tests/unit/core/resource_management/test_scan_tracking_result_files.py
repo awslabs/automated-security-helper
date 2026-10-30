@@ -37,6 +37,7 @@ from automated_security_helper.core.resource_management.scan_tracking import (
     find_scanner_result_files,
     get_completed_scanners,
     get_scan_progress_info,
+    get_scanner_progress,
     is_regular_result_file,
     parse_aggregated_results,
     summarize_scanner_statuses,
@@ -186,9 +187,6 @@ class TestEachResultFileIsReadOnceThroughTheGuard:
 
     def test_the_per_scanner_view_reads_each_file_once_too(self, tmp_path, monkeypatch):
         import automated_security_helper.core.resource_management.scan_tracking as st
-        from automated_security_helper.core.resource_management.scan_tracking import (
-            get_scanner_progress,
-        )
 
         out = tmp_path / "ash_output"
         _write_result(out, "bandit", "source", {"status": "PASSED", "finding_count": 2})
@@ -285,3 +283,73 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
         progress = create_scan_progress_from_files("scan-1", out)
 
         assert progress.total_findings == 0
+
+    @pytest.mark.parametrize(
+        ("document", "expected_total", "expected_counts"),
+        [
+            pytest.param(
+                {"finding_count": "3", "severity_counts": {"high": 3}},
+                0,
+                {"high": 3},
+                id="string-finding_count-is-not-a-count-the-buckets-still-are",
+            ),
+            pytest.param(
+                {"finding_count": -1, "severity_counts": {"high": 2}},
+                0,
+                {"high": 2},
+                id="negative-finding_count-is-not-a-count",
+            ),
+            pytest.param(
+                {"finding_count": 4, "severity_counts": ["high", "high"]},
+                4,
+                {},
+                id="non-dict-severity_counts-yields-no-buckets",
+            ),
+            pytest.param(
+                {"finding_count": 2, "severity_counts": {"high": 1, "weird": 1}},
+                2,
+                {"high": 1, "unknown": 1},
+                id="an-unknown-bucket-is-counted-as-unknown",
+            ),
+            pytest.param(
+                {"finding_count": 7, "severity_counts": {"high": 1, "low": 1}},
+                7,
+                {"high": 1, "low": 1},
+                id="a-mismatched-sum-keeps-finding_count-as-the-total",
+            ),
+            pytest.param(
+                {"finding_count": 2, "severity_counts": {"high": -5, "low": 2}},
+                2,
+                {"low": 2},
+                id="a-negative-bucket-is-dropped",
+            ),
+            pytest.param(
+                {"finding_count": True, "severity_counts": {"high": True}},
+                0,
+                {},
+                id="booleans-are-not-counts",
+            ),
+        ],
+    )
+    def test_malformed_counts_are_read_defensively(
+        self, tmp_path, document, expected_total, expected_counts
+    ):
+        """What a metadata-only file may carry and what the view makes of it.
+        A finding_count that is not a non-negative int is no count, and the
+        total then falls back to the findings array (none here, so 0), never
+        to this view's arithmetic over the buckets; a bucket whose value is not
+        a non-negative int is dropped; a bucket name the model lacks lands in
+        ``unknown``; and the recorded finding_count is the total even when the
+        buckets do not sum to it (the scanner's record wins)."""
+        out = tmp_path / "ash_output"
+        _write_result(out, "bandit", "source", {"scanner_name": "bandit", **document})
+
+        progress = create_scan_progress_from_files("scan-1", out)
+        view = get_scanner_progress(out)["bandit"]
+
+        assert progress.total_findings == expected_total
+        assert view["finding_count"] == expected_total
+        for bucket, value in expected_counts.items():
+            assert progress.severity_counts[bucket] == value
+            assert view["severity_counts"][bucket] == value
+        assert sum(progress.severity_counts.values()) == sum(expected_counts.values())

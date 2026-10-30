@@ -552,11 +552,13 @@ def _counts_of_document(
     count = data.get("finding_count")
     counts = data.get("severity_counts")
     return (
-        count if isinstance(count, int) and not isinstance(count, bool) else None,
+        count
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0
+        else None,
         {
             str(key).lower(): value
             for key, value in counts.items()
-            if isinstance(value, int) and not isinstance(value, bool)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
         }
         if isinstance(counts, dict)
         else None,
