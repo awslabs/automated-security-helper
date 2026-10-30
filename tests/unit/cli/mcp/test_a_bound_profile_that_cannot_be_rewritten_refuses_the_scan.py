@@ -186,6 +186,11 @@ async def test_run_ash_scan_answers_a_config_refusal_not_an_internal_error(
     _bind_then_orphan(DEFAULT_SESSION_ID)
     source = _project(tmp_path)
     monkeypatch.setattr(mcp_server, "monitor_scan_progress", AsyncMock())
+    # The refusal comes before the scan tool: a regression that let the call
+    # through would start a real background scan of tmp_path, which could
+    # outlive this test's loop, so the tool is stood in for and asserted unrun.
+    never_scans = AsyncMock(side_effect=AssertionError("the scan tool ran"))
+    monkeypatch.setattr(mcp_server, "mcp_scan_directory", never_scans)
     ctx = MagicMock(spec=Context)
     ctx.headers = {}
 
@@ -195,6 +200,7 @@ async def test_run_ash_scan_answers_a_config_refusal_not_an_internal_error(
     assert response["error_type"] == "bound_profile_unavailable", response
     assert response["exit_code"] == 3, response
     assert "select_profile" in response["error"], response
+    never_scans.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -210,6 +216,8 @@ async def test_run_ash_scan_reports_an_unwritable_workspace_as_the_servers_failu
     _bind_then_remove_the_copy(DEFAULT_SESSION_ID)
     source = _project(tmp_path)
     monkeypatch.setattr(mcp_server, "monitor_scan_progress", AsyncMock())
+    never_scans = AsyncMock(side_effect=AssertionError("the scan tool ran"))
+    monkeypatch.setattr(mcp_server, "mcp_scan_directory", never_scans)
 
     def cannot_write(sid, config, patched):
         raise PermissionError(13, "Permission denied", "config")
@@ -228,6 +236,7 @@ async def test_run_ash_scan_reports_an_unwritable_workspace_as_the_servers_failu
     assert "Permission denied" in response["error"], response
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("could not be written" in text for text in warnings), warnings
+    never_scans.assert_not_awaited()
 
 
 def _bind_then_remove_the_copy(session_id: str | None) -> Path:
