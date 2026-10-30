@@ -56,6 +56,7 @@ from automated_security_helper.utils.redacted_model import (
     NO_RICH_REPR,
     carry_environment_values,
 )
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.terminal_text import as_written
 from automated_security_helper.utils.python_installer import (
     python_package_install_command as _python_package_install_command,
@@ -778,8 +779,6 @@ def _uv_interpreter_inside(
     through links would read as outside and let the tree's environment in. A
     version request or a name looked up on PATH names no path and is not inside.
     """
-    from automated_security_helper.utils.process_env import snapshot_environ
-
     chosen = (snapshot_environ() if environment is None else environment).get(
         "UV_PYTHON"
     )
@@ -907,6 +906,10 @@ class PluginBase(UVToolMixin, BaseModel):
     # Why ASH could not record the output of this plugin's most recent tool run,
     # or None. See scan_post_run_error.
     _scan_post_run_error: str | None = PrivateAttr(default=None)
+
+    # Whether this plugin has already said it ignored a UV_PYTHON that names an
+    # interpreter inside the scanned tree (once per plugin, not per tool run).
+    _warned_in_tree_uv_python: bool = PrivateAttr(default=False)
 
     # The flag, and its reason, of this plugin's most recent run that did not
     # finish (a timeout, a cancel, a rejected result, a signal death), or None.
@@ -1959,7 +1962,6 @@ class PluginBase(UVToolMixin, BaseModel):
             # runs the tree's .venv python and builds its project unless told not
             # to; see utils/python_child.uv_child_overrides.
             from automated_security_helper.utils import python_child
-            from automated_security_helper.utils.process_env import snapshot_environ
 
             # The choice of interpreter is read from the environment the child
             # gets (``env``, this process's when None): an interpreter the
@@ -1975,10 +1977,16 @@ class PluginBase(UVToolMixin, BaseModel):
             # UV_PYTHON is dropped before the choice is read, so ASH's
             # interpreter is set in its place.
             if _uv_interpreter_inside(env, working_dir, Path(self.context.source_dir)):
-                ASH_LOGGER.debug(
-                    "Ignoring a UV_PYTHON that names an interpreter inside the "
-                    "scanned tree."
-                )
+                # Said once per plugin, as a warning: the operator or the scan's
+                # config set a variable that is not honored, and one line per
+                # tool run would repeat it for every run. The value is not shown.
+                if not self._warned_in_tree_uv_python:
+                    self._warned_in_tree_uv_python = True
+                    self._plugin_log(
+                        "Ignoring a UV_PYTHON that names an interpreter inside the "
+                        "scanned tree; it is not passed to the tool.",
+                        level=logging.WARNING,
+                    )
                 env = {
                     key: value
                     for key, value in (
