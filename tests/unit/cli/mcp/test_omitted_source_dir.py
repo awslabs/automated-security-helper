@@ -89,6 +89,9 @@ class TestStdioFallbackSurvives:
         """Delivering over stdio is legal, and the tree wins over cwd."""
         delivered = tmp_path / "default" / "source"
         delivered.mkdir(parents=True)
+        # A delivered tree with nothing in it is refused like one that is gone
+        # (_holds_an_entry); this test is about which tree wins, so it holds one.
+        (delivered / "app.py").write_text("x = 1\n", encoding="utf-8")
         sd._set_session_source_dir(DEFAULT_SESSION_ID, delivered)
 
         resolution = _resolve_omitted_source_dir(DEFAULT_SESSION_ID)
