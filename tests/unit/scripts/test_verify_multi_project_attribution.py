@@ -954,6 +954,33 @@ class TestScanTimeout:
     def test_a_timeout_under_the_budget_is_accepted(self, gate):
         assert gate._scan_timeout("600") == 600.0
 
+    @pytest.mark.parametrize("text", ["1441", "1700", "1799"])
+    def test_a_timeout_that_loses_the_race_inside_the_budget_is_refused(
+        self, gate, text
+    ):
+        """At the base anything under 1800 passed, 1700 included.
+
+        The setup steps and the stop-and-drain of a timed-out scan spend from
+        the same 1800 s, so a scan allowed 1700 s is cancelled by the job before
+        the tables print, which is what the check says it prevents.
+        """
+        with pytest.raises(argparse.ArgumentTypeError, match="at most 1440s"):
+            gate._scan_timeout(text)
+
+    def test_the_bound_is_the_budget_less_setup_and_shutdown(self, gate):
+        assert gate.MAX_SCAN_TIMEOUT_SECONDS == (
+            gate.JOB_TIMEOUT_BUDGET_SECONDS
+            - gate.SETUP_MARGIN_SECONDS
+            - 2 * (gate.SHUTDOWN_GRACE_SECONDS + gate.DRAIN_SECONDS)
+        )
+        assert gate.MAX_SCAN_TIMEOUT_SECONDS == 1440.0
+        # The bound itself is accepted; the default stays inside it.
+        assert gate._scan_timeout("1440") == 1440.0
+        assert gate.DEFAULT_SCAN_TIMEOUT_SECONDS <= gate.MAX_SCAN_TIMEOUT_SECONDS
+        assert gate._scan_timeout(str(gate.DEFAULT_SCAN_TIMEOUT_SECONDS)) == (
+            gate.DEFAULT_SCAN_TIMEOUT_SECONDS
+        )
+
 
 class TestRemoveHint:
     def test_the_hint_is_shell_quoted(self, gate, tmp_path):
