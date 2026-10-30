@@ -221,17 +221,79 @@ def test_an_expired_client_entry_is_neither_kept_nor_recorded(tmp_path):
     ), config._resolution_warnings
 
 
+def _operator_bandit(entry):
+    return {"scanners": {"bandit": {"options": {"excluded_paths": [entry]}}}}
+
+
 def test_a_client_copy_of_an_operator_entry_takes_the_operators_expiration(tmp_path):
     config = AshConfig()
     config.scanners.bandit.options.excluded_paths = [
         IgnorePathWithReason(path="shared", reason="client says"),
     ]
+    operator = _operator_bandit(
+        {"path": "shared", "reason": "op", "expiration": "2099-01-01"}
+    )
+
+    _strip(config, {}, operator, tmp_path)
+
+    kept = config.scanners.bandit.options.excluded_paths
+    assert [entry.path for entry in kept] == ["shared"]
+    assert isinstance(kept[0], IgnorePathWithReason)
+    assert kept[0].expiration == "2099-01-01"
+    assert kept[0].reason == "op"
+    assert config._client_scanner_exclusions == []
+
+
+@pytest.mark.parametrize(
+    "client_entry",
+    [
+        IgnorePathWithReason(path="shared", reason="client says"),
+        IgnorePathWithReason(
+            path="shared", reason="client says", expiration="2099-01-01"
+        ),
+    ],
+    ids=["no-expiration", "a-later-expiration"],
+)
+def test_a_client_copy_of_an_expired_operator_entry_is_dropped(tmp_path, client_entry):
+    """The operator let the entry expire, so the scanner would not apply it; a
+    client copy kept in the option, in any shape, applied it again. It is
+    dropped with the expired-entry warning and recorded as nothing."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [client_entry]
+    operator = _operator_bandit(
+        {"path": "shared", "reason": "op", "expiration": "2000-01-01"}
+    )
+
+    _strip(config, {}, operator, tmp_path)
+
+    assert _bandit_paths(config) == []
+    assert config._client_scanner_exclusions == []
+    assert any(
+        "'shared'" in warning and "expired" in warning
+        for warning in config._resolution_warnings
+    ), config._resolution_warnings
+
+
+@pytest.mark.parametrize(
+    ("expiration", "kept"),
+    [("2000-01-01", []), ("2099-01-01", ["shared"])],
+    ids=["expired", "unexpired"],
+)
+def test_a_client_string_copy_of_an_operator_entry_follows_the_operators_expiration(
+    tmp_path, expiration, kept
+):
+    """A plain-string option carries no expiration, so a client string that
+    repeated an operator entry stayed as it was and an operator entry that had
+    expired applied again, for good. Expired, the copy is dropped; unexpired,
+    the operator's path stays as the string the option holds."""
+    config = AshConfig()
+    config.scanners.semgrep.options.exclude = ["shared"]
     operator = {
         "scanners": {
-            "bandit": {
+            "semgrep": {
                 "options": {
-                    "excluded_paths": [
-                        {"path": "shared", "reason": "op", "expiration": "2000-01-01"}
+                    "exclude": [
+                        {"path": "shared", "reason": "op", "expiration": expiration}
                     ]
                 }
             }
@@ -240,15 +302,34 @@ def test_a_client_copy_of_an_operator_entry_takes_the_operators_expiration(tmp_p
 
     _strip(config, {}, operator, tmp_path)
 
-    kept = config.scanners.bandit.options.excluded_paths
-    assert [entry.path for entry in kept] == ["shared"]
-    assert isinstance(kept[0], IgnorePathWithReason)
-    assert kept[0].expiration == "2000-01-01"
-    assert kept[0].reason == "op"
+    assert config.scanners.semgrep.options.exclude == kept
     assert config._client_scanner_exclusions == []
 
 
-_SHARED_OPERATOR_ENTRY = {"path": "shared", "reason": "op", "expiration": "2000-01-01"}
+def test_a_client_model_copy_of_an_operator_string_is_the_operators_path_alone(
+    tmp_path,
+):
+    """An operator entry written as a plain string names no reason and no
+    expiration, so the kept entry carries the operator's path and does not
+    expire; it kept the client's own expiration before, as if the operator had
+    set it."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(
+            path="shared", reason="client says", expiration="2099-01-01"
+        ),
+    ]
+
+    _strip(config, {}, _operator_bandit("shared"), tmp_path)
+
+    kept = config.scanners.bandit.options.excluded_paths
+    assert [entry.path for entry in kept] == ["shared"]
+    assert isinstance(kept[0], IgnorePathWithReason)
+    assert kept[0].expiration is None
+    assert config._client_scanner_exclusions == []
+
+
+_SHARED_OPERATOR_ENTRY = {"path": "shared", "reason": "op", "expiration": "2099-01-01"}
 
 
 @pytest.mark.parametrize(
@@ -281,7 +362,7 @@ def test_an_operator_entry_patched_in_above_the_option_is_the_operators(
 
     kept = config.scanners.bandit.options.excluded_paths
     assert [entry.path for entry in kept] == ["shared"]
-    assert kept[0].expiration == "2000-01-01"
+    assert kept[0].expiration == "2099-01-01"
     assert kept[0].reason == "op"
     assert config._client_scanner_exclusions == []
 

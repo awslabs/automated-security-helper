@@ -1179,8 +1179,16 @@ def strip_client_scanner_exclusions(
                 if pattern in operator_entries:
                     # The operator's own entry, with its reason and expiration,
                     # not the client's copy of the path: a client could otherwise
-                    # revive an exclusion the operator let expire.
-                    spelled = _spelled_like(entry, operator_entries[pattern])
+                    # revive an exclusion the operator let expire. An operator
+                    # entry that has expired drops the client's copy whatever
+                    # shape the option holds it in: the scanner would not apply
+                    # it, and a copy kept in a shape that carries no expiration
+                    # (a plain string) would have applied for good.
+                    operator_entry = operator_entries[pattern]
+                    if _entry_expired(_entry_fields(operator_entry)[2]):
+                        expired.append(pattern)
+                        continue
+                    spelled = _spelled_like(entry, operator_entry)
                     if spelled != entry:
                         replaced += 1
                     kept.append(spelled)
@@ -1388,37 +1396,64 @@ def _entry_expired(expiration: Any) -> bool:
         return True
 
 
+def _operator_fields(source: Any) -> Optional[Dict[str, Any]]:
+    """The operator's entry ``source`` as the fields of a path-with-reason entry.
+
+    A mapping is its own fields, with a YAML date (an unquoted 2099-01-31, which
+    arrives as a date object) as the YYYY-MM-DD text the model's expiration
+    holds; a string is an entry of that path alone, with no reason and no
+    expiration. None for any other shape.
+    """
+    if isinstance(source, Mapping):
+        return {
+            key: value.isoformat() if isinstance(value, date) else value
+            for key, value in source.items()
+        }
+    if isinstance(source, str):
+        return {"path": source}
+    return None
+
+
 def _spelled_like(template: Any, source: Any) -> Any:
     """The operator's entry ``source`` in the shape ``template`` has in the option.
 
     The option holds strings, dicts or validated models; the operator's entry
     comes as a string or a mapping from a document or the trusted config's dump.
-    When it cannot be given the template's shape, the client's own entry is
-    kept rather than leave the option with a value of another type.
+    The result carries the operator's fields, its path, reason and expiration,
+    in the template's shape: an operator mapping under a plain-string option is
+    its path, an operator string under a mapping or model option is an entry of
+    that path alone, and a model the operator's fields do not validate as on
+    their own keeps the template's other fields under the operator's
+    (``model_copy``). The client's own copy was kept whenever the shapes
+    differed or the model refused the fields, so a client string stood in for an
+    operator mapping with the operator's expiration lost, and a client model
+    kept its own reason and expiration under an operator string.
     """
     if isinstance(template, BaseModel):
         if isinstance(source, BaseModel):
             return source
-        if isinstance(source, Mapping):
-            # A YAML date (an unquoted 2099-01-31) arrives as a date object; the
-            # model's expiration is the YYYY-MM-DD text.
-            fields = {
-                key: value.isoformat() if isinstance(value, date) else value
-                for key, value in source.items()
-            }
+        fields = _operator_fields(source)
+        if fields is None:
+            return template
+        try:
+            return type(template).model_validate(fields)
+        except Exception:  # noqa: BLE001 -- the operator's fields alone are not a model
             try:
-                return type(template).model_validate(fields)
+                # An operator string names no expiration: the entry does not
+                # expire, so the client's expiration goes with its reason kept.
+                return template.model_copy(update={"expiration": None, **fields})
             except Exception:  # noqa: BLE001 -- keep the option well typed
                 return template
-        return template
     if isinstance(template, dict):
-        if isinstance(source, Mapping):
-            return dict(source)
         if isinstance(source, BaseModel):
             return source.model_dump(exclude_unset=True)
-        return template
-    if isinstance(template, str) and isinstance(source, str):
-        return source
+        fields = _operator_fields(source)
+        return template if fields is None else fields
+    if isinstance(template, str):
+        if isinstance(source, str):
+            return source
+        path, _ = _pattern_of(source)
+        return template if path is None else path
     return template
 
 
