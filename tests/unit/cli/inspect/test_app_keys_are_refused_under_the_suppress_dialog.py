@@ -58,7 +58,7 @@ class TestCheckAction:
             "toggle_search",
             "toggle_suppressed",
             "reset_filters",
-            "quit",
+            "quit_from_table",
         ],
     )
     def test_the_app_bindings_are_refused_under_the_dialog(self, tmp_path, action):
@@ -79,6 +79,34 @@ class TestCheckAction:
             ),
         ):
             assert app.check_action(action, ()) is False, action
+
+    def test_textuals_own_quit_stays_allowed_under_the_dialog(self, tmp_path):
+        """check_action sees actions, not keys: refusing "quit" under the dialog
+        refused Textual's ctrl+q with the q key. The q key has its own action."""
+        app = FindingsExplorerApp(_two_findings())
+        dialog = SuppressDialog(_two_findings()[0], tmp_path / ".ash.yaml")
+        with (
+            patch.object(
+                FindingsExplorerApp,
+                "screen_stack",
+                new_callable=PropertyMock,
+                return_value=[MagicMock(), dialog],
+            ),
+            patch.object(
+                FindingsExplorerApp,
+                "screen",
+                new_callable=PropertyMock,
+                return_value=dialog,
+            ),
+        ):
+            assert app.check_action("quit", ()) is True
+            assert app.check_action("quit_from_table", ()) is False
+
+    def test_the_q_key_is_bound_to_the_apps_own_action(self):
+        bound = {b.key: b.action for b in FindingsExplorerApp.BINDINGS}
+
+        assert bound["q"] == "quit_from_table"
+        assert "quit" not in bound.values()
 
     def test_quit_stays_allowed_on_the_table(self):
         app = FindingsExplorerApp(_two_findings())

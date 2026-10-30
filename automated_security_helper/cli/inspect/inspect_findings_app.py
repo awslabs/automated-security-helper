@@ -827,7 +827,10 @@ class FindingsExplorerApp(App):
     """Interactive findings explorer application."""
 
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
+        # Its own action, not "quit": under the suppress dialog the q key is refused
+        # (check_action), and refusing the "quit" action there refused every key
+        # bound to it, Textual's own ctrl+q included.
+        Binding("q", "quit_from_table", "Quit"),
         Binding("f", "toggle_filters", "Filters"),
         Binding("j", "next_finding", "Next Finding", show=False),
         Binding("k", "previous_finding", "Previous Finding", show=False),
@@ -1153,7 +1156,9 @@ class FindingsExplorerApp(App):
         # result then marked the row the cursor had moved to; an x opened a
         # second dialog over the first. Under the dialog q is refused too: a
         # key the operator typed with the Save button focused would otherwise
-        # quit the app with the reason they typed.
+        # quit the app with the reason they typed. The q key has its own action
+        # (quit_from_table) so that only it is refused: check_action sees actions,
+        # not keys, and refusing "quit" refused Textual's ctrl+q with it.
         if self.screen_stack and isinstance(
             self.screen, (FindingDetailScreen, SuppressDialog)
         ):
@@ -1169,7 +1174,7 @@ class FindingsExplorerApp(App):
                 "suppress_selected",
             }:
                 return False
-            if action == "quit" and isinstance(self.screen, SuppressDialog):
+            if action == "quit_from_table" and isinstance(self.screen, SuppressDialog):
                 return False
         return True
 
@@ -1337,6 +1342,11 @@ class FindingsExplorerApp(App):
                 status_bar.update(
                     _shown_one_line(f"Selected: {finding['rule_id']} · Enter: details")
                 )
+
+    def action_quit_from_table(self) -> None:
+        """Quit on the q key. The app's own action, refused under the suppress
+        dialog (check_action) while Textual's ctrl+q, bound to "quit", stays."""
+        self.exit()
 
     def action_toggle_suppressed(self) -> None:
         """Toggle showing/hiding suppressed findings."""
