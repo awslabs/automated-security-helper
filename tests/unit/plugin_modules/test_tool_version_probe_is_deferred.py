@@ -413,7 +413,11 @@ def test_opengrep_asks_its_version_when_the_arguments_are_resolved(
     """``--metrics`` depends on the installed version, asked once, before the run.
 
     Construction asks nothing (test_constructing_a_plugin_starts_nothing); the
-    first argument resolution asks, and the second reuses the answer.
+    first argument resolution asks, and the second reuses the answer. The
+    resolution the scan runs is ``_resolve_scan_arguments`` (the base's per-target
+    entry, which opengrep overrides to decide ``--metrics`` before the target's
+    excludes are added); the inner ``_resolve_arguments`` is the base's and asks
+    nothing.
     """
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
@@ -432,8 +436,7 @@ def test_opengrep_asks_its_version_when_the_arguments_are_resolved(
     target.mkdir()
 
     runs = [
-        scanner._resolve_arguments(target=target, results_file=tmp_path / "r.sarif")
-        for _ in range(2)
+        scanner._resolve_scan_arguments(target, tmp_path / "r.sarif") for _ in range(2)
     ]
 
     assert asked == [True]
@@ -461,9 +464,7 @@ def test_an_old_opengrep_gets_the_same_arguments_plus_metrics(
             OpengrepScanner, "_get_opengrep_version", lambda self, v=version: v
         )
         scanner = OpengrepScanner(context=plugin_context)
-        argvs[version] = scanner._resolve_arguments(
-            target=target, results_file=tmp_path / "r.sarif"
-        )
+        argvs[version] = scanner._resolve_scan_arguments(target, tmp_path / "r.sarif")
 
     old = list(argvs[(1, 6, 0)])
     at = old.index("--metrics")
