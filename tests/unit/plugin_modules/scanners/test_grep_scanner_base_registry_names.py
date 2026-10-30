@@ -70,7 +70,10 @@ def test_a_registry_name_is_not_local_rules_even_when_a_path_of_that_name_exists
     scanner = _offline_scanner(test_plugin_context, name)
 
     assert "SEMGREP_RULES_CACHE_DIR" in (scanner.dependency_unavailable_reason or "")
-    assert not any(name in value for value in _configs(scanner)), _configs(scanner)
+    # The two directories by path: a bare substring test would read "auto" inside
+    # the bundled rules' own path (automated_security_helper/...).
+    planted = {(root / name).as_posix() for root in (tmp_path, source_dir)}
+    assert not planted.intersection(_configs(scanner)), _configs(scanner)
 
 
 def test_a_local_path_outside_the_tree_is_local_rules(
@@ -95,8 +98,9 @@ def test_a_local_path_inside_the_scanned_tree_is_refused(
 ):
     """Fails at the base: ``./p/ci`` was resolved against ASH's working directory
     and accepted wherever it sat. A rules directory the scanned repository ships is
-    not passed to the tool, offline the cache is still needed, and the refusal is
-    logged once with the option's key."""
+    not passed to the tool, the scanner declines with a reason naming the option
+    (it does not fall back to the cache: the operator asked for those rules), and
+    the path-trust refusal is logged once with the option's key."""
     source_dir = Path(test_plugin_context.source_dir)
     (source_dir / "p" / "ci").mkdir(parents=True, exist_ok=True)
     (source_dir / "p" / "ci" / "x.yaml").write_text(RULE, encoding="utf-8")
@@ -106,7 +110,10 @@ def test_a_local_path_inside_the_scanned_tree_is_refused(
     with caplog.at_level("WARNING"):
         scanner = _offline_scanner(test_plugin_context, "./p/ci")
 
-    assert "SEMGREP_RULES_CACHE_DIR" in (scanner.dependency_unavailable_reason or "")
+    reason = scanner.dependency_unavailable_reason or ""
+    assert "scanners.semgrep.options.config" in reason, reason
+    assert "SEMGREP_RULES_CACHE_DIR" not in reason, reason
+    assert scanner.validate_plugin_dependencies() is False
     assert not any(value.endswith("/p/ci") for value in _configs(scanner)), _configs(
         scanner
     )

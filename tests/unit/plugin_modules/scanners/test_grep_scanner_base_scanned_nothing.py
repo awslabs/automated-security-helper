@@ -195,13 +195,17 @@ def test_an_absolute_path_outside_the_target_keeps_only_its_file_name(
 def test_files_in_an_ash_output_directory_grade_skipped(
     test_plugin_context, monkeypatch, tmp_path
 ):
-    """The ASH output directories the command excluded are ASH's own exclusions."""
+    """The ASH output directories the command excluded are ASH's own exclusions,
+    whether the tool reports the path relative to the target or absolute under it
+    (an output directory the command excluded is always inside the target:
+    ``_ash_output_dirs_inside`` lists only those)."""
     scanner = _scanner(test_plugin_context, monkeypatch)
     scanner._output_dir_excluded = [Path(".ash/ash_output")]
+    target = (tmp_path / "src").as_posix()
 
     skipped = _excluded(
         ".ash/ash_output/reports/report.py",
-        "/abs/repo/.ash/ash_output/scanners/semgrep/x.py",
+        f"{target}/.ash/ash_output/scanners/semgrep/x.py",
     )
     assert _grade(scanner, tmp_path, skipped) == 0
 

@@ -1,8 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""One resolver for the configured rules in both modes, and what the staleness
-bookkeeping says about a scan that read no cache.
+"""One resolver for the configured rules in both modes, a refusal in both modes for
+rules ASH cannot pass, and what the staleness bookkeeping says about a scan that
+read no cache.
 
 - ``options.config`` naming a local rule file goes through
   ``config/path_trust.honored_path`` online as well as offline: a relative value
@@ -11,12 +12,22 @@ bookkeeping says about a scan that read no cache.
   Online used to pass the value as written, so ``config: my-rules.yaml`` could run
   one file online and another offline, and a file the scanned repository shipped
   ran online.
-- A refused or unresolvable configured value online falls back to the default
-  rulesets with a warning, never to the raw value.
+- A configured value that is not a registry entry and resolves to nothing ASH may
+  pass (a typo, a missing file, an in-tree file) DECLINES the scanner in both
+  modes, with a reason naming the option; the scan never runs under the default
+  rulesets or the offline cache in its place. Online used to fall back to the
+  default rulesets, offline to the cache: a different scan reported as the one
+  that was asked for.
 - ``content_databases_in_use`` names the offline ruleset only when the scan read
   the cache: patterns mode, the operator's local rules and a missing cache read
   none, so the result is not graded on the cache's age. The staleness probe is
   pointed at the cache absolutely, as the command was.
+
+The tests that expect a rules path to be PASSED build their tree with
+``context_outside_checkouts`` (this directory's conftest): ``test_plugin_context``
+sits under ``tests/pytest-temp`` inside the repository's checkout, where every
+rules file beside it is refused by path trust. The tests that expect a REFUSAL
+use ``test_plugin_context``, whose source directory is a tree like any other.
 
 Building the scanners probes uv and opengrep; the unit conftest's tool guard answers
 the probes as a host without the tools would, so nothing starts here.
@@ -72,13 +83,21 @@ def _online(monkeypatch, scanner_cls):
     monkeypatch.setattr(scanner_cls, "_scanner_offline", lambda self: False)
 
 
-def _rules_beside_the_tree(test_plugin_context) -> Path:
-    source_dir = Path(test_plugin_context.source_dir)
+def _rules_beside_the_tree(context) -> Path:
+    source_dir = Path(context.source_dir)
     rules_dir = source_dir.parent / "rules-beside-the-tree"
     rules_dir.mkdir(parents=True, exist_ok=True)
     rules = rules_dir / "my-rules.yaml"
     rules.write_text(RULE, encoding="utf-8")
     return rules
+
+
+def _declined_for_its_config(scanner, name: str) -> None:
+    reason = scanner.dependency_unavailable_reason or ""
+    assert f"scanners.{name}.options.config" in reason, reason
+    assert scanner.validate_plugin_dependencies() is False
+    configs = _configs(scanner)
+    assert not any(value in configs for value in scanner.default_rulesets()), configs
 
 
 @pytest.mark.parametrize(
@@ -89,19 +108,21 @@ def test_online_takes_a_relative_config_from_the_source_directory(
     config_cls,
     options_cls,
     cache_env,
-    test_plugin_context,
+    context_outside_checkouts,
     tmp_path,
     monkeypatch,
 ):
     """Fails at the base: online passed ``../rules-beside-the-tree/my-rules.yaml``
     as written, for the tool to resolve wherever it ran."""
-    rules = _rules_beside_the_tree(test_plugin_context)
-    monkeypatch.chdir(tmp_path)
+    rules = _rules_beside_the_tree(context_outside_checkouts)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
     monkeypatch.delenv(cache_env, raising=False)
     _online(monkeypatch, scanner_cls)
 
     scanner = scanner_cls(
-        context=test_plugin_context,
+        context=context_outside_checkouts,
         config=config_cls(
             options=options_cls(
                 offline=False, config="../rules-beside-the-tree/my-rules.yaml"
@@ -109,6 +130,7 @@ def test_online_takes_a_relative_config_from_the_source_directory(
         ),
     )
 
+    assert scanner.dependency_unavailable_reason is None
     assert _configs(scanner) == [Path(os.path.realpath(rules)).as_posix()]
 
 
@@ -120,7 +142,7 @@ def test_both_modes_hand_the_tool_the_same_rule_file(
     config_cls,
     options_cls,
     cache_env,
-    test_plugin_context,
+    context_outside_checkouts,
     tmp_path,
     monkeypatch,
 ):
@@ -129,18 +151,20 @@ def test_both_modes_hand_the_tool_the_same_rule_file(
     Fails at the base: offline resolved the value against ASH's working directory
     and online passed it as written, two different answers for one value.
     """
-    rules = _rules_beside_the_tree(test_plugin_context)
-    monkeypatch.chdir(tmp_path)
+    rules = _rules_beside_the_tree(context_outside_checkouts)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
     monkeypatch.delenv(cache_env, raising=False)
     relative = "../rules-beside-the-tree/my-rules.yaml"
 
     offline = scanner_cls(
-        context=test_plugin_context,
+        context=context_outside_checkouts,
         config=config_cls(options=options_cls(offline=True, config=relative)),
     )
     _online(monkeypatch, scanner_cls)
     online = scanner_cls(
-        context=test_plugin_context,
+        context=context_outside_checkouts,
         config=config_cls(options=options_cls(offline=False, config=relative)),
     )
 
@@ -161,7 +185,8 @@ def test_online_refuses_a_rule_file_inside_the_scanned_tree(
     caplog,
 ):
     """Fails at the base: a rules file the scanned repository shipped was passed
-    online as written. It is refused with a warning and the default rulesets run."""
+    online as written. It is refused with a warning, and the scanner declines
+    rather than running the default rulesets in its place."""
     source_dir = Path(test_plugin_context.source_dir)
     source_dir.mkdir(parents=True, exist_ok=True)
     (source_dir / "shipped-rules.yaml").write_text(RULE, encoding="utf-8")
@@ -178,10 +203,68 @@ def test_online_refuses_a_rule_file_inside_the_scanned_tree(
 
     configs = _configs(scanner)
     assert not any("shipped-rules" in value for value in configs), configs
-    assert configs == list(scanner.default_rulesets()), configs
+    _declined_for_its_config(scanner, scanner.config.name)
     assert any("options.config" in record.getMessage() for record in caplog.records), [
         record.getMessage() for record in caplog.records
     ]
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_online(
+    scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
+):
+    """A typo in ``options.config`` fails loudly: the scanner declines with a
+    reason naming the option, instead of scanning under the default rulesets.
+
+    Fails at the base: the value was passed as written and the tool failed on it
+    at scan time, with nothing recorded at build time.
+    """
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(options=options_cls(offline=False, config="my-rulez.yaml")),
+    )
+
+    _declined_for_its_config(scanner, scanner.config.name)
+    assert "my-rulez.yaml" not in _configs(scanner)
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_offline(
+    scanner_cls,
+    config_cls,
+    options_cls,
+    cache_env,
+    test_plugin_context,
+    tmp_path,
+    monkeypatch,
+):
+    """Offline, the same typo declines the scanner with the same reason, and the
+    cache is NOT read in its place even when one is present.
+
+    Fails at the base: a configured value that resolved to nothing fell through to
+    the cache, so the scan ran the cached registry rules in place of the file the
+    operator named.
+    """
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "registry.yaml").write_text(RULE, encoding="utf-8")
+    monkeypatch.setenv(cache_env, str(cache))
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(options=options_cls(offline=True, config="my-rulez.yaml")),
+    )
+
+    _declined_for_its_config(scanner, scanner.config.name)
+    assert cache.as_posix() not in _configs(scanner), _configs(scanner)
+    assert cache_env not in (scanner.dependency_unavailable_reason or "")
 
 
 @pytest.mark.parametrize(
@@ -199,7 +282,30 @@ def test_online_passes_a_registry_name_as_written(
         config=config_cls(options=options_cls(offline=False, config="p/security")),
     )
 
+    assert scanner.dependency_unavailable_reason is None
     assert _configs(scanner) == ["p/security"]
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_online_with_nothing_configured_runs_the_default_rulesets(
+    scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
+):
+    """The control: the default rulesets are for an empty ``options.config``
+    (the option is a string, so "unset" is the empty string), never a substitute
+    for one that was set."""
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(options=options_cls(offline=False, config="")),
+    )
+
+    assert scanner.dependency_unavailable_reason is None
+    configs = _configs(scanner)
+    assert all(value in configs for value in scanner.default_rulesets()), configs
 
 
 @pytest.mark.parametrize(
@@ -210,24 +316,25 @@ def test_local_rules_offline_declare_no_content_database(
     config_cls,
     options_cls,
     cache_env,
-    test_plugin_context,
+    context_outside_checkouts,
     tmp_path,
     monkeypatch,
 ):
     """Fails at the base: offline declared the ruleset whenever the mode was
     offline, so a scan that ran the operator's own rules was graded on the age of
     a cache it never read."""
-    rules = _rules_beside_the_tree(test_plugin_context)
+    rules = _rules_beside_the_tree(context_outside_checkouts)
     cache = tmp_path / "cache"
     cache.mkdir()
     (cache / "registry.yaml").write_text(RULE, encoding="utf-8")
     monkeypatch.setenv(cache_env, str(cache))
 
     scanner = scanner_cls(
-        context=test_plugin_context,
+        context=context_outside_checkouts,
         config=config_cls(options=options_cls(offline=True, config=str(rules))),
     )
 
+    assert scanner.dependency_unavailable_reason is None
     assert cache.as_posix() not in _configs(scanner)
     assert scanner.content_databases_in_use() == []
 

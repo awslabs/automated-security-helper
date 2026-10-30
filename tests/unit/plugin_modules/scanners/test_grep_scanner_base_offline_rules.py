@@ -145,23 +145,26 @@ def test_a_relative_local_config_reaches_the_tool_as_an_absolute_path(
     config_cls,
     options_cls,
     cache_env,
-    test_plugin_context,
+    context_outside_checkouts,
     tmp_path,
     monkeypatch,
 ):
     """A relative path is taken from the source directory, as every tool path
     option is (``path_trust.resolved_path``), and reaches the tool absolute. A
-    directory beside the scanned one is outside the tree, so the value is passed.
-    ASH's working directory plays no part: it is moved elsewhere here."""
-    source_dir = Path(test_plugin_context.source_dir)
+    directory beside the scanned one, outside every checkout, is a path the
+    scanner may pass. ASH's working directory plays no part: it is moved to a
+    directory holding no such file."""
+    source_dir = Path(context_outside_checkouts.source_dir)
     rules_dir = source_dir.parent / "rules-beside-the-tree"
     rules_dir.mkdir(parents=True, exist_ok=True)
     (rules_dir / "my-rules.yaml").write_text(RULE, encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
     monkeypatch.delenv(cache_env, raising=False)
 
     scanner = scanner_cls(
-        context=test_plugin_context,
+        context=context_outside_checkouts,
         config=config_cls(
             options=options_cls(
                 offline=True, config="../rules-beside-the-tree/my-rules.yaml"
@@ -172,7 +175,7 @@ def test_a_relative_local_config_reaches_the_tool_as_an_absolute_path(
     configs = [Path(value) for value in _configs(scanner)]
     assert Path(os.path.realpath(rules_dir / "my-rules.yaml")) in configs, configs
     assert all(path.is_absolute() for path in configs), configs
-    assert not any(str(tmp_path) in str(path) for path in configs), configs
+    assert not any(str(elsewhere) in str(path) for path in configs), configs
 
 
 @pytest.mark.parametrize(
