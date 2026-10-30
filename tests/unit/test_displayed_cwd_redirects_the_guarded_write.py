@@ -32,7 +32,13 @@ def test_a_guarded_write_under_the_displayed_cwd_lands_in_the_real_one(
     monkeypatch.chdir(tmp_path)
     with displayed_cwd(monkeypatch):
         target = Path(os.path.abspath("staged.yaml"))
-        assert target == Path(DISPLAYED_CWD) / "staged.yaml"
+        if os.name != "nt":
+            # posixpath.abspath builds the path from os.getcwd(), so under the
+            # harness the target names the displayed cwd and the redirect is
+            # what lands the write. ntpath.abspath resolves through the Windows
+            # API instead, so there the target is the real path already and
+            # the redirect has nothing to do; the write below lands either way.
+            assert target == Path(DISPLAYED_CWD) / "staged.yaml"
         with open_for_atomic_write(target, encoding="utf-8") as handle:
             handle.write("project_name: demo\n")
 
