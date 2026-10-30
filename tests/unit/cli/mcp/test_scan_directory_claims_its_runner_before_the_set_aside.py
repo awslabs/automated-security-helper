@@ -140,3 +140,51 @@ def test_a_task_that_cannot_start_leaves_no_claim_behind(tmp_path, monkeypatch):
     assert entry.status == MCScanStatus.FAILED, entry.status
     assert entry.runner_done.is_set(), "the failed start never marked its runner done"
     assert not entry.occupies_its_directory(), "the scan still holds its directory"
+
+
+def test_a_profile_lookup_that_raises_leaves_no_claim_behind(tmp_path, monkeypatch):
+    """The runner's set-up reads the session's bound profile before its own try
+    begins. A lookup that raises something other than a registry or workspace
+    error (a stat refused on the workspace's parent) escaped the refusal guard
+    there, so the task ended with the entry PENDING, its runner claimed and its
+    runner never marked done: the directory was held for the server's life.
+    Every raise in the set-up is a refusal: the entry is closed FAILED with the
+    reason and the runner is marked done."""
+    from automated_security_helper.cli.mcp import profile_registry
+
+    monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
+    output = tmp_path / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    registry = ScanRegistry()
+    scan_id = registry.register_scan(
+        directory_path=str(tmp_path), output_directory=str(output)
+    )
+    entry = registry.get_scan(scan_id)
+    # What the tool records at registration (the claim the tests above read).
+    entry.has_runner = True
+
+    def a_lookup_the_filesystem_refuses(session_id=None):
+        raise PermissionError(13, "denied by policy")
+
+    with (
+        patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
+        patch(f"{_TOOLS}._logger", MagicMock(spec=ASHLogger)),
+        patch.object(
+            profile_registry,
+            "resolve_session_config_path",
+            a_lookup_the_filesystem_refuses,
+        ),
+    ):
+        asyncio.run(
+            mcp_tools._run_scan(
+                scan_id=scan_id,
+                directory_path=str(tmp_path),
+                output_dir=str(output),
+                severity_threshold=None,
+            )
+        )
+
+    assert entry.status == MCScanStatus.FAILED, (entry.status, entry.error_message)
+    assert "denied by policy" in (entry.error_message or ""), entry.error_message
+    assert entry.runner_done.is_set(), "the refused scan never marked its runner done"
+    assert not entry.occupies_its_directory(), "the scan still holds its directory"

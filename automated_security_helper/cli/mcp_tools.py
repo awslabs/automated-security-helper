@@ -2748,11 +2748,9 @@ async def _run_scan(
     )
 
     from automated_security_helper.cli.mcp.profile_registry import (
-        ProfileRegistryError,
         resolve_session_config_path,
         resolve_session_trusted_config_path,
     )
-    from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
         config_base_gate,
@@ -3062,14 +3060,18 @@ async def _run_scan(
     # the sweep, a clear, the end of the session: the write hold's refusal),
     # refuses the scan. Caught here, not left to propagate: the runner's own
     # try begins further down, and an exception out of this coroutine would
-    # leave the entry PENDING, which reads as running.
+    # leave the entry PENDING, which reads as running. Every exception, not the
+    # registry's and the workspace hold's alone: the lookup stats the recorded
+    # files first, and a stat refused on the workspace's parent raises an OSError
+    # of its own, which left the entry PENDING with its runner claimed and never
+    # marked done, so the directory was held for the server's life.
     try:
         trusted_config_path = (
             resolve_session_trusted_config_path(session_id)
             if untrusted_config
             else None
         )
-    except (ProfileRegistryError, SessionWorkspaceBusyError) as exc:
+    except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
         _refuse_before_running(exc)
         return
     # For a remote caller, every config file the operator did not set aside
@@ -3096,10 +3098,11 @@ async def _run_scan(
     # profile is known here.
     try:
         session_profile = resolve_session_config_path(session_id)
-    except (ProfileRegistryError, SessionWorkspaceBusyError) as exc:
-        # As above: a bound profile that cannot be read as registered, or whose
-        # workspace another request holds, refuses the scan, recorded on the
-        # entry rather than raised out of the runner.
+    except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
+        # As above: a bound profile that cannot be read as registered, whose
+        # workspace another request holds, or whose recorded file cannot be
+        # stat'ed, refuses the scan, recorded on the entry rather than raised
+        # out of the runner.
         _refuse_before_running(exc)
         return
     config_may_be_the_profile = (
