@@ -1103,6 +1103,28 @@ class TestScan:
         not_started = [e for e in scanner.errors if "not started" in e]
         assert len(not_started) == 1, scanner.errors
 
+    def test_every_template_the_tool_never_evaluated_is_recorded_by_name(
+        self, repo, rules_root
+    ):
+        """The one that timed out and the one not started after it are both
+        targets the tool never evaluated, and the run's error record names each
+        such target from this list. At the previous tip only a candidate ASH could
+        not read was recorded on it; a template whose own invocation failed, or
+        was never started, was counted as failed and named in the scanner's line
+        but was absent from the run's record, where cfn-nag names its own."""
+        _fake_bundle(rules_root)
+
+        def timing_out(command, **kwargs):
+            return {"returncode": None, "stdout": "", "stderr": "", "timed_out": True}
+
+        scanner = _scanner(repo)
+        self._run(scanner, timing_out)
+        assert scanner.targets_failed == 2
+        assert sorted(scanner.unevaluated_targets) == [
+            "templates/compliant.yaml",
+            "templates/insecure.yaml",
+        ], scanner.unevaluated_targets
+
     def test_an_unreadable_candidate_is_a_target_that_was_not_evaluated(
         self, repo, rules_root
     ):

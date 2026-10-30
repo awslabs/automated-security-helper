@@ -965,12 +965,16 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
                 self.targets_failed += 1
-                # The ERROR log puts the line in self.errors; appended here as
-                # well, every failure was recorded twice, and with the host's
-                # absolute path where the other lines carry the shown one.
+                shown = display_path(path, source_dir)
+                # A target the tool never evaluated, recorded by name as the
+                # unreadable ones are and as cfn-nag records it, so the run's
+                # error record names it. The ERROR log puts the line in
+                # self.errors; appended here as well, every failure was recorded
+                # twice, and with the host's absolute path where the other lines
+                # carry the shown one.
+                self.record_unevaluated_target(shown)
                 self._plugin_log(
-                    f"cfn-guard did not evaluate {display_path(path, source_dir)}: "
-                    f"{reason}",
+                    f"cfn-guard did not evaluate {shown}: {reason}",
                     target_type=target_type,
                     level=logging.ERROR,
                 )
@@ -994,12 +998,15 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     # An earlier invocation timed out, and the executor discards
                     # the whole scan after a recorded timeout, so starting the
                     # remaining templates, each with a fresh full scan_timeout,
-                    # would only spend their time. Named, not started. The ERROR
-                    # log puts the line in self.errors (PluginBase._plugin_log
-                    # appends every ERROR log), so it is not appended here as
-                    # well: appended twice, each template appeared twice in
-                    # the invocation's exitCodeDescription.
+                    # would only spend their time. Named, not started, and
+                    # recorded as a target the tool never evaluated, as every
+                    # template that fails below is (the run's error record
+                    # names each). The ERROR log puts the line in self.errors
+                    # (PluginBase._plugin_log appends every ERROR log), so it is
+                    # not appended here as well: appended twice, each template
+                    # appeared twice in the invocation's exitCodeDescription.
                     self.targets_failed += 1
+                    self.record_unevaluated_target(shown)
                     self._plugin_log(
                         f"cfn-guard did not evaluate {shown}: "
                         f"{_NOT_STARTED_AFTER_TIMEOUT}",
@@ -1012,6 +1019,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         self.targets_failed += 1
+                        self.record_unevaluated_target(shown)
                         self._plugin_log(
                             f"cfn-guard did not evaluate {shown}: "
                             f"{_NOT_STARTED_AFTER_BUDGET}",
@@ -1053,7 +1061,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 if failure is not None or template_report is None:
                     failure = failure or "cfn-guard output could not be read"
                     self.targets_failed += 1
-                    # The ERROR log puts the line in self.errors; see above.
+                    # Recorded as a target the tool never evaluated; the ERROR
+                    # log puts the line in self.errors; see above.
+                    self.record_unevaluated_target(shown)
                     self._plugin_log(
                         f"cfn-guard did not evaluate {shown}: {failure}",
                         target_type=target_type,

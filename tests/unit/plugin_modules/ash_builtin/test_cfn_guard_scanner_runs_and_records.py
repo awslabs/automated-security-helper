@@ -252,6 +252,9 @@ class TestOneScansRecords:
         assert joined.count("did not evaluate one.yaml") == 1
         assert "Skipped broken.yaml: it could not be parsed" in joined
         assert scanner.targets_attempted == 2 and scanner.targets_failed == 2
+        # Both failed targets are recorded by name as targets the tool never
+        # evaluated, with the shown path, so the run's error record names them.
+        assert sorted(scanner.unevaluated_targets) == ["bad.yaml", "one.yaml"]
 
     def test_the_sarif_text_is_not_kept_in_output(self, source, faked_scan):
         scanner = _scanner(source)
