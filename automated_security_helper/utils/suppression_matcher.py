@@ -40,13 +40,23 @@ from automated_security_helper.utils.symbol_spans import SymbolResolver
 # Supported formats (slash-style for JS/TS/Java/C#/Go):
 #   // ash-ignore: RULE-ID [reason]
 #   // ash-ignore-next-line: RULE-ID [reason]
-_HASH_INLINE_PATTERN = re.compile(r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
-_HASH_NEXT_LINE_PATTERN = re.compile(
-    r"#\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+# The blanks after the marker and after the rule id are spaces and tabs only,
+# not ``\s``: ``\s`` matches a carriage return, and under the line-feed-only
+# count a lone CR is inside the line, so ``# ash-ignore: R1\r...`` had its
+# reason start after the CR (the text of the next CR-line, which ``_reason``
+# then could not cut) and ``# ash-ignore:\rR1`` took ``R1`` from the next
+# CR-line as its rule id. A directive ends at the CR either way.
+_HASH_INLINE_PATTERN = re.compile(
+    r"#\s*ash-ignore:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
 )
-_SLASH_INLINE_PATTERN = re.compile(r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
+_HASH_NEXT_LINE_PATTERN = re.compile(
+    r"#\s*ash-ignore-next-line:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
+)
+_SLASH_INLINE_PATTERN = re.compile(
+    r"//\s*ash-ignore:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
+)
 _SLASH_NEXT_LINE_PATTERN = re.compile(
-    r"//\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+    r"//\s*ash-ignore-next-line:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
 )
 
 _INLINE_PATTERNS = [_HASH_INLINE_PATTERN, _SLASH_INLINE_PATTERN]
@@ -118,8 +128,9 @@ def _search_comment(pattern: "re.Pattern[str]", line: str) -> Optional["re.Match
     ``x = "# ash-ignore: B101"`` suppresses nothing. A marker inside a string
     never ends the search: the next match, if there is one, is looked at in turn.
     The spans are found once per line (``_quoted_spans``) and each candidate is
-    placed among them by bisection, so a line of many markers inside many
-    strings costs one pass and a logarithm per marker.
+    placed among them by bisection; a line of many markers inside many strings
+    still pays the pattern's own match once per candidate, and the span lookup
+    adds a logarithm to each.
     """
     starts: Optional[List[int]] = None
     ends: List[int] = []
@@ -150,7 +161,11 @@ def _reason(match: "re.Match[str]") -> str:
     a CR-only file the reason was the rest of the file, and the reason is copied
     into the SARIF justification of every finding the directive suppresses, so
     source text (a secret among it, say) landed in the results. The reason is
-    cut at the first CR whatever the line numbering decides about it.
+    cut at the first CR whatever the line numbering decides about it. The
+    patterns' blanks after the rule id are spaces and tabs only, so a CR right
+    after the rule id is the first character of the reason group and the cut
+    leaves the default reason; with ``\s*`` there the CR was consumed before
+    the group began and the next CR-line's text was the reason.
     """
     return (match.group(2) or "").split("\r", 1)[0].strip()
 

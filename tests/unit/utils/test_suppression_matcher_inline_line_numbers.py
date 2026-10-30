@@ -139,7 +139,8 @@ def test_a_lone_cr_ends_the_reason(tmp_path, directive):
 
 def test_a_cr_alone_after_the_rule_id_leaves_the_default_reason(tmp_path):
     """Cut at the CR, an empty reason is the default one, as for a bare
-    directive."""
+    directive. Red with ``\\s*`` after the rule id: ``\\s`` matches the CR, so
+    the reason group began after it and read ``rest``."""
     source = _write(tmp_path, "x = 1  # ash-ignore: R1\rrest\n")
 
     found = find_inline_suppressions(source)
@@ -147,6 +148,22 @@ def test_a_cr_alone_after_the_rule_id_leaves_the_default_reason(tmp_path):
     assert found == [
         InlineSuppression(line_number=1, rule_id="R1", reason="Inline suppression")
     ]
+
+
+@pytest.mark.parametrize(
+    "directive",
+    ["# ash-ignore:", "# ash-ignore-next-line:"],
+    ids=["inline", "next-line"],
+)
+def test_a_cr_right_after_the_marker_is_no_directive(tmp_path, directive):
+    """Red at the base: ``\\s*`` after the marker consumed the CR and the next
+    CR-line's first word, ``R1``, was taken as the rule id. The marker has no
+    rule id on its own line, so there is no directive."""
+    source = _write(tmp_path, f"x = 1  {directive}\rR1 why\ny = 2\n")
+
+    found = find_inline_suppressions(source)
+
+    assert found == []
 
 
 # --- the quoted-string scan is linear in the line ---
