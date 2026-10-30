@@ -5,8 +5,10 @@
 # Resolve the absolute path of the parent of the script directory (ASH repo root).
 # CDPATH is unset for the cd: with one exported, cd searches its entries for a relative
 # directory whose first component is not "." or ".." and prints the directory it went
-# to, so a script invoked as `utils/../ash` with a CDPATH entry holding a `utils` of its
-# own went to that entry, and ASH_ROOT_DIR held its path twice, on two lines.
+# to, so a script invoked as `<checkout>/ash` from a directory that CDPATH also names
+# (a projects directory, say) found the checkout through that entry and printed it, and
+# ASH_ROOT_DIR held its path twice, on two lines. `./ash` and `ash` give "." and are
+# never searched.
 export ASH_ROOT_DIR="$(CDPATH="" cd -- "$(dirname -- "$0")"; pwd)"
 export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 

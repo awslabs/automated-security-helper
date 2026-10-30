@@ -346,7 +346,11 @@ def test_the_long_version_option_is_still_the_wrappers_own(runner, tmp_path):
             "--version",
         ],
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    # The wrapper exits 0 after the CLI whatever it printed, so the version line
+    # itself is what shows the real CLI ran.
+    assert "awslabs/automated-security-helper v" in result.stdout, shown
     assert calls == [], "the version is printed on the host; no image is built or run"
 
 
@@ -368,26 +372,28 @@ def test_help_runs_the_wrappers_own_cli_not_a_package_in_the_working_directory(
     shown = result.stdout + result.stderr
     assert "PLANTED-PACKAGE-RAN" not in shown, shown
     assert result.returncode == 0, shown
+    # The wrapper exits 0 after the CLI whatever it printed, so the help text itself
+    # is what shows the real CLI ran.
+    assert "Usage" in result.stdout, shown
     assert calls == []
 
 
 def test_the_scripts_directory_is_read_with_cdpath_unset(runner, tmp_path):
     """With CDPATH exported, `cd` searches its entries for a relative directory whose
-    first component is not "." or "..", and prints the directory it went to. Invoked as
-    `utils/../ash` from the repository, the script's directory is `utils/..`; with a
-    CDPATH entry that holds a `utils` of its own, the base went to that entry and the
-    root directory held its path twice on two lines, so the build got a Dockerfile
-    path and a context with a newline in them. (`./ash` and `ash` give "." and are
-    never searched, so they cannot show this.)"""
+    first component is not "." or "..", and prints the directory it went to. Invoked
+    as `<checkout>/ash` from the checkout's parent with that parent in CDPATH (a shell
+    whose CDPATH names a projects directory, run from it), the base found the
+    checkout through the CDPATH entry and printed it, so the root directory held its
+    path twice on two lines and the build got a Dockerfile path and a context with a
+    newline in them. (`./ash` and `ash` give "." and are never searched, so they
+    cannot show this.)"""
     source, out = _dirs(tmp_path)
-    elsewhere = tmp_path / "elsewhere"
-    (elsewhere / "utils").mkdir(parents=True)
     result, calls = _run(
         runner,
         ["--source-dir", str(source), "--output-dir", str(out)],
-        cwd=REPO_ROOT,
-        script="utils/../ash",
-        env={"CDPATH": str(elsewhere), "BUILD_FAILS": "1"},
+        cwd=REPO_ROOT.parent,
+        script=f"{REPO_ROOT.name}/ash",
+        env={"CDPATH": str(REPO_ROOT.parent), "BUILD_FAILS": "1"},
     )
     shown = result.stdout + result.stderr
     builds = [call for call in calls if call[:1] == ["build"]]
