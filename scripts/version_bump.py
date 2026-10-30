@@ -247,10 +247,10 @@ class VersionBumper:
         # carries the old version, and saying "successfully updated" over it is
         # how a half-applied bump reached a release. The count is compared with
         # every target the manager lists, not with the templates that exist: a
-        # target whose template is missing is skipped with a warning, and
-        # measured against the templates alone that skip was invisible, so the
-        # set printed success while the target's page kept the release it was
-        # written at.
+        # target whose template is missing is reported as an error and not
+        # counted, and measured against the templates alone that was invisible
+        # to this check, so the set printed success while the target's page
+        # kept the release it was written at.
         targets = self.template_manager.target_files
         try:
             generated_count = self.template_manager.generate_all_from_templates()

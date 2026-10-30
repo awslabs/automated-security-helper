@@ -18,7 +18,7 @@ Separately, ``set`` printed "Successfully updated" and returned 0 when a templat
 failed to render: ``generate_from_template`` reports the error and returns False,
 ``generate_all_from_templates`` only counts, and nothing compared the count with
 the templates that exist. Compared with the templates that exist, a listed target
-whose template was missing still read as success: it is skipped with a warning and
+whose template was missing still read as success: it is reported as an error and
 never counted, so the count is compared with the targets instead.
 
 How the two checkouts are told apart
@@ -170,10 +170,10 @@ class TestAFailedRegenerationFailsTheSet:
     def test_a_target_with_no_template_fails_the_set(
         self, two_checkouts, monkeypatch, capsys
     ):
-        """A listed target whose template is missing is skipped with a warning.
+        """A listed target whose template is missing is reported as an error.
 
         Counted against the templates that exist rather than the targets, the
-        skip was invisible: the set printed "Successfully updated" and returned
+        miss was invisible: the set printed "Successfully updated" and returned
         True while the target's page kept the release it was written at.
         """
         project, _elsewhere = two_checkouts
