@@ -6,11 +6,15 @@
 The worker refuses every HTTP request detect-secrets tries unless its environment
 states ``REFUSE_HTTP_ENV`` as exactly ``"0"``, and it drops an entry a baseline it
 is handed accepted only when the request says ``"baseline_trusted": true``. Both
-halves are tested on their own beside the worker; this file reads the handoff
-through the scanner's own ``_scan_in_worker``: the environment the worker is
-spawned with states ``"0"`` only when the scan may verify and ``"1"`` otherwise,
-an inherited value of the same name is replaced, and the request file carries the
-trust flag as a JSON bool. Placeholder values only; nothing here is a credential.
+halves are tested on their own beside the worker, and each half of the handoff
+has its own pin through the real scan
+(test_detect_secrets_worker_env_always_states_refusal.py for the environment,
+test_detect_secrets_baseline_entries_are_known.py for the request's flag). This
+file reads BOTH from one call of the scanner's own ``_scan_in_worker``: the
+environment the worker is spawned with states ``"0"`` only when the scan may
+verify and ``"1"`` otherwise, an inherited value of the same name is replaced,
+and the request file carries the trust flag as a JSON bool. Placeholder values
+only; nothing here is a credential.
 """
 
 from __future__ import annotations
