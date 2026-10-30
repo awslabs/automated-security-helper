@@ -804,19 +804,53 @@ def _matched_path_text(uri: str, source_dir_prefix: str) -> str:
     surrogateescape reading): a SARIF ``artifactLocation.uri`` is a URI, and the
     checkov converter writes ``quote()``d paths, so ``a%20b.py`` names the file
     ``a b.py``. Undecoded, no suppression, ignore path or inline comment applied to
-    a file whose name holds a space or parentheses.
+    a file whose name holds a space or parentheses. A producer that writes plain
+    paths can name a file whose name itself holds an escape (``a%2Fb.json``), so
+    when the spelling as written names a file under the scan root and the decoded
+    spelling does not, it is kept as written: the file on disk settles the
+    reading, and the inline-suppression read, the finding id and an operator's
+    entry written against that name keep meeting the file.
     """
     if _is_file_uri(uri):
         text = _file_uri_to_path_text(uri)
     elif "%" in uri and not _URI_WITH_AUTHORITY.match(uri):
         from urllib.parse import unquote
 
-        text = unquote(uri, errors="surrogateescape")
+        decoded = unquote(uri, errors="surrogateescape")
+        text = (
+            uri
+            if _only_the_spelling_as_written_names_a_file(
+                uri, decoded, source_dir_prefix
+            )
+            else decoded
+        )
     else:
         text = uri
     if not text or _URI_WITH_AUTHORITY.match(text):
         return text
     return PurePosixPath(sanitized_uri_text(text, source_dir_prefix)).as_posix()
+
+
+def _only_the_spelling_as_written_names_a_file(
+    written: str, decoded: str, source_dir_prefix: str
+) -> bool:
+    """Whether *written* names a file under the scan root that *decoded* does not.
+
+    Both spellings are looked up where the URI points: as given when absolute,
+    under ``source_dir_prefix`` otherwise. ``os.path.exists`` answers False for a
+    name the file system refuses (a NUL, an over-long component), so an odd URI
+    never raises here and falls back to the decoded reading.
+    """
+    if decoded == written:
+        return False
+
+    def present(text: str) -> bool:
+        candidate = (
+            text if os.path.isabs(text) else os.path.join(source_dir_prefix, text)
+        )
+        return os.path.exists(candidate)
+
+    return present(written) and not present(decoded)
 
 
 def _normalize_sarif_uri(
@@ -1155,7 +1189,12 @@ def _suppress_transitive_of_suppressed_roots(
                 f"advisory is suppressed ({roots})",
                 extra=NO_MARKUP,
             )
+            # Appended beside what the result already carries, as the config pass
+            # does: this pass reaches a result whose own suppressions are not in
+            # effect (a scanner's rejected or under-review record), and replacing
+            # the list dropped that record.
             result.suppressions = [
+                *(result.suppressions or []),
                 Suppression(
                     kind=Kind1.inSource,
                     justification=(
@@ -1163,7 +1202,7 @@ def _suppress_transitive_of_suppressed_roots(
                         f"suppressed: {roots}"
                     ),
                     properties=ash_applied_properties(client_supplied=client_supplied),
-                )
+                ),
             ]
 
 
@@ -1744,13 +1783,16 @@ def apply_suppressions_to_sarif(
                 # The first location that names a file, as the suppression dialog
                 # (which writes the entry's path) picks it: reading locations[0]
                 # alone left a saved entry unmatched for a result whose first
-                # location has no physicalLocation.
+                # location has no physicalLocation, and an artifactLocation that
+                # names its artifact by index alone (no uri) names no file either,
+                # as the transitive pass reads it.
                 location = next(
                     (
                         candidate
                         for candidate in (result.locations or [])
                         if candidate.physicalLocation
                         and candidate.physicalLocation.root.artifactLocation
+                        and candidate.physicalLocation.root.artifactLocation.uri
                     ),
                     None,
                 )

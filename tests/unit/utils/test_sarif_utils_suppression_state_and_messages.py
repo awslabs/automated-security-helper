@@ -235,3 +235,80 @@ def test_the_first_location_naming_a_file_is_the_one_the_suppression_reads(tmp_p
     report = apply_suppressions_to_sarif(_report(result), _context(tmp_path, config))
 
     assert report.runs[0].results[0].suppressions
+
+
+def test_a_first_location_given_by_index_alone_is_passed_over(tmp_path):
+    """An artifactLocation may name its artifact by ``index`` alone, with no
+    ``uri``; the picker took it, read ``""`` as the path and the saved entry on
+    the located second location never applied."""
+    config = AshConfig(
+        project_name="u28",
+        global_settings={
+            "suppressions": [
+                AshSuppression(rule_id="RULE-1", path="app.py", reason="known")
+            ]
+        },
+    )
+    result = _result()
+    result.locations = [
+        Location(
+            physicalLocation=PhysicalLocation2(
+                artifactLocation=ArtifactLocation(index=0)
+            )
+        ),
+        *result.locations,
+    ]
+
+    report = apply_suppressions_to_sarif(_report(result), _context(tmp_path, config))
+
+    assert report.runs[0].results[0].suppressions
+
+
+def test_a_transitive_finding_keeps_the_record_its_scanner_gave_it():
+    """The pass reaches a transitive result whose only suppression is a
+    scanner's rejected record (not in effect) and then REPLACED its list, so
+    the record was gone and the lift left nothing."""
+    from automated_security_helper.utils.sarif_utils import (
+        _suppress_transitive_of_suppressed_roots,
+    )
+
+    root = _result(
+        uri="package-lock.json",
+        ruleId="GHSA-1",
+        suppressions=[Suppression(kind=Kind1.external, justification="x")],
+    )
+    transitive = _transitive(root_rule="GHSA-1")
+    transitive.suppressions = [
+        Suppression(
+            kind=Kind1.external, state=State.rejected, justification="scanner record"
+        )
+    ]
+
+    _suppress_transitive_of_suppressed_roots(
+        _report(root, transitive), lambda value, _is_uri: value
+    )
+
+    assert len(transitive.suppressions) == 2
+    assert transitive.suppressions[0].justification == "scanner record"
+    assert transitive.suppressions[0].state == State.rejected
+    assert transitive.suppressions[1].justification.startswith(
+        "(ASH) Suppressed because every root advisory is suppressed"
+    )
+    assert is_result_suppressed(transitive)
+
+
+def test_a_file_named_with_an_escape_is_read_as_written(tmp_path):
+    """A plain-path producer wrote ``fixtures/a%2Fb.json`` for the file of that
+    name; decoded, it named the missing ``fixtures/a/b.json``, so the inline read
+    opened nothing and the finding id changed."""
+    (tmp_path / "fixtures").mkdir()
+    (tmp_path / "fixtures" / "a%2Fb.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "fixtures" / "a b.json").write_text("{}", encoding="utf-8")
+    prefix = f"{tmp_path.as_posix()}/"
+
+    # The spelling as written names a file and the decoded one does not: kept.
+    assert _matched_path_text("fixtures/a%2Fb.json", prefix) == "fixtures/a%2Fb.json"
+    # Only the decoded spelling names a file: decoded, as a URI reads.
+    assert _matched_path_text("fixtures/a%20b.json", prefix) == "fixtures/a b.json"
+    # Neither names a file: decoded, as before.
+    assert _matched_path_text("fixtures/c%2Fd.json", prefix) == "fixtures/c/d.json"
