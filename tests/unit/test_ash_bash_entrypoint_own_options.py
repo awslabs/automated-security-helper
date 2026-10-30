@@ -6,10 +6,11 @@
 The wrapper's value options (--source-dir, --output-dir, --oci-runner and the CLI's
 --oci and --runner aliases, --build-target, --container-uid, --container-gid,
 --offline-semgrep-rulesets, --ash-revision) take `--opt value` and `--opt=value`, as
-the CLI inside the container does. `-v` is the CLI's --verbose, not the wrapper's
---version, so `./ash scan -v` scans. `--help` and `--version` run the CLI from the
-wrapper's own directory, not the caller's, so a package planted in a scanned checkout
-is not what runs. The script's own directory is read with CDPATH unset, and the
+the CLI inside the container does. `-v` after a subcommand is that subcommand's
+--verbose, so `./ash scan -v` scans; `-v` before any subcommand is the wrapper's
+--version. `--help`, `--version` and that `-v` run the CLI from the wrapper's own
+directory, not the caller's, so a package planted in a scanned checkout is not what
+runs, and exit with the CLI's own status. The script's own directory is read with CDPATH unset, and the
 container is run with its stdin open only for the subcommands that read it (`mcp`,
 `inspect`, `config`) and for a run given `--cli-json-input -`.
 

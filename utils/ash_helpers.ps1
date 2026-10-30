@@ -1702,7 +1702,7 @@ function Invoke-ASH {
         # than $null, so the null test always chose @("") and Get-Command rejected the
         # empty name. An unbound -OCIRunner whose OCI_RUNNER default is empty falls back
         # to discovery, in the order ./ash and the ash CLI use; an explicit -OCIRunner ''
-        # was refused with 3 when Invoke-ASH started.
+        # was refused with 5, the usage-error code, when Invoke-ASH started.
         $runners = if (-not [string]::IsNullOrEmpty($OCIRunner)) {
             @($OCIRunner)
         }
