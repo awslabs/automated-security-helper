@@ -394,14 +394,19 @@ def _copy_manifest(
 def _pnpm_workspace_copy(data: bytes, *, ignore_suppressions: bool) -> Optional[bytes]:
     """The ``pnpm-workspace.yaml`` the copy gets, or None for no file.
 
-    Only ``auditConfig`` crosses: pnpm 10 reads its advisory ignore lists from
-    that key of the workspace file as well as from ``pnpm.auditConfig`` in the
+    ``auditConfig`` crosses: pnpm 10 reads its advisory ignore lists from that
+    key of the workspace file as well as from ``pnpm.auditConfig`` in the
     manifest, and a repository that keeps them there lost its suppressions when
-    the file was left out of the copy. Every other key (the registry among them)
-    is a setting the module does not let the repository set, and stays out.
-    Under ``--ignore-suppressions`` nothing crosses, as the manifest's key is
-    dropped. A file that is not YAML, or not a mapping, gives no file: pnpm then
-    runs as it did without one.
+    the file was left out of the copy. ``packages`` crosses with it, when it is
+    a list of strings: it is the workspace's member globs, which name no
+    registry, proxy or path outside the package, and a workspace file without
+    it is one some pnpm releases refuse as an invalid workspace configuration,
+    so a copy cut down to ``auditConfig`` alone failed an audit that ran with
+    no file at all. Every other key (the registry among them) is a setting the
+    module does not let the repository set, and stays out. Under
+    ``--ignore-suppressions`` nothing crosses, as the manifest's key is dropped.
+    A file that is not YAML, or not a mapping, gives no file: pnpm then runs as
+    it did without one.
     """
     if ignore_suppressions:
         return None
@@ -413,7 +418,11 @@ def _pnpm_workspace_copy(data: bytes, *, ignore_suppressions: bool) -> Optional[
         return None
     if not isinstance(document, dict) or "auditConfig" not in document:
         return None
-    return yaml.safe_dump({"auditConfig": document["auditConfig"]}).encode("utf-8")
+    copied: Dict[str, object] = {"auditConfig": document["auditConfig"]}
+    packages = document.get("packages")
+    if isinstance(packages, list) and all(isinstance(p, str) for p in packages):
+        copied["packages"] = packages
+    return yaml.safe_dump(copied).encode("utf-8")
 
 
 def _links_into_skipped_dir(linked: Path, package_dir: Path) -> bool:

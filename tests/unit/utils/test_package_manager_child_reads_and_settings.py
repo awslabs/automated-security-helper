@@ -87,7 +87,14 @@ class TestPnpmWorkspaceSettings:
         (package / "pnpm-workspace.yaml").write_text(text, encoding="utf-8")
         return package
 
-    def test_the_audit_config_crosses_and_nothing_else_does(self, tmp_path):
+    def test_the_audit_config_and_the_member_globs_cross_and_nothing_else_does(
+        self, tmp_path
+    ):
+        """``packages`` rides along with ``auditConfig``: the member globs name
+        no registry or path outside the package, and a workspace file without
+        them is one some pnpm releases refuse as an invalid workspace
+        configuration, so the cut-down copy failed an audit that ran with no
+        file. The registry, a setting the repository may not set, stays out."""
         package = self._workspace(
             tmp_path,
             yaml.safe_dump(
@@ -102,9 +109,26 @@ class TestPnpmWorkspaceSettings:
         copied = _copy("pnpm", package, tmp_path)
 
         assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {
-            "auditConfig": AUDIT_CONFIG
+            "packages": ["packages/*"],
+            "auditConfig": AUDIT_CONFIG,
         }
         assert b"registry.example" not in copied["pnpm-workspace.yaml"]
+
+    def test_a_packages_value_that_is_not_a_list_of_globs_stays_out(self, tmp_path):
+        """Control: only the list-of-strings shape pnpm defines crosses; a
+        mapping or a list with other members is not the member globs."""
+        package = self._workspace(
+            tmp_path,
+            yaml.safe_dump(
+                {"packages": {"glob": "packages/*"}, "auditConfig": AUDIT_CONFIG}
+            ),
+        )
+
+        copied = _copy("pnpm", package, tmp_path)
+
+        assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {
+            "auditConfig": AUDIT_CONFIG
+        }
 
     def test_nothing_crosses_under_ignore_suppressions(self, tmp_path):
         package = self._workspace(
