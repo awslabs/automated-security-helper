@@ -86,6 +86,7 @@ from automated_security_helper.utils.process_env import set_environ, snapshot_en
 from automated_security_helper.utils.python_child import (
     empty_directory,
     python_child,
+    python_module_arguments,
     runs_module_or_code,
     uv_child_overrides,
 )
@@ -701,11 +702,6 @@ _UV_GLOBAL_OPTIONS_WITH_VALUES = frozenset(
 )
 
 
-#: Python's long option that takes a value, skipped on the way to ``-m uv``.
-_PYTHON_LONG_OPTIONS_WITH_VALUES = frozenset({"--check-hash-based-pycs"})
-#: Python's single-letter options that take a value: the rest of the argument, or
-#: the next argument when nothing follows the letter. -c and -m end the options.
-_PYTHON_LETTERS_WITH_VALUES = frozenset("cmWX")
 #: The modules that run uv: ``python -m uv`` and ``python -m uv.__main__``.
 _UV_MODULES = frozenset({"uv", "uv.__main__"})
 
@@ -729,38 +725,14 @@ def _uv_arguments(args: List[str]) -> Optional[List[str]]:
 def _python_module_arguments(options: List[str]) -> Optional[List[str]]:
     """What follows ``-m uv`` in a Python command line's ``options``, or None.
 
-    Read the way CPython reads its own options: single-letter ones cluster
-    (``-Im uv``, ``-IXutf8``), and a letter that takes a value (-c, -m, -W, -X)
-    takes the rest of its argument (``-muv``) or, when nothing follows it, the next
-    argument. -c, a script, ``-`` or ``--`` means no module runs; -m with any
-    module but uv's means another one does.
+    Read by the one reader of a Python command line's module in ASH,
+    :func:`python_child.python_module_arguments` (clusters such as ``-Im uv``,
+    attached values such as ``-muv``, ``-c``, a script, ``-`` or ``--`` meaning no
+    module): a copy of that reading lived here, and a spelling one of them
+    accepted the other could miss.
     """
-    index = 0
-    while index < len(options):
-        arg = options[index]
-        if arg in _PYTHON_LONG_OPTIONS_WITH_VALUES:
-            index += 2
-            continue
-        if arg in ("-", "--") or not arg.startswith("-"):
-            return None
-        if arg.startswith("--"):
-            index += 1
-            continue
-        for position in range(1, len(arg)):
-            letter = arg[position]
-            if letter not in _PYTHON_LETTERS_WITH_VALUES:
-                continue
-            value: Optional[str] = arg[position + 1 :]
-            if not value:
-                index += 1
-                value = options[index] if index < len(options) else None
-            if letter == "c":
-                return None
-            if letter == "m":
-                return options[index + 1 :] if value in _UV_MODULES else None
-            break  # -W or -X took the rest of this argument or the next one.
-        index += 1
-    return None
+    found = python_module_arguments(options)
+    return found[1] if found is not None and found[0] in _UV_MODULES else None
 
 
 def _uv_reads_project_config(args: List[str], shell: bool) -> bool:
