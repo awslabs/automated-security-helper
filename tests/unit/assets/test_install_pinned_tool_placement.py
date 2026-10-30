@@ -17,6 +17,8 @@ Each class pins one way the install could leave the destination wrong:
   so a copy that ran out of space (ENOSPC, EIO, EACCES) left the same state. The copy
   now comes first and only a rename follows the publish. The staged file is renamed
   into place when both sit on one filesystem and copied only across filesystems.
+* Two installs of one tool with ``third_party_dir`` set: the one that loses the
+  license publish finds the same files in place and still installs the binary.
 * ``publish_third_party`` deleted the old license directory before the move, and
   could not delete a symlink or a file at all.
 * A zip archive's directory entry that carried the member's name counted as a
@@ -363,6 +365,34 @@ class TestAFailedPlacementLeavesTheLicensesAlone:
 
         assert (bin_dir / "demo").read_bytes() == _PAYLOAD
         assert (third_party / "demo" / "LICENSE").read_bytes() == _LICENSE
+        assert sorted(p.name for p in bin_dir.iterdir()) == ["demo"]
+
+
+class TestTwoInstallsOfOneTool:
+    def test_the_loser_of_the_license_publish_still_installs_the_binary(
+        self, tmp_path, monkeypatch
+    ):
+        """Through ``install``, with ``third_party_dir`` set, as the image sets it."""
+        setup = _Setup(monkeypatch)
+        bin_dir = tmp_path / "bin"
+        third_party = tmp_path / "third-party"
+        final = third_party / "demo"
+        real = os.replace
+
+        def other_install_publishes_first(src, dst, *args, **kwargs):
+            if Path(dst) == final and Path(src).name == "incoming":
+                final.mkdir()
+                (final / "LICENSE").write_bytes(_LICENSE)
+                (final / "SOURCE").write_bytes(b"demo notice\n")
+            return real(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", other_install_publishes_first)
+
+        installed = setup.install(bin_dir, third_party)
+
+        assert installed.read_bytes() == _PAYLOAD
+        assert (final / "LICENSE").read_bytes() == _LICENSE
+        assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
         assert sorted(p.name for p in bin_dir.iterdir()) == ["demo"]
 
 

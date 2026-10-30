@@ -1203,6 +1203,11 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     that can stop half way. The old entry (a directory, or a file or symlink put
     there by hand) is then renamed aside, not deleted, and the new directory is
     renamed into place; if that last rename fails, the old entry is put back.
+
+    When putting it back fails too, with nothing at the name, the work directory
+    is kept and holds the old entry as ``old``: its path is printed, and it is
+    the only copy left. A work directory is deleted only when the name holds an
+    entry (this call's or a concurrent publish's) or the old entry was restored.
     """
     third_party_dir.mkdir(parents=True, exist_ok=True)
     for path in staged.iterdir():
@@ -1210,6 +1215,7 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     staged.chmod(0o755)
     final = third_party_dir / staged.name
     work = Path(tempfile.mkdtemp(prefix=_PUBLISH_WORK_PREFIX, dir=third_party_dir))
+    keep_work = False
     try:
         incoming = work / "incoming"
         shutil.copytree(staged, incoming)
@@ -1230,10 +1236,25 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
             # this call was asked to publish and its own copy is surplus.
             if not (isinstance(exc, OSError) and _same_files(incoming, final)):
                 if old.is_symlink() or old.exists():
-                    _rename_or_copy(old, final)
+                    try:
+                        _rename_or_copy(old, final)
+                    except BaseException:
+                        # Something at the name (a concurrent publish's entry)
+                        # supersedes the old one. With nothing there, the old
+                        # entry is gone from its name and `old` is all that is
+                        # left of it, so the work directory must outlive this call.
+                        keep_work = not (final.is_symlink() or final.exists())
+                        if keep_work:
+                            print(
+                                f"could not put the previous {final.name} license "
+                                f"entry back at {final}; it is kept at {old}",
+                                file=sys.stderr,
+                            )
+                        raise
                 raise
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        if not keep_work:
+            shutil.rmtree(work, ignore_errors=True)
     print(f"Installed {staged.name} license files to {final}", flush=True)
     return final
 

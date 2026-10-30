@@ -10,6 +10,11 @@ FileNotFoundError when the other publish had already moved it, and its rename of
 the new directory into place hit "Directory not empty" when the other publish had
 already put the same files there.
 
+A publish whose forward rename fails puts the old entry back. When that restore
+fails as well and nothing is at the name, the old entry is whole only in the
+publish's work directory, which used to be deleted with it. It is kept now, and its
+path is printed.
+
 Nothing here reaches the network or starts a process.
 """
 
@@ -111,4 +116,74 @@ class TestTheLoserOfAConcurrentPublish:
         )
 
         assert (published / "LICENSE").read_bytes() == b"new\n"
+        assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+
+class TestAFailedRestoreDoesNotLoseTheOldEntry:
+    @staticmethod
+    def _old_entry(tmp_path: Path) -> "tuple[Path, Path]":
+        third_party = tmp_path / "third-party"
+        final = third_party / "demo"
+        final.mkdir(parents=True)
+        (final / "LICENSE").write_bytes(b"old\n")
+        return third_party, final
+
+    def test_the_old_entry_is_kept_in_the_work_directory(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        third_party, final = self._old_entry(tmp_path)
+        real = os.replace
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(dst) == final and Path(src).name == "incoming":
+                raise OSError(errno.ENOSPC, "No space left on device")
+            if Path(dst) == final and Path(src).name == "old":
+                raise OSError(errno.EACCES, "Permission denied")
+            return real(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", replace)
+
+        with pytest.raises(PermissionError):
+            installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert not final.exists()
+        kept = [
+            p
+            for p in third_party.iterdir()
+            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
+        ]
+        assert len(kept) == 1, "the work directory holding the old entry was deleted"
+        assert (kept[0] / "old" / "LICENSE").read_bytes() == b"old\n"
+        assert str(kept[0] / "old") in capsys.readouterr().err
+
+    def test_an_entry_a_concurrent_publish_put_there_makes_the_old_one_surplus(
+        self, tmp_path, monkeypatch
+    ):
+        """Control: with something at the name, nothing is kept and nothing leaks."""
+        third_party, final = self._old_entry(tmp_path)
+        _other_publish_wins(monkeypatch, final, b"something else\n")
+
+        with pytest.raises(OSError):
+            installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert (final / "LICENSE").read_bytes() == b"something else\n"
+        assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+    def test_a_restore_that_works_leaves_no_work_directory(self, tmp_path, monkeypatch):
+        """Control: the old entry goes back and the work directory is removed."""
+        third_party, final = self._old_entry(tmp_path)
+        real = os.replace
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(dst) == final and Path(src).name == "incoming":
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return real(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", replace)
+
+        with pytest.raises(OSError) as raised:
+            installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert raised.value.errno == errno.ENOSPC
+        assert (final / "LICENSE").read_bytes() == b"old\n"
         assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
