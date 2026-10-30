@@ -20,6 +20,7 @@ directory first, so a scan run from inside the tree recorded a different path.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import gzip
 import io
@@ -259,6 +260,82 @@ def test_a_failure_of_the_run_is_a_tool_error_that_no_suppression_accepts(
 )
 def test_the_kind_of_a_failure_follows_the_error(error, kind):
     assert archive_converter._failure_kind(error) == kind
+
+
+def _tar_stream_raising(monkeypatch, error: BaseException) -> None:
+    @contextlib.contextmanager
+    def failing(handle):
+        raise error
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(archive_converter, "_tar_stream", failing)
+
+
+@pytest.mark.parametrize(
+    ("error", "raised"),
+    [
+        pytest.param(zlib.error("Error -3 while decompressing"), False, id="damaged"),
+        pytest.param(EOFError("Compressed file ended"), False, id="cut"),
+        pytest.param(
+            OSError(errno.EINVAL, "Invalid data stream"), False, id="bz2-stream"
+        ),
+        pytest.param(PermissionError(errno.EACCES, "denied"), True, id="permission"),
+        pytest.param(OSError(errno.EIO, "Input/output error"), True, id="eio"),
+        pytest.param(MemoryError(), True, id="memory"),
+        pytest.param(AttributeError("defect in the stream"), True, id="defect"),
+    ],
+)
+def test_the_tar_probe_answers_not_a_tar_only_for_the_archives_own_errors(
+    monkeypatch, error, raised
+):
+    """Reading the first block through the decompressor, the probe caught every
+    error and answered "not a tar", so a permission refusal, a device error or a
+    defect in the stream classes was recorded as an input error on the archive,
+    which a suppression waives. Only the archive's own errors are that answer;
+    the run's are raised, for convert() to grade as a tool failure."""
+    _tar_stream_raising(monkeypatch, error)
+    handle = io.BytesIO(b"x" * 1024)
+
+    if raised:
+        with pytest.raises(type(error)):
+            archive_converter._holds_a_tar(handle)
+    else:
+        assert archive_converter._holds_a_tar(handle) is False
+    assert handle.tell() == 0
+
+
+def test_a_run_error_while_probing_a_tar_is_a_tool_error_no_suppression_accepts(
+    test_plugin_context, monkeypatch
+):
+    from automated_security_helper.models.asharp_model import waives_gate
+
+    source = Path(test_plugin_context.source_dir)
+    archive = source / "lib" / "b.tar"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    packed = io.BytesIO()
+    with tarfile.open(fileobj=packed, mode="w") as sound:
+        info = tarfile.TarInfo("z.js")
+        info.size = 6
+        sound.addfile(info, io.BytesIO(b"z = 1\n"))
+    archive.write_bytes(packed.getvalue())
+    test_plugin_context.config.global_settings.suppressions = [
+        AshSuppression(
+            rule_id="ash-unconverted-input",
+            path="lib/b.tar",
+            reason="a fixture kept on purpose",
+        )
+    ]
+    _tar_stream_raising(monkeypatch, PermissionError(errno.EACCES, "denied"))
+    converter = _converter(test_plugin_context, monkeypatch, archive)
+
+    results = converter.convert()
+
+    assert results == []
+    (failed,) = converter.failed_inputs
+    assert failed.kind == "tool"
+    assert failed.accepted is False
+    assert not waives_gate(failed)
+    assert "PermissionError" in failed.reason
 
 
 def test_a_scan_set_path_outside_the_tree_is_not_skipped_and_does_not_raise(

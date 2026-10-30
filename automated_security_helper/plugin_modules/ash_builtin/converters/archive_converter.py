@@ -1011,13 +1011,20 @@ def _holds_a_tar(handle: BinaryIO) -> bool:
     the size it declares, before any bound the converter puts on header reads
     exists. Content the decompressor or the stream refuses is not a tar the
     converter reads; the caller records why when the name says it should be one.
+    An error of the run (no permission or memory, a device failure, a defect in
+    the stream classes) is not that answer: it is raised, so convert() records
+    it as a failure of the run's kind, which no suppression accepts, as
+    _failure_kind grades it. Caught whole, every such error read as "not a tar",
+    and the archive was recorded as an input error a suppression could waive.
     The handle is left at its start.
     """
     handle.seek(0)
     try:
         with _tar_stream(handle) as stream:
             block = stream.read(tarfile.BLOCKSIZE)
-    except Exception:
+    except Exception as error:
+        if _failure_kind(error) == "tool":
+            raise
         return False
     finally:
         handle.seek(0)
