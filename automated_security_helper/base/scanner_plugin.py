@@ -1975,10 +1975,18 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         tool_said_nothing = not "\n".join(self._tool_error_lines()).strip()
         values_read = False
         read_values: Optional[Tuple[str, ...]] = None
+        stderr_withheld = False
         if stderr_text:
             values_read, read_values = True, guarded_values(self)
             if read_values is not None:
                 stderr_text = text_without_values(stderr_text, read_values)
+            else:
+                # The hook raised or gave no usable answer, so nothing here can
+                # hide the values the lines hold. They are not shown: the log
+                # branch below names the stderr log, as it does when it meets
+                # the same hook, and the closing branches say so when it cannot.
+                stderr_text = ""
+                stderr_withheld = True
         # ASH's notes, kept in the message whatever the log read does.
         notes_text = stderr_text if tool_said_nothing else ""
         notes_part = (
@@ -2101,6 +2109,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if stderr_text:
             stderr_text = head_and_tail(stderr_text, _STDERR_EXCERPT_LIMIT)
             detail += f". Stderr: {stderr_text}"
+        elif stderr_withheld:
+            detail += ". Stderr could not be shown"
+            if log_path is not None:
+                detail += f"; see {log_path.as_posix()}"
         elif rejected and log_path is not None:
             # Names the log rather than quoting it: the result was refused, so
             # its outputs were not opened.
