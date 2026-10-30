@@ -2432,6 +2432,14 @@ def _file_uri_path_text(uri: str) -> str:
     parser cut the path there. The path is percent-decoded the way the file
     system decodes a name (surrogateescape), so a name holding a space, a
     non-ASCII character or a byte that is not UTF-8 reads back as the file's own.
+
+    This reader and the sanitize path's (``utils/sarif_utils._file_uri_to_path_text``)
+    agree on everything but a host: that one drops any authority and names
+    ``/abs`` (``TestBug47FileUriHostSegment`` pins it), because it normalizes a
+    location for display and suppression matching, where this one decides
+    whether a result names a listed LOCAL file, and a remote share's path must
+    not. Whether the sanitize path should keep the UNC root too is a product
+    decision, not taken here.
     """
     if uri[:5].lower() != "file:":
         return uri
