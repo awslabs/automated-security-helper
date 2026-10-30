@@ -9,10 +9,11 @@ output file never existed for a clean scan; a secret finding's code snippet was
 written into the details with include_code_snippets on; a suppressed finding
 sat in the finding table with nothing to tell it from an analyzed one; and
 after the fallback walk exhausted, every later section walked the whole chain
-again. What a run keeps from an exhausted walk is the listing's answer alone,
-the candidates it does not name: a throttled listing is asked again by the next
-section, as the walk tests already pin, and a candidate that failed on one
-section's prompt is called again with the next one.
+again. What a run keeps from an exhausted walk is what is settled about the
+models: the candidates the listing does not name, and the candidates Converse
+refused as not permitted or not found. A throttled listing is asked again by
+the next section, as the walk tests already pin, and a candidate that failed on
+one section's prompt is called again with the next one.
 
 No test here calls AWS: the sessions and clients are doubles.
 """
@@ -348,3 +349,41 @@ def test_a_candidate_that_failed_on_one_prompt_is_called_again_for_the_next(
     assert second.ok is True and second.text == "a shorter answer", second.text
     assert runtime.models == [PRIMARY_MODEL, fallback, PRIMARY_MODEL, fallback]
     assert reporter._unavailable_models == set()
+
+
+@pytest.mark.parametrize("code", ["AccessDeniedException", "ResourceNotFoundException"])
+def test_a_candidate_converse_refused_as_not_permitted_is_not_called_again(
+    monkeypatch, tmp_path, code
+):
+    """The other side of the boundary: a listed candidate Converse refused as
+    not permitted or not found is refused on every prompt, so section two
+    does not call it again (and does not walk it), while the configured model
+    is still called with section two's prompt."""
+    prompt_refusal = botocore.exceptions.ClientError(
+        {"Error": {"Code": "ValidationException", "Message": "too long"}}, "Converse"
+    )
+    model_refusal = botocore.exceptions.ClientError(
+        {"Error": {"Code": code, "Message": "no"}}, "Converse"
+    )
+    fallback = "test-vendor.test-model-fallback-1-v1:0"
+    runtime = _RuntimeByModel(
+        {PRIMARY_MODEL: [prompt_refusal], fallback: [model_refusal]}
+    )
+    control_plane = ControlPlaneDouble(fallback)
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", _session_double(runtime, control_plane)
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_fallback_model",
+        {PRIMARY_MODEL: fallback, fallback: PRIMARY_MODEL}.get,
+    )
+    reporter = make_reporter(plugin_context_in(tmp_path), max_retries=0)
+    client = reporter._make_model_client(runtime)
+
+    first = reporter._outcome_with_fallback(client, "prompt one", "system")
+    second = reporter._outcome_with_fallback(client, "prompt two", "system")
+
+    assert first.ok is False and second.ok is False
+    assert runtime.models == [PRIMARY_MODEL, fallback, PRIMARY_MODEL], runtime.models
+    assert reporter._unavailable_models == {fallback}
+    assert control_plane.listings == 1, "the chain was listed once"

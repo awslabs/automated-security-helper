@@ -495,9 +495,10 @@ class _RuntimeFailsThenAnswers:
 
 
 def test_a_failed_answer_is_not_cached(monkeypatch, tmp_path):
-    """The first placement under a key fails (no fallback is listed, so the
-    walk exhausts); the second placement asks the model again instead of
-    serving the failure text from the cache."""
+    """The first placement under a key fails (fallbacks are off, so the
+    configured model's refusal is the outcome and no walk runs); the second
+    placement asks the model again instead of serving the failure text from
+    the cache."""
     runtime = _RuntimeFailsThenAnswers()
     monkeypatch.setattr(
         f"{MODULE}.boto3.Session", _session_double(runtime, ControlPlaneDouble())

@@ -534,6 +534,13 @@ def _number_or_default(
 #: (``CONTROL_PLANE_RETRIES``: three attempts, which is two retries).
 DEFAULT_MODEL_CALL_RETRIES = 3
 
+#: The Converse refusals that are about the model, not the prompt: the caller
+#: is not permitted to invoke it, or Converse does not know it. A fallback
+#: candidate refused with one of these is skipped by the run's later sections
+#: as an unlisted one is; every other failure (a validation error of this
+#: prompt, a throttle, a timeout) is tried again on the next section.
+_REFUSED_FOR_THE_RUN = frozenset({"AccessDeniedException", "ResourceNotFoundException"})
+
 #: The line under a generated section's title: the text came from a model.
 GENERATED_HEADER = (
     "Generated with Amazon Bedrock. Verify suggestions against the source findings."
@@ -2094,10 +2101,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         resumes after it, without calling the configured model again
         (``_configured_error`` keeps why that one failed). A walk that found
         nothing is not kept as such: what it keeps is which candidates the
-        listing does not name (``_unavailable_models``), so a later section
-        does not ask the control plane about them again, while a candidate
-        that failed on one prompt is called again with the next one, and one
-        the control plane left unchecked is checked again.
+        listing does not name and which Converse refused as not permitted or
+        not found (``_unavailable_models``), so a later section does not ask
+        about them again, while a candidate that failed on one prompt (a
+        validation error, a throttle, a timeout) is called again with the next
+        one, and one the control plane left unchecked is checked again.
         """
         opts = self.config.options
 
@@ -2278,9 +2286,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             called.append(resume_after)
         visited = set(called) | {primary}
         # The candidates an earlier walk of this run found the listing does
-        # not name: a listing fact, which does not change within a run, so a
-        # later section takes them as unavailable without asking again. The
-        # shims' walks (keep_as_run_model False) neither read nor write it.
+        # not name, or Converse refused as not permitted or not found: facts
+        # about the model that do not change within a run, so a later section
+        # takes them as unavailable without asking again. The shims' walks
+        # (keep_as_run_model False) neither read nor write it.
         known_unavailable = (
             getattr(self, "_unavailable_models", None) if keep_as_run_model else None
         )
@@ -2320,6 +2329,16 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     # with the real error, not the generic exhaustion text
                     # after calling the rest of the chain for nothing.
                     return outcome
+                if (
+                    known_unavailable is not None
+                    and outcome.code in _REFUSED_FOR_THE_RUN
+                ):
+                    # Not permitted, or not found by Converse: a refusal about
+                    # the model, the same on every prompt, so the run's later
+                    # sections skip it as they skip an unlisted one. A throttle,
+                    # a timeout or a refusal of this prompt is not kept: the
+                    # next section's call may pass.
+                    known_unavailable.add(model)
             model = get_fallback_model(model)
         exhausted = CallOutcome(
             text_without_values(
@@ -2340,9 +2359,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             model_specific=True,
         )
         if known_unavailable is not None:
-            # Only the listing's answer is kept for the run's later sections.
-            # A candidate that was called and failed may answer the next
-            # section's prompt, and a candidate the control plane left
+            # What the run's later sections take as settled: the listing's
+            # answer, and the candidates Converse refused as not permitted or
+            # not found (kept above). A candidate whose call failed on this
+            # prompt (a validation error, a throttle, a timeout) may answer the
+            # next section's prompt, and a candidate the control plane left
             # unchecked (a throttled or refused listing) is checked again.
             known_unavailable.update(unavailable)
         return exhausted

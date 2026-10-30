@@ -165,11 +165,17 @@ class CallOutcome:
     ``_AFTER_CONNECTING``: a connection that closed after it was made, or a
     read of the answer that timed out); a failure of the credentials, the
     connection setup or the service is not.
+    ``code`` is the Converse error code of a failure the service answered
+    (``AccessDeniedException``, ``ValidationException``, ...), None for an
+    answer, an empty response and a client-side failure. A caller that walks
+    a chain reads it to tell a refusal about the model itself (not permitted,
+    not found: the same on every prompt) from one about this prompt.
     """
 
     text: str
     ok: bool
     model_specific: bool = False
+    code: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -370,11 +376,13 @@ class BedrockModelClient:
                     return self._failed(
                         f"*Error: Access denied to model {self._model_label}. Check IAM permissions.*",
                         model_specific,
+                        code,
                     )
                 if code == "ResourceNotFoundException":
                     return self._failed(
                         f"*Error: Model {self._model_label} not found. Check model ID and region.*",
                         model_specific,
+                        code,
                     )
                 if code == "ValidationException":
                     # Not a parameter we sent: an over-long prompt, say, which
@@ -382,13 +390,15 @@ class BedrockModelClient:
                     return self._failed(
                         f"*Error: Validation error with model {self._model_label}: {msg}*",
                         model_specific,
+                        code,
                     )
                 if code in ("ThrottlingException", "TooManyRequestsException"):
                     return self._failed(
                         f"*Error: Rate limit exceeded for model {self._model_label}. Try again later.*",
                         model_specific,
+                        code,
                     )
-                return self._failed(f"*Error: {msg}*", model_specific)
+                return self._failed(f"*Error: {msg}*", model_specific, code)
 
             except Exception as exc:
                 error_type = type(exc).__name__
@@ -452,10 +462,16 @@ class BedrockModelClient:
             return True
         return False
 
-    def _failed(self, text: str, model_specific: bool) -> CallOutcome:
-        """A failed call's outcome, its text redacted."""
+    def _failed(
+        self, text: str, model_specific: bool, code: Optional[str] = None
+    ) -> CallOutcome:
+        """A failed call's outcome, its text redacted; *code* is the Converse
+        error code when the service answered one."""
         return CallOutcome(
-            self._redacted(text), ok=False, model_specific=model_specific
+            self._redacted(text),
+            ok=False,
+            model_specific=model_specific,
+            code=code or None,
         )
 
 
