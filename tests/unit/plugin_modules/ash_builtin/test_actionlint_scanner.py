@@ -2511,8 +2511,9 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         # A later document that fails to compose must not lose the ones before
         # it; the folded value is found by the walk alone.
         ("steps:\n  - uses: >-\n      ./n\n---\nbad: [\n", {"./n"}),
-        # An escape outside Unicode: PyYAML's scanner raises ValueError, not a
-        # YAMLError, on both the composed walk and the line scan's decode. go-yaml
+        # An escape outside Unicode: PyYAML's scanner lets chr() raise, not a
+        # YAMLError, on both the composed walk and the line scan's decode (an
+        # OverflowError here, past the C int; a ValueError past 0x10FFFF). go-yaml
         # rejects the escape too, so actionlint reads nothing through it.
         ('steps:\n  - uses: "./\\UFFFFFFFF"\n', set()),
         ('steps:\n  - uses: "./\\UFFFFFFFF"\n  bad: [\n', set()),

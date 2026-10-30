@@ -408,15 +408,16 @@ def _decoded_scalar(quoted: str, fallback: str) -> Optional[str]:
     Escapes are decoded and line breaks folded as YAML does. The *fallback* (the
     raw text, a superset reading) is returned when PyYAML raises a YAMLError on
     it: a quoting PyYAML cannot read, actionlint's parser might. None is returned
-    on a ValueError, which PyYAML's scanner raises as is on an escape outside
-    Unicode (``\\UFFFFFFFF``): actionlint's parser rejects that escape too, so no
-    file is read through the value.
+    on an escape outside Unicode (``\\UFFFFFFFF``), which PyYAML's scanner hands
+    to ``chr()`` as is: a ValueError past ``0x10FFFF``, an OverflowError past
+    the C int (``\\UFFFFFFFF`` itself, on every supported Python). actionlint's
+    parser rejects that escape too, so no file is read through the value.
     """
     try:
         decoded = yaml.safe_load(quoted)
     except yaml.YAMLError:
         return fallback
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
     return decoded if isinstance(decoded, str) else fallback
 
@@ -478,9 +479,10 @@ def local_uses_references(text: str) -> Set[str]:
         for node in yaml.compose_all(text, Loader=yaml.SafeLoader):
             if node is not None:
                 stack.append(node)
-    except (yaml.YAMLError, RecursionError, ValueError):
-        # ValueError: an escape outside Unicode in a quoted scalar; PyYAML's
-        # scanner lets chr() raise it instead of wrapping it as a YAMLError.
+    except (yaml.YAMLError, RecursionError, ValueError, OverflowError):
+        # ValueError and OverflowError: an escape outside Unicode in a quoted
+        # scalar; PyYAML's scanner lets chr() raise them (OverflowError past
+        # the C int, as for \UFFFFFFFF) instead of wrapping them as a YAMLError.
         pass
     visited: Set[int] = set()
     while stack:
