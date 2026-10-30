@@ -25,6 +25,10 @@ What is asserted
 * It checks every target the template manager lists, as ``set`` counts them, so a
   listed target whose template is missing fails here too; a template that is not
   listed is not looked at.
+* The pyproject.toml version itself must be one ``set`` can write (PEP 440, three
+  release numbers, spelled as pip prints it). A spelling set refuses, or text that
+  is not a version, fails with advice naming a command ``set`` accepts: the
+  canonical spelling, or the final release for a pre-release set cannot write.
 * It passes on a tree where all of them agree.
 * The version it prints comes from the pyproject.toml at the project root; with no
   such file it fails and prints no version that came from somewhere else.
@@ -216,6 +220,73 @@ class TestEveryListedTargetIsChecked:
         out = capsys.readouterr().out
         assert "README.md is not its template rendered for 1.2.3" in out
         assert "missing.md.template does not exist" in out
+
+
+class TestTheVersionItselfIsChecked:
+    def test_a_spelling_set_refuses_is_reported_with_a_command_set_accepts(
+        self, project, monkeypatch, capsys
+    ):
+        # Red before: validate compared the pages and the tables, never the version,
+        # so this tree failed only on its stale page and the advice was
+        # "run 'set 1.02.3'", which set refuses as an invalid version.
+        _write_pyproject(project, "1.02.3", "1.02.3")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "'1.02.3' is not a version that set can write" in out
+        assert "run 'set 1.2.3'" in out
+        assert "set 1.02.3" not in out
+        assert "not its template rendered" not in out
+
+    def test_a_hyphenated_pre_release_gets_its_final_release_as_the_advice(
+        self, project, monkeypatch, capsys
+    ):
+        # An older set wrote this spelling; the current set refuses both it and
+        # 3.8.0rc1, so the advice names the final release.
+        _write_pyproject(project, "3.8.0-rc1", "3.8.0-rc1")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "'3.8.0-rc1' is not a version that set can write" in out
+        assert "run 'set 3.8.0'" in out
+        assert "set 3.8.0-rc1" not in out
+        assert "set 3.8.0rc1" not in out
+
+    def test_text_that_is_not_a_version_is_reported_not_passed(
+        self, project, monkeypatch, capsys
+    ):
+        # Red before: the pages matched the tables' text, so this passed.
+        _write_pyproject(project, "not-a-version", "not-a-version")
+        project.joinpath("README.md").write_text(
+            TEMPLATE.replace("{{VERSION}}", "not-a-version"), encoding="utf-8"
+        )
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "'not-a-version' is not a version that set can write" in out
+        assert "run 'set X.Y.Z' with a final version" in out
+        assert "validation passed" not in out
+
+    def test_a_canonical_pre_release_whose_pages_match_passes(
+        self, project, monkeypatch
+    ):
+        _write_pyproject(project, "2.0.0rc1", "2.0.0rc1")
+        project.joinpath("README.md").write_text(
+            TEMPLATE.replace("{{VERSION}}", "2.0.0rc1"), encoding="utf-8"
+        )
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is True
+
+    def test_a_stale_page_under_a_pre_release_does_not_advise_setting_it(
+        self, project, monkeypatch, capsys
+    ):
+        _write_pyproject(project, "2.0.0rc1", "2.0.0rc1")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "README.md is not its template rendered for 2.0.0rc1" in out
+        assert "run 'set 2.0.0'" in out
+        assert "set 2.0.0rc1" not in out
 
 
 class TestDisagreeingTablesAreReportedOnceNotAsEveryPageStale:

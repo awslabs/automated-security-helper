@@ -124,6 +124,32 @@ def validate_version(version: str) -> bool:
     return parsed.local is None and str(parsed) == version
 
 
+def fix_with_set(version: str) -> str:
+    """The ``set`` command that writes ``version``, or the final release nearest it.
+
+    ``set`` takes a final X.Y.Z spelled as pip prints it and refuses anything else,
+    so a tree whose pyproject.toml holds 3.8.0-rc1 or 3.8.0rc1 cannot be repaired by
+    ``set`` with that text. The advice names what ``set`` accepts: the version
+    itself when it is final, its release numbers (``base_version``) when it is not,
+    and a placeholder when it is not a version at all.
+    """
+    try:
+        parsed = _read_version(version)
+    except ValueError:
+        return "run 'set X.Y.Z' with a final version, such as 'set 3.1.0'"
+    if (
+        parsed.local is None
+        and not parsed.is_prerelease
+        and not parsed.is_postrelease
+        and not parsed.is_devrelease
+    ):
+        return f"run 'set {parsed}'"
+    return (
+        f"run 'set {parsed.base_version}' (set writes final X.Y.Z versions only, "
+        f"so {version} cannot be written)"
+    )
+
+
 class VersionBumper:
     """Handles version bumping and template regeneration."""
 
@@ -275,6 +301,19 @@ class VersionBumper:
         consistent = True
         tables_agree = True
 
+        # The version itself, before anything is compared with it: a spelling
+        # `set` refuses (3.8.0-rc1, written by an older set) or text that is not a
+        # version at all (not-a-version) passed here as long as the pages matched,
+        # and the advice below would have told the reader to run `set` with it.
+        writable = validate_version(current_version)
+        if not writable:
+            print(
+                f"Error: [project] version {current_version!r} is not a version "
+                "that set can write (PEP 440 with three release numbers, spelled "
+                f"as pip prints it); {fix_with_set(current_version)}"
+            )
+            consistent = False
+
         try:
             released = self.template_manager.packaged_release()
         except KeyError:
@@ -287,9 +326,9 @@ class VersionBumper:
             # release version, and the pages are compared once the tables agree.
             print(
                 f"Error: [tool.commitizen] version is {released} but "
-                f"[project] version is {current_version}; run 'set {released}' to "
-                "write both from the release version. The pages are not compared "
-                "until the two agree."
+                f"[project] version is {current_version}; to write both from the "
+                f"release version, {fix_with_set(released)}. The pages are not "
+                "compared until the two agree."
             )
             consistent = False
             tables_agree = False
@@ -321,7 +360,7 @@ class VersionBumper:
                 print(f"Error: {target} does not exist; generate it from {template}")
                 consistent = False
                 continue
-            if not tables_agree:
+            if not (tables_agree and writable):
                 continue
             expected = self.template_manager.render(
                 template.read_text(encoding="utf-8"), current_version
@@ -329,7 +368,8 @@ class VersionBumper:
             if actual != expected:
                 print(
                     f"Error: {target} is not its template rendered for "
-                    f"{current_version}; run 'set {current_version}' to regenerate it"
+                    f"{current_version}; {fix_with_set(current_version)} to "
+                    "regenerate it"
                 )
                 consistent = False
 
