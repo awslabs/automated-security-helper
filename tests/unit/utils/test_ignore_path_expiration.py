@@ -492,8 +492,16 @@ class TestExpiryWarning:
         )
         assert any("suppressions will expire within 30 days" in w for w in warnings)
 
-    def test_ignore_paths_are_warned_about_under_ignore_suppressions(self, tmp_path):
-        """--ignore-suppressions skips the SARIF step, not the scanners' pre-filter."""
+    def test_nothing_expiring_is_warned_about_under_ignore_suppressions(self, tmp_path):
+        """--ignore-suppressions lifts the ignore paths as well as the suppressions.
+
+        ``models.core.ignore_paths_that_skip_scanning`` hands the scanners and
+        converters no ignore path under the flag and the SARIF step applies none
+        (docs/content/concepts/suppressions.md), so an ignore path's expiry
+        changes nothing about the run either, and the checker names neither
+        kind. This test used to expect the ignore path to be warned about on the
+        reading that the flag turned off suppressions only.
+        """
         config = _config(
             ignore_paths=[
                 IgnorePathWithReason(
@@ -514,13 +522,7 @@ class TestExpiryWarning:
         ) as logger:
             assert handle_suppression_expiration_check(plugin_context=context)
         warnings = [str(c.args[0]) for c in logger.warning.call_args_list]
-        assert any(IGNORE_PATTERN in w and "2026-07-01" in w for w in warnings), (
-            warnings
-        )
-        assert not any("B101" in w for w in warnings), (
-            "suppressions are not applied under --ignore-suppressions, so their "
-            "expiry is not news"
-        )
+        assert warnings == [], warnings
 
     def test_an_entry_expiring_today_is_not_called_one_that_will_expire(self, tmp_path):
         """On its expiration date an entry has already stopped applying."""
@@ -592,13 +594,16 @@ class TestExpiredEntriesWarning:
         assert "B101" in message and "tests/a.py" in message and "2026-06-15" in message
         assert "build/**" not in message and "B602" not in message
 
-    def test_suppressions_are_left_out_under_ignore_suppressions(self, tmp_path):
+    def test_nothing_is_reported_expired_under_ignore_suppressions(self, tmp_path):
+        """Under the flag no entry applies, the expired ones included, so an
+        expired entry changes nothing about the scan and no message names one.
+        This test used to expect the expired ignore path to be named, on the
+        reading that the flag turned off suppressions only."""
         warnings = self._warnings(
             tmp_path, self._expired_config(), ignore_suppressions=True
         )
-        (message,) = [w for w in warnings if "have expired" in w]
-        assert IGNORE_PATTERN in message
-        assert "B101" not in message
+        assert [w for w in warnings if "have expired" in w] == [], warnings
+        assert warnings == [], warnings
 
     def test_nothing_expired_means_no_message(self, tmp_path):
         config = _config(
