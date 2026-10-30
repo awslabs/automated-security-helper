@@ -3599,9 +3599,20 @@ def _relocate_colliding_output_dir(output_dir: Path) -> Path:
     # Checked again, not assumed: a working directory inside the relocated path
     # (``ash merge --output-dir ../..`` from within a previous relocation) still
     # has it as an ancestor, and the relocation then changed nothing but the
-    # message. Each step lands strictly inside the previous, so the working
-    # directory's own depth bounds the loop.
-    while cwd.is_relative_to(relocated.resolve()):
+    # message. Each step lands strictly inside the previous one only without
+    # links: a committed ``.ash/ash_output -> ..`` resolves every step back to
+    # the working directory, and a loop that read only the ancestor test never
+    # returned. So a step that does not resolve strictly deeper than the last
+    # ends the loop, and the link at the relocated path is left to
+    # refuse_linked_output_dir, which refuses it as any link there.
+    previous = resolved
+    while True:
+        deeper = relocated.resolve()
+        if not cwd.is_relative_to(deeper):
+            break
+        if deeper == previous or not deeper.is_relative_to(previous):
+            break
+        previous = deeper
         relocated = relocated.joinpath(".ash", "ash_output")
     print(
         f"[bold yellow]output-dir has been adjusted to the following to avoid "
