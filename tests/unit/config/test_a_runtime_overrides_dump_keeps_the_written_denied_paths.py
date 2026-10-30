@@ -60,6 +60,20 @@ def test_a_default_policy_still_dumps_the_shipped_list() -> None:
     assert policy.model_dump()["denied_paths"] == policy.denied_paths
 
 
+def test_a_copy_with_another_list_dumps_that_list() -> None:
+    """``model_copy(update=...)`` copies the written list and runs no validator,
+    so the copy's own list is dumped as it is, not replaced by the list the
+    original was written with. Red at the base: the copy dumped the original's
+    written list."""
+    policy = RuntimeOverridesConfig(denied_paths=[OPERATOR_ENTRY])
+    other = "/scanners/*/options/timeout"
+
+    copied = policy.model_copy(update={"denied_paths": [other]})
+
+    assert copied.model_dump()["denied_paths"] == [other]
+    assert policy.model_dump()["denied_paths"] == [OPERATOR_ENTRY]
+
+
 def test_an_effective_copy_dumps_the_list_that_applies() -> None:
     """The control: ``effective_policy``'s copy holds the merged list and is
     dumped as it is, not as the operator wrote it."""

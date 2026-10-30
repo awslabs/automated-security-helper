@@ -1480,6 +1480,14 @@ class RuntimeOverridesConfig(RedactedSection):
         written = self._written_denied_paths
         if self._effective or written is None:
             return value
+        # The written list describes the field only while the field still
+        # holds what the validator built from it: the written entries, then
+        # the always-denied ones it appended. A ``model_copy(update=...)``
+        # copies the private attribute and runs no validator, so its new list
+        # would otherwise be replaced by the old written one in every dump.
+        expected = [*written, *(e for e in ALWAYS_DENIED_PATHS if e not in written)]
+        if list(value) != expected:
+            return value
         return list(written)
 
 
