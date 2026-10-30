@@ -16,6 +16,7 @@ codes, hints and "Remaining after the fixes" follow its documented contract.
 from __future__ import annotations
 
 import os
+import stat
 from datetime import datetime
 from pathlib import Path
 
@@ -169,6 +170,43 @@ def test_get_refuses_a_deleted_working_directory_with_the_usage_exit(tmp_path):
     assert "deleted" in result.output, result.output
 
 
+def _invoke_in_a_deleted_directory(tmp_path, args):
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    before = os.getcwd()
+    os.chdir(gone)
+    try:
+        gone.rmdir()
+        return _invoke(args)
+    finally:
+        os.chdir(before)
+
+
+def test_the_wizard_refuses_a_deleted_working_directory_before_any_prompt(
+    tmp_path, monkeypatch
+):
+    """Red at the base: without --source-dir the wizard searched "." and asked
+    every question, then failed in the write's os.getcwd with "Error writing
+    config file". No prompt is answered here, so a prompt would raise."""
+    _scripted_wizard(monkeypatch, [])
+
+    result = _invoke_in_a_deleted_directory(tmp_path, ["wizard"])
+
+    assert result.exit_code == USAGE_ERROR_EXIT, result.output
+    assert _no_traceback(result), repr(result.exception)
+    assert "deleted" in result.output, result.output
+
+
+def test_init_with_a_relative_config_refuses_a_deleted_working_directory(tmp_path):
+    """Red at the base: `init --config rel.yaml` resolved the path with
+    config_path.absolute() outside any try, a FileNotFoundError traceback."""
+    result = _invoke_in_a_deleted_directory(tmp_path, ["init", "--config", "rel.yaml"])
+
+    assert result.exit_code == USAGE_ERROR_EXIT, result.output
+    assert _no_traceback(result), repr(result.exception)
+    assert "deleted" in result.output, result.output
+
+
 # --- labels and refusals ---
 
 
@@ -203,6 +241,25 @@ def test_the_ash_config_refusal_is_shown_when_the_named_file_has_errors_too(
 
     assert result.exit_code == INVALID_CONFIG_EXIT, result.output
     assert "ASH_CONFIG names" in result.output, result.output
+
+
+def test_the_named_file_is_checked_when_ash_config_names_the_same_file(
+    tmp_path, monkeypatch
+):
+    """The per-field check of the named file was skipped for every ASH_CONFIG
+    refusal, including the common case where ASH_CONFIG names the very file
+    --config names, which left only the refusal's one line. The field is named
+    in the output here."""
+    named = tmp_path / "named.yaml"
+    named.write_text(
+        "global_settings:\n  severity_threshold: NOT_A_LEVEL\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(named))
+
+    result = _invoke(["get", "--config", str(named), "--source-dir", str(tmp_path)])
+
+    assert result.exit_code == INVALID_CONFIG_EXIT, result.output
+    assert "severity_threshold" in result.output, result.output
 
 
 def test_a_refusal_only_from_ash_plugin_modules_does_not_blame_the_file(
@@ -277,13 +334,36 @@ def test_update_leaves_a_key_with_surrounding_whitespace_to_the_apply(config_fil
     )
 
     assert "is not a top-level configuration key" not in result.output, result.output
+    # The apply strips each key segment, so the padded key reaches the field: a
+    # pre-check that merely stayed silent while the apply dropped the key would
+    # report "updated" and change nothing.
+    assert result.exit_code == 0, result.output
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    assert data["scanners"]["bandit"]["enabled"] is False
 
 
-def test_update_reports_a_file_it_can_no_longer_read_for_keep_from(
-    config_file, monkeypatch
-):
-    """The third read of the file, for keep_from, was bare: a file removed or made
-    unparseable after the load crashed update with a traceback."""
+def test_update_reports_a_text_it_cannot_parse_for_keep_from(config_file, monkeypatch):
+    """The parse for keep_from was bare: a file made unparseable after the load
+    crashed update with a traceback. It is parsed from the compared bytes now,
+    and a parse failure is still reported on one line."""
+
+    def unparseable(*_args, **_kwargs):
+        raise yaml.YAMLError("the text went bad")
+
+    monkeypatch.setattr(config_cli, "parse_config_text", unparseable)
+
+    result = _invoke(["update", str(config_file), "--set", "project_name=x"])
+
+    assert result.exit_code == INVALID_CONFIG_EXIT, result.output
+    assert _no_traceback(result), repr(result.exception)
+    assert "went bad" in result.output, result.output
+
+
+def test_update_renders_keep_from_from_the_bytes_it_compared(config_file, monkeypatch):
+    """Red at the base: keep_from came from a further open of the file, after
+    the bytes comparison, so a file swapped in that window fed the rewrite. With
+    no such open, a reader that fails on every open is never reached and the
+    update goes through on the compared bytes."""
 
     def gone(*_args, **_kwargs):
         raise OSError("the file went away")
@@ -292,9 +372,29 @@ def test_update_reports_a_file_it_can_no_longer_read_for_keep_from(
 
     result = _invoke(["update", str(config_file), "--set", "project_name=x"])
 
-    assert result.exit_code == INVALID_CONFIG_EXIT, result.output
-    assert _no_traceback(result), repr(result.exception)
-    assert "went away" in result.output, result.output
+    assert result.exit_code == 0, result.output
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    assert data["project_name"] == "x"
+    assert data["fail_on_findings"] is True
+
+
+def test_update_does_not_replace_a_file_the_user_may_not_write(config_file):
+    """Red at the base: the staged write renamed over a read-only file, because a
+    rename asks the directory, not the file. The write is made in place for such
+    a file, so the file's own refusal is the outcome, as it was before staging."""
+    if getattr(os, "geteuid", lambda: 1)() == 0:
+        pytest.skip("root may write a read-only file")
+    config_file.chmod(0o444)
+    try:
+        result = _invoke(["update", str(config_file), "--set", "project_name=x"])
+
+        assert result.exit_code == 1, result.output
+        assert _no_traceback(result), repr(result.exception)
+        assert "Error writing config file" in result.output, result.output
+        assert config_file.read_text(encoding="utf-8") == VALID_CONFIG
+        assert stat.S_IMODE(config_file.stat().st_mode) == 0o444
+    finally:
+        config_file.chmod(0o644)
 
 
 def test_update_refuses_a_file_that_changed_while_it_read_it(config_file, monkeypatch):
@@ -598,6 +698,25 @@ def test_the_wizard_does_not_write_a_plugin_module_a_scan_refuses(
 
     assert result.exit_code == INVALID_CONFIG_EXIT, result.output
     assert "Not writing" in result.output, result.output
+    assert not target.exists()
+
+
+def test_the_wizard_refuses_an_environment_module_before_the_first_prompt(
+    tmp_path, monkeypatch
+):
+    """Red at the base: with ASH_PLUGIN_MODULES naming a module a scan refuses,
+    the wizard asked every question and then refused to write, throwing the
+    answers away. No prompt is answered here, so a prompt would raise."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ASH_PLUGIN_MODULES", "no_such_plugin_module_zz")
+    _scripted_wizard(monkeypatch, [])
+    target = tmp_path / "new.yaml"
+
+    result = _invoke(["wizard", "--config", str(target)])
+
+    assert result.exit_code == INVALID_CONFIG_EXIT, result.output
+    assert _no_traceback(result), repr(result.exception)
+    assert "ASH_PLUGIN_MODULES" in result.output, result.output
     assert not target.exists()
 
 

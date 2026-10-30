@@ -66,6 +66,7 @@ from automated_security_helper.config.config_sources import (
     is_json_file,
     is_regular_file,
     is_toml_file,
+    parse_config_text,
     read_config_bytes,
     read_config_file,
     refuse_unless_a_file,
@@ -350,18 +351,53 @@ def _write_target(config_path: Path) -> Path:
     return target
 
 
-def _mode_to_keep(target: Path) -> int | None:
-    """The permission bits of the file at ``target``, or None when there is none.
+def _stat_to_keep(target: Path) -> os.stat_result | None:
+    """The file at ``target`` as it is before the write, or None when there is none.
 
     A staged write makes a new inode, whose mode is 0o666 less the umask
-    (fs_guard.open_for_atomic_write); the mode the user set on the file is put
-    back on the staging file before it is renamed into place, so a 0600 config
-    does not come back 0644. The owner cannot be carried without privilege.
+    (fs_guard.open_for_atomic_write) and whose owner is this process. The mode
+    the user set on the file is put back on the staging file before it is
+    renamed into place (``_carry_file_identity``), so a 0600 config does not
+    come back 0644, and so is the owner where this process may set it.
     """
     try:
-        return stat.S_IMODE(os.stat(target).st_mode)
+        return os.stat(target)
     except (OSError, ValueError):
         return None
+
+
+def _may_not_write(target: Path, before: os.stat_result | None) -> bool:
+    """Whether the file at ``target`` exists and this process may not write it.
+
+    A rename needs write permission on the directory, not on the file, so the
+    staged write replaced a file the user had made read-only (0444 in a
+    writable directory), where the plain write it replaced was refused with
+    EACCES. Such a file is written in place, so the refusal is the file's own.
+    """
+    return before is not None and not os.access(target, os.W_OK)
+
+
+def _carry_file_identity(fd: int, before: os.stat_result | None) -> None:
+    """Give the staging file at ``fd`` the replaced file's owner and mode.
+
+    The owner first: a chown clears set-id bits on some systems, and it is
+    attempted only where the staging file's owner differs (a process running as
+    root over a bind-mounted config, say, which otherwise handed the file back
+    owned by root); without the privilege it is refused and the mode is still
+    carried. Hard links, ACLs and extended attributes are not carried: the
+    rename makes a new file.
+    """
+    if before is None:
+        return
+    if hasattr(os, "fchown"):
+        try:
+            current = os.fstat(fd)
+            if (current.st_uid, current.st_gid) != (before.st_uid, before.st_gid):
+                os.fchown(fd, before.st_uid, before.st_gid)
+        except PermissionError:
+            pass
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, stat.S_IMODE(before.st_mode))
 
 
 def _staged_write_falls_back(error: OSError) -> bool:
@@ -388,20 +424,22 @@ def _write_config_text(config_path: Path, text: str) -> None:
     ``Path.write_text`` truncates the file before it writes, so a write that
     failed partway (a full disk, a signal) left the user's config empty or
     partial. The text is staged beside the file with the file's own permission
-    bits and renamed over it (fs_guard.open_for_atomic_write, as
+    bits and owner and renamed over it (fs_guard.open_for_atomic_write, as
     utils/atomic_write.py writes); where staging or the rename is refused for
-    the file's place (``_staged_write_falls_back``) the in-place write is made.
+    the file's place (``_staged_write_falls_back``), or the file is one this
+    process may not write (``_may_not_write``), the in-place write is made.
     """
     # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
     from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 
     target = _write_target(config_path)
-    mode = _mode_to_keep(target)
+    before = _stat_to_keep(target)
     try:
+        if _may_not_write(target, before):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
         with open_for_atomic_write(target, encoding="utf-8") as handle:
             handle.write(text)
-            if mode is not None and hasattr(os, "fchmod"):
-                os.fchmod(handle.fileno(), mode)
+            _carry_file_identity(handle.fileno(), before)
     except OSError as error:
         if not _staged_write_falls_back(error):
             raise
@@ -414,12 +452,13 @@ def _write_config_bytes(config_path: Path, data: bytes) -> None:
     from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 
     target = _write_target(config_path)
-    mode = _mode_to_keep(target)
+    before = _stat_to_keep(target)
     try:
+        if _may_not_write(target, before):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
         with open_for_atomic_write(target, binary=True) as handle:
             handle.write(data)
-            if mode is not None and hasattr(os, "fchmod"):
-                os.fchmod(handle.fileno(), mode)
+            _carry_file_identity(handle.fileno(), before)
     except OSError as error:
         if not _staged_write_falls_back(error):
             raise
@@ -502,14 +541,22 @@ def _print_invalid_config(
         elif config_file is not None:
             header = f"Invalid configuration in {config_file}:"
         messages = [plugin_module_refusal_message(error)]
-    elif config_file is not None and refused_env_file is None:
+    elif config_file is not None and (
+        refused_env_file is None or _same_file(Path(refused_env_file), config_file)
+    ):
+        # The named file is checked when the refusal is its own: the usual
+        # case, and the case where ASH_CONFIG names the very file --config (or
+        # discovery) named, as _refused_file_label reads it. Skipped for every
+        # ASH_CONFIG refusal, the common `ASH_CONFIG=.ash/.ash.yaml ash config
+        # get` printed only the refusal's one line and dropped the per-field
+        # messages the check gives.
         check = ConfigValidator.check_config_file(
             config_file,
             source_dir=source_dir,
             config_overrides=config_overrides,
             # A refusal get_default_config marked is the ASH_CONFIG file's own,
             # printed below: its check would load that file once more.
-            check_ash_config=getattr(error, "ash_config_file", None) is None,
+            check_ash_config=refused_env_file is None,
         )
         # The ASH_CONFIG file's refusal is not about config_file: printed
         # under its name, it would blame the wrong file. The refusal's own
@@ -951,6 +998,11 @@ def init(
             raise typer.Exit(1)
     else:
         config_path = Path(config)
+        if not config_path.is_absolute():
+            # A relative --config is resolved against the working directory
+            # below (config_path.absolute()); a deleted one ended in a
+            # traceback there instead of the exit-5 refusal.
+            _working_directory()
     if is_toml_file(config_path):
         # Before the --force check: `init --config pyproject.toml --force` would
         # otherwise replace the project's pyproject.toml with YAML.
@@ -1422,7 +1474,9 @@ def update(
     # data, and compared with the bytes the refusal checks read: a file changed
     # since then is refused rather than rewritten from a text the checks never
     # saw. Read as a scan reads it, so a FIFO swapped in at the name is refused
-    # rather than waited on.
+    # rather than waited on. The keep_from data is parsed from these same bytes
+    # (parse_config_text, as read_config_file parses what it reads): a further
+    # open for it, after the comparison, read whatever was at the name by then.
     try:
         current_bytes = read_config_bytes(config_path)
         if current_bytes != original_bytes:
@@ -1434,7 +1488,12 @@ def update(
         # schema line, where the mark made the line read as not a comment and
         # the default schema line replaced it.
         lines = current_bytes.decode("utf-8-sig").splitlines()
-        keep_from = read_config_file(config_path)
+        # Decoded as read_config_file decodes each format: JSON loses a leading
+        # byte order mark (json refuses one), YAML keeps it (the parser skips it).
+        keep_from = parse_config_text(
+            config_path,
+            current_bytes.decode("utf-8-sig" if is_json_file(config_path) else "utf-8"),
+        )
     except (
         OSError,
         ValueError,
@@ -2221,6 +2280,13 @@ def wizard(
         use_color=color,
     )
     console = ash_console(theme=rich_theme())
+    # A deleted working directory is refused here, before the first prompt,
+    # when the paths below are relative to it (the search in ".", a relative
+    # --config): the write at the end resolved them with os.getcwd, so the
+    # wizard asked every question and then failed with "Error writing config
+    # file" where the exit-5 refusal belongs.
+    if (source_dir is None) if config is None else (not Path(config).is_absolute()):
+        _working_directory()
     if config is None:
         # Relative to the working directory when no --source-dir (or
         # ASH_SOURCE_DIR, the scan option's variable) names one, so the path is
@@ -2325,6 +2391,16 @@ def wizard(
             )
         )
         ash_config = AshConfig()
+
+    # Before the first prompt: with ASH_PLUGIN_MODULES naming a module a scan
+    # refuses, the file the wizard writes is one every reader refuses whatever
+    # the answers, and the check after the prompts (below) threw every answer
+    # away. Checked against a default config, so only the environment's entries
+    # are judged here: a module the FILE lists is still the operator's to drop
+    # at the prompts, and the check after them judges what is written.
+    _refuse_a_config_a_scan_refuses(
+        AshConfig(), f"Not writing {config_path}", unfindable=False
+    )
 
     from automated_security_helper.config.environment_record import (
         record_environment_references,
