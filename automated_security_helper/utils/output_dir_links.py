@@ -252,6 +252,22 @@ def linked_output_component(
     # The output directory as the lookup reaches it: the spelling with every
     # ``.`` and ``..`` applied. The same path as the spelling when it holds none.
     reached = current
+    # ASH's writers open the output directory as written, with ``..`` applied by
+    # text (``os.path.abspath``: ``open_no_follow``, ``ignore_output_dir_in_git``,
+    # ``scan_output_dirs``). When that names another directory than the one the
+    # lookup reaches (``/opt/link/../x`` with ``/opt/link`` leading elsewhere
+    # is ``<link's target>/x`` to the kernel and ``/opt/x`` as text), vetting
+    # either would leave the other unexamined, so the spelling is refused. One
+    # directory under two names (``/tmp/../x`` on macOS, where ``/tmp`` is a
+    # link) is compared with both resolved and passes.
+    written = Path(os.path.abspath(spelled))
+    if os.path.normcase(_real_path(written)) != os.path.normcase(_real_path(reached)):
+        return (
+            f"the output directory {spelled.as_posix()} steps back through a "
+            f"link with ..: the lookup reaches {reached.as_posix()} while the "
+            f"path as written names {written.as_posix()}; spell it without .. or "
+            "as the directory it reaches"
+        )
     where = _shown(spelled, reached)
     if is_link(reached):
         return f"the output directory {where} is {_kind(reached)}"
