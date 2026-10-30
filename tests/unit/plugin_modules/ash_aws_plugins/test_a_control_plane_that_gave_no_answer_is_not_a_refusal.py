@@ -35,6 +35,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline i
 )
 from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
     FALLBACK_ONE,
+    FALLBACK_TWO,
     MODULE,
     PRIMARY_MODEL,
     _client_error,
@@ -67,17 +68,28 @@ class ControlPlane:
     that throttles or refuses one listing does so for the other, and
     ``get_available_models`` asks the two apart (a failed profile listing alone
     leaves the on-demand models listed), so a failure here is the whole
-    listing's. ``listings`` counts the profile listings and ``model_listings``
-    the model listings: the control-plane calls a walk makes."""
+    listing's. ``profile_error`` is the one exception: it refuses the profile
+    listing ALONE, with that code, while the model listing answers, which is
+    the shape a caller allowed ListFoundationModels but not
+    ListInferenceProfiles sees. ``listings`` counts the profile listings and
+    ``model_listings`` the model listings: the control-plane calls a walk
+    makes."""
 
     def __init__(
-        self, listed, throttled=False, listing_error=None, throttle_first=0, error=None
+        self,
+        listed,
+        throttled=False,
+        listing_error=None,
+        throttle_first=0,
+        error=None,
+        profile_error=None,
     ):
         self.listed = list(listed)
         self.throttled = throttled
         self.listing_error = listing_error
         self.throttle_first = throttle_first
         self.error = error
+        self.profile_error = profile_error
         self.listings = 0
         self.model_listings = 0
 
@@ -98,6 +110,8 @@ class ControlPlane:
         failure = self._failure()
         if failure is not None:
             raise failure
+        if self.profile_error is not None:
+            raise _error(self.profile_error, "the listing was refused")
         return {"inferenceProfileSummaries": []}
 
     def list_foundation_models(self):
@@ -681,6 +695,42 @@ def test_a_walk_names_a_refused_listing_by_its_code_not_as_unavailable(
     assert "unavailable" not in out.split(". The configured model's error")[0], out
     assert runtime.models == [PRIMARY_MODEL], runtime.models
     assert control.listings == 1, control.listings
+
+
+def test_a_walk_with_only_the_profile_listing_refused_still_calls_on_demand_models(
+    context,  # noqa: F811
+    monkeypatch,
+):
+    """ListInferenceProfiles is denied while ListFoundationModels answers: a
+    fallback the on-demand list names is checked and called, and a fallback
+    only a profile could route is "not checked, listing refused (code)", never
+    "unavailable", because nobody could list the profiles that would name it."""
+    control = ControlPlane([FALLBACK_TWO], profile_error="AccessDeniedException")
+    reporter = _walk_setup(
+        context,
+        monkeypatch,
+        control,
+        {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO},
+    )
+    runtime = Runtime(
+        {
+            PRIMARY_MODEL: _client_error("ResourceNotFoundException"),
+            FALLBACK_TWO: _client_error("ValidationException"),
+        }
+    )
+
+    out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+    group = _listing_group("listing refused (AccessDeniedException)", FALLBACK_ONE)
+    assert out.startswith(
+        f"*Error: No suitable fallback model found for {PRIMARY_MODEL} "
+        f"(called: {PRIMARY_MODEL}, {FALLBACK_TWO}; {group})"
+    ), out
+    assert "unavailable" not in out.split(". The configured model's error")[0], out
+    # The on-demand fallback was called; the profile-only one never was.
+    assert runtime.models == [PRIMARY_MODEL, FALLBACK_TWO], runtime.models
+    # One listing pair serves the whole walk, and the model listing answered.
+    assert (control.listings, control.model_listings) == (1, 1)
 
 
 def test_a_walk_names_every_candidate_a_refused_listing_left_unchecked(

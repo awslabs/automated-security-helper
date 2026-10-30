@@ -51,14 +51,17 @@ BedrockSummaryReporter.model_rebuild()
 
 def make_reporter(context: PluginContext, **option_overrides) -> BedrockSummaryReporter:
     """A reporter on *context* configured with ``REGION`` and ``PRIMARY_MODEL``,
-    with *option_overrides* applied on top of them.
+    with *option_overrides* applied on top of them: an override of
+    ``aws_region`` or ``model_id`` replaces the default rather than raising
+    the "multiple values for keyword argument" TypeError two keyword sets
+    would, so a test that needs its own model id builds its reporter here too.
 
     The boto3 boundary is not patched here. A test patches
     ``<MODULE>.boto3.Session`` before it calls this (the ``runtime`` fixtures
     do), so nothing reaches AWS.
     """
     options = BedrockSummaryReporterConfigOptions(
-        aws_region=REGION, model_id=PRIMARY_MODEL, **option_overrides
+        **{"aws_region": REGION, "model_id": PRIMARY_MODEL, **option_overrides}
     )
     return BedrockSummaryReporter(
         context=context, config=BedrockSummaryReporterConfig(options=options)

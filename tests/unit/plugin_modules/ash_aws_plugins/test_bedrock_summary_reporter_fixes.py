@@ -17,6 +17,7 @@ No test here calls AWS: boto3's session is a double, the model runtime answers b
 plan, and the control plane is a MagicMock.
 """
 
+import json
 from unittest.mock import MagicMock
 
 import botocore.exceptions
@@ -197,6 +198,37 @@ def test_the_walk_ends_on_a_failure_no_other_model_answers(context, monkeypatch)
     assert "No suitable fallback model found" not in out, out
 
 
+def test_the_walk_goes_on_past_a_failure_only_that_model_gave(context, monkeypatch):  # noqa: F811
+    """The control for the early return: a model-specific failure (a refused
+    request, a model not ready) says nothing about the next candidate, so the
+    walk calls the whole chain and ends on the exhaustion text. A walk that
+    returned after the first fallback whatever the failure would fail here."""
+    reporter = make_reporter(context, enable_caching=False)
+    monkeypatch.setattr(
+        f"{MODULE}.get_fallback_model",
+        {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO}.get,
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.validate_bedrock_model", lambda *a, **k: (True, None)
+    )
+    called = []
+
+    def call_model(model):
+        called.append(model)
+        return CallOutcome(
+            f"*Error generating content with model {model}: ValidationException: refused*",
+            ok=False,
+            model_specific=True,
+        )
+
+    out = reporter._walk_fallbacks(
+        _control_plane(), PRIMARY_MODEL, call_model, primary_error="*Error: first*"
+    )
+
+    assert called == [FALLBACK_ONE, FALLBACK_TWO], called
+    assert "No suitable fallback model found" in out, out
+
+
 # ---------------------------------------------------------------------------
 # One run's cache
 # ---------------------------------------------------------------------------
@@ -211,8 +243,13 @@ def test_a_second_report_does_not_read_the_first_runs_answers(context, monkeypat
         Session(**{"bedrock-runtime": Runtime("first run", "second run")}),
     )
 
-    first = reporter.report(sarif_model([finding("R1")]))
-    second = reporter.report(sarif_model([finding("R2")]))
+    # One model reported twice: the prompts are the same both times, so a
+    # cache that survived into the second run would answer "first run" whatever
+    # its key is made of (two different models would miss the cache anyway).
+    model = sarif_model([finding("R1")])
+
+    first = reporter.report(model)
+    second = reporter.report(model)
 
     assert "first run" in first and "first run" not in second, second
     assert "second run" in second, second
@@ -384,9 +421,13 @@ def test_a_failed_batch_is_named_and_kept_out_of_the_synthesis(context, monkeypa
 
     out = reporter._process_findings_by_batch(runtime, sarif_model([]), findings)
 
-    synthesis_prompt = runtime.prompts()[2]
-    assert "*Error" not in synthesis_prompt, synthesis_prompt
-    assert "batch two summary" in synthesis_prompt
+    # The whole third request (system, every message and block), not only the
+    # first text block: the failure must reach the synthesis by no route.
+    assert len(runtime.calls) == 3, runtime.calls
+    synthesis_request = json.dumps(runtime.calls[2], default=str)
+    for text in ("*Error", "too long", "ValidationException"):
+        assert text not in synthesis_request, synthesis_request
+    assert "batch two summary" in synthesis_request
     assert "the synthesis" in out, out
     assert "Batch 1 of 2 was not summarized" in out, out
 
@@ -422,8 +463,11 @@ def test_a_secrets_only_scan_sends_no_placeholder_prompt(context, monkeypatch): 
         "No findings to assess risk",
         "No compliance frameworks specified",
     )
-    for prompt in runtime.prompts():
-        assert not any(text in prompt for text in placeholders), prompt
+    # Checked over each whole request (system, every message and block), so a
+    # placeholder routed through any part of the request is caught.
+    for call in runtime.calls:
+        request = json.dumps(call, default=str)
+        assert not any(text in request for text in placeholders), request
     assert "No actionable findings to analyze for this section." in report, report
     assert "The secret findings are reported in their own section." in report, report
     # The secret advice is still asked for: those findings exist.

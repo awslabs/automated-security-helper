@@ -28,6 +28,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     get_available_models,
     validate_bedrock_model,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
@@ -151,7 +152,7 @@ def test_one_failed_profile_listing_is_one_warning_over_a_walk(caplog):
     ash.log, not one per candidate."""
     listings = ListingsOnce(_client(profile_error=_refused("AccessDeniedException")))
 
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
         first = validate_bedrock_model(listings, PROFILED)
         second = validate_bedrock_model(listings, US_PROFILE)
 
@@ -231,7 +232,7 @@ def test_both_listings_failing_names_the_profile_failure_beside_the_warning(
         "AccessDeniedException", "ListFoundationModels"
     )
 
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
         get_available_models(client)
 
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]

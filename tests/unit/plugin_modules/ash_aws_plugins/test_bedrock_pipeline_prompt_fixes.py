@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 import botocore.exceptions
 import pytest
 
+from automated_security_helper.utils.log import ASH_LOGGER, VERBOSE_LEVEL
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
     BedrockModelClient,
     BedrockPromptBuilder,
@@ -117,7 +118,10 @@ def test_a_refused_pair_is_dropped_from_the_clients_later_calls(caplog):
     ]
     client = BedrockModelClient(runtime, "anthropic.claude-next", 0.5, 100, 0.9)
 
-    with caplog.at_level(logging.WARNING):
+    # Captured on the pipeline's own logger at VERBOSE, so the repair line is
+    # seen to be there: an empty warning list then means the refusal was not
+    # warned about, not that caplog received nothing.
+    with caplog.at_level(VERBOSE_LEVEL, logger=ASH_LOGGER.name):
         first = client.call("prompt", "system")
         second = client.call("again", "system")
 
@@ -125,6 +129,12 @@ def test_a_refused_pair_is_dropped_from_the_clients_later_calls(caplog):
     assert runtime.converse.call_count == 3
     third = runtime.converse.call_args_list[2].kwargs
     assert third["inferenceConfig"] == {"temperature": 0.5, "maxTokens": 100}
+    repairs = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == VERBOSE_LEVEL and "retrying without 'top_p'" in r.getMessage()
+    ]
+    assert len(repairs) == 1, [r.getMessage() for r in caplog.records]
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert warnings == [], warnings
 

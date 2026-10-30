@@ -93,11 +93,15 @@ MAX_RETRY_DELAY_SECONDS = 60
 #: partitions, with an optional country segment (eusc-de-east-1). One pattern
 #: for the three reporters, so a region one accepts is never a configuration
 #: error (exit 3) for another. A value refused here is refused as a
-#: configuration error, so the pattern errs wide.
+#: configuration error, so the pattern errs wide on NAMES. It is anchored at
+#: both ends: a pydantic ``pattern`` is a search, not a whole-value match, so an
+#: unanchored pattern admitted any value that merely holds a region name
+#: ("us-east-1.attacker.example", "us-east-1/x", a trailing newline), and the
+#: value ends up in an endpoint hostname.
 AWS_REGION_PATTERN = (
-    r"(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)"
+    r"^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)"
     r"(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)"
-    r"-\d{1,2}"
+    r"-\d{1,2}$"
 )
 
 

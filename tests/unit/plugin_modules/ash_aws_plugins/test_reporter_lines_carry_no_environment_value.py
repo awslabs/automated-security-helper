@@ -448,7 +448,8 @@ def test_cloudwatch_sts_check_failure(tmp_path, logged, monkeypatch):
 
 
 def test_cloudwatch_publish_failure(tmp_path, logged, monkeypatch):
-    """The failure is logged, kept in the errors, and returned as the report."""
+    """The failure is logged and kept in the errors, redacted; report() returns
+    None, so no report is written from the failure text."""
     from automated_security_helper.plugin_modules.ash_aws_plugins import (
         cloudwatch_logs_reporter as module,
     )

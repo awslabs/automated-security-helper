@@ -1267,8 +1267,10 @@ class TestTheFallbackWalkContract:
 
     def test_a_new_report_starts_from_the_configured_model(self, context, monkeypatch):
         """The model a fallback found is the run's, not the reporter's: the
-        next report() begins with the configured model again. (Without the
-        cache, which would answer the second report from the first.)"""
+        next report() begins with the configured model again. (Caching is off
+        so every call reaches the routing runtime; the cache itself is one
+        report()'s since the cross-run fix, so it would not answer the second
+        report from the first either way.)"""
         reporter = make_reporter(context, enable_caching=False)
         self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
         runtime = _RoutingRuntime(PRIMARY_MODEL)

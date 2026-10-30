@@ -224,6 +224,43 @@ def test_a_name_that_is_no_region_is_refused_by_cloudwatch_logs_too():
         CloudWatchLogsReporterConfigOptions(aws_region="nowhere-1")
 
 
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(
+            lambda region: S3ReporterConfigOptions(
+                aws_region=region, bucket_name="a-bucket"
+            ),
+            id="s3",
+        ),
+        pytest.param(
+            lambda region: BedrockSummaryReporterConfigOptions(aws_region=region),
+            id="bedrock",
+        ),
+        pytest.param(
+            lambda region: CloudWatchLogsReporterConfigOptions(aws_region=region),
+            id="cloudwatch-logs",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("us-east-1.attacker.example", id="host-suffix"),
+        pytest.param("us-east-1/x", id="path-suffix"),
+        pytest.param("US-EAST-1", id="upper-case"),
+        pytest.param("us-east-1\n", id="trailing-newline"),
+        pytest.param("xus-east-1", id="prefix"),
+    ],
+)
+def test_a_value_that_only_holds_a_region_name_is_refused(build, value):
+    """The pattern is a whole-value match: a value that merely contains a region
+    name is refused, since the region ends up in an endpoint hostname. (The
+    upper-case value is the control that the old pattern refused too.)"""
+    with pytest.raises(ValidationError):
+        build(value)
+
+
 def test_the_three_reporters_share_the_one_region_pattern():
     patterns = {
         name: options.model_fields["aws_region"].metadata
