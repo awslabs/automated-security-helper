@@ -156,6 +156,38 @@ def names_no_path(pattern: str) -> bool:
     return _match_form(pattern) in _PATTERNS_NAMING_NO_PATH
 
 
+def _class_holds_surrogate(pattern: str) -> bool:
+    """Whether a bracket expression in *pattern* holds a lone surrogate.
+
+    The brackets are found as ``fnmatch`` finds them: ``[``, an optional ``!``, an
+    optional first ``]`` that is a member, then everything up to the next ``]``; a
+    ``[`` with no such end is an ordinary character. A surrogate there stands for one
+    file name byte that is not UTF-8. Compared in the record form, the class holds
+    the six characters of the byte's escape instead, so it also names ``\\``, ``u``,
+    ``d``, ``c``, ``e`` and the digits (see :func:`_path_pattern_matches`).
+    """
+    length = len(pattern)
+    index = 0
+    while index < length:
+        if pattern[index] != "[":
+            index += 1
+            continue
+        end = index + 1
+        if end < length and pattern[end] == "!":
+            end += 1
+        if end < length and pattern[end] == "]":
+            end += 1
+        while end < length and pattern[end] != "]":
+            end += 1
+        if end >= length:
+            index += 1
+            continue
+        if any("\ud800" <= char <= "\udfff" for char in pattern[index:end]):
+            return True
+        index = end + 1
+    return False
+
+
 def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
     """Case-sensitive path match supporting ``**`` recursive globs.
 
@@ -180,22 +212,37 @@ def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
     # with ? for the escape's backslash (secr?udce9t.py) or as a glob. The raw side
     # is tried only when the name holds a surrogate or its escape; for any other
     # name the two forms are the same text, so nothing changes for it.
+    #
+    # A bracket expression holding a surrogate is matched against the name itself
+    # only. In the record form it holds the surrogate's six characters, so
+    # ``secr[<surrogate>]t.py`` read there also names ``secrdt.py`` and ``secrut.py``.
     finding_raw = undecodable_of_text(file_path)
     finding_norm = text_of_undecodable(finding_raw)
     pattern_form = _match_form(pattern)
     pattern_norm = text_of_undecodable(pattern_form)
+    record_form_reads_it_wider = _class_holds_surrogate(pattern_form)
 
+    # The exact text matches whatever it holds. A pattern with glob characters in it
+    # also matches the file named exactly like it, on purpose: a suppression written
+    # with the file's own name keeps matching it when that name holds ``[``, ``]``,
+    # ``*`` or ``?`` (a framework's ``app/[id]/page.tsx``). The same pattern is still
+    # a glob, so it names the files its classes name as well; ``literal_path_pattern``
+    # is how a pattern is made to name one file only.
     if finding_norm == pattern_norm:
         return True
 
     if "**" in pattern_norm:
-        if _recursive_glob_match(finding_norm, pattern_form):
+        if not record_form_reads_it_wider and _recursive_glob_match(
+            finding_norm, pattern_form
+        ):
             return True
         return finding_raw != finding_norm and _recursive_glob_match(
             finding_raw, pattern_form, record_form=False
         )
 
-    if fnmatch.fnmatchcase(finding_norm, pattern_norm):
+    if not record_form_reads_it_wider and fnmatch.fnmatchcase(
+        finding_norm, pattern_norm
+    ):
         return True
     return finding_raw != finding_norm and fnmatch.fnmatchcase(
         finding_raw, pattern_form
@@ -252,7 +299,9 @@ def literal_path_pattern(path: str) -> str:
 
     ``[``, ``*`` and ``?`` in the path are glob syntax in a pattern, so each is
     written as a class holding only itself: ``x[1].py`` as a pattern matched
-    ``x1.py`` and not ``x[1].py``. A path with none of these comes back as it is.
+    ``x1.py`` as well as ``x[1].py`` (the exact text always matches,
+    :func:`_path_pattern_matches`), so a suppression for the one hid the findings
+    of the other. A path with none of these comes back as it is.
 
     A backslash is part of a name in a path and a separator in a pattern, a
     class's included (:func:`_match_form`), so no pattern spells it. A class
@@ -294,8 +343,15 @@ def directory_spelling(directory: str, *, ignore_path: bool) -> str:
     suppression path, whose trailing slash is literal, ``<dir>/**/*``: every file
     below the directory and not a path named exactly ``<dir>``, which ``<dir>/**``
     would also match.
+
+    A directory that is only separators (``/``, ``\\``) has no spelling here: ``""``
+    is returned, which a caller reads as "no advice to give". It was ``/`` for an
+    ignore path, which matches nothing, and ``/**/*`` for a suppression path, which
+    matches every file, so the two meanings of one input disagreed.
     """
     directory = directory.rstrip("/\\")
+    if not directory:
+        return ""
     return f"{directory}/" if ignore_path else f"{directory}/**/*"
 
 
