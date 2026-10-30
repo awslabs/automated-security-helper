@@ -44,7 +44,7 @@ try:
     import fcntl
 except ImportError:  # Windows, where no sandbox backend exists
     fcntl = None  # type: ignore[assignment]
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import (
     IO,
@@ -585,17 +585,23 @@ def _sweep_tree(
     if not hasattr(os, "fwalk"):
         removed = _sweep_by_name(root, refuse, remove, skipped)
     else:
-        for relative, dir_fd, statuses, dirnames in _walk_descriptors(root, refuse):
-            for name, status in statuses.items():
-                if _is_special(status.st_mode):
-                    removed += remove(name, dir_fd, name)
-            if skipped:
-                # The walk descends into what is left in this list once it
-                # resumes; a named directory's entries are the backend's to
-                # remove. A link at the name was removed and counted above.
-                dirnames[:] = [
-                    name for name in dirnames if _below(relative, name) not in skipped
-                ]
+        # closing(): a consumer that leaves the loop early (an exception) closes
+        # the walk's open directory descriptors at once, not when the generator
+        # is finalized, which another interpreter can defer.
+        with closing(_walk_descriptors(root, refuse)) as walk:
+            for relative, dir_fd, statuses, dirnames in walk:
+                for name, status in statuses.items():
+                    if _is_special(status.st_mode):
+                        removed += remove(name, dir_fd, name)
+                if skipped:
+                    # The walk descends into what is left in this list once it
+                    # resumes; a named directory's entries are the backend's to
+                    # remove. A link at the name was removed and counted above.
+                    dirnames[:] = [
+                        name
+                        for name in dirnames
+                        if _below(relative, name) not in skipped
+                    ]
     if refusals is None and collected:
         raise _sweep_refused(collected) from None
     return removed
@@ -753,15 +759,19 @@ def refuse_links_below(root: Union[str, Path]) -> None:
             "it could not be refused",
         ) from error
 
-    for relative, _dir_fd, statuses, _dirnames in _walk_descriptors(root, refuse):
-        where = root if relative == "." else root / relative
-        for name in sorted(statuses):
-            status = statuses[name]
-            if stat.S_ISLNK(status.st_mode):
-                link = where / name
-                raise OutputLinkRefused(link, link)
-            if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
-                raise OutputHardLinkRefused(where / name, status.st_nlink)
+    # closing(): the raises below leave the walk early, and its open directory
+    # descriptors are then closed here rather than when the generator is
+    # finalized, which another interpreter can defer.
+    with closing(_walk_descriptors(root, refuse)) as walk:
+        for relative, _dir_fd, statuses, _dirnames in walk:
+            where = root if relative == "." else root / relative
+            for name in sorted(statuses):
+                status = statuses[name]
+                if stat.S_ISLNK(status.st_mode):
+                    link = where / name
+                    raise OutputLinkRefused(link, link)
+                if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
+                    raise OutputHardLinkRefused(where / name, status.st_nlink)
 
 
 def sweep_writable(

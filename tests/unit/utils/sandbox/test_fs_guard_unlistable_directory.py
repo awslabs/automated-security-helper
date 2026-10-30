@@ -398,6 +398,22 @@ def test_refuse_links_below_refuses_a_root_that_is_itself_a_link(tmp_path):
         fs_guard.refuse_links_below(root)
 
 
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="counts fds via procfs")
+def test_a_refused_pre_check_leaves_no_directory_descriptor_open(tmp_path):
+    """The pre-check raises out of the walk from two directories down; the walk's
+    open descriptors are closed on the way out (the generator is closed, not
+    left to finalization, which another interpreter can defer)."""
+    root = tmp_path / "results"
+    (root / "a" / "b").mkdir(parents=True)
+    (root / "a" / "b" / "escape").symlink_to(tmp_path)
+    before = len(os.listdir("/proc/self/fd"))
+
+    with pytest.raises(OutputDirLinkRefused):
+        fs_guard.refuse_links_below(root)
+
+    assert len(os.listdir("/proc/self/fd")) == before
+
+
 def test_a_root_that_cannot_be_checked_is_refused_not_skipped(tmp_path, caplog):
     """The sibling route at the root: ``Path.is_symlink`` already reads a missing
     root as False, so the handler around it only ever met the other errors (a
