@@ -61,6 +61,16 @@ SEGMENTS = {
 }
 MARKER = "reached-the-plugin"
 
+#: A probe value per (plugin class name, option) for an option whose validator
+#: admits a fixed set of words, which the generic candidates below (a flipped
+#: bool, an incremented int, MARKER) cannot guess: the value is a member of the
+#: set other than the default, so it reaches the plugin as the configured one.
+#: The unused-suppressions reporter's output_format admits json, markdown and
+#: both (the default), case folded.
+ENUMERATED_OPTION_PROBES = {
+    ("UnusedSuppressionsReporter", "output_format"): "json",
+}
+
 
 def _config_class(plugin_class):
     annotation = plugin_class.model_fields["config"].annotation
@@ -122,6 +132,9 @@ def _option_probe(plugin_class):
     for name, field in options_cls.model_fields.items():
         default = field.get_default(call_default_factory=True)
         candidates = []
+        enumerated = ENUMERATED_OPTION_PROBES.get((plugin_class.__name__, name))
+        if enumerated is not None:
+            candidates.append(enumerated)
         if isinstance(default, bool):
             candidates.append(not default)
         elif isinstance(default, int):
