@@ -700,14 +700,17 @@ def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
     # already carries a version. Executing the resolved binary is the only way to
     # answer "which version is actually on PATH", which is the inventory's point.
     #
-    # Not for a scanner that runs its tool through uv (resolve_deferred_tool_version
-    # above is the uv mixin's): its version probe already ran, and a same-named
-    # binary first on PATH is not the tool uv runs, so its version would be
-    # reported for a scanner that never executes it.
+    # Not for a scanner that runs its tool through uv (use_uv_tool): its version
+    # probe already ran above, and a same-named binary first on PATH is not the
+    # tool uv runs, so its version would be reported for a scanner that never
+    # executes it. The test is the flag, not the presence of
+    # resolve_deferred_tool_version: that method is the uv mixin's, and the mixin
+    # is a base of EVERY plugin, so testing for the method excluded every scanner
+    # and no PATH tool was ever asked its version.
     if (
         entry["version"] is None
         and entry["dependencies_satisfied"] is True
-        and not callable(resolve_version)
+        and not getattr(plugin, "use_uv_tool", False)
     ):
         command = getattr(plugin, "command", None)
         entry["version"] = _probe_tool_version(
