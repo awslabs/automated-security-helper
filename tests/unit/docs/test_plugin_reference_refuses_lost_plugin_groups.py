@@ -202,15 +202,20 @@ def test_a_record_that_is_not_a_mapping_is_refused_as_unreadable(
     assert "not a mapping" in str(caught.value)
 
 
-@pytest.mark.parametrize("record", [[], "", 0, ()], ids=["list", "str", "int", "tuple"])
+@pytest.mark.parametrize(
+    "record", [[], "", 0, (), None], ids=["list", "str", "int", "tuple", "none"]
+)
 def test_a_falsy_record_that_is_not_a_mapping_is_refused_too(
     builtin_only, monkeypatch, record
 ):
-    """An empty list or string is as unreadable as a non-empty one.
+    """An empty list or string is as unreadable as a non-empty one, and so is an
+    explicit None.
 
     The record is read as "nothing failed" only when it is absent or an empty
     mapping; a falsy value of another type says nothing about the groups and
-    must not pass as a clean load.
+    must not pass as a clean load. None in particular is what the loader fails
+    on (``plugins/loader.py`` reads the record with ``.items()``), so a page
+    that read it as clean would disagree with the scan.
     """
     reference, ash_builtin = builtin_only
     monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", record)

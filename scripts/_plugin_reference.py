@@ -156,6 +156,11 @@ def plugin_packages() -> list[str]:
     return sorted(names, key=lambda n: (n != BUILTIN_PACKAGE, n))
 
 
+#: The value of a plugin package's ``ASH_PLUGIN_LOAD_ERRORS`` when the package
+#: has no such attribute at all, which is the only shape read as a clean load.
+_ABSENT = object()
+
+
 def _under(name: str, prefix: str) -> bool:
     return name == prefix or name.startswith(prefix + ".")
 
@@ -187,10 +192,12 @@ def _refuse_lost_plugin_groups(package: str, module: Any, kind: str) -> None:
         # own attribute, whatever the retry returns.
         retry()
     # An absent record is a clean load; a record of any other type than a mapping
-    # is unreadable, an empty list or string included, so the type is checked
-    # before anything is read as "nothing failed".
-    errors = getattr(module, "ASH_PLUGIN_LOAD_ERRORS", None)
-    if errors is None:
+    # is unreadable, an empty list, string or None included, so the type is
+    # checked before anything is read as "nothing failed". A sentinel tells an
+    # absent attribute from one set to None: the loader reads the record with
+    # ``.items()`` and would fail on None, so the page must not read it as clean.
+    errors = getattr(module, "ASH_PLUGIN_LOAD_ERRORS", _ABSENT)
+    if errors is _ABSENT:
         errors = {}
     if not isinstance(errors, Mapping):
         raise ImportError(
