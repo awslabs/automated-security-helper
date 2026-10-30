@@ -17,8 +17,10 @@ What each test pins, and what it read at the base before the fix:
   configuration (it kept ``enabled: True`` whatever the operator switched off);
 * an unvalidated section's ``enabled`` spelled ``"false"`` reads as False (it
   was reported as the string, which every truthiness reader read as enabled);
-* a scanner that runs its tool through uv gets no PATH fallback probe (the
-  version of whichever same-named binary was first on PATH was reported);
+* a scanner that runs its tool through uv (``use_uv_tool``) gets no PATH
+  fallback probe (the version of whichever same-named binary was first on PATH
+  was reported), and one that does not run through uv is probed (a later cut
+  gated on the uv mixin's method, which every plugin has, and probed nothing);
 * the inventory lock is taken with a bound (it was taken forever);
 * a caller's configuration is the one the probes run under (the default
   configuration of the tree was always used).
@@ -228,9 +230,17 @@ def test_an_unvalidated_sections_other_text_is_kept_as_written():
 # ---------------------------------------------------------------------------
 
 
-class _UvRun:
+class _PathTool:
+    """A scanner that runs the binary on PATH: no uv, no self-reported version.
+
+    Every plugin inherits ``resolve_deferred_tool_version`` from the uv mixin,
+    so the stand-in defines it too: the inventory must tell a uv-run tool apart
+    by the ``use_uv_tool`` flag, never by that method's presence.
+    """
+
     offline_strategy = None
-    command = "bandit"
+    command = "grype"
+    use_uv_tool = False
 
     def __init__(self, context=None):
         self.config = None
@@ -243,20 +253,47 @@ class _UvRun:
         return None
 
 
-def test_a_uv_run_tool_is_not_probed_on_path(monkeypatch):
-    """Red before the fix: version None with dependencies True probed the
-    first same-named binary on PATH."""
+class _UvRun(_PathTool):
+    """A scanner that runs its tool through uv, as bandit does (use_uv_tool)."""
+
+    command = "bandit"
+    use_uv_tool = True
+
+
+def _recording_probe(monkeypatch):
     probed = []
     monkeypatch.setattr(
         scanner_inventory,
         "_probe_tool_version",
         lambda command, **kwargs: probed.append(command) or "9.9.9",
     )
+    return probed
+
+
+def test_a_uv_run_tool_is_not_probed_on_path(monkeypatch):
+    """Red before the fix: version None with dependencies True probed the
+    first same-named binary on PATH. The stand-in marks itself a uv-run tool
+    the way the product's scanners do, with ``use_uv_tool``; an earlier cut of
+    this pin marked it by the mixin method alone, which every plugin has, and
+    so pinned a gate that excluded every scanner."""
+    probed = _recording_probe(monkeypatch)
 
     entry = describe_scanner(_UvRun, context=object(), default_config=_NoSection())
 
     assert probed == []
     assert entry["version"] is None
+
+
+def test_a_path_tool_without_a_version_is_probed(monkeypatch):
+    """The other arm of the gate: a scanner that does not run through uv, is
+    reachable and reports no version of its own is asked its version on PATH.
+    Red on the cut whose gate tested for the mixin method: nothing was probed."""
+    probed = _recording_probe(monkeypatch)
+
+    entry = describe_scanner(_PathTool, context=object(), default_config=_NoSection())
+
+    assert probed == ["grype"]
+    assert entry["version"] == "9.9.9"
 
 
 # ---------------------------------------------------------------------------
