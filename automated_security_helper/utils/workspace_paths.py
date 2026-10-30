@@ -333,13 +333,15 @@ def drive_anchor(text: str) -> str:
     """The drive anchor *text* starts with, ``"C:"`` for ``C:/x``, ``C:\\x`` or
     ``C:``, and ``""`` for anything else, ``c:notes.py`` and ``x:legacy`` included.
 
-    The one rule for "is this a Windows drive" the pattern converters and the
-    aggregator's URI reading share, so a letter-colon NAME is a name on both
-    sides. ``aggregation._posix_text`` used to strip the leading separator of
-    any ``/x:...`` URI on the colon alone, so the POSIX URI ``/x:legacy/src/x.py``
-    read as the unrooted ``x:legacy/src/x.py`` and was rebased under its
-    project, a path naming nothing, where :func:`_drive_anchor` reads
-    ``x:legacy`` as a name and the converters keep it one.
+    The one rule for "is this a Windows drive" the pattern converters read,
+    exported so the aggregator's URI reading can take it too and a letter-colon
+    NAME is a name on both sides. ``aggregation._posix_text`` strips the leading
+    separator of any ``/x:...`` URI on the colon alone, so the POSIX URI
+    ``/x:legacy/src/x.py`` reads as the unrooted ``x:legacy/src/x.py`` and is
+    rebased under its project, a path naming nothing, where :func:`_drive_anchor`
+    reads ``x:legacy`` as a name and the converters keep it one. The aggregator's
+    adoption of this function is its own change; until it lands the two readings
+    differ, and this function is the one the aggregator is to take.
     """
     return _drive_anchor(text.replace("\\", "/"))
 

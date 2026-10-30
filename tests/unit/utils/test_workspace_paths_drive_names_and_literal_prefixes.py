@@ -111,7 +111,10 @@ class TestAColonInANameIsNotADrive:
         """``aggregation._posix_text`` strips the leading separator of a URI
         that reduced from ``file:///C:/x`` on the colon alone, so the POSIX URI
         ``/x:legacy/src/x.py`` read as unrooted and was rebased under its
-        project; it reads this rule now, the one the converters read."""
+        project. This is the rule the converters read, exported for the
+        aggregator to adopt in place of its own colon test; until that
+        adoption lands the two readings differ, and these rows pin the one the
+        aggregator is to take."""
         assert drive_anchor(text) == anchor
 
 
