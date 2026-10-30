@@ -3458,6 +3458,32 @@ def test_a_timeouts_token_matches_subprocess_utils_for_any_value():
         ), value
 
 
+def _pin_posix_signal_gate(monkeypatch):
+    """Make subprocess_utils read the platform as POSIX for one test.
+
+    ``signal_death`` reads a negative returncode as a signal only off Windows
+    (``os.name != "nt"``), and ``_exit_description`` takes that gate. A test
+    that asserts the signal wording therefore reads the POSIX side of the gate;
+    without the pin it fails on a Windows host, where -9 is the process's own
+    exit status and the message says "exited -9". The ``os`` seen by
+    subprocess_utils is replaced by a stand-in whose ``name`` is "posix" and
+    whose every other attribute is the real module's (the same shape the
+    Windows-side test uses with "nt").
+    """
+    from automated_security_helper.utils import subprocess_utils as spu
+
+    class _PosixOs:
+        name = "posix"
+
+        def __getattr__(self, attribute):
+            return getattr(os, attribute)
+
+    monkeypatch.setattr(spu, "os", _PosixOs())
+    assert spu.signal_death(-9, "x") is not None, (
+        "the platform gate was not taken: signal_death read -9 as an exit"
+    )
+
+
 class TestARefusedRequirementIsLoggedWithoutItsText:
     """The runner's two requirement refusals name the tool, never the spec.
 
@@ -3652,13 +3678,19 @@ class TestARefusedRequirementIsLoggedWithoutItsText:
         ],
     )
     def test_the_run_exit_error_names_how_the_command_ended(
-        self, runner, tmp_path, response, expected, never
+        self, runner, tmp_path, monkeypatch, response, expected, never
     ):
         """A signal death, a timeout and a child the stop did not end are not
         ordinary exits: "the command exited 124" misreads a timeout, "exited
         None" reads as nonsense, and the old str(CalledProcessError) at least
         said "died with <signal>". Each ending is named by its own value-free
-        words."""
+        words.
+
+        The signal case reads the POSIX side of the platform gate: on Windows a
+        negative returncode is the process's own exit status, never a signal
+        (the test below pins that side), so the gate is pinned to "posix" here
+        and the case reads the same on every host."""
+        _pin_posix_signal_gate(monkeypatch)
 
         def returns_response(*args, **kwargs):
             return dict(response)
@@ -3674,9 +3706,11 @@ class TestARefusedRequirementIsLoggedWithoutItsText:
         assert expected in message, message
         assert never not in message, message
 
-    def test_the_fallback_runs_signal_death_is_not_an_exit(self, runner):
+    def test_the_fallback_runs_signal_death_is_not_an_exit(self, runner, monkeypatch):
         """The fallback branch sees signal deaths as negative returncodes on
-        the raised CalledProcessError; the same value-free naming applies."""
+        the raised CalledProcessError; the same value-free naming applies. The
+        platform gate is pinned to "posix": on Windows -9 is an exit status."""
+        _pin_posix_signal_gate(monkeypatch)
 
         def raises_signal_death(cmd, *args, **kwargs):
             raise subprocess.CalledProcessError(-9, cmd, stderr="killed")
