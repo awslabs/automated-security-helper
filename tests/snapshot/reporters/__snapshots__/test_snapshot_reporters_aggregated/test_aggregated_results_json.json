@@ -625,7 +625,7 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": null,
-      "duration": 0.0,
+      "duration": null,
       "missing_reason": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message",
       "skipped_reason": null
     },
@@ -645,7 +645,7 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": null,
-      "duration": 0.0,
+      "duration": null,
       "missing_reason": null,
       "skipped_reason": "left out of this run"
     },

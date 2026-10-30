@@ -660,7 +660,7 @@ scanner_results:
   npm-audit:
     actionable_finding_count: 0
     dependencies_satisfied: false
-    duration: 0.0
+    duration: null
     excluded: false
     exit_code: 125
     finding_count: 0

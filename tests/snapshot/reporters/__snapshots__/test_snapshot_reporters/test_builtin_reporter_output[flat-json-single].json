@@ -48,7 +48,7 @@
       "dependencies_missing": false,
       "missing_reason": null,
       "skipped_reason": "left out of this run",
-      "duration": 0.0,
+      "duration": null,
       "targets_attempted": null,
       "targets_failed": 0,
       "counters_unusable": false
@@ -163,7 +163,7 @@
       "dependencies_missing": true,
       "missing_reason": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message",
       "skipped_reason": null,
-      "duration": 0.0,
+      "duration": null,
       "targets_attempted": null,
       "targets_failed": 0,
       "counters_unusable": false

@@ -29,7 +29,7 @@ Scanner              Suppressed Critical     High   Medium      Low     Info   D
 -------------------- -------- -------- -------- -------- -------- -------- ---------- ---------- -------- ---------------
 bandit                      0        0        1        0        0        0       <1ms          1 FAILED   MEDIUM (unavailable)
 checkov                     0        0        1        0        0        0       <1ms          1 FAILED   MEDIUM (unavailable)
-npm-audit                   0        0        0        0        0        0       <1ms          0 MISSING  MEDIUM (unavailable)
+npm-audit                   0        0        0        0        0        0        N/A          0 MISSING  MEDIUM (unavailable)
 semgrep                     0        0        0        1        0        0       <1ms          1 FAILED   MEDIUM (unavailable)
 
 Actionable findings meet or exceed the scanner threshold. Suppressed findings are separate.

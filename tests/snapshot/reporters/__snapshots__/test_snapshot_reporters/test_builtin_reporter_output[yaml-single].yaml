@@ -2216,7 +2216,7 @@ scanner_results:
   cdk-nag:
     actionable_finding_count: 0
     dependencies_satisfied: true
-    duration: 0.0
+    duration: null
     excluded: true
     exit_code: null
     finding_count: 0
@@ -2306,7 +2306,7 @@ scanner_results:
   npm-audit:
     actionable_finding_count: 0
     dependencies_satisfied: false
-    duration: 0.0
+    duration: null
     excluded: false
     exit_code: null
     finding_count: 0
