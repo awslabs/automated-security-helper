@@ -138,6 +138,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 from itertools import combinations
 from pathlib import Path
 from typing import (
@@ -736,12 +737,17 @@ def _refuse_config_files_that_are_not_utf8(
     project ends up using the operator's config. Run with the folder check,
     before any project's config is read.
 
-    A path that holds a NUL byte is refused here too, as a definition error: the
-    string reaches ``Path`` but no file can have that name, and the filesystem
-    layer raises ``ValueError`` for it rather than ``OSError``. A path that
-    cannot be resolved at all is refused the same way: ``Path.resolve`` raises
-    ``RuntimeError`` for a link loop on 3.10 to 3.12 (and ``OSError`` where the
-    filesystem layer cannot read the chain), which escaped as a traceback.
+    A path that holds a NUL byte is refused here too, as a definition error: no
+    file can have that name. It is read off the text itself (``"\\x00" in`` the
+    path), not caught from ``Path.resolve``: which inputs pathlib refuses, and
+    with what exception, has changed across the supported Python versions, and a
+    version whose non-strict ``realpath`` returned normally would have let the
+    NUL through this gate (NUL is valid UTF-8) to raise a bare ``ValueError``
+    later. The ``ValueError`` arm stays for whatever else the filesystem layer
+    refuses. A path that cannot be resolved at all is refused the same way:
+    ``Path.resolve`` raises ``RuntimeError`` for a link loop on 3.10 to 3.12
+    (and ``OSError`` where the filesystem layer cannot read the chain), which
+    escaped as a traceback.
     """
     problems = []
     for described, given in (
@@ -751,14 +757,21 @@ def _refuse_config_files_that_are_not_utf8(
     ):
         if given is None or given == "":
             continue
-        absolute = Path(os.path.abspath(os.fspath(given)))
+        text = os.fspath(given)
+        if "\x00" in text:
+            raise WorkspaceDefinitionError(
+                f"The path given for {described} holds a NUL character, which no "
+                f"file's name can: {text!r}."
+            )
+        absolute = Path(os.path.abspath(text))
         try:
             resolved = absolute.resolve()
         except ValueError as exc:
             raise WorkspaceDefinitionError(
                 f"The path given for {described} cannot be a file's name "
                 f"({type(exc).__name__} from the filesystem layer): "
-                f"{str(absolute)!r}. Check it for control characters."
+                f"{str(absolute)!r}. Check it for a character the filesystem "
+                f"layer refuses."
             ) from exc
         except (RuntimeError, OSError) as exc:
             raise WorkspaceDefinitionError(
@@ -779,29 +792,77 @@ def _refuse_config_files_that_are_not_utf8(
         )
 
 
-def _same_directory(first: Path, second: Path) -> bool:
+#: A directory's identity, ``(st_dev, st_ino)``, or None when it cannot be read or
+#: the filesystem gives it no inode (``st_ino == 0``: Python's docs say the inode
+#: identifies a file only "if non-zero", and some Windows network shares, RAM
+#: disks and FUSE mounts report 0). None never equals anything, so such a
+#: directory is judged by its text alone instead of being read as every other.
+_Identity = Optional[Tuple[int, int]]
+
+
+def _directory_identity(path: Path, cache: Dict[Path, _Identity]) -> _Identity:
+    """*path*'s identity, read once per path per *cache*.
+
+    One ``stat`` per distinct path: the overlap check compares every pair of
+    entries and every ancestor of each, and ``os.path.samefile`` stats both sides
+    on every call, which made the check O(N^2 * depth) system calls (about 1.5
+    million for 300 projects at depth 8, before anything is scanned).
+    """
+    if path not in cache:
+        try:
+            result = os.stat(path)
+        except OSError:
+            identity: _Identity = None
+        else:
+            identity = (result.st_dev, result.st_ino) if result.st_ino else None
+        cache[path] = identity
+    return cache[path]
+
+
+def _same_directory(
+    first: Path, second: Path, cache: Optional[Dict[Path, _Identity]] = None
+) -> bool:
     """Whether two canonical paths name one directory.
 
-    Equal as text, or one directory by identity (``os.path.samefile``), which is
-    what joins ``api`` and ``API`` on a case-insensitive filesystem and keeps them
-    apart on a case-sensitive one. A path that cannot be examined is judged by
-    its text alone; the existence check names it later.
+    Equal as text, or one directory by identity (:func:`_directory_identity`),
+    which is what joins ``api`` and ``API`` on a case-insensitive filesystem and
+    keeps them apart on a case-sensitive one. A path that cannot be examined, or
+    whose filesystem reports no inode, is judged by its text alone; the existence
+    check names an unreadable one later.
     """
     if first == second:
         return True
-    try:
-        return os.path.samefile(first, second)
-    except OSError:
-        return False
+    if cache is None:
+        cache = {}
+    identity = _directory_identity(first, cache)
+    return identity is not None and identity == _directory_identity(second, cache)
 
 
-def _is_inside(inner: Path, outer: Path) -> bool:
+def _is_inside(
+    inner: Path,
+    outer: Path,
+    cache: Dict[Path, _Identity],
+    root: Optional[Path] = None,
+) -> bool:
     """Whether *inner* is below *outer*: by text, or by the identity of one of
     *inner*'s ancestors, so ``Api/sub`` is inside ``api`` where the two spellings
-    are one directory."""
+    are one directory.
+
+    Only the ancestors below *root* are read when *inner* is under it: *outer* is
+    an entry inside the root, so no directory at or above the root can be it, and
+    reading the chain up to ``/`` bought nothing."""
     if inner.is_relative_to(outer):
         return True
-    return any(_same_directory(ancestor, outer) for ancestor in inner.parents)
+    target = _directory_identity(outer, cache)
+    if target is None:
+        return False
+    bounded = root is not None and inner.is_relative_to(root)
+    for ancestor in inner.parents:
+        if bounded and (ancestor == root or not ancestor.is_relative_to(root)):
+            break
+        if _directory_identity(ancestor, cache) == target:
+            return True
+    return False
 
 
 def _validate_no_overlap(
@@ -811,27 +872,30 @@ def _validate_no_overlap(
 
     Compares canonicalised real paths, which is what catches a symlink alias that
     containment validation accepts, and then the directories themselves by
-    identity (``os.path.samefile``): on a case-insensitive filesystem whose
-    ``realpath`` keeps the case it was given (macOS APFS by default) ``api`` and
-    ``API`` are two texts naming one directory, and a text comparison accepted
-    them as two projects to be scanned twice and written to one output path.
+    identity (``(st_dev, st_ino)``, each path read once): on a case-insensitive
+    filesystem whose ``realpath`` keeps the case it was given (macOS APFS by
+    default) ``api`` and ``API`` are two texts naming one directory, and a text
+    comparison accepted them as two projects to be scanned twice and written to
+    one output path.
     """
     problems: List[str] = []
+    cache: Dict[Path, _Identity] = {}
+    root = Path(definition.root)
     for first, second in combinations(candidates, 2):
-        if _same_directory(first.resolved, second.resolved):
+        if _same_directory(first.resolved, second.resolved, cache):
             problems.append(
                 f"'{first.entry}' and '{second.entry}' resolve to the same "
                 f"directory '{first.resolved.as_posix()}'; findings would be "
                 f"attributed twice and suppressions applied twice"
             )
-        elif _is_inside(second.resolved, first.resolved):
+        elif _is_inside(second.resolved, first.resolved, cache, root):
             problems.append(
                 f"'{second.entry}' is inside '{first.entry}' "
                 f"('{second.resolved.as_posix()}' is below "
                 f"'{first.resolved.as_posix()}'); overlapping projects would be "
                 f"scanned twice"
             )
-        elif _is_inside(first.resolved, second.resolved):
+        elif _is_inside(first.resolved, second.resolved, cache, root):
             problems.append(
                 f"'{first.entry}' is inside '{second.entry}' "
                 f"('{first.resolved.as_posix()}' is below "
@@ -889,16 +953,24 @@ def _validate_unique_keys(
 def _unscannable_detail(candidate: _Candidate) -> Optional[str]:
     """Why *candidate* cannot be scanned, or None when it can.
 
-    ``Path.is_dir()`` on Python 3.10-3.13 re-raises a ``PermissionError`` from an
-    unsearchable parent directory (3.14 reads it as absent), so the stat is
-    guarded: a project that cannot be examined is reported like one that is
-    missing or unreadable, never as a traceback.
+    Read with ``os.stat`` and ``S_ISDIR`` rather than ``Path.is_dir()``: on Python
+    3.10-3.13 ``is_dir()`` re-raises a ``PermissionError`` from an unsearchable
+    parent directory while 3.14 reads it as absent, so the same locked parent was
+    reported as "cannot be examined (Permission denied)" on one version and
+    "does not exist as a directory" on another. The stat answers the same on
+    every version: a missing entry, or a file on the way to it, does not exist
+    as a directory; any other ``OSError`` is a directory that cannot be examined,
+    named with the system's reason, never a traceback.
     """
     where = f"'{candidate.entry}' at '{candidate.resolved.as_posix()}'"
     try:
-        is_directory = candidate.resolved.is_dir()
+        result = os.stat(candidate.resolved)
+    except (FileNotFoundError, NotADirectoryError):
+        is_directory = False
     except OSError as exc:
         return f"{where} cannot be examined ({exc.strerror or type(exc).__name__})"
+    else:
+        is_directory = stat.S_ISDIR(result.st_mode)
     if not is_directory:
         return (
             f"'{candidate.entry}' does not exist as a directory at "
@@ -1718,7 +1790,11 @@ def resolve_workspace(
             for a remote caller only that session's own bound profile is set
             aside, so a non-default session's profile that uses ``!ENV`` is
             accepted at planning as it is at each project's scan. None reads the
-            session from ``client_config_rules`` when those carry one.
+            session from ``client_config_rules`` when those carry one; given
+            beside rules that carry a different session, it is refused (see
+            Raises), because the operator check and each project's resolution
+            would then judge two sessions, the planning-vs-scan mismatch this
+            parameter exists to remove.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -1730,14 +1806,33 @@ def resolve_workspace(
             not exist, is unreadable, overlaps another entry, collides on its
             key, or pins a scanner version irreconcilable with another project's.
             The message names every offending entry. A workspace file, root,
-            entry, policy file or default config whose path is not UTF-8 raises
-            its WorkspacePathNotUtf8Error subclass, before any project's config
-            is read.
+            entry, policy file, default config or registered ``trusted_config``
+            whose path is not UTF-8 raises its WorkspacePathNotUtf8Error subclass,
+            and a policy file, default config or registered config whose path
+            holds a NUL character, or cannot be resolved, raises the plain error,
+            each before any project's config is read.
         ASHConfigValidationError: Exit code 3. The workspace is fine but one
             project's own config is invalid, or cannot be loaded, or
             ``default_config`` names a file that does not exist. The message
             names the project or the file.
+        ValueError: ``session_id`` and ``client_config_rules.session_id`` are
+            both given and differ. A caller's error, not the workspace's: the
+            two would judge the operator config and the projects for two
+            different sessions.
     """
+    rules_session = getattr(client_config_rules, "session_id", None)
+    if (
+        session_id is not None
+        and rules_session is not None
+        and session_id != rules_session
+    ):
+        raise ValueError(
+            f"resolve_workspace: session_id {session_id!r} differs from "
+            f"client_config_rules.session_id {rules_session!r}; the operator "
+            f"config and the projects would be judged for two sessions"
+        )
+    operator_session = session_id if session_id is not None else rules_session
+
     definition = load_workspace_file(workspace_file)
 
     candidates = _validate_containment(definition, remote_client=remote_client)
@@ -1774,17 +1869,14 @@ def resolve_workspace(
         # the caller's gate: the file's extends chain is opened here, before any
         # project's resolution applies the same gate to the same file. With the
         # call's session, so the !ENV judgement is the one each project's
-        # resolution makes (resolve_config reads client_config_policy.session_id).
+        # resolution makes (resolve_config reads client_config_policy.session_id);
+        # the two sources were checked to agree above.
         check_operator_config(
             operator,
             definition.root,
             permit_base=permit_base,
             remote_client=remote_client,
-            session_id=(
-                session_id
-                if session_id is not None
-                else getattr(client_config_rules, "session_id", None)
-            ),
+            session_id=operator_session,
         )
         operator_digest = operator_config_digest(operator)
 
