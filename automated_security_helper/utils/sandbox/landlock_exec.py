@@ -719,10 +719,14 @@ def _child_setup(restrict: Callable[[], None]) -> None:
 
     The stop signals the wrapper blocked across the fork are unblocked, the child
     leads a new session, it asks the kernel for SIGTERM should the wrapper exit,
-    the dispositions this interpreter ignores are restored, and ``restrict``
-    confines it. Failing to restrict is fatal (``restrict`` raises); a parent-death
-    signal the kernel will not set is noted and the child goes on, as the file's
-    other best-effort steps do.
+    ``restrict`` confines it, and last the dispositions this interpreter ignores
+    are restored, right before the exec: while the restriction runs, a line this
+    program writes about a step that failed must reach a stderr that may be a
+    closed pipe as an error (EPIPE, reported, exit 126), not as SIGPIPE ending the
+    child with -13. Neither Landlock nor the socket filter touches rt_sigaction, so
+    the restored child can still set dispositions. Failing to restrict is fatal
+    (``restrict`` raises); a parent-death signal the kernel will not set is noted
+    and the child goes on, as the file's other best-effort steps do.
     """
     signal.pthread_sigmask(signal.SIG_UNBLOCK, STOP_SIGNALS)
     # A new session has no controlling terminal, so the scanner cannot push
@@ -744,8 +748,8 @@ def _child_setup(restrict: Callable[[], None]) -> None:
             )
             + "\n"
         )
-    _restore_dispositions()
     restrict()
+    _restore_dispositions()
 
 
 def _note(text: str) -> None:

@@ -718,7 +718,9 @@ def test_the_child_asks_for_sigterm_on_its_parents_exit_between_setsid_and_restr
 
 def test_the_child_restores_the_dispositions_the_interpreter_ignores(child_calls):
     """SIGPIPE and SIGXFSZ go back to their defaults before the exec, as
-    subprocess does for every child it starts."""
+    subprocess does for every child it starts, and only after the restriction:
+    while it runs, a failure line written to a closed stderr must be an error
+    the child reports with exit 126, not a SIGPIPE that ends it with -13."""
     calls = child_calls()
     names = [name for name, _ in calls]
     restored = {args for name, args in calls if name == "signal"}
@@ -727,9 +729,10 @@ def test_the_child_restores_the_dispositions_the_interpreter_ignores(child_calls
         (signal.SIGPIPE, signal.SIG_DFL),
         (signal.SIGXFSZ, signal.SIG_DFL),
     }
-    assert max(i for i, name in enumerate(names) if name == "signal") < names.index(
+    assert min(i for i, name in enumerate(names) if name == "signal") > names.index(
         "restrict"
     )
+    assert names[-2:] == ["signal", "signal"]
 
 
 def test_a_refused_parent_death_signal_is_noted_and_the_child_goes_on(
@@ -738,8 +741,9 @@ def test_a_refused_parent_death_signal_is_noted_and_the_child_goes_on(
     """The parent-death signal is best effort: the child says so and is still
     restricted and exec'd."""
     calls = child_calls(prctl_returns=-1)
+    names = [name for name, _ in calls]
 
-    assert ("restrict", ()) == calls[-1]
+    assert names.index("prctl") < names.index("restrict")
     noted = capsys.readouterr().err
     assert "prctl(PR_SET_PDEATHSIG)" in noted
     assert noted.startswith("ash-landlock: ")
