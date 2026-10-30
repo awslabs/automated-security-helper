@@ -1148,16 +1148,18 @@ class UVToolMixin:
             # code here, because _process_command_response, which does that
             # fold on the normal path, raised or never ran, and a run that
             # exited non-zero would otherwise leave the default looking
-            # accepted. A bool is no code (it passes isinstance(int)).
+            # accepted. A bool is no code (it passes isinstance(int)). The fold
+            # goes through the plugin's own ranking, as the normal path's does,
+            # so a scanner that ranks its codes itself ranks this one too.
             code = failed.get("returncode")
             if isinstance(code, int) and not isinstance(code, bool):
                 from automated_security_helper.base.plugin_base import (
-                    worse_exit_code,
+                    _folded_exit_code,
                 )
 
                 try:
-                    self.exit_code = worse_exit_code(
-                        getattr(self, "exit_code", None), code
+                    self.exit_code = _folded_exit_code(
+                        self, getattr(self, "exit_code", None), code
                     )
                 except Exception:  # noqa: BLE001 -- the response is the record
                     pass
