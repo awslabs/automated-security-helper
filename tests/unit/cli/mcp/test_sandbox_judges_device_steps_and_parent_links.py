@@ -12,7 +12,10 @@ resolved. And the link check read only the path's last component: ``os.lstat`` o
 the whole path follows a link in a parent component, so ``granted\\lnk\\repo`` with
 ``lnk`` a link to a share opened the share at the check meant to prevent it.
 A ``..`` component behind a device prefix is now refused, and every component of
-the path is read for links, from the anchor down.
+the path is read for links, from the anchor down. The walk reads the lexically
+collapsed spelling, as Win32 does: ``granted\\missing\\..\\lnk`` examines
+``granted\\lnk``, so a component that is stepped back over neither ends the walk
+nor hides the link after it.
 
 Windows is emulated as the neighbouring module does: ``_running_on_windows`` is
 patched True, and links are made with ``symlink_to``, whose target text is read
@@ -112,6 +115,77 @@ class TestALinkInAParentComponentIsJudged:
         assert (
             sandbox._refusal_before_resolving(
                 "Scan target", tmp_path / "missing" / "repo"
+            )
+            is None
+        )
+
+    def test_a_missing_component_stepped_back_over_does_not_hide_a_share_link(
+        self, tmp_path
+    ):
+        """Red at the first walk: ``granted/missing/../lnk/repo`` ended the walk at
+        ``missing`` with nothing judged, while Win32 collapses ``missing/..`` before
+        any file access and examines ``granted/lnk``, the link to the share. The
+        walk judges the collapsed spelling: the link is found in the parent."""
+        granted = tmp_path / "granted"
+        granted.mkdir()
+        (granted / "lnk").symlink_to("\\\\server\\share")
+
+        refusal = sandbox._refusal_before_resolving(
+            "Scan target", granted / "missing" / ".." / "lnk" / "repo"
+        )
+
+        assert refusal is not None
+        assert "component" in str(refusal)
+        assert "leads to a network share" in str(refusal)
+
+    def test_a_share_link_reached_by_stepping_back_is_the_last_component(
+        self, tmp_path
+    ):
+        """The collapsed path ends at the link, so it is judged as the path itself."""
+        granted = tmp_path / "granted"
+        granted.mkdir()
+        (granted / "lnk").symlink_to("\\\\server\\share")
+
+        refusal = sandbox._refusal_before_resolving(
+            "Scan target", granted / "missing" / ".." / "lnk"
+        )
+
+        assert refusal is not None
+        assert "It is a link that leads to a network share" in str(refusal)
+
+    def test_the_walk_examines_only_the_collapsed_components(
+        self, tmp_path, monkeypatch
+    ):
+        """The components ``lstat`` is asked about are the collapsed ones: the
+        stepped-over ``missing`` is never examined, as Win32 never examines it."""
+        granted = tmp_path / "granted"
+        granted.mkdir()
+        examined = []
+        real_lstat = sandbox.os.lstat
+
+        def recording_lstat(path, *args, **kwargs):
+            examined.append(str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(sandbox.os, "lstat", recording_lstat)
+
+        sandbox._refusal_before_resolving(
+            "Scan target", granted / "missing" / ".." / "repo"
+        )
+
+        assert str(granted / "repo") in examined
+        assert not any(name.endswith("missing") for name in examined)
+
+    def test_a_link_stepped_back_over_is_not_opened(self, tmp_path):
+        """Control: ``granted/lnk/../other`` never touches ``lnk`` on Win32 (the
+        collapse is lexical), so a share link there is not what the path names."""
+        granted = tmp_path / "granted"
+        (granted / "other").mkdir(parents=True)
+        (granted / "lnk").symlink_to("\\\\server\\share")
+
+        assert (
+            sandbox._refusal_before_resolving(
+                "Scan target", granted / "lnk" / ".." / "other"
             )
             is None
         )

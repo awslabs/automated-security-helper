@@ -992,13 +992,21 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
         )
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
-    components = _components_down_to(text)
+    # Win32 collapses ``..`` lexically before any file access, so a spelling
+    # like ``C:\granted\missing\..\lnk`` examines ``C:\granted\lnk`` and never
+    # asks whether ``missing`` is there. The walk judges that collapsed spelling,
+    # the one the OS will examine: walked as written, the missing component would
+    # end the walk with nothing judged and the link under the ``..`` would then be
+    # resolved by the gates. A ``..`` behind a device prefix was refused above.
+    components = _components_down_to(os.path.normpath(text))
     for index, component in enumerate(components):
         try:
             is_link = _is_link_stat(os.lstat(component))
         except OSError:
-            # Not there, or not examinable: nothing below it is either, and
-            # the gates judge the path as they do on every other platform.
+            # Not there, or not examinable: nothing below it is either (the
+            # spelling is already collapsed, so no later ``..`` steps back over
+            # it), and the gates judge the path as they do on every other
+            # platform.
             return None
         if not is_link:
             continue
