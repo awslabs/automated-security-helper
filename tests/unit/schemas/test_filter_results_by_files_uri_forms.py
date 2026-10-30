@@ -190,8 +190,51 @@ class TestWindowsForms:
         assert _resolved_relative_text("//attacker/x/y.py", "/work/proj", True) is None
         assert resolved == []
 
-        _resolved_relative_text("/elsewhere/x/y.py", "/work/proj", False)
-        assert resolved == ["/elsewhere/x/y.py"]
+        _resolved_relative_text("/work/other/y.py", "/work/proj", False)
+        assert resolved == ["/work/other/y.py"]
+
+    def test_a_candidate_under_another_top_level_is_never_resolved(self, monkeypatch):
+        """``Path.resolve`` walks every component, and under an automounted
+        directory (``/net/<host>`` on macOS, an autofs map) a component is a
+        host. A rooted candidate that misses the lexical match is resolved only
+        when it starts under the source directory's own top-level segment."""
+        resolved: list[str] = []
+        original = Path.resolve
+
+        def recording_resolve(self, *args, **kwargs):
+            resolved.append(self.as_posix())
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+
+        assert (
+            _resolved_relative_text("/net/attacker.example/x.py", "/work/proj", False)
+            is None
+        )
+        assert _resolved_relative_text("Z:/share/x.py", "C:/work/proj", True) is None
+        assert resolved == []
+
+        # The controls: the source directory's own top level, as resolved or as
+        # given, still reaches the resolve.
+        _resolved_relative_text("/work/other/y.py", "/work/proj", False)
+        _resolved_relative_text("/src/pkg/y.py", "/work/proj", False, "src/pkg")
+        assert resolved == ["/work/other/y.py", "/src/pkg/y.py"]
+
+    def test_a_remote_mount_result_is_filtered_without_a_resolve(self, monkeypatch):
+        resolved: list[str] = []
+        original = Path.resolve
+
+        def recording_resolve(self, *args, **kwargs):
+            resolved.append(self.as_posix())
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+        report = _report("file:///net/attacker.example/x.py", "/work/proj/src/a.py")
+
+        report.filter_results_by_files({"src/a.py"}, "/work/proj")
+
+        assert _lines(report) == [2]
+        assert [p for p in resolved if p.startswith("/net/")] == []
 
     def test_a_remote_host_result_is_filtered_without_a_resolve(self, monkeypatch):
         resolved: list[str] = []

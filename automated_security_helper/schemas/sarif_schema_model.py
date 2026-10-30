@@ -2518,8 +2518,23 @@ def _resolved_root_text(source_dir: object) -> Optional[str]:
         return None
 
 
+def _first_segment(text: Optional[str], fold_case: bool) -> Optional[str]:
+    """The first path segment of *text* after its root: ``work`` in
+    ``/work/proj``, ``C:`` in ``C:/proj``, ``src`` in ``src/pkg``; None for no
+    text or a text with no segment (``/``, ``.``)."""
+    if not text:
+        return None
+    parts = [part for part in PurePosixPath(text).parts if part not in ("/", "//")]
+    if not parts:
+        return None
+    return parts[0].lower() if fold_case else parts[0]
+
+
 def _resolved_relative_text(
-    candidate: str, resolved_root: Optional[str], fold_case: bool
+    candidate: str,
+    resolved_root: Optional[str],
+    fold_case: bool,
+    lexical_root: Optional[str] = None,
 ) -> Optional[str]:
     """*candidate* made relative to the resolved source directory, resolving the
     candidate too when its own spelling does not match.
@@ -2533,13 +2548,20 @@ def _resolved_relative_text(
     common case pays nothing for it. *fold_case* carries the caller's Windows
     reading through, so a drive-rooted URI against a relative or linked
     ``source_dir`` on Windows is compared the way that file system compares.
-    A UNC-rooted candidate (``//host/share/...``, what ``file://host/...``
-    reads as) is compared lexically only: resolving it on Windows opens a
-    handle on that host's share, and a scanner's SARIF is the scanner's text,
-    so no URI in it names a host this process reaches out to. None when the
-    root could not be resolved, neither spelling matches, the candidate is
-    UNC-rooted and did not match as spelled, or the candidate cannot be
-    resolved.
+
+    A scanner's SARIF is the scanner's text, so no URI in it may make this
+    process reach a host. A UNC-rooted candidate (``//host/share/...``, what
+    ``file://host/...`` reads as) is compared lexically only: resolving it on
+    Windows opens a handle on that host's share. And ``Path.resolve`` walks
+    every component of a rooted candidate, which under an automounted
+    directory (``/net/<host>`` on macOS, an autofs map, a mapped network drive)
+    is a mount of that host; so a candidate is resolved only when it starts
+    under the same top-level segment as the source directory, as resolved or as
+    given (*lexical_root*): the filter resolves toward places the source
+    directory already reaches, and a URI anywhere else is compared as spelled.
+    None when the root could not be resolved, neither spelling matches, the
+    candidate is UNC-rooted or starts elsewhere and did not match as spelled, or
+    the candidate cannot be resolved.
     """
     if resolved_root is None:
         return None
@@ -2547,6 +2569,12 @@ def _resolved_relative_text(
     if relative is not None:
         return relative
     if candidate.startswith("//"):
+        return None
+    first = _first_segment(candidate, fold_case)
+    if first is None or first not in (
+        _first_segment(resolved_root, fold_case),
+        _first_segment(lexical_root, fold_case),
+    ):
         return None
     try:
         resolved_candidate = root_text(Path(candidate).resolve())
@@ -2712,7 +2740,7 @@ class SarifReport(RecordModel):
                     rel_str = _relative_text(candidate_str, source_text, fold_case)
                     if rel_str is None:
                         rel_str = _resolved_relative_text(
-                            candidate_str, resolved_root, fold_case
+                            candidate_str, resolved_root, fold_case, source_text
                         )
                 if rel_str is None:
                     rel_str = PurePosixPath(candidate_str).as_posix()
