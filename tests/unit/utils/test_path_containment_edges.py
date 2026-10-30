@@ -14,7 +14,9 @@
   the candidate's ancestors are compared with the root by identity when the text
   says no.
 - A rejection names the candidate and the root as given, never the real path the
-  candidate resolves to, which the workspace resolver echoes to an MCP client.
+  candidate resolves to, which the workspace resolver echoes to an MCP client. The
+  one message that still printed the resolved root, the ``must_exist`` MISSING
+  rejection, names the root as given too.
 
 Every path here is under ``tmp_path``.
 """
@@ -134,3 +136,19 @@ def test_a_rejection_does_not_name_where_the_candidate_resolves(root, tmp_path):
     assert result.error.violation == PathContainmentViolation.OUTSIDE_ROOT
     assert "secret-place" not in result.error.message
     assert "project-a/hop/inner" in result.error.message
+
+
+@needs_symlinks
+def test_a_missing_directory_rejection_names_the_root_as_given(tmp_path):
+    """The must_exist rejection printed the resolved root, so a root spelled
+    through a link told the client where the link leads."""
+    real = tmp_path / "real-place"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+
+    result = validate_contained_path("project-c", alias, must_exist=True)
+
+    assert result.error.violation == PathContainmentViolation.MISSING
+    assert str(alias) in result.error.message
+    assert "real-place" not in result.error.message
