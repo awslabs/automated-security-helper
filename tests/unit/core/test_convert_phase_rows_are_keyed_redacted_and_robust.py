@@ -20,8 +20,9 @@ wrong on the tree these tests were written against:
 * a disabled converter still had its dependency check run (which can install);
 * an archive refused whole over an extraction limit was painted "No files to
   convert" while the gate failed the run on it;
-* a surviving converter's row carried the first dependency check's answer, not
-  the filter's, and a truthy non-bool answer made the row fail validation;
+* a surviving converter's dependency check was made twice, the row carrying one
+  answer and the filter acting on the other, and a truthy non-bool answer made
+  the row fail validation;
 * a converter without a config made the success row raise;
 * one malformed failed-input record aborted the whole scan from the handler.
 
@@ -350,8 +351,9 @@ class _FlakyDependencyConverter(ConverterPluginBase[_FlakyConfig]):
         return super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:
+        # True for the first question only: a second one answers False.
         type(self).checks += 1
-        return type(self).checks > 1
+        return type(self).checks == 1
 
     def convert(self, target: Path | str | None = None) -> List[Path]:
         return [Path("converted/flaky.py")]
@@ -375,7 +377,7 @@ class _PathAnsweringConverter(ConverterPluginBase[_PathAnsweringConfig]):
 
 
 class TestASurvivorsRowSaysWhatTheFilterDecided:
-    def test_a_converter_the_filter_admitted_is_not_gated_as_unavailable(
+    def test_the_dependency_check_is_made_once_and_its_answer_is_acted_on(
         self, plugin_context
     ):
         _FlakyDependencyConverter.checks = 0
@@ -383,9 +385,11 @@ class TestASurvivorsRowSaysWhatTheFilterDecided:
         results, _ = _run(plugin_context, [_FlakyDependencyConverter])
 
         row = results.converter_results["flaky-dependency-converter"]
+        # Red when the phase asked twice: the filter's second question answered
+        # False, so the converter the row called satisfied was dropped, or (the
+        # other way round) a False recorded for a converter that then ran.
+        assert _FlakyDependencyConverter.checks == 1
         assert row.converted_paths == ["converted/flaky.py"]
-        # Red at the base: the first check's False was recorded, and the gate
-        # reported a converter that converted everything as one that never ran.
         assert row.dependencies_satisfied is True
         assert incomplete_converters(results) == []
 
