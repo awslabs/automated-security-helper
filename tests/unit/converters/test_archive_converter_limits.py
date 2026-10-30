@@ -545,6 +545,13 @@ class TestDeclaredSizes:
 
     def assert_within_limits(self, converter) -> None:
         written = files_written(converter)
+        # The copy path has to have run for the limits to be what is measured: a
+        # member refused at the header pass writes nothing, and nothing is within
+        # every limit. The refusal would read as a pass here otherwise.
+        assert written, (
+            "nothing was written, so the copy limits were never reached; refused: "
+            f"{[(r.member, r.limit) for r in converter.refused_inputs]}"
+        )
         largest = max(written.values(), default=0)
         assert largest <= 1000, f"a member wrote {largest} bytes; {summary(written)}"
         assert sum(written.values()) <= 4000, summary(written)
