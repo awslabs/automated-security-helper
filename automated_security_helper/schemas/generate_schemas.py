@@ -18,33 +18,37 @@ from pydantic.json_schema import GenerateJsonSchema
 #: string that merely starts like a reference is not admitted.
 ENV_REFERENCE_JSON_PATTERN = r"^(!ENV )?\$\{\w+(:.*)?\}$"
 
+
 #: What a results file holds where its stored configuration read a value from
 #: the environment: the reference as the configuration file wrote it, never the
 #: value (config_validator.record_of_config). A fixed-choice or a number field
 #: such as ``global_settings.severity_threshold`` cannot hold one, so the load
 #: reads the field with its default and warns (AshAggregatedResults
 #: .validate_ash_config, config/recorded_config.py).
-ENV_REFERENCE_JSON_SCHEMA = {
-    "type": "string",
-    "pattern": ENV_REFERENCE_JSON_PATTERN,
-    "description": (
-        "An environment reference, kept as the configuration file wrote it. "
-        "The field is read with its default."
-    ),
-}
+def _reference_schema(description: str) -> dict:
+    """The schema of an environment reference, described as ``description``
+    says. Both reference schemas are built here so their type and pattern
+    cannot drift apart; only the description differs."""
+    return {
+        "type": "string",
+        "pattern": ENV_REFERENCE_JSON_PATTERN,
+        "description": description,
+    }
+
+
+ENV_REFERENCE_JSON_SCHEMA = _reference_schema(
+    "An environment reference, kept as the configuration file wrote it. "
+    "The field is read with its default."
+)
 
 #: The same reference in a configuration file, where the loader resolves it to
 #: the variable's value before the field is validated (ash_config
 #: .load_yaml_config; config_sources for TOML): the value, not a default, is
 #: what the field reads.
-CONFIG_FILE_REFERENCE_JSON_SCHEMA = {
-    "type": "string",
-    "pattern": ENV_REFERENCE_JSON_PATTERN,
-    "description": (
-        "An environment reference, resolved to the variable's value when the "
-        "file is loaded."
-    ),
-}
+CONFIG_FILE_REFERENCE_JSON_SCHEMA = _reference_schema(
+    "An environment reference, resolved to the variable's value when the "
+    "file is loaded."
+)
 
 
 def _with_env_reference(json_schema: Any) -> Any:
@@ -64,8 +68,10 @@ class ConfigFileJsonSchema(GenerateJsonSchema):
     field's type alone, so an editor validating a file against the published
     ``AshConfig.json`` (``config_writer.SCHEMA_COMMENT`` points every saved file
     at it) called invalid a file ASH itself reads and writes. Each such field
-    admits the reference (:data:`ENV_REFERENCE_JSON_SCHEMA`) beside its own
-    schema. A free string field admits it already; a string field with a
+    admits the reference (:data:`CONFIG_FILE_REFERENCE_JSON_SCHEMA`, whose
+    description says the loader resolves it; the results schema's
+    :data:`ENV_REFERENCE_JSON_SCHEMA` says the field is read with its default)
+    beside its own schema. A free string field admits it already; a string field with a
     constraint (a pattern, a length) does not, because the reference is not the
     value the constraint describes, so it admits the reference beside the
     constrained string. A ``Decimal`` field is described as a number or a numeric
