@@ -270,6 +270,37 @@ def test_typers_chained_hook_is_left_alone_on_the_pretty_path(monkeypatch):
     assert [report[1] for report in reports] == [error]
 
 
+def test_a_flushed_line_start_colon_is_shown_with_its_line():
+    """Each flushed piece was shown on its own, so ":" then a flush then
+    ":warning::x" reached the stream as "::warning::x" at line start, whole."""
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+    real = io.StringIO()
+    shown = entrypoint._ShownLines(real)
+
+    shown.write(":")
+    shown.flush()
+    assert real.getvalue() == ""
+    shown.write(":warning::x\n")
+
+    assert real.getvalue() == str(shown_not_obeyed("::warning::x\n"))
+    assert real.getvalue() != "::warning::x\n"
+
+
+def test_a_flushed_line_start_hash_is_ended_by_end():
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+    real = io.StringIO()
+    shown = entrypoint._ShownLines(real)
+
+    shown.write("#")
+    shown.flush()
+    assert real.getvalue() == ""
+    shown.end()
+
+    assert real.getvalue() == str(shown_not_obeyed("#\n"))
+
+
 def test_an_exception_whose_text_cannot_be_read_is_still_reported(monkeypatch):
     """The floor's own line formatted str(exc) outside any handler."""
 

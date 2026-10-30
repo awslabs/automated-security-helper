@@ -459,7 +459,10 @@ class _ShownLines:
     so a line written in pieces is shown whole: a ``::`` that starts it is a CI
     command only as a whole line. A flush writes the held piece as far as it
     goes: a hook that writes a prompt without its newline and flushes before it
-    reads the answer is waiting for a reader who must see the prompt. Not a
+    reads the answer is waiting for a reader who must see the prompt. The one
+    piece a flush keeps is a line start made only of ``:`` or ``#``: shown
+    alone, the rest of the line written after it would start the reader's line
+    as a command form. Not a
     terminal (``isatty()`` is false) and no descriptor, so a writer that asks
     does not color its text or write past the stream.
     """
@@ -490,7 +493,12 @@ class _ShownLines:
             self.write(line)
 
     def flush(self) -> None:
-        if self._held:
+        # A piece at a line's start made only of the characters a CI command
+        # form starts with (":" before "::warning::", "#" before "##vso[") stays
+        # held: written on its own it is harmless, and the rest of the line,
+        # written after, would then start the line for the reader. Shown with
+        # its line by the next write or by end().
+        if self._held and not (not self._unended and set(self._held) <= {":", "#"}):
             self._stream.write(self._show(self._held))
             self._held = ""
             self._unended = True
