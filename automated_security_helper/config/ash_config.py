@@ -284,12 +284,16 @@ def resolve_env_references(value: str) -> Optional[str]:
             "The reference is left as written."
         )
         return value.strip()
-    if not colon and "}" in value[match.end() :]:
-        # No colon and another closing brace later in the text, as in
-        # ``${VAR}x}`` or ``${A}/${B}``: not a reference this function
-        # resolves, so it is left as written, as it always was. (The pattern
-        # used to read everything up to that brace as group 3, and this test
-        # read that group; the text after the match says the same thing.)
+    if not colon and (default_text or "}" in value[match.end() :]):
+        # No colon, and either text between the name and its brace
+        # (``${VAR-x}``, ``${VAR x}``, ``${VAR.x}``: the shell's other default
+        # spellings, or a name this pattern does not read) or another closing
+        # brace later in the text (``${VAR}x}``, ``${A}/${B}``): not a
+        # reference this function resolves, so it is left as written, as it
+        # always was. The pattern used to read everything up to the last brace
+        # as group 3, so one test of that group covered both shapes; now that
+        # the default ends at the first brace, the text after the match covers
+        # the second.
         return value.strip()
     if colon and default_text.startswith("-"):
         # The shell's ``${VAR:-default}``. ASH reads everything after the colon
