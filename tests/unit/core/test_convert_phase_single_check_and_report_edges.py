@@ -399,7 +399,15 @@ class TestEventHandlerFailuresAreRedacted:
         phase, agg = _build(plugin_context, [leaky])
 
         def boom(event, **kwargs):
-            raise RuntimeError(f"cannot reach {ENV_VALUE}")
+            # The converter's own events only. A handler that raises at a
+            # phase's START event ends the run by contract, and the phase's
+            # COMPLETE line redacts with the configuration's values, not with
+            # the values this converter read from the environment.
+            if getattr(event, "name", str(event)) in (
+                "CONVERT_START",
+                "CONVERT_COMPLETE",
+            ):
+                raise RuntimeError(f"cannot reach {ENV_VALUE}")
 
         phase.notify_event = boom
         with caplog.at_level(logging.ERROR):
