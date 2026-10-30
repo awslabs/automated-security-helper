@@ -2594,8 +2594,11 @@ def _discard_project_output(project_output: Path) -> None:
     the directory; that is the one thing ``keep_previous_results`` kept that an
     abandon does not. Everything else there (the tools' own output,
     ``_TOOL_OUTPUT_DIRS``; a file this run did not write) is left as it was. A
-    link at any name is left alone and never followed, as every other write here
-    refuses to.
+    link at either of the two names is unlinked, never followed: ``Path.unlink``
+    removes the link entry and leaves its target, and a results file reached
+    through a link would otherwise still read as present beside the FAILED
+    verdict. A link at any other name is left alone, as every other write here
+    refuses to follow one.
     """
     import shutil
 
@@ -2611,10 +2614,14 @@ def _discard_project_output(project_output: Path) -> None:
         )
         return
     for path in entries:
-        if path.name not in _SCAN_OUTPUT_NAMES or path.is_symlink():
+        if path.name not in _SCAN_OUTPUT_NAMES:
             continue
         try:
-            if path.is_dir():
+            if path.is_symlink():
+                # Before the directory test, which follows the link: the link
+                # entry goes and its target is not touched.
+                path.unlink(missing_ok=True)
+            elif path.is_dir():
                 shutil.rmtree(path)
             else:
                 path.unlink(missing_ok=True)

@@ -23,8 +23,10 @@ The contract these cases pin:
 
 - a project that finishes after being abandoned has the results file and the
   reports the scan saved removed, and the tools' own output kept, so its subtree
-  agrees with the FAILED verdict; the discard follows no link at any depth, so a
-  link nested under what it removes is unlinked and its target left as it was;
+  agrees with the FAILED verdict; the discard follows no link at any depth: a
+  link AT one of the two names is unlinked (a results file reached through it
+  would still read as present beside the verdict), a link nested under what it
+  removes is unlinked, and every target is left as it was;
 - a project whose future is already done when the poll overruns it keeps its
   completed outcome;
 - the commit-or-abandon decision is taken once: a worker that has claimed its
@@ -226,11 +228,19 @@ def test_the_discard_leaves_the_tools_output_and_every_link_alone(tmp_path):
 
 
 @needs_symlinks
-def test_the_discard_goes_through_no_link_at_the_names_it_removes(tmp_path):
+def test_the_discard_unlinks_a_link_at_the_names_it_removes_and_follows_none(
+    tmp_path,
+):
     """``reports`` as a link to an outside directory, and the results file as a
     link to an outside file: the two names the discard removes, where a removal
-    through the link would reach outside ``projects/<key>/``. Both links are left
-    as they are and their targets untouched."""
+    through the link would reach outside ``projects/<key>/``.
+
+    Red at the base: both links were left in place, so ``results.exists()`` was
+    still True through the link beside the FAILED verdict, the contradiction the
+    discard exists to remove; and in a real run the scan's own write had gone
+    through that link into the outside file. The link entries are unlinked, as
+    the nested case below has them, and the targets are untouched.
+    """
     project_output = tmp_path / "out" / "projects" / "api"
     project_output.mkdir(parents=True)
     outside = tmp_path / "outside"
@@ -246,8 +256,10 @@ def test_the_discard_goes_through_no_link_at_the_names_it_removes(tmp_path):
 
     execution._discard_project_output(project_output)
 
-    assert (project_output / "reports").is_symlink()
-    assert (project_output / "ash_aggregated_results.json").is_symlink()
+    assert not (project_output / "reports").is_symlink()
+    assert not (project_output / "reports").exists()
+    assert not (project_output / "ash_aggregated_results.json").is_symlink()
+    assert not (project_output / "ash_aggregated_results.json").exists()
     assert (outside / "reports" / "ash.sarif").read_text(encoding="utf-8") == "kept\n"
     assert (outside / "results.json").read_text(encoding="utf-8") == "kept too\n"
 
