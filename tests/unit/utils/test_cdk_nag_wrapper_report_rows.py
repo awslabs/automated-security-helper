@@ -16,7 +16,9 @@ of the report or one field of the SARIF result built from it:
 - a plugin entry with no ``pluginName`` keeps an empty pack, which is the scanner's
   "no pack recorded";
 - a pack whose report failed has no entry in the mapping; ``{pack: []}`` is the shape of
-  a compliant evaluation, and the failure text names the pack instead;
+  a compliant evaluation, and the failure text names the pack instead; a pack that
+  reported failure and whose every listed violation could not be placed on a resource
+  is such a failed pack too;
 - the not-evaluated warning names the rule and the pack, not cdk-nag's exception text;
 - SARIF columns count from 1 and ``endColumn`` is the character after the id;
 - a rule that never ran carries no in-template suppression;
@@ -267,6 +269,63 @@ def test_a_requested_pack_that_never_wrote_an_entry_is_still_missing(tmp_path):
 
     assert "evaluating a rule: AwsSolutions" in failure
     assert "with no entry in the report: HIPAA.Security" in failure
+
+
+def test_a_failed_pack_whose_every_violation_is_unplaceable_is_a_failure(tmp_path):
+    """At the base a failure conclusion with one violation whose construct names no path
+    read as ``{"AwsSolutions": []}`` with no failure: a compliant template, though the
+    pack found something it could not place."""
+    report = _write_report(
+        tmp_path,
+        {
+            "pluginName": "AwsSolutions",
+            "conclusion": "failure",
+            "violations": [_violation(violatingConstructs=[{"constructPath": None}])],
+        },
+    )
+    per_pack, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert failure is not None
+    assert "AwsSolutions" in failure
+    assert "could not be read onto a resource" in failure
+    assert per_pack == {}
+
+
+def test_a_successful_conclusion_with_an_unplaceable_violation_keeps_its_entry(
+    tmp_path,
+):
+    """The conclusion gate: only a pack that itself reported failure is failed this way."""
+    report = _write_report(
+        tmp_path,
+        {
+            "pluginName": "AwsSolutions",
+            "conclusion": "success",
+            "violations": [_violation(violatingConstructs=[{"constructPath": None}])],
+        },
+    )
+    per_pack, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert failure is None
+    assert per_pack == {"AwsSolutions": []}
+
+
+def test_an_unrequested_pack_with_only_unplaceable_violations_does_not_fail_the_template(
+    tmp_path,
+):
+    """The requested-pack gate, as for the other failure branches."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "success", "violations": []},
+        {
+            "pluginName": "CloudFormation Validate",
+            "conclusion": "failure",
+            "violations": [_violation(violatingConstructs=[{"constructPath": None}])],
+        },
+    )
+    per_pack, failure = _violations_from_validation_report(report, ["AwsSolutions"])
+
+    assert failure is None
+    assert per_pack == {"AwsSolutions": []}
 
 
 def test_a_successful_pack_with_nothing_to_list_keeps_its_empty_entry(tmp_path):

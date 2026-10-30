@@ -2811,7 +2811,11 @@ def test_a_construct_with_no_path_is_logged_not_dropped_in_silence(
     with caplog.at_level("WARNING"):
         response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
 
-    assert response.results == {"AwsSolutions": []}
+    # The pack reported failure and nothing it listed could be placed, so the template
+    # is not shown compliant on it: no entry, and a failure that names the pack.
+    assert response.results == {}
+    assert response.failure is not None
+    assert "AwsSolutions" in response.failure
     assert any(
         "AwsSolutions-S1" in r.message and "constructPath" in r.message
         for r in caplog.records

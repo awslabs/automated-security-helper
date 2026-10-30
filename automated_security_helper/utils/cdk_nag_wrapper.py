@@ -1015,11 +1015,12 @@ def _violations_from_validation_report(
                     "results are unaffected"
                 )
             continue
-        # The entry is made only for a pack that evaluated the template, after the two
-        # failure branches above: ``{pack: []}`` is a compliant evaluation's shape, and a
-        # failed pack keyed that way was indistinguishable from one that ran and found
-        # nothing. The failed pack is carried by ``failure`` instead.
-        rows = per_pack.setdefault(pack_name, [])
+        # The rows this entry produces are collected first and the pack's entry is made
+        # after the loop, only for a pack that evaluated the template: ``{pack: []}`` is a
+        # compliant evaluation's shape, and a failed pack keyed that way was
+        # indistinguishable from one that ran and found nothing. The failed pack is
+        # carried by ``failure`` instead.
+        entry_rows: List[_NagFinding] = []
         for violation in violations:
             if not isinstance(violation, Mapping):
                 # The top level and the plugin entries were type-checked; a violation
@@ -1080,7 +1081,7 @@ def _violations_from_validation_report(
                         "placed on a resource and is not reported"
                     )
                     continue
-                rows.append(
+                entry_rows.append(
                     _NagFinding(
                         rule_id=rule_id,
                         resource_id=str(construct_path),
@@ -1098,6 +1099,43 @@ def _violations_from_validation_report(
                         pack=pack_name,
                     )
                 )
+        if (
+            conclusion is not None
+            and conclusion != "success"
+            and violations
+            and not entry_rows
+        ):
+            # The plugin reported failure and listed violations, and every one of them
+            # took a skip path above (not an object, constructs not a list, a construct
+            # that is not an object or names no path). Nothing of what it found can be
+            # placed, so the template is NOT shown compliant on this pack: read as
+            # ``{pack: []}`` it was. Failed like a pack that reported failure with
+            # nothing to show, on the same requested-pack gate; each skip was already
+            # said at WARNING above.
+            detail = (
+                f": {len(violations)} listed violation(s), none of which could be read "
+                "onto a resource"
+            )
+            if (
+                not expected_plugins
+                or not every_requested_named
+                or pack_name in expected_plugins
+            ):
+                failed_packs.append(f"{pack_label}{detail}")
+                failed_names.add(pack_name)
+                ASH_LOGGER.error(
+                    f"cdk-nag pack '{pack_label}' reported '{conclusion}' and listed "
+                    f"violations ASH could not place on any resource, so none of its "
+                    f"findings count and the template is not shown compliant{detail}"
+                )
+            else:
+                ASH_LOGGER.warning(
+                    f"validation plugin '{pack_label}', which was not requested, reported "
+                    f"'{conclusion}' with violations ASH could not place{detail}; the "
+                    "requested packs' results are unaffected"
+                )
+            continue
+        per_pack.setdefault(pack_name, []).extend(entry_rows)
 
     total = sum(len(v) for v in per_pack.values())
     ASH_LOGGER.debug(
