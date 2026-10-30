@@ -130,6 +130,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
+import time
 import uuid
 from contextlib import nullcontext, suppress
 from pathlib import Path
@@ -401,6 +402,10 @@ def _error_response(
         # roots keeps its own, below.
         category = config_load_category(error).value
     response = create_error_response(error, operation, category=category)
+    if isinstance(error, WorkspaceSessionBusy):
+        # Another scan of the session held its lock for the whole wait allowed;
+        # nothing of this scan ran. Named so a client can retry on it.
+        response["error_type"] = "session_busy"
     if isinstance(error, OutputDirectoryNotUsableError):
         response["error_type"] = OUTPUT_DIR_NOT_USABLE
     if _caused_by(error, EnvironmentValueInPath):
@@ -1839,8 +1844,15 @@ async def _execute(
     cancel_events: Optional[Mapping[str, CancelEvent]] = None,
     on_thread_start: Optional[Callable[[], None]] = None,
     results_before: Optional[Dict[str, ResultsFileState]] = None,
+    lock_wait_seconds: Optional[float] = None,
 ) -> Optional[WorkspaceRunResult]:
     """Run the workspace off the event loop, with a progress monitor beside it.
+
+    ``lock_wait_seconds`` bounds the wait for the session's scan lock when
+    another scan of the session holds it (``_acquire_session_lock``); the
+    caller passes its ``scan_timeout_seconds``, so a scan queued behind another
+    waits at most as long as it may run, and is refused as busy after that
+    rather than started late. None waits without a bound, as before.
 
     ``results_before`` is what each project's aggregated results file was before
     the caller touched the output directories (``results_files_before``), handed
@@ -1934,13 +1946,17 @@ async def _execute(
                     with cancel_scope(stop) if stop is not None else nullcontext():
                         if claimed:
                             # The clock starts once the session's lock is held
-                            # (_under_session_lock), not while waiting for it.
+                            # (_under_session_lock), not while waiting for it;
+                            # the wait itself is bounded by lock_wait_seconds
+                            # and ended by a cancel.
                             return _under_session_lock(
                                 session_id,
                                 plan,
                                 settings,
                                 cancel_events=cancel_events,
                                 on_locked=on_thread_start,
+                                stop=stop,
+                                wait_seconds=lock_wait_seconds,
                             )
                         if on_thread_start is not None:
                             on_thread_start()
@@ -1981,8 +1997,15 @@ def _under_session_lock(
     settings: ProjectScanSettings,
     cancel_events: Optional[Mapping[str, CancelEvent]] = None,
     on_locked: Optional[Callable[[], None]] = None,
+    stop: Optional[threading.Event] = None,
+    wait_seconds: Optional[float] = None,
 ) -> WorkspaceRunResult:
     """``execute_workspace``, holding the session's scan lock when there is a session.
+
+    ``stop`` and ``wait_seconds`` shape the wait for that lock
+    (:func:`_acquire_session_lock`): a set ``stop`` ends it as a cancel, and
+    ``wait_seconds`` bounds it, refusing the scan as busy when another scan of
+    the session still holds the lock at the bound.
 
     ``ASH_OFFLINE`` is set once the lock is held, not before: a workspace scan
     waiting behind another scan of its session would otherwise hold the
@@ -2005,10 +2028,61 @@ def _under_session_lock(
             on_locked()
         return _offline_aware(plan, settings, cancel_events=cancel_events)
 
-    with get_default_registry().session_for(session_id).lock:
+    lock = get_default_registry().session_for(session_id).lock
+    _acquire_session_lock(lock, session_id, stop=stop, wait_seconds=wait_seconds)
+    try:
         if on_locked is not None:
             on_locked()
         return _offline_aware(plan, settings, cancel_events=cancel_events)
+    finally:
+        lock.release()
+
+
+#: One slice of the wait for a session's scan lock: how long a cancel, or the
+#: wait's own bound, takes to be noticed while another scan of the session runs.
+_SESSION_LOCK_POLL_SECONDS = 0.25
+
+
+class WorkspaceSessionBusy(Exception):
+    """Another scan of the session held its lock for the whole wait allowed."""
+
+
+def _acquire_session_lock(
+    lock: threading.Lock,
+    session_id: str,
+    *,
+    stop: Optional[threading.Event],
+    wait_seconds: Optional[float],
+) -> None:
+    """Take ``lock`` for the scan, or refuse once the wait is not worth having.
+
+    A plain ``with lock`` waited without a bound and without a way out: a
+    workspace scan queued behind another scan of its session kept its RUNNING
+    registry entries and its ``max_concurrent_scans`` place for the whole wait,
+    ``scan_timeout_seconds`` did not apply (the clock starts once the lock is
+    held, by design), and a cancel could not interrupt the blocking acquire.
+
+    The wait is taken in slices instead: between slices a set ``stop`` ends it
+    as a cancel (:class:`ScanCancelled`, which the caller answers as every other
+    cancel), and ``wait_seconds``, when given, bounds it, after which the scan is
+    refused as :class:`WorkspaceSessionBusy` rather than started late. Both are
+    optional; with neither the wait is unbounded, as before, but still in slices.
+    """
+    deadline = None if not wait_seconds else time.monotonic() + wait_seconds
+    while True:
+        if lock.acquire(timeout=_SESSION_LOCK_POLL_SECONDS):
+            return
+        if stop is not None and stop.is_set():
+            raise ScanCancelled(
+                "the workspace scan was cancelled while waiting for another scan "
+                f"of session {session_id} to finish"
+            )
+        if deadline is not None and time.monotonic() >= deadline:
+            raise WorkspaceSessionBusy(
+                f"another scan of session {session_id} held its lock for "
+                f"{wait_seconds:g} seconds, the limit the workspace scan may wait; "
+                "the scan was not started. Retry once that scan finishes."
+            )
 
 
 def _offline_aware(
@@ -2615,6 +2689,7 @@ async def _scan_workspace(
                 cancel_events=cancel_events,
                 on_thread_start=_start_the_clock,
                 results_before=results_before,
+                lock_wait_seconds=timeout_seconds,
             )
             if result is None:
                 # _execute answers None only from a thread that did not run
