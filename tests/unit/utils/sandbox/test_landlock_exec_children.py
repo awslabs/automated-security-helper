@@ -397,10 +397,11 @@ def reap_calls(monkeypatch):
     """Run ``_reap_leftovers`` with the walk, the kills and the clock stood in for.
 
     The walk returns the given leftovers lists in turn, then empty lists; the
-    arguments each walk was called with and every kill are recorded.
+    arguments each walk was called with and every kill are recorded. The pids in
+    ``still_present`` are the ones whose stat the survivors check still reads.
     """
 
-    def run(deadline_value: float, leftovers: List[List[int]]):
+    def run(deadline_value: float, leftovers: List[List[int]], still_present=()):
         walks: List[object] = []
         kills: List[int] = []
         remaining = list(leftovers)
@@ -417,6 +418,11 @@ def reap_calls(monkeypatch):
         fake_os.waitpid = lambda pid, options: (0, 0)
         monkeypatch.setattr(landlock_exec, "_descendants", walk)
         monkeypatch.setattr(landlock_exec, "_kill_descendant", kill)
+        monkeypatch.setattr(
+            landlock_exec,
+            "_parent_pid",
+            lambda pid: ME if pid in still_present else None,
+        )
         monkeypatch.setattr(landlock_exec, "os", fake_os)
         monkeypatch.setattr(
             landlock_exec,
@@ -435,22 +441,23 @@ def test_the_first_reap_pass_walks_the_whole_tree_when_the_deadline_is_behind(
 ):
     """A stop that left the scanner's exit past the deadline still gets one
     complete pass: the walk is not given the deadline, and what it finds is
-    killed; no second pass follows. The survivors reported are what one more
-    deadline-bounded read still finds after that kill pass, here nothing, not
-    the pids the pass already ended."""
+    killed; no second pass and no second walk follow. The survivors reported are
+    the pids of that pass whose stat can still be read after its kills, here
+    none, not the pids the pass already ended."""
     walks, kills, deadline, survivors = reap_calls(5.0, [[11, 21, 31]])
 
-    assert walks == [None, deadline]
+    assert walks == [None]
     assert kills == [11, 21, 31]
     assert survivors == []
 
 
 def test_pids_still_present_after_the_last_kill_pass_are_the_survivors(reap_calls):
-    """When the re-read after the deadline still finds a pid, that one is
-    reported, the ones the pass ended are not."""
-    walks, kills, deadline, survivors = reap_calls(5.0, [[11, 21], [21]])
+    """A pid of the last pass that is still there after its kills is reported,
+    the ones the pass ended are not; the check reads each such pid's stat, never
+    /proc as a whole, so it ends inside the stop's grace on any kernel."""
+    walks, kills, deadline, survivors = reap_calls(5.0, [[11, 21]], still_present={21})
 
-    assert walks == [None, deadline]
+    assert walks == [None]
     assert kills == [11, 21]
     assert survivors == [21]
 
@@ -497,6 +504,9 @@ def test_a_child_reaped_only_after_the_last_pass_is_not_a_survivor(monkeypatch):
     fake_os.waitpid = waitpid
     monkeypatch.setattr(landlock_exec, "_descendants", walk)
     monkeypatch.setattr(landlock_exec, "_kill_descendant", kill)
+    monkeypatch.setattr(
+        landlock_exec, "_parent_pid", lambda pid: ME if pid in present else None
+    )
     monkeypatch.setattr(landlock_exec, "os", fake_os)
     monkeypatch.setattr(
         landlock_exec,

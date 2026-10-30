@@ -868,13 +868,15 @@ def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
         _reap_exited()
     if leftovers:
         # The deadline ended the loop right after a kill pass, so every pid in
-        # the last list has been signalled and most are gone: read once more,
-        # bounded by the deadline (the direct children are always read), and
-        # report only what is still there, not what that pass already ended. A
-        # child the kill reached after that pass's own sweep is a zombie, still
-        # listed in /proc, until it is collected: one more sweep first.
+        # the last list has been signalled and most are gone. A child the kill
+        # reached after that pass's own sweep is a zombie, still listed in /proc,
+        # until it is collected: one more sweep first. Then only that pass's pids
+        # are looked at, one stat read each, never another listing of /proc: on
+        # a kernel without children files a listing reads PROC_SCAN_LIMIT entries
+        # whatever the clock says, and this runs inside the grace ASH gives a
+        # stop. What is reported is what that pass found and could not end.
         _reap_exited()
-        leftovers = _descendants(until=deadline)
+        leftovers = [pid for pid in leftovers if _parent_pid(pid) is not None]
     return leftovers
 
 

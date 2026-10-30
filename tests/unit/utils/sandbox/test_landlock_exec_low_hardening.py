@@ -159,6 +159,8 @@ def test_the_reap_loop_returns_what_outlived_the_deadline(monkeypatch):
     )
     monkeypatch.setattr(landlock_exec, "time", clock)
     monkeypatch.setattr(landlock_exec, "_descendants", lambda until=None: [777])
+    # The survivors check reads each pid of the last pass: 777 is still there.
+    monkeypatch.setattr(landlock_exec, "_parent_pid", lambda pid: os.getpid())
     killed = []
     monkeypatch.setattr(
         landlock_exec,
