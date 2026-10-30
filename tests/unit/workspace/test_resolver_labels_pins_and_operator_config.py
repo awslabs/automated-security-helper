@@ -725,6 +725,61 @@ class TestDisplayLabels:
         assert shown[0] == "svc (api) (web)"
         assert shown[1:] == ["svc (api)", "svc (api2)"]
 
+    def test_settling_one_collision_does_not_leave_another(self):
+        """Decorating ``web``'s plain ``svc (api)`` lands on ``x``'s plain
+        ``svc (api) (web)``; a single extra pass left the two equal."""
+        projects = [
+            _entry("web", label="svc (api)"),
+            _entry("api", label="svc"),
+            _entry("api2", label="svc"),
+            _entry("x", label="svc (api) (web)"),
+        ]
+
+        _assign_display_labels(projects)
+
+        shown = [project.display_label for project in projects]
+        assert len(set(shown)) == 4, shown
+        assert shown == [
+            "svc (api) (web)",
+            "svc (api)",
+            "svc (api2)",
+            "svc (api) (web) (x)",
+        ]
+
+    def test_two_decorated_labels_that_are_equal_are_told_apart(self):
+        """``a (b) (c)`` is both ``a`` keyed ``b) (c`` and ``a (b)`` keyed ``c``."""
+        projects = [
+            _entry("b) (c", label="a"),
+            _entry("m", label="a"),
+            _entry("c", label="a (b)"),
+            _entry("n", label="a (b)"),
+        ]
+
+        _assign_display_labels(projects)
+
+        shown = [project.display_label for project in projects]
+        assert len(set(shown)) == 4, shown
+        assert shown[1] == "a (m)"
+        assert shown[3] == "a (b) (n)"
+
+    def test_labels_that_no_key_can_tell_apart_are_numbered(self):
+        """Keys are unique in a real plan; this is the guard for a plan whose
+        two projects somehow share one, so the display labels still differ."""
+        projects = [_entry("k", label="svc"), _entry("k", label="svc")]
+
+        _assign_display_labels(projects)
+
+        first, second = (project.display_label for project in projects)
+        assert first != second
+        assert second == f"{first} #2"
+
+    def test_distinct_labels_are_left_as_they_are(self):
+        projects = [_entry("api", label="one"), _entry("web", label="two")]
+
+        _assign_display_labels(projects)
+
+        assert [project.display_label for project in projects] == ["one", "two"]
+
     def test_a_label_read_from_the_environment_is_shown_by_its_mask(
         self, tmp_path, monkeypatch
     ):

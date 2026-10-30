@@ -1456,9 +1456,13 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
     common case readable.
 
     A decorated label can equal another project's plain label (a project named
-    ``svc (api)`` beside two named ``svc``, one of them keyed ``api``), so the
-    display labels are compared once more after decorating and any that still
-    collide are decorated too. Keys are unique, so one more pass settles it.
+    ``svc (api)`` beside two named ``svc``, one of them keyed ``api``), and
+    decorating that plain one can land on a third's (``svc (api) (web)``). So the
+    display labels are compared again after each pass: a colliding label that is
+    still the project's plain one is decorated, and where only decorated ones
+    collide each is decorated with its key once more. Keys are unique, so that
+    ends in a few passes; a bound of one pass per project and a numbered suffix
+    on whatever still collides make it end whatever the labels are.
     """
     counts: Dict[str, int] = {}
     for project in projects:
@@ -1470,12 +1474,25 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
             else project.label
         )
 
-    shown: Dict[str, int] = {}
+    for _ in projects:
+        shown: Dict[str, int] = {}
+        for project in projects:
+            shown[project.display_label] = shown.get(project.display_label, 0) + 1
+        colliding = [p for p in projects if shown[p.display_label] > 1]
+        if not colliding:
+            return
+        plain = [p for p in colliding if p.display_label == p.label]
+        for project in plain or colliding:
+            project.display_label = f"{project.display_label} ({project.key})"
+
+    taken: set = set()
     for project in projects:
-        shown[project.display_label] = shown.get(project.display_label, 0) + 1
-    for project in projects:
-        if shown[project.display_label] > 1 and project.display_label == project.label:
-            project.display_label = f"{project.label} ({project.key})"
+        label, number = project.display_label, 2
+        while label in taken:
+            label = f"{project.display_label} #{number}"
+            number += 1
+        taken.add(label)
+        project.display_label = label
 
 
 def _policy_document(
