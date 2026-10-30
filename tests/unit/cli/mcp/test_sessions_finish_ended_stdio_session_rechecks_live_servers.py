@@ -21,6 +21,7 @@ error already, while the deferred end read it as "no server is live".
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -134,6 +135,43 @@ def test_a_deferred_end_removes_the_workspace_under_the_registrys_lock(
 
     assert lock_was_held == [True], lock_was_held
     assert not sandbox.exists()
+
+
+def test_a_deferred_end_forgets_the_session_in_memory_when_the_root_is_gone(
+    root,
+) -> None:
+    """With no workspace root there is nothing on disk to remove, and the
+    deferred end makes no root to say so; it still drops this server's own
+    memory of the ended session (its registry entry here), as the end would
+    have. Kept, the entry outlived the session for the life of the process."""
+    sessions.get_default_registry().session_for(DEFAULT_SESSION_ID)
+    sessions._ended_while_scanning.add(DEFAULT_SESSION_ID)
+    shutil.rmtree(root)
+
+    sessions.finish_ended_session(DEFAULT_SESSION_ID)
+
+    assert sessions.get_default_registry().get(DEFAULT_SESSION_ID) is None
+    assert DEFAULT_SESSION_ID not in sessions._ended_while_scanning
+    assert not root.exists(), "the deferred end made the workspace root"
+
+
+def test_a_deferred_end_forgets_the_session_in_memory_under_a_live_server(
+    root,
+) -> None:
+    """The workspace stays for the live sibling; the exiting server's memory of
+    the session is its own and goes."""
+    sandbox = _default_workspace(root)
+    handle = _a_live_servers_entry(root)
+    try:
+        sessions.get_default_registry().session_for(DEFAULT_SESSION_ID)
+        sessions._ended_while_scanning.add(DEFAULT_SESSION_ID)
+
+        sessions.finish_ended_session(DEFAULT_SESSION_ID)
+
+        assert sandbox.is_dir()
+        assert sessions.get_default_registry().get(DEFAULT_SESSION_ID) is None
+    finally:
+        handle.close()
 
 
 def test_a_deferred_end_of_another_session_does_not_ask_the_registry(root) -> None:

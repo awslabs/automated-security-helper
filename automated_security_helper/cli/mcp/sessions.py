@@ -1015,6 +1015,12 @@ def finish_ended_session(session_id: Optional[str]) -> None:
     # so a server registering between the answer and the removal is counted or
     # starts after it; a registry that cannot be read keeps the workspace.
     if StdioServerPresence.a_server_is_live(if_none=lambda: end_session(session_id)):
+        # The workspace stays for the live server (or for the last one out,
+        # when the registry could not be read), but this server's own memory
+        # of the session ended with it: its bound profile, delivered-source
+        # record and registry entry are the exiting server's, not the
+        # sibling's, so they are dropped as end_session would have dropped them.
+        _forget_session_in_memory(session_id)
         with _ended_lock:
             _ended_while_scanning.discard(session_id)
 
