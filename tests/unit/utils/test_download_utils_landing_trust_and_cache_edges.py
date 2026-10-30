@@ -250,10 +250,14 @@ def test_a_link_swapped_in_at_the_target_after_the_rename_is_refused(
 def test_a_staging_file_that_cannot_be_made_removes_the_source(tmp_path):
     source = tmp_path / "verified"
     source.write_bytes(b"x")
-    target = tmp_path / "no-such-dir" / "tool"
+    # A plain file where the destination directory would be made: the staging
+    # file's directory cannot be created, so no staging file is.
+    (tmp_path / "blocked").write_bytes(b"")
+    target = tmp_path / "blocked" / "tool"
     with pytest.raises(OSError):
         du._replace_atomically(source, target, expected_sha256=DIGEST_A)
     assert not source.exists()
+    assert (tmp_path / "blocked").is_file()
 
 
 @POSIX_ONLY
@@ -349,9 +353,11 @@ def test_a_receipt_that_is_a_link_is_not_read(receipt_home, tmp_path):
 
 
 @POSIX_ONLY
-def test_a_binary_without_its_execute_bit_is_not_already_installed(
+def test_a_verified_binary_that_lost_its_execute_bit_gets_it_back(
     receipt_home, tmp_path, caplog
 ):
+    """The bytes still match the receipt, so the install is kept and the mode
+    put back, rather than the file downloaded again."""
     import hashlib
 
     destination = tmp_path / "bin"
@@ -369,10 +375,18 @@ def test_a_binary_without_its_execute_bit_is_not_already_installed(
     assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
     target.chmod(0o644)
     with caplog.at_level(logging.WARNING):
-        assert not du._already_installed(
+        assert du._already_installed(
             destination, "tool", "https://x.example/tool", digest
         )
     assert "not executable" in caplog.text
+    assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0o111
+    # The control: bytes that no longer match the receipt are not repaired.
+    target.write_bytes(b"other")
+    target.chmod(0o644)
+    assert not du._already_installed(
+        destination, "tool", "https://x.example/tool", digest
+    )
+    assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0
 
 
 # --- archive members ---------------------------------------------------------------
