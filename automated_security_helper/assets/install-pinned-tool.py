@@ -95,6 +95,7 @@ file that does not match its RECORD.
 import argparse
 import base64
 import csv
+import errno
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -1104,6 +1105,34 @@ def stage_third_party(
     return target
 
 
+def _rename_or_copy(src: Path, dst: Path) -> None:
+    """``os.replace(src, dst)``, falling back to copy-then-delete for a directory.
+
+    On Docker overlay2 without ``redirect_dir``, renaming a directory that lives in
+    a lower image layer fails with EXDEV, although ``dst`` is in the same tree. A
+    reinstall over an earlier layer's license directory meets that. The fallback
+    copies the directory to ``dst`` and then removes ``src``. A copy that fails is
+    removed again, leaving ``src`` as it was; a removal that fails part way is
+    made good from the copy, so one of the two names holds the whole directory.
+    """
+    try:
+        os.replace(src, dst)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV or src.is_symlink() or not src.is_dir():
+            raise
+        try:
+            shutil.copytree(src, dst, symlinks=True)
+        except BaseException:
+            shutil.rmtree(dst, ignore_errors=True)
+            raise
+        try:
+            shutil.rmtree(src)
+        except BaseException:
+            shutil.copytree(dst, src, symlinks=True, dirs_exist_ok=True)
+            shutil.rmtree(dst, ignore_errors=True)
+            raise
+
+
 def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     """Move a staged tool directory into ``third_party_dir``, world-readable.
 
@@ -1131,12 +1160,12 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
         incoming.chmod(0o755)
         old = work / "old"
         if final.is_symlink() or final.exists():
-            os.replace(final, old)
+            _rename_or_copy(final, old)
         try:
             os.replace(incoming, final)
         except BaseException:
             if old.is_symlink() or old.exists():
-                os.replace(old, final)
+                _rename_or_copy(old, final)
             raise
     finally:
         shutil.rmtree(work, ignore_errors=True)
