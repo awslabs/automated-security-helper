@@ -966,9 +966,13 @@ class ConvertPhase(EnginePhase):
                 # the phase's converted_paths with those entries and the row should
                 # agree with what the phase actually collected.
                 #
-                # excluded is False because reaching this loop means the converter
-                # survived filter_enabled_plugins, and dependencies_satisfied is read
-                # with getattr so that recording a failure cannot itself raise.
+                # excluded is False and dependencies_satisfied is True because
+                # reaching this loop means the converter survived
+                # filter_enabled_plugins, whose own check admitted it: the same
+                # two facts the success row records. The first check's answer
+                # (the instance's attribute) can differ from the filter's re-check
+                # and once said "tool absent" of a converter that was admitted
+                # and ran.
                 #
                 # The row is built twice at most. The exception being handled can
                 # be the success row's own validation refusing one of this
@@ -979,9 +983,7 @@ class ConvertPhase(EnginePhase):
                 # failure, so the converter's failure is recorded whatever shape
                 # its records are in.
                 row_fields: Dict[str, Any] = {
-                    "dependencies_satisfied": bool(
-                        getattr(plugin_instance, "dependencies_satisfied", False)
-                    ),
+                    "dependencies_satisfied": True,
                     "excluded": False,
                     "converted_paths": plugin_converted_paths,
                 }
