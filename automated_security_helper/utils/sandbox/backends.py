@@ -168,6 +168,26 @@ def _other_home(policy: SandboxPolicy) -> Optional[Path]:
     return _distinct_home(policy.home, _passwd_home())
 
 
+def _home_to_hide(policy: SandboxPolicy) -> Optional[Path]:
+    """``policy.home`` resolved, or None when it is a filesystem root.
+
+    The policy hands a root as the home when there is no usable one (an empty,
+    relative or unset HOME; ``policy._policy_home``) and for a HOME of "/" (a
+    container's). A root names no home: hidden as one, bwrap mounted a tmpfs over
+    the sandbox's whole root and sandbox-exec denied reading everything the policy
+    did not list.
+    """
+    home = _real(policy.home)
+    return None if home == Path(home.anchor) else home
+
+
+def _homes_to_hide(policy: SandboxPolicy) -> List[Path]:
+    """The home directories a backend hides, resolved: HOME's and the passwd entry's."""
+    homes = [h for h in [_home_to_hide(policy)] if h is not None]
+    other = _other_home(policy)
+    return homes + ([other] if other is not None else [])
+
+
 def _hidden_around(
     root: Path,
     shown: Sequence[Path],
@@ -274,11 +294,19 @@ def _probe_process(
 
 
 def _exit_failure(result: "subprocess.CompletedProcess[str]") -> Optional[str]:
-    """None if ``result`` exited 0, otherwise its last line of output as the reason."""
+    """None if ``result`` exited 0, otherwise its last line of output as the reason.
+
+    The last non-blank line of stderr, else of stdout: a stderr holding only
+    whitespace is not output, so the failure text a program wrote to stdout is
+    read instead of reporting "no output".
+    """
     if result.returncode == 0:
         return None
-    detail = (result.stderr or result.stdout or "").strip().splitlines()
-    return f"exit {result.returncode}: {detail[-1] if detail else 'no output'}"
+    for output in (result.stderr, result.stdout):
+        lines = [line.strip() for line in (output or "").splitlines() if line.strip()]
+        if lines:
+            return f"exit {result.returncode}: {lines[-1]}"
+    return f"exit {result.returncode}: no output"
 
 
 def _probe_run(
@@ -328,10 +356,7 @@ def _carved_homes(policy: SandboxPolicy) -> List[Path]:
     container's) names no home, and as one it would sit inside no path and take
     every other home's place.
     """
-    homes = [h for h in [_real(policy.home)] if h != Path(h.anchor)]
-    other = _other_home(policy)
-    if other is not None:
-        homes.append(other)
+    homes = _homes_to_hide(policy)
     return homes + _home_link_targets(homes, files=True)
 
 
@@ -395,11 +420,60 @@ def _symlinked_components(path: Path) -> List[Tuple[Path, str]]:
     return links
 
 
+def _links_to_recreate(spelling: Path) -> List[Tuple[Path, str]]:
+    """``_symlinked_components`` of ``spelling`` and of every link target it names.
+
+    A link's target can itself pass through another link (``/home/me`` ->
+    ``/local/home/me`` with ``/local`` -> ``/mnt/local``): recreated alone, the
+    first link dangled inside the sandbox, since nothing resolved its target's
+    own spelling. Each target is walked the same way, as the kernel would walk it
+    (a relative target against the directory the link really sits in), until no
+    new link is found.
+    """
+    found: List[Tuple[Path, str]] = []
+    seen: Set[Path] = set()
+    pending = [spelling]
+    while pending:
+        path = pending.pop()
+        for where, target in _symlinked_components(path):
+            if where in seen:
+                continue
+            seen.add(where)
+            found.append((where, target))
+            resolved = Path(target) if os.path.isabs(target) else where.parent / target
+            pending.append(Path(os.path.normpath(resolved)))
+    return found
+
+
 # ---------------------------------------------------------------------------
 # bubblewrap
 # ---------------------------------------------------------------------------
 
 _RO, _CACHE, _RW = 1, 2, 3
+
+#: The shared temporary directories every bwrap spawn gets a fresh tmpfs at, by
+#: their literal spelling: bwrap creates these directories inside its root, so a
+#: host link at either spelling is never recreated over them.
+_SHARED_TMPFS: Tuple[Path, ...] = (
+    Path("/tmp"),  # nosec B108 - a fresh tmpfs mounted inside the sandbox
+    Path("/var/tmp"),  # nosec B108 - a fresh tmpfs inside the sandbox
+)
+
+#: The resolver configuration, which systemd-resolved makes a link into /run.
+_RESOLV_CONF = Path("/etc/resolv.conf")
+
+#: The bwrap options every probe runs with, after the program's path.
+_BWRAP_PROBE_BASE: Tuple[str, ...] = (
+    "--unshare-all",
+    "--die-with-parent",
+    "--ro-bind",
+    "/",
+    "/",
+    "--proc",
+    "/proc",
+    "--dev",
+    "/dev",
+)
 
 
 class BwrapBackend(SandboxBackend):
@@ -409,28 +483,22 @@ class BwrapBackend(SandboxBackend):
     def __init__(self) -> None:
         self._executable: Optional[str] = None
         self._overlay = False
+        #: Whether a throwaway overlay mounts over each filesystem (by st_dev) a
+        #: cache path was found on, probed once per filesystem; see _overlay_over.
+        self._overlay_devices: Dict[int, bool] = {}
 
     @property
     def caches_are_throwaway(self) -> bool:
+        """Whether the probe found overlays supported; a cache on a filesystem that
+        refuses to be an overlay's lower layer is still mounted read-only
+        (_overlay_over)."""
         return self._overlay
 
     def _probe(self) -> Optional[str]:
         found = _sandbox_program("bwrap")
         if not found:
             return "bwrap is not installed (install the 'bubblewrap' package)"
-        self._executable = found
-        base = [
-            found,
-            "--unshare-all",
-            "--die-with-parent",
-            "--ro-bind",
-            "/",
-            "/",
-            "--proc",
-            "/proc",
-            "--dev",
-            "/dev",
-        ]
+        base = [found, *_BWRAP_PROBE_BASE]
         failure = _probe_run(base + [_true()])
         if failure:
             return (
@@ -454,7 +522,47 @@ class BwrapBackend(SandboxBackend):
                 "and Linux 5.11+): scanner caches will be mounted read-only, and uv "
                 "and any tool that has to write its cache get an empty private one."
             )
+        # Recorded last: a probe that failed leaves plan()'s guard unsatisfied, so
+        # a plan on a backend whose probe refused is refused too.
+        self._executable = found
         return None
+
+    def _overlay_over(self, real: Path) -> bool:
+        """Whether a throwaway overlay mounts over the filesystem ``real`` is on.
+
+        The probe mounted one over a fresh temporary directory, which says the
+        kernel and bwrap support overlays at all. overlayfs refuses some
+        filesystems as a lower layer (another overlay, some network and FUSE
+        filesystems), and a cache on one made every spawn fail at the mount. So
+        the first cache path met on each filesystem is tried once, with the
+        probe's own command, and the caches on a filesystem that refuses are
+        mounted read-only, with a private cache for the tools that write one.
+        """
+        try:
+            device = os.stat(real).st_dev
+        except OSError:
+            return False
+        if device not in self._overlay_devices:
+            failure = _probe_run(
+                [
+                    self._executable or "",
+                    *_BWRAP_PROBE_BASE,
+                    "--overlay-src",
+                    real.as_posix(),
+                    "--tmp-overlay",
+                    real.as_posix(),
+                    _true(),
+                ]
+            )
+            self._overlay_devices[device] = failure is None
+            if failure:
+                ASH_LOGGER.warning(
+                    f"bwrap cannot mount a throwaway overlay over {real.as_posix()} "
+                    f"({failure}): the caches on that filesystem are mounted "
+                    "read-only, and a tool that has to write its cache gets an empty "
+                    "private one."
+                )
+        return self._overlay_devices[device]
 
     def plan(
         self, argv: Sequence[str], env: Mapping[str, str], policy: SandboxPolicy
@@ -469,20 +577,46 @@ class BwrapBackend(SandboxBackend):
 
         for p in policy.read_only:
             add(p, _RO)
+        caches_read_only = not self._overlay
         for p in policy.cache:
-            add(p, _CACHE if self._overlay else _RO)
+            real = _real(p)
+            if self._overlay and self._overlay_over(real):
+                add(p, _CACHE)
+            else:
+                caches_read_only = True
+                add(p, _RO)
         for p in policy.writable:
             add(p, _RW)
+        # uv's tools-directory lock, which `uv tool run` opens read-write before it
+        # looks for an installed tool: the one file in the read-only tools
+        # directory it may write, as sandbox-exec grants it.
+        locks = [_real(p) for p in policy.uv_tool_locks]
 
-        home = _real(policy.home)
+        def covered_by_a_bind(path: Path) -> bool:
+            return any(
+                mounted != Path("/") and path != mounted and _is_within(path, mounted)
+                for mounted in mounts
+            )
+
         # (depth, precedence) puts every ancestor ahead of what is mounted inside it,
         # and at one depth the private home tmpfs (precedence 0) ahead of a bind of the
         # same directory, so scanning $HOME itself still shows it, read-only.
         ops: List[Tuple[int, int, List[str]]] = [
-            (len(home.parts), 0, ["--tmpfs", home.as_posix()]),
-            (2, 0, ["--tmpfs", "/tmp"]),  # nosec B108 - a fresh tmpfs mounted inside the sandbox
-            (3, 0, ["--tmpfs", "/var/tmp"]),  # nosec B108 - a fresh tmpfs inside the sandbox
+            (len(shared.parts), 0, ["--tmpfs", shared.as_posix()])
+            for shared in _SHARED_TMPFS
         ]
+        # The private home, and the passwd entry's home when HOME names another
+        # directory: the scanner is told its home is HOME's, and the passwd home
+        # would otherwise stay visible wherever a mounted system path holds it. A
+        # home that does not exist on the host and sits inside a read-only bind is
+        # left alone: bwrap cannot create the mount point there, and there is
+        # nothing to hide; one outside every bind is created in bwrap's own root.
+        home = _home_to_hide(policy)
+        tmpfs_roots: List[Path] = list(_SHARED_TMPFS)
+        for hidden in _homes_to_hide(policy):
+            if hidden.is_dir() or not covered_by_a_bind(hidden):
+                ops.append((len(hidden.parts), 0, ["--tmpfs", hidden.as_posix()]))
+                tmpfs_roots.append(hidden)
         for real, mode in mounts.items():
             if real == Path("/"):
                 continue
@@ -494,18 +628,45 @@ class BwrapBackend(SandboxBackend):
             else:
                 args = ["--bind", src, dst]
             ops.append((len(real.parts), mode, args))
+        for lock in locks:
+            if lock.is_file():
+                ops.append(
+                    (len(lock.parts), _RW, ["--bind", lock.as_posix(), lock.as_posix()])
+                )
         # A directory the tool may not read, inside one mounted to show something
         # else (a checkout under /opt), gets an empty directory over it. Ordered like
         # the home tmpfs: after the mount around it, before what is mounted inside it,
-        # such as the results directory.
+        # such as the results directory. One inside an unread directory that got an
+        # empty directory is covered by it; one inside an unread directory that got
+        # none (nothing showed it) is not, and gets its own.
         unread = sorted({_real(p) for p in policy.unread}, key=lambda p: len(p.parts))
-        for index, real in enumerate(unread):
-            covered = any(_is_within(real, outer) for outer in unread[:index])
+        emitted: List[Path] = []
+        for real in unread:
+            covered = any(_is_within(real, outer) for outer in emitted)
             shown = any(
                 real != mounted and _is_within(real, mounted) for mounted in mounts
             )
             if real != Path("/") and shown and not covered:
                 ops.append((len(real.parts), 0, ["--tmpfs", real.as_posix()]))
+                emitted.append(real)
+        tmpfs_roots += emitted
+        resolver_spelling: List[Path] = []
+        if policy.network and _RESOLV_CONF.is_symlink():
+            # systemd-resolved: resolv.conf points into /run, which is not mounted.
+            # The one file is bound where it really is, in order with the other
+            # mounts; its directory holds the resolver's sockets and nothing the
+            # tool needs. The link's own chain is recreated below.
+            resolver = _real(_RESOLV_CONF)
+            if resolver.is_file():
+                ops.append(
+                    (
+                        len(resolver.parts),
+                        _RO,
+                        ["--ro-bind", resolver.as_posix(), resolver.as_posix()],
+                    )
+                )
+                mounts.setdefault(resolver, _RO)
+                resolver_spelling.append(_RESOLV_CONF)
         ops.sort(key=lambda op: (op[0], op[1]))
 
         cmd: List[str] = [
@@ -527,23 +688,41 @@ class BwrapBackend(SandboxBackend):
         for _, _, args in ops:
             cmd.extend(args)
 
-        bound = [p for p, m in mounts.items() if m in (_RO, _RW, _CACHE)]
+        # The binds that show a host path as it is. Not "/": a policy read path of
+        # the root is never mounted (above), so it shows nothing, and counted as a
+        # bind it made every link look shown and skipped them all. Not the home: a
+        # bind of the home sits under its tmpfs at the same depth, and its links
+        # are recreated as they always were.
+        bound = [p for p in mounts if p != Path("/") and p != home]
         seen_links: Set[Path] = set()
         spellings = list(policy.read_only) + list(policy.writable) + list(policy.cache)
         if policy.cwd:
             spellings.append(policy.cwd)
         spellings.append(policy.home)
-        if policy.network and Path("/etc/resolv.conf").is_symlink():
-            # systemd-resolved: resolv.conf points into /run, which is not mounted.
-            resolver_dir = _real(Path("/etc/resolv.conf")).parent
-            if resolver_dir.exists():
-                cmd.extend(
-                    ["--ro-bind", resolver_dir.as_posix(), resolver_dir.as_posix()]
-                )
+        spellings += resolver_spelling
+
+        def shown_by_a_bind(where: Path) -> bool:
+            # A link is visible inside the sandbox when the innermost mount that
+            # covers its location is a bind of the host; a tmpfs covering it more
+            # closely (the private home, the shared temp directories, an empty
+            # directory over an unread tree) hides it, and it is recreated there.
+            binds = [b for b in bound if _is_within(where, b)]
+            if not binds:
+                return False
+            innermost = max(len(b.parts) for b in binds)
+            return not any(
+                len(root.parts) > innermost
+                for root in tmpfs_roots
+                if _is_within(where, root)
+            )
+
         for spelling in spellings:
-            for where, target in _symlinked_components(Path(spelling)):
-                if where in seen_links or any(
-                    _is_within(where, b) for b in bound if b != home
+            for where, target in _links_to_recreate(Path(spelling)):
+                if (
+                    where in seen_links
+                    or where in mounts
+                    or where in tmpfs_roots
+                    or shown_by_a_bind(where)
                 ):
                     continue
                 seen_links.add(where)
@@ -555,7 +734,7 @@ class BwrapBackend(SandboxBackend):
         cmd.extend(_with_socket_filter(argv))
         child_env = policy.filter_env(env)
         cleanup: List[Callable[[], None]] = []
-        if not self._overlay:
+        if caches_read_only:
             cleanup = _private_caches(policy, child_env)
         return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
 
@@ -587,6 +766,34 @@ _SYSTEM_READLINK: Tuple[str, ...] = ("/usr/bin/readlink", "/bin/readlink")
 
 #: Printed by firejail, unless --quiet, when it runs a command without a sandbox.
 _FIREJAIL_NO_SANDBOX = "existing sandbox"
+
+#: Characters firejail reads in a path option as a glob (``*``, ``?``, ``[``, ``]``,
+#: ``{``, ``}``) or a macro (``~``, ``${HOME}`` and the like), with no way to write
+#: them literally; a path holding one names something else to firejail.
+_FIREJAIL_PATTERN_CHARACTERS = frozenset("*?[]{}~$")
+
+
+def _firejail_path(path: Path) -> str:
+    """``path`` as a firejail option value, or SandboxUnavailable when it cannot be one.
+
+    firejail expands globs and macros in --whitelist, --blacklist, --read-only
+    and --read-write values and offers no escaping, so a path spelled with one of
+    those characters (a results directory named ``out[1]``, a home holding ``$``)
+    would be read as a pattern: the wrong paths shown or hidden, in silence.
+    Such a path is refused, and the operator pointed at the backends that take a
+    path as it is.
+    """
+    text = path.as_posix()
+    if any(ch in _FIREJAIL_PATTERN_CHARACTERS for ch in text) or any(
+        ord(ch) < 0x20 for ch in text
+    ):
+        raise SandboxUnavailable(
+            f"firejail cannot be given the path {text!r}: it reads *, ?, [, ], {{, "
+            "}}, ~ and $ in a path option as a pattern or a macro and offers no way "
+            "to write them literally. Use --sandbox bwrap or --sandbox landlock for "
+            "this scan"
+        )
+    return text
 
 
 class FirejailBackend(SandboxBackend):
@@ -684,7 +891,18 @@ class FirejailBackend(SandboxBackend):
         # whitelist inside $HOME applies to, from the passwd entry, never from HOME
         # (init_cfg in firejail's main.c). Its whitelists are decided against that
         # home. HOME's own directory, when it is another one, is blacklisted below.
-        home = _real(_passwd_home() or policy.home)
+        # A passwd home of "/" (a service account's) names no home: decided
+        # against it, every readable path was "inside the home", so /usr, /etc
+        # and the rest were whitelisted and --private dropped; HOME's directory
+        # is the home then, and the root, which no whitelist or blacklist can
+        # express, is treated as none.
+        passwd_home = _passwd_home()
+        if passwd_home is not None and _real(passwd_home) == Path(
+            _real(passwd_home).anchor
+        ):
+            passwd_home = None
+        home = _real(passwd_home or policy.home)
+        home_is_a_root = home == Path(home.anchor)
         home_variable = _real(policy.home)
         tmp_root = _real(_TMP_ROOT)
         cmd = [self._executable, "--quiet", *_FIREJAIL_CONFINEMENT]
@@ -705,7 +923,7 @@ class FirejailBackend(SandboxBackend):
         ]
         for path in ipc:
             if path and os.path.lexists(path):
-                cmd.append(f"--blacklist={path}")
+                cmd.append(f"--blacklist={_firejail_path(Path(path))}")
 
         # firejail has no throwaway overlay, so a cache is read-only like the rest;
         # _private_caches gives the tools that write one a private directory.
@@ -718,14 +936,14 @@ class FirejailBackend(SandboxBackend):
         whitelisted = [
             p
             for p in readable + writable
-            if _is_within(p, home) or _is_within(p, tmp_root)
+            if (not home_is_a_root and _is_within(p, home)) or _is_within(p, tmp_root)
         ]
-        if not any(_is_within(p, home) for p in whitelisted):
+        if not home_is_a_root and not any(_is_within(p, home) for p in whitelisted):
             cmd.append("--private")
         if not any(_is_within(p, tmp_root) for p in whitelisted):
             cmd.append("--private-tmp")
         for p in whitelisted:
-            cmd.append(f"--whitelist={p.as_posix()}")
+            cmd.append(f"--whitelist={_firejail_path(p)}")
         # HOME names a directory firejail does not treat as the home: the scanner is
         # told its home is there, and its ~/.ssh and ~/.aws would stay readable.
         # Under /tmp it is already hidden by --private-tmp or by the /tmp whitelists.
@@ -733,21 +951,23 @@ class FirejailBackend(SandboxBackend):
         # to start rather than the directory being shown.
         if (
             home_variable != home
-            and home_variable != Path("/")
+            and home_variable != Path(home_variable.anchor)
             and not _is_within(home_variable, tmp_root)
         ):
-            cmd.append(f"--blacklist={home_variable.as_posix()}")
+            cmd.append(f"--blacklist={_firejail_path(home_variable)}")
         # A directory a link at the top of either home names (~/.local kept on
         # another disk) is part of that home but outside it, where firejail shows
         # everything: it is blacklisted, all but the policy's own paths inside it.
-        homes = [home] + (
-            [home_variable] if home_variable not in (home, Path("/")) else []
+        homes = [h for h in [home] if not home_is_a_root] + (
+            [home_variable]
+            if home_variable not in (home, Path(home_variable.anchor))
+            else []
         )
         for target in _home_link_targets(homes, files=True):
             if _is_within(target, tmp_root):
                 continue
             for hidden in _hidden_around(target, readable + writable, homes):
-                cmd.append(f"--blacklist={hidden.as_posix()}")
+                cmd.append(f"--blacklist={_firejail_path(hidden)}")
         # A whitelisted path is mounted read-write whatever --read-only=/ said, so
         # every readable path is made read-only again here, and only then are the
         # writable ones (the results directory, inside the read-only output and
@@ -757,9 +977,15 @@ class FirejailBackend(SandboxBackend):
             # A readable path inside a writable one (the results dir) is left to
             # the --read-write below rather than made read-only first.
             if not any(p == w or _is_within(p, w) for w in writable):
-                cmd.append(f"--read-only={p.as_posix()}")
+                cmd.append(f"--read-only={_firejail_path(p)}")
         for p in writable:
-            cmd.append(f"--read-write={p.as_posix()}")
+            cmd.append(f"--read-write={_firejail_path(p)}")
+        # uv's tools-directory lock, which `uv tool run` opens read-write before it
+        # looks for an installed tool: the one file in the read-only tools
+        # directory it may write, as sandbox-exec grants it.
+        for lock in policy.uv_tool_locks:
+            if _real(lock).is_file():
+                cmd.append(f"--read-write={_firejail_path(_real(lock))}")
         cmd.append("--")
         cmd.extend(_with_socket_filter(argv))
         child_env = policy.filter_env(env)
@@ -859,6 +1085,28 @@ class LandlockBackend(SandboxBackend):
         # First, so a program that is not found is refused with nothing made.
         resolved_argv0 = _landlock_program(argv[0])
         private_root = Path(tempfile.mkdtemp(prefix="ash-sandbox-"))
+        private_cleanup: List[Callable[[], None]] = []
+        try:
+            return self._plan(
+                argv, env, policy, resolved_argv0, private_root, private_cleanup
+            )
+        except BaseException:
+            # A step after the private root was made raised (a link that could not
+            # be made, a private cache that could not be created): nothing is
+            # returned, so nothing would have run the cleanup.
+            SpawnPlan(argv=[], env={}, cleanup=private_cleanup).run_cleanup()
+            shutil.rmtree(private_root, ignore_errors=True)
+            raise
+
+    def _plan(
+        self,
+        argv: Sequence[str],
+        env: Mapping[str, str],
+        policy: SandboxPolicy,
+        resolved_argv0: str,
+        private_root: Path,
+        private_cleanup: List[Callable[[], None]],
+    ) -> SpawnPlan:
         private_tmp = private_root / "tmp"
         private_home = private_root / "home"
         private_tmp.mkdir()
@@ -868,15 +1116,32 @@ class LandlockBackend(SandboxBackend):
         # under /opt or /usr/local, which the policy keeps for the tool prefix)
         # would read the home with it: the home is carved out of such a path here,
         # and the policy's own paths inside the home stay granted as listed.
-        read_only = _around(
-            list(policy.read_only) + list(policy.cache), _carved_homes(policy)
-        )
+        carved = _carved_homes(policy)
+        # The policy's executable paths are granted read and exec; the rest of its
+        # read paths (the scanned tree, the scan target, the working directory, the
+        # directories read_path_env names) are the scan's data and are granted read
+        # alone, as sandbox-exec denies exec in them. Landlock rules add up, so a
+        # data path under an executable root (a checkout under /opt) is still
+        # executable through the root; one under no such root, the common
+        # checkout under $HOME, is not. Caches keep read and exec: a tool's
+        # installed environment can live in one.
+        programs = {os.path.realpath(p) for p in policy.executable}
+        exec_paths = [p for p in policy.read_only if os.path.realpath(p) in programs]
+        data_paths = [
+            p for p in policy.read_only if os.path.realpath(p) not in programs
+        ]
+        read_only = _around(exec_paths + list(policy.cache), carved)
+        read_data = _around(data_paths, carved)
         document = {
             # Caches are read-only: Landlock cannot discard a write, so one in place
             # would change what later runs read. See _private_caches.
             "read_only": [p.as_posix() for p in read_only]
             + ["/proc", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full"],
+            "read_data": [p.as_posix() for p in read_data],
             "writable": [_real(p).as_posix() for p in policy.writable]
+            # uv's tools-directory lock, the one file in the read-only tools
+            # directory `uv tool run` writes, as sandbox-exec grants it.
+            + [_real(p).as_posix() for p in policy.uv_tool_locks]
             # /dev/shm because POSIX semaphores live there and multiprocessing needs
             # them (detect-secrets scans files in a process pool). Landlock cannot
             # make it private, so this is the host's: a documented gap of this
@@ -885,6 +1150,12 @@ class LandlockBackend(SandboxBackend):
             + [private_root.as_posix(), "/dev/null", "/dev/shm"],  # nosec B108 - a Landlock grant, not a file ASH creates
             "network": policy.network,
         }
+        if policy.cwd is None:
+            # A spawn with no working directory of its own (a version probe)
+            # would otherwise start in ASH's, which the policy may not grant: the
+            # wrapper changes into the private TMPDIR instead, as bwrap and
+            # sandbox-exec move such a process out of ASH's directory.
+            document["cwd"] = private_tmp.as_posix()
         cmd = [
             sys.executable,
             "-I",
@@ -898,7 +1169,7 @@ class LandlockBackend(SandboxBackend):
         child_env = policy.filter_env(env)
         child_env["TMPDIR"] = private_tmp.as_posix()
         child_env["HOME"] = private_home.as_posix()
-        private_cleanup = _private_caches(policy, child_env)
+        private_cleanup += _private_caches(policy, child_env)
         return SpawnPlan(
             argv=cmd,
             env=child_env,
@@ -916,7 +1187,11 @@ def _link_policy_paths_into(private_home: Path, policy: SandboxPolicy) -> None:
     path the policy grants under the real home appears at the same relative place
     in it as a symlink to the real path, where the Landlock rules for that path
     apply. Shallowest first; a path under one already linked is reached through it.
+    A home that is a filesystem root names no home (``_home_to_hide``), and every
+    path is under it: nothing is linked then.
     """
+    if _home_to_hide(policy) is None:
+        return
     real_home = _real(policy.home)
     relatives = []
     for path in list(policy.read_only) + list(policy.cache) + list(policy.writable):
@@ -1028,7 +1303,10 @@ def _system_trust_roots() -> Optional[str]:
 
     Runs outside the sandbox, as ASH, with the same command ca-certs runs. None when
     neither keychain gave a certificate, in which case the tool is left to find its
-    own and fails the way it would have without the export.
+    own and fails the way it would have without the export. Only an export that
+    gave certificates is remembered: a failure (a timed-out or refused
+    ``security`` run) is tried again at the next spawn rather than disabling the
+    export for the rest of the process.
     """
     if _trust_roots_cache:
         return _trust_roots_cache[0]
@@ -1056,6 +1334,7 @@ def _system_trust_roots() -> Optional[str]:
             "Could not export the system root certificates; a sandboxed scanner "
             "that reads them itself (semgrep) may fail to verify TLS."
         )
+        return None
     _trust_roots_cache.append(pem)
     return pem
 
@@ -1102,6 +1381,13 @@ def _exec_rules(
     for verdict, paths in (("allow", executable), ("deny", denied), ("allow", nested)):
         if paths:
             rules.append(f"({verdict} process-exec {_sbpl_subpaths(paths)})")
+    # uv's tools-directory lock is the one file inside an executable tool path
+    # the scanner may write (profile grants it file-write*): a file it can write
+    # and run would be a program of its own making, so exec is denied there last.
+    locks = sorted({_real(p) for p in policy.uv_tool_locks})
+    if locks:
+        literals = " ".join(f"(literal {_sbpl_string(lock)})" for lock in locks)
+        rules.append(f"(deny process-exec {literals})")
     return rules
 
 
@@ -1125,10 +1411,11 @@ class SandboxExecBackend(SandboxBackend):
         unpack_dir: Optional[Path] = None,
         private_uv_cache: Optional[Path] = None,
     ) -> str:
-        home = _real(policy.home)
-        # The passwd entry's home too, when HOME names another directory: reading
-        # starts from "/", so a home that is not denied here stays readable.
-        homes = [home] + [h for h in [_other_home(policy)] if h is not None]
+        # HOME's directory and the passwd entry's home, when HOME names another
+        # directory: reading starts from "/", so a home that is not denied here
+        # stays readable. A home that is the filesystem root names no home
+        # (_home_to_hide): denied, it took back every read the policy did not list.
+        homes = _homes_to_hide(policy)
         # And each directory a link at the top of a home names (~/.local kept on
         # another disk), which is part of that home; the policy's own paths inside
         # it are allowed again after the denies, as they are inside the homes.
@@ -1165,16 +1452,29 @@ class SandboxExecBackend(SandboxBackend):
             lines.append(_mach_rule(MACH_SERVICES_WITH_NETWORK))
         lines += [
             f"(deny mach-lookup {_DENIED_MACH_SERVICES})",
-            "(allow ipc-posix-shm)",
+            # POSIX shared memory by name: libSystem's notification center segment,
+            # which every process maps, and the segments Python's multiprocessing
+            # makes for its own pools (detect-secrets). Allowed for every name, a
+            # scanner could open and write the segments of any other process of
+            # the same user.
+            (
+                "(allow ipc-posix-shm-read* "
+                '(ipc-posix-name "apple.shm.notification_center"))'
+            ),
+            '(allow ipc-posix-shm (ipc-posix-name-regex #"^/?(psm_|mp-|sem\\.)"))',
             "(allow ipc-posix-sem)",
             "(allow file-ioctl)",
             "(allow file-read-metadata)",
             # Read anywhere, then take back the home directory and the shared temp
             # directories, then give back the paths the policy lists. In SBPL the
-            # last matching rule wins.
+            # last matching rule wins. /private/var/tmp is the third shared
+            # temporary directory, where other users' and processes' files sit.
             '(allow file-read* (subpath "/"))',
             *[f"(deny file-read* (subpath {_sbpl_string(h)}))" for h in denied],
-            '(deny file-read* (subpath "/private/tmp") (subpath "/private/var/folders"))',
+            (
+                '(deny file-read* (subpath "/private/tmp") (subpath "/private/var/tmp")'
+                ' (subpath "/private/var/folders"))'
+            ),
         ]
         if readable:
             lines.append(f"(allow file-read* {readable})")
@@ -1250,6 +1550,22 @@ class SandboxExecBackend(SandboxBackend):
         cleanup: List[Callable[[], None]] = [
             lambda: shutil.rmtree(private_tmp, ignore_errors=True)
         ]
+        try:
+            return self._plan(argv, env, policy, private_tmp, cleanup)
+        except BaseException:
+            # The profile refused (SandboxUnavailable), or a step raised: nothing is
+            # returned, so the directories made so far are removed here.
+            SpawnPlan(argv=[], env={}, cleanup=cleanup).run_cleanup()
+            raise
+
+    def _plan(
+        self,
+        argv: Sequence[str],
+        env: Mapping[str, str],
+        policy: SandboxPolicy,
+        private_tmp: Path,
+        cleanup: List[Callable[[], None]],
+    ) -> SpawnPlan:
         child_env = policy.filter_env(env)
         child_env["TMPDIR"] = private_tmp.as_posix()
         # Caches are read-only here; see _private_caches. uv's private cache is
@@ -1263,8 +1579,13 @@ class SandboxExecBackend(SandboxBackend):
         )
         trust_roots = None
         # An SSL_CERT_FILE the operator set is passed through and wins, as it
-        # would unsandboxed.
-        if policy.system_trust_roots and "SSL_CERT_FILE" not in child_env:
+        # would unsandboxed; the profile is told to allow reading it, since the
+        # file can sit where the profile denies reads (under the home directory).
+        if child_env.get("SSL_CERT_FILE"):
+            named = Path(child_env["SSL_CERT_FILE"])
+            if named.is_absolute() and named.is_file():
+                trust_roots = named
+        elif policy.system_trust_roots:
             pem = _system_trust_roots()
             if pem is not None:
                 # A directory of its own, outside the writable private TMPDIR, so

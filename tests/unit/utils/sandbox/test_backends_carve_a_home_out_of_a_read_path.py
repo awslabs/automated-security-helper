@@ -106,7 +106,11 @@ def test_the_policy_keeps_the_path_holding_the_home(prefix, tmp_path):
 
 
 def _landlock_read_grants(policy, tmp_path, monkeypatch):
-    """The paths the Landlock plan's document grants reading, resolved."""
+    """The paths the Landlock plan's document grants reading, resolved.
+
+    Both read lists: ``read_only`` (read and exec, the tool paths) and
+    ``read_data`` (read alone, the scan's own data, the scanned tree among them).
+    """
     # The plan makes its private root with tempfile; keep it under tmp_path.
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     plan = LandlockBackend().plan([sys.executable], {"PATH": "/usr/bin"}, policy)
@@ -114,7 +118,7 @@ def _landlock_read_grants(policy, tmp_path, monkeypatch):
         document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
     finally:
         plan.run_cleanup()
-    return {Path(p) for p in document["read_only"]}
+    return {Path(p) for p in document["read_only"] + document.get("read_data", [])}
 
 
 def _holding(granted, home):
