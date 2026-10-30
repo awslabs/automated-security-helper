@@ -1732,7 +1732,9 @@ class FindingsExplorerApp(App):
         The width is read from the excerpt as read, before the masking: measured
         after it, a masked first line, which has no number or marker, read as a
         prefix of its whole length, and every line of the excerpt was allowed
-        that many characters more than the cap."""
+        that many characters more than the cap. The path the view names is the
+        file as the results record it, under the scanned directory; the file is
+        opened by the name read back from its record form (``_source_path``)."""
         if not finding.get("code_snippet"):
             excerpt = _source_excerpt(finding, self.scan_root)
             if excerpt is not None:
@@ -1747,8 +1749,13 @@ class FindingsExplorerApp(App):
                 # masked whole (_line_text).
                 finding["code_snippet"] = _cut_excerpt_lines(excerpt)
                 finding[SNIPPET_LINE_CHARS_KEY] = line_chars
+                # The file as the results record it, under the scanned directory:
+                # the spelling the table and the results file show. The path the
+                # file was OPENED by holds the name read back from its record form
+                # (_source_path), and shown it drew that name's escape where the
+                # results spell the six characters of the record form.
                 finding[SNIPPET_READ_FROM] = str(
-                    _source_path(finding.get("file"), self.scan_root)
+                    self.scan_root / str(finding.get("file"))
                 )
         self.push_screen(FindingDetailScreen(finding))
 

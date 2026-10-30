@@ -9,7 +9,8 @@ Each test here was red before its fix:
 - a read excerpt's line numbers are the view's own layout, right-aligned, and do
   not count toward the cap on the source; their width is measured before the
   excerpt is masked, since a masked line has no number;
-- a file name recorded in its record form is read back before the file is opened;
+- a file name recorded in its record form is read back before the file is opened,
+  and the view names the file as the results record it;
 - a missing rule id is shown as N/A, a message given by id alone as nothing, a null
   justification as "Not specified", never the word None;
 - a scanner name that is not text names no scanner;
@@ -43,6 +44,7 @@ from automated_security_helper.cli.inspect.inspect_findings_app import (
     MESSAGE_CHARS,
     SNIPPET_LINE_CHARS,
     SNIPPET_LINE_CHARS_KEY,
+    SNIPPET_READ_FROM,
     SNIPPET_TRUNCATED,
     FindingsExplorerApp,
     extract_findings,
@@ -479,3 +481,33 @@ async def test_the_shown_line_width_is_measured_before_the_lines_are_masked(tmp_
     # Lines 5 to 12 are shown, so every number is two wide: "   5: " is six.
     assert finding["code_snippet"].startswith("(masked)\n")
     assert finding[SNIPPET_LINE_CHARS_KEY] == SNIPPET_LINE_CHARS + len("   5: ")
+
+
+def _write_a_non_utf8_name(root) -> None:
+    """One line of source in a file whose name holds a byte that is not UTF-8."""
+    with open(os.path.join(os.fsencode(root), b"caf\xe9.py"), "wb") as handle:
+        handle.write(b"x = 1\n")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a file name that is not UTF-8 is a POSIX name"
+)
+@pytest.mark.asyncio
+async def test_the_read_from_path_is_the_name_as_the_results_record_it(tmp_path):
+    """The file is opened by the name read back from its record form; the view
+    names it as the results spell it, the six characters of the record form, not
+    the read-back name, whose lone surrogate drew as an escape of its own."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _write_a_non_utf8_name(root)
+    finding = _finding(file="caf\\udce9.py", line=1)
+    app = FindingsExplorerApp(
+        [finding], config_path=tmp_path / ASH_DEFAULT_CONFIG_FILE_NAME, scan_root=root
+    )
+    async with app.run_test(size=(160, 50)) as pilot:
+        await _settle(pilot)
+        await pilot.press("v")
+        await _settle(pilot)
+
+    assert finding["code_snippet"] == "→ 1: x = 1\n"
+    assert finding[SNIPPET_READ_FROM] == str(root / "caf\\udce9.py")
