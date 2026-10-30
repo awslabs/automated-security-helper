@@ -308,9 +308,17 @@ def get_ash_revision(quiet: bool = False) -> str | None:
                 f"Found direct_url.json file for module @ {direct_url_json_path.as_posix()}"
             )
         try:
-            direct_url_json = json.loads(direct_url_json_path.read_text())
+            # Read as UTF-8, as _recorded_direct_url reads the same file: the two
+            # LOCAL decisions then read the same bytes the same way.
+            direct_url_json = json.loads(
+                direct_url_json_path.read_text(encoding="utf-8")
+            )
             if isinstance(direct_url_json, dict) and "url" in direct_url_json:
                 url = direct_url_json["url"]
+                if not isinstance(url, str):
+                    # Caught below: a record of the wrong shape falls back to the
+                    # recorded revision, as an unreadable one does.
+                    raise TypeError("the url in direct_url.json is not a string")
                 if url.startswith("file://") and _source_tree_in(direct_url_json):
                     info(
                         "ASH installed from local file path, building with LOCAL source"
@@ -324,7 +332,7 @@ def get_ash_revision(quiet: bool = False) -> str | None:
                     # build recorded follows below. Never LOCAL: a LOCAL build with
                     # no ASH tree would have nothing to build but the working
                     # directory, the repository being scanned.
-                    ASH_LOGGER.info(
+                    info(
                         "ASH was installed from a local path that holds no ASH source "
                         "tree, so the image installs the revision its package build "
                         "recorded"
@@ -339,6 +347,10 @@ def get_ash_revision(quiet: bool = False) -> str | None:
                         or vcs_info.get("commit_id")
                         or ASH_REPO_LATEST_REVISION
                     )
+                    if not isinstance(revision, str):
+                        raise TypeError(
+                            "the vcs_info revision in direct_url.json is not a string"
+                        )
                     return_val = revision
                     info(
                         f"Resolved source revision for ASH to use during container image build: {return_val}"
@@ -522,8 +534,14 @@ def validate_path(path: str | Path) -> Path:
     # Convert to absolute path
     abs_path = Path(path).resolve()
 
-    # Check if the path exists
-    if not abs_path.exists():
+    # Check if the path exists. A path that cannot be looked at (an unsearchable
+    # parent) is refused the same way, not raised past the caller's ValueError
+    # handling as a traceback.
+    try:
+        exists = abs_path.exists()
+    except OSError as e:
+        raise ValueError(f"Path cannot be checked: {abs_path} ({e.strerror or e})")
+    if not exists:
         raise ValueError(f"Path does not exist: {abs_path}")
 
     return abs_path
@@ -622,16 +640,32 @@ def _streamed_line(
     (``scan_report=False``, the default, which is also the carrier's default:
     the image build, and the runtime's own stderr) keeps that default band for
     every value, because the exemption's reason -- the report's own words --
-    does not apply there."""
+    does not apply there.
+
+    The stream is read a line at a time, so a value that holds a line break is
+    matched by each of its lines: the whole value never appears in one line, and
+    a child that quotes it back prints it one line at a time."""
     from automated_security_helper.utils.error_text import text_without_values
     from automated_security_helper.utils.numeric_text import MIN_ANYWHERE_LENGTH
 
+    hidden_values = _value_lines(hidden_values)
+    strict_values = _value_lines(strict_values)
     if not scan_report:
         return text_without_values(line, tuple(hidden_values) + tuple(strict_values))
     out = line
     if strict_values:
         out = text_without_values(out, strict_values)
     return text_without_values(out, hidden_values, min_length=MIN_ANYWHERE_LENGTH)
+
+
+def _value_lines(values: Tuple[str, ...]) -> Tuple[str, ...]:
+    """``values`` with each one that holds a line break followed by its lines."""
+    out: List[str] = []
+    for value in values:
+        out.append(value)
+        if "\n" in value or "\r" in value:
+            out.extend(part for part in value.splitlines() if part)
+    return tuple(out)
 
 
 def run_cmd_direct(
@@ -765,6 +799,18 @@ def run_cmd_direct(
             text=True,
             shell=shell,
         )
+        # Line endings untranslated: in universal-newline mode a carriage
+        # return ends a line and is read back as a line feed, so every
+        # progress redraw the runtime printed became a line of its own on the
+        # console and in the captured copy. Each line is still read one at a
+        # time, so the console rewrites in place as the runtime meant.
+        for pipe in (process.stdout, process.stderr):
+            reconfigure = getattr(pipe, "reconfigure", None)
+            if reconfigure is not None:
+                try:
+                    reconfigure(newline="")
+                except (OSError, ValueError, TypeError):
+                    pass
         # The runtime shares this process's group, so the die-now branches'
         # group kill cannot name it: recorded by pid and forgotten the
         # moment its exit is observed, before the reap.
@@ -834,9 +880,18 @@ def run_cmd_direct(
             # the one a die-now signal must still be able to kill.
             subprocess_utils.discard_tool_pid_once_exited(process)
 
-    # Join threads before reading buffers to avoid race condition
+    # Join threads before reading buffers to avoid race condition. The join is
+    # bounded: a pipe a grandchild still holds open never closes. A reader still
+    # running then is said once, so a captured copy read without its tail is
+    # not taken for the whole output.
     for reader in readers:
         reader.join(timeout=5.0)
+        if reader.is_alive():
+            ASH_LOGGER.warning(
+                "The container runtime exited but its output was still being read "
+                "after 5 seconds (a process it started may hold the pipe open); "
+                "the captured copy of its output may be incomplete."
+            )
 
     # Get the captured output (safe now that threads are joined)
     stdout = stdout_buffer.getvalue()
@@ -1276,7 +1331,13 @@ def _non_root_stage_uid_refusal(
     """
     if build_target != BuildTarget.NON_ROOT.value:
         return None
-    if int(container_uid) == 0:
+
+    def is_zero(digits: str) -> bool:
+        # Without int(): a string of digits past the interpreter's conversion
+        # limit raised ValueError here, after the pattern check had passed it.
+        return digits.strip().lstrip("0") == ""
+
+    if is_zero(container_uid):
         return (
             "The non-root image stage creates a user with UID 0, which is root: ASH "
             "is running as root, or --container-uid 0 was given. Pass --build-target "
@@ -1284,7 +1345,7 @@ def _non_root_stage_uid_refusal(
             "--container-gid work only when the output directory is writable by that "
             "UID: the container runs as that user and writes its reports there."
         )
-    if int(container_gid) == 0:
+    if is_zero(container_gid):
         return (
             "The non-root image stage gives its user GID 0, which is root's group: "
             "ASH is running with GID 0, or --container-gid 0 was given. Pass "
@@ -1303,14 +1364,21 @@ def _runner_supports_buildx(resolved_oci_runner: str) -> bool:
     podman, and ``_OCI_RUNNER_CANDIDATES`` reaches ``docker`` before ``podman``, so
     on such a host every name-based check passes for something that has no buildx
     at all. Asking the binary is the only thing that separates the two.
+
+    Asked through ``OCI_RUNNER_WRAPPER``, as the build runs: a wrapper that runs
+    the runtime as another user, or on another host, can have a buildx the bare
+    binary does not, or none where the bare binary has one. The answer is kept
+    per wrapper and path.
     """
-    if resolved_oci_runner in _BUILDX_SUPPORT_CACHE:
-        return _BUILDX_SUPPORT_CACHE[resolved_oci_runner]
+    probe = [*_get_oci_wrapper_prefix(), resolved_oci_runner]
+    key = " ".join(probe)
+    if key in _BUILDX_SUPPORT_CACHE:
+        return _BUILDX_SUPPORT_CACHE[key]
 
     supported = False
     try:
         result = subprocess_utils.run_command(
-            [resolved_oci_runner, "buildx", "version"],
+            [*probe, "buildx", "version"],
             capture_output=True,
             check=False,
             log_level=logging.DEBUG,
@@ -1327,7 +1395,7 @@ def _runner_supports_buildx(resolved_oci_runner: str) -> bool:
         ASH_LOGGER.debug(
             f"{resolved_oci_runner} does not provide buildx -- skipping layer cache"
         )
-    _BUILDX_SUPPORT_CACHE[resolved_oci_runner] = supported
+    _BUILDX_SUPPORT_CACHE[key] = supported
     return supported
 
 
@@ -1617,8 +1685,10 @@ def _build_image(
     #
     # ASH_BASE_OCI_LAYOUT, when this runtime can take it, replaces the override: it is only set
     # on a cache hit, where the pre-pull made no registry call and exported no override, so the
-    # two do not meet in CI. If both were set by hand, the verified layout wins, since it names
-    # content the override would have to fetch.
+    # two do not meet in CI. If both were set by hand, the verified layout wins where this
+    # runtime can take it (docker needs buildx for an oci-layout context, see
+    # _base_oci_layout_args), since it names content the override would have to fetch; where it
+    # cannot, the layout is already in the engine's store and the override applies.
     base_layout_args = _base_oci_layout_args(
         resolved_oci_runner, buildx=bool(cache_args)
     )
@@ -1692,9 +1762,14 @@ def _custom_containerfile_stage_refusal(
     if stage is None or custom_containerfile is None:
         return None
     try:
-        text = Path(custom_containerfile).read_text(encoding="utf-8")
+        # utf-8-sig: a byte order mark on the first line is not part of the FROM
+        # it starts, and the build reads the line past it.
+        text = Path(custom_containerfile).read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None  # the build reports a file it cannot read
+    # A line continued with a trailing backslash is one instruction to the
+    # build, so it is one line here.
+    text = re.sub(r"\\\r?\n", " ", text)
     if any(name.lower() == stage for name in _FROM_AS_STAGE.findall(text)):
         return None
     return (
@@ -1714,6 +1789,7 @@ def _build_custom_image(
     quiet: bool,
     debug: bool,
     target: str | None = None,
+    force: bool = False,
 ) -> str:
     """Build a custom image layered on top of the base ASH image.
 
@@ -1721,6 +1797,9 @@ def _build_custom_image(
         base_image_name: Name of the base image to build on top of.
         custom_containerfile: Path to the custom Containerfile/Dockerfile.
         target: The custom file's stage to build, or None for the whole file.
+        force: Build without the layer cache (``--no-cache``), as ``--force`` builds
+            the base image: the custom file's own stages are otherwise served from
+            the cache whatever the base image became.
 
     Returns:
         The image name of the custom image.
@@ -1747,6 +1826,8 @@ def _build_custom_image(
     )
     if target is not None:
         custom_build_cmd.extend(["--target", target])
+    if force:
+        custom_build_cmd.append("--no-cache")
     if quiet:
         custom_build_cmd.append("-q")
     custom_build_cmd.append(Path(custom_containerfile).parent.as_posix())
@@ -2313,7 +2394,11 @@ def _refuse_output_over_the_source(
         return
     source = Path(source_dir).resolve()
     output = Path(output_dir).resolve()
-    if source == output or source.is_relative_to(output):
+    if (
+        source == output
+        or source.is_relative_to(output)
+        or _is_at_or_above(output_dir, source_dir)
+    ):
         raise ContainerInputError(
             f"The output directory {output} is the source directory {source} or a "
             "directory above it. Container mode mounts the output read-write at "
@@ -2321,6 +2406,30 @@ def _refuse_output_over_the_source(
             "writable through /out. Use an output directory inside the source "
             "(the default .ash/ash_output) or outside it, not above it."
         )
+
+
+def _is_at_or_above(ancestor: Path | str, path: Path | str) -> bool:
+    """Whether ``ancestor`` is ``path`` or a directory above it, by identity.
+
+    The directories are compared by device and inode (``os.path.samestat``), not
+    by name: a bind mount, or another spelling of the case on a case-insensitive
+    volume, names the same directory under a path the real-path comparison does
+    not match. ``path`` is walked as given, then as its real path and that path's
+    parents. A path that cannot be looked at matches nothing: the real-path
+    comparison beside this one still decides what it can.
+    """
+    try:
+        wanted = os.stat(ancestor)
+    except OSError:
+        return False
+    real = Path(os.path.realpath(path))
+    for candidate in (Path(path), real, *real.parents):
+        try:
+            if os.path.samestat(os.stat(candidate), wanted):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _refuse_linked_output_dir(
@@ -3164,7 +3273,9 @@ def _unreadable_config(config: str | None) -> str | None:
     """
     if config is None:
         return None
-    if not config or not Path(config).is_file():
+    # _is_file: a path under an unsearchable directory is refused, not raised as
+    # the PermissionError Path.is_file re-raises on Python 3.10 to 3.13.
+    if not config or not _is_file(Path(config)):
         return (
             f"Config file not found: {config}. --config (or ASH_CONFIG) has to name "
             "an existing file: container mode mounts it read-only for the scan inside "
@@ -3558,6 +3669,7 @@ CONTAINER_ENV_NOT_PASSED = frozenset(
         "ASH_DEBUG",
         "ASH_OFFLINE",
         "ASH_SCAN_SOURCE",
+        OUTER_RUN_ID_ENV,
         "COLUMNS",
         "LINES",
         # ASH's own settings.
@@ -3975,7 +4087,12 @@ def _write_env_file(
     # that is merely old (container_leftovers.sweep_env_dirs).
     record_env_dir(directory)
     real = _real_path(directory)
-    if any(real.is_relative_to(_real_path(tree)) for tree in (source_dir, output_dir)):
+    # By real path, and by the directories' identity (_is_at_or_above): a bind
+    # mount or a case alias reaches the tree under another name.
+    if any(
+        real.is_relative_to(_real_path(tree)) or _is_at_or_above(tree, directory)
+        for tree in (source_dir, output_dir)
+    ):
         shutil.rmtree(directory, ignore_errors=True)
         raise ContainerInputError(
             f"The temporary directory {tempfile.gettempdir()} is inside the source or "
@@ -4113,7 +4230,10 @@ def _termination_raises(env_file_dir: Path | None) -> Iterator[None]:
         return
 
     previous = signal.getsignal(signal.SIGTERM)
-    if previous == signal.SIG_IGN:
+    if previous is None or previous == signal.SIG_IGN:
+        # None: the handler was installed outside Python, so it cannot be read
+        # here and could not be put back; a relay installed over it would be
+        # restored as None, which signal.signal refuses, after the run.
         yield
         return
 
@@ -4321,6 +4441,14 @@ def container_input_refusal(
         operator_environment_names(config, env_config, source_dir, reads)
     except ContainerInputError as e:
         return str(e)
+    except RuntimeError as e:
+        # Python 3.10 to 3.12 raise RuntimeError, not OSError, for a symlink
+        # loop met while a path is resolved: a refusal, not a traceback.
+        return (
+            f"A path the container run would mount cannot be resolved: {e}. "
+            "Container mode mounts the source, the output and the config by "
+            "their real paths, so each has to resolve to a directory or a file."
+        )
     return None
 
 
@@ -5259,6 +5387,7 @@ def run_ash_container(
                         target=_custom_containerfile_stage(
                             build_target, custom_containerfile
                         ),
+                        force=force,
                     )
 
         except Exception as e:
@@ -5321,22 +5450,38 @@ def run_ash_container(
             source_dir = Path.cwd()
             ASH_LOGGER.info(f"Using current directory as source: {source_dir}")
 
-        if output_dir:
-            try:
+        # The link rule once more, on the path as given, right before the
+        # directory is made: the check ahead of the build judged the path as it
+        # was then, and a link that appeared during the build would otherwise
+        # be created through and resolved past here.
+        try:
+            _refuse_linked_output_dir(source_dir, output_dir)
+        except ContainerOutputLinkRefused as e:
+            secho(shown_on_one_line(str(e)), fg=typer.colors.RED)
+            return _not_started(
+                create_completed_process(
+                    args=[], returncode=3, stdout="", stderr=str(e)
+                )
+            )
+        try:
+            if output_dir:
                 output_dir = Path(output_dir)
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_dir = output_dir.resolve()
-            except Exception as e:
-                secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
-                return _not_started(
-                    create_completed_process(
-                        args=[], returncode=1, stdout="", stderr=str(e)
-                    )
+            else:
+                # The default is made under the same guard as a named one: a
+                # directory that cannot be made is a run that never started,
+                # not a traceback.
+                output_dir = source_dir.joinpath("ash_output")
+                output_dir.mkdir(parents=True, exist_ok=True)
+                ASH_LOGGER.info(f"Using default output directory: {output_dir}")
+        except Exception as e:
+            secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
+            return _not_started(
+                create_completed_process(
+                    args=[], returncode=1, stdout="", stderr=str(e)
                 )
-        else:
-            output_dir = source_dir.joinpath("ash_output")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            ASH_LOGGER.info(f"Using default output directory: {output_dir}")
+            )
 
         container_name = new_container_name()
         env_file_dir: Path | None = None
@@ -5346,7 +5491,11 @@ def run_ash_container(
         # (KeyboardInterrupt) or SIGTERM (_termination_raises) all reach the finally.
         # The write is inside this try, so an exit between it and the run is cleaned
         # up too. What no code can close is the store of the returned pair into the
-        # names below, and the push of the exit after the writer returns.
+        # names below, and the push of the exit after the writer returns. Nor the
+        # window between the write and the entry into _termination_raises below:
+        # a SIGTERM at its default disposition there ends the process with no
+        # finally. The directory is recorded as it is made (record_env_dir), so
+        # the next container- or nix-mode start's sweep deletes it, unread.
         try:
             try:
                 # The source as the refusal ahead of the build judged it, so the
