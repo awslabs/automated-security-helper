@@ -200,6 +200,15 @@ contradiction an operator could only resolve by guessing which file to trust, in
 a subtree this feature advertises as consumable by existing single-project
 tooling.
 
+What is kept from such a worker is the set of secret values its findings
+exposed. Its reports were written before the abandon could be seen, and another
+project may pass one of those values on a command line, so once the pool has
+given the stop a bounded grace (``_ABANDONED_STOP_GRACE_POLLS``) a worker that
+came back puts its values into the workspace masking set and has its own reports
+masked with the other projects' values. A worker that has not come back is named
+on its project's error and in the log: its values are not in the set, and its
+output was not masked for the others' secrets.
+
 The residual exposure is process exit. The pool is shut down with ``wait=False``
 so the workspace reports immediately, but the interpreter's own exit handler
 joins the abandoned thread, so a genuinely wedged project still delays the
@@ -400,6 +409,16 @@ from automated_security_helper.workspace.reporting import (
 #: that a timeout is reported promptly, large enough not to spin.
 _DEADLINE_POLL_SECONDS = 0.05
 
+#: How many polls (``_DEADLINE_POLL_SECONDS`` each: two seconds) an abandoned
+#: project's worker is given to come back after its stop was requested. A stop
+#: reaches a scanner's child through the subprocess layer's terminate-then-kill
+#: well inside that, so a worker still busy after this many polls is between scope
+#: checks and may not come back for the rest of its scan. Then its slot is counted
+#: lost for the projects still queued, and the secret values its findings exposed
+#: are declared missing from the workspace masking set rather than waited for
+#: without bound. Small against any ``project_timeout``, large against a stop.
+_ABANDONED_STOP_GRACE_POLLS = 40
+
 #: The phase name that selects report generation, as ``run_ash_scan`` spells it.
 _REPORT_PHASE = "report"
 
@@ -531,6 +550,12 @@ class _ProjectRun:
     #: The project's ``metadata.plugin_load_errors``, for the workspace results'
     #: own: the modules its scan could not import, with the error.
     plugin_load_errors: Dict[str, str] = field(default_factory=dict)
+    #: The scan ran and wrote under ``projects/<key>`` this run, so what is there
+    #: is this run's output and the cross-project masking rewrites it. False for
+    #: a project the workspace never handed to an orchestrator, or whose
+    #: abandoned worker has not come back: what is there then is an earlier
+    #: run's, or still being written.
+    output_written: bool = False
 
 
 def workspace_plugin_modules(
@@ -1435,13 +1460,22 @@ def _scan_one_project(
         # ran, so that file already holds the findings the verdict says do not
         # exist. Removed, as the message above says.
         _discard_project_results(project_output)
-        return _failed_outcome(
+        late = _failed_outcome(
             project,
             settings,
             "abandoned at its project_timeout; the scan completed later and its "
             "results were discarded",
             duration_seconds=time.monotonic() - started,
         )
+        # The verdict is discarded; the secret values the findings exposed are
+        # not. The scan wrote this project's reports before the abandon could be
+        # seen, and another project may pass one of these values on a command
+        # line, so they join the workspace masking set when the pool reads this
+        # result back (_run_projects), and the reports left here are masked
+        # with the other projects' values in turn.
+        late.secret_values = exposed_secret_values(results)
+        late.output_written = True
+        return late
 
     _write_project_results(project_output, results)
 
@@ -1539,6 +1573,7 @@ def _scan_one_project(
             getattr(getattr(results, "metadata", None), "plugin_load_errors", None)
             or {}
         ),
+        output_written=True,
     )
 
 
@@ -2496,12 +2531,19 @@ def execute_workspace(
             run = collected.get(project.key)
             if run is None:
                 continue
-            if run.outcome.status is not ProjectRunStatus.COMPLETED:
+            if (
+                run.outcome.status is not ProjectRunStatus.COMPLETED
+                and not run.output_written
+            ):
                 # Nothing of this run's is under projects/<key> for a project the
                 # workspace never handed to an orchestrator (an unchanged skip, a
-                # link refusal, a config error, never started, abandoned). What is
-                # there is a previous run's output; rewriting it gave stale results
-                # a fresh mtime and nothing else.
+                # link refusal, a config error, never started) or whose abandoned
+                # worker has not come back. What is there is a previous run's
+                # output, or still being written; rewriting it gave stale results
+                # a fresh mtime and nothing else. An abandoned project whose
+                # worker did come back has this run's reports there, written by
+                # the scan before the abandon could be seen, and they are masked
+                # with the other projects' values like every finished project's.
                 continue
             project_output = _project_output_dir(settings, project)
             # The same refusal the scan made before writing there. A project whose
@@ -2676,6 +2718,16 @@ def _run_projects(
         """Stop a project given up on, through its effective event."""
         events[project.key].set()
 
+    # The futures of the projects abandoned at their budget, each still running
+    # when it was given up on. Read back after the pool is done with them: the
+    # worker's own result is FAILED too and is not what is recorded, but it
+    # carries the secret values the project's findings exposed, which the
+    # workspace masking set needs whatever the verdict.
+    abandoned_futures: Dict[Future, ProjectPlan] = {}
+    # Those of them with a caller-given event: the pool waits for their stop at
+    # shutdown, so their values can still join the masking set.
+    stoppable_futures: Set[Future] = set()
+
     def worker(project: ProjectPlan) -> _ProjectRun:
         with start_lock:
             start_times[project.key] = time.monotonic()
@@ -2773,7 +2825,10 @@ def _run_projects(
                     )
                 )
                 abandoned[project.key].set()
-                if not stoppable:
+                abandoned_futures[future] = project
+                if stoppable:
+                    stoppable_futures.add(future)
+                else:
                     unstoppable.append(future)
                 _cancel(project)
                 collected[project.key] = _failed_outcome(
@@ -2828,6 +2883,18 @@ def _run_projects(
                 # is still worth waiting for.
                 continue
             break
+
+        # Every abandoned worker was told to stop. The ones with a caller-given
+        # event are waited for at shutdown below; give their stops a bounded
+        # grace first, so a worker that comes back inside it brings the secret
+        # values its project's findings exposed into the masking set. Bounded,
+        # never open: a worker still busy after it is between scope checks.
+        # Without caller-given events the workspace result does not wait for a
+        # stop at all (the shutdown below), so no grace is spent on those: a
+        # worker that has not come back by then is named as unmasked.
+        stopping = [future for future in stoppable_futures if not future.done()]
+        if stopping:
+            wait(stopping, timeout=_ABANDONED_STOP_GRACE_POLLS * _DEADLINE_POLL_SECONDS)
     finally:
         # Without caller-given events, wait=False: an abandoned worker is told
         # to stop through its pool-built event, but its scan may not check its
@@ -2837,7 +2904,47 @@ def _run_projects(
         # until the stops are done.
         pool.shutdown(wait=cancel_events is not None)
 
+    _read_back_abandoned_workers(abandoned_futures, collected)
     return collected
+
+
+def _read_back_abandoned_workers(
+    abandoned_futures: Mapping[Future, ProjectPlan],
+    collected: Dict[str, _ProjectRun],
+) -> None:
+    """Carry what an abandoned worker brought back onto its recorded outcome.
+
+    The verdict recorded at the abandon stands. A worker that came back brought
+    the secret values its project's findings exposed and wrote this run's
+    reports under ``projects/<key>``, so the recorded run takes both and the
+    workspace masking covers them. A worker that has not come back (its scan is
+    between scope checks, and the pool did not wait for it) is named on the
+    project's error, which the unified results and the workspace reports show,
+    and in the log: the values its findings exposed are not in the masking set
+    and its own output was not masked for the other projects' secrets. Loud,
+    because a report that silently kept a value in clear is what the masking
+    exists to prevent.
+    """
+    grace = _ABANDONED_STOP_GRACE_POLLS * _DEADLINE_POLL_SECONDS
+    for future, project in abandoned_futures.items():
+        recorded = collected.get(project.key)
+        if recorded is None:
+            continue
+        if future.done() and not future.cancelled():
+            try:
+                late = future.result()
+            except Exception:  # noqa: BLE001 -- the worker already guards
+                continue
+            recorded.secret_values = set(late.secret_values)
+            recorded.output_written = late.output_written
+            continue
+        note = (
+            f"its scan had not stopped {grace:g}s after it was abandoned, so the "
+            "secret values its findings exposed did not reach the workspace masking "
+            "set and its own output was not masked for the other projects' secrets"
+        )
+        ASH_LOGGER.error(f"Project '{project.key}': {note}.")
+        recorded.outcome.error = f"{recorded.outcome.error or 'abandoned'}; {note}"
 
 
 def refused_results(plan: WorkspacePlan, detail: str) -> WorkspaceResults:
