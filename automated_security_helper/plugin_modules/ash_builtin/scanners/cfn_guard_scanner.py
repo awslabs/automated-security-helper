@@ -193,6 +193,13 @@ def _stderr_for_message(
 
 #: The executable this scanner runs.
 _COMMAND = "cfn-guard"
+
+#: The failure recorded for a template whose cfn-guard invocation was not started
+#: because an earlier one in the same scan timed out (as cfn-lint records it).
+_NOT_STARTED_AFTER_TIMEOUT = (
+    "not started: an earlier cfn-guard invocation of this scan timed out, and the "
+    "scan is discarded after a timeout"
+)
 _RULE_SET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 #: The files cfn-guard 3.2.1 reads from a ``cfn-guard --rules`` directory, case-sensitively
@@ -734,6 +741,13 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         if not self.dependencies_satisfied:
             self._post_scan(target=target, target_type=target_type)
             return False
+        # Reset here, after the dependency check, as cfn-lint and cfn-nag reset
+        # theirs: the executor runs this instance over the source and then the
+        # converted target, and the converted target's invocation record
+        # (exitCodeDescription, built from self.errors) repeated the source
+        # target's lines. After the check, so an unavailable dependency's line is
+        # not lost on the returns above.
+        self.errors = []
 
         try:
             selected = self._selected_rules()
@@ -749,7 +763,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             discovery = discover_templates(
                 self.context, target_type, global_ignore_paths
             )
-            for shown, reason in [*discovery.refused, *discovery.unreadable]:
+            for shown, reason in discovery.refused:
                 # Not read, so not known to be CloudFormation: skipped and named, as
                 # cfn-nag skips it.
                 self._plugin_log(
@@ -757,6 +771,20 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     target_type=target_type,
                     level=logging.WARNING,
                     append_to_stream="stderr",
+                )
+            for shown, reason in discovery.unreadable:
+                # A candidate ASH could not open or decode: not known to be
+                # CloudFormation, and not known not to be. The tool-absent check
+                # counts it as a template (only MISSING cannot hide one), so with
+                # the tool present it is a target that was not evaluated, not a
+                # skip: the two runs give the same answer for the same file.
+                self.targets_attempted += 1
+                self.targets_failed += 1
+                self.record_unevaluated_target(shown)
+                self._plugin_log(
+                    f"cfn-guard did not evaluate {shown}: {reason}",
+                    target_type=target_type,
+                    level=logging.ERROR,
                 )
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
@@ -771,9 +799,24 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             source_dir = self._source_dir()
             merged: List[Result] = []
             driver = report.runs[0].tool.driver
+            timed_out = False
             for template in discovery.templates:
                 self.targets_attempted += 1
                 shown = display_path(template, source_dir)
+                if timed_out:
+                    # An earlier invocation timed out, and the executor discards
+                    # the whole scan after a recorded timeout, so starting the
+                    # remaining templates, each with a fresh full scan_timeout,
+                    # would only spend their time. Named, not started.
+                    self.targets_failed += 1
+                    self.errors.append(f"{shown}: {_NOT_STARTED_AFTER_TIMEOUT}")
+                    self._plugin_log(
+                        f"cfn-guard did not evaluate {shown}: "
+                        f"{_NOT_STARTED_AFTER_TIMEOUT}",
+                        target_type=target_type,
+                        level=logging.ERROR,
+                    )
+                    continue
                 command = [
                     _COMMAND,
                     "validate",
@@ -789,6 +832,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     stdout_preference="return",
                     stderr_preference="both",
                     timeout=self._effective_scan_timeout(),
+                )
+                timed_out = timed_out or (
+                    isinstance(response, dict) and bool(response.get("timed_out"))
                 )
                 failure, template_report = self._parse_response(
                     response, guarded_values(self)

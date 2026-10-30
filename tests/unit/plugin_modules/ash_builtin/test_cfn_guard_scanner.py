@@ -1000,6 +1000,71 @@ class TestScan:
         assert "cfn-guard exited 255" in joined
         assert "probe-value" not in joined and "not-print" not in joined
 
+    def test_errors_are_reset_for_each_scan_call(self, repo, rules_root):
+        """At the base the converted target's invocation record (built from
+        self.errors) repeated the source target's lines."""
+        _fake_bundle(rules_root)
+
+        def fake(command, **kwargs):
+            return {"returncode": 255, "stdout": "", "stderr": "Parser Error"}
+
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert any("cfn-guard exited 255" in e for e in scanner.errors)
+        stale = list(scanner.errors)
+
+        def clean(command, **kwargs):
+            return {
+                "returncode": 19,
+                "stdout": CAPTURED_INSECURE.read_text(),
+                "stderr": "",
+            }
+
+        self._run(scanner, clean)
+        assert not any(e in scanner.errors for e in stale), scanner.errors
+
+    def test_after_a_timeout_the_remaining_templates_are_not_started(
+        self, repo, rules_root
+    ):
+        """The executor discards the scan after a recorded timeout, so each further
+        template would spend a fresh full scan_timeout for nothing; at the base
+        every remaining template was still started."""
+        _fake_bundle(rules_root)
+        calls = []
+
+        def timing_out(command, **kwargs):
+            calls.append(list(command))
+            return {"returncode": None, "stdout": "", "stderr": "", "timed_out": True}
+
+        scanner = _scanner(repo)
+        self._run(scanner, timing_out)
+        assert len(calls) == 1, "every template after the timeout was still started"
+        assert scanner.targets_attempted == 2
+        assert scanner.targets_failed == 2
+        assert any("timed out" in e for e in scanner.errors)
+        assert any("not started" in e for e in scanner.errors)
+
+    def test_an_unreadable_candidate_is_a_target_that_was_not_evaluated(
+        self, repo, rules_root
+    ):
+        """A non-UTF-8 candidate: with the tool absent the check reads MISSING; at
+        the base, with the tool present, it was a WARNING and nothing more."""
+        _fake_bundle(rules_root)
+        (repo / "templates" / "latin.yaml").write_bytes(b"Resources:\n  caf\xe9: {}\n")
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 19,
+                "stdout": CAPTURED_INSECURE.read_text(),
+                "stderr": "",
+            }
+
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert scanner.targets_attempted == 3
+        assert scanner.targets_failed == 1
+        assert any("could not be read" in e for e in scanner.errors), scanner.errors
+
     def test_rules_removed_between_validation_and_scan_raise(self, repo, rules_root):
         scanner = _scanner(repo)
         with (
