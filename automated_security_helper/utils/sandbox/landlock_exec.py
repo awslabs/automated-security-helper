@@ -601,8 +601,12 @@ def _kill_descendant(pid: int, tree: Set[int]) -> bool:
     5.3+, and ``pidfd_send_signal``), and its parent is read again: a process
     whose parent is not in ``tree`` (the wrapper and the descendants listed with
     it) is not one the scanner started and is left alone. A reused pid whose new
-    parent happens to be in the tree is a descendant after all. Returns whether a
-    signal was sent.
+    parent happens to be in the tree is a descendant after all. When the kernel
+    refuses the pin (``pidfd_open`` answers ENOSYS or EPERM under a seccomp
+    profile, EMFILE when the wrapper is out of descriptors) the kill goes by
+    number after one more read of the parent, as it does where the calls do not
+    exist; only ESRCH means the process is gone. Returns whether a signal was
+    sent.
     """
     parent = _parent_pid(pid)
     if parent is None:
@@ -622,11 +626,15 @@ def _kill_descendant(pid: int, tree: Set[int]) -> bool:
         return False
     pidfd_open = getattr(os, "pidfd_open", None)
     pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+    fd: Optional[int] = None
     if pidfd_open is not None and pidfd_send_signal is not None:
         try:
             fd = pidfd_open(pid)
-        except OSError:
-            return False
+        except OSError as e:
+            if e.errno == errno.ESRCH:
+                return False
+            # Refused, not gone: the kill goes by number below.
+    if fd is not None:
         try:
             # Read again with the process pinned: a reuse between the first read
             # and the open would otherwise have pinned the new process.
@@ -638,6 +646,10 @@ def _kill_descendant(pid: int, tree: Set[int]) -> bool:
             return False
         finally:
             os.close(fd)
+    # By number, with the parent read once more right before: the window for a
+    # reuse is the few instructions between this read and the kill.
+    if _parent_pid(pid) not in tree:
+        return False
     try:
         os.kill(pid, signal.SIGKILL)
         return True

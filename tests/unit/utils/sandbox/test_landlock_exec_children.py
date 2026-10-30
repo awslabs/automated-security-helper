@@ -289,6 +289,46 @@ def test_a_live_descendant_whose_stat_cannot_be_read_is_left_alone_and_named(
     assert noted.startswith("ash-landlock: could not read the parent of process")
 
 
+@pytest.fixture
+def pidfd_refused(monkeypatch):
+    """Run ``_kill_descendant`` on a pid whose parent is the wrapper, with
+    ``pidfd_open`` raising the given errno and the kill by number recorded."""
+
+    def run(code: int) -> List[Tuple[str, tuple]]:
+        calls: List[Tuple[str, tuple]] = []
+        fake_os = _Recording(os, {"kill"}, calls)
+
+        def refuse(pid):
+            raise OSError(code, os.strerror(code))
+
+        fake_os.pidfd_open = refuse
+        monkeypatch.setattr(landlock_exec, "os", fake_os)
+        monkeypatch.setattr(landlock_exec, "_parent_pid", lambda pid: ME)
+        sent = landlock_exec._kill_descendant(4242, {ME})
+        calls.append(("returned", (sent,)))
+        return calls
+
+    return run
+
+
+def test_a_refused_pidfd_pin_falls_back_to_the_kill_by_number(pidfd_refused):
+    """pidfd_open refused by the kernel (ENOSYS or EPERM under a seccomp profile,
+    EMFILE) is not "the process is gone": the descendant is still the scanner's
+    and is killed by number, as on a kernel without the call."""
+    for code in (errno.ENOSYS, errno.EPERM, errno.EMFILE):
+        calls = pidfd_refused(code)
+
+        assert ("kill", (4242, signal.SIGKILL)) in calls
+        assert calls[-1] == ("returned", (True,))
+
+
+def test_a_pidfd_pin_of_a_gone_process_sends_nothing(pidfd_refused):
+    """ESRCH from pidfd_open is the one answer that means gone: no kill."""
+    calls = pidfd_refused(errno.ESRCH)
+
+    assert calls == [("returned", (False,))]
+
+
 def test_a_descendant_that_is_gone_is_skipped_in_silence(procfs, capsys):
     """The common case, a pid that exited between the listing and the kill, says
     nothing."""
