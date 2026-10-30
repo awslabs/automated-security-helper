@@ -30,10 +30,21 @@ COLORS = {
 
 FOOTER_CREDIT = "Build with <3 at Amazon Web Services"
 
+#: The severities a finding carries, the only palette keys severity_color reads.
+SEVERITY_LEVELS = ("critical", "high", "medium", "low", "info")
+
 
 def severity_color(severity: str) -> str:
-    """Return a color without replacing the finding's textual severity."""
-    return COLORS.get(str(severity).lower(), COLORS["muted"])
+    """The color of a finding's severity, or the muted color for any other text.
+
+    Looked up among the severity keys only, not the whole palette: a severity
+    spelled like a layout role ("background", "surface", "panel", "border")
+    used to take that role's color, so its text was painted in the background
+    color and could not be read."""
+    level = str(severity).lower()
+    if level in SEVERITY_LEVELS:
+        return COLORS[level]
+    return COLORS["muted"]
 
 
 def rich_theme() -> RichTheme:
