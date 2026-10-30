@@ -172,6 +172,13 @@ def test_a_locked_path_is_present_whatever_path_exists_answers(tmp_path, monkeyp
         locked.chmod(0o700)
 
 
+def test_a_path_with_a_null_byte_reads_as_absent():
+    """``Path.exists`` answered False for a name with a null byte; ``os.stat``
+    raises ValueError for it, which the check reading the path with ``os.stat``
+    let escape. A ``--cli-json-input`` document can name such a path."""
+    assert _exists(Path("a\0b")) is False
+
+
 @pytest.mark.skipif(os.name == "nt", reason="directory modes are POSIX")
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0, reason="root searches any directory"

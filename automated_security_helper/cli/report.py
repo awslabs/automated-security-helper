@@ -275,13 +275,16 @@ def _exists(path: Path) -> bool:
     the real cause, through the paths that already handle an OSError (exit 3 for
     the configuration, exit 1 for the results). Any other OSError (a name too
     long, a component that is a file) reads as absent: the open would say the
-    same, and the refusal for a missing file names the path.
+    same, and the refusal for a missing file names the path. So does a name with
+    a null byte, which ``os.stat`` refuses with a ValueError where
+    ``Path.exists`` answered False: a ``--cli-json-input`` document can carry
+    one, and the check is not the place for a traceback.
     """
     try:
         os.stat(path)
     except PermissionError:
         return True
-    except OSError:
+    except (OSError, ValueError):
         return False
     return True
 
