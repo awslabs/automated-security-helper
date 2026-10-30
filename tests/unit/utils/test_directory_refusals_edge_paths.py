@@ -51,7 +51,10 @@ def test_a_dot_dot_after_a_link_is_judged_where_the_os_takes_it(tmp_path):
     other = tmp_path / "other"
     real.mkdir()
     other.mkdir()
-    _link(real / "lnk", other)
+    # The link points one level inside "other", so "lnk/.." is "other" itself: a
+    # link to "other" would make "lnk/.." its parent, this test's own directory.
+    (other / "inner").mkdir()
+    _link(real / "lnk", other / "inner")
     _link(other / "dangling", tmp_path / "nowhere")
     _link(real / "dangling", tmp_path / "nowhere")
 
