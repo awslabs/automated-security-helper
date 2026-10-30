@@ -266,9 +266,10 @@ class LintResult:
 class UnusedSuppressionsNotEditable(ValueError):
     """``fix_unused_suppressions`` found entries to comment out but cannot edit
     the file's suppressions list line by line: the list is a flow sequence
-    (``[{...}]``), an alias of a list written elsewhere, a key written more
-    than once (the loader keeps the last, a text walk would edit the first),
-    or a list whose entries the tokens and the node count differently. The
+    (``[{...}]``), an alias of a list written elsewhere, a list anchored in
+    place (``&name``, shared by every alias), a key written more than once
+    (the loader keeps the last, a text walk would edit the first), or a list
+    whose entries the tokens and the node count differently. The
     message says which; the file is left as it is, and the caller tells the
     operator the file could not be edited instead of reporting nothing to do.
     """
@@ -587,7 +588,8 @@ class ConfigLinter:
         only where the returned issues say. Raises
         ``UnusedSuppressionsNotEditable`` when entries are to be commented out
         but the list cannot be edited line by line (a flow sequence, an alias,
-        a repeated key); the caller reports that instead of nothing to do.
+        an anchored list, a repeated key); the caller reports that instead of
+        nothing to do.
 
         Instead of removing unused suppressions entirely, this method comments them out
         with a note including the date and reason. This is safer because a suppression
@@ -707,9 +709,10 @@ class ConfigLinter:
 
         # An entry is reported commented out only once the text walker has
         # commented it: a list it cannot edit (a flow sequence on one line, an
-        # alias of a list written elsewhere) leaves the text as it was, and a
-        # report of a change that was not made would send the operator on to
-        # the next scan believing the file changed.
+        # alias of a list written elsewhere, an anchored list) raises
+        # UnusedSuppressionsNotEditable before any line changes, and a report
+        # of a change that was not made would send the operator on to the next
+        # scan believing the file changed.
         for i in sorted(commented):
             suppression = suppressions[i]
             # Past the shown copy's end, None: _shown_entry then shows every
@@ -811,10 +814,11 @@ class ConfigLinter:
         with only comments under it the key would hold null, which a scan
         refuses (exit 3).
 
-        A list this cannot edit line by line (a flow sequence, ``[{...}]``, or
-        an alias of a list written elsewhere, whose edit would change every
-        other use of the anchor) is left as it is, with nothing reported
-        commented out; the caller reports only what was.
+        A list this cannot edit line by line (a flow sequence, ``[{...}]``; an
+        alias of a list written elsewhere, or a list anchored in place, whose
+        edit would change every other use of the anchor; a repeated key) is
+        left as it is and ``UnusedSuppressionsNotEditable`` says which; the
+        caller reports that, never a change that was not made.
         """
         lines = cls._yaml_lines(raw_content)
         located = cls._locate_suppressions_list(raw_content, lines)
@@ -909,11 +913,14 @@ class ConfigLinter:
         Returns ``(key_line, dash_positions, list_end_line, key_column)``:
         the line of the ``suppressions`` key, the (line, column) of each
         entry's ``-``, in entry order, and the line the list ends before, all
-        0-based; or None when the document holds no such block list (no
+        0-based; or None when the document holds no such list (no
         ``global_settings`` mapping, no ``suppressions`` key under it, a value
-        that is not a sequence, a flow sequence, an alias of a sequence
-        anchored elsewhere), or when the text does not compose (its parse
-        failure was reported before this runs).
+        that is not a sequence), or when the text does not compose (its parse
+        failure was reported before this runs). A list that is there but
+        cannot be edited line by line (a flow sequence, an alias of a sequence
+        anchored elsewhere, a sequence anchored in place, a repeated key, a
+        dash count that disagrees with the node) raises
+        ``UnusedSuppressionsNotEditable`` naming the reason.
 
         The composer places the sequence node at its first ``-`` and ends it
         where the next key of the enclosing mapping starts, and the scanner
@@ -973,6 +980,27 @@ class ConfigLinter:
                 "'global_settings.suppressions' is an alias of a list written "
                 "elsewhere in the file, which every other use of the anchor "
                 "shares; write the list under the key"
+            )
+        # An anchor on the list itself (``suppressions: &shared``): every alias
+        # of the anchor shares the entries, so commenting one out here would
+        # change each of those uses too. The composer places an anchored node
+        # at its anchor token, not at its first ``-``, so without this read the
+        # dash count below would refuse it for the wrong reason.
+        anchor = next(
+            (
+                token.value
+                for token in tokens
+                if isinstance(token, yaml.AnchorToken)
+                and (token.start_mark.line, token.start_mark.column)
+                == (sequence.start_mark.line, sequence.start_mark.column)
+            ),
+            None,
+        )
+        if anchor is not None:
+            raise UnusedSuppressionsNotEditable(
+                f"'global_settings.suppressions' is anchored (&{anchor}), and "
+                "every alias of the anchor shares its entries; write the list "
+                "without the anchor, or comment the entries out by hand"
             )
         column = sequence.start_mark.column
         first_line = sequence.start_mark.line

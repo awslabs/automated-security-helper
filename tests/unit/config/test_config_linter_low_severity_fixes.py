@@ -348,14 +348,12 @@ class TestCommentedOutEntries:
         assert "    #     first line\n" in fixed
         assert "    #       deeper line\n" in fixed
 
-    def test_an_anchored_list_is_refused_not_rewritten(self):
+    def test_an_anchored_list_is_refused_for_its_anchor(self):
         """An edit of a list another key aliases would change every use of the
-        anchor, and a rewrite of the key line would turn ``suppressions: &a``
-        into ``suppressions: [] &a``, which does not parse. The sequence of an
-        anchored list starts at the anchor, so its dashes are not found at that
-        column; the fixer refuses the file, naming why, and writes nothing.
-        (Before the refusal it returned the text unchanged and reported nothing
-        commented out.)"""
+        anchor, so the fixer refuses and says why. The composer places an
+        anchored node at its anchor token, not at its first ``-``; read as a
+        plain list that would have been refused for a dash count of zero, a
+        reason the file does not show."""
         text = (
             "global_settings:\n"
             "  suppressions: &shared\n"
@@ -363,7 +361,25 @@ class TestCommentedOutEntries:
             "    rule_id: B101\n"
         )
 
-        with pytest.raises(UnusedSuppressionsNotEditable, match="list dashes"):
+        with pytest.raises(
+            UnusedSuppressionsNotEditable, match=r"anchored \(&shared\)"
+        ) as refused:
+            ConfigLinter._comment_out_suppressions(text, {0}, "2026-01-01")
+
+        assert "list dashes" not in str(refused.value)
+
+    def test_an_alias_of_a_list_written_elsewhere_is_refused_as_an_alias(self):
+        """The anchored list sits under another key; the suppressions key is an
+        alias of it, and the refusal names the alias, not the anchor."""
+        text = (
+            "shared: &shared\n"
+            "  - path: src/a.py\n"
+            "    rule_id: B101\n"
+            "global_settings:\n"
+            "  suppressions: *shared\n"
+        )
+
+        with pytest.raises(UnusedSuppressionsNotEditable, match="is an alias"):
             ConfigLinter._comment_out_suppressions(text, {0}, "2026-01-01")
 
 
