@@ -88,10 +88,11 @@ def test_a_thread_that_cannot_start_while_finalizing_runs_the_cleanup_inline():
 
 
 def test_a_thread_that_cannot_start_after_threadings_shutdown_runs_inline():
-    """threading's shutdown runs before atexit and before the finalizing flag is
-    set, and Thread.start refuses from then on. A finalizer firing inside the
-    atexit pass cannot leave the cleanup to atexit (a callback registered during
-    the pass never runs), so the main thread being dead is read as shutdown."""
+    """threading's shutdown runs before atexit and before the finalizing flag,
+    the one that makes Thread.start refuse, is set. A start that fails inside
+    the atexit pass for another reason cannot leave the cleanup to atexit (a
+    callback registered during the pass never runs), so the main thread being
+    dead is read as shutdown and the cleanup runs inline."""
     seen: dict = {}
     done = threading.Event()
     plan = _plan_recording_its_thread(seen, done)

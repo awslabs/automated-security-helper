@@ -5910,14 +5910,15 @@ def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
     progress) no finalizer can interrupt an allocation, and the cleanup runs
     inline so the temporary files are gone before the interpreter is. A thread
     that cannot be started (Thread.start raises RuntimeError) runs the cleanup
-    inline once the interpreter is shutting down: when the main thread is no
-    longer alive (threading's shutdown has run, which is what makes Thread.start
-    refuse) or once the interpreter is finalizing. By CPython's order threading's
-    shutdown and the atexit pass both run before the finalizing flag is set, and
-    a callback registered with atexit DURING its pass never runs (the pass
-    iterates the count it read at entry), so a finalizer firing inside another
-    atexit callback with the collector on has nothing to leave the cleanup to
-    but itself; no registry call of this thread can be in progress then.
+    inline once the interpreter is shutting down: once the interpreter is
+    finalizing (the flag that makes Thread.start refuse, set by CPython's order
+    after threading's shutdown and the atexit pass), or when the main thread is
+    no longer alive (threading's shutdown has run). The second case covers a
+    start that fails during the atexit pass for another reason: a callback
+    registered with atexit DURING its pass never runs (the pass iterates the
+    count it read at entry), so a finalizer firing inside another atexit
+    callback with the collector on has nothing to leave the cleanup to but
+    itself; no registry call of this thread can be in progress then.
     Thread.start raises the same error mid-run when the process is out of
     threads or memory, and inline there is the self-deadlock the thread exists
     to avoid, so the cleanup is left to the exit pass instead (atexit, which
