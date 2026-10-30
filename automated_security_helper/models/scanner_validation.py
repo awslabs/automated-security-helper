@@ -4,7 +4,7 @@
 """Data models for scanner validation and state tracking."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Set, TYPE_CHECKING
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.enums import ScannerStatus
@@ -70,8 +70,12 @@ class ValidationCheckpoint:
     checkpoint_name: str
     """Name/identifier of the validation checkpoint"""
 
-    timestamp: datetime = field(default_factory=datetime.now)
-    """When this checkpoint was created"""
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    """When this checkpoint was created, as an aware UTC datetime.
+
+    Serialized into the results with ``isoformat()``, beside every other results
+    timestamp, which is UTC-aware: a naive local-time value wrote an offset-less
+    text a reader could not place."""
 
     expected_scanners: List[str] = field(default_factory=list)
     """List of scanner names that were expected at this checkpoint"""
@@ -570,10 +574,24 @@ class ValidationCheckpointer:
                     enablement_reason="Scanner is enabled and ready for execution",
                 )
             elif scanner_name in excluded_scanners:
+                # The reason the filtering recorded is kept: the scan phase
+                # writes why each scanner was left out (nothing to scan, the
+                # shard split, --exclude-scanners, a Python-only run) when it
+                # excludes it, and this pass rewrote every one of those to
+                # "excluded by configuration".
+                recorded = self._tracker.get_scanner_state(scanner_name)
+                specific = (
+                    recorded.enablement_reason
+                    if recorded is not None
+                    and recorded.enablement_status == "excluded"
+                    and recorded.enablement_reason
+                    else None
+                )
                 self._tracker.update_scanner_state(
                     scanner_name,
                     enablement_status="excluded",
-                    enablement_reason="Scanner is excluded by configuration",
+                    enablement_reason=specific
+                    or "Scanner is excluded by configuration",
                 )
             elif scanner_name in dependency_errors:
                 errors = dependency_errors[scanner_name]
@@ -628,10 +646,16 @@ class ValidationCheckpointer:
             if state.queued_for_execution
         )
 
+        # The rate is the share of the EXPECTED scanners that completed: a
+        # completed name outside the expected set (a scanner that was never
+        # queued here) does not count, so the rate cannot exceed 100%, and
+        # nothing expected is a complete run (1.0, as ensure_complete_results
+        # reads the same empty case), not a 0% one.
+        expected_completed = [s for s in completed_scanners if s in expected_scanners]
         completion_rate = (
-            len(completed_scanners) / len(expected_scanners)
+            len(expected_completed) / len(expected_scanners)
             if expected_scanners
-            else 0.0
+            else 1.0
         )
         missing_completions = [
             s for s in expected_scanners if s not in completed_scanners
@@ -646,7 +670,7 @@ class ValidationCheckpointer:
                 f"  Actually completed ({len(completed_scanners)}): {', '.join(completed_scanners) if completed_scanners else 'None'}"
             )
             self.logger.info(
-                f"  Completion rate: {completion_rate:.1%} ({len(completed_scanners)}/{len(expected_scanners)})"
+                f"  Completion rate: {completion_rate:.1%} ({len(expected_completed)}/{len(expected_scanners)})"
             )
             self.logger.warning(
                 f"  Scanners that didn't complete ({len(missing_completions)}): {', '.join(sorted(missing_completions))}"
@@ -701,7 +725,10 @@ class ValidationCheckpointer:
         ``has_discrepancies`` True. Before that change a missing scanner set the
         count alone and the flag stayed False; a consumer of
         ``metadata.execution_discrepancy_report`` that read the flag as "nothing
-        went wrong" sees True for such a scan from this version on.
+        went wrong" sees True for such a scan from this version on. A checkpoint
+        built some other way, with expected names absent from the actual ones
+        and no discrepancy recorded, still reads ``has_discrepancies`` False
+        beside a non-zero count: the counts are the fields to test.
 
         Args:
             execution_checkpoint: The checkpoint from
@@ -752,8 +779,11 @@ class ValidationCheckpointer:
         self.logger.verbose(
             f"  Originally registered scanners ({len(all_registered)}): {', '.join(sorted(all_registered)) if all_registered else 'None'}"
         )
+        # "Present in results", not "executed successfully": every row counts
+        # here whatever its status, a SKIPPED, MISSING or ERROR one included,
+        # since the question is which registered scanners left a row at all.
         self.logger.verbose(
-            f"  Scanners that executed successfully ({len(executed_scanners)}): {', '.join(sorted(executed_scanners)) if executed_scanners else 'None'}"
+            f"  Scanners present in results ({len(executed_scanners)}): {', '.join(sorted(executed_scanners)) if executed_scanners else 'None'}"
         )
 
         scanner_state_summary = self._tracker.get_scanner_state_summary()
@@ -765,11 +795,15 @@ class ValidationCheckpointer:
                         f"    {state.title()} ({len(scanners)}): {', '.join(sorted(scanners))}"
                     )
 
+        # The share of the REGISTERED scanners with a row: a row that is not a
+        # registered scanner's (a load-error module row) does not count, so the
+        # rate cannot exceed 100% or hide a registered scanner's missing row.
+        registered_present = [s for s in executed_scanners if s in all_registered]
         completion_rate = (
-            len(executed_scanners) / len(all_registered) if all_registered else 1.0
+            len(registered_present) / len(all_registered) if all_registered else 1.0
         )
         self.logger.verbose(
-            f"  Completion rate: {completion_rate:.1%} ({len(executed_scanners)}/{len(all_registered)})"
+            f"  Completeness rate: {completion_rate:.1%} ({len(registered_present)}/{len(all_registered)})"
         )
 
         checkpoint = self.create_checkpoint(
@@ -863,9 +897,19 @@ class ValidationCheckpointer:
         if missing_scanners:
             for scanner_name in missing_scanners:
                 scanner_state = self._tracker.get_scanner_state(scanner_name)
-                reason = (
-                    scanner_state.failure_reason if scanner_state else "Unknown reason"
-                )
+                # A scanner the run excluded on purpose left no row by design: it
+                # was skipped above, and it is no discrepancy either.
+                if scanner_state and scanner_state.enablement_status == "excluded":
+                    continue
+                # The reason the status reading holds: a scanner with missing
+                # dependencies or a recorded exclusion keeps its reason in
+                # enablement_reason or dependency_errors, not failure_reason, so
+                # reading that field alone wrote "missing from results: None".
+                reason = self._tracker.determine_scanner_status_from_execution_data(
+                    scanner_name
+                ).get("failure_reason")
+                if not (isinstance(reason, str) and reason):
+                    reason = "Unknown reason"
                 checkpoint.add_discrepancy(
                     f"Scanner '{scanner_name}' was missing from results: {reason}"
                 )
@@ -882,6 +926,12 @@ class ValidationCheckpointer:
             if aggregated_results.scanner_results
             else 0
         )
+        # The checkpoint's counts and rate were taken before the backfill, so
+        # the rows added here are recorded beside them: the final count, and the
+        # names added, which report_result_completeness reads as what was
+        # adjusted.
+        checkpoint.metadata["final_count"] = final_scanner_count
+        checkpoint.metadata["added_scanners"] = list(added_scanners)
         self.logger.verbose("Result completeness validation completed:")
         self.logger.verbose(f"  Final scanner count in results: {final_scanner_count}")
         self.logger.verbose(f"  Scanners added to results: {len(added_scanners)}")
@@ -914,6 +964,14 @@ class ValidationCheckpointer:
         the same way. It carries no counts, because the adjustment total the
         caller reports is derived from the scanner lists directly.
 
+        ``has_adjustments`` says whether :meth:`ensure_complete_results` added
+        rows (its ``added_scanners`` metadata). It used to mirror
+        ``has_issues()``, so a checkpoint whose only issue was an unregistered
+        row already in the results (a module-import ERROR row) reported
+        adjustments although nothing was adjusted. A checkpoint built without
+        that metadata (one not from ensure_complete_results) keeps the old
+        reading.
+
         Args:
             completeness_checkpoint: The checkpoint from
                 :meth:`ensure_complete_results`.
@@ -922,8 +980,14 @@ class ValidationCheckpointer:
             The completeness report stored on
             ``AshAggregatedResults.metadata.result_completeness_report``.
         """
+        added = completeness_checkpoint.metadata.get("added_scanners")
+        has_adjustments = (
+            bool(added)
+            if isinstance(added, list)
+            else completeness_checkpoint.has_issues()
+        )
         return {
-            "has_adjustments": completeness_checkpoint.has_issues(),
+            "has_adjustments": has_adjustments,
             "missing_scanners": completeness_checkpoint.get_missing_scanners(),
             "unexpected_scanners": completeness_checkpoint.get_unexpected_scanners(),
         }
@@ -987,9 +1051,17 @@ class ValidationCheckpointer:
     ) -> None:
         """Add a queue validation error to the latest queue validation checkpoint.
 
+        With no queue checkpoint yet, one named ``task_queue_validation`` is
+        created, the name this method looks for: the fallback used to create a
+        ``task_queue_validation_errors`` checkpoint that the lookup never found,
+        so every later error created another one.
+
         Args:
             error_message: Description of the error
-            scanner_name: Optional scanner name associated with the error
+            scanner_name: The scanner the error is about, when there is one. Its
+                tracked state records the error as its failure reason, so the
+                completeness pass can say why that scanner left no row; the
+                argument used to be accepted and never read.
         """
         self.logger.error(f"Queue validation error: {error_message}")
 
@@ -1002,10 +1074,15 @@ class ValidationCheckpointer:
                 "No queue validation checkpoint found, creating one for error tracking"
             )
             self.create_checkpoint(
-                checkpoint_name="task_queue_validation_errors",
+                checkpoint_name="task_queue_validation",
                 expected_scanners=[],
                 actual_scanners=[],
                 errors=[error_message],
+            )
+
+        if scanner_name and self._tracker.get_scanner_state(scanner_name) is not None:
+            self._tracker.update_scanner_state(
+                scanner_name, failure_reason=error_message
             )
 
     def handle_queue_validation_errors(
@@ -1015,9 +1092,14 @@ class ValidationCheckpointer:
     ) -> None:
         """Handle errors from queue validation and ensure scan continuity.
 
+        Records a failure reason on each scanner the checkpoint expected in the
+        queue and did not find, and logs the checkpoint's errors.
+
         Args:
             validation_checkpoint: The checkpoint containing validation results
-            scan_results: Optional scan results object to add errors to
+            scan_results: The run's results, accepted for the call sites and left
+                as they are: the scan phase records the checkpoint on the results
+                itself (``validation_checkpoints``), so nothing is written here.
         """
         self.logger.verbose(
             "Processing queue validation errors and ensuring scan continuity"
@@ -1049,6 +1131,15 @@ class ValidationCheckpointer:
     def _get_executed_scanners_from_validation_state(
         self, aggregated_results: "AshAggregatedResults"
     ) -> List[str]:
+        """The scanners present in the results: the keys of ``scanner_results``.
+
+        The results alone. A scanner whose tracked state says it completed but
+        that has no row used to count as present too, so
+        :meth:`ensure_complete_results` never backfilled it and recorded no
+        discrepancy: the completeness pass exists to add the row such a scanner
+        is missing (as PASSED with no findings, from its completed state), and
+        reading the state as the row hid exactly that case.
+        """
         executed_scanners: List[str] = []
 
         if aggregated_results.scanner_results:
@@ -1061,20 +1152,6 @@ class ValidationCheckpointer:
             self.logger.debug(
                 f"Found {len(existing_scanners)} scanners already in results: {sorted(existing_scanners)}"
             )
-
-        for scanner_name, scanner_state in self._tracker.scanner_states.items():
-            if self._tracker.is_class_name_entry(scanner_name):
-                continue
-            if scanner_name in executed_scanners:
-                continue
-            status_info = self._tracker.determine_scanner_status_from_execution_data(
-                scanner_name
-            )
-            if status_info["status"] == "completed":
-                executed_scanners.append(scanner_name)
-                self.logger.debug(
-                    f"Scanner '{scanner_name}' marked as executed in validation state"
-                )
 
         executed_scanners = sorted(set(executed_scanners))
         self.logger.debug(
