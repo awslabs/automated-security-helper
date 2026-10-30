@@ -121,6 +121,36 @@ def test_the_raw_response_is_not_logged(context, messages):
     assert not any(STDOUT_MARKER in text for text in texts), texts
     assert not any(TOKEN in text for text in texts), texts
     assert not any("registry.example" in text and "user:" in text for text in texts)
+    # The audit ran and was summarized exactly once (the absences above would
+    # also hold for a scan that never ran), and the summary's excerpt shows
+    # the registry URL with its credentials masked, not an excerpt cut short
+    # of them.
+    summaries = [text for text in texts if "npm audit responded" in text]
+    assert len(summaries) == 1, texts
+    assert (
+        "stderr starts: npm WARN registry at https://***@registry.example/"
+        in (summaries[0])
+    ), summaries[0]
+
+
+def test_the_summary_masks_a_registry_urls_credentials():
+    """The contract the test above rests on: a registry URL's userinfo on the
+    first stderr line is masked whole, the user part included, although the
+    user part is not one of the env-read values. The 200-character excerpt cap
+    plays no part: the line is short."""
+    summary = NpmAuditScanner._response_summary(
+        "npm",
+        {
+            "stdout": "",
+            "stderr": f"npm WARN https://user:{TOKEN}@registry.example/ answered slowly\n",
+            "returncode": 0,
+        },
+        (),
+    )
+
+    assert "stderr starts: npm WARN https://***@registry.example/ answered" in summary
+    assert "user:" not in summary
+    assert TOKEN not in summary
 
 
 def test_the_response_is_summarized_redacted_at_debug(context, messages):
