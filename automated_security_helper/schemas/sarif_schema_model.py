@@ -2508,14 +2508,21 @@ def _resolved_relative_text(
     common case pays nothing for it. *fold_case* carries the caller's Windows
     reading through, so a drive-rooted URI against a relative or linked
     ``source_dir`` on Windows is compared the way that file system compares.
-    None when the root could not be resolved, neither spelling matches or the
-    candidate cannot be resolved.
+    A UNC-rooted candidate (``//host/share/...``, what ``file://host/...``
+    reads as) is compared lexically only: resolving it on Windows opens a
+    handle on that host's share, and a scanner's SARIF is the scanner's text,
+    so no URI in it names a host this process reaches out to. None when the
+    root could not be resolved, neither spelling matches, the candidate is
+    UNC-rooted and did not match as spelled, or the candidate cannot be
+    resolved.
     """
     if resolved_root is None:
         return None
     relative = _relative_text(candidate, resolved_root, fold_case)
     if relative is not None:
         return relative
+    if candidate.startswith("//"):
+        return None
     try:
         resolved_candidate = root_text(Path(candidate).resolve())
     except (OSError, ValueError, RuntimeError):

@@ -167,6 +167,43 @@ class TestWindowsForms:
         )
         assert _resolved_relative_text("/work/proj/src/a.py", None, True) is None
 
+    def test_a_unc_rooted_candidate_is_never_resolved(self, monkeypatch):
+        """``file://host/...`` reads as ``//host/...``; resolving that on Windows
+        opens a handle on the host's share, so the fallback compares it as
+        spelled and stops. A local rooted candidate still reaches the resolve."""
+        resolved: list[str] = []
+        original = Path.resolve
+
+        def recording_resolve(self, *args, **kwargs):
+            resolved.append(str(self))
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+
+        assert _resolved_relative_text("//attacker/x/y.py", "/work/proj", False) is None
+        assert _resolved_relative_text("//attacker/x/y.py", "/work/proj", True) is None
+        assert resolved == []
+
+        _resolved_relative_text("/elsewhere/x/y.py", "/work/proj", False)
+        assert resolved == ["/elsewhere/x/y.py"]
+
+    def test_a_remote_host_result_is_filtered_without_a_resolve(self, monkeypatch):
+        resolved: list[str] = []
+        original = Path.resolve
+
+        def recording_resolve(self, *args, **kwargs):
+            resolved.append(str(self))
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+        report = _report("file://attacker/x/y.py", "/work/proj/src/a.py")
+
+        report.filter_results_by_files({"src/a.py"}, "/work/proj")
+
+        assert _lines(report) == [2]
+        # source_dir itself is resolved once; no candidate that names a host is.
+        assert [p for p in resolved if p.startswith("//")] == []
+
     def test_a_listed_windows_path_object_is_spelled_with_slashes(self):
         report = _report("C:/proj/src/app.py")
 
