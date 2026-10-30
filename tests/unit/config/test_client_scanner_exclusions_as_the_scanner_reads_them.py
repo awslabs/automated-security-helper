@@ -333,6 +333,10 @@ def test_a_client_path_outside_the_tree_is_not_resolved(tmp_path, tmp_path_facto
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege")
 def test_a_client_link_resolving_elsewhere_is_still_stripped(tmp_path):
+    """A client link to some other file is neither kept in the option nor read:
+    the option takes the operator's own file, the link is refused as a symbolic
+    link when its entries are read, nothing it points at is applied, and no
+    text from the linked file reaches a warning."""
     operator_file = tmp_path / "operator" / ".trivyignore"
     operator_file.parent.mkdir()
     operator_file.write_text("CVE-1\n", encoding="utf-8")
@@ -349,6 +353,13 @@ def test_a_client_link_resolving_elsewhere_is_still_stripped(tmp_path):
 
     assert options.ignore_file != str(link)
     assert options.ignore_file != elsewhere.resolve().as_posix()
+    assert Path(options.ignore_file) == operator_file
+    assert config._client_scanner_exclusions == []
+    assert any(
+        "not passed to trivy" in warning and "it is a symbolic link" in warning
+        for warning in config._resolution_warnings
+    ), config._resolution_warnings
+    assert not any("CVE-2" in warning for warning in config._resolution_warnings)
 
 
 # ---------------------------------------------------------------------------
