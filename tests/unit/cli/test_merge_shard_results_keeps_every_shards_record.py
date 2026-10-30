@@ -46,7 +46,7 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import (
     ConverterStatusInfo,
     FailedInputInfo,
-    ScannerStatusInfo,
+    ScannerTargetStatusInfo,
 )
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from tests.unit.cli.merge_shard_support import (
@@ -455,43 +455,56 @@ class TestConverterRowsAcrossThreeShards:
 
 
 class TestAScannerRowNoShardOwnsIsKept:
+    # The rows are ``ScannerTargetStatusInfo``, the type ``scanner_results`` declares
+    # and the scan writes (scan_phase.py builds every row with it); a row built as
+    # ``ScannerStatusInfo`` carries ``missing_reason`` only as an extra, which the
+    # rebuild below drops with the rest of what that model does not declare.
+    #
+    # What the public path promises about an unowned ERROR row is that the row is
+    # KEPT: ``merge_shard_results`` ends in ``populate_metrics_from_unified_source``,
+    # which rewrites every row from the metrics and, by its own contract, keeps a
+    # ``missing_reason`` on MISSING and FAILED rows only (core/unified_metrics.py,
+    # the block above ``ScannerTargetStatusInfo(**fields)``); the scan writes a
+    # constructor-failure ERROR row with no reason at all (scan_phase.py, the
+    # ``_record_scanner_error`` row). So the reason is not asserted through
+    # the public path. The adoption step alone carries the row's fields through
+    # untouched; ``test_an_unowned_error_row_survives_adoption`` measures that.
     def test_an_unowned_error_row_survives_the_merge(self):
         """The public path: ``merge_shard_results`` builds the owners map itself,
         so a change to how it normalizes names or skips rows is measured here
         and not only through the private helper the tests below drive."""
         shards = build_shards(2)
-        shards[1].scanner_results["broken.plugin.module"] = ScannerStatusInfo(
+        shards[1].scanner_results["broken.plugin.module"] = ScannerTargetStatusInfo(
             status=ScannerStatus.ERROR,
             excluded=False,
             dependencies_satisfied=True,
-            missing_reason="the module failed to import",
         )
 
         merged = merge_shard_results(as_loaded(shards))
 
         row = merged.scanner_results["broken.plugin.module"]
         assert row.status == ScannerStatus.ERROR
-        assert row.missing_reason == "the module failed to import"
+        assert row.excluded is False
+        assert row.dependencies_satisfied is True
         assert row is not shards[1].scanner_results["broken.plugin.module"]
 
     def test_the_same_import_failure_on_every_shard_is_kept_once(self):
         """The realistic shape: a plugin module that fails to import fails on
         every shard, each recording the same ERROR row; the merged report keeps
-        one row and says why."""
+        the row, as ERROR, beside every owned scanner."""
         shards = build_shards(3)
         for shard in shards:
-            shard.scanner_results["broken.plugin.module"] = ScannerStatusInfo(
+            shard.scanner_results["broken.plugin.module"] = ScannerTargetStatusInfo(
                 status=ScannerStatus.ERROR,
                 excluded=False,
                 dependencies_satisfied=True,
-                missing_reason="the module failed to import",
             )
 
         merged = merge_shard_results(as_loaded(shards))
 
         row = merged.scanner_results["broken.plugin.module"]
         assert row.status == ScannerStatus.ERROR
-        assert row.missing_reason == "the module failed to import"
+        assert row.excluded is False
         # The union check exempts the row from its refusal, and the merged
         # report still lists every owned scanner beside it.
         assert set(SCANNERS) <= set(merged.scanner_results)
@@ -505,7 +518,7 @@ class TestAScannerRowNoShardOwnsIsKept:
         did not happen. Red at the base: ShardCoverageError on every such merge."""
         shards = build_shards(2)
         for shard in shards:
-            shard.scanner_results["left-out-scanner"] = ScannerStatusInfo(
+            shard.scanner_results["left-out-scanner"] = ScannerTargetStatusInfo(
                 status=ScannerStatus.SKIPPED,
                 excluded=True,
                 dependencies_satisfied=True,
@@ -523,7 +536,7 @@ class TestAScannerRowNoShardOwnsIsKept:
         config leaving a scanner out while no shard owns it, the partitioning
         disagreement the check exists for; it still refuses."""
         shards = build_shards(2)
-        shards[1].scanner_results["stray-scanner"] = ScannerStatusInfo(
+        shards[1].scanner_results["stray-scanner"] = ScannerTargetStatusInfo(
             status=ScannerStatus.SKIPPED,
             excluded=False,
             dependencies_satisfied=True,
@@ -537,10 +550,10 @@ class TestAScannerRowNoShardOwnsIsKept:
         another records a plain skip, so the shards disagree about the scanner,
         and the merge refuses as before."""
         shards = build_shards(2)
-        shards[0].scanner_results["half-left-out"] = ScannerStatusInfo(
+        shards[0].scanner_results["half-left-out"] = ScannerTargetStatusInfo(
             status=ScannerStatus.SKIPPED, excluded=True, dependencies_satisfied=True
         )
-        shards[1].scanner_results["half-left-out"] = ScannerStatusInfo(
+        shards[1].scanner_results["half-left-out"] = ScannerTargetStatusInfo(
             status=ScannerStatus.SKIPPED, excluded=False, dependencies_satisfied=True
         )
 
@@ -549,7 +562,7 @@ class TestAScannerRowNoShardOwnsIsKept:
 
     def test_an_unowned_error_row_survives_adoption(self):
         shards = build_shards(2)
-        shards[1].scanner_results["broken.plugin.module"] = ScannerStatusInfo(
+        shards[1].scanner_results["broken.plugin.module"] = ScannerTargetStatusInfo(
             status=ScannerStatus.ERROR,
             excluded=False,
             dependencies_satisfied=True,
