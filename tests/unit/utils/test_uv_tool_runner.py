@@ -3848,11 +3848,31 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
                 " install input"
             ),
         ),
+        ("scanners/cdk_nag_scanner.py", 'os.environ.get("JSII_NODE")'): (
+            1,
+            (
+                "the operator's node path for jsii (_jsii_node_value):"
+                " contributed through the scanner's _environment_values() so"
+                " the run's redaction and shown_uv_output's origin filter both"
+                " see it; the dependency check only asks whether it names a"
+                " file, and cdk-nag's node is not installed through uv, so it"
+                " is never a uv install input"
+            ),
+        ),
         ("scanners/cfn_nag_scanner.py", 'os.environ.get("RI_DEVKIT")'): (
             1,
             (
                 "a presence check only; the value itself is never used, so"
                 " nothing of it can print"
+            ),
+        ),
+        ("scanners/cfn_nag_scanner.py", 'os.environ.get("DEVELOPER_DIR")'): (
+            1,
+            (
+                "a filesystem path candidate probed for the macOS developer"
+                " tools (_macos_developer_tools_present), beside"
+                " _MACOS_DEVELOPER_DIRS; only its existence is read, nothing"
+                " of it is passed on or printed; never a uv install input"
             ),
         ),
         ("scanners/_trivy_scanner_base.py", 'os.environ.get("TRIVY_CONFIG")'): (
@@ -3899,9 +3919,11 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
         ("scanners/gitleaks_scanner.py", 'os.environ.get("GITLEAKS_CONFIG")'): (
             1,
             (
-                "the re-scan's GITLEAKS_CONFIG made absolute for the gitleaks"
-                " child's environment; gitleaks is not installed through uv, so"
-                " it is never a uv install input"
+                "GITLEAKS_CONFIG as the operator set it (_config_env_value, the"
+                " module's one read site): the first run anchors a non-absolute"
+                " value and passes it as --config, and the re-scan makes it"
+                " absolute for the gitleaks child's environment; gitleaks is"
+                " not installed through uv, so it is never a uv install input"
             ),
         ),
         (
