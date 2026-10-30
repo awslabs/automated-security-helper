@@ -401,15 +401,12 @@ def test_unsandboxed_yarn_copy_is_made_under_the_scan_s_output_directory(
     ancestors on a shared host (/tmp) every user can write to, so a settings file
     planted there would have redirected the audit. With the output directory
     outside the scanned tree the copy goes there, as npm's and pnpm's do, and the
-    temporary directory is not on yarn's path."""
-    import tempfile
-
+    temporary directory is not on yarn's path. The ``online`` fixture is what
+    points the temporary directory at ``system-tmp``."""
     spawns = _record(online, yarn_version="1.22.22")
     scanner = _scanner(tmp_path)
     _repository(scanner.context.source_dir, "yarn.lock")
     system_tmp = tmp_path / "system-tmp"
-    system_tmp.mkdir()
-    online.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
 
     scanner.scan(target=scanner.context.source_dir, target_type="source")
 
@@ -432,9 +429,8 @@ def test_unsandboxed_yarn_copy_uses_the_operator_s_cache_when_the_output_is_insi
     under the operator's cache directory ($XDG_CACHE_HOME/ash), whose ancestors
     are the operator's own, not under the system temporary directory, and yarn
     still reads the operator's settings (no --no-default-rc, no YARN_RC_FILENAME
-    on the audit)."""
-    import tempfile
-
+    on the audit). The ``online`` fixture is what points the temporary directory
+    at ``system-tmp``."""
     spawns = _record(online, yarn_version="1.22.22")
     repo = tmp_path / "repo"
     scanner = _scanner(tmp_path, output_dir=repo / ".ash" / "ash_output")
@@ -442,8 +438,6 @@ def test_unsandboxed_yarn_copy_uses_the_operator_s_cache_when_the_output_is_insi
     cache_home = tmp_path / "cache-home"
     online.setenv("XDG_CACHE_HOME", str(cache_home))
     system_tmp = tmp_path / "system-tmp"
-    system_tmp.mkdir()
-    online.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
 
     scanner.scan(target=scanner.context.source_dir, target_type="source")
 
