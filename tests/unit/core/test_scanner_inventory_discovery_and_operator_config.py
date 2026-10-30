@@ -58,7 +58,7 @@ def test_discovery_reads_the_metadata_backport_not_the_standard_library(monkeypa
     monkeypatch.setattr(
         importlib_metadata,
         "packages_distributions",
-        lambda: {"hatched_ash_plugins": ["hatched-ash-plugins"]},
+        lambda: {"hatched_ash_plugins": ["ash_hatched_plugins"]},
     )
     monkeypatch.setattr(importlib.metadata, "packages_distributions", dict)
 
