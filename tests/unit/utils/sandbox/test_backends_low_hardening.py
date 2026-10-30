@@ -307,6 +307,15 @@ def test_a_root_home_gets_no_tmpfs(layout):
     assert Path("/") not in tmpfs
 
 
+def test_bwrap_binds_the_uv_tool_lock_read_write(layout):
+    lock = layout.tmp / "tools" / ".lock"
+    lock.parent.mkdir()
+    lock.write_text("")
+    argv = _bwrap().plan(["/bin/true"], {}, _policy(layout, uv_tool_locks=(lock,))).argv
+    assert _real(lock) in _mounts(argv, "--bind")
+    assert _real(lock) not in _mounts(argv, "--ro-bind")
+
+
 def test_the_resolver_file_is_bound_not_its_directory(layout, monkeypatch):
     (layout.tmp / "run" / "resolve").mkdir(parents=True)
     stub = layout.tmp / "run" / "resolve" / "stub-resolv.conf"
