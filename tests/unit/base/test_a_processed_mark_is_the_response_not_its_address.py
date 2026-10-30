@@ -50,6 +50,10 @@ def test_the_mark_holds_the_response_itself(plugin_context):
     response = _response()
 
     scanner._process_command_response(response)
+    # The caller sets the mark, after its own call (the uv mixin does); the
+    # accumulator itself sets none.
+    assert not scanner._was_processed(response)
+    scanner._mark_processed(response)
 
     assert scanner._was_processed(response)
     # Held by identity, so the address cannot be recycled while marked, and an
@@ -62,6 +66,8 @@ def test_recording_retires_the_mark(plugin_context):
     scanner = _scanner(plugin_context)
     response = _response()
     scanner._process_command_response(response)
+    scanner._mark_processed(response)
+    assert scanner._was_processed(response)
 
     scanner._record_response(response, None, set())
 
@@ -81,6 +87,8 @@ def test_the_spawn_failure_recorder_retires_the_mark_too(plugin_context):
         "spawn_failed": True,
     }
     scanner._process_command_response(failure)
+    scanner._mark_processed(failure)
+    assert scanner._was_processed(failure)
 
     scanner._record_spawn_failure(failure)
 
@@ -91,6 +99,7 @@ def test_a_retired_mark_does_not_shadow_the_next_response(plugin_context):
     scanner = _scanner(plugin_context)
     first = _response(returncode=1)
     scanner._process_command_response(first)
+    scanner._mark_processed(first)
     scanner._record_response(first, None, set())
 
     second = _response(returncode=3)

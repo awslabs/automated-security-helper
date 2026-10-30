@@ -1319,10 +1319,10 @@ class PluginBase(UVToolMixin, BaseModel):
         # The helpers below are read through getattr, like the uv inputs hook:
         # this method is bound onto hosts that carry only the accumulator fields
         # (a mixin test drives the real accumulator through a stub plugin), and
-        # a host without them records as before.
-        mark = getattr(self, "_mark_processed", None)
-        if callable(mark):
-            mark(response)
+        # a host without them records as before. It sets no "processed" mark: the
+        # caller that hands it a response owns the mark (the uv mixin marks the
+        # response it processed), so an override of this seam that never calls
+        # super() is still counted.
         plugin_inputs: Tuple[str, ...] = ()
         if getattr(self, "use_uv_tool", False):
             inputs_getter = getattr(self, "_uv_run_inputs_for_records", None)

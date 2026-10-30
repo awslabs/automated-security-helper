@@ -996,6 +996,15 @@ class UVToolMixin:
             # other's inputs mid-call, weakening its redaction. The seam
             # stays the documented one-argument signature.
             self._process_command_response(response)
+            # The mark is this caller's, set after its own call returned, not by
+            # the method it called: that method is an extension seam, and an
+            # override that never calls super() left the response unmarked, so
+            # _run_subprocess processed it a second time. A call that raised sets
+            # no mark, and the handler below hands back a response that is not
+            # marked, so it is processed once there.
+            mark = getattr(self, "_mark_processed", None)
+            if callable(mark):
+                mark(response)
             # The explainer is best-effort, cause-first text about a run that
             # has already been processed: a raise inside it (a hook it reads
             # raising, say) used to fall into the handler below and grade the
@@ -1156,15 +1165,24 @@ class UVToolMixin:
             if not any(failed.get(flag) is True for flag in RESPONSE_FLAGS):
                 failed["post_run_error"] = True
                 failed["spawn_failed"] = False
-            # The normal path registered the response it processed; the copy
-            # returned here stands for it, so the dispatcher does not process
-            # the same run's lines a second time.
-            processed = getattr(self, "_processed_response_ids", None)
-            if response is not None and processed is not None:
+            # A response that was processed before this handler ran is marked;
+            # the copy returned here stands for it, so it is marked in its
+            # place, and the dispatcher does not process the same run's lines a
+            # second time. The original's mark is retired: nothing else would.
+            was_processed = getattr(self, "_was_processed", None)
+            mark = getattr(self, "_mark_processed", None)
+            forget = getattr(self, "_forget_processed", None)
+            if (
+                response is not None
+                and callable(was_processed)
+                and callable(mark)
+                and callable(forget)
+            ):
                 try:
-                    if id(response) in processed:
-                        processed.add(id(failed))
-                except Exception:  # noqa: BLE001 -- a stand-in without the set
+                    if was_processed(response):
+                        mark(failed)
+                        forget(response)
+                except Exception:  # noqa: BLE001 -- a stand-in without the marks
                     pass
             # The tool ran and this is its code: folded into the plugin's exit
             # code here, because _process_command_response, which does that
