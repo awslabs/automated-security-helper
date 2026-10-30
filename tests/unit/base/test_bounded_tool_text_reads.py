@@ -73,6 +73,17 @@ _ALLOWED_HELPER_CALLS = {
         "read_log_bounded",
     ): "the sanctioned log pipeline itself: bound+1, edge trim, marker",
     (
+        "base/scanner_plugin.py",
+        "_error_notifications",
+    ): "bounded+1 read of the tool's SARIF results file for its error-level "
+    "notification texts, dropped whole over the cap; what is shown of them is "
+    "redacted with the run's values before the excerpt cut",
+    (
+        "base/scanner_plugin.py",
+        "ScannerPluginBase._read_results_file",
+    ): "bounded+1 read of the tool's results file for grading, refused over "
+    "the cap and parsed as JSON; structured results, no text shown",
+    (
         "plugin_modules/ash_builtin/scanners/detect_secrets_scanner.py",
         "DetectSecretsScanner._scan_in_worker",
     ): "bounded+1 read of the worker's findings JSON, refused over the cap; "
@@ -105,9 +116,10 @@ _ALLOWED_SIZED_READS = {
     "SNIPPET_LINE_CHARS + 1 characters",
     (
         "cli/mcp/source_delivery.py",
-        "set_source_zip_finalize",
+        "_finalize_zip_upload",
     ): "sha chunks over the operator's own uploaded archive, and the name "
-    "of a refused symlink target from it; not tool output",
+    "of a refused symlink target from it; not tool output (the work behind "
+    "set_source_zip_finalize, whose own body holds no read)",
     (
         "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
         "_copy_stream",
