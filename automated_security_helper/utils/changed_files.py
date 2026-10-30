@@ -272,11 +272,12 @@ def filter_results_to_changed_files(
     if not changed_files and discarded:
         ASH_LOGGER.warning(
             "Discarded %d finding(s): the changed-file set is empty, so it matched "
-            "no location and every finding it could place was removed (one in a "
-            "converted file with no recorded source, or at a location no path "
-            "resolves, is kept and said above). This report is therefore not "
-            "evidence that the tree is clean. Either the diff against --base-ref "
-            "is empty, or none of the paths it names are inside --source-dir.",
+            "no location and every finding it could place was removed (a finding "
+            "in a converted file with no recorded source is kept and said above; "
+            "one at a location no path resolves is kept without a line). This "
+            "report is therefore not evidence that the tree is clean. Either the "
+            "diff against --base-ref is empty, or none of the paths it names are "
+            "inside --source-dir.",
             discarded,
         )
     return results
