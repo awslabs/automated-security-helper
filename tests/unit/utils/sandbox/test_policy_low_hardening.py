@@ -93,13 +93,22 @@ def test_all_proxy_passes_only_with_a_network(layout):
     assert "ALL_PROXY" not in _policy(layout).filter_env({"ALL_PROXY": "p"})
 
 
+def _anchored(layout):
+    """Two absolute entries of the host's own shape (a drive-rooted path on
+    Windows, where a bare ``/abs/x`` is relative to the current drive and Python
+    3.13+ reads it as relative), the relative and empty entries around them, and
+    the two lists the filter is expected to make of them."""
+    abs_x, abs_y = str(layout.home / "x"), str(layout.home / "y")
+    mixed = os.pathsep.join(["rel", abs_x, "", ".", abs_y])
+    relative_only = os.pathsep.join(["rel", "."])
+    return mixed, os.pathsep.join([abs_x, abs_y]), relative_only
+
+
 def test_pythonpath_keeps_only_its_anchored_entries(layout):
     policy = _policy(layout)
-    env = policy.filter_env(
-        {"PYTHONPATH": os.pathsep.join(["rel", "/abs/x", "", ".", "/abs/y"])}
-    )
-    assert env["PYTHONPATH"] == os.pathsep.join(["/abs/x", "/abs/y"])
-    assert "PYTHONPATH" not in policy.filter_env({"PYTHONPATH": "rel:."})
+    mixed, anchored, relative_only = _anchored(layout)
+    assert policy.filter_env({"PYTHONPATH": mixed})["PYTHONPATH"] == anchored
+    assert "PYTHONPATH" not in policy.filter_env({"PYTHONPATH": relative_only})
 
 
 def test_a_pythonpath_named_by_the_scanner_is_anchored_too(layout):
@@ -108,11 +117,9 @@ def test_a_pythonpath_named_by_the_scanner_is_anchored_too(layout):
     read against the scanned tree whichever list let the variable through."""
     policy = _policy(layout, SandboxRequirements(env_names=("PYTHONPATH",)))
     assert "PYTHONPATH" in policy.env_names
-    env = policy.filter_env(
-        {"PYTHONPATH": os.pathsep.join(["rel", "/abs/x", "", ".", "/abs/y"])}
-    )
-    assert env["PYTHONPATH"] == os.pathsep.join(["/abs/x", "/abs/y"])
-    assert "PYTHONPATH" not in policy.filter_env({"PYTHONPATH": "rel:."})
+    mixed, anchored, relative_only = _anchored(layout)
+    assert policy.filter_env({"PYTHONPATH": mixed})["PYTHONPATH"] == anchored
+    assert "PYTHONPATH" not in policy.filter_env({"PYTHONPATH": relative_only})
 
 
 def test_a_relative_xdg_value_is_ignored_as_uv_ignores_it(layout, monkeypatch):
