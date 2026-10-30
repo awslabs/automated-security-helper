@@ -174,16 +174,18 @@ def test_a_binary_that_cannot_be_verified_still_runs(
     assert any(BINARY in line and "unverified" in line for line in warnings), warnings
 
 
-def test_a_values_hook_that_raises_leaves_the_binary_unverified_not_the_check_crashed(
+def test_a_values_hook_that_raises_refuses_the_copy_on_path(
     test_plugin_context, monkeypatch, caplog
 ):
     """The values hook is overridable, and a raising one used to escape the
-    dependency check. Now the copy is not verified (its probe's excerpt could not
-    be redacted), the check still answers, the warning names the hook's failure
-    and carries no text the hook would have redacted, and the verifier is never
-    asked.
+    dependency check; the first cure let the copy run unverified. Now the check
+    answers False with a reason that names the hook's failure and no path, the
+    warning carries no text the hook would have redacted, and the verifier is
+    never asked: a copy whose records cannot be redacted does not run.
 
-    Fails at the base: the exception escaped ``_validate_tool_dependencies``.
+    Fails at the tip that returned True from the value-free arm (the check
+    answered True and no reason was recorded), and at the base, where the
+    exception escaped ``_validate_tool_dependencies``.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     seen: list = []
@@ -195,12 +197,16 @@ def test_a_values_hook_that_raises_leaves_the_binary_unverified_not_the_check_cr
     monkeypatch.setattr(SemgrepScanner, "_values_to_redact", broken)
 
     with caplog.at_level(logging.WARNING):
-        assert scanner._validate_tool_dependencies() is True
+        assert scanner._validate_tool_dependencies() is False
     assert seen == [], "the verify ran with values that could not be read"
+    reason = scanner.dependency_unavailable_reason or ""
+    assert "values hook" in reason and "RuntimeError" in reason, reason
+    assert BINARY not in reason, reason
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any(
         "RuntimeError" in line and "not verified" in line for line in warnings
     ), warnings
+    assert not any(BINARY in line for line in warnings), warnings
 
 
 def test_a_values_hook_answering_a_generator_is_read_once_and_redacts_every_line(

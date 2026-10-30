@@ -279,7 +279,11 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         to satisfy the requirement is refused, with the reason recorded for the
         MISSING row. One that cannot be verified (no uv to resolve the requirement
         with, a probe the sandbox refused) runs, with a warning: it is the only
-        route left, and refusing it would make every host without uv MISSING.
+        route left, and refusing it would make every host without uv MISSING. One
+        whose records could not be redacted (the plugin's own values hook raised
+        or gave no usable answer) is refused, with the reason recorded: that is
+        the plugin's failure, not the host's, and a run shown against nothing is
+        worse than a MISSING row.
         """
         from automated_security_helper.utils.pre_installed_tool import (
             build_requirement,
@@ -301,18 +305,27 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         # hook crash the dependency check, a generator answer was drained by the
         # verify so the lines after it logged the requirement and the answer's
         # detail unredacted, and a None went into the verify as is. With no usable
-        # values the copy is not verified (its probe's excerpt could not be
-        # redacted); it is the only route left, so it runs, and the line says why
-        # without any text the hook would have redacted.
+        # values the copy is REFUSED: its probe's excerpt could not be redacted,
+        # and the scan's own records (every subprocess line, every error) would
+        # be shown against nothing; the mixin's run path refuses the uv route on
+        # the same failure, and a security tool whose redaction is broken does
+        # not run. The reason names the hook's failure and no path, no detail.
         read = guarded_values_read(self)
         if read.values is None:
+            failure = read.failure()
             self._plugin_log(
                 f"The {self.command} on PATH was not verified: the plugin's values "
-                f"hook {read.failure()}, so its check could not be redacted. It is "
-                "the only copy ASH can run here, so it runs unverified.",
+                f"hook {failure}, so its check could not be redacted. It is the "
+                "only copy ASH can run here, and it does not run unverified.",
                 level=logging.WARNING,
             )
-            return True
+            self.dependency_unavailable_reason = (
+                f"{self.command} cannot be used: the plugin's values hook {failure}, "
+                "so the copy on PATH could not be verified and its records could "
+                "not be redacted. Fix the plugin's values hook, or install uv so ASH "
+                "can run a verified copy."
+            )
+            return False
         values: Tuple[str, ...] = read.values
         answer = verify_pre_installed_tool(
             executable,
