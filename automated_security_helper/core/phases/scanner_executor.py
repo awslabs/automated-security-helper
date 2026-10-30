@@ -1709,28 +1709,30 @@ class ScannerExecutor:
                                     # and the row rolled up PASSED.
                                     counted = ScannerSeverityCount()
                                     for finding in raw_results["findings"]:
-                                        # A finding that states no severity (the key
-                                        # is missing, or the finding is not a mapping)
-                                        # is read at the level SARIF gives a result
-                                        # that states none, warning, so it is MEDIUM
-                                        # here as a level-less SARIF result is above.
-                                        # Counted in finding_count alone, as before,
-                                        # such a finding never reached the severity
-                                        # gate and could not fail it. One whose
-                                        # severity is not a known name (or not text)
-                                        # counts as info; increment raises ValueError
-                                        # for both.
+                                        # A finding whose severity ASH cannot place
+                                        # (the key is missing, the finding is not a
+                                        # mapping, the value is not text, or it is a
+                                        # name increment does not know) is read at
+                                        # the level SARIF gives a result that states
+                                        # none, warning, so it is MEDIUM here as a
+                                        # level-less SARIF result is above. One rule
+                                        # for every such finding: an unknown name
+                                        # used to count as info, below the default
+                                        # gate, so a tool's own severity vocabulary
+                                        # ("blocker", "P1") graded lower than a
+                                        # finding that said nothing at all. Counted
+                                        # in finding_count alone, as before this
+                                        # branch, such a finding never reached the
+                                        # severity gate and could not fail it.
                                         severity = (
                                             finding.get("severity")
                                             if isinstance(finding, dict)
                                             else None
                                         )
-                                        if severity is None:
-                                            severity = "medium"
                                         try:
                                             counted.increment(severity)
                                         except ValueError:
-                                            counted.increment("info")
+                                            counted.increment("medium")
                                     container.severity_counts = counted
                                     container.finding_count = len(
                                         raw_results["findings"]

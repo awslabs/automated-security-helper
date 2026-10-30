@@ -156,15 +156,33 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.status == ScannerStatus.ERROR
         assert "could not be graded" in _reason(row)
 
-    def test_a_finding_whose_severity_is_not_text_counts_as_info(self, plugin_context):
+    def test_a_finding_whose_severity_is_not_text_is_read_as_medium(
+        self, plugin_context
+    ):
         row = _row(
             plugin_context, {"findings": [{"severity": 5}, {"severity": "high"}]}
         )
 
         assert row.status == ScannerStatus.FAILED
-        assert row.severity_counts.info == 1
+        assert row.severity_counts.medium == 1
+        assert row.severity_counts.info == 0
         assert row.severity_counts.high == 1
         assert row.finding_count == 2
+
+    @pytest.mark.parametrize("name", ["blocker", "P1", ""])
+    def test_a_finding_with_an_unknown_severity_name_is_read_as_medium(
+        self, plugin_context, name
+    ):
+        """A name increment does not know used to count as info, below the default
+        gate, so a tool's own vocabulary graded lower than a finding that stated no
+        severity at all. Every severity ASH cannot place now reads at the SARIF
+        default level, warning, and reaches the gate."""
+        row = _row(plugin_context, {"findings": [{"severity": name}]})
+
+        assert row.status == ScannerStatus.FAILED
+        assert row.severity_counts.medium == 1
+        assert row.severity_counts.info == 0
+        assert row.finding_count == 1
 
     def test_a_finding_that_is_not_a_mapping_is_read_as_medium(self, plugin_context):
         row = _row(plugin_context, {"findings": [7, {"severity": "high"}]})
