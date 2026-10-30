@@ -243,9 +243,11 @@ class TestOptionArgs:
 class TestBatches:
     def test_a_path_is_costed_as_escaped(self):
         paths = ["a[1].yaml", "b.yaml"]
-        # Raw: 10 + 7 = 17 fits 20; escaped: a[[]1[]].yaml is 13 + 1, so it does not.
-        assert CfnLintScanner.batches(paths, budget=20) == [["a[1].yaml"], ["b.yaml"]]
-        assert CfnLintScanner.batches(paths, budget=21) == [paths]
+        # glob.escape wraps only "[" (and "*", "?"): a[1].yaml becomes a[[]1].yaml,
+        # 11 characters. Raw: 10 + 1 + 6 + 1 = 17 fits 18; escaped: 12 + 7 = 19
+        # does not, so a budget of 18 splits the pair only under the escaped cost.
+        assert CfnLintScanner.batches(paths, budget=18) == [["a[1].yaml"], ["b.yaml"]]
+        assert CfnLintScanner.batches(paths, budget=19) == [paths]
 
     def test_the_fixed_arguments_are_costed_too(self, repo, monkeypatch):
         probe = _FakeCfnLint()
