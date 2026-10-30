@@ -583,14 +583,24 @@ class TestExtraRequirementsFromMetadata:
 
     def test_an_extra_name_is_matched_whole(self):
         """``extra == 'cdk'`` must not be read as part of ``extra == 'cdk2'``."""
-        with patch.object(
-            ash_install,
-            "requires",
-            return_value=[
-                "a>=1; extra == 'cdk2'",
-                'b>=1; extra == "cdk"',
-                "c>=1; extra=='cdk'",
-            ],
+        declared = [
+            "a>=1; extra == 'cdk2'",
+            'b>=1; extra == "cdk"',
+            "c>=1; extra=='cdk'",
+        ]
+        # The requirements are read through the located distribution's own
+        # object (_requirements_declared), not the by-name ``requires`` call,
+        # so the fake sits at that seam; a located name is given too, so the
+        # read runs the same where ASH is not installed as a distribution.
+        with (
+            patch.object(
+                ash_install,
+                "_distributions_declaring_this_module",
+                return_value=["automated-security-helper"],
+            ),
+            patch.object(
+                ash_install, "_requirements_declared", return_value=[declared]
+            ),
         ):
             assert ash_install.extra_requirements_from_metadata("cdk") == [
                 "b>=1",
