@@ -1519,9 +1519,34 @@ def get_scan_progress_info(
             if not isinstance(summary_stats, dict):
                 summary_stats = {}
 
+            # Whether the scanners that ran are all the scanners that were
+            # selected, by the rule get_scan_results and the registry's progress
+            # view share (assess_coverage). "completed" here means the
+            # aggregated file exists and parsed, which it does for a scan whose
+            # tool was MISSING; without this, that scan read as a completed scan
+            # with fewer scanners while get_scan_results called it incomplete.
+            # None when the document is not a results model, or the assessment
+            # itself fails: coverage unknown, the file still reported.
+            coverage_complete: Optional[bool] = None
+            incomplete_scanners: List[Dict[str, Any]] = []
+            try:
+                model = load_aggregated_results_model(output_dir)
+                if model is not None:
+                    _, coverage = assess_coverage(model)
+                    coverage_complete = not coverage_has_gap(coverage)
+                    incomplete_scanners = list(coverage.get("incomplete_scanners", []))
+            except Exception as e:  # noqa: BLE001 -- coverage unknown, not a failure
+                _logger.warning(
+                    f"Coverage of the scan in {output_dir} could not be assessed "
+                    f"from its results: {error_text(e)}",
+                    extra=NO_MARKUP,
+                )
+
             return {
                 "status": "completed",
                 "is_complete": True,
+                "coverage_complete": coverage_complete,
+                "incomplete_scanners": incomplete_scanners,
                 "scanners_completed": scanners_completed,
                 "total_scanners": len(scanners_completed),
                 "findings_count": len(findings),

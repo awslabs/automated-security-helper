@@ -225,9 +225,54 @@ class TestCompletedScannersAreTheOnesThatRan:
 
         info = get_scan_progress_info(out)
 
+        # "completed" is the file-based view's word for "the aggregated file
+        # exists and parsed"; whether the scanners that ran are all the
+        # scanners that were selected is the coverage signal beside it, the
+        # one get_scan_results and the registry's progress view carry. Without
+        # it this scan read as completed with fewer scanners while
+        # get_scan_results called the same directory incomplete.
         assert info["status"] == "completed"
         assert info["scanners_completed"] == ["bandit", "semgrep"]
         assert info["total_scanners"] == 2
+        assert info["coverage_complete"] is False
+        assert "grype" in [row["scanner"] for row in info["incomplete_scanners"]]
+
+    def test_a_scan_whose_scanners_all_ran_reads_as_covered(self, tmp_path):
+        out = tmp_path / "ash_output"
+        out.mkdir()
+        (out / "ash_aggregated_results.json").write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        "bandit": {"status": "PASSED"},
+                        "semgrep": {"status": "FAILED"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "completed"
+        assert info["coverage_complete"] is True
+        assert info["incomplete_scanners"] == []
+
+    def test_an_unassessable_document_leaves_coverage_unknown(self, tmp_path):
+        """A document the results model does not accept is still reported;
+        coverage is None, never a guess either way."""
+        out = tmp_path / "ash_output"
+        out.mkdir()
+        (out / "ash_aggregated_results.json").write_text(
+            json.dumps({"scanner_results": {"bandit": {"status": "NOT_A_STATUS"}}}),
+            encoding="utf-8",
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "completed"
+        assert info["coverage_complete"] is None
+        assert info["incomplete_scanners"] == []
 
 
 class TestTheFileBasedViewCountsWhatTheScannerRecorded:
