@@ -338,13 +338,32 @@ def test_only_a_kill_or_term_death_while_stopping_is_the_servers(monkeypatch):
 # --- the record -------------------------------------------------------------------------------
 
 
+class _ReapedUnderTheLock(_FakeChild):
+    """A child another thread reaped: that thread set the code under Popen's
+    reaping lock, and this thread's poll, asked while the lock was held, read
+    nothing, as ``Popen.poll`` does then."""
+
+    def __init__(self) -> None:
+        super().__init__(returncode=0)
+
+    def poll(self):
+        return None
+
+
 @POSIX_ONLY
 def test_a_child_another_thread_reaped_reads_as_exited(monkeypatch):
+    """The kernel no longer knows the pid (``waitid`` raises ChildProcessError)
+    and the reaper set the code, so the child has ended."""
+
     def reaped_elsewhere(*args, **kwargs):
         raise ChildProcessError
 
     monkeypatch.setattr(spu.os, "waitid", reaped_elsewhere)
-    assert spu._has_exited(_FakeChild()) is True
+    assert spu._has_exited(_ReapedUnderTheLock()) is True
+    # A pid the kernel does not know with NO code set is not a reaped child:
+    # it is a recorded child that was never spawned (a stand-in with a pid of
+    # its own), and the kernel is not asked to decide for it.
+    assert spu._has_exited(_FakeChild()) is False
     # The control: a child the kernel reads as running is running.
     monkeypatch.setattr(spu.os, "waitid", lambda *a, **k: None)
     assert spu._has_exited(_FakeChild()) is False
