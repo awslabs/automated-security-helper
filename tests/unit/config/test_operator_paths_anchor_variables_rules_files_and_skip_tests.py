@@ -11,8 +11,11 @@
   the value is spelled as a path (a rules-file suffix, ``./``); left as written,
   a missing file would be read from the tool's working directory, the scanned
   tree. A registry entry such as ``p/ci`` stays as written.
-* A ``patch`` ``test`` operation sets nothing, so its value is not anchored: an
-  anchored test of a path a base in another directory set would fail the load.
+* A ``patch`` ``test`` operation sets nothing, and its value compares equal to
+  the path as written and as anchored: every operator file and base is anchored
+  before the merge, so a test of a same-directory relative path holds only
+  against the anchored spelling, while a base the load left as written still
+  holds the path as written.
 """
 
 from __future__ import annotations
@@ -21,17 +24,37 @@ import os
 from pathlib import Path
 
 import pytest
+import yaml
 
 from automated_security_helper.config.operator_paths import (
     anchor_patch_operations,
     anchor_relative_paths,
 )
+from automated_security_helper.config.resolve_config import resolve_config
 
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _no_operator_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+
+
 def _anchored(base: Path, value: str) -> str:
     return os.path.normpath(os.path.join(os.fspath(base), value))
+
+
+def _write(path: Path, document: dict) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return path
+
+
+def _touch(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# placeholder\n", encoding="utf-8")
+    return path
 
 
 def test_a_scanner_path_option_holding_a_dollar_is_anchored(tmp_path):
@@ -144,7 +167,11 @@ def test_a_root_pointer_operation_has_its_document_anchored(tmp_path):
     ] == _anchored(tmp_path, "b.yaml")
 
 
-def test_a_test_operation_keeps_its_value_while_a_replace_is_anchored(tmp_path):
+def test_a_test_operation_compares_equal_to_both_spellings_of_its_path(tmp_path):
+    """The test's value is the anchored path, as the replace's is, and it also
+    compares equal to the path as written; a copy keeps both spellings."""
+    import copy
+
     ops = [
         {
             "op": "test",
@@ -160,5 +187,52 @@ def test_a_test_operation_keeps_its_value_while_a_replace_is_anchored(tmp_path):
 
     anchored = anchor_patch_operations(ops, tmp_path)
 
-    assert anchored[0]["value"] == "b.yaml"
+    tested = anchored[0]["value"]
+    assert tested == _anchored(tmp_path, "b.yaml")
+    assert tested == "b.yaml"
+    assert str(tested) == _anchored(tmp_path, "b.yaml")
+    assert tested != "other.yaml"
+    assert copy.deepcopy(anchored)[0]["value"] == "b.yaml"
     assert anchored[1]["value"] == _anchored(tmp_path, "b.yaml")
+
+
+def test_a_test_of_a_same_directory_path_passes_against_the_anchored_base(tmp_path):
+    """The operator's file extends a base beside it that names ``cfg/named.cfg``,
+    and guards its replace with a test of the same relative path. The base's
+    value is anchored at its directory before the merge, so a test compared as
+    written never matched and the chain failed to load; now the test holds and
+    the guarded replace lands, anchored like any value the file sets."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    operator_dir = tmp_path / "operator"
+    _touch(operator_dir / "cfg" / "named.cfg")
+    wanted = _touch(operator_dir / "cfg" / "other.cfg")
+    _write(
+        operator_dir / "base.yaml",
+        {"scanners": {"bandit": {"options": {"config_file": "cfg/named.cfg"}}}},
+    )
+    operator = _write(
+        operator_dir / "ash.yaml",
+        {
+            "extends": "base.yaml",
+            "patch": [
+                {
+                    "op": "test",
+                    "path": "/scanners/bandit/options/config_file",
+                    "value": "cfg/named.cfg",
+                },
+                {
+                    "op": "replace",
+                    "path": "/scanners/bandit/options/config_file",
+                    "value": "cfg/other.cfg",
+                },
+            ],
+        },
+    )
+
+    config = resolve_config(config_path=operator, source_dir=repo)
+
+    options = (config.get_plugin_config("scanner", "bandit") or {}).get("options") or {}
+    value = options.get("config_file")
+    assert value is not None and Path(str(value)).is_absolute(), value
+    assert Path(str(value)).resolve() == wanted.resolve()

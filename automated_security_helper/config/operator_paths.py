@@ -18,7 +18,9 @@ What happens now
 judge: each operator file's own relative values for the options below are made
 absolute against that file's directory before the files are merged, so a value in
 an ``extends`` base is taken from the base's directory, and one a ``patch``
-operation sets from the directory of the file that holds the operation. The file
+operation sets from the directory of the file that holds the operation; a
+``test`` operation's value compares equal to its path as written and as anchored
+(``_test_value``), so a guard on a same-directory path holds. The file
 ``ASH_CONFIG`` names is read the same way. ``--config-overrides``, and the CLI
 flags that become overrides, are taken from the working directory ASH runs in
 (``anchor_override_paths``), and so are ``TRIVY_IGNOREFILE`` and
@@ -422,10 +424,6 @@ def anchor_patch_operations(ops: Any, base_dir: Union[str, Path]) -> Any:
             # anchored as a whole document is.
             or (pointer and not pointer.startswith("/"))
             or "value" not in op
-            # A ``test`` operation compares its value with what the document
-            # holds and sets nothing: anchored, a test of a relative path a base
-            # in another directory set would fail and abort the load.
-            or op.get("op") == "test"
         ):
             anchored_ops.append(op)
             continue
@@ -434,8 +432,64 @@ def anchor_patch_operations(ops: Any, base_dir: Union[str, Path]) -> Any:
             if not pointer
             else [_unescape(segment) for segment in pointer[1:].split("/")]
         )
-        anchored_ops.append(dict(op, value=_anchored_at(segments, op["value"], base)))
+        value = _anchored_at(segments, op["value"], base)
+        if op.get("op") == "test":
+            value = _test_value(op["value"], value)
+        anchored_ops.append(dict(op, value=value))
     return anchored_ops
+
+
+class _EitherSpelling(str):  # noqa: SLOT000 -- a str subtype takes no non-empty __slots__; ``written`` is per instance
+    """A ``test`` operation's value: the path as anchored, which also compares
+    equal to the path as written (``_test_value``).
+
+    ``jsonpatch`` compares the document's value against the operation's with
+    ``!=``; a comparison against a subclass of ``str`` is the subclass's, so the
+    test holds for either spelling. Printed, dumped or hashed it is the anchored
+    path. Rebuilt with both spellings by ``copy.deepcopy``, which the loader's
+    shadow apply makes of the operations.
+    """
+
+    written: str
+
+    def __new__(cls, anchored: str, written: Optional[str] = None):
+        self = super().__new__(cls, anchored)
+        self.written = anchored if written is None else written
+        return self
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            str.__eq__(self, other) is True or str.__eq__(self.written, other) is True
+        )
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    __hash__ = str.__hash__
+
+    def __reduce__(self) -> Tuple[Any, Tuple[str, str]]:
+        return (type(self), (str(self), self.written))
+
+
+def _test_value(written: Any, anchored: Any) -> Any:
+    """A ``test`` operation's value, equal to its path as written and as anchored.
+
+    A test compares its value with what the document holds and sets nothing.
+    Every operator file and base is anchored before the merge, so a test of a
+    same-directory relative path (``test: bandit.yaml`` in a file whose base set
+    it) holds only against the anchored spelling; left as written, the test never
+    matched and the operator's chain failed to load. A base the load left as
+    written (a file inside the scanned tree) still holds the path as written. The
+    value compares equal to either spelling, so the test passes against whichever
+    one the document holds. A value that is not text is compared as written.
+    """
+    if (
+        not isinstance(written, str)
+        or not isinstance(anchored, str)
+        or written == anchored
+    ):
+        return written
+    return _EitherSpelling(anchored, written)
 
 
 def anchor_override_paths(
