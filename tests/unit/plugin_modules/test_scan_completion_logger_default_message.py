@@ -56,3 +56,40 @@ def test_nothing_remaining_logs_the_completion_line():
         )
 
     logger.info.assert_called_once_with("All scanners completed!")
+
+
+def test_a_failed_last_turn_is_named_in_the_completion_line():
+    """Red before the fix: SCAN_COMPLETE is announced for a recorded turn that
+    ended in a failure container too, and the last such event logged "All
+    scanners completed!" as if every scanner had succeeded."""
+    with patch(_LOGGER) as logger:
+        scan_completion_logger.handle_scan_completion_logging(
+            scanner="bandit",
+            remaining_count=0,
+            remaining_scanners=[],
+            succeeded=False,
+        )
+
+    logger.info.assert_called_once_with(
+        "All scanners completed; the last, bandit, ended with a failure."
+    )
+
+
+def test_a_succeeded_or_unstated_last_turn_keeps_the_all_done_line():
+    """Control: an emitter that says the turn succeeded, or says nothing, gets
+    the unchanged line; a failure with scanners still remaining logs the
+    remaining-scanners message, not the all-done line."""
+    with patch(_LOGGER) as logger:
+        scan_completion_logger.handle_scan_completion_logging(
+            scanner="bandit", remaining_count=0, remaining_scanners=[], succeeded=True
+        )
+    logger.info.assert_called_once_with("All scanners completed!")
+
+    with patch(_LOGGER) as logger:
+        scan_completion_logger.handle_scan_completion_logging(
+            scanner="bandit",
+            remaining_count=1,
+            remaining_scanners=["semgrep"],
+            succeeded=False,
+        )
+    logger.info.assert_called_once_with("Remaining scanners (1): semgrep")
