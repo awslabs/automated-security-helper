@@ -94,6 +94,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -204,6 +205,11 @@ def _names_a_root(value: str) -> bool:
     return os.name == "nt" and value[:1] in ("/", "\\")
 
 
+#: A URL: a scheme (RFC 3986) at the start of the value, then ``://``. A value
+#: that holds ``://`` after a path separator or another character a scheme cannot
+#: hold, such as ``rules/a://b.yaml``, is a relative path.
+_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://")
+
 #: Suffixes a rules file opengrep or semgrep reads carries; a registry entry
 #: (``p/ci``, ``r/python.lang.security``, ``auto``) carries none.
 _RULES_FILE_SUFFIXES: Tuple[str, ...] = (".yaml", ".yml", ".json")
@@ -232,11 +238,13 @@ def anchored_path(
 ) -> Any:
     """``value`` made absolute against ``base_dir``, when it is a relative path.
 
-    Anything else (not a string, empty, absolute, starting with ``~``, holding
-    ``://``) is returned as it is, and so is a value holding ``$`` when
-    ``expands_variables`` is true, the default: its reader expands the variable
-    after this (the sandbox does for ``extra_read_paths``), and anchoring the
-    text first would put ``base_dir`` in front of the expansion. A scanner's
+    Anything else (not a string, empty, absolute, starting with ``~``, or a URL:
+    starting with a scheme and ``://``) is returned as it is. A ``://`` further
+    into the value is part of a relative name and is anchored. A value holding
+    ``$`` is returned as it is too when ``expands_variables`` is true, the
+    default: its reader expands the variable after this (the sandbox does for
+    ``extra_read_paths``), and anchoring the text first would put ``base_dir`` in
+    front of the expansion. A scanner's
     tool reads its path options as written, so those are anchored with
     ``expands_variables`` false and a ``$`` is a character of the file's name.
     With ``only_if_there``, a relative value that names nothing under
@@ -245,7 +253,7 @@ def anchored_path(
     """
     if not isinstance(value, str) or not value.strip():
         return value
-    if value.startswith("~") or "://" in value or "\x00" in value:
+    if value.startswith("~") or _URL_SCHEME.match(value) or "\x00" in value:
         return value
     if expands_variables and "$" in value:
         return value
