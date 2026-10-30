@@ -1268,9 +1268,13 @@ class TestScanResolutionSatisfiesARequest:
         """A plugin that explains itself only through ``missing_dependency_reason()``
         -- the hook the MISSING row reads, overridden the way cdk-nag does -- and
         records no ``dependency_unavailable_reason`` gets that reason here too,
-        with the home directory written as ``~`` the way the row records it."""
+        with the home directory written as ``~`` the way the row records it.
+        Only the home prefix is rewritten (``home_as_tilde``); the rest of the
+        path keeps the separators the reason was written with, so the expected
+        text is built with this host's, which on Windows are backslashes."""
         home = Path.home()
         library = home / "depverdict-tools" / "lib"
+        under_tilde = str(Path("~") / "depverdict-tools" / "lib")
 
         def configure(fake):
             fake.dependency_unavailable_reason = None
@@ -1284,7 +1288,7 @@ class TestScanResolutionSatisfiesARequest:
         assert result.exit_code == EXIT_INSTALL_FAILED, result.output
         assert (
             _refused_line("fake-scanner")
-            + ": needs node and the CDK packages under ~/depverdict-tools/lib"
+            + f": needs node and the CDK packages under {under_tilde}"
             in result.output
         ), result.output
         assert str(library) not in result.output, result.output
