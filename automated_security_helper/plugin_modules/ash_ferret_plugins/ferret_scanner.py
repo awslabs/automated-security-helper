@@ -445,11 +445,14 @@ def _link_exclude_patterns(
 def parse_version(version_str: str) -> Tuple[int, ...]:
     """Parse a version string into a tuple of integers for comparison.
 
-    A pre-release (``1.2.3-rc1``, ``1.2.3-beta``) sorts BELOW its release: the
-    tuple carries a trailing ``-1`` for it, so ``2.4.5-rc1`` is older than the
-    minimum ``2.4.5`` and is reported as such, where dropping the suffix read it as
-    the release. Build metadata (``1.2.3+build7``) ranks with its release, as
-    semantic versioning has it.
+    A pre-release (``1.2.3-rc1``, ``1.2.3-beta``) sorts BELOW its release under
+    ``compare_versions``: the tuple carries a trailing ``-1`` for it, and the
+    comparison pads the shorter tuple with zeros, so ``2.4.5-rc1`` reads as
+    ``(2, 4, 5, -1)`` against ``(2, 4, 5, 0)`` and is older than the minimum
+    ``2.4.5``, where dropping the suffix read it as the release. Compare through
+    ``compare_versions``, not ``<`` on the tuples: Python ranks a longer tuple
+    above its own prefix, so ``(2, 4, 5, -1) < (2, 4, 5)`` is False. Build metadata
+    (``1.2.3+build7``) ranks with its release, as semantic versioning has it.
 
     Args:
         version_str: Version string like "1.2.3" or "1.2.3-beta"

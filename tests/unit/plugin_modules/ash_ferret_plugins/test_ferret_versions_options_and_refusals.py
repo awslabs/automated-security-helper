@@ -119,10 +119,14 @@ def _scan(scanner, run, target: Path, ignore_paths: list | None = None):
 
 
 def test_a_pre_release_sorts_below_its_release():
+    """The order is compare_versions', which pads the shorter tuple with zeros:
+    (2, 4, 5, -1) against (2, 4, 5, 0). The bare tuples are not ordered by ``<``
+    (Python ranks a longer tuple above its own prefix), so every caller compares
+    through compare_versions."""
     assert parse_version("2.4.5-rc1") == (2, 4, 5, -1)
-    assert parse_version("2.4.5-rc1") < parse_version("2.4.5")
     assert compare_versions("2.4.5-rc1", "2.4.5") == -1
     assert compare_versions("2.4.5", "2.4.5-rc1") == 1
+    assert compare_versions("2.4.5-rc1", "2.4.4") == 1
 
 
 def test_build_metadata_ranks_with_its_release():
