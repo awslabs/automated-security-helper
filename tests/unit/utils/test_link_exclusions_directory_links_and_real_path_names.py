@@ -179,6 +179,39 @@ def test_a_link_to_an_ignored_directory_holding_a_link_to_scanned_files_is_not_h
     assert values == ["./third_party/lib/vendored.py"]
 
 
+def test_a_chain_of_links_to_scanned_files_is_followed_back_to_the_first_link(
+    tmp_path,
+):
+    """Three hops: ``src/vendored`` leads to ``third_party/lib``, whose own files
+    are all ignored but which holds ``bridge`` to ``third_party/hub``, whose own
+    files are all ignored but which holds ``inner`` to scanned files. One pass
+    judged ``bridge`` by ``hub``'s own counts (all ignored) and left ``lib`` whole,
+    so ``./src/vendored/**`` hid the scanned files reached through all three."""
+    tree = Path(os.path.realpath(tmp_path))
+    target = tree / "proj"
+    (target / "third_party" / "lib").mkdir(parents=True)
+    (target / "third_party" / "lib" / "vendored.py").write_text("", encoding="utf-8")
+    (target / "third_party" / "hub").mkdir()
+    (target / "third_party" / "hub" / "vendor.py").write_text("", encoding="utf-8")
+    (target / "other").mkdir()
+    (target / "other" / "b.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "third_party" / "hub" / "inner").symlink_to(
+        target / "other", target_is_directory=True
+    )
+    (target / "third_party" / "lib" / "bridge").symlink_to(
+        target / "third_party" / "hub", target_is_directory=True
+    )
+    (target / "src").mkdir()
+    (target / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (target / "src" / "vendored").symlink_to(
+        target / "third_party" / "lib", target_is_directory=True
+    )
+
+    values = syft_excludes(target, target, _ignore("third_party/"))
+
+    assert values == ["./third_party/hub/vendor.py", "./third_party/lib/vendored.py"]
+
+
 @pytest.mark.parametrize("function", [ignored_entries, _ignore_entries])
 def test_the_directory_links_default_is_not_a_shared_mapping(function):
     """The default is ``None``, resolved inside the call, not a ``{}`` literal that
