@@ -693,6 +693,17 @@ def _may_describe_credentials(tool_types: AbstractSet[str]) -> bool:
     return not tool_types or _IAC_TOOL_TYPE in tool_types
 
 
+def _has_columns(region: Any) -> bool:
+    """Whether a region reports a column: a span of its line, not a whole resource.
+
+    cfn-nag, cdk-nag and checkov report lines alone; bandit and semgrep report
+    the column their match starts at.
+    """
+    return isinstance(getattr(region, "startColumn", None), int) or isinstance(
+        getattr(region, "endColumn", None), int
+    )
+
+
 def _rule_ids_described(sarif_report: Any) -> Set[str]:
     """IDs of rules whose name or description is about a credential in code.
 
@@ -1378,10 +1389,12 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                         # only when an earlier masking wrote it.
                         end = _TO_END_OF_FILE
                         index.end_marks.append((result, True))
-                elif resource_only and end <= start:
+                elif resource_only and not _has_columns(region) and end <= start:
                     # cdk-nag writes endLine == startLine for the resource's
                     # first line; a one-line region says nothing about where
-                    # the resource ends.
+                    # the resource ends. A finding that reports a column (bandit,
+                    # semgrep) points at a span of its line, not at a resource,
+                    # whatever its message says about hard-coded credentials.
                     end = _TO_END_OF_FILE
             index.add_location(uri, start, end)
             if local:

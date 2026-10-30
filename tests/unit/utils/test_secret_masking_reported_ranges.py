@@ -49,8 +49,12 @@ AFTER_PEM = "y = 2\n"
 FAR_LINE = "z = 3\n"
 
 
-def _result(rule_id, uri, line, message, scanner, context=None, end=None, tags=None):
+def _result(
+    rule_id, uri, line, message, scanner, context=None, end=None, tags=None, column=None
+):
     region = {"startLine": line, "endLine": end if end is not None else line}
+    if column is not None:
+        region["startColumn"] = column
     physical = {"artifactLocation": {"uri": uri}, "region": region}
     if context is not None:
         start, lines = context
@@ -331,6 +335,40 @@ class TestAResourceLevelCredentialFinding:
                 3,
                 [
                     "password = 'placeholder-example-value'\n",
+                    "x = 1\n",
+                    "y = 2\n",
+                    "run()\n",
+                ],
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == MASKED_LINE + "\nx = 1\ny = 2\nrun()\n"
+        assert _region(model, 0).endLine == 3
+
+    def test_a_finding_that_reports_a_column_is_bounded_to_its_own_line(self):
+        """semgrep's secret rules say a credential is hard-coded without quoting
+        it, and report the column their match starts at: a span of the line, not
+        a resource whose properties follow."""
+        columned = _result(
+            "generic.secrets.security.detected-generic-secret",
+            "app.py",
+            3,
+            "A secret is hard-coded in the application. Secrets stored in source "
+            "code, such as credentials, should be kept out of it.",
+            "semgrep",
+            end=3,
+            column=10,
+        )
+        model = _results(
+            columned,
+            _neighbor(
+                "app.py",
+                5,
+                3,
+                [
+                    "token = placeholder_example_value()\n",
                     "x = 1\n",
                     "y = 2\n",
                     "run()\n",
