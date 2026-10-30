@@ -194,26 +194,44 @@ _UV_OPTIONS_WITH_A_VALUE = frozenset(
 
 #: ``uv run`` options that take a value (uv 0.12), on top of the global ones: what
 #: the scan of ``uv run``'s own options has to step over to find where the program
-#: it runs begins.
+#: it runs begins. A hand-kept list, so it falls behind uv; the direction of a gap
+#: is the safe one: an unlisted value-taking option makes the scan stop at its
+#: value, read as the program, so a ``--project`` or ``--python`` after it is not
+#: seen and the overrides are ADDED (``UV_NO_PROJECT``, ``UV_PYTHON``), never
+#: dropped. Short forms are listed beside their long forms.
 _UV_RUN_OPTIONS_WITH_A_VALUE = _UV_OPTIONS_WITH_A_VALUE | frozenset(
     {
+        "--config-setting",
+        "-C",
+        "--default-index",
         "--env-file",
         "--exclude-newer",
         "--extra",
         "--extra-index-url",
         "--find-links",
+        "-f",
+        "--fork-strategy",
         "--group",
         "--index",
+        "-i",
         "--index-strategy",
         "--index-url",
         "--keyring-provider",
         "--link-mode",
+        "--no-binary-package",
+        "--no-build-package",
+        "--no-extra",
         "--no-group",
         "--only-group",
         "--package",
+        "--prerelease",
         "--python",
         "-p",
+        "--refresh-package",
+        "--reinstall-package",
         "--resolution",
+        "--upgrade-package",
+        "-P",
         "--with",
         "--with-editable",
         "--with-requirements",
