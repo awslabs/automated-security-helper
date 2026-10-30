@@ -197,8 +197,10 @@ def test_the_refused_count_is_reset_per_target(context):
     """Refusals on the source target, then the converted target (never staged, so
     nothing refused) exits 3: the second is SKIPPED, not failed on the first's
     count. The second scan runs the real _stage_source path (none for a converted
-    target), so the reset is the product's, not the patch's."""
+    target), so the reset is the product's, not the patch's. The converted target
+    holds a file: an empty one is skipped before anything runs."""
     scanner = _scanner(context)
+    (context.work_dir / "converted.py").write_text("print(2)\n")
 
     def staged(self, target, ignore_paths, cleanup):
         self._staged_refused = 2
@@ -215,6 +217,7 @@ def test_the_refused_count_is_reset_per_target(context):
     ):
         scanner.scan(target=context.source_dir, target_type="source")
 
+    assert scanner.targets_attempted == 1
     assert scanner.targets_failed == 1
 
     with patch.object(
@@ -222,8 +225,9 @@ def test_the_refused_count_is_reset_per_target(context):
     ):
         scanner.scan(target=context.work_dir, target_type="converted")
 
-    assert scanner.targets_attempted == 1
-    assert scanner.targets_failed == 1
+    # SKIPPED: nothing of this target was refused, whatever the first one's count.
+    assert scanner.targets_attempted == 0
+    assert scanner.targets_failed == 0
 
 
 # --- a refused target's end time -------------------------------------------------------
@@ -232,12 +236,14 @@ def test_the_refused_count_is_reset_per_target(context):
 def test_a_refused_target_records_its_own_end_time(context):
     """The refusals ran ahead of the handler that resets end_time for a failed run,
     so a converted target refused after the source target ran kept the source's
-    end time: an end before its start."""
+    end time: an end before its start. The converted target holds a file: an
+    empty one is skipped before the refusals run."""
     scanner, _ = _scan(
         context, {"stdout": "", "stderr": "", "returncode": 0}, SNYK_SARIF
     )
     after_the_source = scanner.end_time
     assert after_the_source is not None
+    (context.work_dir / "converted.py").write_text("print(2)\n")
 
     def refuse(self, target):
         raise ScannerError("refused for the test")
