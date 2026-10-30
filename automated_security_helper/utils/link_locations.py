@@ -27,9 +27,26 @@ from automated_security_helper.utils.scanned_tree import _is_link_stat
 MAX_LINKS_FOLLOWED = 63 if os.name == "nt" else 40
 
 #: The errors ``Path.is_symlink`` reads as "not a link": a component that is not
-#: there, or is below a file, or is a loop. The walk steps through such a component
-#: as before; any other error ends it.
+#: there, or is below a file, or is a loop, and on Windows a device that is not
+#: ready, an invalid name, or a name that cannot be resolved (the Win32 errors
+#: pathlib ignores, which come with ``EINVAL`` as the errno). The walk steps
+#: through such a component as before; any other error ends it. A ``ValueError``
+#: (a NUL in a component) is "not a link" too, as it is for ``is_symlink``.
 _NOT_A_LINK_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP})
+_NOT_A_LINK_WINERRORS = frozenset({21, 123, 1921})
+
+
+def _lookup_says_not_a_link(error: Exception) -> bool:
+    """Whether *error*, raised looking a component up, means "not a link" rather
+    than "the walk cannot continue": the reading :meth:`pathlib.Path.is_symlink`
+    makes of the same errors."""
+    if isinstance(error, ValueError):
+        return True
+    return (
+        getattr(error, "errno", None) in _NOT_A_LINK_ERRNOS
+        or getattr(error, "winerror", None) in _NOT_A_LINK_WINERRORS
+    )
+
 
 _EXTENDED_PREFIX = "\\\\?\\"
 _EXTENDED_UNC_PREFIX = "\\\\?\\UNC\\"
@@ -64,7 +81,10 @@ def link_locations(path: str | Path) -> List[Path]:
     directory reached through another link is found as well, and a ``..`` after
     a link applies to the link's target. A component that cannot be read ends
     the walk, and so does a loop once ``MAX_LINKS_FOLLOWED`` links have been
-    followed. A relative ``path`` is taken from the working directory, which is
+    followed; a component that is not there, holds a NUL, or fails the lookup
+    in a way ``Path.is_symlink`` reads as "not a link" (:data:`_NOT_A_LINK_ERRNOS`,
+    :data:`_NOT_A_LINK_WINERRORS`) is stepped through as a plain name, so a ``..``
+    after it still applies. A relative ``path`` is taken from the working directory, which is
     read for that and nothing else: an absolute ``path`` is walked with the
     working directory deleted. A relative ``path`` with the directory gone has
     no place to start from, so it raises ``FileNotFoundError``, as
@@ -89,15 +109,15 @@ def link_locations(path: str | Path) -> List[Path]:
         try:
             try:
                 is_link = _is_link_stat(os.lstat(step))
-            except OSError as error:
-                if error.errno not in _NOT_A_LINK_ERRNOS:
+            except (OSError, ValueError) as error:
+                if not _lookup_says_not_a_link(error):
                     raise
                 is_link = False
             if not is_link:
                 current = step
                 continue
             text = os.readlink(step)
-        except OSError:
+        except (OSError, ValueError):
             break
         if len(found) >= MAX_LINKS_FOLLOWED:
             break
