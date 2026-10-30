@@ -34,6 +34,7 @@ import logging
 import os
 import shutil
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -1606,7 +1607,11 @@ def test_scan_timeout_bounds_the_target_not_each_batch(repo, monkeypatch, on_pat
     def monotonic():
         return readings.pop(0) if len(readings) > 1 else readings[0]
 
-    monkeypatch.setattr(module.time, "monotonic", monotonic)
+    # The scanner module's own `time` name, not the shared time module: a
+    # monotonic() call from the base class, the sandbox or a logging helper
+    # would otherwise use up a reading and fail this test for an unrelated
+    # reason.
+    monkeypatch.setattr(module, "time", types.SimpleNamespace(monotonic=monotonic))
     scanner = _scanner(repo, scan_timeout=7)
     calls = _through_the_base_class(
         monkeypatch,
@@ -2939,11 +2944,29 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         # With the walk gone, two keys on one flow line are both read: the plain
         # value is cut at the separator, so the scan goes on to the next key.
         ('steps: [{uses: ./c}, {"uses": "./d"}]\nbad: [\n', {"./c", "./d"}),
-        # A next-line value under a flow opener on the line ABOVE is judged by its
-        # own line, so the block-style reading (to the end of the line) applies.
+        # The flow-context test reads from the start of the KEY's line to the
+        # value: an opener two lines up (`[1]`) is not read, so this next-line
+        # value gets the block-style reading (to the end of the line).
         (
             "x: [1]\nsteps:\n  - uses:\n      ./my dir/act\n  bad: [\n",
             {"./my", "./my dir/act"},
+        ),
+        # An opener on the key's own line puts a next-line value in flow context:
+        # the value is read to the closing brace, spaces kept.
+        (
+            "steps: [{uses:\n      ./my dir/act}]\nbad: [\n",
+            {"./my", "./my dir/act"},
+        ),
+        # A flow-context plain value may hold spaces (YAML ends it only at a
+        # comma, a closing bracket or brace, or a comment): `{uses: ./my dir/act}`
+        # is `./my dir/act` to PyYAML and to actionlint's parser alike. The cut at
+        # the first space alone named `./my`, so with the walk gone a reference
+        # out of the tree spelled this way named nothing and the workflow was
+        # linted.
+        ("steps: [{uses: ./my dir/act}]\nbad: [\n", {"./my", "./my dir/act"}),
+        (
+            "steps: [{uses: ./../outside dir/action}]\nbad: [\n",
+            {"./../outside", "./../outside dir/action"},
         ),
         # A quoted value runs across lines, so a stray `uses: "` in a comment (or
         # a name: string, a run: script) opens one that reaches the next quote.
@@ -2994,6 +3017,9 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "tagged-value-without-the-walk",
         "flow-two-keys-without-the-walk",
         "next-line-value-after-a-flow-line",
+        "next-line-value-under-a-flow-key",
+        "flow-plain-with-space",
+        "flow-plain-with-space-out-of-the-tree",
         "double-quote-decoy-before-the-reference",
         "single-quote-decoy-before-the-reference",
     ],

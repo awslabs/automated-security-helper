@@ -457,19 +457,33 @@ def _decoded_scalar(quoted: str, fallback: str) -> Optional[str]:
     return decoded if isinstance(decoded, str) else fallback
 
 
-def _uses_values_of(match: "re.Match[str]", text: str) -> Set[str]:
+#: Where a plain value ends in flow context: a comma, a closing bracket or
+#: brace, or a comment. Spaces are part of the value there too (``{uses: ./my
+#: dir/act}`` is ``./my dir/act`` in YAML), which is why the cut at the first
+#: space is only one of the candidates.
+_FLOW_VALUE_END = re.compile(r"[,\]}]|[ \t]#")
+
+
+def _uses_values_of(match: "re.Match[str]", text: str, key_start: int) -> Set[str]:
     """The values a ``_USES_VALUE`` match could name, YAML quoting decoded.
 
-    A plain value is read two ways, because the line scan does not know whether
-    it sits in a flow collection: the match itself, cut at the first space,
-    quote, comma, closing bracket or ``#`` (right inside ``{...}``, and the cut
-    that lets the scan go on to the next key on the same line), and, when
-    nothing before the value on its line opens a flow collection, the text from
-    the value's start to a comment or the end of the line (right in block style,
-    where ``uses: ./my dir/act`` names a directory with a space in it). Both are
-    candidates: this is a superset of what actionlint resolves, and a candidate
-    that names nothing is judged to be inside the tree. A quoted value whose
-    escape no YAML parser accepts yields nothing (``_decoded_scalar``).
+    A plain value is read two ways, because the line scan has no parser to say
+    where the value ends: the match itself, cut at the first space, quote,
+    comma, closing bracket or ``#`` (the cut that lets the scan proceed to the
+    next key on the same flow line), and the value read to where its context
+    ends it. In block context that is a comment or the end of the line (``uses:
+    ./my dir/act`` names a directory with a space in it); in flow context a
+    comma, a closing bracket or brace, or a comment, with spaces kept (``{uses:
+    ./my dir/act}`` names the same directory, where the cut at the space alone
+    named ``./my``, and a reference out of the tree spelled that way was read
+    as naming nothing and the workflow linted). The context is read from the
+    text between the start of the KEY's line and the value (*key_start* is the
+    key match's start): an opener there, on the key's line or, for a value on
+    the next line, on the line the key shares with it, is flow; an opener on an
+    earlier line is not read. Both readings are candidates: this is a superset
+    of what actionlint resolves, and a candidate that names nothing is judged
+    to be inside the tree. A quoted value whose escape no YAML parser accepts
+    yields nothing (``_decoded_scalar``).
     """
     double_quoted, single_quoted, plain = match.groups()
     if double_quoted is not None:
@@ -480,13 +494,12 @@ def _uses_values_of(match: "re.Match[str]", text: str) -> Set[str]:
         return set() if value is None else {value}
     candidates = {plain}
     start = match.start(3)
-    # The value's own line: the key's when they share it, the next one when the
-    # value starts there, so the flow-collection test reads what precedes the
-    # value, never a key on the line above.
-    line_start = text.rfind("\n", 0, start) + 1
-    if not _FLOW_OPENERS.intersection(text[line_start:start]):
-        line_end = text.find("\n", start)
-        rest = text[start : len(text) if line_end == -1 else line_end]
+    line_end = text.find("\n", start)
+    rest = text[start : len(text) if line_end == -1 else line_end]
+    key_line_start = text.rfind("\n", 0, key_start) + 1
+    if _FLOW_OPENERS.intersection(text[key_line_start:start]):
+        candidates.add(_FLOW_VALUE_END.split(rest, 1)[0].rstrip())
+    else:
         candidates.add(_PLAIN_VALUE_COMMENT.split(rest, 1)[0].rstrip())
     return candidates
 
@@ -510,7 +523,7 @@ def local_uses_references(text: str) -> Set[str]:
     for key in _USES_KEY.finditer(text):
         value = _USES_VALUE.match(text, key.end())
         if value is not None:
-            found.update(_uses_values_of(value, text))
+            found.update(_uses_values_of(value, text, key.start()))
     stack: List[Any] = []
     try:
         # compose_all is a generator: the documents it composed before failing
