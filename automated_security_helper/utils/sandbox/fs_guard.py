@@ -285,19 +285,36 @@ def _root_anchor(path: Path, roots: Iterable[Path]) -> Optional[Tuple[Path, Path
     directory by name, so a link planted at a component between the two was
     followed; from the outermost root every component below it is opened without
     following one.
+
+    The identity match is made outermost ancestor first, and only over the
+    ancestors ABOVE the outermost root matched by spelling. Two ancestors can
+    resolve to one root when a scanner plants a link below the root that points
+    back at it (``out/sub/back -> out``): the outer spelling is the anchor and
+    ``back`` is then a component the guard refuses, where taking the deeper one
+    opened the planted link by name. Below a root matched by spelling nothing is
+    resolved at all, which is also what spares most writes the resolution.
     """
     found: List[Tuple[Path, Path]] = []
-    real_ancestors: Dict[str, Path] = {}
+    unmatched: List[Path] = []
     for root in roots:
         if root in path.parents:
             found.append((root, root))
-            continue
-        if not real_ancestors:
-            for ancestor in path.parents:
-                real_ancestors.setdefault(os.path.realpath(ancestor), ancestor)
-        anchor = real_ancestors.get(os.path.realpath(root))
-        if anchor is not None:
-            found.append((root, anchor))
+        else:
+            unmatched.append(root)
+    if unmatched:
+        above: List[Path] = list(path.parents)
+        if found:
+            outermost = min(found, key=lambda pair: len(pair[1].parts))[1]
+            above = [p for p in above if len(p.parts) < len(outermost.parts)]
+        # path.parents runs from the deepest ancestor up; reversed, the outermost
+        # spelling of each real directory is the one kept.
+        real_ancestors: Dict[str, Path] = {}
+        for ancestor in reversed(above):
+            real_ancestors.setdefault(os.path.realpath(ancestor), ancestor)
+        for root in unmatched:
+            anchor = real_ancestors.get(os.path.realpath(root))
+            if anchor is not None:
+                found.append((root, anchor))
     if not found:
         return None
     return min(found, key=lambda pair: len(pair[1].parts))
