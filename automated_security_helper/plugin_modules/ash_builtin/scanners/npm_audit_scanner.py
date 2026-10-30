@@ -446,7 +446,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         could audit it. With npm present, a lockfile whose own manager is absent
         is a failed target in ``scan()``, named with the manager it needed, as
         it always was; the check refuses only when nothing installed could
-        audit anything, and its reason names the managers the tree needs.
+        audit anything, and its reason names the managers the tree needs. The
+        tree is read for those managers only when npm is absent: with npm on
+        PATH the answer is True whatever the tree holds, and the walk it took
+        on every call (one more full selection per run, for a dependency check
+        that asks only whether a tool is installed) decided nothing.
 
         The version probe (``npm --version``) is bounded like every other
         subprocess here, runs in a fresh empty directory under the results
@@ -473,17 +477,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._source_manifests(), "source"
             )
             return False
+        if find_executable(self.command):
+            self._probe_npm_version()
+            return True
         needed = self._package_managers_needed() or {self.command}
-        available = {binary for binary in needed if find_executable(binary)}
-        if not available and not find_executable(self.command):
+        if not any(find_executable(binary) for binary in needed):
             names = ", ".join(sorted(needed))
             self.dependency_unavailable_reason = (
                 f"{names} not found on PATH; the lockfiles in the scanned tree are "
                 f"audited with {names}"
             )
             return False
-        if find_executable(self.command):
-            self._probe_npm_version()
         return True
 
     def _source_manifests(self) -> List[str]:

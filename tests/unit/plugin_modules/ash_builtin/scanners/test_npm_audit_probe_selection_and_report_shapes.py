@@ -304,6 +304,42 @@ class TestWhichPackageManagersTheCheckNeeds:
         assert satisfied is False
         assert "npm" in (scanner.dependency_unavailable_reason or "")
 
+    def test_with_npm_installed_the_check_reads_no_tree(self, context, monkeypatch):
+        """With npm on PATH the answer is True whatever the tree holds, so the
+        check does not walk the scanned tree for the managers its lockfiles
+        need: that walk, a full selection on every call, decided nothing."""
+        _package(context.source_dir / "web", "yarn.lock")
+        walks = []
+        real_walk = NpmAuditScanner._package_manifests
+
+        def counting(self, *args, **kwargs):
+            walks.append(args)
+            return real_walk(self, *args, **kwargs)
+
+        monkeypatch.setattr(NpmAuditScanner, "_package_manifests", counting)
+
+        scanner, satisfied = self._check(context, monkeypatch, present={"npm"})
+
+        assert satisfied is True
+        assert walks == [], walks
+
+    def test_without_npm_the_check_reads_the_tree_once(self, context, monkeypatch):
+        """Control: npm absent, the tree decides, and it is read once."""
+        _package(context.source_dir / "web", "yarn.lock")
+        walks = []
+        real_walk = NpmAuditScanner._package_manifests
+
+        def counting(self, *args, **kwargs):
+            walks.append(args)
+            return real_walk(self, *args, **kwargs)
+
+        monkeypatch.setattr(NpmAuditScanner, "_package_manifests", counting)
+
+        scanner, satisfied = self._check(context, monkeypatch, present={"yarn"})
+
+        assert satisfied is True
+        assert walks == [("source",)], walks
+
 
 # ---------------------------------------------------------------------------
 # The selection
