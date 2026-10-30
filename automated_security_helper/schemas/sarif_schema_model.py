@@ -2473,8 +2473,23 @@ def _relative_text(candidate: str, root: str, fold_case: bool) -> Optional[str]:
     return PurePosixPath(*candidate_parts[len(root_parts) :]).as_posix()
 
 
-def _resolved_relative_text(candidate: str, source_dir: object) -> Optional[str]:
-    """*candidate* made relative to *source_dir* once both are resolved.
+def _resolved_root_text(source_dir: object) -> Optional[str]:
+    """*source_dir* resolved on this host, as ``/``-separated text; None for a
+    pure path of another flavor (it names no directory here) or a root that
+    cannot be resolved. Computed once per filter call, not once per result."""
+    if isinstance(source_dir, PurePath) and not isinstance(source_dir, Path):
+        return None
+    try:
+        return root_text(Path(str(source_dir)).resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def _resolved_relative_text(
+    candidate: str, resolved_root: Optional[str], fold_case: bool
+) -> Optional[str]:
+    """*candidate* made relative to the resolved source directory, resolving the
+    candidate too when its own spelling does not match.
 
     The lexical comparison takes ``source_dir`` as given, while a scanner's URI
     is whatever spelling the scanner was handed: a relative ``source_dir``, or
@@ -2482,24 +2497,22 @@ def _resolved_relative_text(candidate: str, source_dir: object) -> Optional[str]
     never matched and every absolute URI was dropped. The sanitize path
     (``utils/sarif_utils._sanitize_uri``) resolves in its fallback; this is the
     same fallback, reached only when the lexical form already failed, so the
-    common case pays nothing for it. None when neither spelling matches or a
-    path cannot be resolved.
+    common case pays nothing for it. *fold_case* carries the caller's Windows
+    reading through, so a drive-rooted URI against a relative or linked
+    ``source_dir`` on Windows is compared the way that file system compares.
+    None when the root could not be resolved, neither spelling matches or the
+    candidate cannot be resolved.
     """
-    if isinstance(source_dir, PurePath) and not isinstance(source_dir, Path):
-        # A pure path of another flavor names no directory on this host.
+    if resolved_root is None:
         return None
-    try:
-        resolved_root = root_text(Path(str(source_dir)).resolve())
-    except (OSError, ValueError, RuntimeError):
-        return None
-    relative = _relative_text(candidate, resolved_root, False)
+    relative = _relative_text(candidate, resolved_root, fold_case)
     if relative is not None:
         return relative
     try:
         resolved_candidate = root_text(Path(candidate).resolve())
     except (OSError, ValueError, RuntimeError):
         return None
-    return _relative_text(resolved_candidate, resolved_root, False)
+    return _relative_text(resolved_candidate, resolved_root, fold_case)
 
 
 class SarifReport(RecordModel):
@@ -2598,6 +2611,12 @@ class SarifReport(RecordModel):
         }
         source_text = root_text(source_dir)
         windows_source = is_windows_root(source_dir)
+        # Once, for the resolve fallback below: resolving per result repeated a
+        # file-system walk for every finding in the report.
+        resolved_root = _resolved_root_text(source_dir)
+        # A Windows file system compares a whole path without regard to case, the
+        # tail included: a listed ``src/app.py`` names the URI's ``Src/App.py``.
+        folded_set = {name.lower() for name in recorded_set}
         for run in self.runs:
             if not run.results:
                 continue
@@ -2641,11 +2660,16 @@ class SarifReport(RecordModel):
                 rel_str: Optional[str] = None
                 if is_rooted:
                     rel_str = _relative_text(candidate_str, source_text, fold_case)
-                    if rel_str is None and not fold_case:
-                        rel_str = _resolved_relative_text(candidate_str, source_dir)
+                    if rel_str is None:
+                        rel_str = _resolved_relative_text(
+                            candidate_str, resolved_root, fold_case
+                        )
                 if rel_str is None:
                     rel_str = PurePosixPath(candidate_str).as_posix()
-                if text_of_undecodable(rel_str) in recorded_set:
+                recorded_key = text_of_undecodable(rel_str)
+                if recorded_key in recorded_set or (
+                    fold_case and recorded_key.lower() in folded_set
+                ):
                     filtered.append(result)
             run.results = filtered
 

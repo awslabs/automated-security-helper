@@ -31,6 +31,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Tool,
     ToolComponent,
+    _resolved_relative_text,
 )
 
 pytestmark = pytest.mark.unit
@@ -141,9 +142,30 @@ class TestWindowsForms:
     def test_a_drive_path_matches_without_regard_to_case(self):
         report = _report("file:///c:/proj/Src/App.py", "C:/Proj/src/other.py")
 
-        report.filter_results_by_files({"src/app.py", "Src/App.py"}, "C:/Proj")
+        report.filter_results_by_files({"src/app.py"}, "C:/Proj")
 
         assert _lines(report) == [1]
+
+    def test_a_tail_whose_case_differs_still_names_the_listed_file(self):
+        """The whole path is compared as Windows compares it, not the root alone."""
+        report = _report("file:///C:/proj/Src/App.py", "C:/proj/src/Other.py")
+
+        report.filter_results_by_files({"src/app.py"}, "C:/proj")
+
+        assert _lines(report) == [1]
+
+    def test_the_resolved_fallback_folds_case_when_asked(self):
+        """The fallback a relative or linked Windows source_dir reaches compares
+        as that file system does; it never ran under a drive-rooted URI before."""
+        assert (
+            _resolved_relative_text("/Work/Proj/src/A.py", "/work/proj", True)
+            == "src/A.py"
+        )
+        assert _resolved_relative_text("/Work/Proj/src/A.py", "/work/proj", False) in (
+            None,
+            "src/A.py",
+        )
+        assert _resolved_relative_text("/work/proj/src/a.py", None, True) is None
 
     def test_a_listed_windows_path_object_is_spelled_with_slashes(self):
         report = _report("C:/proj/src/app.py")
