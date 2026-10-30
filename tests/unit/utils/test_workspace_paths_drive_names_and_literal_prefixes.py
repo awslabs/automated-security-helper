@@ -32,6 +32,7 @@ import pytest
 from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.utils.suppression_matcher import file_path_matches
 from automated_security_helper.utils.workspace_paths import (
+    drive_anchor,
     SUPPRESSION,
     to_project_pattern,
     to_workspace_pattern,
@@ -93,6 +94,25 @@ class TestAColonInANameIsNotADrive:
         )
         assert to_project_pattern("c:notes.py", "api", kind=SUPPRESSION) is None
         _contract_holds("api/c:notes.py", "api")
+
+    @pytest.mark.parametrize(
+        ("text", "anchor"),
+        [
+            ("C:/Windows", "C:"),
+            ("c:\\x", "c:"),
+            ("C:", "C:"),
+            ("c:notes.py", ""),
+            ("x:legacy/src/x.py", ""),
+            ("1:x.py", ""),
+            ("src/x.py", ""),
+        ],
+    )
+    def test_the_drive_rule_is_shared_with_the_uri_reading(self, text, anchor):
+        """``aggregation._posix_text`` strips the leading separator of a URI
+        that reduced from ``file:///C:/x`` on the colon alone, so the POSIX URI
+        ``/x:legacy/src/x.py`` read as unrooted and was rebased under its
+        project; it reads this rule now, the one the converters read."""
+        assert drive_anchor(text) == anchor
 
 
 class TestABracketNamedProjectIsAnchoredByEquality:

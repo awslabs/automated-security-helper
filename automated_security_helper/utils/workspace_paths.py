@@ -324,6 +324,21 @@ def _drive_anchor(normalised_raw: str) -> str:
     return ""
 
 
+def drive_anchor(text: str) -> str:
+    """The drive anchor *text* starts with, ``"C:"`` for ``C:/x``, ``C:\\x`` or
+    ``C:``, and ``""`` for anything else, ``c:notes.py`` and ``x:legacy`` included.
+
+    The one rule for "is this a Windows drive" the pattern converters and the
+    aggregator's URI reading share, so a letter-colon NAME is a name on both
+    sides. ``aggregation._posix_text`` used to strip the leading separator of
+    any ``/x:...`` URI on the colon alone, so the POSIX URI ``/x:legacy/src/x.py``
+    read as the unrooted ``x:legacy/src/x.py`` and was rebased under its
+    project, a path naming nothing, where :func:`_drive_anchor` reads
+    ``x:legacy`` as a name and the converters keep it one.
+    """
+    return _drive_anchor(text.replace("\\", "/"))
+
+
 def _normalise(value: PathLike, *, label: str) -> PurePosixPath:
     """Normalise separators and validate, returning a PurePosixPath.
 
