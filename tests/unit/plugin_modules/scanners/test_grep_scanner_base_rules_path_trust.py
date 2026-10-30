@@ -319,11 +319,16 @@ def test_the_decline_reason_names_the_resolved_path_of_a_missing_rules_file(
     )
 
     reason = scanner.dependency_unavailable_reason or ""
-    expected = os.path.realpath(
-        Path(context_outside_checkouts.source_dir).parent
-        / "rules-beside-the-tree"
-        / "my-rulez.yaml"
-    )
+    # The reason spells the path POSIX on every platform (``as_posix()``), so the
+    # expected path is spelled the same way; ``os.path.realpath`` alone spells
+    # backslashes on Windows and would not be found in the text there.
+    expected = Path(
+        os.path.realpath(
+            Path(context_outside_checkouts.source_dir).parent
+            / "rules-beside-the-tree"
+            / "my-rulez.yaml"
+        )
+    ).as_posix()
     assert expected in reason, reason
     assert "does not exist" in reason, reason
     assert "path trust refused" not in reason, reason
@@ -353,7 +358,9 @@ def test_the_decline_reason_names_a_path_trust_refusal_as_such(
 
     reason = scanner.dependency_unavailable_reason or ""
     assert "path trust refused" in reason, reason
-    assert os.path.realpath(source_dir / "shipped-rules.yaml") in reason, reason
+    # POSIX-spelled, as the reason spells it on every platform.
+    expected = Path(os.path.realpath(source_dir / "shipped-rules.yaml")).as_posix()
+    assert expected in reason, reason
     assert "does not exist" not in reason, reason
 
 
