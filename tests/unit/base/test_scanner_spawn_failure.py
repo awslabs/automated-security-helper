@@ -1176,10 +1176,11 @@ def test_a_probes_start_before_the_launch_does_not_grade_the_launch(
 
     monkeypatch.setattr(UVToolRunner, "uv_availability", really_probed)
 
-    def requirement_check_breaks(spec, naming="a tool requirement"):
-        # The real checked_requirement's signature (spec, naming=...): run_tool
-        # passes naming positionally, and a stub narrower than the real
-        # callable raises TypeError instead of this cell's own reason.
+    def requirement_check_breaks(spec, naming="a tool requirement", **kwargs):
+        # The real checked_requirement's signature (spec, naming=..., *,
+        # package=...): run_tool passes naming positionally and the package by
+        # keyword, and a stub narrower than the real callable raises TypeError
+        # instead of this test's own reason.
         raise RuntimeError("a pre-launch step broke")
 
     monkeypatch.setattr(runner_module, "checked_requirement", requirement_check_breaks)

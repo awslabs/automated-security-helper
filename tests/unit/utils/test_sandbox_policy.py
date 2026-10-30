@@ -3539,13 +3539,20 @@ def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
     fake = SimpleNamespace(
         command="stub-tool",
         use_uv_tool=True,
+        # The package that provides the command (None: the command's own name)
+        # and the plugin's own offline mode, both passed to the runner's run.
+        uv_tool_package_name=None,
+        _is_offline_mode=lambda: False,
         _values_to_redact=lambda: ("1.8",),
         _uv_run_inputs_for_records=lambda: ("stub-tool==1.8",),
         _get_tool_package_extras=lambda: None,
         _get_tool_version_constraint=lambda: "==1.8",
         _plugin_log=lambda *a, **k: None,
         _uv_run_failure=None,
-        _uv_response=lambda result, results_dir: result,
+        # The dispatch reads the stderr log's identity before the run (None:
+        # no log there) and hands it to the response builder by keyword.
+        _uv_stderr_log_identity=lambda results_dir: None,
+        _uv_response=lambda result, results_dir, **kwargs: result,
         # The dispatch also reads the interpreter request (empty when unset)
         # and, in its error arms, the after-the-start response (None when the
         # launch started no child).

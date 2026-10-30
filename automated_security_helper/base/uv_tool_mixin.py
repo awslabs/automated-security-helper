@@ -625,11 +625,13 @@ class UVToolMixin:
             )
             return None
         record_values: Tuple[str, ...] = read.values
-        # Whether a stderr log already sits where this run would write its own,
-        # for the offline explainer: a leftover from an earlier run in the same
-        # results directory is not this run's output.
-        stderr_log_before = self._uv_stderr_log_identity(results_dir)
         try:
+            # Whether a stderr log already sits where this run would write its
+            # own, for the offline explainer: a leftover from an earlier run in
+            # the same results directory is not this run's output. Read inside
+            # the try, so a plugin whose hook raises takes the documented
+            # _uv_run_failure arm below instead of raising out of the dispatch.
+            stderr_log_before = self._uv_stderr_log_identity(results_dir)
             # UVToolRunnerError is the module's own import: named by the except
             # arm below, a local import of it would leave that arm reading an
             # unbound name when this import is what raised.
