@@ -120,6 +120,12 @@ def test_a_binding_whose_profile_is_gone_refuses_rather_than_unbinding(
         resolve_session_config_path(SESSION)
 
     assert "select_profile" in str(refused.value)
+    # Refused, not unbound: asked again, the session is still bound to the
+    # profile that is gone and the same refusal comes back. A refusal that also
+    # dropped the binding would answer None here, and the scan would run under
+    # in-tree discovery, the shape this file exists to refuse.
+    with pytest.raises(ProfileRegistryError):
+        resolve_session_config_path(SESSION)
 
 
 def test_an_unbound_session_still_resolves_nothing() -> None:
