@@ -495,6 +495,21 @@ def test_a_symlink_loop_in_a_mounted_path_is_a_refusal(tmp_path, monkeypatch):
     assert "Symlink loop" in refusal
 
 
+def test_another_runtime_error_in_the_mount_check_keeps_its_traceback(
+    tmp_path, monkeypatch
+):
+    """RecursionError is a RuntimeError; a bug is not a refusal."""
+
+    def deep(*args, **kwargs):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(rac, "_require_mountable_inputs", deep)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+    with pytest.raises(RecursionError):
+        rac.container_input_refusal(str(tmp_path), str(tmp_path / "out"), None)
+
+
 def test_the_outer_run_id_is_never_passed_from_a_config():
     assert OUTER_RUN_ID_ENV in rac.CONTAINER_ENV_NOT_PASSED
 

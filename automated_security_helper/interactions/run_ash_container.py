@@ -4486,7 +4486,12 @@ def container_input_refusal(
         return str(e)
     except RuntimeError as e:
         # Python 3.10 to 3.12 raise RuntimeError, not OSError, for a symlink
-        # loop met while a path is resolved: a refusal, not a traceback.
+        # loop met while a path is resolved: that one is a refusal, not a
+        # traceback. Any other RuntimeError (RecursionError and
+        # NotImplementedError are subclasses, and so is a bug's) keeps its
+        # traceback.
+        if "symlink loop" not in str(e).lower():
+            raise
         return (
             f"A path the container run would mount cannot be resolved: {e}. "
             "Container mode mounts the source, the output and the config by "
