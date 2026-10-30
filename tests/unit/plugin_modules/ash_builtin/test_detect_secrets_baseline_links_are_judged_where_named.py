@@ -68,6 +68,14 @@ def _context(tmp_path: Path) -> PluginContext:
     return context
 
 
+def _git_shaped_checkout(root: Path) -> Path:
+    """``root`` as a git checkout the trust rules recognize: a ``.git``
+    directory holding ``HEAD`` (an empty ``.git`` is a stray mkdir to them)."""
+    (root / ".git").mkdir(parents=True)
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    return root
+
+
 def _link_in_tree_to_outside(tmp_path: Path, context: PluginContext) -> Path:
     """``<source>/.secrets.baseline`` as a symlink to a baseline outside the tree."""
     outside = tmp_path / "elsewhere" / "team.baseline"
@@ -217,13 +225,13 @@ def test_an_in_tree_link_elsewhere_in_the_checkout_is_read(
 ):
     """A monorepo: the scanned directory is ``repo/service``, and its
     ``.secrets.baseline`` is a link to the checkout's own ``repo/.secrets.baseline``.
-    The target is the repository's file, inside the checkout that holds the
-    scanned directory, so it is read, and judged as the repository's. Tested
-    against the scanned directory alone, the link was refused as pointing
-    outside."""
+    The target is the repository's file, inside the nearest checkout that
+    holds the scanned directory, so it is read, and judged as the
+    repository's. Tested against the scanned directory alone, the link was
+    refused as pointing outside."""
     monkeypatch.chdir(tmp_path)
     checkout = tmp_path / "repo"
-    (checkout / ".git").mkdir(parents=True)
+    _git_shaped_checkout(checkout)
     shared = checkout / ".secrets.baseline"
     shared.write_text(_baseline_text(), encoding="utf-8")
     context = PluginContext(
@@ -254,6 +262,51 @@ def test_an_in_tree_link_elsewhere_in_the_checkout_is_read(
     reason = scanner._untrusted_baseline_reason(None)
     assert reason is not None, reason
     # The repository's settings: the link's verification filter is not loaded.
+    assert not any(
+        item.path == VERIFICATION_FILTER
+        for item in scanner.config.options.scan_settings.filters_used
+    )
+
+
+def test_an_in_tree_link_into_an_outer_checkout_is_refused(
+    tmp_path, monkeypatch, caplog
+):
+    """The scanned repository ``home/project`` is its own checkout, and the
+    directory above it, ``home``, is a checkout too (a home directory kept in
+    git). A committed ``project/.secrets.baseline -> ../operator.baseline``
+    reaches a file of the outer checkout, which is not the repository's: the
+    admitted targets are the nearest checkout's, so the link is refused and
+    the scan runs without a baseline. Admitting every enclosing checkout read
+    the operator's file under the repository's own settings."""
+    monkeypatch.chdir(tmp_path)
+    home = _git_shaped_checkout(tmp_path / "home")
+    outer = home / "operator.baseline"
+    outer.write_text(_baseline_text(), encoding="utf-8")
+    project = _git_shaped_checkout(home / "project")
+    context = PluginContext(
+        source_dir=project,
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    context.output_dir.mkdir(parents=True)
+    link = project / ".secrets.baseline"
+    try:
+        link.symlink_to(Path("..") / "operator.baseline")
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlinks unavailable on this platform: {exc}")
+
+    with caplog.at_level(logging.WARNING):
+        scanner = DetectSecretsScanner(
+            context=context, config=DetectSecretsScannerConfig()
+        )
+
+    assert not scanner._baseline_in_use()
+    assert scanner._baseline_document is None
+    assert any(
+        "a link to a file outside the scanned directory" in record.message
+        for record in caplog.records
+    ), [record.message for record in caplog.records]
     assert not any(
         item.path == VERIFICATION_FILTER
         for item in scanner.config.options.scan_settings.filters_used
