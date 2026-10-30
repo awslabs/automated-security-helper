@@ -203,14 +203,21 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
     pydantic describes it, so a reshaping serializer added later is never
     described by a schema its output does not match.
 
-    Serialization mode also marks every computed field ``required`` and leaves
-    out every field a dump excludes (``Field(exclude=True)``). A results file
-    from a version that did not compute the field yet (a workspace block without
-    ``skipped_projects``) is still a file this version loads, and one from a
-    version that wrote an excluded field still carries it, under models that
-    refuse unknown keys. So a computed field is described and never required
-    (``model_fields_schema``), and an excluded field is described and never
-    required (``field_is_present``, ``field_is_required``).
+    Serialization mode also marks every computed field ``required``. A results
+    file from a version that did not compute the field yet (a workspace block
+    without ``skipped_projects``) is still a file this version loads, so a
+    computed field is described and never required (``model_fields_schema``).
+
+    A field a dump excludes (``Field(exclude=True)``) is left out, as pydantic
+    leaves it out: no results file carries one. The four excluded fields in the
+    product were excluded from the commit that added them (``AshConfig.extends``
+    and ``patch``, ``WorkspaceProjectResult.scanner_reasons``, the
+    orchestrator's ``config_base_gate``, which is not in the results tree), so
+    no released version wrote one, and the schema would otherwise publish
+    runtime-only fields as part of the results-file contract and generate the
+    schema of a field pydantic cannot describe (a callable), which fails the
+    whole generation. A version that starts writing an excluded field lists it
+    here deliberately, with the model and the version that wrote it.
 
     A model that loads a field by its Python name as well as by its alias
     (``validate_by_name``: the CycloneDX models, whose ``bom-ref`` and
@@ -221,14 +228,6 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
     by the model's ``additionalProperties: false``. A required aliased field is
     required under either name.
     """
-
-    def field_is_present(self, field: Any) -> bool:
-        return True
-
-    def field_is_required(self, field: Any, total: bool) -> bool:
-        if field.get("serialization_exclude"):
-            return False
-        return super().field_is_required(field, total)
 
     def model_fields_schema(self, schema: Any) -> Any:
         json_schema = super().model_fields_schema(schema)

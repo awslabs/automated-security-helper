@@ -13,7 +13,10 @@ carries every computed field and keeps the same required-ness for the rest.
 
 from __future__ import annotations
 
+from typing import Callable, Optional
+
 import jsonschema
+import pydantic
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -33,6 +36,9 @@ class _Record(BaseModel):
     kept: int = 1
     hidden: int = Field(0, exclude=True)
     secret: str = Field(..., exclude=True)
+    # A runtime-only field of a kind pydantic cannot describe: generating its
+    # schema raises, so the generator must never reach it.
+    gate: Optional[Callable[[int], bool]] = Field(None, exclude=True)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -116,22 +122,48 @@ def test_control_pydantics_own_serialization_schema_requires_it():
     assert "derived" in _record_schema()["required"]
 
 
-# --- an excluded field is described and never required -------------------------
+# --- an excluded field is left out, as pydantic leaves it out -------------------
 
 
-def test_the_generator_describes_an_excluded_field_and_does_not_require_it():
-    """A file written by a version that dumped the field still carries it, and a
-    model that forbids unknown keys would refuse it if the schema left it out."""
+def test_the_generator_leaves_an_excluded_field_out():
+    """No results file carries a field its dump excludes (none of the product's
+    excluded fields was ever written by a released version), and describing
+    every excluded field published runtime-only fields as part of the contract."""
     schema = _record_schema(schema_generator=StoredResultsJsonSchema)
-    assert "hidden" in schema["properties"]
-    assert "secret" in schema["properties"]
-    assert {"hidden", "secret"}.isdisjoint(schema.get("required", []))
+    assert "hidden" not in schema["properties"]
+    assert "secret" not in schema["properties"]
+    assert "gate" not in schema["properties"]
+    assert {"hidden", "secret", "gate"}.isdisjoint(schema.get("required", []))
 
 
-def test_control_pydantics_own_serialization_schema_drops_the_excluded_field():
+def test_an_excluded_field_pydantic_cannot_describe_does_not_fail_the_generation():
+    """A model with an excluded callable field generates: the generator never asks
+    pydantic for that field's schema. The control shows the ask would fail."""
+    assert _record_schema(schema_generator=StoredResultsJsonSchema)
+
+    class _Described(BaseModel):
+        gate: Optional[Callable[[int], bool]] = None
+
+    with pytest.raises(pydantic.errors.PydanticInvalidForJsonSchema):
+        _Described.model_json_schema(mode="serialization")
+
+
+def test_control_pydantics_own_serialization_schema_agrees():
     schema = _record_schema()
     assert "hidden" not in schema["properties"]
     assert "secret" not in schema["properties"]
+
+
+def test_no_excluded_field_of_the_product_is_in_the_results_schema(results_schema):
+    """The product's excluded fields, by model: none is described."""
+    excluded = {
+        "AshConfig": ("extends", "patch"),
+        "WorkspaceProjectResult": ("scanner_reasons",),
+    }
+    for model, fields in excluded.items():
+        properties = results_schema["$defs"][model]["properties"]
+        for field in fields:
+            assert field not in properties, (model, field)
 
 
 def test_control_an_ordinary_field_keeps_its_requiredness():
