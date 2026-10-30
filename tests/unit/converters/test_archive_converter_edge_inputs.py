@@ -322,6 +322,31 @@ def test_the_decompressor_is_probed_only_where_the_block_also_spells_a_header(
     assert opens["n"] == opened
 
 
+def test_a_compressed_stream_that_holds_no_tar_falls_back_to_the_raw_bytes(
+    monkeypatch,
+):
+    """The fallback condition is tarfile's (``r:*``): where the first raw block
+    spells a tar header, the decompressor is kept only when what it decompresses
+    starts with a tar header too; otherwise the raw bytes are the tar a tarfile
+    consumer reads. With the header test answering True, a gzip of a non-tar
+    payload reads as its raw bytes, and a gzip of a tar as its payload (the
+    control). Decompression alone used to keep the gzip, so the first case was
+    read as a gzip holding no tar and the file recorded as unreadable."""
+    monkeypatch.setattr(archive_converter, "_spells_a_tar_header", lambda block: True)
+    gzip_of_text = gzip.compress(b"x = 1\n" * 100)
+    gzip_of_tar = tar_bytes({"a.py": "x = 1\n"}, gz=True)
+    plain = tar_bytes({"a.py": "x = 1\n"})
+
+    with archive_converter._tar_stream(io.BytesIO(gzip_of_text)) as stream:
+        assert stream.read(tarfile.BLOCKSIZE) == gzip_of_text[: tarfile.BLOCKSIZE]
+    with archive_converter._tar_stream(io.BytesIO(gzip_of_tar)) as stream:
+        assert stream.read(tarfile.BLOCKSIZE) == plain[: tarfile.BLOCKSIZE]
+
+    probe = archive_converter._decompresses_to_a_tar_header
+    assert probe(archive_converter._GzipMembersStream, io.BytesIO(gzip_of_text)) is False
+    assert probe(archive_converter._GzipMembersStream, io.BytesIO(gzip_of_tar)) is True
+
+
 # ---------------------------------------------------------------- gzip trailing bytes
 
 

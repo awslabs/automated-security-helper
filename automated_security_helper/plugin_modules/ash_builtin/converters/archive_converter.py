@@ -821,29 +821,40 @@ def _decompressor_for(head: bytes) -> Optional[Callable[[BinaryIO], Any]]:
     return None
 
 
-def _decompresses_a_first_block(
+def _decompresses_to_a_tar_header(
     opener: Callable[[BinaryIO], Any], handle: BinaryIO
 ) -> bool:
-    """Whether the decompressor ``opener`` reads a first block from ``handle``.
+    """Whether the decompressor ``opener`` reads a first block from ``handle``
+    that is a tar header (_is_tar_header; an end-of-archive block counts, as
+    ``tarfile.open`` opens an empty tar on one).
 
-    The archive's own errors (a damaged or invalid stream, as _failure_kind
-    grades them) answer False: the bytes are not the compressed stream their
-    magic names. An error of the run (no permission or memory, a device
-    failure, a defect in the stream classes) is raised, as _holds_a_tar raises
-    it, so convert() records a failure of the run's kind and no suppression
-    accepts it. The handle is left at its start.
+    The condition ``tarfile.open`` in its ``r:*`` mode decides the same question
+    by: its compressed opener hands the decompressed stream to the plain reader,
+    which fails (ReadError) when the first block is no header, and the next
+    opener, the plain one, is then tried on the raw bytes. So a stream the
+    decompressor refuses (the archive's own error, as _failure_kind grades it:
+    a damaged or invalid stream) and a stream that decompresses to something
+    other than a tar both answer False: with a first raw block whose checksum
+    holds, the raw bytes are the tar a ``tarfile`` consumer reads. Decompression
+    alone used to answer True, so a gzip whose header spelled a tar and whose
+    payload was not one was read as the gzip, found to hold no tar, and recorded
+    as named-a-tar-but-unreadable while a ``tarfile.open(path)`` consumer
+    extracted the spelled tar. An error of the run (no permission or memory, a
+    device failure, a defect in the stream classes) is raised, as _holds_a_tar
+    raises it, so convert() records a failure of the run's kind and no
+    suppression accepts it. The handle is left at its start.
     """
     handle.seek(0)
     try:
         with opener(handle) as inner:
-            inner.read(tarfile.BLOCKSIZE)
+            block = inner.read(tarfile.BLOCKSIZE)
     except Exception as error:
         if _failure_kind(error) == "tool":
             raise
         return False
     finally:
         handle.seek(0)
-    return True
+    return _is_tar_header(block, empty_is_tar=True)
 
 
 @contextlib.contextmanager
@@ -857,13 +868,17 @@ def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
     checksum holds does not change that by itself: a gzip header's extra field
     (FEXTRA) is free bytes a header can be spelled in, so a tar-header-first
     order read such a gzip as the small tar its header spelled and never
-    reached the deflate payload a consumer gets. Only a stream the decompressor
-    refuses on its first block (_decompresses_a_first_block: the archive's own
-    error, not the run's), and whose first block is a tar header
-    (_spells_a_tar_header), is read as an uncompressed tar: one whose first
-    member's name spells the magic (``BZh91AY&SY-notes.txt`` spells bzip2's
-    whole head), which read as bzip2 was recorded as unreadable. The
-    decompressor is chosen from the magic rather than by letting tarfile try
+    reached the deflate payload a consumer gets. Only a stream whose first raw
+    block is a tar header (_spells_a_tar_header) AND that the decompressor does
+    not read to a tar's first block (_decompresses_to_a_tar_header: it refuses
+    the stream with the archive's own error, not the run's, or what it
+    decompresses is no tar header) is read as an uncompressed tar, which is the
+    condition ``tarfile.open`` in ``r:*`` mode falls back to its plain reader
+    on: one whose first member's name spells the magic (``BZh91AY&SY-notes.txt``
+    spells bzip2's whole head), which read as bzip2 was recorded as unreadable;
+    or a gzip whose header spells a tar over a payload that is none, where the
+    spelled tar is what a ``tarfile`` consumer gets and the only tar there is.
+    The decompressor is chosen from the magic rather than by letting tarfile try
     each in turn. Content with no magic is read as an uncompressed tar.
     archive_kind probes a tar through this same stream, so what it accepts and
     what is extracted agree.
@@ -875,7 +890,7 @@ def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
         inner: Any = handle
         if opener is not None and (
             not _spells_a_tar_header(block)
-            or _decompresses_a_first_block(opener, handle)
+            or _decompresses_to_a_tar_header(opener, handle)
         ):
             inner = stack.enter_context(opener(handle))
         yield _BoundedTarStream(inner)
