@@ -107,6 +107,7 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 
@@ -495,20 +496,44 @@ def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
     return rank >= _THRESHOLD_MIN_RANK.get(threshold, _UNKNOWN_THRESHOLD_MIN_RANK)
 
 
+#: The shape of a threshold worth quoting in the log: a ladder-like word (letters,
+#: digits, ``_``, ``.``, ``-``), at most 32 characters. A misspelled or lower-case
+#: ladder word is this shape; a free-text value an external plugin or an
+#: environment reference passed through is not, and is described, not quoted.
+_QUOTABLE_THRESHOLD = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
+
+
+def _threshold_for_log(threshold: str) -> str:
+    """*threshold* as the off-table warning shows it: quoted when it is a
+    ladder-shaped word, else described by its length.
+
+    The value is whatever an external plugin or caller passed straight through;
+    a configuration that pointed the threshold at an environment variable would
+    have put that variable's value in ash.log. The warning exists to name a typo
+    or a case slip, which a ladder-shaped word shows in full; anything else is
+    not the ladder's business to print.
+    """
+    if _QUOTABLE_THRESHOLD.match(threshold):
+        return repr(threshold)
+    return f"a {len(threshold)}-character value (not shown: not a ladder-shaped word)"
+
+
 def _warn_off_table_threshold(threshold: str) -> None:
     """Log once per process that *threshold* is off the ladder and gates like CRITICAL.
 
     Every configured route normalizes at its edge (``normalize_threshold``, the
     Literal-typed config fields), so a value reaching here is a free-text one an
     external plugin or caller passed straight through; silently gating it like
-    CRITICAL hid a loosened gate. The warning names the value and the ladder,
-    and says the matching is case-sensitive, which is the usual cause.
+    CRITICAL hid a loosened gate. The warning names the value
+    (:func:`_threshold_for_log`: quoted when ladder-shaped, described otherwise)
+    and the ladder, and says the matching is case-sensitive, which is the usual
+    cause.
     """
     if threshold in _WARNED_OFF_TABLE:
         return
     _WARNED_OFF_TABLE.add(threshold)
     _ash_logger().warning(
-        f"Severity threshold {threshold!r} is not one of "
+        f"Severity threshold {_threshold_for_log(threshold)} is not one of "
         f"{', '.join(SEVERITY_THRESHOLDS)} (case-sensitive); it gates like "
         "CRITICAL, so only critical findings fail against it"
     )

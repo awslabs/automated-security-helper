@@ -249,6 +249,32 @@ class TestOffTableThresholdIsSaidOnce:
         ]
         assert values == ["low", "medium"]
 
+    def test_a_value_that_is_not_a_ladder_shaped_word_is_described_not_quoted(
+        self, ash_log
+    ):
+        """The value is whatever an external plugin passed through; a threshold
+        pointed at an environment variable would have put that variable's value
+        in ash.log. A ladder-shaped word (a typo, a case slip) is quoted in full;
+        anything else is described by its length and never printed."""
+        secret_shaped = "p@ss word/with:junk=" + "x" * 40
+        assert severity_fails_threshold("CRITICAL", secret_shaped) is True
+
+        warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert secret_shaped not in warnings[0]
+        assert "x" * 40 not in warnings[0]
+        assert warnings[0].startswith(
+            f"Severity threshold a {len(secret_shaped)}-character value "
+            "(not shown: not a ladder-shaped word) is not one of ALL, LOW, MEDIUM, "
+            "HIGH, CRITICAL (case-sensitive)"
+        )
+
+    @pytest.mark.parametrize("value", ["Hi-gh", "medium.1", "x" * 32])
+    def test_a_ladder_shaped_word_is_still_quoted(self, ash_log, value):
+        assert severity_fails_threshold("CRITICAL", value) is True
+        warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]
+        assert warnings[0].startswith(f"Severity threshold {value!r} is not one of ")
+
     def test_a_ladder_value_and_no_threshold_log_nothing(self, ash_log):
         for threshold in SEVERITY_THRESHOLDS:
             severity_fails_threshold("HIGH", threshold)
