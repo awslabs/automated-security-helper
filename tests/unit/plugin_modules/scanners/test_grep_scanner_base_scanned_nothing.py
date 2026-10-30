@@ -150,6 +150,75 @@ def test_directories_above_the_target_never_count_as_default_ignores(
         )
 
 
+@pytest.mark.parametrize("under", ["tests", "build", "vendor"])
+def test_a_target_nested_under_a_default_ignore_inside_a_git_work_tree_grades_skipped(
+    test_plugin_context, monkeypatch, tmp_path, under
+):
+    """A target such as ``<repo>/tests/e2e-app`` inside a git work tree: the tools
+    anchor their patterns at the repository root, so ``--exclude tests/`` (ASH's
+    re-passed default) leaves out every file of the target, and the files are
+    reported under it. The ``tests`` component sits between the project root and
+    the target, so it is read and the target grades SKIPPED, as the tools graded
+    it; nothing here was the operator's exclude.
+
+    Fails at the tip that read the path relative to the target first: the
+    component above the target was dropped and the scan raised ScannerError
+    blaming the operator's patterns.
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    target = repo / under / "e2e-app"
+    target.mkdir(parents=True)
+    paths_file = tmp_path / "paths.json"
+    paths_file.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "scanned": [],
+                    "skipped": _excluded(
+                        (target / "app.py").as_posix(), (target / "lib.py").as_posix()
+                    ),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    scanner.targets_attempted = None
+    scanner._post_process_sarif(
+        _SARIF, [f"--json-output={paths_file.as_posix()}"], target
+    )
+    assert scanner.targets_attempted == 0
+
+
+def test_the_same_nested_target_outside_any_git_work_tree_is_the_operators_exclude(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The control: with no ``.git`` above it the target is its own project root,
+    the tools match patterns below it, and a path under it carries no ``tests``
+    component, so an exclude that left out every file is the operator's."""
+    scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.py"])
+    target = tmp_path / "checkout" / "tests" / "e2e-app"
+    target.mkdir(parents=True)
+    paths_file = tmp_path / "paths.json"
+    paths_file.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "scanned": [],
+                    "skipped": _excluded((target / "app.py").as_posix()),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    scanner.targets_attempted = None
+    with pytest.raises(ScannerError, match="--exclude patterns left out"):
+        scanner._post_process_sarif(
+            _SARIF, [f"--json-output={paths_file.as_posix()}"], target
+        )
+
+
 def test_an_ignore_name_above_the_target_does_not_count(
     test_plugin_context, monkeypatch, tmp_path
 ):
