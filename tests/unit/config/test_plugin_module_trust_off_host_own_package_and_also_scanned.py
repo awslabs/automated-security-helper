@@ -21,7 +21,6 @@
 
 from __future__ import annotations
 
-import logging
 import sys
 from pathlib import Path
 
@@ -212,7 +211,7 @@ def _repository_naming(tmp_path: Path, *modules: str) -> Path:
 
 
 def test_resolve_config_refuses_a_module_installed_in_an_also_scanned_tree(
-    tmp_path, monkeypatch, caplog
+    tmp_path, monkeypatch, ash_log
 ):
     """``ash report`` passes the results' repository as ``also_scanned``: a
     module installed in it is the scanned party's, so the repository's config
@@ -226,13 +225,14 @@ def test_resolve_config_refuses_a_module_installed_in_an_also_scanned_tree(
     monkeypatch.syspath_prepend(str(site))
     repo = _repository_naming(tmp_path, RESULTS_MODULE, SITE_MODULE)
 
-    with caplog.at_level(logging.WARNING):
-        config = resolve_config(source_dir=repo, also_scanned=[results])
+    config = resolve_config(source_dir=repo, also_scanned=[results])
 
     assert RESULTS_MODULE not in (config.ash_plugin_modules or [])
     assert SITE_MODULE in (config.ash_plugin_modules or [])
-    assert "Ignoring ash_plugin_modules entries" in caplog.text
-    assert "it resolves inside the scanned tree" in caplog.text
+    # ASH_LOGGER does not propagate, so the warning is read from its own handler.
+    messages = [record.getMessage() for record in ash_log]
+    assert any("Ignoring ash_plugin_modules entries" in m for m in messages), messages
+    assert any("it resolves inside the scanned tree" in m for m in messages), messages
 
 
 def test_resolve_config_without_also_scanned_keeps_the_same_module(
