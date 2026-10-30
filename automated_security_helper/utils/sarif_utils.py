@@ -1575,9 +1575,10 @@ def apply_suppressions_to_sarif(
     )
 
     if ignore_suppressions:
-        # The flag names the suppression rules: the ignore paths and the
-        # output-directory exclusion still apply under it
-        # (test_apply_suppressions_with_ignore_flag).
+        # The flag turns the whole suppression step off, ignore paths included
+        # (docs/content/concepts/suppressions.md); the ignore-path arm in Step 1
+        # below reads the flag itself, so nothing is cleared here. The
+        # output-directory exclusion is not a suppression and stays.
         ASH_LOGGER.warning(
             "Ignoring all suppression rules as requested by --ignore-suppressions flag"
         )
