@@ -612,12 +612,13 @@ class TestOneReferencePerValueAtItsStart:
 
     The contract, pinned here (no page of docs/ states it; the file an earlier
     docstring cited does not exist): a reference is ``${VAR}`` or
-    ``${VAR:default}`` and ends at the FIRST ``}`` (a default holding a brace
-    ends there too, see test_a_default_holding_a_brace_ends_at_the_first_brace),
+    ``${VAR:default}`` and ends at the brace that pairs with its opening one (a
+    default may hold brace pairs, see test_a_default_holding_braces_is_read_whole),
     a reference after other text is not resolved, a second reference is not
-    resolved, and a first reference followed by another closing brace with no
-    colon (``${A}/${B}``) is left as written. These tests pin each shape, so
-    the behavior stays a deliberate choice.
+    resolved, and a first reference followed by another closing brace
+    (``${A}/${B}``, ``${A:x}${B}``) is left as written whether or not it wrote a
+    default (test_a_reference_followed_by_another_brace_is_left_as_written).
+    These tests pin each shape, so the behavior stays a deliberate choice.
     """
 
     def test_two_adjacent_references_are_left_as_written(self, tmp_path, monkeypatch):
@@ -642,23 +643,24 @@ class TestOneReferencePerValueAtItsStart:
         config = _load(tmp_path, f"project_name: {value}\n")
         assert config.project_name == value
 
-    def test_a_second_reference_after_a_default_reads_as_the_default(self, monkeypatch):
-        """``${A:x}${B}``: the reference ends at the first ``}``, so the default
-        is ``x`` and the text after it is kept as written, as it is after a
-        ``${A}`` with no default. Set, A's value takes the reference's place;
-        unset, the default does. The reference used to run to the LAST ``}``,
-        which dropped the trailing text when A was set and made the default the
-        garbled ``x}${B`` when it was not; that arm was pinned here as the
-        documented one, and this is the decision to change it."""
+    def test_a_second_reference_after_a_default_is_left_as_written(self, monkeypatch):
+        """``${A:x}${B}``: a reference followed by another closing brace is the
+        composite case whether or not it wrote a default, so the value is left
+        as written, as ``${A}${B}`` is. The reference used to run to the LAST
+        ``}``, which dropped the trailing text when A was set and made the
+        default the garbled ``x}${B`` when it was not; a first cut then ended
+        it at the first brace and resolved A around a literal ``${B}``, which a
+        typed field accepts in the middle of a value where it refuses a value
+        that still reads as a reference at its start."""
         monkeypatch.setenv("ASH_TEST_FIRST", "first")
         monkeypatch.delenv("ASH_TEST_UNSET", raising=False)
         assert (
             resolve_env_references("${ASH_TEST_FIRST:x}${ASH_TEST_SECOND}")
-            == "first${ASH_TEST_SECOND}"
+            == "${ASH_TEST_FIRST:x}${ASH_TEST_SECOND}"
         )
         assert (
             resolve_env_references("${ASH_TEST_UNSET:x}${ASH_TEST_SECOND}")
-            == "x${ASH_TEST_SECOND}"
+            == "${ASH_TEST_UNSET:x}${ASH_TEST_SECOND}"
         )
 
 

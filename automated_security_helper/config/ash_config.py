@@ -26,6 +26,7 @@ from typing import (
     FrozenSet,
     Iterable,
     Literal,
+    NamedTuple,
     Optional,
     Set,
     Tuple,
@@ -229,13 +230,109 @@ def config_env_var_is_secret_shaped(var_name: str) -> bool:
     return is_refused_config_environment_name(var_name)
 
 
-# Group 2 captures the colon itself, so that ``${VAR}`` and ``${VAR:}`` can be
-# told apart; the strings the pattern matches are the same as without it.
-# Group 3, the default, runs to the FIRST closing brace: with a greedy ``.*``
-# it ran to the last one, so in ``${VAR:x}/${OTHER}`` the default was read as
-# ``x}/${OTHER`` and everything after the first brace was dropped when VAR was
-# set, or became that garbled default when it was not.
-ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+)(:?)([^}]*)}")
+# The recognizer: whether a scalar STARTS as a reference, for the YAML implicit
+# resolver, the TOML walk and every "is this a reference" question. Group 2
+# captures the colon itself, so that ``${VAR}`` and ``${VAR:}`` can be told
+# apart. Group 3 runs to the first closing brace on the same line, which is
+# enough to recognize a reference; the default's real extent (a default may
+# hold a brace pair, ``${VAR:{}}``) is read by ``read_env_reference``, the one
+# parser the resolvers use. A newline never belongs to a reference: a TOML
+# multi-line string or a folded YAML scalar that starts like one is the file's
+# own text (the greedy ``.*`` this pattern once used stopped at a newline too).
+ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+)(:?)([^}\r\n]*)}")
+_ENV_REFERENCE_HEAD = re.compile(r"^\${(\w+)(:?)")
+
+
+class EnvReference(NamedTuple):
+    """A ``${VAR}`` or ``${VAR:default}`` reference at the start of a scalar, as
+    ``read_env_reference`` reads it: the variable, whether a colon was written,
+    the default's text (empty for ``${VAR}`` and for ``${VAR:}``), the reference
+    as written, and the text after it."""
+
+    var_name: str
+    colon: bool
+    default_text: str
+    text: str
+    rest: str
+
+
+def read_env_reference(value: str) -> Optional[EnvReference]:
+    """The reference ``value`` starts with, or None when it starts with none.
+
+    The default runs to the closing brace that pairs with the reference's
+    opening one, so a default may hold brace pairs (``${VAR:{}}``; a regex
+    default ``${VAR:\\d{3}}``). A brace left open (``${VAR:{a}``) closes no
+    reference, and a newline inside one ends the reading too: neither is a
+    reference, so the value is its own text. ``${VAR-x}`` (text before the
+    brace with no colon) is read with that text as its default, which the
+    resolvers refuse (``env_reference_left_as_written``).
+    """
+    head = _ENV_REFERENCE_HEAD.match(value)
+    if head is None:
+        return None
+    depth = 0
+    for index in range(head.end(), len(value)):
+        character = value[index]
+        if character in "\r\n":
+            return None
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            if depth == 0:
+                return EnvReference(
+                    var_name=head.group(1),
+                    colon=bool(head.group(2)),
+                    default_text=value[head.end() : index],
+                    text=value[: index + 1],
+                    rest=value[index + 1 :],
+                )
+            depth -= 1
+    return None
+
+
+def env_reference_left_as_written(reference: EnvReference) -> Optional[str]:
+    """Why ``reference`` resolves nothing, or None when it resolves.
+
+    The one rule for the loader (``resolve_env_references``) and for the
+    record's quiet reading (config_validator._quietly_resolved), so the two
+    cannot drift: ``"secret"`` for a credential-shaped name; ``"unlisted"`` for
+    a name a configuration file may not read; ``"not-a-reference"`` for
+    ``${VAR-x}``, ``${VAR x}``, ``${VAR.x}`` (text before the brace with no
+    colon: the shell's other default spellings, or a name this pattern does not
+    read); ``"composite"`` for a reference followed by another closing brace
+    (``${A}/${B}``, ``${A:x}${B}``, ``${A}x}``). A value holds one reference,
+    at its start, whether or not that reference wrote a default; one that goes
+    on to another brace is the file's own text. Each is left exactly as
+    written rather than replaced: a literal that still reads as a reference is
+    visible in the artifact and refused by any typed field, whereas a value
+    with a reference resolved in its middle is not.
+    """
+    if config_env_var_is_secret_shaped(reference.var_name):
+        return "secret"
+    if not config_env_var_is_interpolatable(reference.var_name):
+        return "unlisted"
+    if not reference.colon and reference.default_text:
+        return "not-a-reference"
+    if "}" in reference.rest:
+        return "composite"
+    return None
+
+
+def env_reference_value(reference: EnvReference) -> Tuple[Optional[str], bool]:
+    """What ``reference`` resolves to, and whether its default supplied it.
+
+    ``(value, False)`` when the variable is set; ``(default, True)`` when it is
+    unset and a colon was written (the default ``None`` and an empty default
+    both read as ``""``); ``(None, False)`` when it is unset with no colon,
+    which the loader reports as an error and the quiet reading as no value.
+    """
+    resolved = os.environ.get(reference.var_name, None)
+    if resolved is not None:
+        return resolved, False
+    if not reference.colon:
+        return None, False
+    default = reference.default_text
+    return ("" if default == "None" else default), True
 
 
 def resolve_env_references(value: str) -> Optional[str]:
@@ -245,6 +342,11 @@ def resolve_env_references(value: str) -> Optional[str]:
     config source resolves references by exactly the same rule. Only names
     ``config_env_var_is_interpolatable`` admits are read; any other reference is
     left as written, and that check comes before the environment is consulted.
+    The reference is read by ``read_env_reference`` and judged by
+    ``env_reference_left_as_written`` and ``env_reference_value``, the three
+    functions the record's quiet reading shares; what this function adds is the
+    reporting (the warnings, the error for an unset variable) and the marking
+    of the result as read from the environment.
 
     ``${VAR:default}`` falls back to ``default`` when ``VAR`` is unset (the
     default ``None`` and an empty default both resolve to ``None``). ``${VAR}``
@@ -256,22 +358,26 @@ def resolve_env_references(value: str) -> Optional[str]:
     The bare form did not resolve before. The text to replace was rebuilt as
     ``":".join(groups)``, which appended a colon the bare form had not written,
     so the replacement never matched and ``${VAR}`` stayed as written whatever
-    the environment held. The text replaced is now the text the pattern matched.
+    the environment held. The text replaced is now the text the reference spans.
     """
-    match = ENV_REFERENCE_PATTERN.match(value)
-    if not match:
+    reference = read_env_reference(value)
+    if reference is None:
         return value
-    var_name, colon, default_text = match.group(1), match.group(2), match.group(3)
-    default_text = default_text or ""
-    ASH_LOGGER.debug(f"Evaluating env var match: {match.group(0)}")
-    if config_env_var_is_secret_shaped(var_name):
+    var_name, colon, default_text = (
+        reference.var_name,
+        reference.colon,
+        reference.default_text,
+    )
+    ASH_LOGGER.debug(f"Evaluating env var match: {reference.text}")
+    reason = env_reference_left_as_written(reference)
+    if reason == "secret":
         ASH_LOGGER.warning(
             f"Not reading environment variable {var_name} into the configuration: "
             "a configuration file may not read a variable whose name is a "
             "credential's. The reference is left as written."
         )
         return value.strip()
-    if not config_env_var_is_interpolatable(var_name):
+    if reason == "unlisted":
         # Left exactly as written rather than replaced with its default. A
         # literal that still reads as a reference is visible in the artifact
         # and refused by any typed field, whereas the default is
@@ -287,16 +393,22 @@ def resolve_env_references(value: str) -> Optional[str]:
             "The reference is left as written."
         )
         return value.strip()
-    if not colon and (default_text or "}" in value[match.end() :]):
-        # No colon, and either text between the name and its brace
-        # (``${VAR-x}``, ``${VAR x}``, ``${VAR.x}``: the shell's other default
-        # spellings, or a name this pattern does not read) or another closing
-        # brace later in the text (``${VAR}x}``, ``${A}/${B}``): not a
-        # reference this function resolves, so it is left as written, as it
-        # always was. The pattern used to read everything up to the last brace
-        # as group 3, so one test of that group covered both shapes; now that
-        # the default ends at the first brace, the text after the match covers
-        # the second.
+    if reason == "not-a-reference":
+        # ``${VAR-x}``, ``${VAR x}``, ``${VAR.x}``: not a reference this
+        # function resolves, so it is left as written, as it always was.
+        return value.strip()
+    if reason == "composite":
+        # ``${A}/${B}``, ``${A:x}${B}``, ``${A}x}``: another closing brace after
+        # the reference. The no-default form was always left as written; the
+        # defaulted form once resolved the first reference and kept the second
+        # as a literal in the middle of the value, where a typed field accepts
+        # it, so the two forms now read alike and the value says why.
+        ASH_LOGGER.warning(
+            f"Not resolving the value starting with {reference.text}: it goes on "
+            "to another closing brace, and a configuration value holds one "
+            "${VAR} or ${VAR:default} reference, at its start. The value is "
+            "left as written."
+        )
         return value.strip()
     if colon and default_text.startswith("-"):
         # The shell's ``${VAR:-default}``. ASH reads everything after the colon
@@ -309,17 +421,16 @@ def resolve_env_references(value: str) -> Optional[str]:
             "the colon, so this default starts with '-'. Write the default right "
             "after the colon to leave the '-' out."
         )
-    resolved_var = os.environ.get(var_name, None)
-    used_default = resolved_var is None
+    resolved_var, used_default = env_reference_value(reference)
     if resolved_var is None:
-        if not colon:
-            raise ASHConfigUnsetVariableError(
-                f"Environment variable {var_name} is not set, and the "
-                f"configuration references it as ${{{var_name}}}, which has no "
-                f"default. Set {var_name}, or write ${{{var_name}:None}} (or "
-                "another default after the colon) to allow it to be unset.",
-                variable=var_name,
-            )
+        raise ASHConfigUnsetVariableError(
+            f"Environment variable {var_name} is not set, and the "
+            f"configuration references it as ${{{var_name}}}, which has no "
+            f"default. Set {var_name}, or write ${{{var_name}:None}} (or "
+            "another default after the colon) to allow it to be unset.",
+            variable=var_name,
+        )
+    if used_default:
         default_val: Optional[str] = default_text
         if default_val == "None":
             default_val = None
@@ -327,8 +438,7 @@ def resolve_env_references(value: str) -> Optional[str]:
             f"Environment variable {var_name} not set, using default value of "
             f"{default_val}"
         )
-        resolved_var = "" if default_val is None else default_val
-    full_value = resolved_var + value[match.end() :]
+    full_value = resolved_var + reference.rest
     if full_value.strip() == "":
         return None
     # Marked as env-resolved so a typed field reads the text as its own
@@ -341,7 +451,7 @@ def resolve_env_references(value: str) -> Optional[str]:
     shown = (
         full_value.strip()
         if used_default
-        else ("${" + var_name + "}" + value[match.end() :]).strip()
+        else ("${" + var_name + "}" + reference.rest).strip()
     )
     return env_resolved_scalar(
         full_value.strip(), var_name, shown, from_environment=not used_default

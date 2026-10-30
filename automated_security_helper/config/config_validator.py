@@ -38,9 +38,10 @@ from pydantic_core import core_schema as _core_schema
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
     _PluginConfigSegment,
-    config_env_var_is_interpolatable,
-    config_env_var_is_secret_shaped,
+    env_reference_left_as_written,
+    env_reference_value,
     plugin_key_lookup_names,
+    read_env_reference,
     resolve_env_references,
 )
 from automated_security_helper.config.environment_record import (
@@ -2481,28 +2482,23 @@ def _quietly_resolved(text: str) -> Optional[str]:
     load, over the same text, and its contract is that nothing is read from
     the environment that the load did not read and no ``!ENV`` warning is
     logged again (environment_record_read), so the rule is applied here
-    without its reporting: a name the loader does not read comes back as
-    written, a variable unset with no default comes back None (the load raised
-    there), and the rest resolves as the loader did. This mirrors the loader's
-    rule rather than calling it; the pairing tests read both against the same
-    shapes so the two cannot drift apart unnoticed."""
-    match = ENV_REFERENCE_PATTERN.match(text)
-    if not match:
+    without its reporting: a name the loader does not read, and a composite
+    the loader leaves as written, come back as written; a variable unset with
+    no default comes back None (the load raised there); the rest resolves as
+    the loader did. The rule is the loader's own functions (read_env_reference,
+    env_reference_left_as_written, env_reference_value), not a copy of them:
+    a copy kept here once fell behind the loader's composite check, so the two
+    read ``${A}/${B}`` differently and a stripped key could pair by position.
+    The pairing tests still read both against the same shapes."""
+    reference = read_env_reference(text)
+    if reference is None:
         return text
-    var_name, colon, default_text = match.group(1), match.group(2), match.group(3)
-    default_text = default_text or ""
-    if config_env_var_is_secret_shaped(var_name):
+    if env_reference_left_as_written(reference) is not None:
         return text.strip()
-    if not config_env_var_is_interpolatable(var_name):
-        return text.strip()
-    if not colon and default_text:
-        return text.strip()
-    value = os.environ.get(var_name)
+    value, _used_default = env_reference_value(reference)
     if value is None:
-        if not colon:
-            return None
-        value = "" if default_text == "None" else default_text
-    full_value = value + text[match.end() :]
+        return None
+    full_value = value + reference.rest
     return None if full_value.strip() == "" else full_value.strip()
 
 
@@ -2633,13 +2629,11 @@ def _interpolated_pairs(literal: Any, resolved: Any) -> List[Tuple[str, str]]:
         # check prints can be the string rewritten after `rest` (a base path
         # normalized, "x/./base.yaml" to "x/base.yaml"), which the whole value
         # no longer matches.
-        reference = ENV_REFERENCE_PATTERN.match(_without_env_tag(literal))
+        reference = read_env_reference(_without_env_tag(literal))
         if reference:
-            part = _environment_part(
-                resolved, _without_env_tag(literal)[reference.end() :]
-            )
+            part = _environment_part(resolved, reference.rest)
             if part != resolved:
-                found.append((part, reference.group(0)))
+                found.append((part, reference.text))
     return found
 
 
@@ -2694,11 +2688,11 @@ def _rewrite_for(
     kind: str, path: Tuple[Any, ...], written: str, resolved: str
 ) -> EnvironmentRewrite:
     text = _without_env_tag(written)
-    match = ENV_REFERENCE_PATTERN.match(text)
-    if match is None:
+    reference = read_env_reference(text)
+    if reference is None:
         return EnvironmentRewrite(kind, path, resolved, written, resolved, written)
-    part = _environment_part(resolved, text[match.end() :])
-    return EnvironmentRewrite(kind, path, resolved, written, part, match.group(0))
+    part = _environment_part(resolved, reference.rest)
+    return EnvironmentRewrite(kind, path, resolved, written, part, reference.text)
 
 
 def _environment_part(resolved: str, rest: str) -> str:
