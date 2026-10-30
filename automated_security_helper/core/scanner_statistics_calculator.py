@@ -130,16 +130,21 @@ class ScannerStatisticsCalculator:
             asharp_model
         )
         # Only an entry shaped as the processor writes one, a mapping of target
-        # reports (each a mapping), names a scanner. additional_reports is a
+        # reports with at least one serialized container among them
+        # (``_is_report_shaped``), names a scanner. additional_reports is a
         # free-form dictionary a plugin may write to under any key (cli/merge.py
-        # carries such entries through); read as a scanner, a list of findings
-        # or a scalar became a phantom row with no recorded status, ERROR, that
-        # tripped the completeness gate.
+        # carries such entries through); read as a scanner, a list of findings,
+        # a scalar, or a mapping of mappings that are no reports
+        # ({"summary": {"files": 10}}) became a phantom row with no recorded
+        # status, ERROR, that tripped the completeness gate.
         additional_reports_scanners = [
             name
             for name, reports in (asharp_model.additional_reports or {}).items()
             if isinstance(reports, dict)
-            and any(isinstance(report, dict) for report in reports.values())
+            and any(
+                ScannerStatisticsCalculator._is_report_shaped(report)
+                for report in reports.values()
+            )
         ]
         scanner_results_scanners = (
             list(asharp_model.scanner_results.keys())
@@ -347,6 +352,23 @@ class ScannerStatisticsCalculator:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
         return float(value)
+
+    @staticmethod
+    def _is_report_shaped(report: Any) -> bool:
+        """True when *report* has the shape ``ScanResultProcessor`` writes per target.
+
+        A mapping that carries a ``status`` or a ``scanner_name`` key. Every
+        serialized ``ScanResultsContainer`` has at least one: the constructor
+        is given the name, and the executor and the factories assign the
+        status; a results file written before ``scanner_name`` existed carries
+        the status, and is read as the scanner it is filed under, as before. A
+        plugin's free-form entry (``{"summary": {"files": 10}}`` under a key of
+        its own) has neither. Counted as a scanner, it became an ERROR row (no
+        status can be taken from it) that tripped the completeness gate.
+        """
+        return isinstance(report, dict) and (
+            "status" in report or "scanner_name" in report
+        )
 
     @staticmethod
     def _own_reports(

@@ -8,6 +8,9 @@
   scanner has a recorded row.
 - ``verify_sarif_finding_counts`` compares the SARIF with the findings the SARIF
   can hold: the counts a scanner recorded on a dict result are not a mismatch.
+- An ``additional_reports`` entry names a scanner only when one of its values is
+  shaped as a serialized container (a ``status`` or a ``scanner_name``): a
+  plugin's mapping of mappings is not a phantom ERROR scanner.
 """
 
 from __future__ import annotations
@@ -247,3 +250,39 @@ class TestTheSarifCompareTakesTheDictCountsBackOut:
         )
 
         assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is False
+
+
+class TestAMappingOfMappingsIsNotAScanner:
+    """The filter that keeps a plugin's own ``additional_reports`` entries out of the
+    scanner list accepted any mapping holding a mapping. ``{"summary": {"files": 10}}``
+    passed it, has no ``scanner_name`` for the status readers to match, and so became
+    an ERROR row with nothing recorded, the phantom the filter was added to remove."""
+
+    def test_a_plugins_nested_entry_is_not_a_scanner(self):
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(
+            _model(
+                {
+                    "bandit": {"source": _report("bandit")},
+                    "sbom-meta": {"summary": {"files": 10}},
+                }
+            )
+        )
+
+        assert set(stats) == {"bandit"}, sorted(stats)
+
+    def test_a_report_naming_no_scanner_still_names_one(self):
+        """Control: a results file written before ``scanner_name`` existed carries
+        the status alone, and its entry is a scanner as before."""
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(
+            _model({"legacy": {"source": {"status": "PASSED", "duration": 1.0}}})
+        )
+
+        assert set(stats) == {"legacy"}, sorted(stats)
+
+    def test_a_report_with_a_name_and_no_status_still_names_one(self):
+        """Control: either key is enough."""
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(
+            _model({"bandit": {"source": {"scanner_name": "bandit", "duration": 1.0}}})
+        )
+
+        assert set(stats) == {"bandit"}, sorted(stats)
