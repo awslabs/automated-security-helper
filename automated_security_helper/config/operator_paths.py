@@ -448,14 +448,15 @@ class _EitherSpelling(str):  # noqa: SLOT000 -- a str subtype takes no non-empty
     test holds for either spelling. Printed, dumped or hashed it is the anchored
     path. Rebuilt with both spellings by ``copy.deepcopy``, which the loader's
     shadow apply makes of the operations.
+
+    Made by ``_either_spelling``, which sets ``written`` on a new one after
+    ``str`` has built it from the anchored path: the class takes no constructor
+    of its own, since the package admits no ``__new__`` outside the text
+    escapers' (``tests/unit/utils/test_shown_text_is_shown_once.py`` reads every
+    module for one).
     """
 
     written: str
-
-    def __new__(cls, anchored: str, written: Optional[str] = None):
-        self = super().__new__(cls, anchored)
-        self.written = anchored if written is None else written
-        return self
 
     def __eq__(self, other: object) -> bool:
         return (
@@ -468,7 +469,14 @@ class _EitherSpelling(str):  # noqa: SLOT000 -- a str subtype takes no non-empty
     __hash__ = str.__hash__
 
     def __reduce__(self) -> Tuple[Any, Tuple[str, str]]:
-        return (type(self), (str(self), self.written))
+        return (_either_spelling, (str(self), self.written))
+
+
+def _either_spelling(anchored: str, written: str) -> _EitherSpelling:
+    """An ``_EitherSpelling`` of the anchored path that also equals ``written``."""
+    value = _EitherSpelling(anchored)
+    value.written = written
+    return value
 
 
 def _test_value(written: Any, anchored: Any) -> Any:
@@ -489,7 +497,7 @@ def _test_value(written: Any, anchored: Any) -> Any:
         or written == anchored
     ):
         return written
-    return _EitherSpelling(anchored, written)
+    return _either_spelling(anchored, written)
 
 
 def anchor_override_paths(
