@@ -1237,6 +1237,162 @@ class TestAStoppedScansCoverageNamesTheToolsThatSurvived:
         assert registry.check_scan_progress(scan_id)["could_not_stop"] == []
 
 
+def _stopped_with_a_surviving_tool(tmp_path, tool="bandit", pid=4242, started="100"):
+    """A cancelled scan whose cancel could not end ``tool`` (``pid``), recorded
+    while the system reported ``started`` as the pid's start time."""
+    registry = ScanRegistry()
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / ".ash" / "ash_output").mkdir(parents=True)
+    scan_id = _register(registry, project)
+    entry = registry.get_scan(scan_id)
+    entry.has_runner = True
+    registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+    registry.cancel_scan(scan_id)
+    with patch(f"{_MODULE}._process_start_time", return_value=started):
+        registry.record_cancel_outcome(scan_id, ((tool, pid),), name_process_ids=False)
+    entry.runner_done.set()
+    return registry, entry
+
+
+class TestAReusedPidDoesNotHoldTheDirectory:
+    """The probe behind could_not_stop asked only whether the pid names a live
+    process, so once the system gave the tool's pid to another process the
+    directory, and the server's concurrency slot, stayed held until that
+    stranger ended, which can be the server's own lifetime. The entry now
+    records each pid's start time as the system reports it (/proc/<pid>/stat
+    on Linux); a pid whose start time has changed names another process and
+    reads as gone. A zombie keeps its start time and stays until it is reaped;
+    where the system reports no start time the probe alone decides, as before."""
+
+    def test_the_start_time_is_recorded_with_the_pid(self, tmp_path):
+        _registry, entry = _stopped_with_a_surviving_tool(tmp_path, started="100")
+
+        assert entry.could_not_stop == (("bandit", 4242),)
+        assert entry.tool_start_times == {4242: "100"}
+
+    def test_a_pid_with_another_start_time_reads_as_gone(self, tmp_path):
+        _registry, entry = _stopped_with_a_surviving_tool(tmp_path, started="100")
+
+        with (
+            patch(f"{_MODULE}._process_start_time", return_value="200"),
+            patch(f"{_MODULE}._tool_may_be_running", return_value=True),
+        ):
+            assert entry.a_surviving_tool_is_running() is False
+            assert entry.occupies_its_directory() is False
+
+    def test_the_same_start_time_still_holds_the_directory(self, tmp_path):
+        _registry, entry = _stopped_with_a_surviving_tool(tmp_path, started="100")
+
+        with (
+            patch(f"{_MODULE}._process_start_time", return_value="100"),
+            patch(f"{_MODULE}._tool_may_be_running", return_value=True),
+        ):
+            assert entry.a_surviving_tool_is_running() is True
+            assert entry.occupies_its_directory() is True
+
+    def test_with_no_recorded_start_time_the_probe_alone_decides(self, tmp_path):
+        """A system that reports no start time (no /proc) recorded None; the
+        pid then holds the directory for as long as the probe reads it alive,
+        the hold the entry had before start times were recorded."""
+        _registry, entry = _stopped_with_a_surviving_tool(tmp_path, started=None)
+
+        assert entry.tool_start_times == {4242: None}
+        with (
+            patch(f"{_MODULE}._process_start_time", return_value="200"),
+            patch(f"{_MODULE}._tool_may_be_running", return_value=True),
+        ):
+            assert entry.a_surviving_tool_is_running() is True
+
+    def test_a_start_time_unreadable_now_leaves_the_probe_to_decide(self, tmp_path):
+        """A zombie, or an entry gone from /proc between two reads: with no
+        start time to compare, the probe's answer stands (a zombie's pid is
+        still a process to kill(pid, 0), so it stays held until reaped)."""
+        _registry, entry = _stopped_with_a_surviving_tool(tmp_path, started="100")
+
+        with (
+            patch(f"{_MODULE}._process_start_time", return_value=None),
+            patch(f"{_MODULE}._tool_may_be_running", return_value=True),
+        ):
+            assert entry.a_surviving_tool_is_running() is True
+
+    def test_a_second_record_of_the_same_pid_keeps_the_first_start_time(self, tmp_path):
+        registry, entry = _stopped_with_a_surviving_tool(tmp_path, started="100")
+
+        with patch(f"{_MODULE}._process_start_time", return_value="999"):
+            # The same pair again is nothing new; another tool on the same pid
+            # is a new pair but the pid's first reading stands.
+            assert (
+                registry.record_cancel_outcome(
+                    entry.scan_id, (("bandit", 4242),), name_process_ids=False
+                )
+                is False
+            )
+            registry.record_cancel_outcome(
+                entry.scan_id, (("semgrep", 4242),), name_process_ids=False
+            )
+
+        assert entry.tool_start_times == {4242: "100"}
+
+
+class TestTheStartTimeIsReadFromProcStat:
+    _STAT = (
+        b"4242 (my tool) S 1 4242 4242 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 1 0 "
+        b"7654321 1024000 300 4096 1 1 0 0 0 0 0 0 0 0 0 0 0 "
+        b"17 3 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+    )
+
+    def test_field_22_is_the_start_time_even_with_a_space_in_the_command_name(
+        self,
+    ):
+        from unittest.mock import mock_open
+
+        from automated_security_helper.core.resource_management.scan_registry import (
+            _process_start_time,
+        )
+
+        if os.name == "nt":
+            pytest.skip("Windows reports no /proc start time; the probe alone decides")
+        with patch("builtins.open", mock_open(read_data=self._STAT)):
+            assert _process_start_time(4242) == "7654321"
+
+    def test_a_pid_with_no_proc_entry_reads_none(self):
+        from automated_security_helper.core.resource_management.scan_registry import (
+            _process_start_time,
+        )
+
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            assert _process_start_time(4242) is None
+        assert _process_start_time(0) is None
+
+    @pytest.mark.skipif(
+        os.name == "nt" or not Path("/proc/self/stat").exists(),
+        reason="the start time is a Linux /proc fact",
+    )
+    def test_this_process_has_a_start_time(self):
+        from automated_security_helper.core.resource_management.scan_registry import (
+            _process_start_time,
+        )
+
+        started = _process_start_time(os.getpid())
+
+        assert started is not None
+        assert started.isdigit()
+
+
+class TestATrailingSeparatorStillGivesTheBasename:
+    def test_the_tool_is_named_without_its_trailing_slash(self, tmp_path):
+        """argv0 recorded with a trailing separator gave an empty basename, so
+        the fallback showed the whole recorded name, path included."""
+        _registry, entry = _stopped_with_a_surviving_tool(
+            tmp_path, tool="/opt/tools/bin/bandit/"
+        )
+
+        assert entry.tool_display_names() == ["bandit"]
+        assert "bandit" in entry.warnings[-1]
+        assert "/opt/tools" not in entry.warnings[-1]
+
+
 class TestTheRefusalNamesASurvivingToolByBasename:
     def test_the_servers_path_to_the_tool_is_not_shown(self, tmp_path):
         """record_cancel_outcome reduces the name to its basename on a network

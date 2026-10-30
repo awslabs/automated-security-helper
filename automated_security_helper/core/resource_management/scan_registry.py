@@ -283,6 +283,13 @@ class ScanRegistryEntry:
         # after the stop, so the entry keeps its directory while one of them
         # runs (occupies_its_directory). Empty for a scan nothing stopped.
         self.could_not_stop: Tuple[Tuple[str, int], ...] = ()
+        # The start time of each pid in could_not_stop as the system recorded
+        # it when the pair was recorded (_process_start_time), or None where
+        # the system does not tell. A pid the system has since given to another
+        # process carries another start time, so the probe reads it as gone
+        # instead of holding the directory until the stranger ends; a zombie
+        # keeps its start time and stays until its runner reaps it.
+        self.tool_start_times: Dict[int, Optional[str]] = {}
         # Set while remove_output_of_scan deletes this scan's output tree off
         # the registry lock, and set-and-cleared when the delete has ended,
         # whatever its outcome. register_scan waits on it for a scan of the
@@ -399,8 +406,16 @@ class ScanRegistryEntry:
         return self.a_surviving_tool_is_running()
 
     def a_surviving_tool_is_running(self) -> bool:
-        """Whether a scanner tool the stop could not end still runs, by its pid."""
-        return any(_tool_may_be_running(pid) for _tool, pid in self.could_not_stop)
+        """Whether a scanner tool the cancel could not end still runs, by its pid.
+
+        The pid is read with the start time recorded for it, so a pid the
+        system has reused for another process does not count as the tool.
+        """
+        return any(
+            not _pid_was_reused(pid, self.tool_start_times.get(pid))
+            and _tool_may_be_running(pid)
+            for _tool, pid in self.could_not_stop
+        )
 
     def tool_display_names(self) -> List[str]:
         """The scanner tools the cancel could not end, by basename, in order, once each.
@@ -453,6 +468,50 @@ def _claims_output_tree(
     return False
 
 
+def _process_start_time(pid: int) -> Optional[str]:
+    """The start time the system records for *pid*, or None where it does not say.
+
+    Read from ``/proc/<pid>/stat`` (its field 22, ``starttime``, in clock ticks
+    since boot), which is the Linux fact that tells a process from the one the
+    system later gave its pid to. None on a system without ``/proc`` (Windows,
+    macOS), for a pid with no such entry, or on any read error: the caller then
+    has no start time to compare and falls back to the liveness probe alone, so
+    the check is Linux-only and says so here.
+    """
+    if pid <= 0 or os.name == "nt":
+        return None
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as handle:
+            stat_line = handle.read()
+    except OSError:
+        return None
+    # The command name sits in parentheses and may hold spaces; the fields
+    # after it are split from the text after the last ")".
+    _head, _sep, tail = stat_line.rpartition(b")")
+    fields = tail.split()
+    # state is fields[0] (overall field 3); starttime is overall field 22.
+    if len(fields) < 20:
+        return None
+    return fields[19].decode("ascii", "replace")
+
+
+def _pid_was_reused(pid: int, started: Optional[str]) -> bool:
+    """Whether *pid* now names a process other than the one recorded with *started*.
+
+    ``started`` is the start time ``_process_start_time`` read when the tool was
+    recorded. True only when both that and the start time read now are known
+    and differ: the system has given the pid to another process since, so the
+    recorded tool is gone whatever the liveness probe says of the pid. With no
+    recorded time, or none readable now (a system without ``/proc``, a pid with
+    no entry), nothing is known and the probe alone decides, as before. A
+    zombie keeps its entry and its start time, so it is not read as reused.
+    """
+    if started is None:
+        return False
+    now = _process_start_time(pid)
+    return now is not None and now != started
+
+
 def _tool_may_be_running(pid: int) -> bool:
     """Whether a scanner tool's process, named by pid, may still be running.
 
@@ -461,9 +520,10 @@ def _tool_may_be_running(pid: int) -> bool:
     another user (the signal refused) is running; a pid out of range names no
     process. On Windows signal 0 would terminate the process, so it is opened
     for a query and its exit code read instead (``_windows_process_is_running``).
-    A pid the system has since given to another process reads as running, so
-    the directory stays held until that process ends too: a wait, never a
-    scan's output lost.
+    A pid the system has since given to another process reads as running here;
+    the entry tells the two apart by the start time it recorded
+    (``_pid_was_reused``), and where no start time is known the directory stays
+    held until that process ends too: a wait, never a scan's output lost.
     """
     if pid <= 0:
         return False
@@ -524,8 +584,12 @@ def _shown_tool_name(tool: Any) -> str:
     ``_shown_tool``), which can be a full path on the server
     (``/opt/.../venv/bin/semgrep``). The registry does not know the transport,
     and a remote client has no use for a server path, so every text the
-    registry builds from the record uses this form."""
-    return os.path.basename(str(tool)) or str(tool)
+    registry builds from the record uses this form. A trailing separator
+    (``/opt/bin/``) would give an empty basename, so separators at the end are
+    dropped first."""
+    name = str(tool)
+    separators = "/\\" if os.name == "nt" else "/"
+    return os.path.basename(name.rstrip(separators)) or name
 
 
 def _without_environment_values(
@@ -1490,6 +1554,11 @@ class ScanRegistry:
             if not new:
                 return False
             entry.could_not_stop = entry.could_not_stop + new
+            # The start time of each new pid, read now, so a later probe can
+            # tell the tool from a process the system gives its pid to after
+            # it ends (a_surviving_tool_is_running).
+            for _tool, pid in new:
+                entry.tool_start_times.setdefault(pid, _process_start_time(pid))
             if name_process_ids:
                 named = ", ".join(f"{tool} (pid {pid})" for tool, pid in new)
                 how = "end the listed process(es) before reading or reusing it."
