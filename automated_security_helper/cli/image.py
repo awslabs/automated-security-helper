@@ -254,7 +254,14 @@ def build_ash_image_cli_command(
         raise typer.Exit(ASH_EXIT_TERMINATED) from None
     except KeyboardInterrupt:
         # As ash scan does: the runtime has had the interrupt and its grace
-        # (run_cmd_direct). With --no-run there was no scan, so no verdict was owed.
+        # (run_cmd_direct). The interrupt landed in ONE frame; a cancellable
+        # spawn still running in another thread polls the scope's event, so it
+        # is cancelled before the exit or that thread keeps running a scan the
+        # operator stopped. A normal thread frame, so the real set calls are safe
+        # here where the signal handler's are not. With --no-run there was no
+        # scan, so no verdict was owed.
+        cancel_event.stop_promptly = True
+        cancel_event.set()
         message = "ASH build-image interrupted before it finished"
         if not no_run:
             message += (

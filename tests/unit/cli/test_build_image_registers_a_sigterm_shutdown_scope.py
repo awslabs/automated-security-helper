@@ -29,7 +29,10 @@ from automated_security_helper.core.cancellation import (
     ScanCancelled,
     current_cancel_event,
 )
-from automated_security_helper.core.constants import ASH_EXIT_TERMINATED
+from automated_security_helper.core.constants import (
+    ASH_EXIT_INTERRUPTED,
+    ASH_EXIT_TERMINATED,
+)
 
 pytestmark = [
     pytest.mark.unit,
@@ -110,3 +113,26 @@ def test_a_stopped_build_only_run_owes_no_verdict(shutdown_state, monkeypatch):
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
     assert "ASH build-image stopped by SIGTERM" in result.output
     assert "did not complete" not in result.output
+
+
+def test_an_interrupt_cancels_the_scope_before_the_exit(shutdown_state, monkeypatch):
+    """Ctrl-C lands in one frame; a spawn still running on another thread polls
+    the scope's event, so the command cancels it before exiting, as ash scan
+    does. Exiting with the event clear left that thread running a scan the
+    operator stopped."""
+    seen: dict = {}
+
+    def stand_in_scan(**kwargs):
+        seen["event"] = current_cancel_event()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "automated_security_helper.cli.image.run_ash_scan", stand_in_scan
+    )
+    result = CliRunner().invoke(_build_image_app(), [])
+
+    assert result.exit_code == ASH_EXIT_INTERRUPTED, result.output
+    assert "ASH build-image interrupted" in result.output
+    event = seen["event"]
+    assert event.is_set(), "the scope's event is left clear after the interrupt"
+    assert event.stop_promptly is True
