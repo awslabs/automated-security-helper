@@ -251,12 +251,13 @@ def find_tool_interpreter(executable: str) -> Optional[str]:
     """The Python interpreter whose environment provides ``executable``, if any.
 
     A console script names its interpreter on its ``#!`` line, and that is the
-    environment that provides it. The interpreter beside the executable is read
-    only for a file with no ``#!`` line that is a Windows launcher (an ``.exe``
-    entry point, whose shebang is embedded past the file's start): a native
-    binary, or a script another interpreter owns, used to be judged against
-    whatever python sat in its directory, an unrelated environment, and read
-    as unsatisfied.
+    environment that provides it. A script another interpreter runs (a shell
+    wrapper a package installed into a venv's ``bin``) is provided by the
+    environment beside it, so the interpreter in its directory is read, as it is
+    for a Windows launcher (an ``.exe`` entry point, whose shebang is embedded
+    past the file's start). A native binary with no ``#!`` line and no ``.exe``
+    suffix has no interpreter: it used to be judged against whatever python sat
+    in its directory, an unrelated environment, and read as unsatisfied.
     """
     resolved = Path(os.path.realpath(executable))
     try:
@@ -271,10 +272,10 @@ def find_tool_interpreter(executable: str) -> Optional[str]:
         interpreter = parts[0]
         if Path(interpreter).name == "env" and len(parts) > 1:
             interpreter = find_executable(parts[1]) or ""
-        if "python" not in Path(interpreter).name.lower():
-            return None
-        return interpreter if Path(interpreter).is_file() else None
-    if os.name != "nt" and resolved.suffix.lower() != ".exe":
+        if "python" in Path(interpreter).name.lower():
+            return interpreter if Path(interpreter).is_file() else None
+        # Another interpreter's script: the environment beside it, below.
+    elif os.name != "nt" and resolved.suffix.lower() != ".exe":
         return None
     for name in _INTERPRETER_NAMES:
         candidate = resolved.parent / name

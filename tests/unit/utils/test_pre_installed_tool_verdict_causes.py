@@ -5,9 +5,9 @@
 right cause.
 
 * ``find_tool_interpreter`` reads a console script's ``#!`` line for the
-  interpreter that provides it; a native binary, or a script another
-  interpreter owns, is no longer judged against whatever python sits in its
-  directory.
+  interpreter that provides it; a native binary is no longer judged against
+  whatever python sits in its directory, while a shell wrapper in a venv's
+  ``bin`` still takes the python beside it.
 * A dry run that reports no changes while uv warns that the installed version
   "does not have an extra named" the requested one is unsatisfied: the extra is
   never provided.
@@ -81,6 +81,22 @@ class TestFindToolInterpreter:
         python = _executable(bin_dir / "python.exe", b"MZ\x90\x00")
         launcher = _executable(bin_dir / "tool.exe", b"MZ\x90\x00")
         assert find_tool_interpreter(str(launcher)) == str(python)
+
+    def test_a_shell_wrapper_in_a_venv_bin_takes_the_python_beside_it(self, tmp_path):
+        """A package can install a shell wrapper into its venv's bin; the
+        environment that provides it is the one beside it (the offline
+        pre-installed scanner tests model a tool this way)."""
+        bin_dir = tmp_path / "bin"
+        python = _executable(bin_dir / "python", b"#!/bin/sh\nexit 0\n")
+        wrapper = _executable(bin_dir / "bandit", b"#!/bin/sh\nexit 0\n")
+        assert find_tool_interpreter(str(wrapper)) == str(python)
+
+    def test_a_shell_wrapper_with_no_python_beside_it_has_no_interpreter(
+        self, tmp_path
+    ):
+        """The control: with nothing beside it, no environment is claimed."""
+        wrapper = _executable(tmp_path / "bin" / "tool", b"#!/bin/sh\nexit 0\n")
+        assert find_tool_interpreter(str(wrapper)) is None
 
 
 class TestAnExtraTheInstalledVersionDoesNotDeclare:
