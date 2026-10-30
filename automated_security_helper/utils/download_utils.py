@@ -761,6 +761,12 @@ def unquarantine_macos_binary(file_path: Path) -> None:
         # reported as done with nothing saying so.
         if result.returncode != 0:
             detail = str(result.stderr or result.stdout or "").strip()
+            if "No such xattr" in detail:
+                # A file urllib downloaded carries no quarantine attribute (the
+                # browser and the Finder set it); xattr -d then exits 1 with this
+                # text, and there is nothing to remove.
+                ASH_LOGGER.debug(f"{file_path} carries no quarantine attribute")
+                return
             ASH_LOGGER.warning(
                 f"Failed to unquarantine {file_path}: xattr exited "
                 f"{result.returncode}{': ' + detail if detail else ''}. macOS may "
@@ -1218,8 +1224,11 @@ def install_binary_from_url(
         )
 
     # Download the file, keeping the digest that was verified as the bytes landed.
+    # Landed executable (0o755) as a binary, not with the data default: a
+    # make_executable that refuses below (a link or a non-regular file at the
+    # path) would otherwise leave a receipted install that cannot run.
     binary_path, installed_digest = _download_verified(
-        url, destination, rename_to, expected_sha256=expected_sha256
+        url, destination, rename_to, expected_sha256=expected_sha256, mode=0o755
     )
 
     # Make it executable
@@ -1608,25 +1617,38 @@ def _restore_cached_asset(
                 "cache entry is kept; downloading it again."
             )
             return None
+        # A failure inside the copy is recorded here and acted on once both
+        # files are closed: on Windows an open file cannot be unlinked, so the
+        # staged copy's removal (and the cache entry's) used to raise
+        # PermissionError out of this function instead of falling back to the
+        # download.
+        read_failure: Optional[str] = None
+        write_failure: Optional[str] = None
         with target:
             while True:
                 try:
                     chunk = source.read(_HASH_CHUNK_BYTES)
                 except OSError as e:
-                    staged.unlink(missing_ok=True)
-                    _discard_cache_entry(cached, str(e))
-                    return None
+                    read_failure = str(e)
+                    break
                 if not chunk:
                     break
                 try:
                     target.write(chunk)
                 except OSError as e:
-                    staged.unlink(missing_ok=True)
-                    ASH_LOGGER.warning(
-                        f"Could not stage cached {asset_name} in {staging_dir}: {e}. "
-                        "The cache entry is kept; downloading it again."
-                    )
-                    return None
+                    write_failure = str(e)
+                    break
+    if read_failure is not None:
+        staged.unlink(missing_ok=True)
+        _discard_cache_entry(cached, read_failure)
+        return None
+    if write_failure is not None:
+        staged.unlink(missing_ok=True)
+        ASH_LOGGER.warning(
+            f"Could not stage cached {asset_name} in {staging_dir}: {write_failure}. "
+            "The cache entry is kept; downloading it again."
+        )
+        return None
     try:
         verify_sha256(staged, expected_sha256, f"cached asset {cached}")
     except ToolDownloadIntegrityError as e:
@@ -2197,6 +2219,10 @@ def get_opengrep_url(
     """
     # Base URL for opengrep releases
     base_url = f"https://github.com/opengrep/opengrep/releases/download/{version}"
+
+    # platform.machine() answers "AMD64" on Windows and "x86_64" or "aarch64"
+    # elsewhere; the comparisons below are on the lowercase names.
+    arch = arch.lower()  # type: ignore[assignment]
 
     # Map platform and architecture to the appropriate binary name
     if target_platform == "linux":
