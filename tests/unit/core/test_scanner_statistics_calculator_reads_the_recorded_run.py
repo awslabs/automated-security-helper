@@ -145,18 +145,19 @@ class TestDuration:
 
         assert stats["old"]["duration"] == 2.5
 
-    def test_a_scanner_that_ran_and_recorded_no_number_reads_zero(self):
-        """A row holding text, or a report with a null duration, is a scanner
-        that ran and recorded no duration: it reads 0.0, the value its
-        formatting readers have always been given (never None, which only a
-        scanner that did not run carries)."""
+    def test_a_scanner_that_recorded_no_number_reads_none(self):
+        """A row holding text, or a report with a null duration, recorded no
+        duration: it reads None, which every reader formats as "N/A" (as an
+        excluded scanner's already did). Coerced to 0.0 it read "<1ms", a run
+        time the scanner never had: a scanner that never started (failed to
+        construct, or its module failed to import) carries exactly this shape."""
         model = _model({"nulled": {"source": _report("nulled", duration=None)}})
         model.scanner_results["odd"] = SimpleNamespace(status="PASSED", duration="fast")
 
         stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
 
-        assert stats["odd"]["duration"] == 0.0
-        assert stats["nulled"]["duration"] == 0.0
+        assert stats["odd"]["duration"] is None
+        assert stats["nulled"]["duration"] is None
 
     @pytest.mark.parametrize("value", [math.nan, math.inf])
     def test_a_non_finite_duration_renders_as_not_available(self, value):

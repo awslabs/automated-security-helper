@@ -141,12 +141,14 @@ class TestNonMappingEntriesAndDurations:
 
         assert stats["cdk-nag"]["duration"] == 5.0
 
-    def test_a_null_duration_reads_zero(self):
+    def test_a_null_duration_reads_none(self):
+        """No report recorded a duration: None, formatted "N/A" by every reader,
+        never a 0.0 that reads "<1ms"."""
         stats = ScannerStatisticsCalculator.extract_scanner_statistics(
             _model({"bandit": {"source": _report("bandit", duration=None)}})
         )
 
-        assert stats["bandit"]["duration"] == 0.0
+        assert stats["bandit"]["duration"] is None
 
 
 class TestScannerNameFromAResult:

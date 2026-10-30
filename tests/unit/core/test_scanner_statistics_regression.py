@@ -45,12 +45,18 @@ class TestTotalDoesNotDoubleCountSuppressed:
 
 
 class TestBug78DurationNoneCrash:
-    """duration stored as None must not crash downstream f-string formatting."""
+    """A duration recorded as None must not crash the readers that format it.
 
-    def test_duration_none_from_additional_reports_becomes_safe_value(self):
+    The first cure coerced the None to 0.0 in the statistics, which made a
+    scanner that never ran read "<1ms"; every reader of the field now formats
+    None itself (format_duration, the tables, the reporters), so the statistics
+    keep the None and the pin is that the formatter takes it."""
+
+    def test_duration_none_from_additional_reports_reads_none_and_formats(self):
         from automated_security_helper.core.scanner_statistics_calculator import (
             ScannerStatisticsCalculator,
         )
+        from automated_security_helper.core.unified_metrics import format_duration
 
         asharp = MagicMock()
         asharp.sarif = MagicMock()
@@ -70,12 +76,10 @@ class TestBug78DurationNoneCrash:
 
         stats = ScannerStatisticsCalculator.extract_scanner_statistics(asharp)
         duration = stats["test-scanner"]["duration"]
-        # duration must be a number, not None, so f"{duration:.2f}s" won't crash
-        assert duration is not None
-        assert isinstance(duration, (int, float))
-        # Verify it doesn't crash when formatted
-        formatted = f"{duration:.2f}s"
-        assert "s" in formatted
+        # No duration was recorded, so none is invented: the readers format the
+        # None as "N/A" rather than a 0.0 that reads "<1ms".
+        assert duration is None
+        assert format_duration(duration) == "N/A"
 
     def test_duration_zero_still_works(self):
         from automated_security_helper.core.scanner_statistics_calculator import (

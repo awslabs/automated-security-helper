@@ -300,12 +300,14 @@ class ScannerStatisticsCalculator:
                         scanner_status_info
                     )
 
-            if duration is None and not (excluded or dependencies_missing):
-                # The scanner ran and recorded no duration (a report with a null
-                # duration, a row holding text): the readers that format it
-                # expect a number, so it reads 0.0 as it always has. Only a
-                # scanner that did not run keeps None.
-                duration = 0.0
+            # A scanner no report or row recorded a duration for keeps None,
+            # whatever its status: every reader of the field formats None as
+            # "N/A" (format_duration, the metrics table, the text and HTML
+            # reporters, the report emitter, the merge command), as it already
+            # did for an excluded scanner. Coerced to 0.0 for any scanner that
+            # was not excluded or missing, a scanner that never started (one
+            # that failed to construct, or whose module failed to import, whose
+            # row carries no duration) read "<1ms", a run time it never had.
 
             # Store statistics for this scanner
             scanner_stats[scanner_name] = {
