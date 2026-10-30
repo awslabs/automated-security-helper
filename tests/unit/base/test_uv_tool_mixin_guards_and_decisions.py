@@ -300,14 +300,20 @@ class TestTheErrorArmsRedactWithOneGuardedRead:
 
     def test_the_version_probe_reads_the_hook_once(self):
         """The except arm used to read the hook a second time, bare: a hook that
-        answered once and then raised escaped the arm as its own error."""
-        answers = iter([(SECRET,)])
+        answered once and then raised escaped the arm as its own error.
+
+        The read count is asserted, not only the second read's effect: a second
+        read through the guarded helper would answer None and log the withheld
+        text, which holds the arm's words and no secret, so the two text
+        assertions alone could not tell one read from two.
+        """
+        reads: list = []
 
         def _once():
-            try:
-                return next(answers)
-            except StopIteration:
-                raise RuntimeError("the values hook broke on its second read") from None
+            reads.append(True)
+            if len(reads) > 1:
+                raise RuntimeError("the values hook broke on its second read")
+            return (SECRET,)
 
         plugin = FakePlugin()
         plugin._values_to_redact = _once  # type: ignore[method-assign]
@@ -316,6 +322,7 @@ class TestTheErrorArmsRedactWithOneGuardedRead:
         )
         with patch(RUNNER, return_value=runner):
             assert plugin._get_uv_tool_version("bandit") is None
+        assert len(reads) == 1, reads
         logged = plugin.logged()
         assert any("UV tool runner error getting" in line for line in logged), logged
         assert not any(SECRET in line for line in logged), logged
