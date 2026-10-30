@@ -23,6 +23,7 @@ import os
 import platform
 import shlex
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -148,10 +149,24 @@ _resolved: Dict[Any, "SandboxBackend | SandboxUnavailable"] = {}
 #: feature: the probe process ran past the backend's probe timeout (the text
 #: subprocess gives a TimeoutExpired, which ``SandboxBackend.probe`` keeps as
 #: the reason), or the kernel refused a resource for now (EAGAIN's strerror).
-#: Such a refusal is reported for this request and not remembered, so the next
-#: scan of the tree probes again; a missing program or kernel feature is
-#: remembered for the process like a working backend is.
+#: An answer reached through such a condition (the refusal itself, or under auto
+#: a fallback chosen because the preferred backend met one) is remembered for
+#: ``_TRANSIENT_RETRY_SECONDS`` only, so the scanners of one scan share one
+#: answer and a later request probes again; a missing program or kernel
+#: feature, and a backend found with no transient skip, are remembered for the
+#: process.
 _TRANSIENT_REASON_MARKERS: Tuple[str, ...] = ("timed out", "temporarily unavailable")
+
+#: How long an answer reached through a transient condition is kept. Longer than
+#: one scan's run of ``resolve_backend`` calls (a scan asks once per scanner,
+#: serialized by ``_probe_lock``, so with no memory a hanging probe cost one
+#: timeout PER SCANNER), shorter than the gap between two scans of the same tree
+#: in a long-lived process, where the condition may have passed.
+_TRANSIENT_RETRY_SECONDS = 60.0
+
+#: Cache keys whose answer was reached through a transient condition, with the
+#: monotonic time from which the answer is probed again.
+_transient_until: Dict[Any, float] = {}
 
 
 def _probe_reason_is_transient(refusal: SandboxUnavailable) -> bool:
@@ -160,10 +175,11 @@ def _probe_reason_is_transient(refusal: SandboxUnavailable) -> bool:
     Read from the reason's text: the backends report a probe that raised as text,
     so the exception class is not available here. Under auto the reason joins
     every backend's, and one transient member makes the whole answer transient,
-    which re-probes the others too. The cost is one more probe per request of
-    ``resolve_backend`` (one per scanner, serialized by the lock, each bounded
-    by the backend's probe timeout) for as long as the condition lasts, where
-    remembering a timeout refused or downgraded every later scan in the process.
+    which re-probes the others too. The cost is bounded by
+    ``_TRANSIENT_RETRY_SECONDS``: one probe per tree scope per window, each
+    bounded by the backend's probe timeout, for as long as the condition lasts,
+    where remembering a timeout for the process refused or downgraded every
+    later scan.
     """
     reason = str(refusal)
     return any(marker in reason for marker in _TRANSIENT_REASON_MARKERS)
@@ -179,6 +195,7 @@ def clear_backend_cache() -> None:
     """Forget probe results and the grant warnings already written. For tests."""
     with _probe_lock:
         _resolved.clear()
+        _transient_until.clear()
         _WARNED_WITHHELD.clear()
 
 
@@ -215,9 +232,10 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     """The working backend for ``mode``; raises SandboxUnavailable with the reason.
 
     Probed once per process and mode, under a lock, because parallel scanner threads
-    ask at the same moment and each probe starts a process. A refusal whose reason
-    is transient (``_probe_reason_is_transient``) is raised but not kept, so the
-    next request probes again.
+    ask at the same moment and each probe starts a process. An answer reached
+    through a transient condition (``_probe_reason_is_transient``: the refusal
+    itself, or under auto a fallback taken because the preferred backend met one)
+    is kept for ``_TRANSIENT_RETRY_SECONDS`` and probed again after.
     """
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
@@ -226,11 +244,17 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
         raise ValueError("resolve_backend called for sandbox mode 'off'")
     cache_key = (mode_value, tree_scope_key())
     with _probe_lock:
+        now = time.monotonic()
         cached = _resolved.get(cache_key)
+        until = _transient_until.get(cache_key)
+        if cached is not None and until is not None and now >= until:
+            # Reached through a transient condition, and its window has passed.
+            cached = None
         if cached is None:
+            transient = False
             try:
                 if mode_value == SandboxMode.auto.value:
-                    cached = _resolve_auto()
+                    cached, transient = _resolve_auto()
                 else:
                     cached = _probe_backend(mode_value)
                 ASH_LOGGER.info(
@@ -242,11 +266,12 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 # process's life, one stack per tree scope.
                 cached = e.with_traceback(None)
                 cached.__context__ = None
-            if not (
-                isinstance(cached, SandboxUnavailable)
-                and _probe_reason_is_transient(cached)
-            ):
-                _resolved[cache_key] = cached
+                transient = _probe_reason_is_transient(cached)
+            _resolved[cache_key] = cached
+            if transient:
+                _transient_until[cache_key] = now + _TRANSIENT_RETRY_SECONDS
+            else:
+                _transient_until.pop(cache_key, None)
     if isinstance(cached, SandboxUnavailable):
         # Classified at the raise, not in the cache, so a cached refusal is
         # always graded with the mode of the current request.
@@ -254,7 +279,15 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     return cached
 
 
-def _resolve_auto() -> SandboxBackend:
+def _resolve_auto() -> Tuple[SandboxBackend, bool]:
+    """The first working backend of this platform's order, and whether a backend
+    skipped on the way failed transiently.
+
+    A fallback reached past a transient skip is an answer for now, not for the
+    process: ``resolve_backend`` keeps it for the transient window only, so the
+    preferred backend is tried again instead of the fallback staying pinned for
+    the tree scope.
+    """
     system = platform.system().lower()
     order = AUTO_ORDER.get(system, ())
     if not order:
@@ -263,11 +296,13 @@ def _resolve_auto() -> SandboxBackend:
             "WSL2 and use --sandbox bwrap there, or use --mode container"
         )
     reasons = []
+    transient = False
     for name in order:
         try:
-            return _probe_backend(name)
+            return _probe_backend(name), transient
         except SandboxUnavailable as e:
             reasons.append(f"{name}: {e}")
+            transient = transient or _probe_reason_is_transient(e)
     raise SandboxUnavailable(
         "--sandbox auto found no working sandbox (" + "; ".join(reasons) + ")"
     )

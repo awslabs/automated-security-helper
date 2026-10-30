@@ -6,8 +6,10 @@
 ``resolve_backend`` probes a backend once per process and tree scope. A probe
 whose reason is a passing condition (the probe process timed out, a resource was
 busy) used to be remembered like a missing program, so every later scan in the
-process was refused or downgraded; such a refusal is now raised and the next
-request probes again. A missing backend is still remembered.
+process was refused or downgraded; an answer reached through such a condition
+(the refusal, or under auto a fallback taken past a transient skip) is now kept
+for a short window, so one scan's scanners share one answer, and probed again
+after it. A missing backend is still remembered for the process.
 
 ``_plan_spawn``'s DEBUG record of the planned argv used to join the arguments
 as text, which raised TypeError for a path object (subprocess accepts one) after
@@ -77,19 +79,55 @@ def _backend(name="bwrap"):
     return backend
 
 
-def test_a_probe_that_timed_out_is_probed_again(fresh_cache, monkeypatch):
+class _Clock:
+    """A monotonic clock the test advances by hand."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """The scope module's clock, replaced so a transient window can be crossed."""
+    clock = _Clock()
+    monkeypatch.setattr(scope, "time", clock)
+    return clock
+
+
+PAST_THE_WINDOW = scope._TRANSIENT_RETRY_SECONDS + 1.0
+
+
+def test_a_probe_that_timed_out_is_probed_again_after_the_window(
+    fresh_cache, monkeypatch, clock
+):
+    """Inside the window the refusal is served from memory (one timeout per tree
+    scope, not one per scanner); past it the next request probes again."""
     backend = _backend()
     probes = _probe_answers(monkeypatch, [SandboxUnavailable(TIMED_OUT), backend])
 
     with pytest.raises(scope.SandboxBackendUnavailable) as first:
         scope.resolve_backend("bwrap")
-
     assert TIMED_OUT in str(first.value)
+
+    with pytest.raises(scope.SandboxBackendUnavailable) as second:
+        scope.resolve_backend("bwrap")
+    assert TIMED_OUT in str(second.value)
+    assert probes == ["bwrap"]
+
+    clock.advance(PAST_THE_WINDOW)
     assert scope.resolve_backend("bwrap") is backend
     assert probes == ["bwrap", "bwrap"]
 
 
-def test_a_busy_resource_is_probed_again(fresh_cache, monkeypatch):
+def test_a_busy_resource_is_probed_again_after_the_window(
+    fresh_cache, monkeypatch, clock
+):
     backend = _backend()
     probes = _probe_answers(
         monkeypatch,
@@ -104,21 +142,26 @@ def test_a_busy_resource_is_probed_again(fresh_cache, monkeypatch):
     with pytest.raises(scope.SandboxBackendUnavailable):
         scope.resolve_backend("bwrap")
 
+    clock.advance(PAST_THE_WINDOW)
     assert scope.resolve_backend("bwrap") is backend
     assert probes == ["bwrap", "bwrap"]
 
 
-def test_a_missing_backend_is_remembered(fresh_cache, monkeypatch):
+def test_a_missing_backend_is_remembered(fresh_cache, monkeypatch, clock):
+    """A missing program has no window: it is remembered for the process."""
     probes = _probe_answers(monkeypatch, [SandboxUnavailable(NOT_INSTALLED)])
 
     for _ in range(2):
         with pytest.raises(scope.SandboxBackendUnavailable, match="not installed"):
             scope.resolve_backend("bwrap")
+        clock.advance(PAST_THE_WINDOW)
 
     assert probes == ["bwrap"]
 
 
-def test_under_auto_one_timed_out_member_is_probed_again(fresh_cache, monkeypatch):
+def test_under_auto_one_timed_out_member_is_probed_again(
+    fresh_cache, monkeypatch, clock
+):
     """The joined auto reason is transient when one backend's probe timed out."""
     monkeypatch.setattr(
         scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
@@ -144,7 +187,50 @@ def test_under_auto_one_timed_out_member_is_probed_again(fresh_cache, monkeypatc
 
     assert "timed out" in str(first.value)
     assert "firejail is not installed" in str(first.value)
+    with pytest.raises(scope.SandboxBackendUnavailable):
+        scope.resolve_backend("auto")
+    assert probes == ["bwrap", "firejail"]
+
+    clock.advance(PAST_THE_WINDOW)
     assert scope.resolve_backend("auto") is backend
+    assert probes == ["bwrap", "firejail", "bwrap"]
+
+
+def test_under_auto_a_fallback_past_a_transient_skip_expires(
+    fresh_cache, monkeypatch, clock
+):
+    """bwrap times out, firejail works: firejail answers for the window, not for
+    the process; past the window the preferred backend is tried again."""
+    monkeypatch.setattr(
+        scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
+    )
+    bwrap = _backend("bwrap")
+    firejail = _backend("firejail")
+    answers = {
+        "bwrap": [SandboxUnavailable(TIMED_OUT), bwrap],
+        "firejail": [firejail],
+    }
+    probes: list = []
+
+    def probe(name):
+        probes.append(name)
+        answer = answers[name].pop(0) if len(answers[name]) > 1 else answers[name][0]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(scope, "_probe_backend", probe)
+
+    assert scope.resolve_backend("auto") is firejail
+    assert scope.resolve_backend("auto") is firejail
+    assert probes == ["bwrap", "firejail"]
+
+    clock.advance(PAST_THE_WINDOW)
+    assert scope.resolve_backend("auto") is bwrap
+    assert probes == ["bwrap", "firejail", "bwrap"]
+
+    clock.advance(PAST_THE_WINDOW)
+    assert scope.resolve_backend("auto") is bwrap
     assert probes == ["bwrap", "firejail", "bwrap"]
 
 
