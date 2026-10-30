@@ -109,7 +109,7 @@ class TestUpdateVersionInPyproject:
 
     def test_returns_false_on_missing_version(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text('[project]\nname = "test"\n')
+        pyproject.write_text('[project]\nname = "automated-security-helper"\n')
 
         with patch(
             "automated_security_helper.utils.version_management.get_project_root",
