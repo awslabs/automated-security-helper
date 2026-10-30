@@ -5,6 +5,7 @@ This module provides utilities to manage version information dynamically
 from pyproject.toml, ensuring a single source of truth.
 """
 
+import logging
 import os
 import re
 import stat
@@ -49,6 +50,10 @@ VERSION_TABLES: Tuple[str, ...] = ("project", "tool.commitizen")
 # distribution that owns them from another one on sys.path.
 _PACKAGE_DIR = Path(__file__).resolve().parent.parent
 
+# Not ASH_LOGGER: that module imports far more than this one may, because the
+# package __init__ imports this module first.
+_LOGGER = logging.getLogger(__name__)
+
 
 def _load_toml(path: Path) -> dict:
     with open(path, "rb") as fh:
@@ -85,6 +90,7 @@ def get_version_from_pyproject(project_root: Optional[Path] = None) -> Optional[
         name is not this distribution's is some other project's file at that
         path, not a version of ASH, so it reads as None too.
     """
+    pyproject_path: Optional[Path] = None
     try:
         pyproject_path = _resolve_project_root(project_root) / "pyproject.toml"
 
@@ -95,7 +101,16 @@ def get_version_from_pyproject(project_root: Optional[Path] = None) -> Optional[
             version = project.get("version")
             return version if isinstance(version, str) else None
         return None
-    except Exception:
+    except Exception as exc:
+        # The caller falls back to the installed metadata and then to "unknown",
+        # so a pyproject.toml that cannot be read or parsed would otherwise end
+        # as a version of "unknown" with nothing saying why.
+        _LOGGER.warning(
+            "Could not read the version from %s: %s: %s",
+            pyproject_path if pyproject_path is not None else "pyproject.toml",
+            type(exc).__name__,
+            exc,
+        )
         return None
 
 
@@ -128,7 +143,11 @@ def _installed_version() -> Optional[str]:
         pass
     try:
         return importlib.metadata.version(DISTRIBUTION_NAME)
-    except importlib.metadata.PackageNotFoundError:
+    except Exception:
+        # Not only PackageNotFoundError: this runs when the package is imported,
+        # and a distribution record that exists but cannot be read (a missing or
+        # undecodable METADATA file, say) raised something else and made
+        # `import automated_security_helper` fail before the CLI could report it.
         return None
 
 
@@ -188,6 +207,16 @@ def _replace_table_version(
     return content[: start.end()] + body + content[end:], replaced == 1
 
 
+def _table_version(data: dict, table: str) -> object:
+    """The ``version`` key of the dotted ``table`` in parsed TOML, or None."""
+    node: object = data
+    for part in table.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node.get("version") if isinstance(node, dict) else None
+
+
 def update_version_in_pyproject(
     new_version: str, project_root: Optional[Path] = None
 ) -> bool:
@@ -197,9 +226,16 @@ def update_version_in_pyproject(
     Sets ``[project] version`` and, when the table exists, ``[tool.commitizen]
     version`` to the same value. The file is replaced atomically: the new text is
     written beside it and renamed over it, so a write that fails leaves the old
-    file in place instead of a truncated one. The file keeps its permission bits,
-    and a pyproject.toml that is a symlink keeps being one: the file it points to
-    is the one replaced.
+    file in place instead of a truncated one. The file keeps its permission bits
+    and its line endings (a CRLF file stays CRLF, an LF file stays LF on every
+    platform), and a pyproject.toml that is a symlink keeps being one: the file it
+    points to is the one replaced.
+
+    Nothing is written when the file is not this project's (its ``[project]
+    name`` is not this distribution's), or when the edited text does not parse as
+    TOML and read back as ``new_version``. A version that holds a double quote,
+    a backslash or a line break ends a TOML string early or is read as an escape,
+    and the file would be left unreadable or naming another version.
 
     Args:
         new_version: New version string to set.
@@ -212,17 +248,33 @@ def update_version_in_pyproject(
     try:
         pyproject_path = _resolve_project_root(project_root) / "pyproject.toml"
 
-        # Read the file as text to preserve formatting
-        with open(pyproject_path, "r", encoding="utf-8") as f:
+        # newline="" keeps the file's own line endings through the round trip;
+        # the default translation turned every CRLF into LF on the way in.
+        with open(pyproject_path, "r", encoding="utf-8", newline="") as f:
             content = f.read()
+
+        # The default root is the directory above this package, which for an
+        # installed copy is site-packages and may hold another project's file.
+        project = tomllib.loads(content).get("project", {})
+        if _normalized_name(project.get("name")) != DISTRIBUTION_NAME:
+            return False
 
         new_content, replaced = _replace_table_version(
             content, VERSION_TABLES[0], new_version
         )
         if not replaced:
             return False
+        moved = [VERSION_TABLES[0]]
         for table in VERSION_TABLES[1:]:
-            new_content, _ = _replace_table_version(new_content, table, new_version)
+            new_content, did_replace = _replace_table_version(
+                new_content, table, new_version
+            )
+            if did_replace:
+                moved.append(table)
+
+        edited = tomllib.loads(new_content)
+        if any(_table_version(edited, table) != new_version for table in moved):
+            return False
 
         _replace_file_text(pyproject_path, new_content)
 
@@ -254,7 +306,9 @@ def _replace_file_text(path: Path, text: str) -> None:
     target = Path(os.path.realpath(path))
     mode = stat.S_IMODE(target.stat().st_mode)
     fchmod = getattr(os, "fchmod", None)
-    with open_for_atomic_write(target) as handle:
+    # newline="": the text is written as given, so the line endings it carries are
+    # the ones on disk; the default would turn each LF into CRLF on Windows.
+    with open_for_atomic_write(target, newline="") as handle:
         handle.write(text)
         if fchmod is not None:
             fchmod(handle.fileno(), mode)
