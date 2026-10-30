@@ -341,6 +341,7 @@ from automated_security_helper.core.scanner_selection import (
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
+    ScannerSelectionError,
     WorkspaceDefinitionError,
 )
 from automated_security_helper.core.unified_metrics import recorded_error
@@ -884,9 +885,11 @@ def refuse_unresolvable_scanner_selection(
     :func:`prewarm_plugin_registry` has loaded the one plugin-module set every
     project shares, with the builders every selection refusal shares --
     ``core.scanner_selection.selection_after_exclusions`` for the cancelled
-    selection and ``refuse_selection_matching_no_scanner`` for the one that
-    matches nothing -- so the answer is the one each project's scan phase would
-    reach, in the same words, named for the selection's origin. That this
+    selection, ``community_scanner_refusal`` for the one that names a community
+    scanner whose module this run did not load, and
+    ``refuse_selection_matching_no_scanner`` for the one that matches nothing --
+    so the answer is the one each project's scan phase would reach, in the same
+    words, named for the selection's origin. That this
     refusal lands before any project ran is this function's position in
     :func:`execute_workspace`, not a sentence of the message.
 
@@ -917,6 +920,7 @@ def refuse_unresolvable_scanner_selection(
         split_plugin_names,
     )
     from automated_security_helper.core.scanner_selection import (
+        community_scanner_refusal,
         refuse_selection_matching_no_scanner,
     )
     from automated_security_helper.plugins import ash_plugin_manager
@@ -945,6 +949,14 @@ def refuse_unresolvable_scanner_selection(
         if declared is None:
             return
         declared_names.append(declared)
+    # A selection that resolves to nothing and names a community scanner ASH
+    # ships whose module this run did not load is refused naming the module to
+    # add (and any misspelled name beside it), in the one text the engine and
+    # the scan phase raise; read as spelling advice alone, it sent the operator
+    # to fix a name that was right.
+    refusal = community_scanner_refusal(remaining, declared_names, scanner_classes)
+    if refusal:
+        raise ScannerSelectionError(refusal)
     refuse_selection_matching_no_scanner(
         remaining, declared_names, settings.selection_origin
     )
