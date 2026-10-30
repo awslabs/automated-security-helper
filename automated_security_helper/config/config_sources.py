@@ -75,7 +75,10 @@ config by the same rules (``resolve_config``'s ``overlay_config_path``).
 
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
-only.
+only. A file an MCP client chose (one the "Environment variables" rule refuses
+by its own names, not only as a base of a refused file) may not use ``test``:
+whether such a file loads would say whether a value it may not read equals the
+one it guessed.
 
 Base paths
 ----------
@@ -336,13 +339,20 @@ SOURCE_KIND_PYPROJECT = "pyproject"
 
 _PATCH_OPS = {"add", "remove", "replace", "test"}
 _URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+# The `tool` and `ash` keys as TOML lets them be written: bare, or as a basic or
+# a literal string (`"tool"`, `'ash'`), which name the same key.
+_TOOL_KEY = r"""(?:tool|"tool"|'tool')"""
+_ASH_KEY = r"""(?:ash|"ash"|'ash')"""
 # A [tool.ash] or [tool.ash.*] header, a [[tool.ash.*]] array-of-tables header,
-# or a top-level dotted `tool.ash...` key. Only consulted for a pyproject.toml
-# that failed to parse, to decide whether it was meant to configure ASH, and to
+# a top-level dotted `tool.ash...` key, or a top-level `tool = { ... }` inline
+# table that holds an `ash` key. Only consulted for a pyproject.toml that
+# failed to parse, to decide whether it was meant to configure ASH, and to
 # report the table's line (_tool_ash_declared, which also reads the other
 # spelling: an `ash` key under a [tool] table).
 _TOOL_ASH_PATTERN = re.compile(
-    r"^[ \t]*(\[\[?[ \t]*tool[ \t]*\.[ \t]*ash[ \t]*[\].]|tool[ \t]*\.[ \t]*ash[ \t]*[.=])",
+    rf"^[ \t]*(\[\[?[ \t]*{_TOOL_KEY}[ \t]*\.[ \t]*{_ASH_KEY}[ \t]*[\].]"
+    rf"|{_TOOL_KEY}[ \t]*\.[ \t]*{_ASH_KEY}[ \t]*[.=]"
+    rf"|{_TOOL_KEY}[ \t]*=[ \t]*\{{(?:[^\n]*?[{{,])?[ \t]*{_ASH_KEY}[ \t]*[.=])",
     re.MULTILINE,
 )
 # A bare `[tool]` table header, and an `ash` key (`ash = {...}` or `ash.x = ...`)
@@ -352,10 +362,10 @@ _TOOL_ASH_PATTERN = re.compile(
 # the `$`; the trailing class admits it, where the other two patterns need no
 # such care because they do not anchor at the line's end.
 _TOOL_TABLE_HEADER = re.compile(
-    r"^[ \t]*\[[ \t]*tool[ \t]*\][ \t]*(?:#.*)?[ \t\r]*$", re.MULTILINE
+    rf"^[ \t]*\[[ \t]*{_TOOL_KEY}[ \t]*\][ \t]*(?:#.*)?[ \t\r]*$", re.MULTILINE
 )
 _ANY_TABLE_HEADER = re.compile(r"^[ \t]*\[", re.MULTILINE)
-_ASH_KEY_LINE = re.compile(r"^[ \t]*ash[ \t]*[.=]", re.MULTILINE)
+_ASH_KEY_LINE = re.compile(rf"^[ \t]*{_ASH_KEY}[ \t]*[.=]", re.MULTILINE)
 
 
 def _tool_ash_declared(text: str) -> Optional[int]:
@@ -364,10 +374,11 @@ def _tool_ash_declared(text: str) -> Optional[int]:
 
     Read by the lines alone, for a text that did not parse: a ``[tool.ash]`` or
     ``[tool.ash.*]`` table header, a ``[[tool.ash.*]]`` array-of-tables header, a
-    top-level dotted ``tool.ash...`` key, or an ``ash`` key under a bare ``[tool]``
-    table. The last two spellings went unread, so an unparsable pyproject written
-    either way was skipped as holding no ASH settings and the scan ran with the
-    defaults while its configuration sat unread.
+    top-level dotted ``tool.ash...`` key, a top-level ``tool = { ash = ... }``
+    inline table, or an ``ash`` key under a bare ``[tool]`` table, with either key
+    bare or quoted (``[tool."ash"]``). A spelling that went unread made an
+    unparsable pyproject written that way be skipped as holding no ASH settings,
+    and the scan ran with the defaults while its configuration sat unread.
     """
     match = _TOOL_ASH_PATTERN.search(text)
     if match is not None:
@@ -405,8 +416,12 @@ def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
     `extends` merging and `patch` pointers use the same rule, for the same
     reason: a base and a child are as likely to spell a section differently as a
     file and an override are.
+
+    A key that is not a string (a YAML number, boolean or null key) has no
+    ``-``/``_`` twin and is matched only as itself; read as text, it made the
+    merge of any file holding one fail with an AttributeError.
     """
-    if key in container:
+    if key in container or not isinstance(key, str):
         return key
     for variant in (key.replace("-", "_"), key.replace("_", "-")):
         if variant != key and variant in container:
@@ -1245,28 +1260,36 @@ class ConfigDiscovery:
     notes: List[str] = field(default_factory=list)
 
 
-def pyproject_has_ash_table(path: Path) -> bool:
+def pyproject_has_ash_table(path: Path, expect: Optional[FileIdentity] = None) -> bool:
     """Whether `path` is a pyproject.toml that configures ASH.
 
     A pyproject.toml that does not parse (including one that is not UTF-8,
     which TOML requires) is skipped unless its text declares a ``tool.ash``
     table, in which case it is an error: skipping it would scan with the default
     config while the repository's own config sat unread. Read errors propagate.
+
+    ``expect`` is the identity a caller took when it checked the path
+    (``ConfigSource.identity``, taken by discovery's permit check): every read
+    here is held to it, so a name made to lead to another file after the check
+    is refused (``ConfigFileChangedError``) and not read. Without it the
+    identity is the file the name leads to now.
     """
     undecoded: Optional[str] = None
-    # The file the name leads to now: the first read decides that it is not
-    # UTF-8, and the read of its bytes below must be of that same file, so one
-    # swapped in between is refused (OSError, ESTALE) and not scanned for the
-    # pattern in its place.
-    seen = identity_to_hold(path)
+    # The file the name leads to now, or the one the caller checked: the first
+    # read decides that it is not UTF-8, and the read of its bytes below must be
+    # of that same file, so one swapped in between is refused (OSError, ESTALE)
+    # and not scanned for the pattern in its place.
+    seen = expect if expect is not None else identity_to_hold(path)
     try:
         text = _read_toml_text(path, expect=seen)
     except UnicodeDecodeError as exc:
-        # Latin-1 decodes any byte string, which is all the pattern needs.
-        if (
-            _tool_ash_declared(read_config_bytes(path, expect=seen).decode("latin-1"))
-            is None
-        ):
+        # Latin-1 decodes any byte string, which is all the pattern needs. A
+        # leading UTF-8 byte order mark is dropped first, as _read_toml_text
+        # drops it from a file that is UTF-8: decoded as Latin-1 it is three
+        # characters in front of the first line, and a [tool.ash] header there
+        # no longer started its line.
+        raw = read_config_bytes(path, expect=seen).removeprefix(b"\xef\xbb\xbf")
+        if _tool_ash_declared(raw.decode("latin-1")) is None:
             return False
         # The decoder's message is not repeated (unparsed_config_reason);
         # parse_error_kind gives the error's type, because this message names
@@ -1332,7 +1355,10 @@ def _unreadable_pyproject(
 
 
 def _pyproject_is_a_source(
-    path: Path, found_before: List[ConfigSource], notes: List[str]
+    path: Path,
+    found_before: List[ConfigSource],
+    notes: List[str],
+    expect: Optional[FileIdentity] = None,
 ) -> bool:
     """Probe pyproject.toml without letting it break an unrelated config.
 
@@ -1352,6 +1378,11 @@ def _pyproject_is_a_source(
 
     What cannot be used behind a higher-precedence source is appended to
     ``notes`` rather than logged; see ``ConfigDiscovery``.
+
+    ``expect`` is the identity discovery's permit check took for the name
+    (``ConfigSource.identity``); the read for the table is held to it
+    (``pyproject_has_ash_table``), so a file swapped in after the check is
+    refused as one that cannot be read, not read outside the grant.
     """
     # Classified from os.stat and its errno, so each name that cannot be followed
     # is reported for what it is.
@@ -1379,7 +1410,7 @@ def _pyproject_is_a_source(
             notes,
         )
     try:
-        return pyproject_has_ash_table(path)
+        return pyproject_has_ash_table(path, expect=expect)
     except OSError as exc:
         return _unreadable_pyproject(path, found_before, exc, notes)
     except ASHConfigSourceError as exc:
@@ -1588,7 +1619,7 @@ def discover_config_source(
     notes: List[str] = []
     for candidate in candidates:
         if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
-            candidate.path, found, notes
+            candidate.path, found, notes, expect=candidate.identity
         ):
             found.append(candidate)
     if not found:
@@ -1607,9 +1638,12 @@ def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> No
     it reads links, opens nothing and does not raise on a symlink loop, where
     ``Path.resolve`` raised a bare RuntimeError on one on Python 3.10 to 3.12
     in place of a config refusal. A loop resolves to itself and is judged as
-    the path it was found at.
+    the path it was found at. Judged by ``_permitted``, the check discovery
+    makes of each candidate, so on Windows a found file that is a link is
+    refused unresolved: resolving it can open a connection to the host a UNC
+    target names, which discovery's own check never does.
     """
-    if permit_base is None or permit_base(Path(os.path.realpath(path))):
+    if permit_base is None or _permitted(Path(path), permit_base):
         return
     raise ASHConfigInputNotPermittedError(
         f"{Path(path).as_posix()}, the config file found in the scanned directory, "
@@ -1926,9 +1960,12 @@ def toml_config_table(path: Path, text: str) -> Any:
     unparsed: Optional[str] = None
     try:
         document = _parse_toml(text)
-    except ValueError as exc:
-        # TOMLDecodeError, and the ValueError int() raises for a number past
-        # the interpreter's digit limit, which tomllib lets through undressed.
+    except (ValueError, RecursionError) as exc:
+        # TOMLDecodeError, the ValueError int() raises for a number past the
+        # interpreter's digit limit, which tomllib lets through undressed, and
+        # the RecursionError of a text nested past the interpreter's recursion
+        # limit, which left read_config_file raw (parse_config_text and
+        # pyproject_has_ash_table word it the same way).
         unparsed = unparsed_config_reason(path, exc)
     if unparsed is not None:
         # Outside the handler (unparsed_config_reason).
@@ -2350,10 +2387,12 @@ def parse_config_text_literally(
     if is_toml_file(path):
         return _toml_document(path, text)
 
-    from automated_security_helper.utils.yaml_aliases import NoRecursiveAliasLoader
+    from automated_security_helper.config.ash_config import _NoAliasSafeLoader
 
-    # A recursive alias is refused as parse_config_text's loader refuses it.
-    class _LiteralLoader(NoRecursiveAliasLoader):
+    # Every alias is refused, as parse_config_text's loader (load_yaml_config)
+    # refuses it: a literal reading that admitted one read a document the load
+    # never reads.
+    class _LiteralLoader(_NoAliasSafeLoader):
         pass
 
     def as_written(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> str:
@@ -2421,7 +2460,12 @@ def default_confinement_root(
             errno.ELOOP, os.strerror(errno.ELOOP)
         )
     if source_dir is not None:
-        source_real = Path(source_dir).resolve()
+        # realpath, as check_discovered_source resolves: it reads links and does
+        # not raise on a symbolic link loop, where Path.resolve raised a bare
+        # RuntimeError on Python 3.10 to 3.12. A source directory that loops
+        # holds no config, and the root falls back to the config's own
+        # directory, as it does from 3.13 on.
+        source_real = Path(os.path.realpath(source_dir))
         if config_real.is_relative_to(source_real):
             return source_real
     parent = config_real.parent
@@ -3022,13 +3066,19 @@ def deep_merge(base: Any, overlay: Any, model: Optional[type[BaseModel]] = None)
         )
     if model is not None and issubclass(model, _PluginConfigSegment):
         # A plugin's section: every spelling get_plugin_config reads for the
-        # same plugin is one section, under the overlay's spelling.
+        # same plugin is one section, under the overlay's spelling. A key that
+        # is not a string (a YAML number, boolean or null) names no plugin, so
+        # it joins nothing here and is merged below by itself.
         for key in list(rest):
+            if not isinstance(key, str):
+                continue
             names = plugin_key_lookup_names(key)
             same = [
                 other
                 for other in merged
-                if other not in settings and plugin_key_lookup_names(other) & names
+                if isinstance(other, str)
+                and other not in settings
+                and plugin_key_lookup_names(other) & names
             ]
             if not same:
                 continue
@@ -3450,6 +3500,30 @@ def _tested_path_shown(
     return f"'{respelled}'"
 
 
+def _refuse_a_clients_test_op(ops: Any, where: str) -> None:
+    """Refuse a ``test`` operation in the ``patch`` of a file an MCP client chose.
+
+    A test op compares a place of the configuration with the value it gives,
+    and the file loads only when the two are equal. A client's file that
+    extends the operator's config could so learn, from whether it loaded,
+    whether a value it may not read was the one it guessed: a wrong guess was
+    refused as a failed test and a right one loaded. Every test op of such a
+    file is refused before any operation applies, in one text whatever the
+    configuration holds at its path, so no outcome depends on that value.
+    ``where`` is how the message names the file.
+    """
+    if not isinstance(ops, list):
+        return
+    for index, op in enumerate(ops):
+        if isinstance(op, dict) and op.get("op") == "test":
+            raise ASHConfigSourceError(
+                f"'{PATCH_KEY}' entry {index} in {where} is a test op, which a "
+                "config file that came from an MCP client may not use: it "
+                "compares values of the configuration the file is given, which "
+                "the client may not read. Remove the test op."
+            )
+
+
 def _apply_patch(
     document: Dict[str, Any],
     ops: Any,
@@ -3489,8 +3563,11 @@ def _apply_patch(
     # the environment, and jsonpatch's own messages quote the document.
     for index, op in enumerate(ops):
         if not isinstance(op, dict) or not isinstance(op.get("path"), str):
+            # The keys are named as shown_ops shows them: a key the file read
+            # from the environment is the value it read, and is <value> there.
+            shown_keys = shown_ops[index] if isinstance(shown_ops[index], dict) else op
             got = (
-                f"a mapping with keys {', '.join(sorted(map(str, op)))}"
+                f"a mapping with keys {', '.join(sorted(map(str, shown_keys)))}"
                 if isinstance(op, dict)
                 else f"a {type(op).__name__}"
             )
@@ -3910,6 +3987,12 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
     """
     node = document
     for segment in reference.path:
+        if not isinstance(node, (dict, list)):
+            # The place is gone: a later file wrote a scalar where the
+            # reference's mapping or list was. Indexing a string with the
+            # reference's list index would read one character of it, and a
+            # character equal to the value read would keep the reference.
+            return False
         try:
             node = node[segment]
         except (TypeError, KeyError, IndexError):
@@ -4294,6 +4377,9 @@ def _resolve(
         # path the caller gave and not the target of a symlink.
         refuse_unless_a_file(path)
         env_refused = state.refuse_env(path)
+        # Whether the rule refuses this file for itself, not only as a base of
+        # a file it refuses: the file's own patch is then the client's.
+        refused_for_itself = env_refused
         data = _read_into_state(
             path,
             state,
@@ -4307,7 +4393,11 @@ def _resolve(
         # A base whose path came from the environment is named `<value>`, and
         # so is everything its own path was built from.
         hidden = real in state.environment_paths
-        if not real.is_file():
+        # is_regular_file, not Path.is_file: before Python 3.14 is_file raised
+        # PermissionError for a base under a directory that cannot be searched,
+        # and the base then failed as an unforeseen error of the file that
+        # extends it instead of with the refusal below.
+        if not is_regular_file(real):
             # The cause says which path problem it is (missing, a directory, a
             # link loop), so the MCP category mapping answers it as a path
             # problem, never with format advice (config_load_category reads
@@ -4331,9 +4421,8 @@ def _resolve(
             ) from cause
         # Judged by the name the entry spells as well as the file it reaches, as
         # the root is: a base reached through a client's link is the client's.
-        env_refused = (
-            env_refused_above or state.refuse_env(named) or state.refuse_env(real)
-        )
+        refused_for_itself = state.refuse_env(named) or state.refuse_env(real)
+        env_refused = env_refused_above or refused_for_itself
         unquoted: Optional[str] = None
         # Whether the read was refused because the file is no longer the one that
         # was checked. A reworded error below drops its cause, so the fact rides
@@ -4511,6 +4600,12 @@ def _resolve(
             from_environment=bool(read_bases),
         )
         ops = own.pop(PATCH_KEY, None)
+        # The operations as the file wrote them, whose values the references
+        # read from the environment were taken from: anchoring below rewrites
+        # an operator path in a value, and a token planted for a reference
+        # matches the value as read, so the anchored copy would drop the
+        # reference of every value it rewrote (_placed_through_patch).
+        written_ops = ops
         if anchor:
             from automated_security_helper.config.operator_paths import (
                 anchor_patch_operations,
@@ -4550,6 +4645,16 @@ def _resolve(
                 expect=checked,
                 operator_context=operator_file,
             )
+            if not isinstance(base_document, dict):
+                # A base's own patch can replace its whole document (the root
+                # pointer). Merged, a non-mapping replaced everything the bases
+                # before it set, and this file's own keys then replaced it in
+                # turn, so the base and each earlier one were dropped silently.
+                raise ASHConfigSourceError(
+                    f"Base config {state.shown(base_path)}, extended by "
+                    f"{state.shown(real)}, must be a mapping once its own "
+                    f"'{PATCH_KEY}' is applied, got {type(base_document).__name__}"
+                )
             merged = deep_merge(merged, base_document, AshConfig)
             if unconfined is not None:
                 unconfined = deep_merge(unconfined, base_unconfined, AshConfig)
@@ -4562,6 +4667,12 @@ def _resolve(
         if owned is not None and operator_file:
             _owned_plugin_keys(own, owned)
         if ops is not None:
+            if refused_for_itself:
+                # A file the chain's rule refuses for itself is one an MCP
+                # client chose (see "Environment variables"), so its patch is
+                # the client's. A base it extends is refused with it for the
+                # environment, but that base's own patch is not the client's.
+                _refuse_a_clients_test_op(ops, state.shown(real))
             shown_data = with_environment_values_shown(data, read)
             patched = _apply_patch(
                 merged,
@@ -4587,10 +4698,12 @@ def _resolve(
                 ),
             )
             # Each reference at the place its value has once the patch has
-            # applied, which only the patch says.
+            # applied, which only the patch says. Followed through the
+            # operations as written: anchoring changes values only, so they
+            # move each value where the anchored ones moved it.
             state.references[first:] = _placed_through_patch(
                 merged,
-                ops,
+                written_ops,
                 state.references[first:],
                 from_ops,
                 where=state.shown(real),
@@ -4967,6 +5080,13 @@ def uses_env_references(path: Path) -> bool:
     so those commands refuse the file. TOML and JSON files return False: the
     rewriting commands refuse TOML already, and JSON is not interpolated. A file
     that does not parse returns False, and the caller's own load reports why.
+
+    The file is read as every config file is (``read_config_bytes``): opened
+    without blocking, read only when the opened file is a regular file, and at
+    most ``ASH_CONFIG_MAX_FILE_BYTES`` of it. A plain ``open`` here waited on a
+    FIFO swapped in after the check below and read a file of any size. A file
+    that cannot be read within those bounds returns False, and the caller's own
+    load refuses it the same way.
     """
     path = Path(path)
     if is_toml_file(path) or is_json_file(path):
@@ -4977,7 +5097,7 @@ def uses_env_references(path: Path) -> bool:
         # The caller's load refuses it; opening a FIFO here would wait for ever.
         return False
     try:
-        with open(path, mode="r", encoding="utf-8") as f:
-            return _yaml_reads_the_environment(f)
-    except OSError:
+        text = read_config_bytes(path).decode("utf-8")
+    except (OSError, UnicodeDecodeError, ASHConfigSourceError):
         return False
+    return _yaml_reads_the_environment(_NamedText(text, str(path)))
