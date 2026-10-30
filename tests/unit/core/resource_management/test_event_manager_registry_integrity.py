@@ -1,0 +1,260 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The event subscription manager keeps its registry consistent with what it reports.
+
+Each test is pinned against the behavior it replaced:
+
+* Metadata was stored and returned by reference, so a caller's later edits to
+  its own dict, or to the returned info, changed the registered subscription.
+* ``register_subscription`` stored the entry before indexing it and had no
+  rollback, so an indexing error left a half-registered subscription while the
+  caller was told registration failed.
+* The bulk cleanups snapshotted ids under the lock, released it and unregistered
+  each id in turn: a same-id subscription registered meanwhile under another
+  scan was removed, one removed meanwhile counted as a failed cleanup, and a
+  cleanup that raised was counted with an empty ``errors`` list.
+* Cleanup errors grew without bound and counted toward the health status for
+  the life of the process.
+* ``get_cleanup_errors`` with a negative limit returned all but the oldest.
+* The context managers unregistered by id on exit, removing a same-id
+  subscription registered after their own was unregistered; the managed
+  subscription's ``unregister`` control did not record that it ran; and
+  ``auto_cleanup_on_error=False`` still unregistered on error.
+* Ages and timestamps came from the naive local clock.
+"""
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from automated_security_helper.core.resource_management import event_manager
+from automated_security_helper.core.resource_management.event_manager import (
+    EventSubscriptionContextManager,
+    EventSubscriptionManager,
+)
+from automated_security_helper.core.resource_management.exceptions import (
+    MCPResourceError,
+)
+
+pytestmark = pytest.mark.unit
+
+
+async def _register(manager, subscription_id, scan_id="scan", cleanup_func=None, **kw):
+    return await manager.register_subscription(
+        subscription_id=subscription_id,
+        event_type=kw.pop("event_type", "scan_progress"),
+        handler=lambda event: None,
+        cleanup_func=cleanup_func,
+        scan_id=scan_id,
+        **kw,
+    )
+
+
+class TestMetadataIsNotAliased:
+    @pytest.mark.asyncio
+    async def test_the_callers_later_edits_do_not_reach_the_registry(self):
+        manager = EventSubscriptionManager()
+        metadata = {"owner": "a"}
+        await _register(manager, "sub", metadata=metadata)
+
+        metadata["owner"] = "b"
+
+        assert manager.get_subscription_info("sub")["metadata"] == {"owner": "a"}
+
+    @pytest.mark.asyncio
+    async def test_editing_the_returned_info_does_not_reach_the_registry(self):
+        manager = EventSubscriptionManager()
+        await _register(manager, "sub", metadata={"owner": "a"})
+
+        manager.get_subscription_info("sub")["metadata"]["owner"] = "b"
+
+        assert manager.get_subscription_info("sub")["metadata"] == {"owner": "a"}
+
+
+class TestAFailedRegistrationLeavesNothingBehind:
+    @pytest.mark.asyncio
+    async def test_an_unhashable_scan_id_registers_nothing(self):
+        manager = EventSubscriptionManager()
+
+        with pytest.raises(MCPResourceError):
+            await _register(manager, "sub", scan_id=["not", "hashable"])
+
+        assert manager.get_subscription_info("sub") is None
+        assert manager.get_subscription_statistics()["total_subscriptions"] == 0
+        assert manager.get_all_subscriptions() == []
+
+
+class TestBulkCleanupDetachesThenCleans:
+    @pytest.mark.asyncio
+    async def test_a_same_id_subscription_registered_during_cleanup_survives(self):
+        manager = EventSubscriptionManager()
+
+        async def a_cleans_up():
+            # A's cleanup removes B itself and re-registers the id under
+            # another scan, as a handler reacting to the cleanup might.
+            await manager.unregister_subscription("b")
+            await _register(manager, "b", scan_id="other-scan")
+
+        await _register(manager, "a", scan_id="scan", cleanup_func=a_cleans_up)
+        await _register(manager, "b", scan_id="scan")
+
+        results = await manager.cleanup_all_subscriptions()
+
+        assert (results["successful_cleanups"], results["failed_cleanups"]) == (2, 0)
+        survivor = manager.get_subscription_info("b")
+        assert survivor is not None
+        assert survivor["scan_id"] == "other-scan"
+
+    @pytest.mark.asyncio
+    async def test_a_subscription_removed_meanwhile_is_not_a_failed_cleanup(self):
+        manager = EventSubscriptionManager()
+
+        async def a_cleans_up():
+            await manager.unregister_subscription("b")
+
+        await _register(manager, "a", scan_id="scan", cleanup_func=a_cleans_up)
+        await _register(manager, "b", scan_id="scan")
+
+        # cleanup_all visits in registration order, so A's cleanup runs first
+        # and removes B before the loop reaches it.
+        results = await manager.cleanup_all_subscriptions()
+
+        assert results["total_subscriptions"] == 2
+        assert results["failed_cleanups"] == 0
+        assert results["successful_cleanups"] == 2
+        assert manager.get_subscriptions_by_scan("scan") == []
+
+    @pytest.mark.asyncio
+    async def test_a_cleanup_that_raises_is_named_in_the_errors(self):
+        manager = EventSubscriptionManager()
+
+        def broken():
+            raise RuntimeError("socket already closed")
+
+        await _register(manager, "a", scan_id="scan", cleanup_func=broken)
+
+        results = await manager.cleanup_subscriptions_by_type("scan_progress")
+
+        assert results["failed_cleanups"] == 1
+        assert results["errors"] == [
+            {"subscription_id": "a", "error": "socket already closed"}
+        ]
+
+
+class TestCleanupErrorsAreBoundedAndExpire:
+    @pytest.mark.asyncio
+    async def test_only_the_newest_errors_are_kept(self):
+        manager = EventSubscriptionManager()
+
+        def broken():
+            raise RuntimeError("boom")
+
+        for index in range(event_manager.MAX_CLEANUP_ERRORS + 50):
+            await _register(manager, f"sub-{index}", cleanup_func=broken)
+            await manager.unregister_subscription(f"sub-{index}")
+
+        errors = manager.get_cleanup_errors()
+
+        assert len(errors) == event_manager.MAX_CLEANUP_ERRORS
+        assert (
+            errors[-1]["subscription_id"]
+            == f"sub-{event_manager.MAX_CLEANUP_ERRORS + 49}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_old_error_no_longer_drives_the_health_status(self):
+        manager = EventSubscriptionManager()
+
+        def broken():
+            raise RuntimeError("boom")
+
+        await _register(manager, "sub", cleanup_func=broken)
+        await manager.unregister_subscription("sub")
+        assert (await manager.get_health_status())["status"] == "warning"
+
+        stale = datetime.now(timezone.utc) - timedelta(
+            seconds=event_manager.CLEANUP_ERROR_RETENTION_SECONDS + 60
+        )
+        manager._cleanup_errors[0]["timestamp"] = stale.isoformat()
+
+        health = await manager.get_health_status()
+
+        assert health["status"] == "healthy"
+        assert health["cleanup_errors"] == 0
+        assert manager.get_cleanup_errors() == []
+
+    def test_a_negative_limit_is_refused(self):
+        manager = EventSubscriptionManager()
+
+        with pytest.raises(ValueError):
+            manager.get_cleanup_errors(limit=-1)
+
+
+class TestContextManagersRemoveOnlyTheirOwnRegistration:
+    @pytest.mark.asyncio
+    async def test_subscription_context_leaves_a_same_id_successor_alone(self):
+        manager = EventSubscriptionManager()
+
+        async with manager.subscription_context(
+            subscription_id="sub", event_type="scan_progress", handler=lambda e: None
+        ):
+            await manager.unregister_subscription("sub")
+            await _register(manager, "sub", scan_id="successor")
+
+        survivor = manager.get_subscription_info("sub")
+        assert survivor is not None
+        assert survivor["scan_id"] == "successor"
+
+    @pytest.mark.asyncio
+    async def test_the_explicit_unregister_control_is_not_repeated_on_exit(self):
+        manager = EventSubscriptionManager()
+        managed = EventSubscriptionContextManager(manager)
+
+        async with managed.managed_subscription(
+            subscription_id="sub", event_type="scan_progress", handler=lambda e: None
+        ) as info:
+            assert await info["unregister"]() is True
+            assert info["cleanup_attempted"] is True
+            await _register(manager, "sub", scan_id="successor")
+
+        survivor = manager.get_subscription_info("sub")
+        assert survivor is not None
+        assert survivor["scan_id"] == "successor"
+
+    @pytest.mark.asyncio
+    async def test_auto_cleanup_off_keeps_the_subscription_after_an_error(self):
+        manager = EventSubscriptionManager()
+        managed = EventSubscriptionContextManager(manager)
+
+        with pytest.raises(RuntimeError):
+            async with managed.managed_subscription(
+                subscription_id="sub",
+                event_type="scan_progress",
+                handler=lambda e: None,
+                auto_cleanup_on_error=False,
+            ):
+                raise RuntimeError("handler blew up")
+
+        assert manager.get_subscription_info("sub") is not None
+
+
+class TestTimesAreTimezoneAware:
+    @pytest.mark.asyncio
+    async def test_created_at_and_error_timestamps_carry_a_zone(self):
+        manager = EventSubscriptionManager()
+
+        def broken():
+            raise RuntimeError("boom")
+
+        await _register(manager, "sub", cleanup_func=broken)
+        created_at = datetime.fromisoformat(
+            manager.get_subscription_info("sub")["created_at"]
+        )
+        await manager.unregister_subscription("sub")
+        recorded = datetime.fromisoformat(manager.get_cleanup_errors()[0]["timestamp"])
+
+        assert created_at.tzinfo is not None
+        assert recorded.tzinfo is not None
+        usage = await manager.get_resource_usage()
+        assert usage["subscription_ages"]["count"] == 0

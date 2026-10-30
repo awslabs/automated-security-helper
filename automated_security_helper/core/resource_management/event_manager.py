@@ -12,13 +12,32 @@ import asyncio
 import inspect
 from typing import Dict, List, Set, Any, Optional, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+
+#: How many cleanup errors the manager keeps, newest last. The list used to grow
+#: without bound for the life of the process.
+MAX_CLEANUP_ERRORS = 100
+
+#: How long a cleanup error counts toward the health status. Errors older than
+#: this are dropped from the store, so one historical failure does not keep the
+#: status at "warning", and eleven at "critical", for the life of the process.
+CLEANUP_ERROR_RETENTION_SECONDS = 3600.0
+
+
+def _utc_now() -> datetime:
+    """The current time, timezone-aware in UTC.
+
+    Subscription ages and the cleanup-error timestamps are differences between
+    two readings; taken from the naive local clock, a daylight-saving fall-back
+    or a clock step between them made an age negative or an hour off.
+    """
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -29,7 +48,7 @@ class EventSubscription:
     event_type: str
     handler: Callable
     cleanup_func: Optional[Callable] = None
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=_utc_now)
     scan_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -78,6 +97,12 @@ class EventSubscriptionManager:
 
         Raises:
             MCPResourceError: If registration fails
+
+        The metadata is copied: stored by reference, the registering caller's
+        later edits to its own dict changed the registered subscription. A
+        registration that fails partway (an unhashable scan_id or event_type
+        raises while the indices are updated) leaves nothing behind: the stored
+        entry used to stay, unindexed, while the caller was told it failed.
         """
         async with self._subscription_lock:
             try:
@@ -93,7 +118,7 @@ class EventSubscriptionManager:
                     handler=handler,
                     cleanup_func=cleanup_func,
                     scan_id=scan_id,
-                    metadata=metadata or {},
+                    metadata=dict(metadata) if metadata else {},
                 )
 
                 # Store subscription
@@ -118,6 +143,7 @@ class EventSubscriptionManager:
                 return True
 
             except Exception as e:
+                self._discard_partial_registration(subscription_id, scan_id, event_type)
                 self._logger.error(
                     f"Failed to register subscription {subscription_id}: {str(e)}"
                 )
@@ -129,6 +155,107 @@ class EventSubscriptionManager:
                         "scan_id": scan_id,
                     },
                 )
+
+    def _discard_partial_registration(
+        self, subscription_id: str, scan_id: Any, event_type: Any
+    ) -> None:
+        """Undo whatever register_subscription stored before it raised."""
+        self._subscriptions.pop(subscription_id, None)
+        for index, key in (
+            (self._subscriptions_by_scan, scan_id),
+            (self._subscriptions_by_type, event_type),
+        ):
+            try:
+                members = index.get(key)
+            except TypeError:
+                # An unhashable key was never indexed.
+                continue
+            if members is not None:
+                members.discard(subscription_id)
+                if not members:
+                    del index[key]
+
+    def get_registration(self, subscription_id: str) -> Optional[EventSubscription]:
+        """The registered subscription object for ``subscription_id``, or None.
+
+        For a caller that registers a subscription and later has to remove
+        exactly that registration and not whatever is registered under the id by
+        then: :meth:`unregister_registration` takes the object this returns.
+        """
+        return self._subscriptions.get(subscription_id)
+
+    def _detach(self, subscription: EventSubscription) -> None:
+        """Take ``subscription`` out of the registry and its indices. Caller holds the lock."""
+        subscription_id = subscription.subscription_id
+        if subscription.scan_id and subscription.scan_id in self._subscriptions_by_scan:
+            self._subscriptions_by_scan[subscription.scan_id].discard(subscription_id)
+            if not self._subscriptions_by_scan[subscription.scan_id]:
+                del self._subscriptions_by_scan[subscription.scan_id]
+
+        if subscription.event_type in self._subscriptions_by_type:
+            self._subscriptions_by_type[subscription.event_type].discard(
+                subscription_id
+            )
+            if not self._subscriptions_by_type[subscription.event_type]:
+                del self._subscriptions_by_type[subscription.event_type]
+
+        del self._subscriptions[subscription_id]
+
+    async def _run_cleanup(self, subscription: EventSubscription) -> Optional[str]:
+        """Run a detached subscription's cleanup, outside the lock.
+
+        Returns None when it ran (or there was none), else the error's text,
+        which is also recorded in the cleanup errors.
+        """
+        subscription_id = subscription.subscription_id
+        if not subscription.cleanup_func:
+            return None
+        try:
+            outcome = subscription.cleanup_func()
+            if inspect.isawaitable(outcome):
+                await outcome
+            self._logger.debug(f"Executed cleanup for subscription {subscription_id}")
+            return None
+        except Exception as e:
+            self._record_cleanup_error(
+                {
+                    "subscription_id": subscription_id,
+                    "event_type": subscription.event_type,
+                    "scan_id": subscription.scan_id,
+                    "error": str(e),
+                    "timestamp": _utc_now().isoformat(),
+                }
+            )
+            self._logger.error(
+                f"Cleanup failed for subscription {subscription_id}: {str(e)}"
+            )
+            return str(e)
+
+    def _record_cleanup_error(self, error_info: Dict[str, Any]) -> None:
+        """Keep ``error_info``, dropping the oldest past MAX_CLEANUP_ERRORS."""
+        self._cleanup_errors.append(error_info)
+        excess = len(self._cleanup_errors) - MAX_CLEANUP_ERRORS
+        if excess > 0:
+            del self._cleanup_errors[:excess]
+
+    def _drop_expired_cleanup_errors(self) -> None:
+        """Forget cleanup errors older than CLEANUP_ERROR_RETENTION_SECONDS."""
+        if not self._cleanup_errors:
+            return
+        now = _utc_now()
+        kept = []
+        for error_info in self._cleanup_errors:
+            recorded = error_info.get("timestamp")
+            try:
+                when = datetime.fromisoformat(recorded)
+            except (TypeError, ValueError):
+                kept.append(error_info)
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if (now - when).total_seconds() <= CLEANUP_ERROR_RETENTION_SECONDS:
+                kept.append(error_info)
+        self._cleanup_errors[:] = kept
 
     async def unregister_subscription(self, subscription_id: str) -> bool:
         """Unregister an event subscription with cleanup.
@@ -155,54 +282,77 @@ class EventSubscriptionManager:
                     f"Subscription {subscription_id} not found for unregistration"
                 )
                 return False
-
-            # Remove from indices
-            if (
-                subscription.scan_id
-                and subscription.scan_id in self._subscriptions_by_scan
-            ):
-                self._subscriptions_by_scan[subscription.scan_id].discard(
-                    subscription_id
-                )
-                if not self._subscriptions_by_scan[subscription.scan_id]:
-                    del self._subscriptions_by_scan[subscription.scan_id]
-
-            if subscription.event_type in self._subscriptions_by_type:
-                self._subscriptions_by_type[subscription.event_type].discard(
-                    subscription_id
-                )
-                if not self._subscriptions_by_type[subscription.event_type]:
-                    del self._subscriptions_by_type[subscription.event_type]
-
-            # Remove subscription
-            del self._subscriptions[subscription_id]
+            self._detach(subscription)
 
         # Execute cleanup function if provided, outside the lock.
-        cleanup_success = True
-        if subscription.cleanup_func:
-            try:
-                outcome = subscription.cleanup_func()
-                if inspect.isawaitable(outcome):
-                    await outcome
+        cleanup_error = await self._run_cleanup(subscription)
+        self._logger.debug(f"Unregistered subscription {subscription_id}")
+        return cleanup_error is None
+
+    async def unregister_registration(self, subscription: EventSubscription) -> bool:
+        """Unregister exactly ``subscription``, if it is still the one registered.
+
+        For the context managers, which register a subscription and remove it on
+        exit: removing by id alone removed, and ran the cleanup of, a different
+        subscription registered under the same id during the block, after the
+        block's own had been unregistered. Returns False, and touches nothing,
+        when the registry no longer holds this object under its id; otherwise as
+        :meth:`unregister_subscription`.
+        """
+        async with self._subscription_lock:
+            if (
+                self._subscriptions.get(subscription.subscription_id)
+                is not subscription
+            ):
                 self._logger.debug(
-                    f"Executed cleanup for subscription {subscription_id}"
+                    f"Subscription {subscription.subscription_id} is no longer the "
+                    "registered one; leaving the registry as it is"
                 )
-            except Exception as e:
-                cleanup_success = False
-                error_info = {
-                    "subscription_id": subscription_id,
-                    "event_type": subscription.event_type,
-                    "scan_id": subscription.scan_id,
-                    "error": str(e),
-                    "timestamp": datetime.now().isoformat(),
-                }
-                self._cleanup_errors.append(error_info)
-                self._logger.error(
-                    f"Cleanup failed for subscription {subscription_id}: {str(e)}"
+                return False
+            self._detach(subscription)
+        cleanup_error = await self._run_cleanup(subscription)
+        return cleanup_error is None
+
+    async def _cleanup_detached(
+        self,
+        detached: List[EventSubscription],
+        cleanup_results: Dict[str, Any],
+        what: str,
+    ) -> Dict[str, Any]:
+        """Run the cleanups of subscriptions already taken out of the registry.
+
+        The bulk cleanups detach their whole set under one lock acquisition and
+        run the cleanups afterwards. They used to snapshot ids, release the lock
+        and unregister each id in turn: an id re-registered meanwhile under
+        another scan or type was removed as if it were the old one, a
+        subscription removed meanwhile was counted as a failed cleanup, and a
+        cleanup that raised was counted as failed with nothing in ``errors``.
+        """
+        for subscription in detached:
+            error = await self._run_cleanup(subscription)
+            if error is None:
+                cleanup_results["successful_cleanups"] += 1
+            else:
+                cleanup_results["failed_cleanups"] += 1
+                cleanup_results["errors"].append(
+                    {"subscription_id": subscription.subscription_id, "error": error}
                 )
 
-        self._logger.debug(f"Unregistered subscription {subscription_id}")
-        return cleanup_success
+        self._logger.info(
+            f"Cleaned up {cleanup_results['successful_cleanups']}/"
+            f"{cleanup_results['total_subscriptions']} {what}"
+        )
+        return cleanup_results
+
+    def _detach_all(self, subscription_ids: Set[str]) -> List[EventSubscription]:
+        """Detach every registered subscription in ``subscription_ids``. Caller holds the lock."""
+        detached = []
+        for subscription_id in list(subscription_ids):
+            subscription = self._subscriptions.get(subscription_id)
+            if subscription is not None:
+                self._detach(subscription)
+                detached.append(subscription)
+        return detached
 
     async def cleanup_subscriptions_by_scan(self, scan_id: str) -> Dict[str, Any]:
         """Clean up all subscriptions for a specific scan.
@@ -222,36 +372,16 @@ class EventSubscriptionManager:
         }
 
         async with self._subscription_lock:
-            subscription_ids = self._subscriptions_by_scan.get(scan_id, set()).copy()
-            cleanup_results["total_subscriptions"] = len(subscription_ids)
+            detached = self._detach_all(self._subscriptions_by_scan.get(scan_id, set()))
+            cleanup_results["total_subscriptions"] = len(detached)
 
-        if not subscription_ids:
+        if not detached:
             self._logger.debug(f"No subscriptions found for scan {scan_id}")
             return cleanup_results
 
-        # Clean up each subscription
-        for subscription_id in subscription_ids:
-            try:
-                success = await self.unregister_subscription(subscription_id)
-                if success:
-                    cleanup_results["successful_cleanups"] += 1
-                else:
-                    cleanup_results["failed_cleanups"] += 1
-            except Exception as e:
-                cleanup_results["failed_cleanups"] += 1
-                cleanup_results["errors"].append(
-                    {"subscription_id": subscription_id, "error": str(e)}
-                )
-                self._logger.error(
-                    f"Error cleaning up subscription {subscription_id} for scan {scan_id}: {str(e)}"
-                )
-
-        self._logger.info(
-            f"Cleaned up {cleanup_results['successful_cleanups']}/{cleanup_results['total_subscriptions']} "
-            f"subscriptions for scan {scan_id}"
+        return await self._cleanup_detached(
+            detached, cleanup_results, f"subscriptions for scan {scan_id}"
         )
-
-        return cleanup_results
 
     async def cleanup_subscriptions_by_type(self, event_type: str) -> Dict[str, Any]:
         """Clean up all subscriptions for a specific event type.
@@ -271,36 +401,18 @@ class EventSubscriptionManager:
         }
 
         async with self._subscription_lock:
-            subscription_ids = self._subscriptions_by_type.get(event_type, set()).copy()
-            cleanup_results["total_subscriptions"] = len(subscription_ids)
+            detached = self._detach_all(
+                self._subscriptions_by_type.get(event_type, set())
+            )
+            cleanup_results["total_subscriptions"] = len(detached)
 
-        if not subscription_ids:
+        if not detached:
             self._logger.debug(f"No subscriptions found for event type {event_type}")
             return cleanup_results
 
-        # Clean up each subscription
-        for subscription_id in subscription_ids:
-            try:
-                success = await self.unregister_subscription(subscription_id)
-                if success:
-                    cleanup_results["successful_cleanups"] += 1
-                else:
-                    cleanup_results["failed_cleanups"] += 1
-            except Exception as e:
-                cleanup_results["failed_cleanups"] += 1
-                cleanup_results["errors"].append(
-                    {"subscription_id": subscription_id, "error": str(e)}
-                )
-                self._logger.error(
-                    f"Error cleaning up subscription {subscription_id} for event type {event_type}: {str(e)}"
-                )
-
-        self._logger.info(
-            f"Cleaned up {cleanup_results['successful_cleanups']}/{cleanup_results['total_subscriptions']} "
-            f"subscriptions for event type {event_type}"
+        return await self._cleanup_detached(
+            detached, cleanup_results, f"subscriptions for event type {event_type}"
         )
-
-        return cleanup_results
 
     async def cleanup_all_subscriptions(self) -> Dict[str, Any]:
         """Clean up all registered subscriptions.
@@ -316,36 +428,16 @@ class EventSubscriptionManager:
         }
 
         async with self._subscription_lock:
-            subscription_ids = list(self._subscriptions.keys())
-            cleanup_results["total_subscriptions"] = len(subscription_ids)
+            detached = self._detach_all(set(self._subscriptions.keys()))
+            cleanup_results["total_subscriptions"] = len(detached)
 
-        if not subscription_ids:
+        if not detached:
             self._logger.debug("No subscriptions to clean up")
             return cleanup_results
 
-        # Clean up each subscription
-        for subscription_id in subscription_ids:
-            try:
-                success = await self.unregister_subscription(subscription_id)
-                if success:
-                    cleanup_results["successful_cleanups"] += 1
-                else:
-                    cleanup_results["failed_cleanups"] += 1
-            except Exception as e:
-                cleanup_results["failed_cleanups"] += 1
-                cleanup_results["errors"].append(
-                    {"subscription_id": subscription_id, "error": str(e)}
-                )
-                self._logger.error(
-                    f"Error cleaning up subscription {subscription_id}: {str(e)}"
-                )
-
-        self._logger.info(
-            f"Cleaned up {cleanup_results['successful_cleanups']}/{cleanup_results['total_subscriptions']} "
-            f"total subscriptions"
+        return await self._cleanup_detached(
+            detached, cleanup_results, "total subscriptions"
         )
-
-        return cleanup_results
 
     def get_subscription_info(self, subscription_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a specific subscription.
@@ -354,7 +446,9 @@ class EventSubscriptionManager:
             subscription_id: The subscription ID
 
         Returns:
-            Subscription information dictionary or None if not found
+            Subscription information dictionary or None if not found. The
+            metadata is a copy: handed out by reference, a caller editing the
+            returned info changed the registered subscription.
         """
         subscription = self._subscriptions.get(subscription_id)
         if subscription is None:
@@ -366,7 +460,7 @@ class EventSubscriptionManager:
             "created_at": subscription.created_at.isoformat(),
             "scan_id": subscription.scan_id,
             "has_cleanup_func": subscription.cleanup_func is not None,
-            "metadata": subscription.metadata,
+            "metadata": dict(subscription.metadata),
         }
 
     def get_subscriptions_by_scan(self, scan_id: str) -> List[Dict[str, Any]]:
@@ -430,11 +524,17 @@ class EventSubscriptionManager:
         """Get recent cleanup errors.
 
         Args:
-            limit: Optional limit on number of errors to return
+            limit: Optional limit on number of errors to return, the newest
+                ones. Zero returns none; a negative limit is refused with
+                ValueError (it used to slice away the oldest ``|limit|`` and
+                return the rest).
 
         Returns:
             List of cleanup error information
         """
+        if limit is not None and limit < 0:
+            raise ValueError(f"limit must be zero or positive, not {limit}")
+        self._drop_expired_cleanup_errors()
         if limit is None:
             return self._cleanup_errors.copy()
         if limit == 0:
@@ -456,8 +556,14 @@ class EventSubscriptionManager:
 
         Returns:
             Dictionary with health status information
+
+        ``cleanup_errors`` counts the errors of the last
+        CLEANUP_ERROR_RETENTION_SECONDS: counted for the life of the process,
+        one old failure kept the status at "warning" and eleven at "critical"
+        with nothing in-tree ever clearing them.
         """
         async with self._subscription_lock:
+            self._drop_expired_cleanup_errors()
             total_subscriptions = len(self._subscriptions)
             cleanup_errors = len(self._cleanup_errors)
 
@@ -536,7 +642,7 @@ class EventSubscriptionManager:
             total_memory_kb = subscription_size + index_size + error_size
 
             # Get subscription age statistics
-            now = datetime.now()
+            now = _utc_now()
             subscription_ages = []
 
             for subscription in self._subscriptions.values():
@@ -588,8 +694,13 @@ class EventSubscriptionManager:
 
         Raises:
             MCPResourceError: If subscription registration fails
+
+        On exit the block's own registration is removed, and only that one
+        (:meth:`unregister_registration`): removing by id removed a different
+        subscription registered under the same id during the block, after the
+        block's had been unregistered.
         """
-        subscription_registered = False
+        registered: Optional[EventSubscription] = None
 
         try:
             # Register the subscription
@@ -612,7 +723,7 @@ class EventSubscriptionManager:
                     },
                 )
 
-            subscription_registered = True
+            registered = self.get_registration(subscription_id)
             self._logger.debug(
                 f"Context manager registered subscription: {subscription_id}"
             )
@@ -628,11 +739,9 @@ class EventSubscriptionManager:
 
         finally:
             # Always attempt cleanup, even if an exception occurred
-            if subscription_registered:
+            if registered is not None:
                 try:
-                    cleanup_success = await self.unregister_subscription(
-                        subscription_id
-                    )
+                    cleanup_success = await self.unregister_registration(registered)
                     if cleanup_success:
                         self._logger.debug(
                             f"Context manager successfully cleaned up subscription: {subscription_id}"
@@ -684,10 +793,18 @@ class EventSubscriptionContextManager:
             cleanup_func: Optional cleanup function to call when unsubscribing
             scan_id: Optional scan ID associated with the subscription
             metadata: Optional metadata for the subscription
-            auto_cleanup_on_error: Whether to automatically cleanup on errors
+            auto_cleanup_on_error: Whether the subscription is unregistered when
+                the block raises. With it False the subscription stays
+                registered after an error, for the caller to deal with; it used
+                to be unregistered by the final cleanup anyway, so the flag
+                changed nothing.
 
         Yields:
-            Dictionary with subscription information and control methods
+            Dictionary with subscription information and control methods. Its
+            ``unregister`` control removes the block's own registration and
+            records that it did, so leaving the block does not unregister the
+            id a second time (and with it a same-id subscription registered
+            after the explicit call).
 
         Raises:
             MCPResourceError: If subscription management fails
@@ -699,6 +816,14 @@ class EventSubscriptionContextManager:
             "registered": False,
             "cleanup_attempted": False,
         }
+        registered: Optional[EventSubscription] = None
+        block_raised = False
+
+        async def _unregister() -> bool:
+            subscription_info["cleanup_attempted"] = True
+            if registered is None:
+                return False
+            return await self._event_manager.unregister_registration(registered)
 
         try:
             # Register subscription
@@ -718,11 +843,10 @@ class EventSubscriptionContextManager:
                 )
 
             subscription_info["registered"] = True
+            registered = self._event_manager.get_registration(subscription_id)
 
             # Add control methods to subscription info
-            subscription_info["unregister"] = lambda: (
-                self._event_manager.unregister_subscription(subscription_id)
-            )
+            subscription_info["unregister"] = _unregister
             subscription_info["get_info"] = lambda: (
                 self._event_manager.get_subscription_info(subscription_id)
             )
@@ -733,12 +857,13 @@ class EventSubscriptionContextManager:
             yield subscription_info
 
         except Exception as e:
+            block_raised = True
             self._logger.error(
                 f"Error in managed subscription {subscription_id}: {str(e)}"
             )
-            if auto_cleanup_on_error and subscription_info["registered"]:
+            if auto_cleanup_on_error and registered is not None:
                 try:
-                    await self._event_manager.unregister_subscription(subscription_id)
+                    await self._event_manager.unregister_registration(registered)
                     subscription_info["cleanup_attempted"] = True
                     self._logger.debug(
                         f"Auto-cleanup performed for {subscription_id} due to error"
@@ -750,13 +875,14 @@ class EventSubscriptionContextManager:
             raise
 
         finally:
-            # Final cleanup if not already done
+            # Final cleanup if not already done, and not declined for an error
             if (
-                subscription_info["registered"]
+                registered is not None
                 and not subscription_info["cleanup_attempted"]
+                and not (block_raised and not auto_cleanup_on_error)
             ):
                 try:
-                    await self._event_manager.unregister_subscription(subscription_id)
+                    await self._event_manager.unregister_registration(registered)
                     subscription_info["cleanup_attempted"] = True
                     self._logger.debug(f"Final cleanup performed for {subscription_id}")
                 except Exception as cleanup_error:
