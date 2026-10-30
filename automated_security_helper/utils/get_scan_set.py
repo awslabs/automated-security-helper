@@ -266,14 +266,24 @@ def _is_bundled_cdk_below(walked: str | Path, root_absolute: str) -> bool:
     the answer changed with how the source was spelled: ``.`` inside that
     directory read as outside it, the absolute path of the same directory as inside.
     *root_absolute* is the scan root, made absolute.
+
+    The root's own last component is kept in front of the path below it: a scan
+    root that is itself a ``node_modules`` directory holds ``aws-cdk/...``, which is
+    the bundled tree, and without the root's name the test would never see the
+    ``/node_modules`` before it. Only that one component is kept, not the ones
+    above it, so a root below ``node_modules/aws-cdk-lib`` still scans.
     """
     relative = os.path.relpath(os.path.abspath(walked), root_absolute)
-    return _is_bundled_cdk_path("/" + relative)
+    return _is_bundled_cdk_path("/" + os.path.basename(root_absolute) + "/" + relative)
 
 
-def _bundled_cdk_in(parts: Sequence[str]) -> bool:
-    """:func:`_is_bundled_cdk_path` for a path given as its components below the root."""
-    return _is_bundled_cdk_path("/" + "/".join(parts), separators="/")
+def _bundled_cdk_in(parts: Sequence[str], root_name: str = "") -> bool:
+    """:func:`_is_bundled_cdk_path` for a path given as its components below the root.
+
+    *root_name* is the scan root's last component, as :func:`_is_bundled_cdk_below`
+    keeps it; empty when the caller has no root.
+    """
+    return _is_bundled_cdk_path("/" + root_name + "/" + "/".join(parts), separators="/")
 
 
 #: Whether this is Windows. Read where an answer is given for Windows alone, so a
@@ -642,7 +652,9 @@ def _count_files_in_own_output(directory: str, committed: Collection[str] = ()) 
 _RESTATED_ASH_INCLUSIONS = (".git", "**/cdk.out/asset.*", "!**/*.template.json")
 
 
-def _excluded_by_ash_itself(walked: str, parts: Sequence[str]) -> bool:
+def _excluded_by_ash_itself(
+    walked: str, parts: Sequence[str], root_name: str = ""
+) -> bool:
     """Whether ASH leaves a file out with no ignore file at all, from its path.
 
     *walked* is the file's path as the walk spelled it and *parts* its components
@@ -653,14 +665,15 @@ def _excluded_by_ash_itself(walked: str, parts: Sequence[str]) -> bool:
 
     - The bundled aws-cdk tree: a ``node_modules/aws-cdk*`` component in *parts*,
       the path below the scan root (:func:`_is_bundled_cdk_below`), as the scan set
-      tests it. *walked* is not read.
+      tests it, with *root_name*, the scan root's last component, in front.
+      *walked* is not read.
     - Any ``*.template.json`` is kept otherwise, which is what the forced-inclusion
       pass does whatever else matched.
     - A ``.git`` component, file or directory, is left out (rule ``.git``).
     - An ``asset.*`` component directly under a ``cdk.out`` component is left out
       (rule ``**/cdk.out/asset.*``).
     """
-    if _bundled_cdk_in(parts):
+    if _bundled_cdk_in(parts, root_name):
         return True
     if parts and parts[-1].endswith(".template.json"):
         return False
@@ -689,11 +702,14 @@ def _files_removed_by_ignore_files(
     wrong file, or to none, still counts.
     """
     kept = set(scan_set_files)
+    root_name = os.path.basename(os.path.abspath(source))
     return sum(
         1
         for walked in all_files
         if walked not in kept
-        and not _excluded_by_ash_itself(walked, _relative_parts(walked, source))
+        and not _excluded_by_ash_itself(
+            walked, _relative_parts(walked, source), root_name
+        )
     )
 
 
@@ -752,6 +768,7 @@ def _count_files_ash_would_scan(
     """
     count = 0
     root_absolute = os.path.abspath(source)
+    root_name = os.path.basename(root_absolute)
     for root, dirs, files in _walk_unless_link(directory):
         parts = _relative_parts(root, source)
         kept_dirs = []
@@ -777,7 +794,9 @@ def _count_files_ash_would_scan(
         count += sum(
             1
             for name in files
-            if not _excluded_by_ash_itself(os.path.join(root, name), parts + (name,))
+            if not _excluded_by_ash_itself(
+                os.path.join(root, name), parts + (name,), root_name
+            )
             and not _file_link_leaves_the_tree(root, name, links, source)
         )
     return count

@@ -150,6 +150,31 @@ class TestTheBundledCdkTreeBelowTheScanRoot:
         assert gss._excluded_by_ash_itself("ignored", ("node_modules", "aws-cdk", "x"))
         assert not gss._excluded_by_ash_itself("ignored", ("aws-cdk-lib", "proj", "x"))
 
+    def test_a_root_that_is_a_node_modules_directory_keeps_the_bundled_tree_out(
+        self, tmp_path
+    ):
+        """Judged by the path below the root alone, ``aws-cdk/...`` under a root
+        named ``node_modules`` lost the ``/node_modules`` before it, and the bundled
+        fixtures entered the scan set."""
+        root = _build(
+            tmp_path / "node_modules",
+            {
+                "aws-cdk/lib/fixture.template.json": "{}\n",
+                "mine/stack.template.json": "{}\n",
+            },
+        )
+        absolute = os.path.abspath(root)
+
+        assert gss._is_bundled_cdk_below(
+            os.path.join(root, "aws-cdk", "lib", "fixture.template.json"), absolute
+        )
+        assert not gss._is_bundled_cdk_below(
+            os.path.join(root, "mine", "stack.template.json"), absolute
+        )
+        assert gss._excluded_by_ash_itself("x", ("aws-cdk", "lib", "x"), "node_modules")
+        assert not gss._excluded_by_ash_itself("x", ("aws-cdk", "lib", "x"), "src")
+        assert _names(root, scan_set(source=str(root))) == {"mine/stack.template.json"}
+
 
 class TestTheAssetsOfAKeptAssembly:
     TREE = {
