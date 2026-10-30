@@ -19,11 +19,13 @@ Three things the report used to get wrong:
 import json
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.interactions import run_ash_scan
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerStatusInfo,
@@ -40,6 +42,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Region,
     Result,
 )
+from automated_security_helper.utils.content_db_staleness import ContentDbAgeRecord
 
 pytestmark = pytest.mark.unit
 
@@ -195,6 +198,247 @@ class TestScanStatusReportsScannersThatDidNotComplete:
         assert not any(
             m["level"] == "fatal" for m in report["scan"].get("messages", [])
         )
+
+
+def _stale_record(scanner: str, database: str) -> ContentDbAgeRecord:
+    measured_at = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+    return ContentDbAgeRecord(
+        name=database,
+        scanner=scanner,
+        built=measured_at - timedelta(days=9),
+        measured_by="the scanner's own report",
+        max_age=timedelta(days=7),
+        measured_at=measured_at,
+        policy="fail",
+        bound_source="config",
+        bound_is_tool_default=False,
+        refresh="run the scanner's database update",
+    )
+
+
+#: One ``ScanIncompleteness`` per arm of the exit code that is not a scanner row,
+#: with the words a reader of the report should find about it.
+_OTHER_ARMS = {
+    "converter-did-not-run": (
+        run_ash_scan.ScanIncompleteness(
+            converters=(
+                run_ash_scan.IncompleteConverter("archive", "the tool crashed"),
+            )
+        ),
+        (
+            "Converter archive did not complete (the tool crashed); the inputs it "
+            "would have converted were not scanned."
+        ),
+    ),
+    "rule-not-evaluated": (
+        run_ash_scan.ScanIncompleteness(unevaluated_rules=("AwsSolutions-S1",)),
+        (
+            "Rule AwsSolutions-S1 could not be evaluated; what it would have found "
+            "is absent from this report."
+        ),
+    ),
+    "stale-database": (
+        run_ash_scan.ScanIncompleteness(
+            stale_content_databases=(_stale_record("grype", "vulnerability-db"),)
+        ),
+        (
+            "Scanner grype ran against a content database (vulnerability-db) past "
+            "its declared age bound; its findings may be out of date."
+        ),
+    ),
+    "tool-could-not-be-stopped": (
+        run_ash_scan.ScanIncompleteness(could_not_stop=(("semgrep", "pid 4242"),)),
+        (
+            "Scanner semgrep's tool could not be stopped (pid 4242); it may still "
+            "have been writing when this report was taken."
+        ),
+    ),
+}
+
+
+def _answering(facts: run_ash_scan.ScanIncompleteness):
+    """A stand-in for ``scan_incompleteness`` that answers *facts* with the gate
+    on and, with it off, only the arms the exit code asks with the gate off."""
+
+    def fake(results, *, gate, **kwargs):
+        if gate:
+            return facts
+        return run_ash_scan.ScanIncompleteness(
+            unevaluated_rules=facts.unevaluated_rules,
+            stale_content_databases=facts.stale_content_databases,
+            could_not_stop=facts.could_not_stop,
+        )
+
+    return fake
+
+
+class TestScanStatusReportsEveryArmOfTheExitCode:
+    """``scan.status`` read two of the exit code's arms (incomplete scanners and
+    no scanner having run), so a scan that exited 1 because a rule was not
+    evaluated, a converter did not run, a content database was stale or a tool
+    could not be stopped read ``success`` with no message: byte-identical to a
+    clean scan, with every scanner PASSED."""
+
+    @pytest.mark.parametrize("arm", list(_OTHER_ARMS), ids=list(_OTHER_ARMS))
+    def test_each_arm_is_a_failure_with_its_own_message(
+        self, reporter, monkeypatch, arm
+    ):
+        facts, expected = _OTHER_ARMS[arm]
+        monkeypatch.setattr(run_ash_scan, "scan_incompleteness", _answering(facts))
+        model = _model(_result("B105", "x = 's'"))
+        model.ash_config = AshConfig(project_name="scan-status-test")
+
+        report = json.loads(reporter.report(model))
+
+        assert len(report["vulnerabilities"]) == 1
+        assert report["scan"]["status"] == "failure"
+        assert report["scan"]["messages"] == [{"level": "warn", "value": expected}]
+
+    @pytest.mark.parametrize(
+        "arm", ["rule-not-evaluated", "stale-database", "tool-could-not-be-stopped"]
+    )
+    def test_an_arm_the_gate_does_not_cover_fails_the_scan_with_the_gate_off(
+        self, reporter, monkeypatch, arm
+    ):
+        """These arms exit 1 whatever ``fail_on_incomplete_scanners`` says, so
+        the status follows them with the gate off too."""
+        facts, expected = _OTHER_ARMS[arm]
+        monkeypatch.setattr(run_ash_scan, "scan_incompleteness", _answering(facts))
+        model = _model()
+        model.ash_config = AshConfig(
+            project_name="scan-status-test", fail_on_incomplete_scanners=False
+        )
+
+        report = json.loads(reporter.report(model))
+
+        assert report["scan"]["status"] == "failure"
+        assert report["scan"]["messages"] == [{"level": "warn", "value": expected}]
+
+    def test_a_converter_behind_the_gate_keeps_success_with_the_gate_off(
+        self, reporter, monkeypatch
+    ):
+        facts, expected = _OTHER_ARMS["converter-did-not-run"]
+        monkeypatch.setattr(run_ash_scan, "scan_incompleteness", _answering(facts))
+        model = _model()
+        model.ash_config = AshConfig(
+            project_name="scan-status-test", fail_on_incomplete_scanners=False
+        )
+
+        report = json.loads(reporter.report(model))
+
+        assert report["scan"]["status"] == "success"
+        assert report["scan"]["messages"] == [{"level": "warn", "value": expected}]
+
+    def test_every_arm_at_once_lists_every_message(self, reporter, monkeypatch):
+        facts = run_ash_scan.ScanIncompleteness(
+            scanners=(("bandit", "MISSING"),),
+            converters=(run_ash_scan.IncompleteConverter("archive", "crashed"),),
+            unevaluated_rules=("AwsSolutions-S1", "AwsSolutions-S2"),
+            could_not_stop=(("semgrep", "pid 4242"),),
+        )
+        monkeypatch.setattr(run_ash_scan, "scan_incompleteness", _answering(facts))
+        model = _model()
+        model.ash_config = AshConfig(project_name="scan-status-test")
+
+        report = json.loads(reporter.report(model))
+
+        values = [m["value"] for m in report["scan"]["messages"]]
+        assert report["scan"]["status"] == "failure"
+        assert len(values) == 5
+        assert values[0] == (
+            "Scanner bandit did not complete (MISSING); its findings are absent "
+            "from this report."
+        )
+        assert values[1].startswith("Converter archive did not complete (crashed)")
+        assert values[2].startswith("Rule AwsSolutions-S1 could not be evaluated")
+        assert values[3].startswith("Rule AwsSolutions-S2 could not be evaluated")
+        assert values[4].startswith("Scanner semgrep's tool could not be stopped")
+
+    def test_the_status_is_read_from_the_exit_codes_object_not_the_messages(
+        self, reporter, monkeypatch
+    ):
+        """A ``ScanIncompleteness`` that is truthy for a reason this reporter has
+        no message for still fails the scan: the status is the object's truth
+        value, so the next arm the exit code grows is not read as success."""
+
+        class _Newer(run_ash_scan.ScanIncompleteness):
+            def __bool__(self):
+                return True
+
+        monkeypatch.setattr(run_ash_scan, "scan_incompleteness", _answering(_Newer()))
+        model = _model()
+        model.ash_config = AshConfig(project_name="scan-status-test")
+
+        report = json.loads(reporter.report(model))
+
+        assert report["scan"]["status"] == "failure"
+
+
+class TestACoverageThatCannotBeReadIsNotVouchedFor:
+    """When ``scan_incompleteness`` itself raised, the report said ``success``
+    with no message, the loss logged at DEBUG: a MISSING scanner read as a
+    clean scan. The vulnerabilities are kept, as before; the report now says it
+    cannot vouch for coverage, and under a gate that is on the scan reads as
+    incomplete."""
+
+    @staticmethod
+    def _raising(results, *, gate, **kwargs):
+        raise RuntimeError("the scan module could not read this model")
+
+    def test_a_raising_read_is_a_warning_and_a_failure_under_the_gate(
+        self, reporter, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(run_ash_scan, "scan_incompleteness", self._raising)
+        model = _model(_result("B105", "x = 's'"))
+        model.ash_config = AshConfig(project_name="scan-status-test")
+
+        with caplog.at_level("WARNING"):
+            report = json.loads(reporter.report(model))
+
+        assert len(report["vulnerabilities"]) == 1
+        assert report["scan"]["status"] == "failure"
+        assert report["scan"]["messages"] == [
+            {
+                "level": "warn",
+                "value": (
+                    "Scanner coverage could not be determined; this report "
+                    "cannot say whether the scan was complete."
+                ),
+            }
+        ]
+        assert any(
+            "coverage could not be determined" in record.getMessage()
+            and record.levelname == "WARNING"
+            for record in caplog.records
+        )
+
+    def test_with_the_gate_off_the_warning_stays_and_the_status_is_success(
+        self, reporter, monkeypatch
+    ):
+        monkeypatch.setattr(run_ash_scan, "scan_incompleteness", self._raising)
+        model = _model()
+        model.ash_config = AshConfig(
+            project_name="scan-status-test", fail_on_incomplete_scanners=False
+        )
+
+        report = json.loads(reporter.report(model))
+
+        assert report["scan"]["status"] == "success"
+        assert [m["level"] for m in report["scan"]["messages"]] == ["warn"]
+
+    def test_an_unimportable_scan_module_reads_the_same_way(
+        self, reporter, monkeypatch
+    ):
+        model = _model()
+        model.ash_config = AshConfig(project_name="scan-status-test")
+        monkeypatch.setitem(
+            sys.modules, "automated_security_helper.interactions.run_ash_scan", None
+        )
+
+        report = json.loads(reporter.report(model))
+
+        assert report["scan"]["status"] == "failure"
+        assert [m["level"] for m in report["scan"]["messages"]] == ["warn"]
 
 
 class TestScanTimestampsAreUtc:

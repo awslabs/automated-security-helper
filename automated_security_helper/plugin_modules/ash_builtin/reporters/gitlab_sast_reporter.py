@@ -3,7 +3,7 @@
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, Tuple, TYPE_CHECKING
 
 from automated_security_helper.utils.sarif_utils import (
     get_finding_id,
@@ -563,19 +563,20 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 }
             )
 
-        # The same holds for a scan that ran fewer scanners than it was asked
-        # to: a scanner at ERROR or MISSING produced no findings, so a report
-        # that said "success" with no message was byte-identical to a clean
-        # scan of the same tree. The messages are always written; whether the
-        # gap also fails the scan is the operator's fail_on_incomplete_scanners,
-        # the same answer the exit code gives, so a pip install without the cdk
-        # extra that the operator has accepted does not read "failure" here
+        # The same holds for a scan that did less than it was asked to: a
+        # scanner at ERROR or MISSING, a converter that did not run, a rule a
+        # scanner could not evaluate, a content database past its bound, a tool
+        # that could not be stopped. Each produced no findings for what it did
+        # not cover, so a report that said "success" with no message was
+        # byte-identical to a clean scan of the same tree. The messages are
+        # always written; whether the gaps also fail the scan is the question
+        # the exit code asks, under the operator's fail_on_incomplete_scanners
+        # as the recorded config carries it (a command-line override is not
+        # recorded, so the two can differ there), so a pip install without the
+        # cdk extra that the operator has accepted does not read "failure" here
         # while the scan exits 0.
-        coverage_messages = self._coverage_messages(model)
+        coverage_messages, scan_incomplete = self._coverage(model)
         messages.extend(coverage_messages)
-        coverage_fails_the_scan = bool(coverage_messages) and self._completeness_gate(
-            model
-        )
 
         # Determine scan status. "success" says the scan ran to completion and
         # this report carries everything it found.
@@ -585,9 +586,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # scan that completed with findings was indistinguishable from one
         # that broke. The findings themselves decide the exit code elsewhere.
         scan_status = (
-            "success"
-            if not skipped_results and not coverage_fails_the_scan
-            else "failure"
+            "success" if not skipped_results and not scan_incomplete else "failure"
         )
 
         # Create the final report structure matching the reference
@@ -623,32 +622,74 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             separators=(",", ":"),
         )
 
-    @staticmethod
-    def _coverage_messages(model: "AshAggregatedResults") -> List[Dict[str, str]]:
-        """One ``warn`` message per scanner that was selected and did not complete.
+    @classmethod
+    def _coverage(
+        cls, model: "AshAggregatedResults"
+    ) -> Tuple[List[Dict[str, str]], bool]:
+        """The ``warn`` messages for everything the scan did not cover, and
+        whether that makes the scan incomplete under the operator's gate.
 
-        Read through ``scan_incompleteness``, the same question the exit code
-        asks, with the gate on so the facts are reported whatever the operator's
-        ``fail_on_incomplete_scanners`` says: GitLab's widget reads this report,
-        not the exit code. Whether the facts also turn ``scan.status`` to
-        failure is :meth:`_completeness_gate`'s question. An empty list means
-        every selected scanner completed. Guarded, the import included,
-        because a model this cannot read, or a scan module that cannot be
-        imported, is not a reason to lose the vulnerabilities already
-        transformed: an exception out of here would reach ``report()`` and
-        become ``_failure_report`` with no vulnerabilities at all.
+        Both come from ``scan_incompleteness``, the object the exit code reads
+        its own answer from. The messages are read with the gate on, so every
+        fact is reported whatever ``fail_on_incomplete_scanners`` says: GitLab's
+        widget reads this report, not the exit code. The status is read with
+        the gate as :meth:`_completeness_gate` resolves it, from the same
+        object's truth value, never re-derived from the messages: a report that
+        asked only "did every scanner complete" said ``success`` for a scan
+        that exited 1 because a rule was not evaluated, a converter did not
+        run, a content database was stale or a tool could not be stopped, and
+        would drift again at the next arm the exit code grows.
+
+        Guarded, the import included, because a model this cannot read, or a
+        scan module that cannot be imported, is not a reason to lose the
+        vulnerabilities already transformed: an exception out of here would
+        reach ``report()`` and become ``_failure_report`` with no
+        vulnerabilities at all. But a coverage this could not read is not a
+        coverage this can vouch for, so the failure is a ``warn`` message of
+        its own, logged at WARNING, and the scan reads as incomplete under a
+        gate that is on; it was logged at DEBUG and read as ``success``.
         """
+        gate = cls._completeness_gate(model)
         try:
             from automated_security_helper.interactions.run_ash_scan import (
                 scan_incompleteness,
             )
 
-            coverage = scan_incompleteness(model, gate=True)
-            rows = [(str(name), str(status)) for name, status in coverage.scanners]
-            no_scanner_ran = bool(coverage.no_scanner_ran)
+            facts = scan_incompleteness(model, gate=True)
+            incomplete = (
+                bool(facts) if gate else bool(scan_incompleteness(model, gate=False))
+            )
+            messages = cls._coverage_messages(facts)
         except Exception as e:  # noqa: BLE001 -- see the docstring
-            ASH_LOGGER.debug(f"Could not read scanner coverage: {str(e)}")
-            return []
+            ASH_LOGGER.warning(
+                "Scanner coverage could not be determined for the GitLab SAST "
+                f"report: {error_text(e)}"
+            )
+            return (
+                [
+                    {
+                        "level": "warn",
+                        "value": (
+                            "Scanner coverage could not be determined; this "
+                            "report cannot say whether the scan was complete."
+                        ),
+                    }
+                ],
+                gate,
+            )
+        return messages, incomplete
+
+    @staticmethod
+    def _coverage_messages(facts: Any) -> List[Dict[str, str]]:
+        """One ``warn`` message per fact of *facts*, a ``ScanIncompleteness``.
+
+        Every field that makes the object truthy has a message here, so a
+        reader of the report alone learns each reason the exit code would give.
+        """
+        rows = [
+            (str(name), str(getattr(status, "value", status)))
+            for name, status in facts.scanners
+        ]
         messages = [
             {
                 "level": "warn",
@@ -659,13 +700,59 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             }
             for name, status in rows
         ]
-        if no_scanner_ran:
+        if facts.no_scanner_ran:
             messages.append(
                 {
                     "level": "warn",
                     "value": (
                         "No scanner reached a verdict; this report describes a "
                         "tree that was not scanned."
+                    ),
+                }
+            )
+        for converter in facts.converters:
+            name = getattr(converter, "name", None) or converter[0]
+            reason = getattr(converter, "reason", None) or converter[1]
+            messages.append(
+                {
+                    "level": "warn",
+                    "value": (
+                        f"Converter {name} did not complete ({reason}); the "
+                        "inputs it would have converted were not scanned."
+                    ),
+                }
+            )
+        for rule in facts.unevaluated_rules:
+            messages.append(
+                {
+                    "level": "warn",
+                    "value": (
+                        f"Rule {rule} could not be evaluated; what it would have "
+                        "found is absent from this report."
+                    ),
+                }
+            )
+        for record in facts.stale_content_databases:
+            scanner = getattr(record, "scanner", None) or "a scanner"
+            database = getattr(record, "name", None) or "content database"
+            messages.append(
+                {
+                    "level": "warn",
+                    "value": (
+                        f"Scanner {scanner} ran against a content database "
+                        f"({database}) past its declared age bound; its findings "
+                        "may be out of date."
+                    ),
+                }
+            )
+        for name, reason in facts.could_not_stop:
+            messages.append(
+                {
+                    "level": "warn",
+                    "value": (
+                        f"Scanner {name}'s tool could not be stopped ({reason}); "
+                        "it may still have been writing when this report was "
+                        "taken."
                     ),
                 }
             )
