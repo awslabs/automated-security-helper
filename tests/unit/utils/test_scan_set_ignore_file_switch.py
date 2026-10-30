@@ -548,6 +548,8 @@ class TestAshsOwnExclusionsByName:
         "node_modules/aws-cdk/t.template.json",
         "src/node_modules/aws-cdkmine/y.py",
         "node_modules/aws/cdk.py",
+        ".git/y.template.json/a",
+        ".git/a.template.json/b.template.json",
     ]
 
     def test_the_restated_rules_are_ash_inclusions(self):
@@ -561,6 +563,7 @@ class TestAshsOwnExclusionsByName:
         for entry in gss.ASH_INCLUSIONS:
             own_spec.add_rule(entry, base_path=root)
         forced = gss._forced_inclusion_spec(root)
+        forced_directories = {}
         disagree = []
         for path in self.PATHS:
             if sys.platform == "win32" and path.endswith("."):
@@ -569,7 +572,8 @@ class TestAshsOwnExclusionsByName:
                 continue
             full = root / path
             by_parser = gss._is_bundled_cdk_path(str(full)) or (
-                own_spec.match(full) and not forced.match(full)
+                own_spec.match(full)
+                and not gss._forced_in(forced, str(root), full, forced_directories)
             )
             by_name = gss._excluded_by_ash_itself(str(full), tuple(path.split("/")))
             if by_parser != by_name:

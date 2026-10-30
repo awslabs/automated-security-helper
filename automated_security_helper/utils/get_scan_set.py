@@ -669,14 +669,19 @@ def _excluded_by_ash_itself(
       tests it, with *root_name*, the scan root's last component, in front.
       *walked* is not read.
     - Any ``*.template.json`` is kept otherwise, which is what the forced-inclusion
-      pass does whatever else matched.
+      pass does whatever else matched, unless a directory above it, below the scan
+      root, is itself named ``*.template.json`` (:func:`_forced_in`).
     - A ``.git`` component, file or directory, is left out (rule ``.git``).
     - An ``asset.*`` component directly under a ``cdk.out`` component is left out
       (rule ``**/cdk.out/asset.*``).
     """
     if _bundled_cdk_in(parts, root_name):
         return True
-    if parts and parts[-1].endswith(".template.json"):
+    if (
+        parts
+        and parts[-1].endswith(".template.json")
+        and not any(part.endswith(".template.json") for part in parts[:-1])
+    ):
         return False
     for index, part in enumerate(parts):
         if part == ".git":
@@ -2031,6 +2036,37 @@ def ignore_file_exclusion_record(
     }
 
 
+def _forced_in(
+    forced_inclusions: IgnoreParser,
+    root_absolute: str,
+    file_path: Path,
+    forced_directories: Dict[Path, bool],
+) -> bool:
+    """Whether a forced inclusion names *file_path* itself.
+
+    A rule that names a file also names a directory of that name, and the
+    parser then reports everything below the directory as matched. A directory
+    called ``x.template.json`` made every file in it, ``.git`` internals and
+    user-ignored files among them, forced into the scan set. A file counts when
+    no directory above it, below the scan root, is matched by a forced rule.
+
+    *forced_directories* remembers each directory's answer between calls. At module
+    level so that the test of :func:`_excluded_by_ash_itself`, which restates this
+    from names, can compare against it.
+    """
+    if not forced_inclusions.match(file_path):
+        return False
+    for parent in file_path.parents:
+        if str(parent) == root_absolute or not parent.is_relative_to(root_absolute):
+            break
+        matched = forced_directories.get(parent)
+        if matched is None:
+            matched = forced_directories[parent] = forced_inclusions.match(parent)
+        if matched:
+            return False
+    return True
+
+
 def get_files_not_matching_spec(
     path,
     spec,
@@ -2065,27 +2101,6 @@ def get_files_not_matching_spec(
     root_absolute = os.path.abspath(path)
     forced_directories: Dict[Path, bool] = {}
 
-    def forced_in(file_path: Path) -> bool:
-        """Whether a forced inclusion names *file_path* itself.
-
-        A rule that names a file also names a directory of that name, and the
-        parser then reports everything below the directory as matched. A directory
-        called ``x.template.json`` made every file in it, ``.git`` internals and
-        user-ignored files among them, forced into the scan set. A file counts when
-        no directory above it, below the scan root, is matched by a forced rule.
-        """
-        if not forced_inclusions.match(file_path):
-            return False
-        for parent in file_path.parents:
-            if str(parent) == root_absolute or not parent.is_relative_to(root_absolute):
-                break
-            matched = forced_directories.get(parent)
-            if matched is None:
-                matched = forced_directories[parent] = forced_inclusions.match(parent)
-            if matched:
-                return False
-        return True
-
     included = []
     for inc_full in _all_files:
         # inc_full stays native throughout, because callers use it to open files.
@@ -2100,7 +2115,9 @@ def get_files_not_matching_spec(
         # no rule of that directory's ignore file matched it and it stayed in the
         # scan set. abspath, not resolve: the rules are anchored on abspath bases.
         file_path = Path(os.path.abspath(inc_full))
-        if spec.match(file_path) and not forced_in(file_path):
+        if spec.match(file_path) and not _forced_in(
+            forced_inclusions, root_absolute, file_path, forced_directories
+        ):
             continue
         clean = _source_dir_marker(path, inc_full)
         debug_echo(f"Matched file for scan set: {clean}", debug=debug)
