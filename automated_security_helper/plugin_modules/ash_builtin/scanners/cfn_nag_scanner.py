@@ -46,6 +46,7 @@ from automated_security_helper.utils.cfn_template_model import (
     read_template_text,
     undecodable_candidate_is_a_template,
     unevaluable_template_reason,
+    unmarked_wide_template_reason,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -931,9 +932,21 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     #
                     # The exception is named by type and line only. Its text quotes the
                     # file -- PyYAML prints the offending line -- and this is logged.
-                    unevaluated = unevaluable_template_reason(
-                        cfn_file, scan_root, text=text_read
+                    #
+                    # A UTF-16 or UTF-32 template written without a byte-order mark
+                    # decodes as UTF-8 without an error and reaches the parsers
+                    # NUL-interleaved: a template ASH could not decode, counted as
+                    # its marked twin is above, a failed target, where it was named
+                    # as unparseable and counted as nothing.
+                    unevaluated = (
+                        unmarked_wide_template_reason(text_read)
+                        if text_read is not None
+                        else None
                     )
+                    if unevaluated is None:
+                        unevaluated = unevaluable_template_reason(
+                            cfn_file, scan_root, text=text_read
+                        )
                     if unevaluated is not None:
                         # A file whose structure is a template (a top-level Resources
                         # mapping) that ASH could not evaluate counts as an unevaluated

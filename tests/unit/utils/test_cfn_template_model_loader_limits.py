@@ -255,15 +255,20 @@ def test_a_candidate_that_is_not_utf8_counts_only_when_its_text_is_a_template(
     utf16.write_bytes(
         '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16")
     )
-    # No byte-order mark: found only by the reading as UTF-16.
+    # No byte-order mark: found only by the reading as UTF-16 (or UTF-32).
     nomark = tmp_path / "utf16-nomark.json"
     nomark.write_bytes(
         '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16-be")
+    )
+    nomark32 = tmp_path / "utf32-nomark.json"
+    nomark32.write_bytes(
+        '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-32-le")
     )
     assert holds_cloudformation_template([notes], tmp_path) is False
     assert holds_cloudformation_template([stack], tmp_path) is True
     assert holds_cloudformation_template([utf16], tmp_path) is True
     assert holds_cloudformation_template([nomark], tmp_path) is True
+    assert holds_cloudformation_template([nomark32], tmp_path) is True
     assert holds_cloudformation_template([notes, utf16], tmp_path) is True
 
 

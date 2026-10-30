@@ -91,22 +91,40 @@ def test_a_candidate_that_is_not_utf8_is_judged_from_its_text(context):
     )
     # No byte-order mark: the bytes decode as UTF-8 without an error (NUL is valid
     # UTF-8), so the text reaches the parsers NUL-interleaved and both reject it;
-    # the reading as UTF-16 is what finds the template, and it is named as a
-    # template that could not be parsed, not dropped at TRACE.
+    # the reading as UTF-16 (or UTF-32) is what finds the template, and it is a
+    # template ASH could not decode, a failed target with the encoding in its
+    # reason, as its marked twin is. Named as a template that could not be parsed,
+    # it was counted as nothing; dropped at TRACE before that, it vanished.
     (source / "utf16-nomark.json").write_bytes(
         '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16-le")
+    )
+    (source / "utf32-nomark.json").write_bytes(
+        '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-32-be")
+    )
+    # No byte-order mark and a character outside ASCII: its UTF-16 bytes are not
+    # UTF-8, so this one takes the UnicodeDecodeError arm, where the lenient
+    # decode reads it as UTF-16 and finds the template.
+    (source / "utf16-nomark-accent.json").write_bytes(
+        '{"Resources": {"Café": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16-le")
     )
 
     found = discover_templates(context, "source")
 
     assert [shown for shown, _ in found.skipped] == ["latin-notes.yaml"]
     assert "not UTF-8" in found.skipped[0][1], found.skipped
-    assert [shown for shown, _ in found.unreadable] == [
+    unreadable = dict(found.unreadable)
+    assert sorted(unreadable) == [
         "latin-stack.yaml",
+        "utf16-nomark-accent.json",
+        "utf16-nomark.json",
         "utf16.json",
+        "utf32-nomark.json",
     ]
-    assert [shown for shown, _ in found.unparseable] == ["utf16-nomark.json"]
-    assert all("UnicodeDecodeError" in reason for _, reason in found.unreadable)
+    assert found.unparseable == []
+    for shown in ("latin-stack.yaml", "utf16-nomark-accent.json", "utf16.json"):
+        assert "UnicodeDecodeError" in unreadable[shown], unreadable
+    assert "UTF-16 text without a byte-order mark" in unreadable["utf16-nomark.json"]
+    assert "UTF-32 text without a byte-order mark" in unreadable["utf32-nomark.json"]
     assert [display_path(p, source) for p in found.templates] == [
         "intrinsics.yaml",
         "nested/stack.json",

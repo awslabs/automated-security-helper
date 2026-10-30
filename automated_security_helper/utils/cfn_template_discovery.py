@@ -41,6 +41,11 @@ The outcomes per file
   in ``skipped`` with the reason, so the callers name it at WARNING and count
   nothing, as cfn-nag skips it. Before this split one such file failed all three
   CloudFormation scanners with no structure read at all;
+* a UTF-16 or UTF-32 template written without a byte-order mark: it decodes as
+  UTF-8 without an error (NUL is valid UTF-8) and reaches the parsers
+  NUL-interleaved, so it is found by ``cfn_template_model.unmarked_wide_template_reason``
+  and returned in ``unreadable`` with the reason, a template ASH could not decode,
+  the same answer its marked twin gets;
 * a candidate neither parser reads that could still be a damaged template (a lenient
   read finds a Resources mapping, or the text carries a CloudFormation marker):
   returned in ``unparseable`` with the parse error, so the callers name it and count
@@ -71,6 +76,7 @@ from automated_security_helper.utils.cfn_template_model import (
     read_template_text,
     undecodable_candidate_is_a_template,
     unevaluable_template_reason,
+    unmarked_wide_template_reason,
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.link_exclusions import drop_ignored
@@ -93,8 +99,9 @@ class TemplateDiscovery:
     templates: List[Path] = field(default_factory=list)
     unmodelable: List[Tuple[Path, str]] = field(default_factory=list)
     refused: List[Tuple[str, str]] = field(default_factory=list)
-    #: Candidates ASH could not open (an OSError), and candidates that are not
-    #: UTF-8 whose text reads as a template, with the reason. Not known not to be
+    #: Candidates ASH could not open (an OSError), candidates that are not UTF-8
+    #: whose text reads as a template, and UTF-16 or UTF-32 templates written
+    #: without a byte-order mark, with the reason. Not known not to be
     #: CloudFormation, so a target that was not evaluated; named by the callers,
     #: and counted as something to scan by
     #: :func:`cloudformation_templates_nothing_to_scan_reason`, since only MISSING
@@ -228,6 +235,18 @@ def discover_templates(
             )
             continue
         except Exception as exc:  # nosec B112 - not YAML/JSON, so not a template
+            # A UTF-16 or UTF-32 template written without a byte-order mark
+            # decodes as UTF-8 without an error and reaches the parsers
+            # NUL-interleaved: a template ASH could not decode, so a failed
+            # target, as its marked twin is through the UnicodeDecodeError arm.
+            # Named as a template that could not be parsed, it was counted as
+            # nothing; dropped at TRACE before that, it vanished.
+            reason = unmarked_wide_template_reason(text) if text is not None else None
+            if reason is not None:
+                result.unreadable.append(
+                    (display_path(path, context.source_dir), reason)
+                )
+                continue
             # A file whose structure is a template but whose values the parser
             # could not build, or that is nested deeper than ASH reads, is a
             # failed target, as cfn-nag counts the same file; a file that is not

@@ -513,6 +513,33 @@ def test_an_unreadable_candidate_is_a_target_that_was_not_evaluated(ash_temp_pat
     assert any("could not be read" in e for e in scanner.errors), scanner.errors
 
 
+def test_a_utf16_template_without_a_byte_order_mark_is_a_failed_target(
+    ash_temp_path,
+):
+    """Written without a mark, a UTF-16 template decodes as UTF-8 without an error
+    (NUL is valid UTF-8) and reaches the parsers NUL-interleaved. At the previous
+    tip it was named as a template that could not be parsed, a WARNING counted as
+    nothing; it is a template ASH could not decode, so a failed target named in the
+    error record, as its marked twin is."""
+    repo = ash_temp_path / "repo"
+    repo.mkdir()
+    (repo / "stack.json").write_bytes(
+        '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16-le")
+    )
+    fake = RegionFaultCfnLint("no-such-template")
+    scanner = _scanner(repo)
+
+    _run(scanner, fake, repo)
+
+    assert fake.calls == []
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1
+    named = [e for e in scanner.errors if "did not evaluate" in e and "stack.json" in e]
+    assert len(named) == 1, scanner.errors
+    assert "UTF-16 text without a byte-order mark" in named[0]
+    assert not any("Skipped" in e and "stack.json" in e for e in scanner.errors)
+
+
 def test_a_non_utf8_candidate_with_no_template_in_it_is_skipped(ash_temp_path):
     """At the previous tip this file was a failed target with no structure read, so
     one Latin-1 locale file in a repository reported ERROR from every CloudFormation

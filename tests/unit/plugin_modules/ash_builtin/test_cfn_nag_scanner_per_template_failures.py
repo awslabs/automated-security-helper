@@ -288,6 +288,32 @@ def test_a_template_that_cannot_be_decoded_is_a_failed_unevaluated_target(
     assert "UnicodeDecodeError" in named[0]
 
 
+def test_a_utf16_template_without_a_byte_order_mark_is_a_failed_target(
+    scanner, deps_available, subprocess_double
+):
+    """Written without a mark, a UTF-16 template decodes as UTF-8 without an error
+    (NUL is valid UTF-8) and reaches the parsers NUL-interleaved. At the previous
+    tip it was named as a template that could not be parsed, a WARNING counted as
+    nothing; it is a template ASH could not decode, so a failed target named in the
+    error record, as its marked twin is and as cfn-lint and cfn-guard count it."""
+    (scanner.context.work_dir / "stack.json").write_bytes(
+        '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16-le")
+    )
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 2
+    assert scanner.targets_failed == 1
+    named = [e for e in scanner.errors if "did not evaluate" in e and "stack.json" in e]
+    assert len(named) == 1, scanner.errors
+    assert "UTF-16 text without a byte-order mark" in named[0]
+    assert any("stack.json" in t for t in scanner.unevaluated_targets)
+    assert not any("Skipped" in e and "stack.json" in e for e in scanner.errors)
+
+
 def test_a_non_utf8_file_with_no_template_in_it_is_skipped_and_named(
     scanner, deps_available, subprocess_double
 ):

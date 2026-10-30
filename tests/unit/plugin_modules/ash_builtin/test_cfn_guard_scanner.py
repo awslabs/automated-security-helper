@@ -1124,6 +1124,37 @@ class TestScan:
         assert scanner.targets_failed == 1
         assert any("could not be read" in e for e in scanner.errors), scanner.errors
 
+    def test_a_utf16_template_without_a_byte_order_mark_is_a_failed_target(
+        self, repo, rules_root
+    ):
+        """Written without a mark, a UTF-16 template decodes as UTF-8 without an
+        error and reaches the parsers NUL-interleaved. At the previous tip it was
+        named as a template that could not be parsed, a WARNING counted as nothing;
+        it is a template ASH could not decode, so a failed target named in the
+        error record, as its marked twin is."""
+        _fake_bundle(rules_root)
+        (repo / "templates" / "stack.json").write_bytes(
+            '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16-le")
+        )
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 19,
+                "stdout": CAPTURED_INSECURE.read_text(),
+                "stderr": "",
+            }
+
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert scanner.targets_attempted == 3
+        assert scanner.targets_failed == 1
+        named = [
+            e for e in scanner.errors if "did not evaluate" in e and "stack.json" in e
+        ]
+        assert len(named) == 1, scanner.errors
+        assert "UTF-16 text without a byte-order mark" in named[0]
+        assert not any("Skipped" in e and "stack.json" in e for e in scanner.errors)
+
     def test_a_non_utf8_candidate_with_no_template_in_it_is_skipped(
         self, repo, rules_root
     ):

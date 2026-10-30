@@ -537,18 +537,30 @@ _BYTE_ORDER_MARKS = (
 )
 
 
+#: The encodings a file holding NUL bytes may be in when it carries no byte-order
+#: mark, with the name a record gives each: UTF-16 and UTF-32, either byte order.
+#: To a UTF-8 reader such a file is NUL-interleaved text, not an error.
+_UNMARKED_WIDE_ENCODINGS = (
+    ("utf-16-le", "UTF-16"),
+    ("utf-16-be", "UTF-16"),
+    ("utf-32-le", "UTF-32"),
+    ("utf-32-be", "UTF-32"),
+)
+
+
 def _decode_leniently(data: bytes) -> list[str]:
     """``data`` as text, every reading it could be: by its byte-order mark when it
     has one; else as UTF-8 with every undecodable byte replaced, and, when the bytes
-    hold a NUL (what a UTF-16 file written without a mark looks like to a UTF-8
-    reader), as UTF-16 in both byte orders too. The caller takes any reading."""
+    hold a NUL (what a UTF-16 or UTF-32 file written without a mark looks like to a
+    UTF-8 reader), as each of those in both byte orders too
+    (:data:`_UNMARKED_WIDE_ENCODINGS`). The caller takes any reading."""
     for mark, encoding in _BYTE_ORDER_MARKS:
         if data.startswith(mark):
             return [data[len(mark) :].decode(encoding, errors="replace")]
     readings = [data.decode("utf-8", errors="replace")]
     if b"\x00" in data:
-        readings.append(data.decode("utf-16-le", errors="replace"))
-        readings.append(data.decode("utf-16-be", errors="replace"))
+        for encoding, _ in _UNMARKED_WIDE_ENCODINGS:
+            readings.append(data.decode(encoding, errors="replace"))
     return readings
 
 
@@ -567,9 +579,10 @@ def undecodable_candidate_is_a_template(
 
     The file is read again, under the scanned-tree rule, and decoded as well as it
     can be (:func:`_decode_leniently`: by its byte-order mark, else as UTF-8 with
-    replacement and, when it holds NUL bytes, as UTF-16 in both byte orders, since
-    a UTF-16 file written without a mark carries no readable marker under a UTF-8
-    reading); :func:`_could_be_a_template` then answers from any of the readings. True is a template ASH could not decode, which the scanners count
+    replacement and, when it holds NUL bytes, as UTF-16 and UTF-32 in both byte
+    orders, since such a file written without a mark carries no readable marker
+    under a UTF-8 reading); :func:`_could_be_a_template` then answers from any of
+    the readings. True is a template ASH could not decode, which the scanners count
     as a failed target and the tool-absent check as a template. False is a file that
     is not CloudFormation, skipped and named at WARNING, as a Helm chart or a
     tsconfig.json is. The scanners and the tool-absent check all ask here, so the
@@ -863,6 +876,37 @@ _LENIENT_READ_FAILURES = (
 )
 
 
+def unmarked_wide_template_reason(text: str) -> str | None:
+    """For text the template parser rejected: is it a UTF-16 or UTF-32 template
+    written without a byte-order mark, read as UTF-8?
+
+    Such a file decodes as UTF-8 without an error, since NUL is valid UTF-8, so its
+    text reaches the parsers NUL-interleaved and both reject it; read as what it is,
+    it is a template. The scanners record it as a template ASH could not decode, a
+    failed, unevaluated target named in the error record, the same answer the
+    UnicodeDecodeError route gives the marked twin (:func:`undecodable_candidate_is_a_template`).
+    Before this it was named as a template that could not be parsed and counted as
+    nothing, and before that dropped at TRACE: a template in the repository that no
+    scanner counted.
+
+    Returns the reason for the record, naming the encoding found, or None when the
+    text holds no NUL or no reading of it in :data:`_UNMARKED_WIDE_ENCODINGS` is a
+    template by :func:`_could_be_a_template`. A reading that still holds a NUL is
+    not text of that encoding and is not tried.
+    """
+    if "\x00" not in text:
+        return None
+    raw = text.encode("utf-8", errors="surrogatepass")
+    for encoding, label in _UNMARKED_WIDE_ENCODINGS:
+        reading = raw.decode(encoding, errors="replace")
+        if "\x00" not in reading and _could_be_a_template(reading):
+            return (
+                f"the file is {label} text without a byte-order mark, read as "
+                "UTF-8: a CloudFormation template ASH could not decode"
+            )
+    return None
+
+
 def _could_be_a_template(text: str) -> bool:
     """For a file the template parser rejected: could it be a damaged template?
 
@@ -878,20 +922,17 @@ def _could_be_a_template(text: str) -> bool:
     A file whose root is a sequence could not be one, marker or not
     (:func:`_root_is_a_sequence`).
 
-    A UTF-16 file written without a byte-order mark decodes as UTF-8 without an
-    error (NUL is valid UTF-8), so its text arrives here NUL-interleaved and carries
-    no readable marker; such a template was skipped as not CloudFormation where its
-    marked twin was named. Text that holds a NUL is read again as UTF-16 in either
-    byte order, and a reading that is a template counts.
+    A UTF-16 or UTF-32 file written without a byte-order mark decodes as UTF-8
+    without an error (NUL is valid UTF-8), so its text arrives here NUL-interleaved
+    and carries no readable marker; such a template was skipped as not
+    CloudFormation where its marked twin was named. Text that holds a NUL is read
+    again in those encodings (:func:`unmarked_wide_template_reason`), and a reading
+    that is a template counts. The scanners ask that function first and record such
+    a file as a template they could not decode, a failed target; the answer here
+    keeps the tool-absent check (:func:`holds_cloudformation_template`) in step.
     """
-    if "\x00" in text:
-        raw = text.encode("utf-8", errors="surrogatepass")
-        for encoding in ("utf-16-le", "utf-16-be"):
-            reading = raw.decode(encoding, errors="replace")
-            # A reading that still holds a NUL would come back here; it is not
-            # UTF-16 text of this order, so it is not tried.
-            if "\x00" not in reading and _could_be_a_template(reading):
-                return True
+    if unmarked_wide_template_reason(text) is not None:
+        return True
     if _root_is_a_sequence(text):
         return False
     loader = None
