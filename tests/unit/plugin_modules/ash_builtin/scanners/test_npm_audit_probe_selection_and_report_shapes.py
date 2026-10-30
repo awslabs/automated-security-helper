@@ -597,11 +597,15 @@ def test_a_url_ending_in_a_slash_gives_the_package_rule_id():
     """Trailing slashes are dropped before the last segment is read, so an
     advisory URL with one keeps its id; a URL with no segment left at all (the
     empty string used to be the rule id, shared by every such advisory) falls
-    back to the package's own id. A URL whose last segment is a collection, not
-    an advisory ("https://x/advisories/"), is read as that segment: no shape of
-    an advisory id is assumed."""
+    back to the package's own id, carrying the tool's advisory id when the entry
+    gives one. A URL whose last segment is a collection, not an advisory
+    ("https://x/advisories/"), is read as that segment: no shape of an advisory
+    id is assumed."""
     assert NpmAuditScanner._advisory_id("lodash", {"url": "///"}) == "npm-lodash"
     assert NpmAuditScanner._advisory_id("lodash", {"url": ""}) == "npm-lodash"
+    assert NpmAuditScanner._advisory_id("lodash", {"url": "", "source": 42}) == (
+        "npm-lodash-42"
+    )
     assert NpmAuditScanner._advisory_id("lodash", {"url": f"{GHSA}/"}) == (
         "GHSA-xvch-5gv4-984h"
     )
@@ -624,8 +628,33 @@ class TestTheNpmConversion:
             pytest.fail(f"an empty helpUri reached the SARIF model: {raised}")
 
         (rule,) = sarif.runs[0].tool.driver.rules
-        assert rule.id == "npm-minimist"
+        assert rule.id == "npm-minimist-1179"
         assert rule.helpUri is None
+
+    def test_two_url_less_advisories_on_one_package_are_two_rules(
+        self, scanner, monkeypatch
+    ):
+        """Both fell back to the package's own id, so the dedupe by (rule,
+        place) folded the second into the first and its severity, CWE and
+        CVSS were gone from the report. npm's ``source`` tells them apart."""
+        _unknown_versions(monkeypatch)
+        report = _npm_report(
+            [
+                _via("<0.2.4", url=None),
+                _via(">=1.0.0 <1.2.6", url=None, source=1180, severity="low"),
+            ]
+        )
+
+        sarif = scanner._convert_npm_audit_to_sarif(report, "/fake")
+
+        assert sorted(rule.id for rule in sarif.runs[0].tool.driver.rules) == [
+            "npm-minimist-1179",
+            "npm-minimist-1180",
+        ]
+        assert sorted(r.ruleId for r in sarif.runs[0].results) == [
+            "npm-minimist-1179",
+            "npm-minimist-1180",
+        ]
 
     def test_a_yarn_record_without_a_url_gets_a_rule_with_no_help_uri(self, scanner):
         record = {
@@ -648,6 +677,7 @@ class TestTheNpmConversion:
 
         (rule,) = sarif.runs[0].tool.driver.rules
         assert rule.helpUri is None
+        assert rule.id == "npm-lodash-1065", "the record's own id tells it apart"
 
     def test_an_entry_that_is_not_an_object_is_named(self, scanner):
         report = {"vulnerabilities": {"left-pad": "not an object"}, "metadata": {}}
@@ -787,6 +817,31 @@ def test_a_linked_lockfile_is_placed_where_it_sits(tmp_path):
 
     assert rel == "a/package-lock.json"
     assert index is not None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+def test_a_root_named_through_a_link_still_places_its_lockfile(tmp_path):
+    """The walk hands the scanner the lockfile's real path while the target
+    was named through a link: the lexical compare raised, the context was
+    (None, None), and every result of the lockfile lost its package identity
+    with the range exclusion silently off. The resolved paths place it."""
+    real = tmp_path / "repo"
+    (real / "a").mkdir(parents=True)
+    lockfile = real / "a" / "package-lock.json"
+    lockfile.write_text(json.dumps({"lockfileVersion": 3, "packages": {}}))
+    alias = tmp_path / "alias"
+    os.symlink(real, alias)
+
+    rel, index = NpmAuditScanner._lock_context(lockfile, alias)
+
+    assert rel == "a/package-lock.json"
+    assert index is not None
+    # The lexical answer still wins where it exists: a lockfile named through
+    # the alias is placed under the alias, not under the real root's spelling.
+    through_alias = alias / "a" / "package-lock.json"
+    assert npm_audit_scanner._shown_lockfile(through_alias, alias) == (
+        "a/package-lock.json"
+    )
 
 
 class TestTheScanLoop:

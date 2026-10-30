@@ -147,6 +147,22 @@ def _usable_cvss_score(cvss: Any) -> float | None:
 # The userinfo of a URL (``https://user:token@host``), masked in log excerpts.
 _URL_USERINFO = re.compile(r"(://)[^\s/@]+@")
 
+
+def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
+    """``text``, a tool's own words, as it may be shown or recorded.
+
+    Redacted of ``values`` (the env-read values, ``shown_tool_stderr``) and
+    then with any URL's userinfo masked whole. A registry URL a tool quotes
+    can carry its credentials inline (``https://user:token@host/``), and the
+    user part is not one of the env-read values, so the redaction alone showed
+    it. The mask ran on the debug summary's first stderr line only; the audit
+    failure's reason, the yarn error detail and a raised exception's text
+    reached ScannerError and the persisted results with the user part shown.
+    Every tool-text path goes through here.
+    """
+    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values))
+
+
 # One comparator of an npm advisory range: an operator, a version and an
 # optional prerelease or build suffix.
 _RANGE_COMPARATOR = re.compile(
@@ -273,18 +289,28 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
 
     The place a yarn or pnpm result came from: those tools name no install
     path, so without it findings from two projects for one package, version
-    and advisory were identical. Lexical, never resolved: a linked lockfile
-    is reported where it sits in the tree.
+    and advisory were identical. Lexical first: a linked lockfile is reported
+    where it sits in the tree. Resolved only as a fallback: when the two paths
+    reached the scanner in different spellings of one tree (a root named
+    through a link while the walk returned the real path, or the reverse), the
+    lexical compare raised, this answered None, and every result of the
+    lockfile lost its package identity while the range exclusion was silently
+    off; both sides resolved place it.
     """
     if lock_file is None:
         return None
+    root = Path(target_path)
     try:
         return (
             Path(os.path.abspath(lock_file))
-            .relative_to(Path(os.path.abspath(target_path)))
+            .relative_to(Path(os.path.abspath(root)))
             .as_posix()
         )
     except ValueError:
+        pass
+    try:
+        return Path(lock_file).resolve().relative_to(root.resolve()).as_posix()
+    except (ValueError, OSError):
         return None
 
 
@@ -820,10 +846,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         (None, None) when there is no lockfile, it is not an npm lockfile, or it
         is not under the scan root: node paths then cannot be tied to a place.
 
-        The relative path is lexical (absolute, not resolved): a lockfile that
-        is a link inside the tree is reported where it sits, with its
+        The relative path is lexical first (absolute, not resolved): a lockfile
+        that is a link inside the tree is reported where it sits, with its
         ``package_path`` under the link's directory, not the target's. The
-        index reads the lockfile through the link.
+        index reads the lockfile through the link. Resolved only when the
+        lexical compare fails, for a root and a lockfile that spell one tree
+        two ways (``_shown_lockfile``).
         """
         if lock_file is None or Path(lock_file).name not in NPM_LOCKFILE_NAMES:
             return None, None
@@ -959,7 +987,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 if values is None:
                     reason = "(the tool's error text is not shown)"
                 elif reason:
-                    reason = shown_tool_stderr(reason, values).strip()
+                    reason = _shown_tool_text(reason, values).strip()
                 return (
                     f"{binary} audit reported an error: {reason or 'no detail given'}"
                 )
@@ -1023,7 +1051,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             if values is None
             else [
                 line.strip()
-                for line in shown_tool_stderr(
+                for line in _shown_tool_text(
                     str(result.get("stderr") or ""), values
                 ).splitlines()
                 if line.strip() and "complete log of this run" not in line
@@ -1111,7 +1139,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         raw_text = str(text or "")
 
         def _shown(piece: str) -> str:
-            return shown_tool_stderr(piece, values)
+            return _shown_tool_text(piece, values)
 
         # The decoded stream, in order: ("event", data + its line's own
         # terminator) and ("plain", a run of raw lines with their own
@@ -1477,7 +1505,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # -- and only when the detail answered nothing, because it is
                 # a second redaction pass over the same text and nobody reads
                 # it when the detail named the failure.
-                fallback = shown_tool_stderr(problem_text, values).strip().splitlines()
+                fallback = _shown_tool_text(problem_text, values).strip().splitlines()
                 reason = fallback[0].strip()[:300] if fallback else ""
             if detail:
                 reason = f"{reason} / {detail}"[:300]
@@ -1567,7 +1595,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             pkg_name = record["package"]
             severity = str(record["severity"])
             level = _SEVERITY_LEVEL.get(severity, "warning")
-            vuln_id = self._advisory_id(pkg_name, {"url": record["url"]})
+            vuln_id = self._advisory_id(
+                pkg_name, {"url": record["url"], "source": record["id"]}
+            )
             title = record["title"] or f"Vulnerability in {pkg_name}"
             score = _usable_cvss_score(record["cvss"])
             grade = {} if score is not None else _grade_properties(severity)
@@ -1722,11 +1752,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         The URL's last path segment, trailing slashes dropped: a URL ending in
         ``/`` gave the empty string, and every such advisory then shared one
-        empty-id rule. With no segment left, the package's own id.
+        empty-id rule. With no segment left, the package's own id, carrying the
+        tool's advisory id (npm's ``source``; a yarn or pnpm record's id, handed
+        in as ``source``) when it gives one: two URL-less advisories on one
+        package fell back to the same id, and the dedupe by (rule, place) folded
+        the second into the first, dropping its severity, CWE and CVSS.
         """
         url = str(via.get("url") or "")
         segment = url.rstrip("/").split("/")[-1] if url else ""
-        return segment or f"npm-{pkg_name}"
+        if segment:
+            return segment
+        source = via.get("source")
+        if source is None or source == "":
+            return f"npm-{pkg_name}"
+        return f"npm-{pkg_name}-{source}"
 
     def _root_advisories(
         self,
@@ -2352,12 +2391,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             if result.get(flag)
         )
         if values is not None and stderr.strip():
-            shown = shown_tool_stderr(stderr, values).strip().splitlines()
+            # Redacted and with any URL's userinfo masked (_shown_tool_text),
+            # as every other tool text shown or recorded here.
+            shown = _shown_tool_text(stderr, values).strip().splitlines()
             if shown:
-                # A registry URL on stderr can carry its credentials inline
-                # (``https://user:token@host/``), and the user part is not one
-                # of the env-read values, so the whole userinfo is masked.
-                first = _URL_USERINFO.sub(r"\1***@", shown[0].strip())
+                first = shown[0].strip()
                 parts.append(f"stderr starts: {first[:200]}")
         return "; ".join(parts)
 
@@ -2750,8 +2788,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 # the excerpt degrades to its value-free
                                 # placeholder.
                                 printed = (
-                                    shown_tool_stderr(
-                                        str(version_result.get("stdout") or ""),
+                                    _shown_tool_text(
+                                        version_result.get("stdout") or "",
                                         record_values,
                                     ).strip()[:80]
                                     if record_values is not None
@@ -2895,7 +2933,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # like every other tool text here, and dropped when
                         # there are no values to redact with (the hook raised).
                         described = (
-                            shown_tool_stderr(str(e), record_values).strip()
+                            _shown_tool_text(e, record_values).strip()
                             if record_values is not None
                             else "(text not shown)"
                         )

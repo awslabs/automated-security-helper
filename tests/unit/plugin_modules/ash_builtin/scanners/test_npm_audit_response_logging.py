@@ -153,6 +153,54 @@ def test_the_summary_masks_a_registry_urls_credentials():
     assert TOKEN not in summary
 
 
+def test_an_audit_errors_reason_masks_a_registry_urls_credentials():
+    """npm quotes the registry URL in the error document's message, and the
+    reason went into the failure record with only the env-read values
+    redacted, so the URL's user part stayed in the report. The userinfo is
+    masked whole, as the debug summary's excerpt already was."""
+    reason = NpmAuditScanner._audit_failure(
+        "npm",
+        {"returncode": 1},
+        {
+            "message": f"request to https://user:{TOKEN}@registry.example/ failed",
+            "error": {"code": "E503", "summary": "the registry answered 503"},
+        },
+        (TOKEN,),
+    )
+
+    assert reason is not None
+    assert "https://***@registry.example/" in reason
+    assert "user:" not in reason
+    assert TOKEN not in reason
+    assert "E503" in reason
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(
+            '{"type":"error","data":"Error: request to '
+            f'https://user:{TOKEN}@registry.example/ failed"}}\n',
+            id="a yarn 1 error event",
+        ),
+        pytest.param(
+            f"Error: request to https://user:{TOKEN}@registry.example/ failed\n"
+            "    at fetch (/node_modules/yarn/lib/cli.js:1:2)\n",
+            id="a plain error line",
+        ),
+    ],
+)
+def test_the_yarn_error_detail_masks_a_registry_urls_credentials(text):
+    """Both arms of the detail (an error event's data, a plain error line)
+    print the tool's text into the failure record; the URL's userinfo is
+    masked whole on each."""
+    detail = NpmAuditScanner._yarn_error_detail(text, (TOKEN,))
+
+    assert "https://***@registry.example/" in detail
+    assert "user:" not in detail
+    assert TOKEN not in detail
+
+
 def test_the_response_is_summarized_redacted_at_debug(context, messages):
     stderr = f"npm WARN token {TOKEN} rejected\nsecond line\n"
 
