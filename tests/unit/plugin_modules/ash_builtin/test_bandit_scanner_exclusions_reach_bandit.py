@@ -502,7 +502,10 @@ def test_a_target_whose_path_holds_a_comma_gets_no_ini_entries(tmp_path, caplog)
 
     with caplog.at_level(logging.WARNING):
         assert scanner._ini_excludes(comma) == []
-    assert not caplog.records, [r.getMessage() for r in caplog.records]
+    # Only the warnings count: caplog also holds the DEBUG lines the scanner's
+    # construction logs (its uv tool set-up), which are not about the entries.
+    blamed = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert not blamed, blamed
     # The same file does yield entries under a target it can anchor at.
     assert scanner._ini_excludes(plain), "the control target must get entries"
 
