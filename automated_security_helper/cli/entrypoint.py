@@ -746,7 +746,7 @@ def _run_module_app(app: Callable[..., Any]) -> None:
     # vendored click package has no Abort, so importing it from there raised an
     # ImportError that the failure path turned into exit 1 for every module app.
     from typer import Abort
-    from typer._click.exceptions import UsageError
+    from typer._click.exceptions import ClickException, UsageError
 
     from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 
@@ -768,6 +768,15 @@ def _run_module_app(app: Callable[..., Any]) -> None:
     except Abort:
         _emit("Aborted!\n", getattr(sys, "stderr", None))
         raise SystemExit(1) from None
+    except ClickException as exc:
+        # Every other click error (a command's own ClickException, a
+        # FileError): outside standalone mode click raises it to here, where
+        # the standalone handling would have printed its one "Error:" line and
+        # exited with its code. Printed so, shown, not obeyed: the message can
+        # quote a path or a value from the scanned tree. It is not a crash to
+        # report with a traceback.
+        _emit(_shown(f"Error: {exc.format_message()}\n"), getattr(sys, "stderr", None))
+        raise SystemExit(exc.exit_code) from None
     code = result if isinstance(result, int) and not isinstance(result, bool) else 0
     raise SystemExit(code)
 

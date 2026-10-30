@@ -472,3 +472,29 @@ def test_a_module_app_that_returns_exits_zero(monkeypatch):
         entrypoint.run_module_app(_demo_app())
 
     assert exit_info.value.code == 0
+
+
+def test_a_commands_click_error_under_a_module_app_is_one_line(monkeypatch, capsys):
+    """Outside standalone mode click raises a command's ClickException to the
+    caller; only usage errors were caught, so a FileError or a command's own
+    ClickException became a full traceback where standalone mode printed one
+    "Error:" line and exited with the exception's code."""
+    from typer._click.exceptions import ClickException
+
+    app = typer.Typer()
+
+    @app.command()
+    def run():
+        raise ClickException("the input \x1b[31mcannot\x1b[0m be read")
+
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        entrypoint.run_module_app(app)
+
+    assert exit_info.value.code == 1
+    output = capsys.readouterr()
+    assert "Error: the input" in output.err
+    assert "Traceback" not in output.out + output.err
+    assert entrypoint._BANNER not in output.out + output.err
+    assert "\x1b[31m" not in output.out + output.err
