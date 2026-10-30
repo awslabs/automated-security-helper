@@ -10331,35 +10331,43 @@ def _stop_server(process: subprocess.Popen) -> None:
 
 @pytest.mark.parametrize("tool", ["set_source_zip_chunk", "select_profile"])
 @pytest.mark.e2e
-def test_a_session_write_is_refused_as_busy_while_the_sweep_holds_the_session(
+def test_a_session_write_during_the_sweeps_wait_for_the_lock_is_accepted(
     tmp_path: Path, tool: str
 ) -> None:
-    """mcp-server.md (Deliver source to the server).
+    """mcp-server.md (Clean up).
 
     A stateless streamable-HTTP server with a one-second ``--session-workspace-ttl``
     has a session that bound a profile and sent an upload's first chunk; the session
     then goes unused past the TTL. Stateless, because the server holds no session as
     issued, so the sweep is what ends an unused one; a stateful server keeps a session
     it still holds (the held-session test below). Another server holds the lock a
-    sweep takes before it removes a session, so the sweep that a new session's first
-    request sets off holds the stale session while it waits for the lock. A
-    ``set_source_zip_chunk`` or a ``select_profile`` the stale session sends during
-    that wait must be refused with ``success`` false and ``error_type``
-    ``session_workspace_busy``. The control is that the same calls succeeded before
-    the session went stale.
+    sweep takes before it removes a session. The sweep that a new session's first
+    request sets off waits for that lock holding no session: the lock is taken
+    before any session is, so a ``set_source_zip_chunk`` or a ``select_profile`` the
+    stale session sends during the wait must be accepted, and the write counts as a
+    use. The sweep then gives the lock up within about a second and removes nothing,
+    so the stale session's workspace is still there once the sweep has returned.
+
+    The page's ``session_workspace_busy`` refusal is the removal window, which opens
+    only once the lock is held; no deterministic probe of it from outside the
+    server exists, so that sentence is pinned by its words alone here.
     """
+    assert_on_page(MCP_SERVER, _SWEEP_LOCK_WAIT_IS_BOUNDED)
     assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
     process, port, lines, root, _profile = _sweep_server(tmp_path, stateless=True)
     try:
         stale = _session_with_a_workspace(port, "page-claims-upload", _STALE_SESSION)
-        assert _workspace(root, stale).is_dir()
+        workspace = _workspace(root, stale)
+        assert workspace.is_dir()
         with _another_servers_lock(root, tmp_path):
             time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-            sweeping, _ = _start_a_session_in_the_background(port, _SWEEPING_SESSION)
+            sweeping, result = _start_a_session_in_the_background(
+                port, _SWEEPING_SESSION
+            )
             time.sleep(0.3)
             if tool == "set_source_zip_chunk":
                 chunk = base64.b64encode(b"more").decode("ascii")
-                refused = stale.tool(
+                accepted = stale.tool(
                     tool,
                     upload_id="page-claims-upload",
                     sequence=1,
@@ -10367,13 +10375,18 @@ def test_a_session_write_is_refused_as_busy_while_the_sweep_holds_the_session(
                     last=True,
                 )
             else:
-                refused = stale.tool(tool, profile_name="page-claims")
-            sweeping.join(timeout=90)
+                accepted = stale.tool(tool, profile_name="page-claims")
+            sweeping.join(timeout=_SWEEP_LOCK_WAIT_SECONDS + 3)
+            assert not sweeping.is_alive(), (
+                "the request that set off the sweep was not answered within "
+                f"{_SWEEP_LOCK_WAIT_SECONDS + 3} s while another server held the lock"
+            )
+            assert "error" not in result, result
+            assert workspace.is_dir(), f"the sweep removed {workspace} without the lock"
     finally:
         _stop_server(process)
 
-    assert refused.get("success") is False, refused
-    assert refused.get("error_type") == "session_workspace_busy", refused
+    assert accepted.get("success") is True, accepted
 
 
 @pytest.mark.e2e
