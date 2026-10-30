@@ -565,8 +565,17 @@ def _finalize_staged(
     # has it: without it Windows opens the descriptor in text mode, the read folds
     # CR LF and stops at the first 0x1A, and every executable or archive, which
     # holds both, hashed short of its bytes and was refused as replaced.
-    fd = os.open(staging, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+    # O_NONBLOCK: a FIFO renamed over the staging name would block this open
+    # before the digest check could refuse it; the descriptor is asked what it
+    # is before anything is read from it.
+    fd = os.open(staging, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ToolDownloadIntegrityError(
+                f"The file staged for {target} is not a regular file. Something "
+                "replaced it before installing it; refusing to put it at the "
+                "install path."
+            )
         staged = _sha256_of_open_file(fd)
         if staged != expected_sha256:
             # Not unlinked here: both callers already remove the staging file on
@@ -705,7 +714,10 @@ def make_executable(file_path: Path) -> None:
         return
     ASH_LOGGER.info(f"Making {file_path} executable")
     try:
-        fd = os.open(file_path, os.O_RDONLY | _O_NOFOLLOW)
+        # O_NONBLOCK: a FIFO at the install path would block this open; opened,
+        # the descriptor says what it is and anything but a regular file is
+        # refused below.
+        fd = os.open(file_path, os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK)
     except OSError as error:
         if error.errno in (errno.ELOOP, getattr(errno, "EMLINK", errno.ELOOP)):
             ASH_LOGGER.warning(
@@ -715,7 +727,13 @@ def make_executable(file_path: Path) -> None:
             return
         raise
     try:
-        os.fchmod(fd, os.fstat(fd).st_mode | 0o111)  # Add execute permission
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            ASH_LOGGER.warning(
+                f"Refusing to change the mode of {file_path}: it is not a regular file"
+            )
+            return
+        os.fchmod(fd, info.st_mode | 0o111)  # Add execute permission
     finally:
         os.close(fd)
 
@@ -949,7 +967,9 @@ def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
             )
             return None
     try:
-        fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+        # O_NONBLOCK: a FIFO swapped in at the receipt path after the is_file
+        # check would block this open; the regular-file check below refuses it.
+        fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
     except OSError as e:
         ASH_LOGGER.debug(f"Ignoring unreadable install receipt at {path} ({e})")
         return None
