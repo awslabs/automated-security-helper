@@ -332,6 +332,82 @@ def test_a_gitfile_is_followed_to_the_git_dir_it_names(tmp_path):
 
 
 @needs_fifos
+def test_a_gitfile_record_is_taken_as_git_takes_it_with_its_trailing_space(tmp_path):
+    """git takes everything after ``gitdir: `` and drops only trailing carriage
+    returns and newlines, so ``gitdir: <tmp>/admin `` names the directory whose
+    name ends in a space. The check stripped the space and looked at ``admin``,
+    which is plain, while git would wait on the FIFO in ``admin ``."""
+    plain = tmp_path / "admin"
+    plain.mkdir()
+    (plain / "HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+    spaced = tmp_path / "admin "
+    spaced.mkdir()
+    os.mkfifo(spaced / "HEAD")
+    gitfile = tmp_path / "wt" / ".git"
+    gitfile.parent.mkdir()
+    gitfile.write_text(f"gitdir: {spaced.as_posix()}\n", encoding="utf-8")
+
+    assert not _git_entry_is_plain(gitfile)
+
+
+def test_a_gitfile_without_gits_exact_prefix_is_not_plain(tmp_path):
+    """``gitdir:<path>`` with no space is a file git refuses as an invalid gitfile,
+    so git opens nothing through it; it counts as not plain, the side that errs
+    toward nested, as ``_marks_a_checkout`` counts it."""
+    admin = tmp_path / "admin"
+    admin.mkdir()
+    (admin / "HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+    gitfile = tmp_path / "wt" / ".git"
+    gitfile.parent.mkdir()
+    gitfile.write_text(f"gitdir:{admin.as_posix()}\n", encoding="utf-8")
+
+    assert not _git_entry_is_plain(gitfile)
+
+
+@needs_fifos
+def test_the_common_dirs_config_is_checked_through_commondir(tmp_path):
+    """A linked worktree's admin dir holds no config: git's repository-format check
+    reads ``<commondir>/config``, which the admin dir's own three files never
+    covered, so a FIFO there held git_common_dir for git's timeout."""
+    common = tmp_path / "common"
+    admin = common / "worktrees" / "x"
+    admin.mkdir(parents=True)
+    (admin / "HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+    (admin / "commondir").write_text("../..\n", encoding="utf-8")
+    os.mkfifo(common / "config")
+    gitfile = tmp_path / "wt" / ".git"
+    gitfile.parent.mkdir()
+    gitfile.write_text(f"gitdir: {admin.as_posix()}\n", encoding="utf-8")
+
+    assert not _git_entry_is_plain(gitfile)
+
+
+@needs_fifos
+def test_a_git_directory_with_a_commondir_file_is_checked_the_same_way(tmp_path):
+    common = tmp_path / "common"
+    common.mkdir()
+    os.mkfifo(common / "config")
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (repo / ".git" / "commondir").write_text("../../common\n", encoding="utf-8")
+
+    assert not _git_entry_is_plain(repo / ".git")
+
+
+def test_control_a_commondir_naming_a_plain_common_dir_is_plain(tmp_path):
+    common = tmp_path / "common"
+    common.mkdir()
+    (common / "config").write_text("", encoding="utf-8")
+    admin = common / "worktrees" / "x"
+    admin.mkdir(parents=True)
+    (admin / "HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+    (admin / "commondir").write_text("../..\n", encoding="utf-8")
+
+    assert _git_entry_is_plain(admin)
+
+
+@needs_fifos
 def test_a_reftable_stack_is_checked_as_packed_refs_is(tmp_path):
     common = _common_with_a_branch(tmp_path)
     (common / "reftable").mkdir()
