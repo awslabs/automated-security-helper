@@ -86,12 +86,16 @@ def _warnings_naming(handler: _Collect, session_id: str) -> List[str]:
 def test_a_removal_that_raises_is_named_and_the_sweep_goes_on(
     root, monkeypatch, logged
 ) -> None:
-    failing = _workspace(root, FAILING)
-    other = _workspace(root, OTHER)
+    workspaces = {FAILING: _workspace(root, FAILING), OTHER: _workspace(root, OTHER)}
     real = sessions._remove_stale_session_state
+    failed: List[str] = []
 
     def failing_removal(root_, session_id, sandbox, cutoff):
-        if session_id == FAILING:
+        # The FIRST entry the sweep visits fails, whatever its name: the sweep
+        # walks the root in the filesystem's order, so a sweep that stopped at
+        # the failure would pass whenever the other entry happened to come first.
+        if not failed:
+            failed.append(session_id)
             raise ValueError("the registry refused this name")
         return real(root_, session_id, sandbox, cutoff)
 
@@ -100,10 +104,14 @@ def test_a_removal_that_raises_is_named_and_the_sweep_goes_on(
     # A cutoff in the future: both workspaces are older than the TTL.
     removed = sessions.sweep_stale_workspaces(1.0, now=time.time() + 3600)
 
-    assert removed == [OTHER], "the sweep did not continue past the failing entry"
-    assert not other.exists()
-    assert failing.is_dir(), "the failing workspace was not kept for the next pass"
-    named = _warnings_naming(logged, FAILING)
+    assert failed, "no removal was attempted"
+    (survivor,) = set(workspaces) - {failed[0]}
+    assert removed == [survivor], "the sweep did not continue past the failing entry"
+    assert not workspaces[survivor].exists()
+    assert workspaces[failed[0]].is_dir(), (
+        "the failing workspace was not kept for the next pass"
+    )
+    named = _warnings_naming(logged, failed[0])
     assert len(named) == 1, f"expected one warning naming the session; got {named}"
     assert "next pass" in named[0]
 
