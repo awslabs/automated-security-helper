@@ -416,7 +416,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
         if not configured or not isinstance(configured, str):
             return None
-        if "://" in configured or _is_registry_name(configured):
+        if self._passes_through_as_written(configured):
             return None
         source_dir = getattr(self.context, "source_dir", None)
         if source_dir is None:
@@ -445,13 +445,28 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         return self._option_key("config")
 
     def _configured_registry_entry(self) -> Optional[str]:
-        """``options.config`` when it names a registry entry or a URL, else None."""
+        """``options.config`` when it is passed to the tool as written (a registry
+        entry, a URL, or one of the tool's own spellings), else None."""
         configured = getattr(self.config.options, "config", None)  # type: ignore[union-attr]
         if not configured or not isinstance(configured, str):
             return None
-        if "://" in configured or _is_registry_name(configured):
+        if self._passes_through_as_written(configured):
             return configured
         return None
+
+    def _passes_through_as_written(self, configured: str) -> bool:
+        """Whether a configured value is one the tool reads itself, not a path ASH
+        resolves: a URL, a registry entry name (``_is_registry_name``), or a bare
+        token the tool knows (``_is_tool_spelling``: semgrep's ``policy``,
+        ``supply-chain`` and ``secrets`` products, a bare ruleset name) that names
+        no file or directory in the source tree. A bare token that does name one
+        there is a path, and goes through path trust like any other (the source
+        directory is the tool's working directory, where the tool itself would read
+        the name as that path)."""
+        if "://" in configured or _is_registry_name(configured):
+            return True
+        source_dir = getattr(self.context, "source_dir", None)
+        return _is_tool_spelling(configured, source_dir)
 
     def _configure_offline_mode(self) -> None:
         """Set --metrics off (when supported), then the rules: the operator's local
@@ -1027,6 +1042,32 @@ def _is_registry_name(configured: str) -> bool:
     """Whether ``configured`` is a registry entry name (``auto``, ``p/...``, ``r/...``,
     ``s/...``)."""
     return configured == "auto" or configured.startswith(_REGISTRY_PREFIXES)
+
+
+#: Suffixes that make a bare token a rule FILE name rather than a tool spelling.
+_RULE_FILE_SUFFIXES = (".yaml", ".yml")
+
+
+def _is_tool_spelling(configured: str, source_dir: Optional[Path]) -> bool:
+    """Whether ``configured`` is a bare token the tool reads itself, not a path.
+
+    semgrep's ``--config`` takes, beside paths and URLs and the registry entries
+    ``_is_registry_name`` knows, product names such as ``policy``, ``supply-chain``
+    and ``secrets``, and the set grows with the tool. ASH does not keep that list:
+    a token with no path separator and no rule-file suffix is read as the tool's
+    own spelling and passed through, as the base passed every value, UNLESS a file
+    or directory of that name exists in the source tree, where the tool, run in the
+    source directory, would read the token as that path; that case is a path and
+    goes through path trust, so a repository cannot smuggle its own rules in under
+    a bare name.
+    """
+    if not configured or "/" in configured or "\\" in configured:
+        return False
+    if configured.lower().endswith(_RULE_FILE_SUFFIXES):
+        return False
+    if source_dir is not None and Path(source_dir).joinpath(configured).exists():
+        return False
+    return True
 
 
 def _pattern_anchor(target_abs: Path) -> Path:

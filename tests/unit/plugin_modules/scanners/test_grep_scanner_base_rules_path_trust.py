@@ -287,6 +287,64 @@ def test_online_passes_a_registry_name_as_written(
 
 
 @pytest.mark.parametrize(
+    "spelling", ["policy", "supply-chain", "secrets", "my-ruleset"]
+)
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_online_passes_a_bare_tool_spelling_as_written(
+    scanner_cls,
+    config_cls,
+    options_cls,
+    cache_env,
+    test_plugin_context,
+    monkeypatch,
+    spelling,
+):
+    """A bare token with no path separator and no rule-file suffix is one of the
+    tool's own spellings (semgrep's product names, a ruleset name) and reaches the
+    tool untouched, as every value did at the base.
+
+    Fails at the tip that read every non-registry value as a local path: such a
+    token resolved to nothing and declined the scanner.
+    """
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(options=options_cls(offline=False, config=spelling)),
+    )
+
+    assert scanner.dependency_unavailable_reason is None
+    assert _configs(scanner) == [spelling]
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_a_bare_name_that_exists_in_the_source_tree_is_a_path_and_is_refused(
+    scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
+):
+    """The control for the pass-through: a bare token that names a directory in
+    the source tree is what the tool, run there, would read as that directory, so
+    it is a path, and an in-tree path is refused; the scanner declines."""
+    source_dir = Path(test_plugin_context.source_dir)
+    (source_dir / "rules").mkdir(parents=True, exist_ok=True)
+    (source_dir / "rules" / "x.yaml").write_text(RULE, encoding="utf-8")
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=test_plugin_context,
+        config=config_cls(options=options_cls(offline=False, config="rules")),
+    )
+
+    _declined_for_its_config(scanner, scanner.config.name)
+    assert "rules" not in _configs(scanner)
+
+
+@pytest.mark.parametrize(
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )
 def test_online_with_nothing_configured_runs_the_default_rulesets(
