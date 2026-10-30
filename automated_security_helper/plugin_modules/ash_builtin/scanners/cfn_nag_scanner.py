@@ -150,13 +150,18 @@ def _cfn_nag_sarif_text(stdout: str) -> tuple[str, int]:
 #: handed to ``puts`` as its MESSAGE, with no class name: "wrong number of
 #: arguments (given 1, expected 2)" was the whole line the arity defect left
 #: (tests/integration/scanners/test_cfn_nag_custom_rules.py measured it). A class
-#: name appears only in the inspect form (``#<ArgumentError: ...>``) or the
-#: uncaught form (``... (ArgumentError)``). All three are read; a bare class name
-#: elsewhere in a line (a gem's deprecation warning naming one) is not, and a Ruby
-#: ``warning:`` line never is.
+#: name appears in the inspect form (``#<ArgumentError: ...>``), the uncaught form
+#: (``... (ArgumentError)``), or a custom rule's own message (``MyRuleError: no such
+#: attribute``). All of these are read: a line that names an exception class
+#: anywhere counts, unless it is a Ruby or gem ``warning:`` line (a deprecation
+#: warning naming a class is not a raise). A custom rule that raises with a message
+#: naming no class and matching none of the standard openings is still missed.
 _RUBY_EXCEPTION_FORMS = re.compile(
     r"#<[A-Z][A-Za-z0-9:]*(?:Error|Exception)\b|\([A-Z][A-Za-z0-9:]*(?:Error|Exception)\)\s*$"
 )
+#: A Ruby exception class name anywhere in a line (the base's reading, kept for a
+#: custom rule's raise; a ``warning:`` line is excluded before this is applied).
+_RUBY_EXCEPTION_CLASS = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Error|Exception)\b")
 #: How Ruby's standard exceptions begin their messages, lowercased.
 _RUBY_EXCEPTION_MESSAGES = (
     "wrong number of arguments",
@@ -185,8 +190,10 @@ def _rule_exception_lines(stderr: str) -> List[str]:
         if not stripped or "warning:" in stripped:
             continue
         lowered = stripped.lower()
-        if _RUBY_EXCEPTION_FORMS.search(stripped) or any(
-            opening in lowered for opening in _RUBY_EXCEPTION_MESSAGES
+        if (
+            _RUBY_EXCEPTION_FORMS.search(stripped)
+            or _RUBY_EXCEPTION_CLASS.search(stripped)
+            or any(opening in lowered for opening in _RUBY_EXCEPTION_MESSAGES)
         ):
             raised.append(stripped)
     return raised

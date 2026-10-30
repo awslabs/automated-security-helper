@@ -172,13 +172,20 @@ def test_rule_exception_lines_read_the_inspect_and_uncaught_forms_too():
     assert lines("#<CfnNag::RuleRepoError: no such repo>\n")
 
 
-def test_rule_exception_lines_ignore_warnings_and_bare_class_names():
-    """A gem's deprecation warning naming an exception class is not a raise."""
+def test_rule_exception_lines_ignore_warnings_but_read_class_names():
+    """A gem's deprecation warning naming an exception class is not a raise, but a
+    custom rule's own traceback line, which names its class and a message cfn_nag
+    never wrote, is one. At the previous tip the class-name form was dropped
+    with the warnings, so such a rule read as a fully evaluated template."""
     lines = cfn_nag_scanner._rule_exception_lines
     assert lines("warning: constant ::Fixnum is deprecated\n") == []
     assert lines("/gems/x.rb:3: warning: ArgumentError will be raised in 4.0\n") == []
-    assert lines("Loaded RuntimeError-safe rule set\n") == []
+    assert lines("/gems/y.rb:8: warning: DeprecationError in 5.0\n") == []
     assert lines("\n   \n") == []
+    assert lines("MyRuleError: no such attribute\n") == [
+        "MyRuleError: no such attribute"
+    ]
+    assert lines("custom_rule.rb:12:in `audit_impl': MyRuleException\n")
 
 
 def test_a_rule_that_raised_marks_the_template_unevaluated_and_keeps_findings(
@@ -199,6 +206,35 @@ def test_a_rule_that_raised_marks_the_template_unevaluated_and_keeps_findings(
     assert scanner.targets_failed == 1
     assert any("raised" in line for line in scanner.errors), scanner.errors
     assert scanner.unevaluated_targets, "the template is not recorded as unevaluated"
+
+
+@pytest.mark.parametrize(
+    "stderr, failed",
+    [
+        pytest.param("MyRuleError: no such attribute\n", 1, id="class-name-raise"),
+        pytest.param(
+            "/gems/y.rb:8: warning: DeprecationError in 5.0\n", 0, id="warning"
+        ),
+    ],
+)
+def test_a_class_named_raise_fails_the_template_but_a_warning_does_not(
+    scanner, deps_available, subprocess_double, stderr, failed
+):
+    """A custom rule's own traceback line names its class; a gem's deprecation
+    warning naming a class is noise. At the previous tip both were ignored."""
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    subprocess_double.return_value = {
+        "stdout": _sarif(),
+        "stderr": stderr,
+        "returncode": 0,
+    }
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == failed, scanner.errors
+    assert bool(scanner.unevaluated_targets) is bool(failed)
 
 
 def test_an_unwritable_results_directory_fails_only_that_template(
