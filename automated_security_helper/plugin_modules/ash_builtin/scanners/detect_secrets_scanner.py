@@ -2141,6 +2141,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         malformed left ``_baseline_real`` set but no document, and the anchor
         still moved to the file's directory, where it met no baseline path at
         all and moved the operator's own exclude patterns (see ``scan``).
+
+        The walk up the spelled path is right only when every link sits ABOVE
+        the baseline's directory. With a link between that directory and the
+        scan root (``repo/api -> packages/api``, the baseline in ``repo``), the
+        resolved gap is two levels but the spelled path is one below the
+        checkout, so the walk left the checkout, no key or pattern met anything,
+        and a deeper link could reach ``/``. The directory the walk lands on is
+        checked against the baseline's; when it is not the same directory, the
+        baseline's paths are read relative to the scan root, the shape before
+        this rule, and a debug line says so.
         """
         if (
             target_type != "source"
@@ -2157,7 +2167,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         depth = len(real_root.parts) - len(baseline_dir.parts)
         if depth < 1 or depth > len(root.parents):
             return scan_root
-        return root.parents[depth - 1]
+        anchor = root.parents[depth - 1]
+        if Path(os.path.realpath(anchor)) != baseline_dir:
+            ASH_LOGGER.debug(
+                "The scanned directory reaches the baseline's directory through a "
+                "link below it, so the baseline's paths are read relative to the "
+                "scanned directory"
+            )
+            return scan_root
+        return anchor
 
     def _baseline_known(
         self, baseline: Optional[Dict[str, Any]], scan_root: Path

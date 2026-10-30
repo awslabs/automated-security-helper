@@ -37,6 +37,7 @@ a process runner stand-in to read the request it writes.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -675,6 +676,52 @@ def test_a_malformed_linked_baseline_moves_no_anchor(tmp_path, monkeypatch):
     # is the scan set's call, not this test's.
     assert "tests/fixture.py" not in names, names
     assert {"docs/notes.py", "settings.py"} <= set(names), names
+
+
+def test_a_scan_root_reached_through_a_link_below_the_baselines_directory_keeps_the_scan_root(
+    tmp_path, monkeypatch
+):
+    """``repo/api`` is a link to ``repo/packages/api`` and the baseline sits in
+    ``repo``. Resolved, the scan root is two levels below the baseline's
+    directory; spelled, it is one. The walk up the spelled path by the resolved
+    gap left the checkout (a deeper link could reach ``/``), and no key or
+    pattern met anything. The directory the walk lands on is now checked
+    against the baseline's: when it is not that directory, the baseline's paths
+    are read relative to the scan root, the shape before the re-anchoring. The
+    control is the same baseline under the real directory, where the walk is
+    right and the anchor is the checkout."""
+    monkeypatch.chdir(tmp_path)
+    checkout = tmp_path / "repo"
+    (checkout / ".git").mkdir(parents=True)
+    real_api = checkout / "packages" / "api"
+    real_api.mkdir(parents=True)
+    (real_api / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
+    (checkout / ".secrets.baseline").write_text(
+        json.dumps(_baseline({})), encoding="utf-8"
+    )
+    try:
+        (checkout / "api").symlink_to(
+            Path("packages") / "api", target_is_directory=True
+        )
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlinks unavailable on this platform: {exc}")
+    context = PluginContext(
+        source_dir=checkout / "api",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    context.output_dir.mkdir(parents=True)
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    # No baseline was placed in the tree; the anchor rule is driven directly
+    # with the checkout's baseline as the one the scan found and parsed.
+    assert not scanner._baseline_in_use()
+    scanner._baseline_real = Path(os.path.realpath(checkout / ".secrets.baseline"))
+    scanner._baseline_from_option = False
+    scanner._baseline_document = {"results": {}}
+
+    assert scanner._baseline_anchor(checkout / "api", "source") == checkout / "api"
+    assert scanner._baseline_anchor(real_api, "source") == checkout
 
 
 def test_an_operator_baseline_beside_the_tree_is_read_relative_to_the_scanned_directory(
