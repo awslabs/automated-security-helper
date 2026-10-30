@@ -46,7 +46,10 @@ aggregator does too.
 """
 
 import json
+import re
+from pathlib import PurePosixPath
 from typing import Any, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
+from urllib.parse import unquote
 
 from pydantic import Field
 from typing_extensions import Annotated
@@ -219,6 +222,41 @@ def _most_severe(results: List[Dict[str, Any]], count: int) -> List[Dict[str, An
     return ranked[:count]
 
 
+#: The base id the aggregator anchors each project's run to; the same spelling as
+#: ``workspace/aggregation.py``'s ``PROJECT_ROOT_URI_BASE_ID``, repeated here so the
+#: reporter module does not import the aggregator at import time.
+PROJECT_ROOT_URI_BASE_ID = "PROJECTROOT"
+
+_DRIVE_ANCHOR = re.compile(r"^[A-Za-z]:")
+
+
+def _project_path_is_placeable(project_path: str) -> bool:
+    """Whether a project path can sit below the workspace root.
+
+    Rooted (``/x``, ``\\x``, ``C:``) or escaping (a ``..`` component) paths
+    cannot, so a URI prefixed with one names nothing GitHub can resolve against
+    the repository the document is uploaded for.
+    """
+    text = project_path.strip().replace("\\", "/")
+    if text.startswith("/") or _DRIVE_ANCHOR.match(text):
+        return False
+    return ".." not in PurePosixPath(text).parts
+
+
+def _result_workspace_uri(result: Any) -> Optional[str]:
+    """``properties.workspace_uri`` as the aggregator wrote it on *result*, or None."""
+    props = getattr(result, "properties", None)
+    if props is None:
+        return None
+    value = getattr(props, "workspace_uri", None)
+    if value is None:
+        extra = getattr(props, "model_extra", None)
+        value = extra.get("workspace_uri") if isinstance(extra, dict) else None
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
 def _run_project_path(run: Any) -> Optional[str]:
     """The project's path below the workspace root, from the run's properties.
 
@@ -315,6 +353,14 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # module docstring).
             runs = list(sarif.runs)
 
+            # The project path of each run of a workspace document, or {} for a
+            # document that is not one. None refuses the document: a project
+            # path that cannot sit below one repository root (absolute, or
+            # escaping with "..") would mis-locate every finding of that run.
+            project_paths = self._workspace_project_paths(model, runs)
+            if project_paths is None:
+                return None
+
             # 1. Collect all rules from every run's driver and extensions,
             #    flattened. Two scanners can declare one rule id (grype and
             #    trivy both name a CVE; two linters one shared code) with
@@ -359,13 +405,14 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             #    Each run's results are located against its own project path,
             #    so a multi-run document reads against the workspace root.
             slim_results: List[Dict[str, Any]] = []
-            for run in runs:
+            for index, run in enumerate(runs):
                 slim_results.extend(
                     self._build_slim_results(
                         run.results or [],
                         rules_map,
                         rule_level_from_results,
-                        project_path=_run_project_path(run),
+                        project_path=project_paths.get(index),
+                        project_root=self._project_root(run),
                         qualified=qualified,
                     )
                 )
@@ -431,10 +478,10 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             }
 
             # The base ids the run's locations may refer to, for a document
-            # whose URIs were not rebased (one run, no project path). A
-            # multi-run document's URIs are workspace-relative and refer to
-            # none.
-            if len(runs) == 1 and not _run_project_path(runs[0]):
+            # whose URIs were not rebased (one run outside a workspace
+            # document, a project's own upload among them). A workspace
+            # document's URIs are workspace-relative and refer to none.
+            if len(runs) == 1 and not project_paths.get(0):
                 bases = self._original_uri_base_ids(runs[0])
                 if bases:
                     out_run["originalUriBaseIds"] = bases
@@ -464,6 +511,97 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # failure legible; see this method's docstring.
             ASH_LOGGER.error(f"Failed to create GHAS SARIF report: {e}")
             return None
+
+    @staticmethod
+    def _workspace_project_paths(
+        model: "AshAggregatedResults", runs: list
+    ) -> Optional[Dict[int, Optional[str]]]:
+        """Each run's project path below the workspace root, by run index.
+
+        ``{}`` when the document is not a workspace one, so no URI is rebased.
+        That is decided from the model, as ``csv_reporter`` does with
+        ``is_workspace_scan``, or from the document carrying more than one run
+        (``ash report`` over a workspace output directory hands over the unified
+        model), never from a stamp one run happens to carry: a project's own
+        per-project document keeps its project-relative URIs and its base ids,
+        which is what its own upload needs.
+
+        None refuses the document. A workspace is one repository root only when
+        it is a monorepo, and the model does not record which repository each
+        project is in, so two things are checked instead. A project path that
+        is absolute or escapes with ``..`` (a ``.code-workspace`` folder named
+        ``../other``) cannot sit below the workspace root, so every finding of
+        that run would be mis-located: refused, with the per-project document
+        named. Several distinct project paths merge into one document, which is
+        right for a monorepo and wrong for a workspace of separate repositories:
+        logged once as a warning naming the per-project documents, because the
+        model cannot tell the two apart and the operator can.
+        """
+        from automated_security_helper.models.workspace import is_workspace_scan
+
+        if not runs or not (is_workspace_scan(model) or len(runs) > 1):
+            return {}
+        paths: Dict[int, Optional[str]] = {}
+        for index, run in enumerate(runs):
+            path = _run_project_path(run)
+            if path is not None and not _project_path_is_placeable(path):
+                key = GHASReporter._run_workspace_project(run) or path
+                ASH_LOGGER.error(
+                    f"The GHAS report over the workspace is not written: project "
+                    f"'{key}' sits at '{path}', which is not below the workspace "
+                    "root, so its findings cannot be located against one "
+                    f"repository. Upload the project's own report, "
+                    f"projects/{key}/reports/ash.ghas.sarif, instead."
+                )
+                return None
+            paths[index] = path
+        distinct = {path for path in paths.values() if path}
+        if len(distinct) > 1:
+            ASH_LOGGER.warning(
+                f"The GHAS report merges {len(distinct)} projects below one "
+                "workspace root into one document. GitHub resolves it against one "
+                "repository, which is right for a monorepo; a workspace of "
+                "separate repositories uploads each project's own "
+                "projects/<key>/reports/ash.ghas.sarif instead."
+            )
+        return paths
+
+    @staticmethod
+    def _run_workspace_project(run: Any) -> Optional[str]:
+        """The project key the aggregator stamped on *run*, or None."""
+        props = getattr(run, "properties", None)
+        if props is None:
+            return None
+        value = getattr(props, "workspace_project", None)
+        if value is None:
+            extra = getattr(props, "model_extra", None)
+            value = extra.get("workspace_project") if isinstance(extra, dict) else None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    @staticmethod
+    def _project_root(run: Any) -> Optional[str]:
+        """The project's absolute path, read back from its ``PROJECTROOT`` base.
+
+        The aggregator anchors each project's run with
+        ``originalUriBaseIds.PROJECTROOT`` = the ``file://`` URI of the project
+        directory (``workspace/aggregation.py``, ``project_root_uri``). It is the
+        third argument ``to_workspace_uri`` needs to place an absolute URI inside
+        the project; without it an absolute URI is kept as written.
+        """
+        bases = getattr(run, "originalUriBaseIds", None)
+        if not isinstance(bases, dict):
+            return None
+        location = bases.get(PROJECT_ROOT_URI_BASE_ID)
+        uri = getattr(location, "uri", None)
+        if not isinstance(uri, str) or not uri.lower().startswith("file://"):
+            return None
+        text = unquote(uri[len("file://") :])
+        if len(text) > 2 and text[0] == "/" and text[2] == ":":
+            text = text[1:]
+        text = text.rstrip("/")
+        return text or None
 
     @staticmethod
     def _original_uri_base_ids(run: Any) -> Dict[str, Dict[str, str]]:
@@ -707,14 +845,16 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         rules_map: Dict[str, Dict[str, Any]],
         rule_level_from_results: Dict[str, str],
         project_path: Optional[str] = None,
+        project_root: Optional[str] = None,
         qualified: Optional[Dict[Tuple[str, str], str]] = None,
     ) -> List[Dict[str, Any]]:
         """Build a minimal list of result objects.
 
         *project_path* is the results' project's path below the workspace root
-        when they come from one run of a workspace's unified model, and None for
-        a single-directory scan; see :meth:`_build_slim_locations`. *qualified*
-        maps (scanner, rule id) to the id a colliding rule was declared under.
+        when they come from one run of a workspace document, and None otherwise;
+        *project_root* the project's absolute path when the run is anchored to
+        it; see :meth:`_build_slim_locations`. *qualified* maps (scanner, rule
+        id) to the id a colliding rule was declared under.
         """
         slim_results = []
 
@@ -777,7 +917,12 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 result_dict["message"] = {"text": rule_id or "Finding detected"}
 
             # Locations — only physical location with uri and region
-            locations = self._build_slim_locations(result.locations, project_path)
+            locations = self._build_slim_locations(
+                result.locations,
+                project_path,
+                workspace_uri=_result_workspace_uri(result) if project_path else None,
+                project_root=project_root,
+            )
             if locations:
                 result_dict["locations"] = locations
 
@@ -810,20 +955,31 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         return slim
 
     def _build_slim_locations(
-        self, locations: Optional[list], project_path: Optional[str] = None
+        self,
+        locations: Optional[list],
+        project_path: Optional[str] = None,
+        workspace_uri: Optional[str] = None,
+        project_root: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Extract minimal location info.
 
-        With *project_path*, each URI is expressed below the workspace root, the
-        way the aggregator computes ``properties.workspace_uri``, because GitHub
-        resolves every URI of the one document against the one repository it is
-        uploaded for. A URI the helper cannot place (absolute and outside the
-        project) is kept as the scanner wrote it.
+        With *project_path*, each URI is expressed below the workspace root,
+        because GitHub resolves every URI of the one document against the one
+        repository it is uploaded for. The aggregator already did this once, for
+        the result's first placeable location, and stored the answer as
+        ``properties.workspace_uri``; that value is used for that location as it
+        stands (*workspace_uri*), so the document agrees with the aggregator
+        exactly, including for an absolute URI it placed inside the project.
+        The other locations are recomputed by the same helper with the same
+        inputs, the project's absolute path (*project_root*) included. A URI the
+        helper cannot place (absolute and outside the project) is kept as the
+        scanner wrote it.
         """
         if not locations:
             return []
 
         slim_locs = []
+        first_placed_pending = workspace_uri is not None
         for loc in locations:
             if not loc.physicalLocation:
                 continue
@@ -848,7 +1004,13 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 # Rebased below the workspace root, so the base id the
                 # aggregator anchored the project-relative URI to no longer
                 # applies and is dropped with the rebase.
-                artifact_dict["uri"] = to_workspace_uri(uri, project_path) or uri
+                rebased = to_workspace_uri(uri, project_path, project_root)
+                if rebased is not None and first_placed_pending:
+                    # The aggregator's own answer for the first location it
+                    # could place: the same question, asked once.
+                    rebased = workspace_uri
+                    first_placed_pending = False
+                artifact_dict["uri"] = rebased or uri
             else:
                 # A base id a scanner anchored its own output to is kept with
                 # the URI it qualifies; dropped, a URI relative to a declared

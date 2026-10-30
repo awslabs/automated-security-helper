@@ -18,6 +18,11 @@ import json
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    WorkspaceProjectResult,
+    WorkspaceResults,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
     GHASReporter,
 )
@@ -223,15 +228,179 @@ def test_a_multi_run_document_carries_no_base_ids_or_related_locations(reporter)
 def test_a_root_or_slash_terminated_project_path_places_the_uri_once(
     reporter, project_path, expected
 ):
+    """A workspace document with one project: the model's workspace block says
+    so, and the one run's URIs are placed below the workspace root."""
     run = _project_run(project_path, "R-1", "src/handler.py")
     model = AshAggregatedResults()
     model.sarif = SarifReport(version="2.1.0", runs=[run])
+    model.workspace = _workspace(project_path)
 
     (out,) = json.loads(reporter.report(model))["runs"]
 
     assert (
         out["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
         == expected
+    )
+
+
+def _workspace(*project_paths: str) -> WorkspaceResults:
+    return WorkspaceResults(
+        workspace_file="/ws/.ash-workspace.yaml",
+        workspace_root="/ws",
+        exit_code=0,
+        projects=[
+            WorkspaceProjectResult(
+                project=path.strip("/").replace("/", "-") or "root",
+                relative_path=path,
+                display_label=path,
+                status=ProjectRunStatus.COMPLETED,
+                severity_threshold="MEDIUM",
+                output_path=f"projects/{path}",
+                scanners={"bandit": "COMPLETED"},
+                incomplete_scanners=[],
+                ceiling_unreachable_findings={},
+                sarif_run_index=index,
+            )
+            for index, path in enumerate(project_paths)
+        ],
+    )
+
+
+def test_a_projects_own_document_keeps_its_uris_and_base_ids(reporter):
+    """The per-project document the workspace driver writes carries one run
+    that happens to be stamped; it is not a workspace document (no workspace
+    block, one run), so its URIs stay project-relative with their base id, which
+    is what uploading it for that project's repository needs."""
+    run = _project_run(
+        "services/api",
+        "R-1",
+        "src/handler.py",
+        originalUriBaseIds={
+            "PROJECTROOT": ArtifactLocation(uri="file:///ws/services/api/")
+        },
+    )
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(version="2.1.0", runs=[run])
+
+    (out,) = json.loads(reporter.report(model))["runs"]
+
+    artifact = out["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]
+    assert artifact == {"uri": "src/handler.py", "uriBaseId": "PROJECTROOT"}
+    assert out["originalUriBaseIds"] == {
+        "PROJECTROOT": {"uri": "file:///ws/services/api/"}
+    }
+
+
+@pytest.mark.parametrize(
+    "project_path", ["../other", "/abs/other", "services/../../other", "C:/other"]
+)
+def test_a_project_path_outside_the_workspace_root_refuses_the_document(
+    reporter, caplog, project_path
+):
+    """A path that cannot sit below the workspace root (a ``.code-workspace``
+    folder named ``../other``) would mis-locate every finding of its run; the
+    document is not written, and the log names the project's own report."""
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(
+        version="2.1.0",
+        runs=[
+            _project_run("services/api", "API-1", "src/handler.py"),
+            _project_run(project_path, "OTHER-1", "src/x.py"),
+        ],
+    )
+
+    with caplog.at_level("ERROR"):
+        assert reporter.report(model) is None
+
+    assert any(
+        "projects/" in r.message and "ash.ghas.sarif" in r.message
+        for r in caplog.records
+    )
+
+
+def test_merging_several_projects_warns_once_about_the_one_root(reporter, caplog):
+    """The model does not record which repository each project is in, so the
+    merge is right for a monorepo and wrong for separate repositories; the
+    operator is told, once, and pointed at the per-project documents."""
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(
+        version="2.1.0",
+        runs=[
+            _project_run("services/api", "API-1", "src/handler.py"),
+            _project_run("apps/web", "WEB-1", "src/index.js"),
+        ],
+    )
+
+    with caplog.at_level("WARNING"):
+        assert reporter.report(model) is not None
+
+    warnings = [
+        r.message
+        for r in caplog.records
+        if r.levelname == "WARNING" and "one document" in r.message
+    ]
+    assert len(warnings) == 1
+    assert "2 projects" in warnings[0] and "ash.ghas.sarif" in warnings[0]
+
+
+def test_the_aggregators_workspace_uri_is_read_before_it_is_recomputed(reporter):
+    """The aggregator placed the result's first location and stored the answer
+    on the result as ``properties.workspace_uri``; the document carries that
+    answer as it stands and recomputes only the locations the aggregator did
+    not place. The stored value is deliberately not what a recompute would
+    give, so the test tells the two apart."""
+    run = _project_run("services/api", "API-1", "src/handler.py")
+    run.results[0].properties = PropertyBag.model_validate(
+        {
+            "workspace_project": "services-api",
+            "workspace_uri": "services/api/src/handler-as-aggregated.py",
+        }
+    )
+    run.results[0].locations.append(
+        Location(
+            physicalLocation=PhysicalLocation(
+                artifactLocation=ArtifactLocation(uri="src/other.py"),
+            )
+        )
+    )
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(
+        version="2.1.0",
+        runs=[run, _project_run("apps/web", "WEB-1", "src/index.js")],
+    )
+
+    (out,) = json.loads(reporter.report(model))["runs"]
+
+    api = next(r for r in out["results"] if r["ruleId"] == "API-1")
+    assert [
+        loc["physicalLocation"]["artifactLocation"]["uri"] for loc in api["locations"]
+    ] == ["services/api/src/handler-as-aggregated.py", "services/api/src/other.py"]
+
+
+def test_an_absolute_uri_is_placed_through_the_runs_project_root(reporter):
+    """The run's ``PROJECTROOT`` base is the project's absolute path, the
+    argument the helper needs to place an absolute URI inside the project; the
+    two-argument call kept such a URI absolute."""
+    run = _project_run(
+        "services/api",
+        "API-1",
+        "/ws/services/api/src/handler.py",
+        originalUriBaseIds={
+            "PROJECTROOT": ArtifactLocation(uri="file:///ws/services/api/")
+        },
+    )
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(
+        version="2.1.0",
+        runs=[run, _project_run("apps/web", "WEB-1", "src/index.js")],
+    )
+
+    (out,) = json.loads(reporter.report(model))["runs"]
+
+    api = next(r for r in out["results"] if r["ruleId"] == "API-1")
+    assert (
+        api["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        == "services/api/src/handler.py"
     )
 
 
