@@ -1,0 +1,424 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Edges of the detect-secrets scanner's settings and its worker exchange.
+
+Each test pins one behavior the scanner lacked:
+
+* a relative or empty ``sandbox.extra_read_paths`` entry became a root at the
+  process's working directory for the baseline gate, which the sandbox policy
+  itself never grants;
+* ``baseline_file: ""`` resolved to the source directory, was chosen, failed as
+  not a regular file and kept the tree's own ``.secrets.baseline`` out;
+* the baseline was opened without ``O_NONBLOCK`` and decoded with the locale's
+  encoding;
+* a second ``_process_config_options`` pass kept the trust refusal, the resolved
+  path and the parsed document of the first;
+* naming ``scan_settings.version`` alone kept the baseline's plugins and filters
+  from loading;
+* a baseline's wordlist filter reached the worker with a relative file name it
+  opened from its own empty working directory, and failed the scan;
+* a non-string exclude pattern raised TypeError past the ``re.error`` handler;
+* a request the scanner could not serialize was left part-written in the
+  results directory;
+* a worker run ASH could not record was graded as complete;
+* the converted target's invocation record carried the source target's errors;
+* a failed scan left ``end_time`` at the previous target's value;
+* a config passed to ``scan()`` replaced the processed one, so default settings
+  failed with "no detect-secrets plugins";
+* the module's command line built the scanner without a context and raised.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from pathlib import Path
+
+import pytest
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    detect_secrets_scanner as module,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+    SHOULD_EXCLUDE_FILE_FILTER,
+    WORDLIST_FILTER,
+    WORKER_REQUEST_FILE_NAME,
+    DetectSecretsScanner,
+    DetectSecretsScannerConfig,
+    DetectSecretsScannerConfigOptions,
+    DetectSecretsScanSettings,
+)
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
+
+
+def _context(tmp_path: Path) -> PluginContext:
+    context = PluginContext(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    context.source_dir.mkdir(parents=True)
+    context.output_dir.mkdir(parents=True)
+    (context.source_dir / "settings.py").write_text("value = 1\n", encoding="utf-8")
+    return context
+
+
+def _record_worker(scanner, monkeypatch) -> dict:
+    seen: dict = {}
+
+    def recorded(self, **kwargs):
+        seen.update(kwargs)
+        return None
+
+    monkeypatch.setattr(type(scanner), "_scan_in_worker", recorded)
+    return seen
+
+
+def _baseline(**fields) -> dict:
+    return {"version": "1.5.0", "results": {}, **fields}
+
+
+def _scanner(context, **options) -> DetectSecretsScanner:
+    return DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(**options)
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The baseline gate reads extra_read_paths as the sandbox policy does
+# --------------------------------------------------------------------------- #
+
+
+def _sandboxed_outside_baseline(tmp_path, entries: list):
+    context = _context(tmp_path)
+    context.config.sandbox.mode = "bwrap"
+    context.config.sandbox.read_path_scanners = ["detect-secrets"]
+    context.config.sandbox.extra_read_paths = entries
+    granted = tmp_path / "granted"
+    granted.mkdir()
+    baseline = granted / "baseline.json"
+    baseline.write_text(json.dumps(_baseline()), encoding="utf-8")
+    return _scanner(context, baseline_file=str(baseline))
+
+
+def test_a_relative_or_empty_extra_read_path_grants_no_baseline(tmp_path, monkeypatch):
+    """Resolved from the working directory, "granted" and "" covered the
+    baseline; the sandbox mounts neither, so the gate read a file the worker
+    could not."""
+    monkeypatch.chdir(tmp_path)
+    scanner = _sandboxed_outside_baseline(tmp_path, ["granted", ""])
+    assert scanner._baseline_trust_refused is True
+    assert scanner._baseline_in_use() is False
+
+
+def test_an_absolute_extra_read_path_grants_the_baseline(tmp_path, monkeypatch):
+    """Control: the policy's own reading admits an absolute entry."""
+    monkeypatch.chdir(tmp_path)
+    scanner = _sandboxed_outside_baseline(tmp_path, [str(tmp_path / "granted")])
+    assert scanner._baseline_trust_refused is False
+    assert scanner._baseline_in_use() is True
+
+
+# --------------------------------------------------------------------------- #
+# An empty baseline_file names nothing
+# --------------------------------------------------------------------------- #
+
+
+def test_an_empty_baseline_file_option_reads_as_unset(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    in_tree = context.source_dir / ".secrets.baseline"
+    in_tree.write_text(json.dumps(_baseline()), encoding="utf-8")
+    scanner = _scanner(context, baseline_file="")
+    assert scanner._chosen_baseline == Path(os.path.realpath(in_tree))
+    assert scanner._baseline_from_option is False
+    assert scanner._baseline_in_use() is True
+
+
+# --------------------------------------------------------------------------- #
+# How the baseline is opened and decoded
+# --------------------------------------------------------------------------- #
+
+
+def test_the_baseline_is_opened_without_blocking_and_read_as_utf_8(
+    tmp_path, monkeypatch
+):
+    document = _baseline(results={"café.py": []})
+    path = tmp_path / "baseline.json"
+    path.write_bytes(json.dumps(document, ensure_ascii=False).encode("utf-8"))
+    calls: dict = {}
+    real_open, real_fdopen = os.open, os.fdopen
+
+    def recording_open(name, flags, *args, **kwargs):
+        calls["flags"] = flags
+        return real_open(name, flags, *args, **kwargs)
+
+    def recording_fdopen(fd, *args, **kwargs):
+        calls["fdopen"] = kwargs
+        return real_fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", recording_open)
+    monkeypatch.setattr(module.os, "fdopen", recording_fdopen)
+
+    assert DetectSecretsScanner._read_baseline(path) == document
+    if hasattr(os, "O_NONBLOCK"):
+        assert calls["flags"] & os.O_NONBLOCK
+    assert calls["fdopen"].get("encoding") == "utf-8"
+
+
+# --------------------------------------------------------------------------- #
+# A second pass starts from its own config
+# --------------------------------------------------------------------------- #
+
+
+def test_a_second_pass_resets_the_first_passs_baseline_records(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    scanner = _scanner(_context(tmp_path))
+    scanner._baseline_trust_refused = True
+    scanner._baseline_real = tmp_path / "stale.json"
+    scanner._baseline_document = _baseline()
+    scanner._process_config_options()
+    assert scanner._baseline_trust_refused is False
+    assert scanner._baseline_real is None
+    assert scanner._baseline_document is None
+
+
+# --------------------------------------------------------------------------- #
+# version alone does not switch the baseline's settings off
+# --------------------------------------------------------------------------- #
+
+
+def test_naming_a_version_still_loads_the_baselines_plugins_and_filters(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    (context.source_dir / ".secrets.baseline").write_text(
+        json.dumps(
+            _baseline(
+                plugins_used=[{"name": "AWSKeyDetector"}],
+                filters_used=[
+                    {"path": "detect_secrets.filters.heuristic.is_likely_id_string"}
+                ],
+            )
+        ),
+        encoding="utf-8",
+    )
+    scanner = _scanner(
+        context, scan_settings=DetectSecretsScanSettings(version="1.5.0")
+    )
+    settings = scanner.config.options.scan_settings
+    assert [plugin.name for plugin in settings.plugins_used] == ["AWSKeyDetector"]
+    assert "detect_secrets.filters.heuristic.is_likely_id_string" in [
+        item.path for item in settings.filters_used
+    ]
+    assert settings.version == "1.5.0"
+
+
+# --------------------------------------------------------------------------- #
+# The wordlist filter reaches the worker only when the worker can apply it
+# --------------------------------------------------------------------------- #
+
+
+def _wordlist_scanner(tmp_path, monkeypatch, *, words: bool, importable: bool):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "_module_importable", lambda name: importable)
+    context = _context(tmp_path)
+    if words:
+        (context.source_dir / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    (context.source_dir / ".secrets.baseline").write_text(
+        json.dumps(
+            _baseline(
+                plugins_used=[{"name": "AWSKeyDetector"}],
+                filters_used=[{"path": WORDLIST_FILTER, "file_name": "words.txt"}],
+            )
+        ),
+        encoding="utf-8",
+    )
+    return _scanner(context)
+
+
+def _wordlist_entries(scanner) -> list:
+    return [
+        item
+        for item in scanner.config.options.scan_settings.filters_used
+        if item.path == WORDLIST_FILTER
+    ]
+
+
+def test_a_relative_word_list_is_anchored_at_the_baseline_and_handed_over(
+    tmp_path, monkeypatch
+):
+    scanner = _wordlist_scanner(tmp_path, monkeypatch, words=True, importable=True)
+    (entry,) = _wordlist_entries(scanner)
+    expected = Path(os.path.realpath(scanner.context.source_dir / "words.txt"))
+    assert entry.file_name == expected.as_posix()
+    assert entry.min_length == 3
+    assert entry.file_hash == ""
+    seen = _record_worker(scanner, monkeypatch)
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+    handed = [
+        item
+        for item in seen["scan_settings_dict"]["filters_used"]
+        if item["path"] == WORDLIST_FILTER
+    ]
+    assert [item["file_name"] for item in handed] == [expected.as_posix()]
+
+
+def test_a_word_list_that_is_not_there_drops_the_filter_with_a_warning(
+    tmp_path, monkeypatch, caplog
+):
+    with caplog.at_level(logging.WARNING):
+        scanner = _wordlist_scanner(tmp_path, monkeypatch, words=False, importable=True)
+    assert _wordlist_entries(scanner) == []
+    assert "Ignoring the detect-secrets wordlist filter" in caplog.text
+    assert "words.txt" not in caplog.text
+
+
+def test_a_missing_wordlist_package_drops_the_filter(tmp_path, monkeypatch, caplog):
+    with caplog.at_level(logging.WARNING):
+        scanner = _wordlist_scanner(tmp_path, monkeypatch, words=True, importable=False)
+    assert _wordlist_entries(scanner) == []
+    assert "pyahocorasick" in caplog.text
+
+
+# --------------------------------------------------------------------------- #
+# Exclude patterns that are not strings
+# --------------------------------------------------------------------------- #
+
+
+def test_a_non_string_exclude_pattern_is_skipped_not_raised():
+    patterns = DetectSecretsScanner._get_baseline_exclude_patterns(
+        {
+            "filters_used": [
+                {"path": SHOULD_EXCLUDE_FILE_FILTER, "pattern": [5, "^tests/"]}
+            ]
+        }
+    )
+    assert [pattern.pattern for pattern in patterns] == ["^tests/"]
+
+
+def test_a_pattern_field_that_is_not_a_list_excludes_nothing():
+    assert (
+        DetectSecretsScanner._get_baseline_exclude_patterns(
+            {"filters_used": [{"path": SHOULD_EXCLUDE_FILE_FILTER, "pattern": 7}]}
+        )
+        == []
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The worker exchange
+# --------------------------------------------------------------------------- #
+
+
+def test_a_request_that_cannot_be_written_leaves_no_file_behind(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    scanner = _scanner(context)
+    work_dir = Path(scanner.results_dir) / "source"
+    work_dir.mkdir(parents=True)
+    with pytest.raises(TypeError):
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[str(context.source_dir / "settings.py")],
+            scan_settings_dict={"plugins_used": [object()]},
+            work_dir=work_dir,
+            scan_timeout=None,
+        )
+    assert not (work_dir / WORKER_REQUEST_FILE_NAME).exists()
+
+
+def test_a_run_ash_could_not_record_fails_the_scan(tmp_path, monkeypatch):
+    from automated_security_helper.utils import subprocess_utils
+
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    scanner = _scanner(context)
+
+    def unrecorded(**kwargs):
+        return {
+            "returncode": 0,
+            "post_run_error": True,
+            "error": "the stderr log could not be written",
+        }
+
+    monkeypatch.setattr(
+        subprocess_utils, "run_command_with_output_handling", unrecorded
+    )
+    with pytest.raises(ScannerError, match="could not record"):
+        scanner.scan(target=context.source_dir, target_type="source")
+
+
+def test_the_invocation_record_holds_only_this_targets_errors(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    scanner = _scanner(context)
+    scanner.errors.append("the previous target failed")
+    _record_worker(scanner, monkeypatch)
+    report = scanner.scan(target=context.source_dir, target_type="source")
+    assert isinstance(report, SarifReport)
+    assert report.runs[0].invocations[0].exitCodeDescription == ""
+
+
+def test_a_failed_scan_records_its_end_time(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    scanner = _scanner(context)
+
+    def failing(self, **kwargs):
+        raise RuntimeError("the worker died")
+
+    monkeypatch.setattr(DetectSecretsScanner, "_scan_in_worker", failing)
+    with pytest.raises(ScannerError):
+        scanner.scan(target=context.source_dir, target_type="source")
+    assert scanner.end_time is not None
+    assert scanner.end_time >= scanner.start_time
+
+
+def test_a_config_passed_to_scan_is_processed_before_it_is_used(tmp_path, monkeypatch):
+    """The base swaps the config in; this scanner's settings come from processing
+    it, so a default config arrived with no plugins and the scan refused."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    scanner = _scanner(context)
+    seen = _record_worker(scanner, monkeypatch)
+    scanner.scan(
+        target=context.source_dir,
+        target_type="source",
+        config=DetectSecretsScannerConfig(),
+    )
+    assert seen["scan_settings_dict"]["plugins_used"]
+
+
+# --------------------------------------------------------------------------- #
+# The module's own command line
+# --------------------------------------------------------------------------- #
+
+
+def test_the_module_command_line_scans_its_working_directory(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "settings.py").write_text("value = 1\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+    seen: dict = {}
+
+    def recorded(self, **kwargs):
+        seen.update(kwargs)
+        return None
+
+    monkeypatch.setattr(DetectSecretsScanner, "_scan_in_worker", recorded)
+    report = module._main(project)
+    assert isinstance(report, SarifReport)
+    assert any(path.endswith("settings.py") for path in seen["scan_paths"])
