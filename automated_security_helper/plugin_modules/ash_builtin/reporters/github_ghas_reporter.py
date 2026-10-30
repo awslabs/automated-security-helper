@@ -46,7 +46,7 @@ aggregator does too.
 """
 
 import json
-from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
 from pydantic import Field
 from typing_extensions import Annotated
@@ -60,6 +60,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sarif_utils import suppressions_in_effect
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     effective_sarif_level,
@@ -68,6 +69,32 @@ from automated_security_helper.utils.severity_ladder import (
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+# GitHub's SARIF upload limits, from "SARIF support for code scanning" (the
+# "File compatibility" table, read 2026-10-30): "If any of these objects exceeds
+# its maximum value the SARIF file is rejected." Results per run 25,000, rules per
+# run 25,000, locations per result 1,000 of which "Only 100 locations will be
+# included", tags per rule 20 of which "Only 10 tags will be included". The
+# document emitted here stays under every one: locations and tags are cut at what
+# GitHub keeps anyway, results past the cap are the least severe ones (GitHub
+# itself keeps "the top 5,000 results ... prioritized by severity" of a run) and
+# rules no emitted result names go first. Each cut is logged; a rejected upload
+# would have lost the whole file in silence.
+_MAX_RESULTS_PER_RUN = 25000
+_MAX_RULES_PER_RUN = 25000
+_LOCATIONS_KEPT_PER_RESULT = 100
+_TAGS_KEPT_PER_RULE = 10
+
+#: The rule entry keys that describe a rule; two rules of one id whose entries
+#: agree on these are one rule declared twice, not a collision.
+_RULE_DESCRIPTION_KEYS = (
+    "security_severity",
+    "default_level",
+    "short_description",
+    "help_uri",
+    "help_text",
+    "tags",
+)
 
 # Mapping from ASH severity to security-severity score.
 # These scores place findings into GitHub's severity buckets:
@@ -149,6 +176,47 @@ def _rule_id(result: Any) -> Optional[str]:
     rule = getattr(result, "rule", None)
     rule = getattr(rule, "root", rule)
     return getattr(rule, "id", None) or None
+
+
+def _result_scanner(result: Any) -> Optional[str]:
+    """The scanner that produced *result*, from ``properties.scanner_name``.
+
+    Read by attribute and through ``model_extra``, because a ``PropertyBag``
+    allows extras and a key the schema does not declare lands there.
+    """
+    props = getattr(result, "properties", None)
+    if props is None:
+        return None
+    value = getattr(props, "scanner_name", None)
+    if value is None:
+        extra = getattr(props, "model_extra", None)
+        value = extra.get("scanner_name") if isinstance(extra, dict) else None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _string_map(value: Any) -> Dict[str, str]:
+    """*value*, a SARIF fingerprint map (a dict, or a model with extras), as
+    ``{str: str}``; empty when it is neither."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        extra = getattr(value, "model_extra", None)
+        value = extra if isinstance(extra, dict) else {}
+    return {str(key): str(item) for key, item in value.items() if item is not None}
+
+
+def _most_severe(results: List[Dict[str, Any]], count: int) -> List[Dict[str, Any]]:
+    """The *count* most severe of *results*, by their level as the gate grades it,
+    in their original order within a level (a stable sort)."""
+    ranked = sorted(
+        results,
+        key=lambda result: SEVERITIES.index(
+            result_severity({"level": result.get("level")})
+        ),
+    )
+    return ranked[:count]
 
 
 def _run_project_path(run: Any) -> Optional[str]:
@@ -248,12 +316,20 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             runs = list(sarif.runs)
 
             # 1. Collect all rules from every run's driver and extensions,
-            #    flattened
+            #    flattened. Two scanners can declare one rule id (grype and
+            #    trivy both name a CVE; two linters one shared code) with
+            #    different descriptions, help and scores. Flattened first-wins,
+            #    the second scanner's alerts carried the first scanner's text
+            #    and score, and the two scanners' results pooled into one
+            #    severity. Such a second rule is declared under
+            #    "<scanner>/<rule id>" and that scanner's results name it; the
+            #    first keeps the bare id, so existing alerts keep theirs.
             rules_map: Dict[str, Dict[str, Any]] = {}
+            qualified: Dict[Tuple[str, str], str] = {}
             for run in runs:
-                self._collect_rules(run.tool.driver, rules_map)
+                self._collect_rules(run.tool.driver, rules_map, qualified)
                 for ext in run.tool.extensions or []:
-                    self._collect_rules(ext, rules_map)
+                    self._collect_rules(ext, rules_map, qualified)
 
             # 2. The most severe of each rule's results, as the gate grades them
             #    (issue_severity, else the level), for rules whose scanner gave
@@ -266,7 +342,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             rule_level_from_results: Dict[str, str] = {}
             for run in runs:
                 for result in run.results or []:
-                    rule_id = _rule_id(result)
+                    rule_id = self._emitted_rule_id(result, qualified)
                     if not rule_id or self._left_out(result):
                         continue
                     severity = result_severity(result)
@@ -290,11 +366,55 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                         rules_map,
                         rule_level_from_results,
                         project_path=_run_project_path(run),
+                        qualified=qualified,
                     )
                 )
 
+            # A result GitHub cannot display: none of its locations has a uri.
+            # The result is still written (SARIF allows it, and dropping it
+            # would under-report in silence), but GitHub's documentation says
+            # "At least one location is required for code scanning to display
+            # a result", so the operator is told which rules' alerts will not
+            # appear.
+            unlocated = sorted(
+                {
+                    str(result.get("ruleId") or "<no rule>")
+                    for result in slim_results
+                    if "locations" not in result
+                }
+            )
+            if unlocated:
+                ASH_LOGGER.warning(
+                    f"GHAS report: {sum(1 for r in slim_results if 'locations' not in r)} "
+                    "result(s) carry no location with a file, which GitHub code "
+                    f"scanning does not display; rules: {', '.join(unlocated)}"
+                )
+
+            # GitHub rejects a run with more than 25,000 results; it keeps the
+            # most severe itself when it truncates, so the same choice is made
+            # here, and said.
+            if len(slim_results) > _MAX_RESULTS_PER_RUN:
+                ASH_LOGGER.error(
+                    f"GHAS report: {len(slim_results)} results exceed GitHub's limit "
+                    f"of {_MAX_RESULTS_PER_RUN} per run; the "
+                    f"{len(slim_results) - _MAX_RESULTS_PER_RUN} least severe are "
+                    "left out of the upload and are in the other reports"
+                )
+                slim_results = _most_severe(slim_results, _MAX_RESULTS_PER_RUN)
+
             # 4. Ensure every rule has security-severity
             slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
+            if len(slim_rules) > _MAX_RULES_PER_RUN:
+                referenced = {result.get("ruleId") for result in slim_results}
+                named = [rule for rule in slim_rules if rule["id"] in referenced]
+                unnamed = [rule for rule in slim_rules if rule["id"] not in referenced]
+                slim_rules = (named + unnamed)[:_MAX_RULES_PER_RUN]
+                ASH_LOGGER.warning(
+                    f"GHAS report: more than {_MAX_RULES_PER_RUN} rules, GitHub's "
+                    "limit per run; rules no emitted result names are left out "
+                    f"first ({len(named)} named, {len(slim_rules) - len(named)} "
+                    "unnamed kept)"
+                )
 
             # 5. Assemble the final SARIF structure
             out_run: Dict[str, Any] = {
@@ -382,44 +502,94 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             return value.strip()
         return None
 
+    @staticmethod
+    def _emitted_rule_id(
+        result: Any, qualified: Optional[Dict[Tuple[str, str], str]] = None
+    ) -> Optional[str]:
+        """The rule id *result* is emitted under: its own, or the qualified id
+        its scanner's colliding rule was declared under (:meth:`_collect_rules`)."""
+        rule_id = _rule_id(result)
+        if not rule_id or not qualified:
+            return rule_id
+        scanner = _result_scanner(result)
+        if scanner is None:
+            return rule_id
+        return qualified.get((scanner, rule_id), rule_id)
+
     def _collect_rules(
-        self, tool_component, rules_map: Dict[str, Dict[str, Any]]
+        self,
+        tool_component,
+        rules_map: Dict[str, Dict[str, Any]],
+        qualified: Optional[Dict[Tuple[str, str], str]] = None,
     ) -> None:
-        """Collect rules from a ToolComponent into the rules map."""
+        """Collect rules from a ToolComponent into the rules map.
+
+        A rule whose id another component already declared with the same
+        description is the same rule and is skipped. One declared differently
+        is a collision: it is entered under ``<component name>/<id>`` and the
+        pair (component name, id) is recorded in *qualified*, so the results of
+        that scanner name the qualified id (:meth:`_emitted_rule_id`) and keep
+        their own description, help and score.
+        """
         if not tool_component or not tool_component.rules:
             return
 
+        component_name = str(getattr(tool_component, "name", None) or "")
         for rule in tool_component.rules:
-            if rule.id in rules_map:
-                continue
-
-            # Extract existing security-severity if present
-            security_severity = None
-            rule_tags = []
-            if rule.properties:
-                props = rule.properties.model_extra or {}
-                # Check both hyphenated (from native SARIF) and underscored (from ASH code)
-                security_severity = _usable_security_severity(
-                    props.get("security-severity", props.get("security_severity"))
+            entry = self._rule_entry(rule, component_name)
+            emitted_id = rule.id
+            existing = rules_map.get(rule.id)
+            if existing is not None:
+                if existing.get("component") == component_name or all(
+                    existing.get(key) == entry.get(key)
+                    for key in _RULE_DESCRIPTION_KEYS
+                ):
+                    continue
+                if not component_name or qualified is None:
+                    continue
+                emitted_id = f"{component_name}/{rule.id}"
+                if emitted_id in rules_map:
+                    continue
+                entry["id"] = emitted_id
+                qualified[(component_name, rule.id)] = emitted_id
+                ASH_LOGGER.debug(
+                    f"GHAS report: rule {rule.id} is declared differently by "
+                    f"{existing.get('component') or 'another scanner'} and "
+                    f"{component_name}; {component_name}'s is emitted as {emitted_id}"
                 )
-                rule_tags = rule.properties.tags or []
+            rules_map[emitted_id] = entry
 
-            # Get the default level from the rule configuration
-            default_level = None
-            if rule.defaultConfiguration and rule.defaultConfiguration.level:
-                default_level = _level_value(rule.defaultConfiguration.level)
+    @staticmethod
+    def _rule_entry(rule: Any, component_name: str) -> Dict[str, Any]:
+        """The rules_map entry for *rule* as *component_name* declares it."""
+        # Extract existing security-severity if present
+        security_severity = None
+        rule_tags = []
+        if rule.properties:
+            props = rule.properties.model_extra or {}
+            # Check both hyphenated (from native SARIF) and underscored (from ASH code)
+            security_severity = _usable_security_severity(
+                props.get("security-severity", props.get("security_severity"))
+            )
+            rule_tags = rule.properties.tags or []
 
-            rules_map[rule.id] = {
-                "id": rule.id,
-                "security_severity": security_severity,
-                "default_level": default_level,
-                "short_description": (
-                    rule.shortDescription.text if rule.shortDescription else None
-                ),
-                "help_uri": str(rule.helpUri) if rule.helpUri else None,
-                "help_text": (rule.help.text if rule.help else None),
-                "tags": rule_tags,
-            }
+        # Get the default level from the rule configuration
+        default_level = None
+        if rule.defaultConfiguration and rule.defaultConfiguration.level:
+            default_level = _level_value(rule.defaultConfiguration.level)
+
+        return {
+            "id": rule.id,
+            "component": component_name,
+            "security_severity": security_severity,
+            "default_level": default_level,
+            "short_description": (
+                rule.shortDescription.text if rule.shortDescription else None
+            ),
+            "help_uri": str(rule.helpUri) if rule.helpUri else None,
+            "help_text": (rule.help.text if rule.help else None),
+            "tags": list(rule_tags),
+        }
 
     def _resolve_security_severity(
         self,
@@ -504,10 +674,11 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             if rule_info["help_text"]:
                 rule_dict["help"] = {"text": rule_info["help_text"]}
 
-            # Always set properties with security-severity
+            # Always set properties with security-severity. Tags are cut at the
+            # ten GitHub includes; past twenty it rejects the file.
             properties: Dict[str, Any] = {"security-severity": severity}
             if rule_info["tags"]:
-                properties["tags"] = rule_info["tags"]
+                properties["tags"] = list(rule_info["tags"])[:_TAGS_KEPT_PER_RULE]
             rule_dict["properties"] = properties
 
             slim_rules.append(rule_dict)
@@ -517,11 +688,17 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
     def _left_out(self, result: Any) -> bool:
         """Whether *result* is kept out of the file: suppressed, under
         ``exclude_suppressed`` (the default). One test for the results list and
-        the rules' scores, so a result never scores a rule it is not in."""
+        the rules' scores, so a result never scores a rule it is not in.
+
+        Suppressed means a suppression in effect (``suppressions_in_effect``):
+        one ``rejected`` by the reviewer or still ``underReview`` has not taken
+        effect (SARIF 3.35.4), the gate still fails the scan on the finding,
+        and the file kept it out as if it were dismissed.
+        """
         return bool(
             self.config
             and self.config.options.exclude_suppressed
-            and getattr(result, "suppressions", None)
+            and suppressions_in_effect(getattr(result, "suppressions", None))
         )
 
     def _build_slim_results(
@@ -530,12 +707,14 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         rules_map: Dict[str, Dict[str, Any]],
         rule_level_from_results: Dict[str, str],
         project_path: Optional[str] = None,
+        qualified: Optional[Dict[Tuple[str, str], str]] = None,
     ) -> List[Dict[str, Any]]:
         """Build a minimal list of result objects.
 
         *project_path* is the results' project's path below the workspace root
         when they come from one run of a workspace's unified model, and None for
-        a single-directory scan; see :meth:`_build_slim_locations`.
+        a single-directory scan; see :meth:`_build_slim_locations`. *qualified*
+        maps (scanner, rule id) to the id a colliding rule was declared under.
         """
         slim_results = []
 
@@ -547,11 +726,12 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # If this result references a rule we haven't seen, create a
             # synthetic entry so the rule list stays complete. report() builds
             # the rules from rules_map after this returns.
-            rule_id = _rule_id(result)
+            rule_id = self._emitted_rule_id(result, qualified)
             if rule_id and rule_id not in rules_map:
                 level_val = effective_sarif_level(result)
                 rules_map[rule_id] = {
                     "id": rule_id,
+                    "component": _result_scanner(result) or "",
                     "security_severity": None,
                     "default_level": None,
                     "short_description": None,
@@ -600,6 +780,16 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             locations = self._build_slim_locations(result.locations, project_path)
             if locations:
                 result_dict["locations"] = locations
+
+            # Fingerprints. GitHub tracks an alert across uploads by
+            # partialFingerprints (it "will attempt to use partialFingerprints
+            # if they exist"); dropped from the slim copy, every alert of a
+            # scanner that supplied them was re-keyed by line hash and reopened
+            # when its line moved.
+            for key in ("partialFingerprints", "fingerprints"):
+                prints = _string_map(getattr(result, key, None))
+                if prints:
+                    result_dict[key] = prints
 
             slim_results.append(result_dict)
 
@@ -683,6 +873,15 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                     phys_dict["region"] = region_dict
 
             slim_locs.append({"physicalLocation": phys_dict})
+
+        # GitHub includes the first hundred locations of a result and rejects
+        # a file with a result past a thousand; the rest are not uploaded.
+        if len(slim_locs) > _LOCATIONS_KEPT_PER_RESULT:
+            ASH_LOGGER.debug(
+                f"GHAS report: a result's {len(slim_locs)} locations are cut to "
+                f"the {_LOCATIONS_KEPT_PER_RESULT} GitHub includes"
+            )
+            slim_locs = slim_locs[:_LOCATIONS_KEPT_PER_RESULT]
 
         return slim_locs
 
