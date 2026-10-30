@@ -53,7 +53,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shutil
 import sys
 import threading
 import time
@@ -134,23 +133,18 @@ CHANGE_REFUSED_BY_CHANGE = "other-change"
 CHANGE_REFUSED_BY_WRITE = "write"
 
 
-#: Why :meth:`MCPSession.try_begin_write` refused: the TTL sweep is removing the
-#: session, so its state is gone once it is done.
-WRITE_REFUSED_BY_SWEEP = "sweep"
-
-#: Why :meth:`MCPSession.try_begin_write` refused: a change that deletes the
-#: session's directory (``clear_source`` or the end of the session) holds it.
-#: Its removal may or may not have reached the upload's files yet.
-WRITE_REFUSED_BY_CHANGE = "change"
-
-
 class MCPSession(BaseModel):
     """Per-connection state for an MCP client.
 
     Fields:
         id: Stable connection identifier provided by the transport.
         workspace_root: Per-session scratch directory. The disconnect hook
-            rmtrees this path; do NOT place shared state here.
+            rmtrees this path; do NOT place shared state here. None while the
+            workspace root cannot be resolved (no home directory and no
+            ``ASH_MCP_WORKSPACE_ROOT``, say): ``MCPSessionRegistry.session_for``
+            hands the session out anyway, since a scan needs its claim and lock
+            and not its directory, and ``get_or_create`` fills the path in once
+            the root resolves.
         created_at: UTC timestamp the session was created.
 
     A client's binding is not a field of this model. The directory it delivered
@@ -167,8 +161,12 @@ class MCPSession(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: str = Field(description="Stable per-connection identifier.")
-    workspace_root: Path = Field(
-        description="Per-session scratch dir; disconnect rmtrees this.",
+    workspace_root: Optional[Path] = Field(
+        default=None,
+        description=(
+            "Per-session scratch dir; disconnect rmtrees this. None until the "
+            "workspace root resolves."
+        ),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -426,16 +424,6 @@ def _session_holds_a_binding() -> Callable[[str], bool]:
     return holds_binding
 
 
-#: Sessions the registry holds before it looks for idle ones to forget. A stateless
-#: server with ``--trust-upstream-session-id`` sees one new id per client, and no
-#: end of session, so without this the map only grows (a session that never
-#: delivered anything has no workspace directory for the TTL sweep to find).
-SESSION_MAP_EVICT_ABOVE = 1024
-
-#: How long a session must have gone unrequested, and idle, to be forgotten.
-IDLE_SESSION_SECONDS = 300.0
-
-
 class MCPSessionRegistry:
     """Process-local registry of MCP sessions keyed by connection id.
 
@@ -477,21 +465,33 @@ class MCPSessionRegistry:
     def session_for(self, session_id: str) -> MCPSession:
         """Return the session for ``session_id``, adding it to the map if needed.
 
-        Creates nothing on disk. This is the call for a caller that needs the
-        session's claim or lock and not its directory: a scan, and a change to
-        the delivered tree, whose functions create and mark the directory
-        themselves when they write there. A scan of a directory the operator
-        granted therefore starts even when the workspace root can't be created.
+        Creates nothing on disk, and resolves nothing it has to: this is the
+        call for a caller that needs the session's claim or lock and not its
+        directory: a scan, and a change to the delivered tree, whose functions
+        create and mark the directory themselves when they write there. A scan
+        of a directory the operator granted therefore starts even when the
+        workspace root can't be resolved (no home directory and no
+        ``ASH_MCP_WORKSPACE_ROOT``) or created; the session's
+        ``workspace_root`` is then None until :meth:`get_or_create` resolves it
+        (:meth:`_workspace_for`).
 
         Repeated calls with the same id return the same instance, so the lock
         and the claim are shared by every caller of one session.
 
         Raises:
             ValueError: if ``session_id`` is not usable as a single path
-                component. The id names a directory that ``get_or_create``
-                creates and ``disconnect`` removes, so it is validated here
-                rather than trusted from the caller; ``cli/mcp/session_paths.py``
-                holds the rule, shared with the other surfaces that build a
+                component, or names a directory the server keeps under the
+                workspace root for itself: the presence registries
+                (``.stdio-servers``, ``.ash-mcp-scans``), their guard file
+                (``.lock``, :data:`PRESENCE_LOCK_NAME`) and any spelling of a
+                reserved name that opens the same directory on a
+                case-insensitive filesystem
+                (``session_identity.is_reserved_session_id``). The stdio
+                session's own id is admitted: its workspace is a session's. The
+                id names a directory that ``get_or_create`` creates and
+                ``disconnect`` removes, so it is validated here rather than
+                trusted from the caller; ``cli/mcp/session_paths.py`` holds the
+                component rule, shared with the other surfaces that build a
                 per-session path.
 
         Validated before the map lookup, not after. Checking only on the
@@ -500,6 +500,7 @@ class MCPSessionRegistry:
         """
         from automated_security_helper.cli.mcp.session_identity import (
             UNIDENTIFIED_SESSION_ID,
+            is_reserved_session_id,
         )
 
         if session_id == UNIDENTIFIED_SESSION_ID:
@@ -508,6 +509,13 @@ class MCPSessionRegistry:
                 "session state"
             )
         session_id = validated_path_component(session_id)
+        if not _is_the_stdio_session(session_id) and (
+            is_reserved_session_id(session_id) or _names_a_presence_lock(session_id)
+        ):
+            raise ValueError(
+                f"session_id {session_id!r} names a directory the server keeps "
+                "under its workspace root for itself, so it cannot name a session"
+            )
         with self._lock:
             existing = self._sessions.get(session_id)
             if existing is not None:
@@ -515,10 +523,26 @@ class MCPSessionRegistry:
                 return existing
             if len(self._sessions) >= SESSION_MAP_EVICT_ABOVE:
                 self._forget_idle_sessions()
-            workspace = session_directory(self._workspace_parent, session_id)
-            session = MCPSession(id=session_id, workspace_root=workspace)
+            session = MCPSession(
+                id=session_id, workspace_root=self._workspace_for(session_id)
+            )
             self._sessions[session_id] = session
             return session
+
+    def _workspace_for(self, session_id: str) -> Optional[Path]:
+        """The session's directory under the workspace root, or None for now.
+
+        ``resolve_workspace_root`` raises ``RuntimeError`` when no home directory
+        can be determined, and joining the id under the root can raise ``OSError``
+        resolving the parent. Neither refuses the session: :meth:`session_for`
+        creates nothing on disk, and :meth:`get_or_create`, which does, resolves
+        the path again and lets that error out to the caller that needs the
+        directory.
+        """
+        try:
+            return session_directory(self._workspace_parent, session_id)
+        except (RuntimeError, OSError):
+            return None
 
     def _forget_idle_sessions(self) -> None:
         """Drop entries nobody has asked for lately and nothing runs on.
@@ -541,15 +565,27 @@ class MCPSessionRegistry:
         """Return the session for ``session_id`` with its workspace directory.
 
         :meth:`session_for`, plus the session's directory and its marker,
-        created when missing.
+        created when missing. A session handed out while the workspace root
+        could not be resolved has no ``workspace_root`` yet; it is resolved
+        here, and the error is this caller's, since it needs the directory.
 
         Raises:
             ValueError: as :meth:`session_for`.
+            RuntimeError: when the workspace root can't be resolved (no home
+                directory and no ``ASH_MCP_WORKSPACE_ROOT``).
             OSError: when the directory can't be created.
         """
         session = self.session_for(session_id)
-        if not session.workspace_root.is_dir():
-            mark_session_workspace(session.workspace_root)
+        workspace = session.workspace_root
+        if workspace is None:
+            workspace = session_directory(self._workspace_parent, session_id)
+            with self._lock:
+                if session.workspace_root is None:
+                    session.workspace_root = workspace
+                else:
+                    workspace = session.workspace_root
+        if not workspace.is_dir():
+            mark_session_workspace(workspace)
         return session
 
     def get(self, session_id: str) -> Optional[MCPSession]:
@@ -576,9 +612,9 @@ class MCPSessionRegistry:
         The delivered source tree itself lives inside the workspace directory
         and goes with it.
 
-        Idempotent: calling on an unknown id is a no-op. The rmtree uses
-        ``ignore_errors=True`` so a partially-deleted workspace doesn't
-        wedge the registry.
+        Idempotent: calling on an unknown id is a no-op. The removal is best
+        effort (:meth:`_remove_workspace`): what it cannot remove stays on disk,
+        named in one warning, and never wedges the registry.
         """
         # Lazy imports: both modules belong to this package's import web, and a
         # module-level import here would be a cycle.
@@ -638,9 +674,43 @@ class MCPSessionRegistry:
         return doomed
 
     def _remove_workspace(self, workspace: Path) -> None:
-        """rmtree ``workspace``, ignoring what cannot be removed."""
-        if workspace.exists():
-            shutil.rmtree(workspace, ignore_errors=True)
+        """Delete ``workspace``, and say so when some of it could not be removed.
+
+        ``source_delivery._remove_tree`` clears the read-only bit of an entry the
+        delete refuses and tries again, as the removal of an ended session does;
+        what it still cannot remove stays on disk, and a silent return would
+        report that as removed. Under its hidden delete name
+        (``.<session id>.deleting-<uuid4>``) the leftover is cleared by the TTL
+        sweep once it is older than the TTL, marker or no marker
+        (:func:`sweep_stale_workspaces`); one left at the session's own path
+        (the rename aside was refused) may have lost its marker to the delete,
+        and the sweep never removes an unmarked directory, so the warning says
+        it stays until removed by hand.
+        """
+        from automated_security_helper.cli.mcp.source_delivery import _remove_tree
+
+        if not workspace.exists():
+            return
+        if _remove_tree(workspace):
+            return
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        if is_a_deleting_name(workspace.name):
+            outlook = (
+                "The TTL sweep removes what is left once it is older than the TTL."
+            )
+        else:
+            outlook = (
+                "It could not be renamed aside first, so what is left stands at "
+                "the session's own path, may have lost its session marker, and "
+                "stays until it is removed by hand."
+            )
+        ASH_LOGGER.warning(
+            "Could not remove all of %s, the workspace of a session that "
+            "disconnected: some entry in it cannot be removed by this account. %s",
+            workspace,
+            outlook,
+        )
 
     def __contains__(self, session_id: object) -> bool:
         with self._lock:
@@ -702,8 +772,11 @@ def _remove_session_state(session_id: str) -> None:
     try:
         # end_session holds the session's lock already.
         remove_session_workspace(session_id)
-    except ValueError:
-        # An id that cannot name a directory never had a workspace.
+    except (ValueError, RuntimeError):
+        # An id that cannot name a directory never had a workspace, and with no
+        # workspace root (no home directory, RuntimeError) there is none to
+        # remove; the bound profile and the entry are the server's own and are
+        # cleared either way.
         pass
     clear_session_state(session_id)
     get_default_registry().forget(session_id)
@@ -782,16 +855,21 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
 
     A session with no workspace directory has nothing a scan could be reading, and
     no registry is opened for it. A reserved name other than the stdio session's
-    (the unidentified sentinel, the two registries) never has a presence entry, so
-    it is removed without opening the registry. The stdio session is shared by
-    every stdio server of one user, and a scan of it in a sibling server holds a
-    presence entry like a replica's scan of a session
+    (``session_identity.is_reserved_session_id``: a presence registry, the
+    unidentified sentinel, a spelling of the stdio id that opens its directory
+    on a case-insensitive filesystem) never has a presence entry and has no
+    workspace of its own: what stands at the name under the root is the
+    server's, so only the in-memory state is cleared for it and nothing on disk
+    is touched. An id named for the registries' guard file
+    (:data:`PRESENCE_LOCK_NAME`), for which :class:`ScanPresence` registers
+    nothing, is removed without opening the registry. The stdio session is
+    shared by every stdio server of one user, and a scan of it in a sibling
+    server holds a presence entry like a replica's scan of a session
     (:func:`_publishes_scan_presence`), so ending it reads the registry as for
-    any session. Only ``ValueError`` and
-    ``RuntimeError`` (an id that names no directory, no workspace root) mean there
-    is no workspace: an ``OSError`` from the stat of the directory says nothing
-    about whether it exists, so that case takes the guarded path like a session
-    whose directory is there.
+    any session. Only ``ValueError`` and ``RuntimeError`` (an id that names no
+    directory, no workspace root) mean there is no workspace: an ``OSError``
+    from the stat of the directory says nothing about whether it exists, so
+    that case takes the guarded path like a session whose directory is there.
 
     If the presence lock cannot be taken, nothing proves that no scan holds the
     session, so the tree stays on disk. The TTL sweep needs the same lock, so
@@ -818,6 +896,16 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
         scan, None when the lock could not be taken or the check or removal
         failed, and only the in-memory state was cleared.
     """
+    from automated_security_helper.cli.mcp.session_identity import (
+        is_reserved_session_id,
+    )
+
+    if is_reserved_session_id(session_id) and not _is_the_stdio_session(session_id):
+        # A presence registry, the unidentified sentinel, or an alias of the
+        # stdio id: the directory of that name is the server's, not a
+        # session's, so it is never removed as one.
+        _forget_session_in_memory(session_id)
+        return True
     try:
         root = _workspace_root()
         sandbox = session_directory(root, session_id)
@@ -832,7 +920,11 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
         # instead of answering False. The workspace may exist, so the removal
         # takes the guarded path below, as ``ScanPresence`` registers for it.
         has_workspace = True
-    if not has_workspace or not _publishes_scan_presence(session_id):
+    if (
+        not has_workspace
+        or not _publishes_scan_presence(session_id)
+        or _names_a_presence_lock(session_id)
+    ):
         _remove_session_state(session_id)
         return True
     holder = root / SCAN_PRESENCE_DIR / session_id
@@ -1037,11 +1129,16 @@ def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
     """How many scans ``session_id`` may run at once, or None for no limit.
 
     The operator's ``mcp-resource-management.max_concurrent_scans_per_session``,
-    read from ``ASH_CONFIG`` (``get_default_config``), never from the config a
-    scan resolves: that can be the scanned tree's own or one a client delivered,
-    and a limit the limited party can raise is no limit. Read per scan, so a
-    changed ``ASH_CONFIG`` applies to the next one; a file that no longer loads
-    leaves the default. 0 is no limit.
+    read from ``ASH_CONFIG``, never from the config a scan resolves: that can be
+    the scanned tree's own or one a client delivered, and a limit the limited
+    party can raise is no limit. Read as the server's other limits are
+    (``mcp_tools._resource_limits``, ``default_config_for_tree``): loaded as a
+    scan rooted at the server's working directory loads it, so what an
+    ``ASH_CONFIG`` file inside this checkout writes for an operator-only option
+    is left out and does not make the file unloadable for this read while the
+    scan itself reads past it; the two reads of one file then agree on its
+    limits. Read per scan, so a changed ``ASH_CONFIG`` applies to the next one;
+    a file that no longer loads leaves the default. 0 is no limit.
 
     Only a caller of a network transport is limited. stdio has one session, the
     local client's, and nobody to share the host with.
@@ -1061,12 +1158,14 @@ def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
     from automated_security_helper.config.ash_config import (
         MCPResourceManagementConfig,
     )
-    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.config.default_config import (
+        default_config_for_tree,
+    )
 
     if not caller_is_remote(session_id):
         return None
     try:
-        settings = get_default_config().mcp_resource_management
+        settings = default_config_for_tree().mcp_resource_management
     except Exception:  # noqa: BLE001 -- an unloadable ASH_CONFIG keeps the default
         settings = MCPResourceManagementConfig()
     return settings.max_concurrent_scans_per_session or None
@@ -1114,7 +1213,26 @@ def session_scan_limit_refusal(
 #: ``session_identity.is_reserved_session_id`` refuses it as a session id in any
 #: letter case.
 STDIO_SERVERS_DIR = ".stdio-servers"
-_STDIO_SERVERS_LOCK = ".lock"
+
+#: The guard file of each presence registry, locked around every change to the
+#: registry. Not a session id either (:func:`_names_a_presence_lock`): under
+#: ``SCAN_PRESENCE_DIR`` a session's holder directory and the guard file share
+#: one parent, so a session of this name would have its holder where the file
+#: is, could register no scan, and could never be swept.
+PRESENCE_LOCK_NAME = ".lock"
+_STDIO_SERVERS_LOCK = PRESENCE_LOCK_NAME
+
+
+def _names_a_presence_lock(session_id: str) -> bool:
+    """True if ``session_id`` names the presence registries' guard file.
+
+    Compared as ``session_identity.is_reserved_session_id`` compares: casefolded,
+    with trailing periods and spaces dropped, because a case-insensitive
+    filesystem opens ``.LOCK`` as ``.lock`` and Windows drops the trailing
+    characters. The name is shorter than eight characters, so no generated 8.3
+    short name aliases it.
+    """
+    return session_id.casefold().rstrip(". ") == PRESENCE_LOCK_NAME
 
 
 class PresenceLockError(Exception):
@@ -1400,7 +1518,7 @@ class StdioServerPresence:
 #: Not a session workspace: it carries no session marker, and
 #: ``session_identity.is_reserved_session_id`` refuses it as a session id.
 SCAN_PRESENCE_DIR = ".ash-mcp-scans"
-_SCAN_PRESENCE_LOCK = ".lock"
+_SCAN_PRESENCE_LOCK = PRESENCE_LOCK_NAME
 
 
 def _workspace_root() -> Path:
@@ -1441,11 +1559,21 @@ class ScanPresence:
     and nothing is reported, for a session with no workspace on disk or no
     resolvable workspace root: nothing of the session's
     is there to protect, and a scan of a directory the operator granted creates
-    nothing under the root. A root whose registry can't be used leaves the scan
+    nothing under the root. Nothing is registered for a reserved name either, nor
+    for a session named for the registries' guard file
+    (:func:`_names_a_presence_lock`), whose holder directory would be where the
+    guard file is. A root whose registry can't be used leaves the scan
     unregistered rather than failing it, with a warning: a refused guard shares
     the process-wide warn-once latch (:func:`_warn_guard_refused_once`) with the
     TTL sweep and ``end_session``. A scan whose entry exists but can't be locked
     does not start: ``__enter__`` raises :class:`PresenceLockError`.
+
+    The scan's end is a use of the workspace: ``__exit__`` sets the workspace's
+    modification time to now, registered or not, before the entry is dropped.
+    The TTL sweep reads liveness from that time, and a scan that ran longer than
+    the TTL on a workspace nothing else touched would otherwise leave it older
+    than the cutoff the moment the entry went, so the next pass would remove
+    the tree and the results the scan had just written under it.
 
     Limits: as ``StdioServerPresence``, a server on another host sharing the root
     through a filesystem that does not share these locks can't see them.
@@ -1455,12 +1583,16 @@ class ScanPresence:
         self._session_id = session_id
         self._entry: Optional[Path] = None
         self._handle: Any = None
+        # The workspace found on entry, touched on exit; None when none was.
+        self._sandbox: Optional[Path] = None
 
     def __enter__(self) -> Self:
         import uuid
 
         session_id = self._session_id
-        if not _publishes_scan_presence(session_id):
+        if not _publishes_scan_presence(session_id) or _names_a_presence_lock(
+            session_id
+        ):
             return self
         try:
             root = _workspace_root()
@@ -1494,6 +1626,7 @@ class ScanPresence:
             return self
         if not has_workspace:
             return self
+        self._sandbox = sandbox
         guarded = False
         try:
             with _scan_presence_guard(root):
@@ -1540,6 +1673,12 @@ class ScanPresence:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
+        sandbox, self._sandbox = self._sandbox, None
+        if sandbox is not None:
+            # Before the entry goes: while it is held no sweep removes the
+            # workspace, and once it is gone the workspace's age is what keeps
+            # it. Whatever ended the scan, its end was a use.
+            _touch_workspace(sandbox)
         if self._entry is None:
             return
         entry, handle = self._entry, self._handle
@@ -1678,9 +1817,22 @@ def touch_session_workspace(session_id: str) -> None:
 
     try:
         sandbox = session_directory(resolve_workspace_root(), session_id)
+    except (OSError, ValueError, RuntimeError):
+        return
+    _touch_workspace(sandbox)
+
+
+def _touch_workspace(sandbox: Path) -> None:
+    """Set ``sandbox``'s modification time to now, if it is a directory of its own.
+
+    A symlink is left alone: the sweep never follows one, and touching it would
+    touch what it points at. A workspace that is gone, or that cannot be touched,
+    is left as it is.
+    """
+    try:
         if sandbox.is_dir() and not sandbox.is_symlink():
             os.utime(sandbox)
-    except (OSError, ValueError, RuntimeError):
+    except OSError:
         pass
 
 
@@ -1713,8 +1865,10 @@ def sweep_stale_workspaces(
 
     "Used" is the newest modification time of the sandbox directory and its
     direct children; every HTTP request that names a session refreshes it
-    (:func:`touch_session_workspace`), and every delivery writes there. Skipped,
-    and never queued for later:
+    (:func:`touch_session_workspace`), every delivery writes there, and the end
+    of every scan of the session refreshes it (:class:`ScanPresence`), so a scan
+    that ran longer than the TTL does not leave its workspace stale the moment
+    it returns. Skipped, and never queued for later:
 
     - a session whose scan runs in this process (its claim or lock is held) or
       whose tree is being changed, because the sweep takes the session's change
@@ -2086,6 +2240,7 @@ def _remove_stale_session_state(
 __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
+    "PRESENCE_LOCK_NAME",
     "PresenceLockError",
     "SESSION_SCAN_LIMIT",
     "SESSION_CHANGE_IN_PROGRESS",
