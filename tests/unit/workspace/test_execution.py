@@ -32,6 +32,7 @@ from automated_security_helper.models.workspace import (
     WorkspaceExitCode,
 )
 from automated_security_helper.workspace.execution import (
+    _ABANDONED_STOP_GRACE_SECONDS,
     ProjectScanSettings,
     execute_workspace,
 )
@@ -1527,6 +1528,13 @@ class TestFailureHandling:
         The wedge here releases on an event rather than sleeping, so the test
         asserts the workspace returned while the worker was still running --
         which is the whole property -- without depending on a sleep duration.
+
+        The bound allows for the one grace the pool gives every abandoned
+        worker's stop after the loop (``_ABANDONED_STOP_GRACE_SECONDS``), paid
+        on this path too so a worker that comes back inside it brings the
+        secret values its findings exposed into the cross-project masking set.
+        That wait is bounded and part of the contract; the open-ended wait on a
+        held slot is the defect this test pins.
         """
         _, plan = _make_workspace(
             tmp_path,
@@ -1545,7 +1553,11 @@ class TestFailureHandling:
         finally:
             release.set()
 
-        assert elapsed < 5.0, f"took {elapsed:.1f}s; the budget was 0.2s"
+        bound = PROJECT_TIMEOUT + _ABANDONED_STOP_GRACE_SECONDS + 2.0
+        assert elapsed < bound, (
+            f"took {elapsed:.1f}s; the project_timeout was {PROJECT_TIMEOUT}s plus "
+            f"the {_ABANDONED_STOP_GRACE_SECONDS}s stop grace, bound {bound}s"
+        )
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses == {
             "wedged": ProjectRunStatus.FAILED,
