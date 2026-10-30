@@ -113,13 +113,19 @@ def test_lint_fix_reports_a_write_it_cannot_make_without_a_traceback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A write that fails for the write's own reason (a full disk) is not
-    retried in place; `lint --fix` says so on one line and exits 1."""
+    retried in place; `lint --fix` says so on one line and exits 1.
+
+    The fixable issue is one a scan accepts (a scanner section's internal-only
+    `name` field, a warning --fix removes): lint's exit describes the file as it
+    is after the fixes, and a file a scan refuses (a top-level `build` section)
+    exits 3 before the refused rewrite's 1, so with such a file the write error
+    would be reported and the exit would still be 3.
+    """
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     config_path = tmp_path / ".ash" / ".ash.yaml"
     config_path.parent.mkdir()
-    # `build` is an internal-only top-level field, which `lint --fix` removes.
-    starting = "project_name: full-disk-probe\nbuild:\n  some: value\n"
+    starting = "project_name: full-disk-probe\nscanners:\n  bandit:\n    name: bandit\n"
     config_path.write_text(starting, encoding="utf-8")
     real_open = io.open
 
