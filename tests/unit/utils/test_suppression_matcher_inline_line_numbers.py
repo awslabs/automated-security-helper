@@ -89,6 +89,23 @@ def test_a_lone_cr_is_not_a_line_break(tmp_path, with_scan_root):
     assert found == [InlineSuppression(line_number=3, rule_id="R2", reason="known")]
 
 
+@pytest.mark.parametrize("with_scan_root", [False, True], ids=["plain", "scan-root"])
+def test_a_cr_only_file_is_one_line_with_at_most_one_directive(
+    tmp_path, with_scan_root
+):
+    """The contract the docstring states: a file with no line feed (classic Mac
+    CR-only endings) is one line to the line-feed count, so of its two
+    directives only the first on the line is found, and it names line 1."""
+    source = _write(
+        tmp_path,
+        "x = 1\r# ash-ignore: R1 first\ry = 2\r# ash-ignore: R2 second\rz = 3\r",
+    )
+
+    found = find_inline_suppressions(source, tmp_path if with_scan_root else None)
+
+    assert found == [InlineSuppression(line_number=1, rule_id="R1", reason="first")]
+
+
 def test_a_path_the_os_layer_refuses_yields_no_suppressions_and_no_error(tmp_path):
     """Red at the base: ``ValueError: embedded null byte`` escaped."""
     found = find_inline_suppressions(tmp_path / "with\x00nul.py")

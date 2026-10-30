@@ -657,6 +657,14 @@ def find_inline_suppressions(
     starts with a UTF-16 or UTF-32 byte order mark is read in that encoding, any
     other as UTF-8.
 
+    Lines are counted by line feed, as a scanner's SARIF ``startLine`` counts
+    them (a CRLF file's carriage return belongs to the line before it; a lone
+    CR is not a line break). That is the contract for a file with no line feed
+    at all (classic Mac CR-only line endings): it is one line here, so at most
+    one directive is found, the first on the line, and it names line 1 (line 2
+    for ``ash-ignore-next-line``); a scanner that numbers such a file by CR
+    reports lines these directives never match.
+
     Args:
         file_path: Path to the source file to scan.
         scan_root: The scanned tree. When given, the file is read under the
