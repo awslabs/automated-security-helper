@@ -13,8 +13,11 @@ handler, as a MARKUP log record, through ``rich.print``, and in the stderr of
 ``emoji=False`` show each as written.
 
 escape_markup splits each emoji code across two markup segments with an empty
-``[none][/none]`` after its first colon, so no segment holds a whole code. An
-emoji code ASH writes into its own markup, outside escape_markup, renders.
+``[none][/none]`` after its first colon, so no segment holds a whole code. A
+tag-shaped value holding a colon (``[a:b:]``, ``[a:b]:c``), which Rich's escape
+backslashes, is opened with an empty style after its ``[`` instead, so the split
+inside it ends no tag and the backslashes the escape doubled before it are halved
+back. An emoji code ASH writes into its own markup, outside escape_markup, renders.
 """
 
 from __future__ import annotations
@@ -32,7 +35,27 @@ from automated_security_helper.utils.terminal_text import commands_broken
 
 pytestmark = pytest.mark.unit
 
-VALUES = [":warning:", ":lock:", "a:smile:b", "::warning::x", ":x:lock:"]
+BACKSLASH = chr(0x5C)
+
+VALUES = [
+    ":warning:",
+    ":lock:",
+    "a:smile:b",
+    "::warning::x",
+    ":x:lock:",
+    # A tag-shaped value holding a code: Rich's escape backslashes the tag, and a
+    # split inside an escaped tag would end it and show the backslash, so the tag
+    # is opened with an empty style after its "[" instead and the code split.
+    "[a:b:]",
+    # The code starts inside the tag and ends after it.
+    "[a:b]:c",
+    # A colon in the tag but no code: opened too, shown the same.
+    "x [a:b] y",
+    # Backslashes before the tag: the escape doubles them and adds one; the
+    # opened tag needs none, so they are halved back to the ones written.
+    BACKSLASH + "[a:b:]",
+    BACKSLASH + BACKSLASH + "[a:b:]",
+]
 
 
 def _console(stream: io.StringIO) -> Console:
