@@ -501,7 +501,8 @@ def test_null_errors_with_exit_zero_is_clean():
     ("path", "expected"),
     [
         (".github/workflows/ci.yml", True),
-        (".github/workflows/ci.YAML", True),
+        # As spelled: GitHub, actionlint and zizmor read .yml and .yaml only.
+        (".github/workflows/ci.YAML", False),
         ("svc/.github/workflows/ci.yaml", True),
         # A backslash separates on Windows and is a name character on POSIX,
         # where a root-level file so named is not a workflow and a workflow
@@ -2179,19 +2180,14 @@ _PARITY_LAYOUT = [
     [
         (
             "source",
-            [
-                ".github/workflows/ci.yml",
-                ".github/workflows/release.YAML",
-                "svc/.github/workflows/deploy.yaml",
-            ],
+            [".github/workflows/ci.yml", "svc/.github/workflows/deploy.yaml"],
         ),
-        ("source/.github", ["workflows/ci.yml", "workflows/release.YAML"]),
-        ("source/.github/workflows", ["ci.yml", "release.YAML"]),
+        ("source/.github", ["workflows/ci.yml"]),
+        ("source/.github/workflows", ["ci.yml"]),
         (
             "converted",
             [
                 "archive.zip/.github/workflows/ci.yml",
-                "archive.zip/.github/workflows/release.YAML",
                 "archive.zip/ignored/.github/workflows/v.yml",
                 "archive.zip/svc/.github/workflows/deploy.yaml",
             ],
@@ -2207,7 +2203,8 @@ def test_actionlint_lints_exactly_the_workflows_zizmor_audits(
     zizmor also audits composite actions, which actionlint does not lint, so its
     ``action.yml`` inputs are left out of the comparison. ``ignored/`` is in the
     source's ``.gitignore``, which the converted files (not from the scan set) do
-    not read.
+    not read. ``release.YAML`` is in the layout and selected by neither: both tools
+    and GitHub read the suffix as spelled.
     """
     from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
         ZizmorScanner,

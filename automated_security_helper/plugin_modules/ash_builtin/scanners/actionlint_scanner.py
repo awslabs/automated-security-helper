@@ -334,7 +334,9 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
 
     GitHub reads ``*.yml``/``*.yaml`` directly inside ``.github/workflows`` and not
     in its subdirectories. Applied at any depth, so a nested project's workflows are
-    linted too.
+    linted too. The suffix is matched as spelled, as actionlint, zizmor and GitHub
+    read it, so ``ci.YAML`` is not a workflow and the two scanners select the same
+    files (``is_zizmor_input``).
 
     ``scan_root`` is the directory *relative_path* is relative to. Its own name and
     its parent's count, so a scan root that is itself a ``.github`` or
@@ -352,7 +354,7 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
         len(parts) >= 3
         and parts[-3] == ".github"
         and parts[-2] == "workflows"
-        and parts[-1].lower().endswith(_WORKFLOW_SUFFIXES)
+        and parts[-1].endswith(_WORKFLOW_SUFFIXES)
     )
 
 
