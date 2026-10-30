@@ -962,8 +962,10 @@ def _carry_trusted_module_references(
     rule ``reindex_plugin_module_references`` applies to its own list
     (``_remapped_module_reference_lists``): an entry of several comma-joined
     names gets one per kept piece, re-resolved to the piece; a name two trusted
-    entries both read is carried ONCE, from the first entry that holds it, so
-    the record never holds two rewrites at one index; and a trusted reference
+    entries both hold is carried ONCE, from the first of them that a reference
+    names (else the first of them), so the record never holds two rewrites at
+    one index and a literal spelling before the read one does not swallow the
+    read one's reference; and a trusted reference
     recorded at or past the end of the trusted list refuses the carry
     (PluginModuleReferenceError, ``config`` unchanged), as the reindex refuses
     it, because such a reference describes no entry and dropping or keeping it
@@ -979,20 +981,6 @@ def _carry_trusted_module_references(
     new_index = {
         name: i for i, name in enumerate(loaded) if only is None or name in only
     }
-    seen: set[str] = set()
-    new_indices: Dict[int, List[int]] = {}
-    respelled: Dict[int, bool] = {}
-    for old, entry in enumerate(entries):
-        pieces = split_plugin_modules([entry])
-        respelled[old] = pieces != [entry]
-        mine: List[int] = []
-        for piece in pieces:
-            if piece in seen:
-                continue
-            seen.add(piece)
-            if piece in new_index:
-                mine.append(new_index[piece])
-        new_indices[old] = mine
     sources = {
         attribute: tuple(
             reference
@@ -1001,6 +989,33 @@ def _carry_trusted_module_references(
         )
         for attribute in _MODULE_REFERENCE_LISTS
     }
+    referenced = {
+        tuple(reference.path)[1]
+        for references in sources.values()
+        for reference in references
+    }
+    # The entry a duplicated name is carried from: the first entry a reference
+    # names, else the first entry. The reindex keeps the first entry outright
+    # because its references were recorded against that very list; here the
+    # references are the trusted base's and a literal spelling may come first.
+    owner: Dict[str, int] = {}
+    pieces_of: Dict[int, List[str]] = {}
+    respelled: Dict[int, bool] = {}
+    for old, entry in enumerate(entries):
+        pieces = split_plugin_modules([entry])
+        pieces_of[old] = pieces
+        respelled[old] = pieces != [entry]
+        for piece in pieces:
+            holder = owner.get(piece)
+            if holder is None or (old in referenced and holder not in referenced):
+                owner[piece] = old
+    new_indices: Dict[int, List[int]] = {}
+    for old, pieces in pieces_of.items():
+        mine: List[int] = []
+        for piece in dict.fromkeys(pieces):
+            if owner[piece] == old and piece in new_index:
+                mine.append(new_index[piece])
+        new_indices[old] = mine
     carried = _remapped_module_reference_lists(
         sources,
         new_indices,

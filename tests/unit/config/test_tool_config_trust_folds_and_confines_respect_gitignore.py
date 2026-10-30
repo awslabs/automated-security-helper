@@ -67,6 +67,33 @@ def test_the_operators_pin_is_restored_when_the_section_has_no_options(tmp_path)
     assert _pin_of(config) == "==1.2.3"
 
 
+def test_a_non_mapping_options_value_is_named_in_a_warning_and_left(tmp_path):
+    """A plugin section whose ``options`` is not a mapping cannot hold the pin.
+    The value is left as written for the plugin to refuse, and a warning names
+    the section and the pin, so the omission is not silent."""
+    config = AshConfig.model_validate({"scanners": {PLUGIN: {"options": "oops"}}})
+    records: List[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.WARNING)
+    ASH_LOGGER.addHandler(handler)
+    try:
+        confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+
+    section = config.get_plugin_config("scanner", PLUGIN) or {}
+    assert section.get("options") == "oops", section
+    warnings = [r.getMessage() for r in records if r.levelno == logging.WARNING]
+    assert any(
+        f"scanners.{PLUGIN}.options is not a mapping" in w and "tool_version" in w
+        for w in warnings
+    ), warnings
+
+
 def test_the_operators_pin_is_restored_when_the_section_is_absent(tmp_path):
     config = AshConfig.model_validate({"project_name": "repo"})
 

@@ -438,10 +438,23 @@ def confine_tool_versions(
                 if isinstance(section, dict):
                     for name in OPERATOR_ONLY_PLUGIN_OPTIONS:
                         wanted = _trusted_option(trusted_options, name)
-                        if wanted is not _MISSING and wanted is not None:
-                            section.setdefault("options", {})
-                            if isinstance(section["options"], dict):
-                                section["options"][name] = wanted
+                        if wanted is _MISSING or wanted is None:
+                            continue
+                        section.setdefault("options", {})
+                        if isinstance(section["options"], dict):
+                            section["options"][name] = wanted
+                        else:
+                            # A value that is not a mapping cannot hold the
+                            # pin; the plugin will refuse it when it reads its
+                            # options, and the operator's pin is not in force
+                            # until then, so say so rather than drop it
+                            # silently.
+                            ASH_LOGGER.warning(
+                                f"{segment}.{key}.options is not a mapping, so "
+                                f"the operator's {name} pin cannot be restored "
+                                "into it; the plugin reads its options from "
+                                "this value as written."
+                            )
                 continue
             for name in OPERATOR_ONLY_PLUGIN_OPTIONS:
                 default = _field_default(options, name)

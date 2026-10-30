@@ -54,6 +54,25 @@ def test_a_patch_whose_sibling_op_fails_still_shows_the_op_that_applies():
     assert seen.get("sandbox", {}).get("extra_read_paths") == ["/etc"], seen
 
 
+def test_a_failed_test_op_leaves_the_document_unpatched_in_the_per_op_walk():
+    """Resolution aborts the whole patch when a ``test`` op fails, so the ops
+    after it are never applied by the load. The per-op walk follows: a failed
+    test ends it with the unpatched document, so the walk does not read a
+    grant the load never makes and refuse a file the load treats as
+    unpatched."""
+    document = {
+        "patch": [
+            {"op": "remove", "path": "/no/such/place/at/all"},
+            {"op": "test", "path": "/project_name", "value": "not-the-base-name"},
+            {"op": "add", "path": "/sandbox/extra_read_paths", "value": ["/etc"]},
+        ]
+    }
+
+    seen = _with_own_patch(document, AshConfig())
+
+    assert seen is document, seen
+
+
 def test_the_trusted_default_config_is_read_once(tmp_path: Path, monkeypatch):
     """The chain the server trusts is judged from the files the load itself
     read, not from a second resolution of ASH_CONFIG that a file changed in

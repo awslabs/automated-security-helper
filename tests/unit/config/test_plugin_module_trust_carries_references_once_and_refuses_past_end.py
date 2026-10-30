@@ -86,6 +86,37 @@ def test_a_name_two_trusted_entries_read_is_carried_once(root: Path):
         assert tuple(carried[0].path[:2]) == ("ash_plugin_modules", 1), carried
 
 
+def test_a_literal_spelling_before_the_read_entry_does_not_drop_its_reference(
+    root: Path,
+):
+    """The trusted list names the module literally first and reads it from the
+    environment second. Only the second entry carries a reference; the carry
+    takes the duplicated name from the entry a reference names, so the kept
+    name keeps its one reference rather than losing it to the literal entry."""
+    from automated_security_helper.config.plugin_module_trust import (
+        _carry_trusted_module_references,
+    )
+
+    trusted = _resolved_config(
+        _entries_file(root / "trusted.yaml", [SEC_ONE, "${ASH_RECV_ONE}"])
+    )
+    assert list(trusted.ash_plugin_modules) == [SEC_ONE, SEC_ONE]
+    for attribute in _LISTS:
+        references = _module_references(trusted, attribute)
+        assert [reference.path[1] for reference in references] == [1], attribute
+
+    config = _resolved_config(_entries_file(root / "client.yaml", [INSTALLED]))
+    loaded = [INSTALLED, SEC_ONE]
+    config.ash_plugin_modules = list(loaded)
+
+    _carry_trusted_module_references(config, trusted, loaded)
+
+    for attribute in _LISTS:
+        carried = _module_references(config, attribute)
+        assert len(carried) == 1, (attribute, carried)
+        assert tuple(carried[0].path[:2]) == ("ash_plugin_modules", 1), carried
+
+
 def test_a_trusted_reference_past_the_trusted_list_refuses_the_carry(root: Path):
     """A trusted reference recorded past the end of the trusted list names no
     entry. The carry refuses it as the reindex does, before touching any list
