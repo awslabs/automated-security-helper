@@ -511,6 +511,16 @@ ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES = (
 )
 ASH_CONFIG_ENV_VAR_SECRET_NAMES = ("ASH_MCP_AUTH_HEADER_VALUE",)
 
+# ``ASH_`` names a config file MAY interpolate although they end in a listed
+# suffix: a limit named after the word, not the word's value. The one such
+# setting ASH reads is ``ASH_BEDROCK_MAX_TOKENS`` (``max_tokens`` of the Bedrock
+# summary reporter), which ``_TOKENS`` would refuse. :func:`is_refused_config_environment_name`
+# reads these before the suffixes and before the masking rule's reading, so a
+# name ending in one of them is admitted; a plural token name without the limit
+# word before it (``ASH_API_TOKENS``, ``ASH_X_TOKENS``) is still refused, and
+# the singular ``ASH_MAX_TOKEN`` is too (``_TOKEN`` names one token).
+ASH_CONFIG_ENV_VAR_LIMIT_SUFFIXES = ("_MAX_TOKENS",)
+
 
 def is_refused_config_environment_name(name: str) -> bool:
     """Whether a config file may NOT interpolate the ``ASH_`` variable *name*,
@@ -524,13 +534,20 @@ def is_refused_config_environment_name(name: str) -> bool:
     the suffixes and the names, while the secret-shaped reading masked the
     stream output only, so the loader admitted names the same module called
     secrets (qualified, glued and digit-suffixed forms among them).
+
+    False, before the suffixes and the masking rule's reading, for a name
+    ending in one of ``ASH_CONFIG_ENV_VAR_LIMIT_SUFFIXES``: a limit named after
+    the word (``ASH_BEDROCK_MAX_TOKENS``), which both readings would otherwise
+    refuse for its plural ``TOKENS``. The listed names come first still.
     """
     upper = name.upper()
-    return (
-        upper in ASH_CONFIG_ENV_VAR_SECRET_NAMES
-        or upper.endswith(ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES)
-        or is_secret_shaped_environment_name(name)
-    )
+    if upper in ASH_CONFIG_ENV_VAR_SECRET_NAMES:
+        return True
+    if upper.endswith(ASH_CONFIG_ENV_VAR_LIMIT_SUFFIXES):
+        return False
+    return upper.endswith(
+        ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES
+    ) or is_secret_shaped_environment_name(name)
 
 
 def is_readable_environment_name(name: str) -> bool:
