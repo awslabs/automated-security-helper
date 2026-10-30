@@ -368,3 +368,50 @@ def test_members_written_to_distinct_paths_are_all_extracted(
     assert sorted(files) == ["m.js", "vendor/m.js", "vendor/n.js"]
     assert converter.refused_inputs == []
     assert archive_converter.archives_extracted_whole(test_plugin_context) == {"a.zip"}
+
+
+@pytest.mark.parametrize("kind", ["zip", "tar"])
+def test_a_member_under_a_file_member_is_refused_alone(
+    test_plugin_context, monkeypatch, kind
+):
+    """``x.js`` and then ``x.js/y.js``: the second cannot be written under a file.
+    The extractor failed on it, and the whole archive was recorded as a failed
+    input, ``x.js`` and ``ok.js`` lost with it, so two members were enough to keep
+    an archive's content from being scanned. The member is refused alone now,
+    naming the file its path runs through, and the rest is extracted."""
+    maker = _zip if kind == "zip" else _tar
+    archive = maker(
+        Path(test_plugin_context.source_dir) / f"a.{kind}",
+        [("x.js", b"x\n"), ("x.js/y.js", b"y\n"), ("ok.js", b"ok\n")],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"x.js": b"x\n", "ok.js": b"ok\n"}
+    assert converter.failed_inputs == []
+    (refused,) = converter.refused_inputs
+    assert (refused.path, refused.member) == (f"a.{kind}", "x.js/y.js")
+    assert "'x.js'" in refused.reason, refused.reason
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
+
+
+@pytest.mark.parametrize("kind", ["zip", "tar"])
+def test_a_member_written_where_earlier_members_are_extracted_below_is_refused_alone(
+    test_plugin_context, monkeypatch, kind
+):
+    """The reverse order: ``a/b.js`` and then a file named ``a``. The later member
+    cannot be written where the directory stands (IsADirectoryError failed the
+    whole archive before); it is refused alone and ``a/b.js`` is scanned."""
+    maker = _zip if kind == "zip" else _tar
+    archive = maker(
+        Path(test_plugin_context.source_dir) / f"a.{kind}",
+        [("a/b.js", b"b\n"), ("a", b"a\n"), ("ok.js", b"ok\n")],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"a/b.js": b"b\n", "ok.js": b"ok\n"}
+    assert converter.failed_inputs == []
+    (refused,) = converter.refused_inputs
+    assert (refused.path, refused.member) == (f"a.{kind}", "a")
+    assert "below its path" in refused.reason, refused.reason

@@ -201,62 +201,6 @@ def test_the_kind_of_a_failure_follows_the_error(error, kind):
     assert archive_converter._failure_kind(error) == kind
 
 
-def _zip_with(members) -> bytes:
-    zipped = io.BytesIO()
-    with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_STORED) as archive:
-        for info, data in members:
-            archive.writestr(info, data)
-    return zipped.getvalue()
-
-
-@pytest.mark.parametrize(
-    ("name", "data", "words"),
-    [
-        pytest.param(
-            "under.zip",
-            _zip_with(
-                [
-                    (zipfile.ZipInfo("x.js"), b"x\n"),
-                    (zipfile.ZipInfo("x.js/y.js"), b"y\n"),
-                ]
-            ),
-            ("NotADirectoryError",),
-            id="member-under-a-file",
-        ),
-    ],
-)
-def test_what_the_archive_itself_makes_unextractable_is_an_input_error(
-    name, data, words, test_plugin_context, monkeypatch
-):
-    """A member under a path an earlier member made a file: the archive's doing,
-    recorded as an input error a reviewed suppression may accept, with the reason
-    naming it; not a tool failure. (An encrypted member and a compression method
-    zipfile does not read are refused one by one before extraction, with the rest
-    of the archive extracted; test_archive_converter_edge_inputs covers them.)"""
-    from automated_security_helper.models.asharp_model import waives_gate
-
-    source = Path(test_plugin_context.source_dir)
-    archive = source / name
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    archive.write_bytes(data)
-    test_plugin_context.config.global_settings.suppressions = [
-        AshSuppression(
-            rule_id="ash-unconverted-input", path=name, reason="a reviewed fixture"
-        )
-    ]
-    converter = _converter(test_plugin_context, monkeypatch, archive)
-
-    results = converter.convert()
-
-    assert results == []
-    (failed,) = converter.failed_inputs
-    assert failed.kind == "input"
-    for word in words:
-        assert word in failed.reason, failed.reason
-    assert failed.accepted is True
-    assert waives_gate(failed)
-
-
 def test_a_scan_set_path_outside_the_tree_is_not_skipped_and_does_not_raise(
     test_plugin_context, monkeypatch
 ):

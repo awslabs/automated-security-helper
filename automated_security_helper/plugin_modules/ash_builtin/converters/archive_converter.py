@@ -1188,6 +1188,22 @@ _MEMBER_SAME_PATH = (
     "an earlier member of the archive is extracted to the same path, and a member "
     "given by name alone cannot be renamed beside it"
 )
+#: A member whose path runs through a path an earlier member of the archive is
+#: written to as a file (``x.js`` before ``x.js/y.js``), and a member written as a
+#: file to a path earlier members are extracted below (``a/b.js`` before ``a``).
+#: Each is refused alone: the extractor fails on it, and an archive holding such a
+#: pair used to lose every member, those already written included, so anyone who
+#: could commit an archive could keep all of its content from being scanned by
+#: adding ``a`` and ``a/b``. inspect_members reads every name before anything is
+#: written, so the pair is known in time.
+_MEMBER_UNDER_A_FILE = (
+    "its path runs through '{path}', which an earlier member of the archive is "
+    "extracted to as a file"
+)
+_MEMBER_OVER_A_DIRECTORY = (
+    "earlier members of the archive are extracted below its path, so it cannot "
+    "be written there as a file"
+)
 #: The one line that stands for the renamed members past MEMBER_REFUSALS_LISTED,
 #: so an archive of thousands of repeated names does not log a line apiece.
 _MEMBERS_RENAMED_UNLISTED = (
@@ -1524,6 +1540,22 @@ def _written_key(member_name: str, kind: Optional[Literal["zip", "tar"]]) -> str
     been a second file, so nothing is lost either way.
     """
     return os.path.normcase(_member_written_path(member_name, kind)).casefold()
+
+
+def _written_prefix_keys(
+    member_name: str, kind: Optional[Literal["zip", "tar"]]
+) -> List[str]:
+    """The keys (_written_key) of the directories a member of this name is written
+    below, the top first: ``a`` and ``a/b`` for ``a/b/c.js``, none for ``c.js``.
+    A member written to one of them as a file, or a member whose own key is one
+    of another member's, cannot be extracted beside that member: the extractor
+    fails on whichever comes later (NotADirectoryError, IsADirectoryError), so
+    inspect_members refuses that one alone instead.
+    """
+    parts = _member_written_path(member_name, kind).split("/")
+    return [
+        _written_key("/".join(parts[:count]), kind) for count in range(1, len(parts))
+    ]
 
 
 def _named_member(
@@ -1952,6 +1984,12 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # file is written beside the earlier one under a numbered name, and both
         # are scanned, rather than one written over the other.
         written: Dict[str, str] = {}
+        # The directories the admitted members are written below (every prefix
+        # of their written paths, _written_prefix_keys), so a later member bound
+        # for one of them as a file, or one whose path runs through an admitted
+        # member's file, is refused alone instead of failing the whole archive
+        # at extraction (NotADirectoryError, IsADirectoryError).
+        directories: Set[str] = set()
         # Every member's key before any is renamed, so a renamed member never
         # takes the name of a member that comes later in the archive.
         taken: Set[str] = set()
@@ -2037,7 +2075,17 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 problem = _MEMBER_NESTED_ARCHIVE
             if problem is None:
                 destination = _written_key(member_name, kind)
-                if destination in written and isinstance(member, str):
+                prefixes = _written_prefix_keys(member_name, kind)
+                through = next((key for key in prefixes if key in written), None)
+                if through is not None:
+                    # x.js before x.js/y.js: the later member cannot be written
+                    # under a file, and is refused alone, naming the file.
+                    problem = _MEMBER_UNDER_A_FILE.format(path=written[through])
+                elif destination in directories:
+                    # a/b.js before a: the later member cannot be written as a
+                    # file where the earlier members' directory stands.
+                    problem = _MEMBER_OVER_A_DIRECTORY
+                elif destination in written and isinstance(member, str):
                     # A bare name has no member object whose name the extractor
                     # would read, so it cannot be renamed beside the earlier
                     # member; the later name is refused, as every duplicate was
@@ -2071,6 +2119,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     destination = _written_key(renamed, kind)
                 if problem is None:
                     written[destination] = member_name
+                    # A rename changes the base name alone, so the prefixes of
+                    # the name as read are the renamed member's too.
+                    directories.update(prefixes)
             if problem is not None:
                 if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:
                     listed[problem] = listed.get(problem, 0) + 1
