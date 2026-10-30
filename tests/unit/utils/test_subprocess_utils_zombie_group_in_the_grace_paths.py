@@ -108,6 +108,28 @@ def test_a_refused_stop_on_a_group_of_zombies_marks_nothing():
     assert started.stop_refused is False
 
 
+def test_a_refused_stop_on_a_group_with_a_live_member_marks_the_record():
+    """The control for the test above: the same record and the same reads, with
+    a member of the group still running, so the mark is set. Without it a
+    False could as well mean the record was never found."""
+    group = _GroupOfZombies()
+    process = _reaped_child(_NO_SUCH_PGID)
+    started = subprocess_utils._StartedChild()
+    with contextlib.ExitStack() as stack:
+        group.installed(stack)
+        stack.enter_context(
+            patch.object(subprocess_utils, "_has_exited", return_value=True)
+        )
+        # No orphan to reap and a group that still exists: a member lives.
+        stack.enter_context(
+            patch.object(subprocess_utils, "_group_exists", return_value=True)
+        )
+        with started.recording():
+            started.process = process
+            subprocess_utils._note_stop_refused(process)
+    assert started.stop_refused is True
+
+
 def test_the_servers_last_stop_settles_at_once_on_groups_of_zombies():
     """kill_running_groups waits for the groups it signalled to be gone; as PID 1
     a group left with nothing but zombies is gone once they are reaped."""
