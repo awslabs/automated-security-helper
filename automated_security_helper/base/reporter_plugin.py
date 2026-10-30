@@ -59,6 +59,7 @@ from typing_extensions import Self
 
 from pydantic import (
     Field,
+    ValidationError,
     ValidationInfo,
     ValidatorFunctionWrapHandler,
     field_validator,
@@ -693,9 +694,20 @@ class ReporterPluginBase(PluginBase, Generic[T]):
             # extension. Left None, the enabled filter was skipped, the report
             # was written as the base's "ash.txt", and the reporter could not be
             # selected by name. A reporter that declares no model keeps None.
+            # So does one whose model has a required field: it states no default
+            # to run on, and building it with no config used to be allowed, so
+            # the refusal does not fail its construction (the section is checked
+            # where one is given, by ``configure`` and the ``config`` field).
             declared = self._declared_config_model()
             if declared is not None:
-                self.config = declared()
+                try:
+                    self.config = declared()
+                except ValidationError:
+                    ASH_LOGGER.debug(
+                        f"{self.__class__.__name__} declares a config model with a "
+                        "required field, so it is built with no config",
+                        extra=NO_MARKUP,
+                    )
         return self
 
     def configure(
