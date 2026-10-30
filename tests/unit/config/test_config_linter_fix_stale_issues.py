@@ -219,6 +219,43 @@ def test_of_two_entries_with_one_id_only_the_expired_one_is_removed(tmp_path):
     assert remaining == [{"path": "src/same.py", "rule_id": "B101", "reason": "same"}]
 
 
+def test_two_entries_written_the_same_way_are_both_removed(tmp_path):
+    """Red before each fresh issue was matched once: two identical expired
+    entries carry one id and raise two issues, both given issues matched the
+    first fresh issue, and the second removal resolved to the entry the first
+    had already removed, so one duplicate stayed in the file."""
+    config_path = tmp_path / ".ash.yaml"
+    duplicate = {
+        "path": "src/twice.py",
+        "rule_id": "B101",
+        "reason": "copied",
+        "expiration": "2020-01-01",
+    }
+    _write(
+        config_path,
+        [
+            {"path": "src/first.py", "rule_id": "B101", "reason": "keep"},
+            dict(duplicate),
+            dict(duplicate),
+        ],
+    )
+    issues = ConfigLinter.lint(config_path).fixable_issues
+    assert [i.path for i in issues] == [
+        "global_settings.suppressions[1]",
+        "global_settings.suppressions[2]",
+    ]
+    assert issues[0].entry_id == issues[1].entry_id
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, issues)
+
+    assert [i.category for i in fixed_issues] == [
+        LintCategory.SUPPRESSION_EXPIRED,
+        LintCategory.SUPPRESSION_EXPIRED,
+    ]
+    remaining = yaml.safe_load(fixed_content)["global_settings"]["suppressions"]
+    assert remaining == [{"path": "src/first.py", "rule_id": "B101", "reason": "keep"}]
+
+
 def test_an_entry_un_expired_while_the_prompt_waited_is_kept(tmp_path):
     """Red before the fresh lint came back: the entry's id leaves expiration
     out, so the stale removal still found the entry and popped it although its

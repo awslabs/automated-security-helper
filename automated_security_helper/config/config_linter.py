@@ -2489,24 +2489,28 @@ class ConfigLinter:
         has another id and is not matched; one whose expiration moved into the
         future raises no fresh issue and is not matched. Any other issue is
         kept when a fresh issue equals it.
+
+        Each fresh issue is matched at most once: two entries written the same
+        way carry one id and raise two fresh issues, and the second given issue
+        takes the second fresh one, so both entries are fixed. Before this,
+        both given issues matched the first fresh issue, and the second fix
+        resolved to the entry the first had already removed and was reported
+        not fixed.
         """
         kept: List[LintIssue] = []
+        unmatched = list(fresh)
         for issue in given:
             if (
                 issue.category in cls._SUPPRESSION_FIX_CATEGORIES
                 and issue.entry_id is not None
             ):
-                match = next(
-                    (
-                        candidate
-                        for candidate in fresh
-                        if candidate.category == issue.category
+                for position, candidate in enumerate(unmatched):
+                    if (
+                        candidate.category == issue.category
                         and candidate.entry_id == issue.entry_id
-                    ),
-                    None,
-                )
-                if match is not None:
-                    kept.append(match)
+                    ):
+                        kept.append(unmatched.pop(position))
+                        break
             elif issue in fresh:
                 kept.append(issue)
         return kept
