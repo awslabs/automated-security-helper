@@ -300,7 +300,9 @@ def test_unquarantine_names_the_file_alone_and_reports_a_nonzero_exit(
 
     def fake_run(args, **kwargs):
         seen["args"] = args
-        return SimpleNamespace(returncode=1, stdout="", stderr="No such xattr")
+        return SimpleNamespace(
+            returncode=1, stdout="", stderr="Operation not permitted"
+        )
 
     monkeypatch.setattr(du.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(du, "run_command", fake_run)
@@ -308,7 +310,29 @@ def test_unquarantine_names_the_file_alone_and_reports_a_nonzero_exit(
         du.unquarantine_macos_binary(Path("/opt/ash/bin/tool"))
     assert "-r" not in seen["args"]
     assert seen["args"][-1] == "/opt/ash/bin/tool"
-    assert "exited 1" in caplog.text and "No such xattr" in caplog.text
+    assert "exited 1" in caplog.text and "Operation not permitted" in caplog.text
+
+
+def test_a_file_with_no_quarantine_attribute_is_not_a_failed_unquarantine(
+    monkeypatch, caplog
+):
+    """A file the downloader wrote carries no quarantine attribute, so
+    ``xattr -d`` exits 1 with "No such xattr": nothing to remove, no warning."""
+
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="/opt/ash/bin/tool: No such xattr: com.apple.quarantine",
+        )
+
+    monkeypatch.setattr(du.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(du, "run_command", fake_run)
+    with caplog.at_level(logging.DEBUG):
+        du.unquarantine_macos_binary(Path("/opt/ash/bin/tool"))
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [], [r.getMessage() for r in warnings]
+    assert "carries no quarantine attribute" in caplog.text
 
 
 # --- the receipt store -----------------------------------------------------------
