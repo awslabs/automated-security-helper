@@ -10,10 +10,12 @@ list under ``transient_settings``.
 Usage: ``python -m automated_security_helper.utils.detect_secrets_worker REQUEST OUTPUT``
 
 REQUEST is a JSON file with ``root`` (str), ``baseline`` (the parsed baseline document,
-or null), ``settings`` (the dict handed to ``transient_settings``), ``paths`` (the
-absolute file names to scan) and ``verify`` (whether candidate secrets may be sent to
-their issuers; missing means no). The file list goes in a file rather than on the
-command line because a large repository's list exceeds the Windows command-line limit.
+or null), ``baseline_trusted`` (whether the operator named that baseline, so its audit
+may drop entries; missing means no), ``settings`` (the dict handed to
+``transient_settings``), ``paths`` (the absolute file names to scan) and ``verify``
+(whether candidate secrets may be sent to their issuers; missing means no). The file
+list goes in a file rather than on the command line because a large repository's list
+exceeds the Windows command-line limit.
 
 Unless ``verify`` is true, every HTTP request made through ``requests`` fails before
 it is sent. The scanner already removes the verification filter from ``settings``
@@ -35,8 +37,11 @@ OUTPUT is written only on success, as a JSON list of ``[key, [secret, ...]]`` pa
 the collection's own key order, each secret in ``PotentialSecret.json()`` form. The key
 is kept separately from the secret's ``filename`` because they differ: scan_files keys a
 multi-file scan by the path relative to ``root`` while the secret keeps the absolute
-name. A baseline's entries are in the collection too; one the baseline's audit marked
-``is_secret: false`` (accepted as not a secret) is left out of OUTPUT.
+name. A baseline's entries are in the collection too. When the request marks the
+baseline trusted (the operator named it), one the baseline's audit marked
+``is_secret: false`` (accepted as not a secret) is left out of OUTPUT; otherwise every
+entry is reported, because a baseline the scanned repository wrote itself (the in-tree
+file the scanner loads by default) may mark a finding but may not remove it.
 
 A secret found by this scan also carries ``ash_start_column``, the 1-based column its
 value starts at in its line, when the value is found there. detect-secrets reports no
@@ -64,6 +69,10 @@ from automated_security_helper.utils.process_env import (
 
 #: The key of the column in each secret written to OUTPUT.
 START_COLUMN_KEY = "ash_start_column"
+
+#: The REQUEST key the scanner sets to ``true`` only for a baseline the operator
+#: named. Only then may the baseline's audit drop an entry from OUTPUT.
+BASELINE_TRUSTED_KEY = "baseline_trusted"
 
 
 def _read_lines(filename: str, count: int) -> Optional[List[str]]:
@@ -184,6 +193,7 @@ def _accepted_by_the_baseline(collection: Any) -> _Accepted:
     each keeping the audit result the baseline recorded (a secret found again
     under the baseline's key is the same set element). One audited and accepted as not
     a secret is not reported; an unaudited one, or one audited as a secret, is.
+    Called only for a baseline the request marks trusted; see ``run()``.
     """
     return {
         (key, secret.type, secret.secret_hash)
@@ -243,7 +253,13 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
             else SecretsCollection()
         )
         collection.root = request["root"]
-        accepted = _accepted_by_the_baseline(collection)
+        # A baseline the operator named may drop what its audit accepted. One the
+        # scanned repository wrote (the in-tree default) is untrusted: it may mark
+        # an entry but every entry still reaches OUTPUT. Absent, or anything but
+        # the JSON true, reads as untrusted.
+        accepted: _Accepted = set()
+        if request.get(BASELINE_TRUSTED_KEY) is True:
+            accepted = _accepted_by_the_baseline(collection)
         with transient_settings(request["settings"]):
             _scan_files(collection, request["paths"])
         return [

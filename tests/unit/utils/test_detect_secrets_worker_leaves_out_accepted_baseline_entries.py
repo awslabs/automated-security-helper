@@ -1,14 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The detect-secrets worker leaves out a baseline entry the audit accepted.
+"""The detect-secrets worker leaves out a baseline entry the audit accepted, but
+only for a baseline the operator named.
 
 The worker loads the baseline into the collection it then scans into, so every
 baseline entry was in its output, and the scanner turned each into a failure:
 one the baseline's audit had marked ``is_secret: false`` (accepted as not a
 secret) was reported as a finding all the same. An unaudited entry, or one
-audited as a secret, is still reported. The values here are placeholders, never
-credentials.
+audited as a secret, is still reported. The drop is gated on the request's
+``baseline_trusted`` flag: a baseline the scanned repository wrote (the in-tree
+default) may mark an entry but may not remove it, so without the flag every entry
+is reported as before. The values here are placeholders, never credentials.
 """
 
 from __future__ import annotations
@@ -61,20 +64,25 @@ def quiet_worker(monkeypatch):
     monkeypatch.setattr(multiprocessing, "set_start_method", lambda *a, **k: None)
 
 
-def _request(tmp_path, baseline):
+def _request(tmp_path, baseline, trusted=None):
+    """A worker request; ``trusted`` None leaves the flag out, as a scanner that
+    loaded the repository's own in-tree baseline does."""
     target = tmp_path / "f.txt"
     target.write_text(
         'password = "' + ACCEPTED_VALUE + '"\n'  # pragma: allowlist secret
         'secret = "' + UNAUDITED_VALUE + '"\n',  # pragma: allowlist secret
         encoding="utf-8",
     )
-    return {
+    request = {
         "root": str(tmp_path),
         "baseline": baseline,
         "settings": SETTINGS,
         "paths": [str(target)],
         "verify": False,
     }
+    if trusted is not None:
+        request[detect_secrets_worker.BASELINE_TRUSTED_KEY] = trusted
+    return request
 
 
 def _hashes(result):
@@ -86,16 +94,40 @@ def _hashes(result):
 def test_an_entry_the_audit_accepted_is_left_out(tmp_path, quiet_worker):
     baseline = _baseline([(ACCEPTED_VALUE, 1, False), (UNAUDITED_VALUE, 2, None)])
 
-    result = detect_secrets_worker.run(_request(tmp_path, baseline))
+    result = detect_secrets_worker.run(_request(tmp_path, baseline, trusted=True))
 
     assert _hashed(ACCEPTED_VALUE) not in _hashes(result)
     assert _hashed(UNAUDITED_VALUE) in _hashes(result)
 
 
+def test_an_accepted_entry_of_an_untrusted_baseline_is_still_reported(
+    tmp_path, quiet_worker
+):
+    """The in-tree baseline is the repository's own text: its audit may not drop a
+    finding, so a request that does not mark the baseline trusted reports the
+    accepted entry as before."""
+    baseline = _baseline([(ACCEPTED_VALUE, 1, False), (UNAUDITED_VALUE, 2, None)])
+
+    result = detect_secrets_worker.run(_request(tmp_path, baseline))
+
+    assert _hashes(result) == sorted(
+        [_hashed(ACCEPTED_VALUE), _hashed(UNAUDITED_VALUE)]
+    )
+
+
+@pytest.mark.parametrize("value", [False, "true", 1, None])
+def test_only_the_json_true_marks_a_baseline_trusted(tmp_path, quiet_worker, value):
+    baseline = _baseline([(ACCEPTED_VALUE, 1, False)])
+
+    result = detect_secrets_worker.run(_request(tmp_path, baseline, trusted=value))
+
+    assert _hashed(ACCEPTED_VALUE) in _hashes(result)
+
+
 def test_an_entry_audited_as_a_secret_is_reported(tmp_path, quiet_worker):
     baseline = _baseline([(ACCEPTED_VALUE, 1, True)])
 
-    result = detect_secrets_worker.run(_request(tmp_path, baseline))
+    result = detect_secrets_worker.run(_request(tmp_path, baseline, trusted=True))
 
     assert _hashed(ACCEPTED_VALUE) in _hashes(result)
     assert _hashed(UNAUDITED_VALUE) in _hashes(result)
