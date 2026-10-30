@@ -32,7 +32,17 @@ pytestmark = pytest.mark.unit
 
 
 def _passed_report(**extra):
-    return {"target_type": "source", "status": "PASSED", **extra}
+    # A scan writes every per-target report under the scanner's own name
+    # (ScanResultsContainer.scanner_name); the metrics readers the archive scope
+    # goes through (core/unified_metrics.own_target_reports) keep only a report
+    # that carries it, as the calculator does, so a report without the name is
+    # nobody's and says nothing about what the scanner looked at.
+    return {
+        "scanner_name": "bandit",
+        "target_type": "source",
+        "status": "PASSED",
+        **extra,
+    }
 
 
 def _stale(tmp_path):

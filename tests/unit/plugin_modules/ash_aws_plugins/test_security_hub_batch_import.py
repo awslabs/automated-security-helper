@@ -5609,9 +5609,14 @@ def _scoped_model(rule: str):
         del model.metadata.__pydantic_extra__["changed_files_only"]
     elif rule == "a target of the scanner failed":
         # cdk-nag style: 10 templates attempted, 4 failed, rolled up to FAILED.
+        # The report carries the scanner's name as a scan writes it: the
+        # metrics readers (core/unified_metrics.own_target_reports) read only a
+        # report that names its scanner, so one without the name would count
+        # as no report and the scanner as having lost no target.
         model.scanner_results["bandit"].status = ScannerStatus.FAILED
         model.additional_reports["bandit"] = {
             "source": {
+                "scanner_name": "bandit",
                 "target_type": "source",
                 "status": "FAILED",
                 "targets_attempted": 10,
