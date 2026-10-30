@@ -154,6 +154,25 @@ def test_the_null_device_handed_the_descriptor_itself_stays_open(
     assert recorded_os == [("inheritable", 2, True)], recorded_os
 
 
+def test_a_held_descriptor_is_reported_held_though_inheritance_fails(
+    monkeypatch, no_reservations, recorded_os
+):
+    """The descriptor is open on the null device once dup2 returned; a failure
+    to make it inheritable does not unhold it, and False said it was not held."""
+
+    def refusing_set_inheritable(fd, inheritable):
+        raise OSError("not permitted")
+
+    monkeypatch.setattr(os, "set_inheritable", refusing_set_inheritable)
+
+    assert entrypoint._reserve_descriptor(2) is True
+    assert recorded_os == [
+        ("open", os.devnull, os.O_WRONLY),
+        ("dup2", NULL_FD, 2),
+        ("close", NULL_FD),
+    ], recorded_os
+
+
 def test_a_descriptor_closed_at_startup_is_recorded_though_the_hold_fails(
     monkeypatch, no_reservations
 ):

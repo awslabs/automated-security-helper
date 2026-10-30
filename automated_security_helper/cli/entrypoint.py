@@ -158,15 +158,19 @@ def _reserve_descriptor(fd: int, flags: int = os.O_WRONLY) -> bool:
     """Hold the closed descriptor *fd* with ``os.devnull``, opened with *flags*
     (for writing by default; stdin is held for reading).
 
-    Returns whether it is held. Opening the null device may itself be handed
-    *fd*, the lowest free number; then it is already in place and stays open.
+    Returns whether it is held: True once *fd* is open on the null device in
+    this process, whether or not the step after it succeeded. Opening the null
+    device may itself be handed *fd*, the lowest free number; then it is already
+    in place and stays open.
 
-    Held inheritable on both paths. ``os.open`` gives a descriptor children do
-    not inherit (PEP 446), so on the path where it was handed *fd* itself a
-    child that inherits stderr would start with that number closed again, and
-    its first ``open()`` would land there: the hazard this hold exists for.
-    ``os.dup2`` gives an inheritable one by default; it is set the same way so
-    the two paths cannot drift apart.
+    Held inheritable on both paths, as best effort. ``os.open`` gives a
+    descriptor children do not inherit (PEP 446), so on the path where it was
+    handed *fd* itself a child that inherits stderr would start with that number
+    closed again, and its first ``open()`` would land there: the hazard this
+    hold exists for. ``os.dup2`` gives an inheritable one by default; it is set
+    the same way so the two paths cannot drift apart. A failure to set it leaves
+    the hold in place for this process and is not reported: the descriptor is
+    held, which is what the result says.
     """
     try:
         null = os.open(os.devnull, flags)
@@ -182,7 +186,7 @@ def _reserve_descriptor(fd: int, flags: int = os.O_WRONLY) -> bool:
     try:
         os.set_inheritable(fd, True)
     except OSError:
-        return False
+        pass
     return True
 
 
