@@ -7989,24 +7989,47 @@ _ASH_MODULE = [sys.executable, "-m", "automated_security_helper.cli.main"]
 
 
 @pytest.mark.parametrize(
-    "options, expected",
+    "options, expected, env",
     [
-        pytest.param(["--no-such-option"], 5, id="unknown-option"),
-        pytest.param(["--port", "not-a-number"], 5, id="value-of-the-wrong-type"),
+        pytest.param(["--no-such-option"], 5, {}, id="unknown-option"),
+        pytest.param(["--port", "not-a-number"], 5, {}, id="value-of-the-wrong-type"),
         pytest.param(
-            ["--transport", "sse", "--stateless-http"], 5, id="stateless-http-on-sse"
+            ["--transport", "sse", "--stateless-http"],
+            5,
+            {},
+            id="stateless-http-on-sse",
         ),
         pytest.param(
-            ["--auth-header-name", "X-ASH-Token"], 5, id="auth-header-name-alone"
+            ["--auth-header-name", "X-ASH-Token"], 5, {}, id="auth-header-name-alone"
         ),
-        pytest.param(["--quiet", "--verbose"], 5, id="quiet-with-verbose"),
-        pytest.param(["--profile", "strict"], 3, id="profile-spec-without-equals"),
-        pytest.param(["--profile", "strict={missing}"], 3, id="profile-file-missing"),
+        pytest.param(["--quiet", "--verbose"], 5, {}, id="quiet-with-verbose"),
+        pytest.param(["--profile", "strict"], 3, {}, id="profile-spec-without-equals"),
         pytest.param(
-            ["--profile", "strict={unknown_key}"], 3, id="profile-with-unknown-key"
+            ["--profile", "strict={missing}"], 3, {}, id="profile-file-missing"
         ),
         pytest.param(
-            ["--profile", "strict={good}"], 0, id="control-a-profile-that-loads"
+            ["--profile", "strict={unknown_key}"], 3, {}, id="profile-with-unknown-key"
+        ),
+        pytest.param(
+            ["--profile", "strict={in_workspace}"],
+            3,
+            {"ASH_MCP_WORKSPACE_ROOT": "{workspace_root}"},
+            id="profile-inside-the-mcp-workspace-root",
+        ),
+        pytest.param(
+            ["--profile", "strict={in_checkout}"],
+            3,
+            {"ASH_MCP_ALLOWED_ROOTS": "{scan_root}"},
+            id="profile-in-a-checkout-under-a-scan-root",
+        ),
+        pytest.param(
+            ["--profile", "strict={server_written}"],
+            0,
+            {"ASH_MCP_WORKSPACE_ROOT": "{workspace_root}"},
+            id="control-a-config-the-server-wrote-in-the-workspace-root",
+        ),
+        pytest.param(
+            ["--profile", "strict={good}"], 0, {}, id="control-a-profile-that-loads"
         ),
         pytest.param(
             [
@@ -8019,33 +8042,62 @@ _ASH_MODULE = [sys.executable, "-m", "automated_security_helper.cli.main"]
                 "value",
             ],
             0,
+            {},
             id="control-options-that-combine",
         ),
     ],
 )
 @pytest.mark.unit
 def test_ash_mcp_refuses_options_with_the_exit_code_the_mcp_page_gives(
-    _mcp_cli: Callable[..., Any], tmp_path: Path, options: List[str], expected: int
+    _mcp_cli: Callable[..., Any],
+    tmp_path: Path,
+    options: List[str],
+    expected: int,
+    env: Dict[str, str],
 ) -> None:
     """mcp-server.md (How the server runs scans).
 
     Each command line runs through the ``ash`` app with serving replaced, and must exit
     with the code the paragraph gives without starting a server. The controls are a
-    profile that loads and options that combine, which start one.
+    profile that loads, a profile the server itself wrote in a session's ``config/``
+    directory under the workspace root, and options that combine, which start one.
+    The two placements the paragraph refuses are built as named: a profile under a
+    session's ``source/`` below the MCP workspace root, and one inside a directory
+    holding a ``.git`` entry under a root ``ASH_MCP_ALLOWED_ROOTS`` grants; ``env``
+    names the variable each placement is judged against.
     """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
+    )
+    from automated_security_helper.cli.mcp.sandbox import CONFIG_DIR_NAME
+
     assert_on_page(MCP_SERVER, _MCP_EXITS_FOR_REFUSED_OPTIONS)
+    workspace_root = tmp_path / "mcp-workspaces"
+    session_dir = workspace_root / "a-session"
+    (session_dir / "source").mkdir(parents=True)
+    (session_dir / CONFIG_DIR_NAME).mkdir()
+    scan_root = tmp_path / "scan-root"
+    checkout = scan_root / "repo"
+    (checkout / ".git").mkdir(parents=True)
     files = {
         "missing": tmp_path / "absent.yaml",
         "unknown_key": tmp_path / "unknown-key.yaml",
         "good": tmp_path / "good.yaml",
+        "in_workspace": session_dir / "source" / "strict.yaml",
+        "in_checkout": checkout / "strict.yaml",
+        "server_written": session_dir / CONFIG_DIR_NAME / SESSION_CONFIG_FILENAME,
     }
     files["unknown_key"].write_text(
         "project_name: p\nno_such_top_level_key: 1\n", encoding="utf-8"
     )
-    files["good"].write_text("project_name: p\n", encoding="utf-8")
+    for name in ("good", "in_workspace", "in_checkout", "server_written"):
+        files[name].write_text("project_name: p\n", encoding="utf-8")
+    places = {"workspace_root": workspace_root, "scan_root": scan_root}
     args = [option.format(**files) for option in options]
 
-    result, served = _mcp_cli(*args)
+    result, served = _mcp_cli(
+        *args, **{name: value.format(**places) for name, value in env.items()}
+    )
     assert result.exit_code == expected, (
         f"ash mcp {shlex.join(args)} exited {result.exit_code}, expected {expected}:\n"
         f"{result.output[-1500:]}"
@@ -10365,14 +10417,16 @@ def test_a_session_write_during_the_sweeps_wait_for_the_lock_is_accepted(
     A stateless streamable-HTTP server with a one-second ``--session-workspace-ttl``
     has a session that bound a profile and sent an upload's first chunk; the session
     then goes unused past the TTL. Stateless, because the server holds no session as
-    issued, so the sweep is what ends an unused one; a stateful server keeps a session
-    it still holds (the held-session test below). Another server holds the lock a
+    issued, so the sweep is what ends an unused one; a stateful server's idle session
+    is swept the same way (the idle stateful test below). Another server holds the lock a
     sweep takes before it removes a session. The sweep that a new session's first
     request sets off waits for that lock holding no session: the lock is taken
     before any session is, so a ``set_source_zip_chunk`` or a ``select_profile`` the
-    stale session sends during the wait must be accepted, and the write counts as a
-    use. The sweep then gives the lock up within about a second and removes nothing,
-    so the stale session's workspace is still there once the sweep has returned.
+    stale session sends during the wait must be accepted, and answered while the
+    sweep is still waiting, which the sweep's request still being open when the
+    write returns shows. The sweep then gives the lock up within about a second and
+    removes nothing, so the stale session's workspace is still there once the sweep
+    has returned.
 
     Two tells say the write landed during the wait and not around it: the request
     that set off the sweep is still open when the write returns (the sweep did not
@@ -10528,8 +10582,9 @@ def test_a_removed_workspace_takes_the_upload_and_the_bound_profile_with_it(
     copy, must be gone. The upload must be gone with it: its next chunk is refused,
     and the upload sent again from chunk 0 is accepted. Selecting the profile again
     must succeed and write its copy again. The control is the workspace, the copy and
-    the upload's first chunk all there before the sweep. A session the server still
-    holds is not swept (the held-session test below).
+    the upload's first chunk all there before the sweep. A session a stateful server
+    still holds as issued but that went idle is swept too (the idle stateful test
+    below).
     """
     assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
     assert_on_page(MCP_SERVER, _SWEEP_COVERS_THE_ENDS_IT_CANNOT_SEE)
