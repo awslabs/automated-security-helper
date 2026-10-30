@@ -15,6 +15,7 @@ Two mechanisms, each pinned against the behavior it replaced:
 """
 
 import asyncio
+import inspect
 
 import pytest
 
@@ -47,7 +48,7 @@ class TestAnAwaitableReturnedByACleanupIsAwaited:
         def cleanup():  # not a coroutine function; returns one
             return really_clean_up()
 
-        assert not asyncio.iscoroutinefunction(cleanup)
+        assert not inspect.iscoroutinefunction(cleanup)
         await _register(manager, "sub", cleanup)
 
         assert await manager.unregister_subscription("sub") is True
