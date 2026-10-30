@@ -377,6 +377,33 @@ def test_a_requested_absent_tool_is_named_in_one_failure_clause(monkeypatch):
     assert "no install commands were run" not in text, text
 
 
+def test_a_requested_construction_failure_counts_by_the_request_it_carries(
+    monkeypatch,
+):
+    """The outcome is named by its class and the request by the declared name;
+    the verdict read the name only, so a disabled plugin's failure was listed as
+    not counted and the run passed."""
+    panels = io.StringIO()
+    monkeypatch.setattr(
+        dependencies, "console", Console(file=panels, width=300, no_color=True)
+    )
+    failure = _outcome(
+        name="CfnNagScanner",
+        command=None,
+        disabled_by_config=True,
+        errors=["cfn-nag stand-in cannot be built"],
+        requested=True,
+    )
+
+    with pytest.raises(typer.Exit) as exit_info:
+        _report_and_exit([failure], requested_tools=["cfn-nag"])
+
+    assert exit_info.value.exit_code == 1
+    text = " ".join(panels.getvalue().split())
+    assert "plugin error(s): CfnNagScanner" in text, text
+    assert "not counted" not in text, text
+
+
 def test_a_tool_uv_alone_lists_is_not_counted_as_verified_on_path(monkeypatch):
     panels = io.StringIO()
     monkeypatch.setattr(

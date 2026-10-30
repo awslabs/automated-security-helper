@@ -1506,7 +1506,14 @@ def install_dependencies(
         # named, rather than an unknown name: every failure of that name, since
         # two plugin classes can declare one.
         for name in requested_names:
-            outcomes.extend(failures_by_name.get(name, []))
+            for failure in failures_by_name.get(name, []):
+                # Recorded on the outcome itself: it is named by its class
+                # (``CfnNagScanner``) and the request by the declared name
+                # (``cfn-nag``), so the verdict's name match never found it, and a
+                # requested plugin its section disables read as not counted, exit
+                # 0, "Installation Complete".
+                failure.requested = True
+                outcomes.append(failure)
         # Only reachable if a plugin's built name differs from the one read from its
         # config, which no bundled plugin does; refused rather than reported as
         # installed.
@@ -2146,9 +2153,16 @@ def _report_and_exit(
 
     commands_attempted = sum(o.commands_attempted for o in outcomes)
     commands_failed = sum(o.commands_failed for o in outcomes)
+
     # Only these decide the verdict; see the docstring. A tool named with --tool
     # always counts: it is an explicit request, and its failure is this run's.
-    needed = [o for o in outcomes if o.needed or o.name in requested_tools]
+    # Decided once, here: the request recorded on the outcome by the build (a
+    # construction failure is named by its class, never by the declared name the
+    # request used), or the declared name itself for an outcome made elsewhere.
+    def asked(o: PluginInstallOutcome) -> bool:
+        return o.requested or o.name in requested_tools
+
+    needed = [o for o in outcomes if o.needed or asked(o)]
     needed_failed = sum(o.commands_failed for o in needed)
     plugins_with_errors = [o.name for o in needed if o.errors]
     # "Verified on PATH" counts a tool the lookup found (ASH's own interpreter
@@ -2208,8 +2222,8 @@ def _report_and_exit(
     # installs, can still answer otherwise.
     check_refused = [o for o in absent if o.check_answer is False]
     path_absent = [o for o in absent if o.check_answer is not False]
-    requested_absent = [label(o) for o in path_absent if o.name in requested_tools]
-    other_absent = [label(o) for o in path_absent if o.name not in requested_tools]
+    requested_absent = [label(o) for o in path_absent if asked(o)]
+    other_absent = [label(o) for o in path_absent if not asked(o)]
     not_available = sorted(
         (o for o in outcomes if o.unsupported_platform is not None),
         key=lambda o: o.name,
@@ -2222,7 +2236,7 @@ def _report_and_exit(
         for o in outcomes
         if o.disabled_by_config
         and o.unsupported_platform is None
-        and o.name not in requested_tools
+        and not asked(o)
         and (o.is_absent or o.commands_failed or o.errors)
     )
 
