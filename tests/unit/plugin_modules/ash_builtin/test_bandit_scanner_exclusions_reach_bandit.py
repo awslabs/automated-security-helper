@@ -240,13 +240,18 @@ def test_a_link_name_with_a_non_utf8_byte_does_not_fail_the_scan(tmp_path):
     """The argument's length is measured as exec passes the bytes; a strict
     encode raised UnicodeEncodeError on the surrogate such a name decodes to."""
     name = os.fsdecode(b"li\xffnk.py")
-    if os.fsencode(name) != b"li\xffnk.py":
-        pytest.skip("the file system does not keep a non-UTF-8 name")
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "target.py").write_text("x = 1\n", encoding="utf-8")
     source = _tree(tmp_path, ["app.py"])
-    os.symlink(outside / "target.py", source / name)
+    # The codec round-trips any byte under surrogateescape, so only the file
+    # system can say whether it keeps such a name: APFS refuses it (EILSEQ).
+    try:
+        os.symlink(outside / "target.py", source / name)
+    except OSError:
+        pytest.skip("the file system refuses a name that is not valid UTF-8")
+    if b"li\xffnk.py" not in os.listdir(os.fsencode(source)):
+        pytest.skip("the file system did not keep the non-UTF-8 name as written")
     scanner = _scanner(source, tmp_path)
 
     argv, _, _ = scanner._execute_scan(source, "source", [])
