@@ -979,17 +979,34 @@ def test_a_value_the_move_does_not_take_is_still_refused(
     assert isinstance(outcome, Exception), outcome
 
 
-@pytest.mark.parametrize("spelling", ["OpenGrep", "open-grep", "opengrep-scanner"])
-def test_a_moved_exclusion_under_another_spelling_reaches_no_scanner(
-    spelling: str,
-) -> None:
-    """Every spelling the plugin lookup reads is moved, or the file is refused.
+#: Each spelling of the opengrep section a delivered config might write, and
+#: whether the document loader folds it onto the declared ``opengrep`` section.
+#: The fold drops ASCII case and the ``-``/``_`` separators and nothing else
+#: (config/plugin_section_names.folded_section_name), so a spelling with an
+#: extra word is not a spelling of the declared name: it stays an extra section
+#: the scanner never reads.
+OTHER_SPELLINGS = [
+    pytest.param("OpenGrep", True, id="case"),
+    pytest.param("open-grep", True, id="separator"),
+    pytest.param("opengrep-scanner", False, id="extra-word"),
+]
 
-    A spelling the loader folds onto the scanner's own section is the scanner's
-    and is recorded. One it leaves as an extra section the scanner never reads
-    (``get_plugin_config`` reads the section spelled with the scanner's own name
-    first) is still moved out, so no client value stays in the config, but is
-    recorded as nothing: it excluded nothing, so there is nothing to mark.
+
+@pytest.mark.parametrize(("spelling", "folded_onto_declared"), OTHER_SPELLINGS)
+def test_a_moved_exclusion_under_another_spelling_reaches_no_scanner(
+    spelling: str, folded_onto_declared: bool
+) -> None:
+    """Every spelling of the section is moved, and each one's record is stated.
+
+    A spelling the loader folds onto the scanner's own section is the scanner's:
+    the exclusion is moved out and recorded, as it is under the declared name. A
+    spelling it leaves as an extra section the scanner never reads
+    (``get_plugin_config`` reads the section spelled with the scanner's own name)
+    is still moved out, so no client value stays in the config, but is recorded
+    as nothing and warned about: it excluded nothing, so there is nothing to
+    mark. Each spelling's outcome is written here, not read off the result: a
+    spelling that the loader stopped folding, or that it refused, fails the row
+    instead of passing under whichever branch the result happened to take.
     """
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -998,16 +1015,27 @@ def test_a_moved_exclusion_under_another_spelling_reaches_no_scanner(
         {".ash/.ash.yaml": yaml.safe_dump(document), "client-dir/app.py": "x = 1\n"}
     )
     outcome = _scan_resolution(source)
-    if isinstance(outcome, AshConfig):
-        scanners = json.dumps(outcome.model_dump(mode="json")["scanners"])
-        assert "client-dir" not in scanners, scanners
-        unread = spelling in (outcome.scanners.__pydantic_extra__ or {})
-        expected = [] if unread else [("exclude", "client-dir")]
-        assert [
-            (item.option, item.pattern) for item in outcome._client_scanner_exclusions
-        ] == expected
+
+    assert isinstance(outcome, AshConfig), outcome
+    scanners = json.dumps(outcome.model_dump(mode="json")["scanners"])
+    assert "client-dir" not in scanners, scanners
+    extra = outcome.scanners.__pydantic_extra__ or {}
+    recorded = [
+        (item.scanner, item.option, item.pattern)
+        for item in outcome._client_scanner_exclusions
+    ]
+    if folded_onto_declared:
+        assert spelling not in extra, sorted(extra)
+        assert recorded == [("opengrep", "exclude", "client-dir")]
     else:
-        assert isinstance(outcome, Exception), outcome
+        assert spelling in extra, sorted(extra)
+        assert recorded == []
+        unread = [
+            warning
+            for warning in outcome._resolution_warnings
+            if f"scanners.{spelling}" in warning and "does not read" in warning
+        ]
+        assert len(unread) == 1, outcome._resolution_warnings
 
 
 def test_a_cli_config_outside_the_mcp_workspace_is_unchanged(tmp_path: Path) -> None:
