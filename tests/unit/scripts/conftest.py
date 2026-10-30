@@ -36,7 +36,15 @@ def load_script(name: str) -> ModuleType:
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        # A script that fails to load (a missing optional dependency, a
+        # SyntaxError mid-edit) must not stay cached half-built: every later
+        # test of it would get the broken module back and fail with a
+        # misleading AttributeError instead of the real error.
+        sys.modules.pop(module_name, None)
+        raise
     return module
 
 
