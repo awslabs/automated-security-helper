@@ -281,7 +281,7 @@ class ClientScannerExclusion(BaseModel):
         """
         if self.kind == "bandit":
             return bandit_would_skip(self.pattern, relative=relative, absolute=absolute)
-        outside = Path(relative).is_absolute()
+        outside = _names_no_root(relative)
         if self.kind == "checkov":
             return not outside and checkov_skips(
                 self.pattern,
@@ -344,6 +344,28 @@ def _has_a_drive(path: str) -> bool:
     return len(path) >= 2 and path[1] == ":" and path[0].isalpha()
 
 
+def _names_no_root(relative: str) -> bool:
+    """Whether a finding's ``relative`` path names no file of the scanned tree.
+
+    The SARIF step leaves a path it could not make relative to the source
+    directory as it was, absolute or climbing out of the tree, and such a
+    finding names no file the scanner read its exclusion over, so no path
+    pattern hides it. One reading for every entry kind: a leading ``/`` (how
+    the SARIF step spells a POSIX root), a drive letter (``C:/``), or a first
+    component of ``..``. ``Path.is_absolute`` was the reading for the glob,
+    checkov and trivy kinds: it is true for a leading ``/`` on POSIX alone and
+    for a drive on Windows alone, and false for ``..`` everywhere, so each
+    platform matched the other's spelling, and a ``../`` path, as a run of
+    directories above the scan root.
+    """
+    below = _slashed(relative)
+    while below.startswith("./"):
+        below = below[2:]
+    if not below or below.startswith("/") or _has_a_drive(below):
+        return True
+    return below.split("/", 1)[0] == ".."
+
+
 def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
     """Whether bandit, given ``excluded_paths`` entry ``pattern``, skips the file at ``absolute``.
 
@@ -366,13 +388,13 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
         bandit_excluded_path_globs,
     )
 
-    below = _slashed(relative)
-    while below.startswith("./"):
-        below = below[2:]
-    if not below or below.startswith("/") or _has_a_drive(below):
+    if _names_no_root(relative):
         # An absolute "relative" path is the SARIF step's sign that it could
         # not place the finding under the source directory: no root is known.
         return False
+    below = _slashed(relative)
+    while below.startswith("./"):
+        below = below[2:]
     path = _slashed(absolute)
     if not path.endswith("/" + below):
         return False

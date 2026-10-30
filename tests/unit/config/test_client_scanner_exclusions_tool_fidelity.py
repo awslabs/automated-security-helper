@@ -170,6 +170,43 @@ def test_a_finding_outside_the_scan_root_is_not_hidden_by_a_path_pattern(
     assert exclusion.hides(relative=kept, absolute=f"/s/{kept}", rule_id=rule_id)
 
 
+@pytest.mark.parametrize(
+    "outside",
+    [
+        "/elsewhere/vendor/a.py",
+        "C:/elsewhere/vendor/a.py",
+        "../vendor/a.py",
+        "./../vendor/a.py",
+    ],
+    ids=["posix-root", "drive", "parent", "dot-parent"],
+)
+@pytest.mark.parametrize(
+    ("scanner", "option", "kind"),
+    [
+        ("semgrep", "exclude", "glob"),
+        ("checkov", "skip_path", "checkov"),
+        ("bandit", "excluded_paths", "bandit"),
+    ],
+    ids=["glob", "checkov", "bandit"],
+)
+def test_every_spelling_of_a_path_outside_the_tree_hides_nothing(
+    scanner, option, kind, outside
+):
+    """A POSIX root is absolute to ``Path`` on POSIX alone, a drive on Windows
+    alone, and a leading ``..`` nowhere, so the glob, checkov and trivy kinds
+    read the other platform's spelling, and a path climbing out of the tree, as
+    directories above the scan root and matched an unanchored entry against
+    them. One reading (``_names_no_root``) now serves every kind, bandit's
+    included, whatever the host."""
+    exclusion = ClientScannerExclusion(
+        scanner=scanner, option=option, kind=kind, pattern="vendor", reason="r"
+    )
+    assert not exclusion.hides(relative=outside, absolute=f"/s/{outside}", rule_id=None)
+    assert exclusion.hides(
+        relative="vendor/a.py", absolute="/s/vendor/a.py", rule_id=None
+    )
+
+
 def test_an_id_only_trivy_entry_still_hides_a_finding_outside_the_scan_root():
     entry = ClientScannerExclusion(
         scanner="trivy-repo",
