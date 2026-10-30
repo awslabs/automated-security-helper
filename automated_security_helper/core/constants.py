@@ -52,6 +52,12 @@ ASH_WORK_DIR_NAME = "converted"
 #: spelling, because ``ash merge`` reads it back to tell a scanner the flag left out
 #: from one no shard was asked to run.
 PYTHON_ONLY_SKIPPED_REASON = "not a Python-only scanner, and --python-only is set"
+#: The start of the ``excluded_reason`` the scan phase records for a scanner that
+#: a sharded run assigned to another shard; the shard index and count follow it.
+#: One spelling, for the same reason as above: ``ash merge`` matches this prefix to
+#: tell a scanner the split left out from one no shard was asked to run, so a
+#: reword here that the merge did not follow would reopen that hole silently.
+SHARD_SPLIT_REASON_PREFIX = "assigned to another shard (this run is shard "
 
 
 def is_anchored(path: str, pathmod: Any = os.path) -> bool:

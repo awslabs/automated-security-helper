@@ -10,7 +10,10 @@ from automated_security_helper.base.plugin_config import (
     plugin_config_key,
     section_enabled,
 )
-from automated_security_helper.core.constants import PYTHON_ONLY_SKIPPED_REASON
+from automated_security_helper.core.constants import (
+    PYTHON_ONLY_SKIPPED_REASON,
+    SHARD_SPLIT_REASON_PREFIX,
+)
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
@@ -1252,8 +1255,8 @@ class ScanPhase(EnginePhase):
                                 }
                             ):
                                 excluded_reason = (
-                                    "assigned to another shard (this run is shard "
-                                    f"{self._shard_assignment.shard_index} of "
+                                    SHARD_SPLIT_REASON_PREFIX
+                                    + f"{self._shard_assignment.shard_index} of "
                                     f"{self._shard_assignment.shard_count})"
                                 )
                             # The same line, and the same text, as
