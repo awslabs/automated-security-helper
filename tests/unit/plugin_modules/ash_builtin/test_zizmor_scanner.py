@@ -2109,3 +2109,32 @@ def test_a_run_declined_after_earlier_batches_keeps_their_counters(repo, monkeyp
     assert scanner.targets_attempted == 2
     assert scanner.targets_failed == 0
     assert scanner.exit_code == 0
+
+
+def test_batches_that_all_declined_leave_no_exit_code(repo, monkeypatch):
+    """The template declined the first batch, so zizmor never ran: the exit
+    code stays None, the base class's "the tool did not run", not a 0 that
+    reads as a clean run."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40)
+    scanner = _scanner(repo)
+    _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: False)
+
+    result = scanner.scan(repo, "source", [])
+
+    assert result is False
+    assert scanner.targets_attempted == 0
+    assert scanner.exit_code is None
+
+
+def test_batch_exit_codes_are_folded_by_the_base_classs_ranking():
+    """The fold is the base class's: a signal death (negative) outranks every
+    code and is recorded as the shell reports it, and None leaves the fold
+    where it was."""
+    from automated_security_helper.base.plugin_base import worse_exit_code
+
+    assert worse_exit_code(None, 0) == 0
+    assert worse_exit_code(0, 1) == 1
+    assert worse_exit_code(1, -11) == 139
+    assert worse_exit_code(139, 0) == 139
+    assert zizmor_module.worse_exit_code is worse_exit_code

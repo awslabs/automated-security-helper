@@ -138,6 +138,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.base.plugin_base import worse_exit_code
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -1306,7 +1307,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             )
         reports: List[SarifReport] = []
         attempted = failed = 0
-        worst_exit_code = 0
+        # Folded as the base class folds its own runs (worse_exit_code): a
+        # signal death outranks every code, and a batch that recorded no code
+        # (None, "the tool did not run") leaves the fold alone; max() with
+        # "or 0" read a signal death as 0 and None as a clean run.
+        worst_exit_code: Optional[int] = None
         for batch in batches:
             self._inputs = batch
             result = super().scan(
@@ -1324,7 +1329,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 return result
             attempted += self.targets_attempted
             failed += self.targets_failed
-            worst_exit_code = max(worst_exit_code, self.exit_code or 0)
+            if self.exit_code is not None:
+                worst_exit_code = worse_exit_code(worst_exit_code, self.exit_code)
             reports.append(result)
         self.targets_attempted = attempted
         self.targets_failed = failed
