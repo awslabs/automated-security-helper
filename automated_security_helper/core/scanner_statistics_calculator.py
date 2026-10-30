@@ -1203,8 +1203,12 @@ class ScannerStatisticsCalculator:
         key that folds to the name. Two keys that both fold to it with neither
         exact (a merge of "Bandit" and "bandit" files) read as the first, a shape
         no ASH writer produces.
+
+        A model with no ``additional_reports`` at all (a summary read that carries
+        only the configuration, as the threshold readers are given) holds no
+        reports: None, the same answer as an entry that is absent.
         """
-        reports = asharp_model.additional_reports
+        reports = getattr(asharp_model, "additional_reports", None)
         if not isinstance(reports, dict):
             return None
         found = reports.get(scanner_name)
