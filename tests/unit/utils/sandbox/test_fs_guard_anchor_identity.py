@@ -92,3 +92,65 @@ def test_nothing_below_a_root_matched_by_spelling_is_resolved(
 
     assert anchored == (out, out)
     assert resolved == []
+
+
+def test_an_anchor_that_no_longer_leads_to_the_root_is_refused(
+    aliased_root, tmp_path, monkeypatch
+):
+    """The anchor is opened by name after the identity match. If the link above
+    it is re-pointed in between, the name reaches another tree; the opened
+    directory is compared with the root and the write is refused. The race is
+    played here by pinning the match and re-pointing the link before the open."""
+    out, aliased = aliased_root
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "out").mkdir(parents=True)
+    monkeypatch.setattr(fs_guard, "_registered_anchor", lambda path: (out, aliased))
+    alias = tmp_path / "alias"
+    alias.unlink()
+    alias.symlink_to(elsewhere)
+
+    with pytest.raises(OutputLinkRefused):
+        open_for_write(aliased / "x")
+
+    assert not (elsewhere / "out" / "x").exists(), "nothing was written elsewhere"
+
+
+def test_a_root_replaced_by_a_link_after_registration_is_refused(tmp_path):
+    """A root is refused as a link when it is registered; one put there later
+    used to be followed by the open of the anchor by name, so every check below
+    ran in the tree the link points at."""
+    out = tmp_path / "out"
+    out.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    root = register_writable_root(out)
+    try:
+        out.rename(tmp_path / "moved")
+        out.symlink_to(elsewhere)
+
+        with pytest.raises(OutputLinkRefused):
+            open_for_write(out / "x")
+        with pytest.raises(OutputLinkRefused):
+            with fs_guard.open_for_atomic_write(out / "y") as handle:
+                handle.write("y")
+    finally:
+        release_writable_root(root)
+
+    assert sorted(p.name for p in elsewhere.iterdir()) == [], "nothing landed there"
+
+
+def test_a_guarded_read_refuses_an_anchor_that_leads_elsewhere(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "x").write_bytes(b"not for the reader")
+    root = register_writable_root(out)
+    try:
+        out.rename(tmp_path / "moved")
+        out.symlink_to(elsewhere)
+
+        with pytest.raises(OSError):
+            fs_guard.read_bytes_at_most(out / "x", 64)
+    finally:
+        release_writable_root(root)

@@ -945,7 +945,33 @@ def _is_link(name: str, dir_fd: int) -> bool:
         return False
 
 
-def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...], target: Path) -> int:
+def _anchor_is_root(fd: int, root: Path) -> bool:
+    """Whether the directory ``fd`` was opened at is ``root`` itself, now.
+
+    A guarded write or read opens its anchor by name, and that name may reach
+    the root through a link above it (the identity match in ``_root_anchor``); a
+    link re-pointed between the match and the open would put every check below
+    in another tree, which is the root-link hazard the module docstring names.
+    So the descriptor is compared with the root as it is at this moment: the
+    same device and inode, and the root not itself a link (a link put at the root
+    since its registration is read as one found there).
+    """
+    opened = os.fstat(fd)
+    try:
+        expected = os.lstat(root)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(expected.st_mode):
+        return False
+    return (opened.st_dev, opened.st_ino) == (expected.st_dev, expected.st_ino)
+
+
+def _open_dir_beneath(
+    root: Path,
+    relative_parts: Tuple[str, ...],
+    target: Path,
+    identity_of: Optional[Path] = None,
+) -> int:
     """A descriptor for ``root/relative_parts``, never following a link below root.
 
     Each component is opened relative to the previous one with O_NOFOLLOW, and
@@ -955,13 +981,19 @@ def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...], target: Path)
     O_DIRECTORY on Linux, as ENOTDIR: an ENOTDIR is read again with lstat, and a
     link there is the same refusal. A component another writer creates between
     the failed open and the mkdir is used as it is. A missing root is created
-    first; links at or above it are not examined.
+    first; links above it are not examined, except that with ``identity_of`` (the
+    registered or named root ``root`` is a spelling of) the directory opened at
+    ``root`` must be that root itself (``_anchor_is_root``), or OutputLinkRefused
+    is raised for ``target`` and nothing below is opened.
     """
     try:
         fd = os.open(root, os.O_RDONLY | _DIRECTORY)
     except FileNotFoundError:
         os.makedirs(root, exist_ok=True)
         fd = os.open(root, os.O_RDONLY | _DIRECTORY)
+    if identity_of is not None and not _anchor_is_root(fd, identity_of):
+        os.close(fd)
+        raise OutputLinkRefused(target, root, where="at a directory it writes below")
     current = root
     try:
         for part in relative_parts:
@@ -1290,7 +1322,7 @@ def open_for_atomic_write(
     staging = _staging_name(path.name, path.parent)
     dir_fd: Optional[int] = None
     if anchor is not None and _HAS_DIR_FD:
-        dir_fd = _open_dir_beneath(anchor, relative[:-1], path)
+        dir_fd = _open_dir_beneath(anchor, relative[:-1], path, identity_of=guard[0])
 
     def refuse_a_link_at_the_name() -> Optional[os.stat_result]:
         if dir_fd is not None:
@@ -1410,7 +1442,7 @@ def open_for_write(
             flags |= os.O_APPEND if append else os.O_TRUNC
         return os.fdopen(os.open(path, flags, mode), open_mode, **text)
     relative = path.relative_to(anchor).parts
-    dir_fd = _open_dir_beneath(anchor, relative[:-1], path)
+    dir_fd = _open_dir_beneath(anchor, relative[:-1], path, identity_of=guard[0])
     try:
         name = relative[-1]
         if _is_link(name, dir_fd):
@@ -1447,10 +1479,19 @@ def _guarded_read_fd(path: Path) -> int:
     anchored = _registered_anchor(path) if hasattr(os, "fwalk") else None
     if anchored is None or path == anchored[1]:
         return os.open(path, _READ_FLAGS)
-    root = anchored[1]
-    relative = path.relative_to(root).parts
-    dir_fd = os.open(root, os.O_RDONLY | _DIRECTORY)
+    root, anchor = anchored
+    relative = path.relative_to(anchor).parts
+    dir_fd = os.open(anchor, os.O_RDONLY | _DIRECTORY)
     try:
+        if not _anchor_is_root(dir_fd, root):
+            # The anchor was opened by name and reached another directory than
+            # the root (a link above it re-pointed, or a link put at the root):
+            # nothing below is read from there.
+            raise OSError(
+                errno.ELOOP,
+                f"{path} was not read: {anchor} does not lead to the directory "
+                f"{root} is registered as",
+            )
         for part in relative[:-1]:
             child = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=dir_fd)
             os.close(dir_fd)
