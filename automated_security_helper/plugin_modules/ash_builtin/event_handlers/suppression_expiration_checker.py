@@ -28,10 +28,13 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
     This ensures the check is performed only once per execution rather than
     multiple times during SARIF processing.
 
-    Ignore paths are checked even under ``--ignore-suppressions``: that flag
-    turns off suppressions only, and ignore paths still apply (when results are
-    processed, in the scanners that pre-filter their files and in the
-    converters), so their expiry still changes the scan.
+    Nothing is checked under ``--ignore-suppressions``: the flag lifts every
+    suppression and every ignore path for the run (``models.core.
+    ignore_paths_that_skip_scanning`` returns none under it, and the SARIF step
+    applies none), so an ignore path's expiry changes nothing about the scan,
+    and a warning about it would describe a scan that is not running. The
+    checker used to warn about expiring and expired ignore paths under the flag
+    all the same, on the reading that the flag turned off suppressions only.
 
     Args:
         **kwargs: Event data including:
@@ -66,21 +69,18 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
     for (keys, _), (_, entries, _) in zip(IGNORE_PATH_LISTS, ignore_path_lists):
         recorded.update(recorded_ignore_paths(plugin_context.config, entries, keys))
 
-    _warn_about_expired_entries(
-        ignore_path_lists, [] if ignoring_suppressions else suppressions, recorded
-    )
+    if ignoring_suppressions:
+        ASH_LOGGER.debug(
+            "Suppressions and ignore paths are being ignored, so none of them is "
+            "checked for expiration"
+        )
+        return True
+
+    _warn_about_expired_entries(ignore_path_lists, suppressions, recorded)
     _warn_about_expiring_ignore_paths(ignore_path_lists, recorded)
 
     if not suppressions:
         ASH_LOGGER.debug("No suppressions configured, skipping expiration check")
-        return True
-
-    # Check if ignore_suppressions flag is set
-    if (
-        hasattr(plugin_context, "ignore_suppressions")
-        and plugin_context.ignore_suppressions
-    ):
-        ASH_LOGGER.debug("Suppressions are being ignored, skipping expiration check")
         return True
 
     ASH_LOGGER.debug(f"Checking {len(suppressions)} suppressions for expiration")
@@ -98,7 +98,10 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
         ASH_LOGGER.warning("The following suppressions will expire within 30 days:")
         for suppression in expiring_suppressions:
             expiration_date = _shown(suppression, "expiration", recorded)
-            rule_id = _shown(suppression, "rule_id", recorded)
+            # A suppression with no rule covers every rule, spelled "*" as the
+            # expired-entries warning and the suppression's own id spell it;
+            # this line printed Rule 'None' for the same entry.
+            rule_id = _shown(suppression, "rule_id", recorded) or "*"
             file_path = _shown(suppression, "path", recorded)
             reason = _shown(suppression, "reason", recorded) or "No reason provided"
             ASH_LOGGER.warning(
