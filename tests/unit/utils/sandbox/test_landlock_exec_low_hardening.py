@@ -21,7 +21,6 @@ import json
 import os
 import signal
 import sys
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -151,9 +150,14 @@ def test_a_descendant_is_killed_through_its_pinned_descriptor(monkeypatch):
 
 
 def test_the_reap_loop_returns_what_outlived_the_deadline(monkeypatch):
-    clock = iter([0.0, 0.0, 0.0, 5.0, 5.0, 5.0, 5.0])
-    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    # The wrapper's own clock, not the process's: three reads inside the deadline,
+    # then past it for every read after, however many there are.
+    readings = [0.0, 0.0, 0.0]
+    clock = SimpleNamespace(
+        monotonic=lambda: readings.pop(0) if readings else 5.0,
+        sleep=lambda seconds: None,
+    )
+    monkeypatch.setattr(landlock_exec, "time", clock)
     monkeypatch.setattr(landlock_exec, "_descendants", lambda until=None: [777])
     killed = []
     monkeypatch.setattr(
@@ -171,7 +175,7 @@ def test_the_reap_loop_returns_what_outlived_the_deadline(monkeypatch):
     assert killed and killed[0][0] == 777 and os.getpid() in killed[0][1]
 
     monkeypatch.setattr(landlock_exec, "_descendants", lambda until=None: [])
-    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
+    clock.monotonic = lambda: 0.0
     assert landlock_exec._reap_leftovers(lambda: 1.0) == []
 
 
