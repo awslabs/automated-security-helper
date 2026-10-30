@@ -157,6 +157,10 @@ _SPAN_LINE_START_TAG = re.compile(r"(\n[ \t>]*)<")
 #: row at. Inside a code span the backslash is literal to CommonMark, but the
 #: GFM table extension reads "\|" as a pipe kept inside its column, spans included.
 _UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+#: A GFM table's delimiter row: columns of one or more hyphens, each with an
+#: optional colon at either end, separated by pipes, with the pipe at either end
+#: optional and up to three leading spaces.
+_TABLE_DELIMITER_ROW = re.compile(r"^ {0,3}\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$")
 
 #: A line put after an answer while closing its fences: report text follows every
 #: answer, so text here shows whether the answer left a fence open.
@@ -227,28 +231,48 @@ def _code_span_ranges(source: str) -> List[Tuple[int, int]]:
     return spans
 
 
+def _cell_count(line: str) -> int:
+    """How many columns a GitHub viewer reads *line* as: the segments between
+    its unescaped pipes, the optional pipe at either end not counting. The pipes
+    inside code spans count too, as the viewer splits before it reads spans."""
+    text = line.strip().removeprefix("|")
+    if text.endswith("|") and not text.endswith("\\|"):
+        text = text[:-1]
+    return len(_UNESCAPED_PIPE.split(text))
+
+
 def _table_row_lines(source: str, spans: List[Tuple[int, int]]) -> List[bool]:
-    """Which lines of *source* a GitHub viewer can read as table rows: the lines
-    holding an unescaped pipe outside their code spans. A viewer splits such a
-    row into columns at every pipe before it reads the spans, the spans' own pipes
-    included, which is the only reading in which a span's content can end up
-    outside a span."""
-    blanked = list(source)
-    for start, end in spans:
-        for index in range(start, end):
-            if blanked[index] != "\n":
-                blanked[index] = " "
-    return [
-        _UNESCAPED_PIPE.search(line) is not None
-        for line in "".join(blanked).split("\n")
-    ]
+    """Which lines of *source* a GitHub viewer reads as table rows, by the GFM
+    table rule: a table exists only where a delimiter row (``|---|``-shaped
+    columns of hyphens, an optional colon at either end of each) follows a
+    header row with the same column count, and it then runs to the end of the
+    block (*source* is one block, so there is no blank line to end it sooner).
+    The header, the delimiter and every later line of the block are its rows.
+    A lone line holding a pipe is prose: the viewer never splits it, so its
+    spans are whole and a pipe inside one of them is just code. *spans* is
+    unused by the rule and kept for the caller's shape: the viewer splits a row
+    at the pipes inside spans too, so they count toward a column count."""
+    lines = source.split("\n")
+    rows = [False] * len(lines)
+    for index in range(len(lines) - 1):
+        if rows[index]:
+            continue
+        delimiter = lines[index + 1]
+        if not _TABLE_DELIMITER_ROW.match(delimiter) or "|" not in delimiter:
+            continue
+        if _cell_count(lines[index]) != _cell_count(delimiter):
+            continue
+        for row in range(index, len(lines)):
+            rows[row] = True
+        break
+    return rows
 
 
 def _inline_as_written(source: str) -> str:
     """One block's inline text with HTML outside its code spans written as text
     and each span as the model wrote it, but for a "<" starting a line inside a
     span, which stays text (_SPAN_LINE_START_TAG), and for a span that holds a
-    pipe on a table row (_table_row_lines): the report is read by GitHub
+    pipe on a row of a GFM table (_table_row_lines): the report is read by GitHub
     Markdown viewers, which split a table row into columns at every pipe before
     reading the spans, so a span that crosses a column boundary ends there and the
     HTML after the pipe is outside any span. There the span's pipes are written

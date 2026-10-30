@@ -78,34 +78,52 @@ def test_a_pipe_span_on_a_table_row_keeps_its_pipe_in_its_column_and_its_html_in
     """On a table row the span's pipe is written as "\\|", which GFM keeps inside
     its column and the span, and its "<" as text, so a viewer that does not read
     the escape still renders no HTML."""
-    row = "| rule | `x | <img src=x onerror=alert(1)>` |"
+    table = "| rule | note |\n|---|---|\n| rule | `x | <img src=x onerror=alert(1)>` |"
 
-    written = _markdown_as_written(row)
+    written = _markdown_as_written(table)
 
     assert "`x \\| &lt;img src=x onerror=alert(1)>`" in written, written
     assert "<img" not in written, written
-    # The column delimiters themselves are untouched.
-    assert written.startswith("| rule | ") and written.endswith(" |"), written
+    # The header, the delimiter and the column delimiters are untouched.
+    assert written.startswith("| rule | note |\n|---|---|\n| rule | "), written
+    assert written.endswith(" |"), written
 
 
 def test_a_pipe_already_escaped_in_a_table_row_span_is_not_escaped_again():
-    row = "| a | `x \\| y` |"
+    table = "| a |\n|---|\n| `x \\| y` |"
 
-    written = _markdown_as_written(row)
+    written = _markdown_as_written(table)
 
-    assert written == row, written
+    assert written == table, written
 
 
-def test_only_the_table_row_lines_of_a_block_are_rewritten():
-    """A paragraph line and a table row in one inline block: the sentence's span
-    stays as written, the row's span is escaped."""
-    block = "Use `a<b | c` here.\n| col | `d<e | f` |"
+def test_a_lone_line_with_pipes_is_prose_and_its_span_stays_as_written():
+    """GFM makes a table only of a header row followed by a delimiter row; a
+    line that merely holds pipes is a paragraph, which the viewer never splits,
+    so its span is whole and nothing in it is rewritten."""
+    for line in (
+        "| rule | `x | <b>bold</b>` |",
+        "Use `a<b | c` or x | y on the same line.",
+    ):
+        assert _markdown_as_written(line) == line, line
 
-    written = _markdown_as_written(block)
 
-    first, second = written.split("\n")
-    assert first == "Use `a<b | c` here.", first
-    assert second == "| col | `d&lt;e \\| f` |", second
+def test_a_table_row_whose_only_pipe_is_inside_a_span_is_still_split():
+    """Inside a table the viewer splits every row at every pipe, a span's pipe
+    included, so a row whose only pipe sits in a span is rewritten too."""
+    table = "| a |\n|---|\n`x | <b>y</b>`"
+
+    written = _markdown_as_written(table)
+
+    assert written.endswith("`x \\| &lt;b>y&lt;/b>`"), written
+
+
+def test_a_table_whose_header_and_delimiter_disagree_is_not_a_table():
+    """The control: a delimiter row with a different column count makes no
+    table, so the lines are prose and a span holding a pipe is left as written."""
+    block = "| a | b |\n|---|\n| `x | <b>y</b>` |"
+
+    assert _markdown_as_written(block) == block
 
 
 # ---------------------------------------------------------------------------
