@@ -294,6 +294,35 @@ def test_a_client_link_to_the_operators_ignore_file_is_replaced_by_its_path(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege")
+def test_a_client_path_outside_the_tree_is_not_resolved(tmp_path, tmp_path_factory):
+    """Resolving a client path touches the file system (a UNC value connects
+    out on Windows, a hung mount blocks), so a value outside the scanned root
+    and the operator documents' directories is compared as text only. A link
+    out there to the operator's file is not followed: the option takes the
+    operator's own file by the ordinary branch, with no resolution warning."""
+    operator_file = tmp_path / "operator" / ".trivyignore"
+    operator_file.parent.mkdir()
+    operator_file.write_text("CVE-1\n", encoding="utf-8")
+    outside = tmp_path_factory.mktemp("outside")
+    link = outside / "client-link"
+    link.symlink_to(operator_file)
+    config = AshConfig()
+    options = config.scanners.trivy.options
+    options.ignore_file = str(link)
+    operator = {"scanners": {"trivy": {"options": {"ignore_file": str(operator_file)}}}}
+
+    _strip(config, {}, operator, tmp_path)
+
+    assert options.ignore_file != str(link)
+    assert Path(options.ignore_file).resolve() == operator_file.resolve()
+    assert config._client_scanner_exclusions == []
+    assert not any(
+        "resolves to the operator's ignore file" in warning
+        for warning in config._resolution_warnings
+    ), config._resolution_warnings
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege")
 def test_a_client_link_resolving_elsewhere_is_still_stripped(tmp_path):
     operator_file = tmp_path / "operator" / ".trivyignore"
     operator_file.parent.mkdir()

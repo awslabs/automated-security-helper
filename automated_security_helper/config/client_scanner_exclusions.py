@@ -748,7 +748,11 @@ def strip_client_scanner_exclusions(
             is_read = key == read_key
             if spec.kind == "trivy-ignore-file":
                 operator_spelling = (
-                    _names_an_operator_file(str(value), operator_entries)
+                    _names_an_operator_file(
+                        str(value),
+                        operator_entries,
+                        inside=[root] + [path.parent for path, _ in operator_documents],
+                    )
                     if value
                     else None
                 )
@@ -1061,7 +1065,10 @@ def _section_the_scanner_reads(
 
 
 def _names_an_operator_file(
-    value: str, operator_entries: Mapping[str, Any]
+    value: str,
+    operator_entries: Mapping[str, Any],
+    *,
+    inside: Sequence[Optional[Path]] = (),
 ) -> Optional[str]:
     """The spelling the option keeps when trivy ``ignore_file`` ``value`` names an operator file, else None.
 
@@ -1078,11 +1085,22 @@ def _names_an_operator_file(
     opens the option's value by name later, never follows a path a client
     chose. Resolving it here and opening the client's spelling later would be
     a check the client could change between the two.
+
+    Resolving touches the file system, and the value is the client's: a UNC
+    path makes Windows connect to the named host, and a path on a hung network
+    mount blocks the resolution. So the value is resolved only when, read
+    lexically (``..`` folded, no link followed), it lies under one of the
+    ``inside`` directories: the scanned root and the operator documents'
+    directories, the places an operator file can be. A value elsewhere is
+    compared as text only, and when the text matches nothing it takes the
+    operator's own file by the caller's next branch, as any other client value.
     """
     if value in operator_entries:
         return value
     if Path(value).as_posix() in operator_entries:
         return value
+    if not _lexically_under(value, inside):
+        return None
     try:
         resolved = Path(value).resolve().as_posix()
     except (OSError, RuntimeError, ValueError):
@@ -1090,6 +1108,30 @@ def _names_an_operator_file(
     if resolved in operator_entries:
         return resolved
     return None
+
+
+def _lexically_under(value: str, directories: Sequence[Optional[Path]]) -> bool:
+    """Whether ``value``, with ``..`` folded and no link followed, is under one of ``directories``.
+
+    Both sides are normalized the same way (``os.path.normpath``); a relative
+    value is read against the current directory, as ``Path.resolve`` would
+    read it. A UNC or drive-prefixed value under none of the directories is
+    False, as is any value when no directory is given.
+    """
+    try:
+        candidate = Path(os.path.normpath(os.path.abspath(value)))
+    except (OSError, ValueError):
+        return False
+    for directory in directories:
+        if directory is None:
+            continue
+        try:
+            root = Path(os.path.normpath(os.path.abspath(str(directory))))
+        except (OSError, ValueError):
+            continue
+        if candidate == root or root in candidate.parents:
+            return True
+    return False
 
 
 def _operator_entries(
