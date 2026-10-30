@@ -43,6 +43,9 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
     ArchiveConverterConfig,
     ArchiveConverterConfigOptions,
 )
+from automated_security_helper.utils.scan_output_dirs import (
+    CONVERTED_SOURCES_FILE_NAME,
+)
 from tests.utils.archive_builders import (
     GENEROUS_LIMITS,
     GIBIBYTE,
@@ -157,14 +160,20 @@ def converter_for(
 
 
 def files_written(converter: ArchiveConverter) -> Dict[str, int]:
-    """Size of every file under the converter's output, by path below it."""
+    """Size of every member file under the converter's output, by path below it.
+
+    The converter's own record of what it extracted (converted-sources.json, at
+    the top of the results directory) is not extracted content and is left out: an
+    archive whose every member was refused still has an extraction directory and
+    an entry there, and writes no member.
+    """
     root = Path(converter.results_dir)
     if not root.exists():
         return {}
     return {
         path.relative_to(root).as_posix(): path.stat().st_size
         for path in root.rglob("*")
-        if path.is_file()
+        if path.is_file() and path != root / CONVERTED_SOURCES_FILE_NAME
     }
 
 

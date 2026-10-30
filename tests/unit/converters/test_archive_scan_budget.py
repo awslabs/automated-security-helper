@@ -26,6 +26,9 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
     ArchiveConverterConfig,
     ArchiveConverterConfigOptions,
 )
+from automated_security_helper.utils.scan_output_dirs import (
+    CONVERTED_SOURCES_FILE_NAME,
+)
 from tests.utils.archive_builders import GENEROUS_LIMITS, incompressible, zip_bytes
 
 pytestmark = pytest.mark.unit
@@ -79,7 +82,13 @@ def test_the_archive_that_takes_the_scan_over_four_times_max_total_bytes_is_refu
         ("a4.zip", "max_total_bytes")
     ]
     assert "together with the archives" in converter.refused_inputs[0].reason
-    written = [p.name for p in Path(converter.results_dir).iterdir()]
+    # The extraction directories, less the converter's own record of their
+    # sources (converted-sources.json), which sits beside them.
+    written = [
+        p.name
+        for p in Path(converter.results_dir).iterdir()
+        if p.name != CONVERTED_SOURCES_FILE_NAME
+    ]
     assert len(written) == 5, written
     assert not [name for name in written if name.endswith("a4__zip")], written
 

@@ -26,6 +26,9 @@ import pytest
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
 )
+from automated_security_helper.utils.scan_output_dirs import (
+    CONVERTED_SOURCES_FILE_NAME,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -68,9 +71,13 @@ def convert(context, monkeypatch, archives: List[Tuple[str, bytes]]):
 
 
 def written(converter) -> List[str]:
+    """Every member file the converter wrote, less its own record of their sources
+    (converted-sources.json), which is not extracted content."""
     root = Path(converter.results_dir)
     return sorted(
-        p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and p != root / CONVERTED_SOURCES_FILE_NAME
     )
 
 
