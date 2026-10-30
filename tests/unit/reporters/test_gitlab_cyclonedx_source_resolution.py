@@ -25,6 +25,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter import (
     _DEFAULT_LOCKFILES,
+    GITLAB_SCHEMA_VERSION,
     PURL_TYPE_TO_GITLAB,
     SYFT_TYPE_TO_GITLAB,
     GitLabCycloneDXReporter,
@@ -358,7 +359,7 @@ class TestDefaultsAndTheMinimalDocument:
 
         props = _metadata_props(json.loads(reporter.report(model)))
 
-        assert props["gitlab:meta:schema_version"] == "1"
+        assert props["gitlab:meta:schema_version"] == GITLAB_SCHEMA_VERSION
         assert props["gitlab:dependency_scanning:category"] == "development"
         assert props["gitlab:dependency_scanning:package_manager:name"] == "conan"
         assert props["gitlab:dependency_scanning:language:name"] == "C++"

@@ -101,7 +101,8 @@ class TestMetadataLevelProperties:
             if p["name"] == "gitlab:dependency_scanning:language:name"
         ]
         assert len(lang_props) == 1
-        # Python, for the same reason the package manager is pip.
+        # Python, for the same reason the package manager is poetry: only the
+        # declared components vote.
         assert lang_props[0]["value"] == "Python"
 
     def test_dependency_scanning_input_file_path_present(self, report_doc):
