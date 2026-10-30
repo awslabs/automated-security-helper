@@ -177,6 +177,10 @@ def test_a_run_with_no_findings_writes_its_files_without_a_model_call(
     assert "No actionable findings to analyze for this section." in executive
     assert "No actionable findings to analyze for this section." in technical
     assert runtime.calls == [], "a clean scan asks the model nothing"
+    # The files say no model was called instead of claiming generated output.
+    for written in (executive, technical):
+        assert "Generated with Amazon Bedrock" not in written, written
+        assert "nothing was sent to Amazon Bedrock" in written, written
 
 
 def test_a_run_with_no_findings_and_markdown_off_writes_nothing(monkeypatch, tmp_path):

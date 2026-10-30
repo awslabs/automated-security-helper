@@ -524,6 +524,18 @@ def _number_or_default(
 #: (``CONTROL_PLANE_RETRIES``: three attempts, which is two retries).
 DEFAULT_MODEL_CALL_RETRIES = 3
 
+#: The line under a generated section's title: the text came from a model.
+GENERATED_HEADER = (
+    "Generated with Amazon Bedrock. Verify suggestions against the source findings."
+)
+
+#: The same line for a run that called no model (no findings matched the
+#: analysis filters): the companion files are written so a configured file
+#: exists and the previous run's does not linger, and they say what they hold.
+NOTHING_SENT_HEADER = (
+    "No findings matched the analysis filters; nothing was sent to Amazon Bedrock."
+)
+
 
 class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     # The environment defaults are read when the options are built, not when this
@@ -1213,7 +1225,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             # clean scan.
             if self.config.options.output_markdown:
                 nothing = self._nothing_to_analyze()
-                self._write_files(model, summary, nothing, nothing)
+                # No model was called, so the companion files say so instead
+                # of claiming generated output.
+                self._write_files(
+                    model, summary, nothing, nothing, header=NOTHING_SENT_HEADER
+                )
             return summary
 
         # The model client repeats a failed call itself (BedrockModelClient), so
@@ -1239,7 +1255,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         summary = (
             outcome
             + "\n\n## Generated analysis\n\n"
-            + "Generated with Amazon Bedrock. Verify suggestions against the source findings.\n\n"
+            + GENERATED_HEADER
+            + "\n\n"
             + summary.removeprefix("# Security scan summary report\n\n")
             + f"\n\n{FOOTER_CREDIT}\n"
         )
@@ -2356,10 +2373,14 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         summary: str,
         exec_content: Optional[str],
         tech_content: Optional[str],
+        *,
+        header: str = GENERATED_HEADER,
     ) -> None:
         """Write the summary file and, for each included section with content,
         its companion file. Shared by the run with findings and the run with
-        none, so a clean scan writes its files too."""
+        none, so a clean scan writes its files too; *header* is the line under
+        each companion file's title, the generated-output notice by default
+        and, for a run that called no model, a line that says so."""
         opts = self.config.options
         included = set(opts.include_sections) - set(opts.exclude_sections)
 
@@ -2383,7 +2404,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 opts.output_executive_file,
                 self._scan_outcome(model)
                 + "\n\n## Executive summary\n\n"
-                + "Generated with Amazon Bedrock. Verify suggestions against the source findings.\n\n"
+                + header
+                + "\n\n"
                 + exec_content
                 + f"\n\n{FOOTER_CREDIT}\n",
             )
@@ -2400,7 +2422,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 opts.output_technical_file,
                 self._scan_outcome(model)
                 + "\n\n## Technical analysis\n\n"
-                + "Generated with Amazon Bedrock. Verify suggestions against the source findings.\n\n"
+                + header
+                + "\n\n"
                 + tech_content
                 + f"\n\n{FOOTER_CREDIT}\n",
             )
