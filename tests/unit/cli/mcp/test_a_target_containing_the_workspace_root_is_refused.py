@@ -118,25 +118,35 @@ def test_a_directory_beside_the_workspace_root_is_not_taken_for_an_ancestor(
 ):
     """Control: a sibling directory of the root contains nothing of it.
 
-    Its name is a prefix of the root's, so a text prefix match would refuse it;
-    the gate compares path components and file identity, not characters. The
-    two directories are granted: a caller with a session id is a network caller
+    Three siblings, so a text prefix match in either direction would refuse
+    one of them: the root's name is a prefix of the first's (``mcp`` of
+    ``mcp-2``, the old inside-the-root text bug), the second's name is a prefix
+    of the root's (``mc`` of ``mcp``, the ancestor branch's text bug: a check
+    written as ``str(root).startswith(str(target))`` refuses it), and the
+    third's is a prefix of the root's parent (``hom`` of ``home``). The gate
+    compares path components and file identity, not characters. The directories
+    are granted: a caller with a session id is a network caller
     (``caller_is_remote``), and a network caller reaches a directory outside its
     own sandbox only through the operator's grant. The grant does not admit an
-    ancestor (the test above), so what admits these two is the gate not firing.
+    ancestor (the test above), so what admits these is the gate not firing.
     """
     _delivered(OWN)
     shared = shared_workspace_root()
     assert shared is not None
     beside = shared.with_name(shared.name + "-2")
     beside.mkdir()
+    prefix_of_root = shared.with_name(shared.name[:-1])
+    prefix_of_root.mkdir()
+    prefix_of_parent = shared.parent.with_name(shared.parent.name[:-1])
+    prefix_of_parent.mkdir()
     checkout = tmp_path / "checkout"
     checkout.mkdir()
+    granted = (beside, prefix_of_root, prefix_of_parent, checkout)
     monkeypatch.setenv(
-        ASH_MCP_ALLOWED_ROOTS_ENV, os.pathsep.join([str(beside), str(checkout)])
+        ASH_MCP_ALLOWED_ROOTS_ENV, os.pathsep.join(str(path) for path in granted)
     )
 
-    for outside in (beside, checkout):
+    for outside in granted:
         refusal = validate_scan_target_in_sandbox(outside, session_id=OWN)
         assert refusal is None, f"{outside} was refused: {refusal}"
 
