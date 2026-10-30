@@ -320,12 +320,8 @@ TOOL_NOTES: dict[str, dict] = {
       "<target_type>": { ... per-scanner-target progress ... }
     }
   },
-  "skipped_scanners": ["<scanner_name>"],
   "timestamp": "<iso8601>",
-  "operation": "get_scan_progress",
-  "scanner_statuses": {
-    "<scanner_name>": { "status": "...", "excluded": bool, "dependencies_satisfied": bool }
-  }
+  "operation": "get_scan_progress"
 }""",
         # A caveat is a string, or a dict that is printed only when the server
         # returns what it describes: "needs" are response keys, "needs_types"
