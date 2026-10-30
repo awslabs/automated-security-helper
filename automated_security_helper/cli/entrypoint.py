@@ -700,7 +700,7 @@ def main() -> None:
     _run_reporting_failures(run)
 
 
-def run_module_app(app: Callable[[], Any]) -> None:
+def run_module_app(app: Callable[..., Any]) -> None:
     """Run *app*, one of the CLI's Typer apps, with :func:`main`'s failure path.
 
     For a command module run as a script (``python -m
