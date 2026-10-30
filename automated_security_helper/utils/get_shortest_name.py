@@ -22,8 +22,10 @@ def get_shortest_name(input: str | Path):  # noqa: A002
         return input
     in_path = Path(input)
     if not in_path.exists():
-        # Just return the input, not an existing Path
-        return input
+        # Not an existing path: returned as given, as text. Callers put the result
+        # in str-typed SARIF fields (artifactLocation.uri, working_directory), and a
+        # Path handed back unchanged reached them as a Path.
+        return input if isinstance(input, str) else input.as_posix()
     cwd = Path.cwd().absolute()
     absolute = in_path.absolute()
     # Annotated because the two branches bind different types: relative_to() gives a
@@ -57,8 +59,10 @@ def home_as_tilde(text: str) -> str:
     not-found reason writes ``as_posix()`` paths; a drive-letter home is matched
     without regard to case. Only a whole path is replaced: it must start the text or
     follow whitespace or one of ``,;:(='"`[<{`` and end the text or be followed by a
-    separator, whitespace or one of ``,;:)'"`]>}``, so ``/home/a`` is left alone
-    inside ``/home/ab``, ``/srv/home/a``, ``//home/a`` and ``file:///home/a``. A
+    separator, whitespace, one of ``,;:)'"`]>}``, or a period that ends a sentence
+    (one followed by whitespace or the end of the text), so ``/home/a`` is left alone
+    inside ``/home/ab``, ``/home/a.bak``, ``/srv/home/a``, ``//home/a`` and
+    ``file:///home/a`` and is rewritten in ``looked under /home/a.``. A
     name that goes on with one of those characters is rewritten too, though it is
     not under the home directory: ``/home/a]x/y`` becomes ``~]x/y`` and
     ``/opt/a[/home/a/x`` becomes ``/opt/a[~/x``. This text is for display, and such
@@ -94,7 +98,9 @@ def home_as_tilde(text: str) -> str:
         if windows:
             forms.add(stripped.replace("\\", "/"))
     before = r"(?<![^\s,;:(='\"`\[<{])"
-    after = r"(?![^/\\\s,;:)'\"`\]>}])"
+    # A period is a boundary only when it ends a sentence: `/home/a.bak` names a
+    # sibling directory, `/home/a.` ends a reason.
+    after = r"(?:(?![^/\\\s,;:)'\"`\]>}])|(?=\.(?:\s|$)))"
     for form in sorted(forms, key=len, reverse=True):
         flags = re.IGNORECASE if drive.match(form) else 0
         text = re.sub(before + re.escape(form) + after, "~", text, flags=flags)
