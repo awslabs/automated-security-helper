@@ -2034,11 +2034,12 @@ def test_a_converted_inputs_absolute_path_does_not_stay_in_the_logical_location(
 
 def test_many_inputs_are_audited_in_several_runs_and_one_report(repo, monkeypatch):
     """A tree with more inputs than one command line holds is audited in several
-    zizmor runs; the counters are summed and the findings joined."""
-    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40, raising=False)
-    calls: list = []
+    zizmor runs; the counters are summed and the findings joined. Each run
+    answers with the findings of its own inputs only, so the joined report must
+    hold every expected finding exactly once, rebased and joined per batch."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
     scanner = _scanner(repo)
-    _fake_run(scanner, stdout=CAPTURED_SARIF.read_text(), calls=calls)
+    calls = _fake_runs_per_batch(scanner, CAPTURED_SARIF.read_text())
 
     report = scanner.scan(repo, "source", [])
 
@@ -2048,7 +2049,41 @@ def test_many_inputs_are_audited_in_several_runs_and_one_report(repo, monkeypatc
     assert inputs_per_call == [[path] for path in EXPECTED_INPUTS]
     assert scanner.targets_attempted == len(EXPECTED_INPUTS)
     assert scanner.targets_failed == 0
-    assert len(report.runs[0].results) == len(EXPECTED_INPUTS) * len(EXPECTED_FINDINGS)
+    assert sorted(_summarize(report)) == EXPECTED_FINDINGS
+
+
+#: An argv budget that puts one input per batch for every fixture input, clear of
+#: the 24+16 boundary two adjacent inputs' lengths add up to, whether or not a
+#: separator byte is counted.
+_ONE_INPUT_PER_BATCH = 36
+
+
+def _fake_runs_per_batch(scanner, sarif_text: str) -> list:
+    """Like ``_fake_run``, answering each run with the captured SARIF reduced to
+    the results whose file is among that run's inputs (the arguments after
+    ``--``); returns the recorded calls."""
+    calls: list = []
+    whole = json.loads(sarif_text)
+
+    def run(command, results_dir=None, env=None, timeout=None, **_):
+        calls.append({"command": list(command), "env": env, "timeout": timeout})
+        inputs = set(command[command.index("--") + 1 :])
+        part = copy.deepcopy(whole)
+        part["runs"][0]["results"] = [
+            result
+            for result in whole["runs"][0]["results"]
+            if result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            in inputs
+        ]
+        name = scanner.__class__.__name__
+        Path(results_dir, f"{name}.stdout.log").write_text(json.dumps(part))
+        response = {"returncode": 0}
+        scanner._process_command_response(response)
+        return response
+
+    object.__setattr__(scanner, "_run_subprocess", run)
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: True)
+    return calls
 
 
 def _fake_runs(scanner, stdouts: list) -> list:
@@ -2095,7 +2130,7 @@ def test_a_joined_report_carries_every_batchs_rules_and_invocations(repo, monkey
     description) in the joined report, each rule id appears once, the
     invocations of every run are kept in order, and a result's ruleIndex
     points at its rule in the merged list, not into the batch's own array."""
-    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40)
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
     scanner = _scanner(repo)
     calls = _fake_runs(scanner, [CAPTURED_SARIF.read_text(), _later_batch_sarif()])
 
@@ -2125,7 +2160,7 @@ def test_a_run_declined_after_earlier_batches_keeps_their_counters(repo, monkeyp
     input: the two the earlier batches audited, and the three the declined
     batch and the ones after it never ran, counted as attempted and failed so
     no reader sees "two audited, nothing found" beside the refusal."""
-    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40, raising=False)
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
     scanner = _scanner(repo)
     _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
     checks: list = []
@@ -2151,7 +2186,7 @@ def test_batches_that_all_declined_leave_no_exit_code(repo, monkeypatch):
     """The template declined the first batch, so zizmor never ran: the exit
     code stays None, the base class's "the tool did not run", not a 0 that
     reads as a clean run, and every input counts as attempted and failed."""
-    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40)
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
     scanner = _scanner(repo)
     _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
     object.__setattr__(scanner, "validate_plugin_dependencies", lambda: False)
