@@ -371,10 +371,14 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
         "prepare_content_db",
         lambda tool, *a, **k: prepared.append((tool, k)),
     )
+    # A completed run carries its exit code; a response without one is a tool
+    # that never ran, which the scanner refuses before grading.
     monkeypatch.setattr(
         trivy_base.ScannerPluginBase,
         "_run_subprocess",
-        lambda self, command, *a, **k: commands.append(list(command)) or {},
+        lambda self, command, *a, **k: (
+            commands.append(list(command)) or {"returncode": 0}
+        ),
     )
     with patch.object(scanner, "_pre_scan", return_value=True):
         scanner.scan(target=source, target_type="source")
