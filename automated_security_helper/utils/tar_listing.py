@@ -111,6 +111,19 @@ class TarListingStopped(ValueError):
         self.offset = offset
 
 
+class TarCutShort(ValueError):
+    """The tar's bytes end at byte ``offset``, right after a member, with no
+    end-of-archive zero block: it was cut at a block boundary, and what followed
+    the last member listed is unknown."""
+
+    def __init__(self, offset: int) -> None:
+        super().__init__(
+            f"the tar ends at byte {offset} with no end-of-archive block after its "
+            "last member, so it was cut there and what followed is unknown"
+        )
+        self.offset = offset
+
+
 class TooManyTarMembers(ValueError):
     """The tar holds more than ``limit`` members."""
 
@@ -154,10 +167,18 @@ def open_tar_listing(
     blocks before the end, a tar of end blocks only, a concatenated tar whose
     last blocks are zeros) appends nothing.
 
+    Under ``"r:*"`` tarfile tries each compression in turn and reads the first
+    header under each, so a listing can begin more than once. The counts, the
+    lists and the budget charge belong to one reading of the bytes: each time
+    the first header (byte 0) is read again, what the earlier attempt recorded
+    is dropped and its budget charge given back, so an attempt tarfile
+    abandoned leaves nothing in the result of the one it keeps.
+
     Raises:
         tarfile.TarError, OSError, EOFError: The tar could not be opened or read.
     """
     skipped = [0]
+    charged = [0]
     # A handle that meters its header reads (the archive converter's bounded
     # stream) is credited each skipped block's bytes as the block is
     # classified, so skips are charged to this listing's own budgets and
@@ -166,24 +187,51 @@ def open_tar_listing(
     # Whether any member was read, and whether the LAST header event before
     # the current one was a zero block: at the end of the bytes these two
     # tell an ordinary end (zeros, then the end) from a tar cut at a block
-    # boundary, which presents no damaged header and no stop.
+    # boundary, which presents no damaged header and no stop. limit_stop is
+    # set by the attempt that ended the listing at its limit, so the header
+    # that contained that read (a pax or GNU long-name header reads the next
+    # header inside its own) does not record the stop as the tar's end.
     read_any = [False]
     last_zero = [False]
+    limit_stop = [False]
+
+    def begin_attempt() -> None:
+        """Drop what an earlier reading of these bytes recorded."""
+        if budget is not None:
+            budget.used -= charged[0]
+        skipped[0] = 0
+        charged[0] = 0
+        read_any[0] = False
+        last_zero[0] = False
+        limit_stop[0] = False
+        unreadable.clear()
+        if stopped is not None:
+            stopped.clear()
+        if ended is not None:
+            ended.clear()
 
     class _Recorded(TarInfo):
         @classmethod
         def fromtarfile(cls, tarfile: TarFile) -> _Recorded:
             # Where the header about to be read starts, in the (decompressed) tar.
             offset = tarfile.fileobj.tell()
+            if offset == 0:
+                begin_attempt()
             try:
                 member = super().fromtarfile(tarfile)
             except _END_OF_DATA:
                 # The bytes genuinely end here (a limit stop raises its own
-                # _END_OF_DATA outside this try). An end right after a member,
-                # with no end-of-archive zero block between, means what
-                # followed is unknowable; the byte is recorded for the
-                # caller's extracted-in-part row.
-                if ended is not None and not ended and read_any[0] and not last_zero[0]:
+                # _END_OF_DATA, flagged, from the read that hit the limit). An
+                # end right after a member, with no end-of-archive zero block
+                # between, means what followed is unknowable; the byte is
+                # recorded for the caller's extracted-in-part row.
+                if (
+                    ended is not None
+                    and not ended
+                    and not limit_stop[0]
+                    and read_any[0]
+                    and not last_zero[0]
+                ):
                     ended.append(offset)
                 raise
             except HeaderError as error:
@@ -193,17 +241,25 @@ def open_tar_listing(
                     last_zero[0] = False
                     if not unreadable:
                         unreadable.append(offset)
-                skipped[0] += _BLOCK
+                # The bytes tarfile read for this header before it raised: one
+                # block for a plain header, more for a pax or GNU long-name
+                # header whose extension it read first. Charged whole, rounded
+                # up to blocks, so the limits bound what the listing read.
+                consumed = max(_BLOCK, tarfile.fileobj.tell() - offset)
+                consumed = -(-consumed // _BLOCK) * _BLOCK
+                skipped[0] += consumed
                 if credit is not None:
-                    credit(_BLOCK)
+                    credit(consumed)
                 over = skipped[0] > SKIPPED_BYTES_LIMIT
                 if budget is not None and skipped[0] > ORDINARY_END_BYTES:
-                    budget.used += _BLOCK
+                    budget.used += consumed
+                    charged[0] += consumed
                     over = over or budget.spent
                 if not over:
                     raise
                 # tarfile ends a listing at the end of the bytes after the first
                 # header, so this ends it here.
+                limit_stop[0] = True
                 if stopped is not None and not stopped:
                     stopped.append(offset)
                 raise _END_OF_DATA("the listing skipped its limit of blocks") from None
@@ -234,14 +290,17 @@ def tar_names(handle: IO[bytes]) -> List[str]:
             member it named is unknown. It names the first such header's byte.
         TarListingStopped: The listing stopped past SKIPPED_BYTES_LIMIT bytes of
             blocks it skipped, so what follows is unknown.
+        TarCutShort: The bytes end right after a member with no end-of-archive
+            block, so the tar was cut there and what followed is unknown.
         TooManyTarMembers: The tar holds more than MAX_LISTED_MEMBERS members;
             the listing stops there.
         tarfile.TarError, OSError, EOFError: The listing could not be read.
     """
     unreadable: List[int] = []
     stopped: List[int] = []
+    ended: List[int] = []
     names: List[str] = []
-    with open_tar_listing(handle, unreadable, stopped) as listing:
+    with open_tar_listing(handle, unreadable, stopped, ended=ended) as listing:
         for member in listing:
             if len(names) == MAX_LISTED_MEMBERS:
                 raise TooManyTarMembers(MAX_LISTED_MEMBERS)
@@ -250,4 +309,6 @@ def tar_names(handle: IO[bytes]) -> List[str]:
         raise UnreadableTarHeader(unreadable[0])
     if stopped:
         raise TarListingStopped(stopped[0])
+    if ended:
+        raise TarCutShort(ended[0])
     return names
