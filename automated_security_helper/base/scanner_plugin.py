@@ -1381,6 +1381,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         them to scan (measured), and grype's and opengrep's SARIF writers always add
         one, so an empty file is not a clean scan. A scanner whose tool really does
         write an empty file for a clean scan overrides this to return a report.
+
+        A report an override returns has to hold at least one SARIF run, as a
+        report the tool wrote does: one with none is refused with the same
+        "no SARIF run" error, since it grades nothing. A clean scan is a run
+        with no results.
         """
         raise ScannerError("its results file is empty, so there is nothing to grade")
 
@@ -1586,11 +1591,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             self._post_scan(target=target, target_type=target_type)
             return True
 
-        validated = self._pre_scan(
-            target=target,
-            target_type=target_type,
-            config=config,
-        )
+        try:
+            validated = self._pre_scan(
+                target=target,
+                target_type=target_type,
+                config=config,
+            )
+        except BaseException:
+            # _pre_scan starts the timing and then does the work that can
+            # raise (the results directory, the dependency check). The raise
+            # leaves this method before the try below, so the end is set here:
+            # left None, the executor would pair this target's start with no
+            # end, or with the previous target's.
+            if self.end_time is None:
+                self.end_time = datetime.now(timezone.utc)
+            raise
         if not validated:
             self._post_scan(target=target, target_type=target_type)
             return False
