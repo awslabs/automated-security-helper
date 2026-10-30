@@ -32,6 +32,7 @@ import shutil
 import struct
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
@@ -49,6 +50,20 @@ SCAN_WORKFLOW = "run-ash-security-scan.yml"
 SARIF_WORKFLOW = "upload-ash-sarif.yml"
 #: How many characters of a log a failure message quotes at most.
 TAIL_CHARS = 4000
+#: What reading a zip can raise: a bad archive or header (BadZipFile), a value that
+#: does not parse (ValueError, which BadZipFile extends), a file error, corrupt
+#: deflate data (zlib.error), a truncated member (EOFError), an encrypted member
+#: (RuntimeError) and an unsupported compression method (NotImplementedError). A
+#: reader that catches these reports the archive and goes on.
+_ZIP_ERRORS = (
+    OSError,
+    ValueError,
+    zipfile.BadZipFile,
+    zlib.error,
+    EOFError,
+    RuntimeError,
+    NotImplementedError,
+)
 
 #: What separates ``ash`` from its first argument: blanks, and backslash-newline
 #: continuations. A plain line break ends the command, as it does in a script or a
@@ -201,7 +216,7 @@ def aggregated_results_in(root: Path) -> list[tuple[str, dict[str, Any]]]:
                                     json.loads(archive.read(member)),
                                 )
                             )
-            except (OSError, ValueError, zipfile.BadZipFile):
+            except _ZIP_ERRORS:
                 continue
     if not found:
         return []
@@ -321,7 +336,7 @@ def junit_counts(root: Path) -> tuple[int, int]:
                         for member in archive.namelist()
                         if member.endswith(".xml")
                     ]
-            except (OSError, zipfile.BadZipFile):
+            except _ZIP_ERRORS:
                 continue
     for data in documents:
         try:
@@ -1081,7 +1096,7 @@ def _zipped_results(path: Path, depth: int) -> list[tuple[int, ArtifactResults]]
                         ),
                     )
                 )
-    except (OSError, ValueError, zipfile.BadZipFile):
+    except _ZIP_ERRORS:
         return []
     return found
 
@@ -1267,7 +1282,7 @@ def unpack_artifact(results: ArtifactResults, target: Path) -> tuple[Path, list[
             _copy_stored_artifact(Path(results.source).parent, target)
         else:
             _extract_zipped_artifact(results, target)
-    except (OSError, ValueError, zipfile.BadZipFile) as error:
+    except _ZIP_ERRORS as error:
         return output, [
             (
                 f"the artifact {results.name} ({results.where}) could not be "

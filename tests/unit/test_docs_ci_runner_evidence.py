@@ -34,6 +34,7 @@ import subprocess
 import sys
 import time
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -900,6 +901,45 @@ def test_an_artifact_that_cannot_be_unpacked_is_one_problem(tmp_path):
     output, problems = unpack(intact, tmp_path / "good-out")
     assert problems == []
     assert (output / "ash_aggregated_results.json").is_file()
+
+
+ZIP_READ_ERRORS = [
+    pytest.param(zlib.error("corrupt deflate data"), id="corrupt deflate data"),
+    pytest.param(EOFError("truncated member"), id="truncated member"),
+    pytest.param(RuntimeError("File 'x' is encrypted"), id="encrypted member"),
+    pytest.param(NotImplementedError("compression method"), id="unsupported method"),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("error", ZIP_READ_ERRORS)
+def test_every_error_a_broken_zip_raises_is_one_unpack_problem(
+    tmp_path, monkeypatch, error
+):
+    """zipfile raises more than BadZipFile on a broken archive: corrupt deflate data,
+    a truncated member, an encrypted member, an unsupported compression method. Each
+    is the one "could not be unpacked" problem, never an escape that aborts the
+    judge; the artifact store's reader passes such an archive over the same way."""
+    read = _api("reports", "results_from_artifact_store")
+    unpack = _api("reports", "unpack_artifact")
+    store = tmp_path / "artifacts"
+    _zip_artifact(store, "ash-output", _aggregated(), SARIF_BYTES, "out/")
+    (judged,) = read(store)
+
+    def failing_extract(self, member, path=None, pwd=None):
+        raise error
+
+    monkeypatch.setattr(zipfile.ZipFile, "extract", failing_extract)
+    output, problems = unpack(judged, tmp_path / "out" / "ash_output")
+    assert len(problems) == 1 and "could not be unpacked" in problems[0], problems
+    assert str(error) in problems[0]
+    assert output == tmp_path / "out" / "ash_output" / "out"
+
+    def failing_read(self, name, pwd=None):
+        raise error
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", failing_read)
+    assert read(store) is None, "an archive whose members cannot be read holds nothing"
 
 
 @pytest.mark.unit

@@ -37,6 +37,7 @@ import os
 import sys
 import types
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -1687,6 +1688,37 @@ def test_junit_counts_read_the_reports_the_codebuild_agent_zips(tmp_path):
     (tmp_path / "broken.zip").write_bytes(b"PK\x03\x04 not a zip")
     # 1 failed + 1 passed in the plain report, 3 failed + 2 passed in the zipped one.
     assert counts(tmp_path) == (7, 4)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(zlib.error("corrupt deflate data"), id="corrupt deflate data"),
+        pytest.param(EOFError("truncated member"), id="truncated member"),
+        pytest.param(RuntimeError("File 'x' is encrypted"), id="encrypted member"),
+        pytest.param(
+            NotImplementedError("compression method"), id="unsupported method"
+        ),
+    ],
+)
+def test_junit_counts_pass_over_a_zip_whose_members_cannot_be_read(
+    tmp_path, monkeypatch, error
+):
+    """Each error zipfile raises while reading a member leaves that archive counted
+    as nothing, the way a file that is not a zip is, and the plain reports still count;
+    none of them escapes to abort the leg's judge."""
+    counts = _api("reports", "junit_counts")
+    _junit_report(tmp_path / "plain" / "ash.junit.xml", 1, 1)
+    _junit_report(tmp_path / "zipped" / "ash.junit.xml", 3, 2)
+    with zipfile.ZipFile(tmp_path / "reports-ash-findings.zip", "w") as archive:
+        archive.write(tmp_path / "zipped" / "ash.junit.xml", "ash.junit.xml")
+    (tmp_path / "zipped" / "ash.junit.xml").unlink()
+
+    def failing_read(self, name, pwd=None):
+        raise error
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", failing_read)
+    assert counts(tmp_path) == (2, 1)
 
 
 def test_the_gate_job_reads_the_exit_code_the_scan_job_kept(tmp_path):
