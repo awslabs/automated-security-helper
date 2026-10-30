@@ -46,7 +46,13 @@ def test_a_line_separator_inside_a_string_does_not_shift_later_keys(tmp_path):
         "  }\n"
         "}\n"
     )
-    assert len(text.splitlines()) != len(text.split("\n")), "the fixture must differ"
+    # The separator has to be a line break to str.splitlines() and not to the
+    # scanners' "\n" count. The old comparison against len(text.split("\n"))
+    # was equal by coincidence: splitlines() drops the empty piece after the
+    # final "\n" that split("\n") keeps, so both read the same length and the
+    # precondition never held. One line more than there are "\n" characters is
+    # what the separator adds.
+    assert len(text.splitlines()) == text.count("\n") + 1, "the fixture must differ"
     entries = load_npm_lock_entries(_lockfile(tmp_path, text))
     assert entries is not None
     by_key = {entry.key: entry for entry in entries}
