@@ -145,6 +145,12 @@ class TestChildEnvironment:
         assert env["PYTHONUTF8"] == "1"
 
 
+#: Above any pid_max, so a signal that escapes the killpg patch (a refactor to
+#: ``from os import killpg``, or a bare os.kill) meets ESRCH instead of a live
+#: process on the runner.
+FAKE_PID = 2**30
+
+
 class _FakeProcess:
     """A child that dies on SIGTERM, or ignores it and dies on SIGKILL only.
 
@@ -153,7 +159,7 @@ class _FakeProcess:
     """
 
     def __init__(self, dies_on_term: bool):
-        self.pid = 4242
+        self.pid = FAKE_PID
         self.dies_on_term = dies_on_term
         self.alive = True
         self.waits: list = []
@@ -267,7 +273,7 @@ class _FakePipes:
     """A stopped child whose output pipes follow a script of results or timeouts."""
 
     def __init__(self, *outcomes):
-        self.pid = 4242
+        self.pid = FAKE_PID
         self.outcomes = list(outcomes)
         self.timeouts: list = []
 
@@ -288,7 +294,7 @@ def _timeout(output=None, stderr=None):
 class _FakeScanChild:
     """A scan child that exited while a tool it started still holds the pipes."""
 
-    pid = 4242
+    pid = FAKE_PID
 
     def __init__(self, *args, **kwargs):
         self.returncode = 0
