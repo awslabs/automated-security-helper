@@ -127,6 +127,43 @@ def test_the_os_walk_fallback_refuses_a_directory_it_cannot_list(
         fs_guard.sweep_writable([root])
 
 
+def test_the_os_walk_fallback_records_a_failed_removal_and_goes_on(
+    tmp_path, monkeypatch, caplog
+):
+    """The descriptor walk records a removal that fails and sweeps on; the
+    os.walk fallback (the platform without fwalk) let the OSError abort the whole
+    sweep, so a link after the failed one survived. Measured here by taking fwalk
+    away and failing the first removal."""
+    value = "SWEEPSECRET-4476"
+    root = tmp_path / "results"
+    root.mkdir()
+    (root / f"aaa-{value}").symlink_to(tmp_path)
+    (root / "zzz-link").symlink_to(tmp_path)
+    real_unlink = os.unlink
+
+    def failing_unlink(path, *args, **kwargs):
+        if value in os.fspath(path):
+            raise OSError(1, "the first removal fails", os.fspath(path))
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.delattr(os, "fwalk")
+    monkeypatch.setattr(os, "unlink", failing_unlink)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        removed = fs_guard.sweep_writable([root], (value,))
+
+    assert removed == 1
+    assert not os.path.lexists(root / "zzz-link"), "the sweep must continue past it"
+    assert os.path.lexists(root / f"aaa-{value}"), "the failed one is left as found"
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Could not remove" in record.getMessage()
+    ]
+    assert lines, [record.getMessage() for record in caplog.records]
+    assert not any("SWEEPSECRET-4476" in line for line in lines), lines
+
+
 def test_a_directory_removed_during_the_walk_is_not_a_refusal(tmp_path, monkeypatch):
     """fwalk reports a subdirectory that vanished between its listing and its
     open as ENOENT; nothing is below it, so the sweep goes on."""

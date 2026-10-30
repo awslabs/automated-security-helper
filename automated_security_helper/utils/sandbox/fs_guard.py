@@ -419,9 +419,28 @@ def _sweep_tree(
             _too_deep(root, dirpath, dirnames)
             for name in list(dirnames) + filenames:
                 path = os.path.join(dirpath, name)
-                if _is_special(os.lstat(path).st_mode):
+                try:
+                    mode = os.lstat(path).st_mode
+                except OSError:
+                    continue
+                if not _is_special(mode):
+                    continue
+                # The same shape as the descriptor walk below: a removal that
+                # fails is recorded and the sweep goes on to the next entry.
+                try:
                     os.unlink(path)
                     removed += 1
+                except OSError as e:
+                    _sweep_warning(
+                        f"Could not remove {name} under {root}: {e}",
+                        "Could not remove an entry a scanner left in its results "
+                        "directory; it is not named because the plugin's redaction "
+                        "values could not be read",
+                        values,
+                        values_unread,
+                    )
+                if name in dirnames:
+                    dirnames.remove(name)
         return removed
     for dirpath, dirnames, filenames, dir_fd in os.fwalk(
         root, onerror=unlistable, follow_symlinks=False
