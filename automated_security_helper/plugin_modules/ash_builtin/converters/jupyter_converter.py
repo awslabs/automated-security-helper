@@ -41,6 +41,7 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
@@ -335,17 +336,20 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
 
-        # First, so the version probe below has the results directory a sandbox
-        # scope is built from.
         super().model_post_init(context)
 
-        # The probe runs nbconvert, so under a sandbox it runs sandboxed, as a
-        # scanner's version probe does. The convert phase defers it until the
-        # dependency check asks (uv_tool_mixin.deferred_tool_version_probes),
-        # so the environment is resolved only when a notebook needs nbconvert.
-        # The spec the probe resolves under is _uv_from_spec, the requirement
-        # the check reads, so it reports the version that runs.
-        with self._probe_scope():
+        # Construction starts nothing. The version probe runs nbconvert (`uv tool
+        # run --from nbconvert`, which resolves and downloads it), so it is only
+        # RECORDED here, as the mixin records every probe inside
+        # deferred_tool_version_probes, and run by the dependency check once a
+        # notebook needs nbconvert (_validate_dependencies, inside _probe_scope,
+        # so under a sandbox it runs sandboxed as a scanner's probe does). The
+        # convert phase enters the same block around construction; a converter
+        # built outside a scan (a test, the MCP server, `ash dependencies`) used
+        # to probe at once, which reached uv and the index for a tool the run
+        # might never need. The spec the probe resolves under is _uv_from_spec,
+        # the requirement the check reads, so it reports the version that runs.
+        with deferred_tool_version_probes():
             self.tool_version = self._get_uv_tool_version(self.command)
 
     def _probe_scope(self) -> ContextManager[Optional[SandboxUnavailable]]:
