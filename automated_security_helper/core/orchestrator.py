@@ -1573,10 +1573,6 @@ class ASHScanOrchestrator(BaseModel):
                 )
                 problem = None
                 try:
-                    from automated_security_helper.models.asharp_model import (
-                        AshAggregatedResults,
-                    )
-
                     with open(self.existing_results_path, "r", encoding="utf-8") as f:
                         model_data = json.load(f)
 
