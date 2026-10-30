@@ -64,6 +64,37 @@ class TestRunChecks:
             "fine: one problem",
         ]
 
+    def test_a_null_field_and_an_unparsable_junit_file_are_recorded(
+        self, reports, tmp_path
+    ):
+        """Both are shapes a malformed report tree produces, not gate defects.
+
+        A field present but null raises AttributeError where the check reads
+        it; a truncated ash.junit.xml raises ParseError out of fromstring. Both
+        escaped the tuple and aborted the gate, losing the problems collected.
+        """
+
+        def null_workspace(output_dir):
+            flat = {"workspace": None}
+            return [flat.get("workspace", {}).get("projects")]
+
+        def truncated_junit(output_dir):
+            from defusedxml import ElementTree
+
+            ElementTree.fromstring("<testsuites><testsuite")
+            return []
+
+        def fine(output_dir):
+            return ["fine: one problem"]
+
+        problems = reports.run_checks(tmp_path, (null_workspace, truncated_junit, fine))
+        assert len(problems) == 3
+        assert problems[0].startswith(
+            "null_workspace: could not finish; AttributeError"
+        )
+        assert problems[1].startswith("truncated_junit: could not finish; ParseError")
+        assert problems[2] == "fine: one problem"
+
     def test_an_unexpected_exception_still_propagates(self, reports, tmp_path):
         def broken(output_dir):
             raise RuntimeError("not a shape of the report tree")

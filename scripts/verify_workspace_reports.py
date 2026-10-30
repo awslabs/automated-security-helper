@@ -96,6 +96,7 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping
+from xml.etree.ElementTree import ParseError  # nosec B405 - the exception type only; parsing uses defusedxml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_FILENAME = "ash_aggregated_results.json"
@@ -634,6 +635,13 @@ def check_per_project_identity(output_dir: Path) -> List[str]:
 
 #: What a check raises when an artefact it reads is missing or shaped wrong.
 #: Recorded as that check's problem; every other check still runs.
+#: The exceptions a malformed report tree raises inside one check. Each is a
+#: finding about the artefacts, recorded against the check that met it; any
+#: other exception is a defect in the gate and propagates with its traceback.
+#: ``json.JSONDecodeError`` is a ``ValueError``; ``AttributeError`` is what a
+#: field that is present but ``null`` raises (``flat.get("workspace", {})``
+#: returning None, a null ``metadata``, a results file that is a list);
+#: ``ParseError`` is what a truncated or empty ``ash.junit.xml`` raises.
 CHECK_FAILURES = (
     GateFailure,
     OSError,
@@ -641,7 +649,8 @@ CHECK_FAILURES = (
     IndexError,
     TypeError,
     ValueError,
-    json.JSONDecodeError,
+    AttributeError,
+    ParseError,
 )
 
 
@@ -662,7 +671,9 @@ def run_checks(output_dir: Path, checks) -> List[str]:
     abort the gate with a traceback, discarding every problem the earlier checks
     had collected and the evidence directory with them. A missing artefact is a
     finding about the report tree, so it is recorded against the check that met
-    it and the remaining checks still report theirs.
+    it and the remaining checks still report theirs. The same holds for a field
+    that is present but null (AttributeError) and a junit file that does not
+    parse (ParseError), both shapes a malformed report tree produces.
     """
     problems: List[str] = []
     for check in checks:
