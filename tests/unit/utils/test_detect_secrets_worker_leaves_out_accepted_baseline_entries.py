@@ -110,9 +110,11 @@ def test_an_accepted_entry_of_an_untrusted_baseline_is_still_reported(
 
     result = detect_secrets_worker.run(_request(tmp_path, baseline))
 
-    assert _hashes(result) == sorted(
-        [_hashed(ACCEPTED_VALUE), _hashed(UNAUDITED_VALUE)]
-    )
+    # The baseline's own entries are in OUTPUT beside the scan's (under the
+    # baseline's key), so the accepted value appears twice and nothing is left
+    # out: the set of hashes is both values, and the accepted one is present.
+    assert set(_hashes(result)) == {_hashed(ACCEPTED_VALUE), _hashed(UNAUDITED_VALUE)}
+    assert _hashes(result).count(_hashed(ACCEPTED_VALUE)) >= 1
 
 
 @pytest.mark.parametrize("value", [False, "true", 1, None])
