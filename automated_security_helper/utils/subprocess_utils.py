@@ -3186,7 +3186,15 @@ def _stop_tree(
         _wait_after_kill(process)
         return
     pgid = process.pid
-    if process.returncode is not None and _pid_names_a_live_process(pgid):
+    # The exit status already read, never poll(): a poll here would reap a
+    # leader whose exit was not yet observed, and the group its pid names
+    # would then read as a stranger's below while its orphans still run. Read
+    # with a default, as the other reads of a child's state here go through
+    # poll and wait: a stand-in child need not carry the attribute.
+    if (
+        getattr(process, "returncode", None) is not None
+        and _pid_names_a_live_process(pgid)
+    ):
         # The child was reaped, and a live process holds its pid. POSIX keeps a
         # pid from reuse only while it names a live group, so the child's own
         # group (its orphans) was gone before that process got the id, and the
