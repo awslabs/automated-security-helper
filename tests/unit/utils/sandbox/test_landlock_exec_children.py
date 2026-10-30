@@ -193,6 +193,48 @@ def test_a_three_level_tree_lists_proc_once_without_children_files(procfs):
     assert proc.listed.count("/proc") == 1
 
 
+def test_descendants_with_the_highest_pids_are_read_before_the_cap_is_met(
+    procfs, monkeypatch
+):
+    """The wrapper's descendants were forked after it and carry the highest pids;
+    a bounded scan that read /proc in ascending order would spend its cap on
+    older processes and find none of them. The scan starts just above this
+    process and wraps around."""
+    monkeypatch.setattr(landlock_exec, "PROC_SCAN_LIMIT", 3)
+    files: Dict[str, Entry] = {
+        _task("self"): ["7"],
+        f"{_task('self')}/7": [],
+        "/proc": ["1", "2", "3", "4", "5", str(ME), "1001", "2002", "self"],
+        f"/proc/{ME}/stat": _stat(ME, 1),
+        "/proc/1001/stat": _stat(1001, ME),
+        "/proc/2002/stat": _stat(2002, 1001),
+    }
+    for pid in range(1, 6):
+        files[f"/proc/{pid}/stat"] = _stat(pid, 1)
+    proc = procfs(files)
+
+    assert landlock_exec._descendants() == [1001, 2002]
+    read = [path for path in proc.opened if path.endswith("/stat")]
+    assert read == ["/proc/1001/stat", "/proc/2002/stat", "/proc/1/stat"]
+
+
+def test_a_scan_with_a_deadline_is_bounded_by_the_deadline_not_the_cap(
+    procfs, monkeypatch
+):
+    """With a deadline to honor, the entry cap does not apply: a scan with time
+    left reads every entry."""
+    monkeypatch.setattr(landlock_exec, "PROC_SCAN_LIMIT", 1)
+    monkeypatch.setattr(
+        landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
+    )
+    files: Dict[str, Entry] = {"/proc": ["1", "2", "3", "4", "self"]}
+    for pid in range(1, 5):
+        files[f"/proc/{pid}/stat"] = _stat(pid, ME)
+    procfs(files)
+
+    assert landlock_exec._parent_map(until=lambda: 20.0) == {ME: [1, 2, 3, 4]}
+
+
 def _three_levels() -> Dict[str, Entry]:
     """Children files for this process -> 11 -> 21 -> 31."""
     files: Dict[str, Entry] = {

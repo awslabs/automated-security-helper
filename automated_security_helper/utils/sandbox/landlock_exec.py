@@ -530,28 +530,32 @@ def _parent_map(
 
     The fallback for a kernel without children files: every /proc/<pid>/stat,
     which on a host with thousands of processes costs a few hundred
-    milliseconds. At most ``limit`` entries are read (PROC_SCAN_LIMIT), and none
-    once ``until()`` (a time.monotonic() deadline, asked again before every entry
-    so a stop that arrives mid-scan moves it) has passed, so the map holds what
-    was read by then.
+    milliseconds. The entries are read from just above this process's pid
+    upward and then from the lowest pid on: the wrapper's descendants were
+    forked after it, so they usually carry the highest pids on the host, and a
+    bounded read meets them before anything older. The bound is ``until()`` (a
+    time.monotonic() deadline, asked again before every entry so a stop that
+    arrives mid-scan moves it) when one is given, else at most ``limit`` entries
+    (PROC_SCAN_LIMIT); the map holds what was read by then.
     """
     if limit is None:
         limit = PROC_SCAN_LIMIT
     parents: Dict[int, List[int]] = {}
-    read = 0
-    for entry in os.listdir("/proc"):
-        if not entry.isdigit():
-            continue
-        if read >= limit or (until is not None and time.monotonic() >= until()):
+    pids = sorted(int(entry) for entry in os.listdir("/proc") if entry.isdigit())
+    start = next((i for i, pid in enumerate(pids) if pid > os.getpid()), len(pids))
+    for read, pid in enumerate(pids[start:] + pids[:start]):
+        if until is None:
+            if read >= limit:
+                break
+        elif time.monotonic() >= until():
             break
-        read += 1
         try:
-            with open(f"/proc/{entry}/stat", "rb") as f:
+            with open(f"/proc/{pid}/stat", "rb") as f:
                 fields = f.read().rsplit(b")", 1)[1].split()
         except (OSError, IndexError):
             continue
         if len(fields) > 1:
-            parents.setdefault(int(fields[1]), []).append(int(entry))
+            parents.setdefault(int(fields[1]), []).append(pid)
     return parents
 
 
