@@ -24,6 +24,7 @@ from typing import Dict, List, Optional
 from urllib.parse import quote
 
 from automated_security_helper.core.cancellation import (
+    CancelEvent,
     ScanCancelled,
     current_cancel_event,
     raise_if_cancelled,
@@ -37,6 +38,7 @@ from automated_security_helper.utils.python_child import python_code_argv
 from automated_security_helper.utils.subprocess_utils import (
     HeldInterrupt,
     child_environ,
+    could_not_stop_sentence,
     discard_tool_pid_before_reap,
     discard_tool_pid_once_exited,
     find_executable,
@@ -469,9 +471,27 @@ def _enter_shell(cmd: List[str], env: Dict[str, str]) -> subprocess.CompletedPro
                         # below. The signal was delivered to this process alone,
                         # so the shell has not been interrupted yet, whatever
                         # the terminal probe would say.
-                        stop_after_interrupt(process, child_got_the_interrupt=False)
+                        stopped = stop_after_interrupt(
+                            process, child_got_the_interrupt=False
+                        )
+                        if stopped:
+                            raise ScanCancelled(
+                                "the scan was cancelled while the Nix shell ran"
+                            ) from None
+                        # The grace ran out and the kernel refused the kill, so
+                        # the shell, which is the inner scan, may still run. The
+                        # cancel says so and carries the pid as data, as the
+                        # spawn layer's cancels do, and the event records it for
+                        # the exit line, which names survivors from the records,
+                        # never from the text.
+                        if isinstance(cancel_event, CancelEvent):
+                            cancel_event.note_could_not_stop("nix", process.pid)
                         raise ScanCancelled(
-                            "the scan was cancelled while the Nix shell ran"
+                            "the scan was cancelled while the Nix shell ran; "
+                            + could_not_stop_sentence(
+                                f"the Nix shell (pid {process.pid})"
+                            ),
+                            could_not_stop=(("nix", process.pid),),
                         ) from None
                     time.sleep(0.1)
                 returncode = process.wait()

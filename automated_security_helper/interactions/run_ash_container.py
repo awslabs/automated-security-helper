@@ -59,6 +59,7 @@ from automated_security_helper.core.enums import (
     ExportFormat,
 )
 from automated_security_helper.core.cancellation import (
+    CancelEvent,
     ScanCancelled,
     current_cancel_event,
     raise_if_cancelled,
@@ -81,6 +82,7 @@ from automated_security_helper.utils.console import (
 )
 from automated_security_helper.utils.subprocess_utils import (
     ALLOW_IN_TREE_TOOLS_ENV,
+    could_not_stop_sentence,
     create_completed_process,
     in_tree_tools_allowed,
     raise_called_process_error,
@@ -844,13 +846,32 @@ def run_cmd_direct(
                     # The signal was delivered to this process alone, so the
                     # runtime has not been interrupted yet, whatever the
                     # terminal probe would say.
-                    _stop_after_interrupt(process, child_got_the_interrupt=False)
+                    stopped = _stop_after_interrupt(
+                        process, child_got_the_interrupt=False
+                    )
                     for reader in readers:
                         # A thread that was never started cannot be joined.
                         if reader.ident is not None:
                             reader.join(timeout=5.0)
+                    if stopped:
+                        raise ScanCancelled(
+                            "the scan was cancelled while the container runtime ran"
+                        )
+                    # The grace ran out and the kernel refused the kill, so the
+                    # runtime may still run. The cancel says so and carries the
+                    # pid as data, as the spawn layer's cancels do, and the
+                    # event records it for the exit line, which names survivors
+                    # from the records, never from the text.
+                    if isinstance(cancel_event, CancelEvent):
+                        cancel_event.note_could_not_stop(
+                            "container runtime", process.pid
+                        )
                     raise ScanCancelled(
-                        "the scan was cancelled while the container runtime ran"
+                        "the scan was cancelled while the container runtime ran; "
+                        + could_not_stop_sentence(
+                            f"the container runtime (pid {process.pid})"
+                        ),
+                        could_not_stop=(("container runtime", process.pid),),
                     )
                 time.sleep(0.1)
         except KeyboardInterrupt:
@@ -868,7 +889,14 @@ def run_cmd_direct(
             # the signal was delivered to this process alone, so the runtime has
             # received nothing. Without this arm the exit unwound past the wait
             # with the runtime left running.
-            _stop_after_interrupt(process, child_got_the_interrupt=False)
+            stopped = _stop_after_interrupt(process, child_got_the_interrupt=False)
+            if not stopped:
+                # The kill was refused, so the runtime may outlive the exit
+                # after all: recorded on the scan's event, when there is one,
+                # for the exit line. The exit itself is re-raised unchanged.
+                event = current_cancel_event()
+                if isinstance(event, CancelEvent):
+                    event.note_could_not_stop("container runtime", process.pid)
             for reader in readers:
                 if reader.ident is not None:
                     reader.join(timeout=5.0)
