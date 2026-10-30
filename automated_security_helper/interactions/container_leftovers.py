@@ -932,17 +932,28 @@ def _env_dir_sweepable(
 ) -> bool:
     """Whether a private directory, found by prefix, is one to delete.
 
-    Recorded by this host: its creator decides, gone or alive, whatever the
-    directory's age; a run older than the bound that is still alive owns its
-    directory, and deleting it under that run on its age alone broke the run.
-    Otherwise older than the age bound: yes, recorded by another host or not
-    recorded at all. Anything else is left: an unrecorded directory younger than
-    the bound may be a live run's, made before its record or by a writer with none.
+    Recorded by this host: its creator decides. Gone: yes. Alive and confirmed
+    by its start time: no, whatever the directory's age; a run older than the
+    bound that is still alive owns its directory, and deleting it under that run
+    on its age alone broke the run. Alive by pid alone, with no start time to
+    confirm it (the record was written without one, or this host has no ``/proc``
+    or a hidden one): the age bound decides, since a later process given the same
+    pid reads as the creator there, and a directory holding the operator's values
+    must not stay until the next boot on that reading. Not recorded by this host:
+    older than the age bound, yes; anything else is left, since an unrecorded
+    directory younger than the bound may be a live run's, made before its record
+    or by a writer with none.
     """
+    aged = _now() - status.st_mtime > RECORD_MAX_AGE_SECONDS
     record = entry[1] if entry is not None else None
     if record is not None and here is not None and record.get("host") == here:
-        return not _creator_alive(record["creator_pid"], record.get("creator_start"))
-    return _now() - status.st_mtime > RECORD_MAX_AGE_SECONDS
+        pid, start = record["creator_pid"], record.get("creator_start")
+        if not _creator_alive(pid, start):
+            return True
+        if start is None or _process_start(pid) is None:
+            return aged
+        return False
+    return aged
 
 
 def sweep_env_dirs() -> List[str]:

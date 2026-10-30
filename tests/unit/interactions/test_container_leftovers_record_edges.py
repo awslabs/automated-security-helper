@@ -301,9 +301,36 @@ def test_a_live_creators_directory_is_kept_whatever_its_age():
         },
     )
     ancient = SimpleNamespace(st_mtime=0.0)
+    if entry[1]["creator_start"] is None:
+        pytest.skip("this host reports no process start times")
 
     assert leftovers._env_dir_sweepable(ancient, entry, here) is False
     assert leftovers._env_dir_sweepable(ancient, None, here) is True
+
+
+def test_a_creator_alive_by_pid_alone_keeps_only_the_age_bound(monkeypatch):
+    """Without a start time to confirm it (no /proc, or a record written without
+    one) a live pid may be another process given the creator's number, so the
+    directory is kept only as long as the age bound allows."""
+    here = leftovers.host_key()
+    if here is None:
+        pytest.skip("this host has no identity for records")
+    entry = (
+        "ash-envdir-x.json",
+        {"host": here, "creator_pid": os.getpid(), "creator_start": None},
+    )
+    ancient = SimpleNamespace(st_mtime=0.0)
+    young = SimpleNamespace(st_mtime=leftovers._now())
+
+    assert leftovers._env_dir_sweepable(ancient, entry, here) is True
+    assert leftovers._env_dir_sweepable(young, entry, here) is False
+
+    # The same with a recorded start time the host can no longer read.
+    confirmed = dict(entry[1], creator_start="100")
+    monkeypatch.setattr(leftovers, "_process_start", lambda pid: None)
+
+    assert leftovers._env_dir_sweepable(ancient, (entry[0], confirmed), here) is True
+    assert leftovers._env_dir_sweepable(young, (entry[0], confirmed), here) is False
 
 
 # ---------------------------------------------------------------------------
