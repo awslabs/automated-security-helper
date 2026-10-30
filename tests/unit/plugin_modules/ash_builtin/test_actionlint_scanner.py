@@ -2529,6 +2529,15 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         # reads a value on the line after its key, and one behind a tag.
         ("steps:\n  - uses:\n      ./m\n  bad: [\n", {"./m"}),
         ("steps:\n  - uses: !!str ./t\n  bad: [\n", {"./t"}),
+        # With the walk gone, two keys on one flow line are both read: the plain
+        # value is cut at the separator, so the scan goes on to the next key.
+        ('steps: [{uses: ./c}, {"uses": "./d"}]\nbad: [\n', {"./c", "./d"}),
+        # A next-line value under a flow opener on the line ABOVE is judged by its
+        # own line, so the block-style reading (to the end of the line) applies.
+        (
+            "x: [1]\nsteps:\n  - uses:\n      ./my dir/act\n  bad: [\n",
+            {"./my", "./my dir/act"},
+        ),
     ],
     ids=[
         "block",
@@ -2556,6 +2565,8 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "single-quoted-multi-line",
         "next-line-value-without-the-walk",
         "tagged-value-without-the-walk",
+        "flow-two-keys-without-the-walk",
+        "next-line-value-after-a-flow-line",
     ],
 )
 @pytest.mark.unit
