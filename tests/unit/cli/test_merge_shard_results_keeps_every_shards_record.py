@@ -148,6 +148,10 @@ class TestAShardWithoutASelectionRecordIntendedWhatItOwned:
 
 
 class TestTheMergedReportSharesNothingWithTheShards:
+    """Each test first checks that the fixture holds what the loops read, so an
+    empty table cannot make a loop assert nothing, and the editing test counts
+    the edits it makes."""
+
     def test_tool_components_and_rules_are_copies(self):
         shards = build_shards(3)
 
@@ -164,7 +168,10 @@ class TestTheMergedReportSharesNothingWithTheShards:
             for component in model.sarif.runs[0].tool.extensions
             for rule in component.rules or []
         }
-        for component in merged.sarif.runs[0].tool.extensions:
+        assert shard_components and shard_rules, "the fixture holds no components"
+        merged_components = merged.sarif.runs[0].tool.extensions
+        assert merged_components, "the merge kept no components"
+        for component in merged_components:
             assert id(component) not in shard_components
             for rule in component.rules or []:
                 assert id(rule) not in shard_rules
@@ -179,11 +186,14 @@ class TestTheMergedReportSharesNothingWithTheShards:
             for model in shards
             for report in model.additional_reports.values()
         }
+        assert shard_reports, "the fixture holds no additional reports"
+        assert merged.additional_reports, "the merge kept no additional reports"
         for report in merged.additional_reports.values():
             assert id(report) not in shard_reports
         shard_rows = {
             id(row) for model in shards for row in model.scanner_results.values()
         }
+        assert shard_rows and merged.scanner_results
         for row in merged.scanner_results.values():
             assert id(row) not in shard_rows
 
@@ -192,13 +202,26 @@ class TestTheMergedReportSharesNothingWithTheShards:
         before = [model.model_dump_json() for model in shards]
 
         merged = merge_shard_results(as_loaded(shards))
+        edits = 0
         for component in merged.sarif.runs[0].tool.extensions:
             component.name = "renamed"
+            edits += 1
             for rule in component.rules or []:
                 rule.id = "renamed"
-        for report in merged.additional_reports.values():
+                edits += 1
+        for name, report in merged.additional_reports.items():
+            # The values are models or mappings by shape; edit each as it is,
+            # so a value of the other shape is not left untouched in silence.
             if isinstance(report, dict):
                 report.clear()
+            else:
+                merged.additional_reports[name] = None
+            edits += 1
+        for row in merged.scanner_results.values():
+            row.status = ScannerStatus.ERROR
+            row.excluded = True
+            edits += 1
+        assert edits >= 10, edits
 
         assert [model.model_dump_json() for model in shards] == before
 
@@ -252,14 +275,37 @@ class TestTimingIsOrderedByInstant:
             _parse_instant("not a time")
 
     def test_text_that_does_not_parse_is_ordered_as_text(self):
-        """The fallback, so a hand-written stamp cannot crash the merge."""
+        """The fallback, so a hand-written stamp cannot crash the merge. The
+        unparseable value sorts FIRST as text, so this reads the text order
+        apart from "the parseable value wins" and from "the unparseable one is
+        put last", which the earlier value ("not a time") could not tell apart."""
         shards = build_shards(2)
-        shards[0].metadata.summary_stats.start = "not a time"
+        shards[0].metadata.summary_stats.start = "2026-08-28T09:00:00"
+        shards[1].metadata.summary_stats.start = "1999 bogus"
+        shards[0].metadata.summary_stats.end = "2026-08-28T09:30:00"
+        shards[1].metadata.summary_stats.end = "1999 bogus"
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.metadata.summary_stats.start == "1999 bogus"
+        assert merged.metadata.summary_stats.end == "2026-08-28T09:30:00"
+
+    def test_a_naive_and_an_aware_stamp_fall_back_to_the_text_order(self):
+        """Shards written by different versions can mix a naive stamp with an
+        aware one; comparing the two as datetimes raises TypeError, so the key
+        falls back to the text order instead of crashing the merge. As text the
+        aware spelling sorts after the naive one, so the naive start and the
+        aware end are the answers here."""
+        shards = build_shards(2)
+        shards[0].metadata.summary_stats.start = "2026-08-28T10:00:00+02:00"
         shards[1].metadata.summary_stats.start = "2026-08-28T09:00:00"
+        shards[0].metadata.summary_stats.end = "2026-08-28T10:30:00+02:00"
+        shards[1].metadata.summary_stats.end = "2026-08-28T09:30:00"
 
         merged = merge_shard_results(as_loaded(shards))
 
         assert merged.metadata.summary_stats.start == "2026-08-28T09:00:00"
+        assert merged.metadata.summary_stats.end == "2026-08-28T10:30:00+02:00"
 
 
 class TestConverterRowsAcrossThreeShards:
@@ -408,6 +454,47 @@ class TestConverterRowsAcrossThreeShards:
 
 
 class TestAScannerRowNoShardOwnsIsKept:
+    def test_an_unowned_error_row_survives_the_merge(self):
+        """The public path: ``merge_shard_results`` builds the owners map itself,
+        so a change to how it normalizes names or skips rows is measured here
+        and not only through the private helper the tests below drive."""
+        shards = build_shards(2)
+        shards[1].scanner_results["broken.plugin.module"] = ScannerStatusInfo(
+            status=ScannerStatus.ERROR,
+            excluded=False,
+            dependencies_satisfied=True,
+            missing_reason="the module failed to import",
+        )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        row = merged.scanner_results["broken.plugin.module"]
+        assert row.status == ScannerStatus.ERROR
+        assert row.missing_reason == "the module failed to import"
+        assert row is not shards[1].scanner_results["broken.plugin.module"]
+
+    def test_the_same_import_failure_on_every_shard_is_kept_once(self):
+        """The realistic shape: a plugin module that fails to import fails on
+        every shard, each recording the same ERROR row; the merged report keeps
+        one row and says why."""
+        shards = build_shards(3)
+        for shard in shards:
+            shard.scanner_results["broken.plugin.module"] = ScannerStatusInfo(
+                status=ScannerStatus.ERROR,
+                excluded=False,
+                dependencies_satisfied=True,
+                missing_reason="the module failed to import",
+            )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        row = merged.scanner_results["broken.plugin.module"]
+        assert row.status == ScannerStatus.ERROR
+        assert row.missing_reason == "the module failed to import"
+        # The union check exempts the row from its refusal, and the merged
+        # report still lists every owned scanner beside it.
+        assert set(SCANNERS) <= set(merged.scanner_results)
+
     def test_an_unowned_error_row_survives_adoption(self):
         shards = build_shards(2)
         shards[1].scanner_results["broken.plugin.module"] = ScannerStatusInfo(

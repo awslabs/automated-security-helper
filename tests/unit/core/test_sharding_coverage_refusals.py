@@ -21,9 +21,12 @@ left unrun; ``tests/unit/cli/test_merge.py`` pins that disclosure.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from automated_security_helper.core.sharding import (
+    MISSING_SHARD_INDICES_SHOWN,
     ShardAssignment,
     ShardCoverageError,
     verify_shard_coverage,
@@ -38,16 +41,59 @@ def _assignment(index: int, count: int, owned, **extra) -> ShardAssignment:
     )
 
 
+def _coverage_outcome_within(seconds: float, assignments):
+    """What ``verify_shard_coverage`` raised, or None for a return, within
+    *seconds*; a daemon thread, so a call that never returns fails the test
+    instead of hanging the run (the thread is left behind in that case)."""
+    outcome: list = []
+
+    def run() -> None:
+        try:
+            verify_shard_coverage(assignments)
+            outcome.append(None)
+        except BaseException as exc:  # noqa: BLE001 - the outcome under test
+            outcome.append(exc)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    assert outcome, f"verify_shard_coverage did not return within {seconds} s"
+    return outcome[0]
+
+
 class TestMissingIndicesAreCountedNotListed:
-    def test_a_large_declared_count_is_refused_with_a_bounded_message(self):
-        count = 1_000_000
-        with pytest.raises(ShardCoverageError) as excinfo:
-            verify_shard_coverage([_assignment(0, count, ["bandit"])])
-        message = str(excinfo.value)
+    def test_a_hostile_declared_count_is_refused_at_once(self):
+        """The memory claim: ``set(range(10**15))`` would exhaust memory, and a
+        refusal that listed every index would run to petabytes; a count of a
+        million, the earlier value, is tens of megabytes and milliseconds, so an
+        implementation that still built the set passed. The bound turns a
+        regression into a failure instead of a hung run."""
+        count = 10**15
+        outcome = _coverage_outcome_within(30.0, [_assignment(0, count, ["bandit"])])
+        assert isinstance(outcome, ShardCoverageError), outcome
+        message = str(outcome)
         assert "Missing shard results" in message
         assert f"{count - 1} of {count}" in message
         assert " more" in message
         assert len(message) < 2000, len(message)
+
+    def test_the_listing_names_every_index_up_to_the_cap(self):
+        count = MISSING_SHARD_INDICES_SHOWN + 1
+        with pytest.raises(ShardCoverageError) as excinfo:
+            verify_shard_coverage([_assignment(count - 1, count, ["bandit"])])
+        message = str(excinfo.value)
+        listed = ", ".join(str(i) for i in range(MISSING_SHARD_INDICES_SHOWN))
+        assert f"({listed})" in message, message
+        assert " more" not in message
+
+    def test_one_past_the_cap_is_counted_not_listed(self):
+        count = MISSING_SHARD_INDICES_SHOWN + 2
+        with pytest.raises(ShardCoverageError) as excinfo:
+            verify_shard_coverage([_assignment(count - 1, count, ["bandit"])])
+        message = str(excinfo.value)
+        listed = ", ".join(str(i) for i in range(MISSING_SHARD_INDICES_SHOWN))
+        assert f"({listed} and 1 more)" in message, message
+        assert f"{count - 1} of {count}" in message
 
     def test_a_short_gap_names_every_missing_index(self):
         with pytest.raises(ShardCoverageError) as excinfo:
