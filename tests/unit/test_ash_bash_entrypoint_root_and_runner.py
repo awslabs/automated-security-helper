@@ -5,8 +5,8 @@
 
 The repo root is the script file's directory, a symlinked ./ash followed; --help and
 --version exit with the host CLI's status; -o after a subcommand is the subcommand's;
---offline reaches the scan; a refused run leaves no output directory behind; a
-non-numeric container UID is shown, not written raw; a runner found on PATH under a
+--offline reaches the scan; a run refused after the output directory is made leaves
+it in place, as it always did; a non-numeric container UID is shown, not written raw; a runner found on PATH under a
 directory with a space runs; a runner given with arguments is still recognized by its
 first word; --debug traces the build with its values shown; a --config inside one
 quoted argument is this script's --config; the extends check reads TOML dotted and
@@ -302,9 +302,14 @@ def test_offline_reaches_the_scan_inside_the_container(runner, source, tmp_path)
     assert "--offline" in _after_image(run), run
 
 
-def test_a_refused_run_leaves_no_output_directory_behind(runner, source, tmp_path):
-    """The output directory was made before the container UID check, so a refused run
-    left a new .ash/ash_output behind."""
+def test_a_run_refused_after_the_output_dir_is_made_leaves_it(runner, source, tmp_path):
+    """The output directory is made right after its path checks, before the container
+    UID check and the runtime lookup, so a run refused later leaves the new
+    .ash/ash_output in place: the order every release had, which
+    tests/unit/cli/test_directory_refusals_agree.py pins (a missing --output-dir is
+    made before the run stops at the runtime refusal). Making it only just before the
+    build or the run left no directory behind here, and left the output-dir usage
+    refusals behind the runtime one there."""
     result, calls = _run(
         runner,
         ["--no-build", "--source-dir", str(source), "--container-uid", "abc"],
@@ -313,7 +318,7 @@ def test_a_refused_run_leaves_no_output_directory_behind(runner, source, tmp_pat
 
     assert result.returncode == 3, result.stdout + result.stderr
     assert "must be a numeric value" in result.stderr, result.stderr
-    assert not (source / ".ash").exists(), list(source.iterdir())
+    assert (source / ".ash" / "ash_output").is_dir(), list(source.iterdir())
     assert calls == []
 
 
