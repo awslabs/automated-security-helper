@@ -594,15 +594,29 @@ class UVToolMixin:
         never sent again. A later call resolves it; the runner memoizes a
         completed probe's answer, so a tool that answered nothing costs a memo
         read, not another process.
+
+        A None answer never overwrites ``tool_version``. The scan can select
+        another route before this is called again (a verified copy on PATH, a
+        direct binary) and set ``tool_version`` from it with ``use_uv_tool``
+        cleared; the uv probe then answers None, and assigning that answer
+        erased the version the route had read, in the SARIF step that reads
+        it. A route that left uv also drops the owed probe without asking it.
         """
         deferred = self._deferred_tool_version_probe
         if deferred is None:
             return
+        if not self.use_uv_tool:
+            # Another route was selected and owns tool_version now; the uv
+            # probe is no longer owed, and asking it would answer None.
+            self._deferred_tool_version_probe = None
+            return
         tool_name, package_name = deferred
         version = self._get_uv_tool_version(tool_name, package_name)
+        if version is None:
+            # Still owed; whatever tool_version holds is kept as it is.
+            return
         self.tool_version = version
-        if version is not None:
-            self._deferred_tool_version_probe = None
+        self._deferred_tool_version_probe = None
 
     # ------------------------------------------------------------------
     # Execution

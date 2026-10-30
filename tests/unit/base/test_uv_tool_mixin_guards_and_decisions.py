@@ -159,6 +159,38 @@ class TestTheGuardedReadRefusesWhatIsNotAValueSet:
         assert guarded_values_read(plugin).values == ("a", "b")
 
 
+class TestTheDeferredProbeNeverOverwritesAKnownVersion:
+    """``resolve_deferred_tool_version`` records an answer, never a None."""
+
+    def test_a_probe_answering_none_keeps_the_version_another_route_set(self):
+        plugin = FakePlugin(tool_version="1.7.0")
+        plugin._deferred_tool_version_probe = ("bandit", "bandit>=1.7")
+        with patch.object(FakePlugin, "_get_uv_tool_version", return_value=None):
+            plugin.resolve_deferred_tool_version()
+        assert plugin.tool_version == "1.7.0"
+        # Still owed: a later call may read it.
+        assert plugin._deferred_tool_version_probe == ("bandit", "bandit>=1.7")
+
+    def test_a_route_that_left_uv_drops_the_probe_without_asking(self):
+        plugin = FakePlugin(tool_version="1.7.0", use_uv_tool=False)
+        plugin._deferred_tool_version_probe = ("bandit", "bandit>=1.7")
+        with patch.object(
+            FakePlugin, "_get_uv_tool_version", side_effect=AssertionError("asked")
+        ):
+            plugin.resolve_deferred_tool_version()
+        assert plugin.tool_version == "1.7.0"
+        assert plugin._deferred_tool_version_probe is None
+
+    def test_an_answer_is_recorded_and_retires_the_probe(self):
+        """The control."""
+        plugin = FakePlugin()
+        plugin._deferred_tool_version_probe = ("bandit", "bandit>=1.7")
+        with patch.object(FakePlugin, "_get_uv_tool_version", return_value="1.8.0"):
+            plugin.resolve_deferred_tool_version()
+        assert plugin.tool_version == "1.8.0"
+        assert plugin._deferred_tool_version_probe is None
+
+
 class TestEveryGateNamesTheProbesFailure:
     FAILURE = "the probe timed out after 10 seconds"
 
