@@ -18,6 +18,16 @@ returned. A cancel is not an Exception and still writes nothing.
 The engine here is a stub shaped like the real one: it holds ``_asharp_model``
 from construction (the same object the phases mutate) and its ``execute_phases``
 mutates that model the way the phases do before it raises.
+
+The model read is the engine's ``_results`` first, ``_asharp_model`` second. The
+real engine hands ``_results`` from phase to phase and the scan phase may return
+a new object; ``_asharp_model`` is synced to it only in the changed-files
+narrowing, at the end of the final suppression pass and after the report phase.
+A failure between the scan phase's end and that sync (a suppression or metrics
+step at the start of the report arm) left ``_asharp_model`` as the model the
+engine started with, which carries no completion checkpoint, so the scan's
+results were not written although the scan phase had run to its end. A second
+stub below replaces ``_results`` the way such a scan phase does.
 """
 
 from __future__ import annotations
@@ -68,6 +78,32 @@ class _EngineStub:
 
     def execute_phases(self, phases):
         self._before_raising(self._asharp_model)
+        raise self._raised
+
+
+class _ReplacingEngineStub:
+    """Hands a NEW model along as ``_results``, as a scan phase that returns one.
+
+    ``_asharp_model`` stays the model the engine was constructed with (no
+    completion checkpoint), as the real engine's does until its later sync;
+    ``_results`` is the model the scan phase finished, and the failure lands
+    before the sync.
+    """
+
+    def __init__(self, raised, results=...):
+        self._asharp_model = AshAggregatedResults()
+        self._results = self._asharp_model
+        self._raised = raised
+        self._replacement = results
+
+    def execute_phases(self, phases):
+        if self._replacement is ...:
+            finished = AshAggregatedResults()
+            finished.metadata.project_name = "finished-by-the-scan-phase"
+            _scan_phase_ran_to_its_end(finished)
+            self._results = finished
+        else:
+            self._results = self._replacement
         raise self._raised
 
 
@@ -136,6 +172,50 @@ def test_a_scan_phase_that_raised_midway_writes_no_results_file(tmp_path, monkey
 
     # Red at the previous tip: the partial model was written.
     assert not (orchestrator.output_dir / RESULTS_FILE).exists()
+
+
+def test_the_model_the_scan_phase_handed_along_is_the_one_written(
+    tmp_path, monkeypatch
+):
+    """A failure before the engine syncs ``_asharp_model`` to ``_results``."""
+    orchestrator = _orchestrator(
+        tmp_path, monkeypatch, _nothing_ran, RuntimeError("suppressions raised")
+    )
+    orchestrator.execution_engine = _ReplacingEngineStub(
+        RuntimeError("suppressions raised")
+    )
+
+    with pytest.raises(ASHValidationError, match="suppressions raised"):
+        orchestrator._execute_scan(phases=["scan", "report"])
+
+    # Red at the previous tip: only _asharp_model was read, it carried no
+    # completion checkpoint, and nothing was written.
+    written = orchestrator.output_dir / RESULTS_FILE
+    assert written.is_file()
+    # The file holds the model the scan phase finished, not the engine's
+    # construction-time one.
+    text = written.read_text(encoding="utf-8")
+    assert "finished-by-the-scan-phase" in text
+    assert SCAN_PHASE_COMPLETION_CHECKPOINT in text
+
+
+def test_an_engine_whose_results_are_not_a_model_falls_back_to_its_held_model(
+    tmp_path, monkeypatch
+):
+    """The control for the fallback: ``_results`` that is not a model (None, a
+    stub's attribute) is passed over for ``_asharp_model``, as every stub above
+    is read."""
+    orchestrator = _orchestrator(
+        tmp_path, monkeypatch, _nothing_ran, RuntimeError("reporter raised")
+    )
+    engine = _ReplacingEngineStub(RuntimeError("reporter raised"), results=None)
+    _scan_phase_ran_to_its_end(engine._asharp_model)
+    orchestrator.execution_engine = engine
+
+    with pytest.raises(ASHValidationError, match="reporter raised"):
+        orchestrator._execute_scan(phases=["scan", "report"])
+
+    assert (orchestrator.output_dir / RESULTS_FILE).is_file()
 
 
 def test_a_cancel_still_writes_no_results_file(tmp_path, monkeypatch):

@@ -65,8 +65,15 @@ class TestDefaultsAreComputedPerInstance:
         # process's directory, stood in for the source-derived one.
         assert orchestrator.output_dir == source / ".ash" / "ash_output"
 
-    def test_a_bare_orchestrator_scans_the_working_directory(self):
+    def test_a_bare_orchestrator_scans_the_working_directory(
+        self, tmp_path, monkeypatch
+    ):
+        # Under a directory of this test's own: the result is then the same
+        # wherever pytest is run from, and whatever the constructor derives
+        # from the working directory lands here, never in the checkout.
+        monkeypatch.chdir(tmp_path)
         orchestrator = ASHScanOrchestrator()
+        assert Path.cwd().resolve() == tmp_path.resolve()
         assert orchestrator.source_dir == Path.cwd()
         assert orchestrator.output_dir == Path.cwd() / ".ash" / "ash_output"
 
@@ -178,6 +185,10 @@ class _CapturingEngine:
 
 def _build_with_stub_engine(monkeypatch, **kwargs) -> ASHScanOrchestrator:
     monkeypatch.setattr(orchestrator_module, "ScanExecutionEngine", _CapturingEngine)
+    # Class-level state shared by every test of this module: emptied here, so a
+    # build that stopped constructing the engine would fail its own test on an
+    # empty record instead of passing on the previous test's kwargs.
+    _CapturingEngine.captured = {}
     orchestrator = ASHScanOrchestrator(**kwargs)
     config = AshConfig()
     orchestrator.config = config

@@ -1292,7 +1292,23 @@ class ASHScanOrchestrator(BaseModel):
         if not self._writes_results_file(phases):
             return
         engine = self.execution_engine
-        results = getattr(engine, "_asharp_model", None) if engine else None
+        # The model the phases hand along is the engine's ``_results``: the
+        # scan phase may return a new object rather than the one it was given
+        # (scan_phase.py allows either), and the engine syncs ``_asharp_model``
+        # to ``_results`` only at the end of its final suppression pass, in
+        # the changed-files narrowing and after the report phase. A failure
+        # between the scan phase's end and that sync (the suppression and
+        # metrics steps at the start of the report arm, or in the scan arm
+        # when there is no report phase) leaves ``_asharp_model`` holding the
+        # model the engine started with, which carries no completion
+        # checkpoint, so nothing was written for a scan phase that did run to
+        # its end. ``_asharp_model`` is the fallback: an engine that holds no
+        # ``_results`` model (the stubs the tests stand in) is read as before.
+        results = None
+        if engine is not None:
+            results = getattr(engine, "_results", None)
+            if not isinstance(results, AshAggregatedResults):
+                results = getattr(engine, "_asharp_model", None)
         if not isinstance(results, AshAggregatedResults):
             return
         if not scan_phase_completed(results):
