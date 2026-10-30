@@ -528,9 +528,11 @@ def _finalize_staged(
 ) -> str:
     """Put ``staging`` at ``target``, verify what landed, and return its digest.
 
-    ``mode`` is the mode the landed file gets on POSIX: ``0o755`` for an
-    executable, which is what the archive members and the pinned binaries are;
-    ``download_file`` passes ``0o644`` for the data files it lands.
+    ``mode`` is the mode the landed file gets on POSIX: ``0o755``, the default,
+    for an executable, which is what the archive members, the pinned binaries
+    and every download whose caller names no mode are; the callers that fetch
+    data (a rules bundle, a release archive) pass ``0o644`` through
+    ``download_file``.
 
     Two checks, covering two different intervals, and neither makes the other
     redundant.

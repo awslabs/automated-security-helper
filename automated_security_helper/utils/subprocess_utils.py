@@ -3165,14 +3165,20 @@ def _stop(
         # not left SIGTERMed only while the interrupt goes on. A kill the kernel
         # refuses (EPERM on a child that switched user) must not replace the
         # interrupt being raised with an OSError the caller reads as a failure;
-        # it is logged, so the refusal is not silent.
+        # it is what _stop_child's refusal path does for the ordinary stop: the
+        # spawn's record is marked (the response is graded by the refused stop,
+        # not a later poll) and the refusal is logged at WARNING.
         try:
             if process.poll() is None:
                 process.kill()
         except OSError as error:
-            ASH_LOGGER.debug(
-                f"Could not kill pid {process.pid} after an interrupt (errno "
-                f"{error.errno}: {error}); the interrupt is raised as it is",
+            _note_stop_refused(process)
+            ASH_LOGGER.warning(
+                _logged_without(
+                    f"Could not stop {_argv_of(process)[0]} (pid {process.pid}) "
+                    f"after an interrupt: {error}",
+                    _SPAWN_VALUES.get(),
+                ),
                 extra=NO_MARKUP,
             )
         raise
@@ -3353,16 +3359,20 @@ def _stop_tree(
                 # the tool is not left SIGTERMed only while the interrupt goes
                 # on. The group id is still the child's: the leader is not
                 # reaped before the wait returns. A refused kill (EPERM on a
-                # member the server may not signal) is logged, not raised: the
-                # interrupt is what the caller handles, not an OSError in its
-                # place; the refusal is read by the survivor check elsewhere.
+                # member the server may not signal) is marked and logged, not
+                # raised: the interrupt is what the caller handles, not an
+                # OSError in its place, and the record says the stop was
+                # refused, as _stop_child says for the ordinary stop.
                 try:
                     _signal_group(pgid, signal.SIGKILL)
                 except OSError as error:
-                    ASH_LOGGER.debug(
-                        f"Could not kill process group {pgid} after an interrupt "
-                        f"(errno {error.errno}: {error}); the interrupt is raised "
-                        "as it is",
+                    _note_stop_refused(process)
+                    ASH_LOGGER.warning(
+                        _logged_without(
+                            f"Could not stop {_argv_of(process)[0]} (process group "
+                            f"{pgid}) after an interrupt: {error}",
+                            _SPAWN_VALUES.get(),
+                        ),
                         extra=NO_MARKUP,
                     )
                 raise
@@ -5546,12 +5556,24 @@ def run_command_stream_output(
         # from this thread.
         stop_once = threading.Lock()
         prompt = getattr(cancel_event, "prompt", None)
+        watcher: Optional[threading.Thread] = None
 
-        def stop_on_cancel() -> None:
+        def stop_on_cancel() -> bool:
+            """Stop the child once; False when the other reader is stopping it."""
             if not stop_once.acquire(blocking=False):
-                return
+                return False
             stop = _stop_tree if _leads_its_own_group(process) else _stop
             _stop_child(args, process, stop, _stop_grace(cancel_event), prompt)
+            return True
+
+        def wait_for_the_watchers_stop() -> None:
+            """A stop the watcher began runs to its end before this thread goes
+            on: its SIGTERM grace, then its SIGKILL. Raising the cancel while the
+            watcher still waits out the grace put the finally's kill in front of
+            that grace (a tool that printed one more line after the SIGTERM lost
+            the grace it was given). Bounded by the grace and two reaps."""
+            if watcher is not None and watcher.is_alive():
+                watcher.join(timeout=_stop_grace(cancel_event) + 2 * _REAP_SECONDS)
 
         watcher_done = threading.Event()
 
@@ -5561,18 +5583,20 @@ def run_command_stream_output(
                     stop_on_cancel()
                     return
 
-        watcher: Optional[threading.Thread] = None
-        if cancel_event is not None:
-            watcher = ash_thread(
-                watch_for_the_cancel, name="ash-stream-cancel-watch", daemon=True
-            )
-            watcher.start()
         try:
+            # Started inside the try: a thread that cannot start raises, and the
+            # finally below then still kills and reaps the child.
+            if cancel_event is not None:
+                watcher = ash_thread(
+                    watch_for_the_cancel, name="ash-stream-cancel-watch", daemon=True
+                )
+                watcher.start()
             # Stream output, shown: it is the tool's, and quotes what it scanned.
             for line in process.stdout:
                 print(shown_not_obeyed(line.rstrip()))
                 if cancel_event is not None and cancel_event.is_set():
-                    stop_on_cancel()
+                    if not stop_on_cancel():
+                        wait_for_the_watchers_stop()
                     raise_if_cancelled()
 
             # Wait for process to complete
@@ -5590,6 +5614,10 @@ def run_command_stream_output(
             _log_unrecorded_run(cmd_str, e)
         finally:
             watcher_done.set()
+            # A stop the watcher is still waiting out keeps its grace: the kill
+            # below comes after it, not in front of it.
+            if stop_once.locked():
+                wait_for_the_watchers_stop()
             try:
                 if process.poll() is None:
                     process.kill()
