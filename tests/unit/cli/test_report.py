@@ -3,6 +3,7 @@
 
 import json
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import typer
@@ -28,6 +29,23 @@ def _results_file_only_in_the_directory_itself(mock_output_dir: MagicMock) -> No
         return candidate
 
     mock_output_dir.joinpath.side_effect = joinpath
+
+
+def _declares_name(mock_plugin_class: MagicMock, name: str) -> None:
+    """Give the mock reporter class the name the command looks ``--format`` up by.
+
+    The command matches the format against each reporter class's declared name
+    (base/plugin_config.declared_plugin_name: the ``name`` default of the class
+    its ``config`` field is typed with) without building the class, and falls
+    back to the lowercased class name only when none is declared. A bare
+    MagicMock declares none, so it answered to ``mockreporterplugin`` and the
+    command refused the requested format as unknown before it read anything.
+    """
+    config_class = MagicMock()
+    config_class.model_fields = {"name": SimpleNamespace(default=name)}
+    mock_plugin_class.model_fields = {
+        "config": SimpleNamespace(annotation=config_class)
+    }
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
@@ -57,6 +75,7 @@ def test_report_command_basic(
     mock_plugin_class = MagicMock()
     mock_plugin_class.__name__ = "MockReporterPlugin"  # Add __name__ attribute
     mock_plugin_class.return_value = mock_reporter_plugin
+    _declares_name(mock_plugin_class, mock_reporter_plugin.config.name)
     mock_plugin_manager.plugin_modules.return_value = [mock_plugin_class]
 
     # Mock open to return a file with JSON content
@@ -127,6 +146,7 @@ def test_a_reporter_that_returns_none_exits_non_zero(
     mock_plugin_class = MagicMock()
     mock_plugin_class.__name__ = "MockReporterPlugin"
     mock_plugin_class.return_value = mock_reporter_plugin
+    _declares_name(mock_plugin_class, mock_reporter_plugin.config.name)
     mock_plugin_manager.plugin_modules.return_value = [mock_plugin_class]
 
     mock_file = MagicMock()
@@ -229,6 +249,7 @@ def test_report_command_with_verbose(
     mock_plugin_class = MagicMock()
     mock_plugin_class.__name__ = "MockReporterPlugin"  # Add __name__ attribute
     mock_plugin_class.return_value = mock_reporter_plugin
+    _declares_name(mock_plugin_class, mock_reporter_plugin.config.name)
     mock_plugin_manager.plugin_modules.return_value = [mock_plugin_class]
 
     # Mock open to return a file with JSON content
