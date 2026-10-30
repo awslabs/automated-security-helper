@@ -111,8 +111,6 @@ DROP_WORKING_DIRECTORY = (
     "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]\n"
 )
 
-_FUTURE_IMPORT = "from __future__ import"
-
 
 def python_code_argv(source: str) -> List[str]:
     """ASH's interpreter running ``source`` with ``-c``, importing nothing from its cwd.

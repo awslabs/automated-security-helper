@@ -96,6 +96,7 @@ from automated_security_helper.core.cancellation import (
     discard_tool_pid,
     raise_if_cancelled,
     record_tool_group,
+    stop_grace_in_progress,
 )
 from automated_security_helper.core.constants import (
     ASH_BIN_PATH,
@@ -3102,18 +3103,24 @@ def _wait_out_grace(
     """
     deadline = time.monotonic() + grace
     shortened = prompt is None
-    while process.poll() is None or (pgid is not None and _group_survives(pgid)):
-        now = time.monotonic()
-        if not shortened and prompt is not None and prompt.is_set():
-            shortened = True
-            deadline = min(deadline, now + PROMPT_STOP_GRACE_SECONDS)
-        if now >= deadline:
-            return
-        step = min(_GRACE_POLL_SECONDS, deadline - now)
-        if shortened or prompt is None:
-            time.sleep(step)
-        else:
-            prompt.wait(step)
+    # Inside stop_grace_in_progress: a first Ctrl-C during this wait latches the
+    # registered scans' cancel and does not interrupt the wait, so the SIGKILL
+    # that follows the grace is still sent (a SIGTERM-ignoring tool would
+    # otherwise outlive the interrupted stop). The context's own docstring names
+    # this wait as the one it exists for; it had no caller until now.
+    with stop_grace_in_progress():
+        while process.poll() is None or (pgid is not None and _group_survives(pgid)):
+            now = time.monotonic()
+            if not shortened and prompt is not None and prompt.is_set():
+                shortened = True
+                deadline = min(deadline, now + PROMPT_STOP_GRACE_SECONDS)
+            if now >= deadline:
+                return
+            step = min(_GRACE_POLL_SECONDS, deadline - now)
+            if shortened or prompt is None:
+                time.sleep(step)
+            else:
+                prompt.wait(step)
 
 
 #: How long a cancellable spawn waits, once the child has been stopped or has
@@ -3157,10 +3164,17 @@ def _stop(
         # A Ctrl-C during the grace: the SIGKILL still follows, so the child is
         # not left SIGTERMed only while the interrupt goes on. A kill the kernel
         # refuses (EPERM on a child that switched user) must not replace the
-        # interrupt being raised with an OSError the caller reads as a failure.
-        with contextlib.suppress(OSError):
+        # interrupt being raised with an OSError the caller reads as a failure;
+        # it is logged, so the refusal is not silent.
+        try:
             if process.poll() is None:
                 process.kill()
+        except OSError as error:
+            ASH_LOGGER.debug(
+                f"Could not kill pid {process.pid} after an interrupt (errno "
+                f"{error.errno}: {error}); the interrupt is raised as it is",
+                extra=NO_MARKUP,
+            )
         raise
     if process.poll() is None:
         process.kill()
@@ -3339,11 +3353,18 @@ def _stop_tree(
                 # the tool is not left SIGTERMed only while the interrupt goes
                 # on. The group id is still the child's: the leader is not
                 # reaped before the wait returns. A refused kill (EPERM on a
-                # member the server may not signal) is swallowed here: the
+                # member the server may not signal) is logged, not raised: the
                 # interrupt is what the caller handles, not an OSError in its
                 # place; the refusal is read by the survivor check elsewhere.
-                with contextlib.suppress(OSError):
+                try:
                     _signal_group(pgid, signal.SIGKILL)
+                except OSError as error:
+                    ASH_LOGGER.debug(
+                        f"Could not kill process group {pgid} after an interrupt "
+                        f"(errno {error.errno}: {error}); the interrupt is raised "
+                        "as it is",
+                        extra=NO_MARKUP,
+                    )
                 raise
             if process.poll() is not None and not _group_survives(pgid):
                 # The wait reaps the leader and can end with the group
