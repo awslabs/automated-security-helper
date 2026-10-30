@@ -801,15 +801,16 @@ def _checkov_pattern(pattern: str) -> Optional[re.Pattern[str]]:
 
     ``re.compile`` refuses a malformed pattern with ``re.error``, a repetition
     count past its limit (``a{4294967296}``) with ``OverflowError``, and a
-    nesting deeper than the parser's recursion with ``RecursionError``. Only
-    the first was caught, so the other two escaped ``checkov_skips`` into the
+    nesting deeper than the parser's recursion with ``RecursionError``, and a
+    pattern whose compiled form does not fit in memory with ``MemoryError``.
+    Only the first was caught, so the others escaped ``checkov_skips`` into the
     suppression pass and failed it after the scan had run; every shape the
     compiler refuses is read as a substring, as checkov reads a pattern it
     cannot compile.
     """
     try:
         return re.compile(pattern.replace(".terraform", r"\.terraform"))
-    except (re.error, OverflowError, RecursionError):
+    except (re.error, OverflowError, RecursionError, MemoryError):
         return None
 
 
@@ -1437,9 +1438,13 @@ def _names_an_operator_file(
     mount blocks the resolution. So the value is resolved only when, read
     lexically (``..`` folded, no link followed), it lies under one of the
     ``inside`` directories: the scanned root and the operator documents'
-    directories, the places an operator file can be. A value elsewhere is
-    compared as text only, and when the text matches nothing it takes the
-    operator's own file by the caller's next branch, as any other client value.
+    directories, the places an operator file can be. The gate is lexical, so
+    a value under one of them that is itself a link the client placed is
+    resolved too; that is the case this branch exists for, a client link to
+    the operator's file, and the resolve stays inside the tree it may read.
+    A value elsewhere is compared as text only, and when the text matches
+    nothing it takes the operator's own file by the caller's next branch, as
+    any other client value.
     """
     if value in operator_entries:
         return value
