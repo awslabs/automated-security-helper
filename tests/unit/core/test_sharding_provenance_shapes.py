@@ -15,6 +15,10 @@ such shards would merge with that scanner's findings counted twice.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import pytest
 
 from automated_security_helper.core.sharding import (
@@ -28,6 +32,38 @@ from automated_security_helper.core.sharding import (
 pytestmark = pytest.mark.unit
 
 SCANNERS = ["semgrep", "bandit", "grype", "checkov"]
+
+
+class _Records(logging.Handler):
+    """Keeps every record the logger emits, as the sinks receive it."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@contextmanager
+def _recording() -> Iterator[_Records]:
+    """ASH's logger at WARNING with a recording handler on it, for the block.
+
+    The logger's own level is set for the duration: a merge that ran earlier in
+    the process may have left it higher, and then nothing would reach the
+    handler and an empty list would read as "nothing logged".
+    """
+    from automated_security_helper.core import sharding
+
+    records = _Records()
+    saved_level = sharding.ASH_LOGGER.level
+    sharding.ASH_LOGGER.addHandler(records)
+    sharding.ASH_LOGGER.setLevel(logging.WARNING)
+    try:
+        yield records
+    finally:
+        sharding.ASH_LOGGER.removeHandler(records)
+        sharding.ASH_LOGGER.setLevel(saved_level)
 
 
 class TestAnUnknownProvenanceFieldIsDropped:
@@ -70,6 +106,72 @@ class TestAnUnknownProvenanceFieldIsDropped:
         text = warning.call_args_list[0].args[0]
         assert "field_from_a_newer_ash" in text
         assert "shard 1" in text
+
+    def test_the_dropped_names_are_shown_once_at_the_sinks(self):
+        """A dropped key's text comes from a results file any shard wrote. It was
+        shown (ESC as the text ``\\x1b``) before the message was built, and the
+        console and ash.log sinks then showed the plain message again, so the
+        console read ``\\\\x1b``, two backslashes for one ESC, and a backslash
+        that reads as an escape four deep. The values are now put in raw and the
+        whole message is shown once, as a ShownText the sinks write as it is. Checked as
+        both sinks write the record (console_text, and ash.log's
+        TextFileFormatter)."""
+        from automated_security_helper.core import sharding
+        from automated_security_helper.utils.log import TextFileFormatter, console_text
+        from automated_security_helper.utils.terminal_text import ShownText
+
+        sharding._WARNED_PROVENANCE_KEYS.clear()
+        with _recording() as records:
+            ShardAssignment.model_validate(
+                {
+                    "shard_index": 1,
+                    "shard_count": 2,
+                    "assigned_scanners": ["bandit"],
+                    "k\x1b[31m": True,
+                    "##group[x": True,
+                    "C:\\x64": True,
+                }
+            )
+
+        [record] = [r for r in records.records if "does not know" in r.getMessage()]
+        assert isinstance(record.msg, ShownText), type(record.msg)
+        assert getattr(record, "markup", True) is False
+        for printed in (
+            console_text(record, record.getMessage()),
+            TextFileFormatter("%(message)s").format(record),
+        ):
+            # ESC as one escape; the runner command's first "#" as its escape; a
+            # backslash that reads as an escape doubled once.
+            assert "k\\x1b[31m" in printed, printed
+            assert "\\x23#group[x" in printed, printed
+            assert "C:\\\\x64" in printed, printed
+            assert "\\\\x1b" not in printed and "\\\\x23" not in printed, printed
+            assert "\\\\\\\\" not in printed, printed
+            assert "\x1b" not in printed and "\n" not in printed, repr(printed)
+
+    def test_a_shard_index_that_is_not_an_int_is_shown_once_too(self):
+        """The index is read from the same file as the keys and goes into the
+        message the same way; a text index carrying ESC is shown once."""
+        from pydantic import ValidationError
+
+        from automated_security_helper.core import sharding
+        from automated_security_helper.utils.log import console_text
+
+        sharding._WARNED_PROVENANCE_KEYS.clear()
+        with _recording() as records, pytest.raises(ValidationError):
+            ShardAssignment.model_validate(
+                {
+                    "shard_index": "one\x1b[0m",
+                    "shard_count": 2,
+                    "assigned_scanners": ["bandit"],
+                    "field_from_a_newer_ash": True,
+                }
+            )
+
+        [record] = [r for r in records.records if "does not know" in r.getMessage()]
+        printed = console_text(record, record.getMessage())
+        assert "shard one\\x1b[0m" in printed, printed
+        assert "\\\\x1b" not in printed and "\x1b" not in printed, repr(printed)
 
     def test_a_record_with_only_known_fields_logs_nothing(self):
         """The control for the warning."""

@@ -104,7 +104,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field, model_validator
 
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.undecodable_text import StrippedRecordModel
 
 from automated_security_helper.core.exceptions import (
@@ -115,6 +115,7 @@ from automated_security_helper.utils.terminal_text import (
     NAMED_HASH_COMMAND,
     controls_shown,
     hash_command_broken,
+    shown_on_one_line,
 )
 
 __all__ = [
@@ -230,17 +231,20 @@ class ShardAssignment(StrippedRecordModel):
                 if memo_key in _WARNED_PROVENANCE_KEYS:
                     return data
                 _WARNED_PROVENANCE_KEYS.add(memo_key)
-                where = (
-                    f"shard {shown_shard_text(str(shard))}"
-                    if shard is not None
-                    else "a shard"
-                )
-                names = ", ".join(shown_shard_text(name) for name in dropped)
+                # The values are put in raw and the whole message is shown once,
+                # by shown_on_one_line, which the log sink writes as it is. A value
+                # shown here and the message shown again at the sink doubled the
+                # backslash of every escape (``\\x1b`` for one ESC).
+                where = f"shard {shard}" if shard is not None else "a shard"
+                names = ", ".join(dropped)
                 ASH_LOGGER.warning(
-                    f"The provenance of {where} carries {len(dropped)} field(s) this "
-                    f"ASH does not know and ignores: {names}. The results file was "
-                    "written by another ASH version; the fields this version knows "
-                    "are read as usual."
+                    shown_on_one_line(
+                        f"The provenance of {where} carries {len(dropped)} field(s) "
+                        f"this ASH does not know and ignores: {names}. The results "
+                        "file was written by another ASH version; the fields this "
+                        "version knows are read as usual."
+                    ),
+                    extra=NO_MARKUP,
                 )
         return data
 
