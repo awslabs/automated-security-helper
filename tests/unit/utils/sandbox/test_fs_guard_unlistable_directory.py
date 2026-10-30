@@ -301,13 +301,14 @@ def test_the_os_walk_fallback_refuses_a_directory_it_cannot_list(
         fs_guard.sweep_writable([root])
 
 
-def test_the_os_walk_fallback_records_a_failed_removal_and_goes_on(
+def test_the_os_walk_fallback_records_a_failed_removal_sweeps_on_and_refuses(
     tmp_path, monkeypatch, caplog
 ):
-    """The descriptor walk records a removal that fails and sweeps on; the
-    os.walk fallback (the platform without fwalk) let the OSError abort the whole
-    sweep, so a link after the failed one survived. Measured here by taking fwalk
-    away and failing the first removal."""
+    """A removal that fails is a refusal: logged, the sweep continues to the next
+    entry (the os.walk fallback once let the OSError abort the whole sweep, so a
+    link after the failed one survived), and the sweep raises once at the end,
+    since the link it could not remove is still there for a reader to follow.
+    Measured by taking fwalk away and failing the first removal."""
     value = "SWEEPSECRET-4476"
     root = tmp_path / "results"
     root.mkdir()
@@ -324,14 +325,40 @@ def test_the_os_walk_fallback_records_a_failed_removal_and_goes_on(
     monkeypatch.setattr(os, "unlink", failing_unlink)
 
     with caplog.at_level(logging.WARNING, logger="ash"):
-        removed = fs_guard.sweep_writable([root], (value,))
+        with pytest.raises(PermissionError) as refused:
+            fs_guard.sweep_writable([root], (value,))
 
-    assert removed == 1
     assert not os.path.lexists(root / "zzz-link"), "the sweep must continue past it"
     assert os.path.lexists(root / f"aaa-{value}"), "the failed one is left as found"
     lines = _warnings(caplog, "Could not remove")
     assert lines, [record.getMessage() for record in caplog.records]
     assert not any("SWEEPSECRET-4476" in line for line in lines), lines
+    assert "SWEEPSECRET-4476" not in str(refused.value), str(refused.value)
+    summaries = _warnings(caplog, "Scanner sandbox: removed")
+    assert summaries and "removed 1 " in summaries[0], summaries
+
+
+def test_a_link_the_sweep_cannot_remove_is_refused_not_passed_over(tmp_path, caplog):
+    """A scanner can plant a link and take the write bit off its directory:
+    the listing and the lstat work, the unlink fails with EACCES, and the sweep
+    used to return normally with the link in place. It is a refusal."""
+    root = tmp_path / "results"
+    locked = root / "d"
+    locked.mkdir(parents=True)
+    (locked / "out.sarif").symlink_to(tmp_path)
+    locked.chmod(0o555)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.sweep_writable([root], ("SWEEPSECRET-4480",))
+    finally:
+        locked.chmod(0o755)
+
+    assert "out.sarif" in str(refused.value), str(refused.value)
+    assert _warnings(caplog, "Could not remove"), [
+        record.getMessage() for record in caplog.records
+    ]
+    assert os.path.lexists(locked / "out.sarif"), "the link is left as found"
 
 
 def test_a_directory_removed_during_the_walk_is_not_a_refusal(tmp_path, monkeypatch):

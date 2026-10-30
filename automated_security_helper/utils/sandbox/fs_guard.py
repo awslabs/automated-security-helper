@@ -537,7 +537,8 @@ def _sweep_tree(
 
     What the walk cannot do is refused, never skipped: a directory it cannot open
     or list (a mode the scanner set, a descriptor limit), an entry it cannot
-    examine (a directory readable but not searchable), a tree nested past
+    examine (a directory readable but not searchable), an entry it cannot remove
+    (a directory the scanner made read-only around its link), a tree nested past
     _SWEEP_DEPTH_LIMIT. Skipped, every link below the spot would survive for a
     reader that opens paths by name to follow. Each refusal is logged as a removal
     failure is (``_sweep_warning``: redacted with the sweep's values, value-free
@@ -581,15 +582,18 @@ def _sweep_tree(
         collected.append(OSError(_errno_of(error), shown))
 
     def remove(name: str, dir_fd: Optional[int], path: Union[str, Path]) -> int:
-        # A removal that fails is recorded and the sweep goes on to the next
-        # entry; the entry stays for the operator, named in the warning.
+        # A removal that fails is a refusal like a directory that cannot be
+        # listed: the link stays where a reader that opens paths by name would
+        # follow it (a scanner can plant one and take the directory's write bit
+        # away), so it is logged, kept with the other refusals, and the sweep
+        # goes on to the next entry so nothing else is shielded by it.
         try:
             if dir_fd is None:
                 os.unlink(path)
             else:
                 os.unlink(name, dir_fd=dir_fd)
         except OSError as e:
-            _sweep_warning(
+            shown = _sweep_warning(
                 f"Could not remove {name} under {root}: {e}",
                 "Could not remove an entry a scanner left in its results "
                 "directory; it is not named because the plugin's redaction "
@@ -597,6 +601,7 @@ def _sweep_tree(
                 values,
                 values_unread,
             )
+            collected.append(OSError(_errno_of(e), shown))
             return 0
         return 1
 
