@@ -232,6 +232,15 @@ def build_ash_image_cli_command(
                 color=color,
                 mode=RunMode.container,
             )
+            # The handler only sets the event; the phases raise on their next
+            # poll. A SIGTERM that lands where nothing polls (between the image
+            # build and the run, in a build step, after a --no-run build) lets
+            # run_ash_scan return as if nothing happened, and the command then
+            # exited 0 after a stop. The exit says what the handler saw.
+            if shutdown_requested():
+                raise ScanCancelled(
+                    "SIGTERM landed where nothing in the run polled the event"
+                )
     except ScanCancelled as error:
         if not shutdown_requested():
             # Not this frame's stop: nothing on the CLI sets the event but the

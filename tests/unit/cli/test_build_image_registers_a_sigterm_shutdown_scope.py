@@ -115,6 +115,27 @@ def test_a_stopped_build_only_run_owes_no_verdict(shutdown_state, monkeypatch):
     assert "did not complete" not in result.output
 
 
+def test_a_sigterm_nothing_polled_still_ends_the_command_terminated(
+    shutdown_state, monkeypatch
+):
+    """The handler sets the event and the phases raise on their next poll. A
+    SIGTERM that lands where nothing polls (between the build and the run, or
+    after a --no-run build) let the scan return as if nothing happened, and the
+    command exited 0 after a stop."""
+
+    def stand_in_scan(**kwargs):
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_REQUESTED", True)
+        return None
+
+    monkeypatch.setattr(
+        "automated_security_helper.cli.image.run_ash_scan", stand_in_scan
+    )
+    result = CliRunner().invoke(_build_image_app(), ["--no-run"])
+
+    assert result.exit_code == ASH_EXIT_TERMINATED, result.output
+    assert "ASH build-image stopped by SIGTERM" in result.output
+
+
 def test_an_interrupt_cancels_the_scope_before_the_exit(shutdown_state, monkeypatch):
     """Ctrl-C lands in one frame; a spawn still running on another thread polls
     the scope's event, so the command cancels it before exiting, as ash scan
