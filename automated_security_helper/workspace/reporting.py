@@ -734,9 +734,12 @@ def refuse_linked_workspace_report_paths(
 
     *plugin_modules* are the workspace's plugin modules, as
     :func:`unsupported_reporter_names` and :func:`emit_workspace_reports` take
-    them: without them only the built-in reporters are built here, and a
-    plugin-module reporter's bad file name, collision or link was refused only
-    after every project had been scanned.
+    them. They matter only when *reporter_classes* is unset: then only ASH's
+    built-in reporters and those of these modules are built here. The
+    production caller passes the run's reporter classes, which already hold the
+    plugin modules' reporters (``execution.workspace_reporter_classes``), and
+    the selection reads those; it is given here as well so the three callers of
+    :func:`_selected_reporters` build the same set whichever way they are called.
 
     Run before any project is scanned, for the reason
     :func:`unsupported_reporter_names` is: nothing gets scanned or written, so the
