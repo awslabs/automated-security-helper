@@ -487,18 +487,40 @@ def repository_is_nested(root: Path) -> bool:
     return False
 
 
+#: What git itself requires a gitfile to start with (setup.c,
+#: ``read_gitfile_gently``): the word, the colon and one space. The path is
+#: everything after it. ``_GITFILE_PREFIX`` above is the looser test for
+#: "marks a checkout"; this one decides which directory git opens.
+_GITFILE_RECORD_PREFIX = "gitdir: "
+
+
 def _git_entry_is_plain(entry: Path) -> bool:
     """Whether git can start on the repository whose ``.git`` is *entry* without
-    waiting on what it reads first: the git dir's HEAD, config and commondir.
+    waiting on what it reads first: the git dir's HEAD, config and commondir,
+    and the common dir's config.
 
     *entry* is a ``.git`` directory, a gitfile naming the git dir, or a symlink
     to either (``_marks_a_checkout`` counted it). Each of the three files must be
-    plain (``_plain_entry``) in the git dir the entry leads to. A gitfile whose
-    record cannot be read, or that names something that is not a directory,
-    counts as not plain: the entry marked a checkout, and what git would read
-    there cannot be ruled out. Asked before ``git_common_dir`` runs on the
-    directory, which read those files and waited on a FIFO there for git's
-    30-second timeout.
+    plain (``_plain_entry``) in the git dir the entry leads to, and so must
+    ``config`` in the common dir that git dir's ``commondir`` names
+    (``_common_dir_named``): git's repository-format check reads it next, and
+    for a linked worktree that is ``<common>/config``, which the admin dir does
+    not hold, so a FIFO there held ``git_common_dir`` for git's timeout while
+    the admin dir's own three files read plain.
+
+    A gitfile is parsed as git parses it: the exact prefix ``gitdir: ``, then
+    everything after it with only trailing carriage returns and newlines
+    dropped (as ``_registered_worktree`` reads a ``gitdir`` record). Stripping
+    the rest read ``gitdir: /x `` as ``/x`` while git opens ``/x `` (trailing
+    space), so the directory checked was not the one git would wait in. A
+    record without the exact prefix is one git refuses ("invalid gitfile
+    format"), so git starts on nothing through it; it counts as not plain, the
+    side that errs toward nested, as ``_marks_a_checkout`` counts it. A gitfile
+    whose record cannot be read, or that names something that is not a
+    directory, counts as not plain too: the entry marked a checkout, and what
+    git would read there cannot be ruled out. Asked before ``git_common_dir``
+    runs on the directory, which read those files and waited on a FIFO there
+    for git's 30-second timeout.
     """
     try:
         looked_up = os.lstat(entry)
@@ -511,9 +533,9 @@ def _git_entry_is_plain(entry: Path) -> bool:
         if record is None:
             return False
         text = record.rstrip("\r\n")
-        if not text.startswith("gitdir:"):
+        if not text.startswith(_GITFILE_RECORD_PREFIX):
             return False
-        named = text[len("gitdir:") :].strip()
+        named = text[len(_GITFILE_RECORD_PREFIX) :]
         if not named:
             return False
         git_dir = Path(os.path.normpath(os.path.join(entry.parent, named)))
@@ -524,7 +546,35 @@ def _git_entry_is_plain(entry: Path) -> bool:
             return False
     except OSError:
         return False
-    return all(_plain_entry(git_dir / name) for name in ("HEAD", "config", "commondir"))
+    if not all(
+        _plain_entry(git_dir / name) for name in ("HEAD", "config", "commondir")
+    ):
+        return False
+    common = _common_dir_named(git_dir)
+    if common is None:
+        return False
+    return common == git_dir or _plain_entry(common / "config")
+
+
+def _common_dir_named(git_dir: Path) -> Optional[Path]:
+    """The common dir of the repository whose git dir is *git_dir*, read as git
+    reads it (setup.c, ``get_common_dir_noenv``): *git_dir* itself when no
+    ``commondir`` file is there; otherwise the file's text with trailing carriage
+    returns and newlines dropped, joined under *git_dir* unless absolute. None
+    when something is at the name that is not a record ``_read_gitdir_record``
+    can read: what git would open there cannot be told.
+    """
+    path = git_dir / "commondir"
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return git_dir
+    except OSError:
+        return None
+    record = _read_gitdir_record(path)
+    if record is None:
+        return None
+    return Path(os.path.normpath(os.path.join(git_dir, record.rstrip("\r\n"))))
 
 
 def _admin_dirs_are_plain(common: Path) -> bool:
