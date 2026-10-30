@@ -32,12 +32,16 @@ def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> Lis
         if path in ["properties", ".properties"]:
             continue
 
-        # Check if this is an expected transformation
-        is_expected_transformation = False
-        for transform_path in EXPECTED_TRANSFORMATIONS:
-            if path == transform_path or path.startswith(f"{transform_path}."):
-                is_expected_transformation = True
-                break
+        # Check if this is an expected transformation: the entry itself, a
+        # field under it ("tool.driver.name") or an item of it. extract_field_paths
+        # writes a list's items as "properties.tags[0]", which neither equals
+        # "properties.tags" nor starts with "properties.tags.", so every tag of a
+        # consolidated tag list was reported as a missing field.
+        is_expected_transformation = any(
+            path == transform_path
+            or path.startswith((f"{transform_path}.", f"{transform_path}["))
+            for transform_path in EXPECTED_TRANSFORMATIONS
+        )
 
         if path not in agg_paths and not is_expected_transformation:
             # Get the value from the original result
