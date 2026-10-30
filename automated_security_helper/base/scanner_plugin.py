@@ -2168,7 +2168,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # the tool, as in validate_plugin_dependencies: a tool that is present
         # does not make a scanner that refused to run satisfied.
         if self.dependency_unavailable_reason:
-            self._plugin_log(self.dependency_unavailable_reason, level=logging.ERROR)
+            # Redacted like every other place the reason is shown: it can name a
+            # path or option the config read from the environment, and the line
+            # is logged and kept in ``errors``, which the failure message and the
+            # results file quote.
+            self._plugin_log(
+                self._text_without_hooked_values(
+                    self.dependency_unavailable_reason,
+                    f"{self.__class__.__name__} is unavailable",
+                ),
+                level=logging.ERROR,
+            )
             self.dependencies_satisfied = False
             return False
         # Use enhanced validation that includes pre-installed tool detection
