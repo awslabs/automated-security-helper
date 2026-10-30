@@ -1840,7 +1840,7 @@
         },
         "regions": {
           "default": [],
-          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read.",
+          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "items": {
             "type": "string"
           },
