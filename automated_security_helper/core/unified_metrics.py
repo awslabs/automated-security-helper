@@ -202,16 +202,24 @@ def own_target_reports(
     own readers refuse it; one that names no scanner (a report written before the
     field existed) is kept. Every reader of the per-target reports in this module
     goes through here, so the counters, the exit code, the reasons and the
-    unscanned inputs agree on which reports are the scanner's.
+    unscanned inputs agree on which reports are the scanner's. The key and the
+    recorded name are matched in any case, as the calculator's ``_own_reports``
+    matches them: the name a row is read under is the union's first spelling,
+    and the reports can sit under another.
     """
-    reports = (asharp_model.additional_reports or {}).get(scanner_name)
+    reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
     if not isinstance(reports, dict):
         return {}
     return {
         key: report
         for key, report in reports.items()
         if isinstance(report, dict)
-        and report.get("scanner_name") in (None, scanner_name)
+        and (
+            report.get("scanner_name") is None
+            or ScannerStatisticsCalculator._same_scanner(
+                report.get("scanner_name"), scanner_name
+            )
+        )
     }
 
 

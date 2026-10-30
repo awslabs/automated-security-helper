@@ -227,12 +227,16 @@ class ScannerStatisticsCalculator:
             # hold a value under the scanner's name that is not a container (a
             # null, a list), and indexing it raised TypeError here, after the
             # scan ran.
-            reports = asharp_model.additional_reports.get(scanner_name)
+            reports = ScannerStatisticsCalculator.reports_for(
+                asharp_model, scanner_name
+            )
             recorded_durations = [
                 report["duration"]
                 for report in (reports.values() if isinstance(reports, dict) else ())
                 if isinstance(report, dict)
-                and report.get("scanner_name") == scanner_name
+                and ScannerStatisticsCalculator._same_scanner(
+                    report.get("scanner_name"), scanner_name
+                )
                 and isinstance(report.get("duration"), (int, float))
                 and not isinstance(report.get("duration"), bool)
             ]
@@ -347,16 +351,24 @@ class ScannerStatisticsCalculator:
         is keyed by name, and a results file merged from another, or written by
         hand, can file a report under the wrong key. A report that names no scanner
         at all (one written before the field existed) is kept, as the counters'
-        readers in ``core.unified_metrics`` keep it.
+        readers in ``core.unified_metrics`` keep it. The key and the recorded name
+        are matched in any case (``reports_for``, ``_same_scanner``): the name a
+        row is read under is the union's first spelling, and the reports can sit
+        under another.
         """
-        reports = asharp_model.additional_reports.get(scanner_name)
+        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
         if not isinstance(reports, dict):
             return {}
         return {
             key: report
             for key, report in reports.items()
             if isinstance(report, dict)
-            and report.get("scanner_name") in (None, scanner_name)
+            and (
+                report.get("scanner_name") is None
+                or ScannerStatisticsCalculator._same_scanner(
+                    report.get("scanner_name"), scanner_name
+                )
+            )
         }
 
     @staticmethod
@@ -512,13 +524,15 @@ class ScannerStatisticsCalculator:
         nothing. All zero when the scanner has no such report.
         """
         total = ScannerSeverityCount()
-        reports = asharp_model.additional_reports.get(scanner_name)
+        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
         if not isinstance(reports, dict):
             return total
         for report in reports.values():
             if (
                 not isinstance(report, dict)
-                or report.get("scanner_name") != scanner_name
+                or not ScannerStatisticsCalculator._same_scanner(
+                    report.get("scanner_name"), scanner_name
+                )
                 or not isinstance(report.get("raw_results"), dict)
                 or not isinstance(report.get("severity_counts"), dict)
             ):
@@ -1057,14 +1071,15 @@ class ScannerStatisticsCalculator:
         or when two targets were graded against different levels, since then the
         reports carry no one answer and the record's own read stands.
         """
-        reports = asharp_model.additional_reports.get(scanner_name)
+        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
         if not isinstance(reports, dict):
             return None
         levels = set()
         for report in reports.values():
-            if (
-                not isinstance(report, dict)
-                or report.get("scanner_name") != scanner_name
+            if not isinstance(
+                report, dict
+            ) or not ScannerStatisticsCalculator._same_scanner(
+                report.get("scanner_name"), scanner_name
             ):
                 continue
             level = report.get("scanner_severity_threshold")
@@ -1137,6 +1152,43 @@ class ScannerStatisticsCalculator:
         return excluded, dependencies_missing, error
 
     @staticmethod
+    def reports_for(asharp_model: AshAggregatedResults, scanner_name: Any) -> Any:
+        """The ``additional_reports`` entry for *scanner_name*: under its own spelling,
+        or under the one spelling that folds to it.
+
+        ``extract_scanner_statistics`` unions scanner names case-insensitively and
+        keeps the first spelling met, scanner_results' before the reports', so the
+        name a row is read under can differ in case from the key its reports sit
+        under: "Bandit" in scanner_results, "bandit" in additional_reports (a merged
+        or hand-written results file). An exact lookup then found nothing, and
+        every per-target read (an ERROR or MISSING recorded only there, the dict
+        counts, the durations, the target counters) was lost along with the row
+        the union had dropped. The exact key wins when present; otherwise the first
+        key that folds to the name. Two keys that both fold to it with neither
+        exact (a merge of "Bandit" and "bandit" files) read as the first, a shape
+        no ASH writer produces.
+        """
+        reports = asharp_model.additional_reports
+        if not isinstance(reports, dict):
+            return None
+        found = reports.get(scanner_name)
+        if found is not None or not isinstance(scanner_name, str):
+            return found
+        folded = scanner_name.lower()
+        for name, value in reports.items():
+            if isinstance(name, str) and name.lower() == folded:
+                return value
+        return None
+
+    @staticmethod
+    def _same_scanner(recorded: Any, scanner_name: Any) -> bool:
+        """Whether a report's recorded ``scanner_name`` names *scanner_name*, in any
+        case. Names that are not text compare as they are."""
+        if isinstance(recorded, str) and isinstance(scanner_name, str):
+            return recorded.lower() == scanner_name.lower()
+        return recorded == scanner_name
+
+    @staticmethod
     def _recorded_report(
         asharp_model: AshAggregatedResults, scanner_name: str, target: str
     ) -> Optional[Dict[str, Any]]:
@@ -1154,7 +1206,7 @@ class ScannerStatisticsCalculator:
         recorded, each leaves the scanner with no recorded status, which
         ``get_scanner_status_info`` reports as an error.
         """
-        reports = asharp_model.additional_reports.get(scanner_name)
+        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
         if not isinstance(reports, dict):
             return None
         report = reports.get(target)
@@ -1163,7 +1215,11 @@ class ScannerStatisticsCalculator:
         # container's target directly; asked for "None", both are read.
         if report is None and target == "None":
             report = reports.get(None)
-        if not isinstance(report, dict) or report.get("scanner_name") != scanner_name:
+        if not isinstance(
+            report, dict
+        ) or not ScannerStatisticsCalculator._same_scanner(
+            report.get("scanner_name"), scanner_name
+        ):
             return None
         return report
 
@@ -1369,14 +1425,15 @@ class ScannerStatisticsCalculator:
         reports count, as in ``_recorded_report``: a mapping that names another
         scanner is no report of this one's.
         """
-        reports = asharp_model.additional_reports.get(scanner_name)
+        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
         if not isinstance(reports, dict):
             return False
 
         for target_report in reports.values():
-            if (
-                not isinstance(target_report, dict)
-                or target_report.get("scanner_name") != scanner_name
+            if not isinstance(
+                target_report, dict
+            ) or not ScannerStatisticsCalculator._same_scanner(
+                target_report.get("scanner_name"), scanner_name
             ):
                 continue
             if ScannerStatisticsCalculator.target_report_is_missing(target_report):
