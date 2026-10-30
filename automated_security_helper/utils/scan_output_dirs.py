@@ -523,18 +523,32 @@ def _git_index_environ() -> Dict[str, str]:
 def _pathspec_options() -> Tuple[str, ...]:
     """git's global options that make the index pathspec match the directory as named.
 
-    Literal everywhere, so no character of the path is read as a glob. Where the
-    filesystem compares names without regard to case (:func:`output_name_key`:
-    macOS and Windows) the match ignores case too: the index keeps the spelling the
-    file was committed with, and an output directory spelled ``Out`` is the
-    committed ``out`` there, so a case-exact pathspec listed nothing and the
-    committed-output refusal never fired. ``--noglob-pathspecs`` adds the literal
-    magic that ``--icase-pathspecs`` can be combined with; ``--literal-pathspecs``
-    refuses any magic.
+    Literal where the filesystem compares names exactly, so no character of the
+    path is read as a glob or as pathspec magic: ``--literal-pathspecs``. Where it
+    compares names without regard to case (:func:`output_name_key`: macOS and
+    Windows) the match must ignore case too (the index keeps the spelling the file
+    was committed with, and an output directory spelled ``Out`` is the committed
+    ``out`` there, so a case-exact pathspec listed nothing and the committed-output
+    refusal never fired), and no global option gives both: ``--literal-pathspecs``
+    refuses every magic, and ``--icase-pathspecs`` with ``--noglob-pathspecs``
+    still read a leading ``:`` of the name as magic (``:out`` matched ``out``;
+    ``:!x`` excluded). There the element carries the readings itself
+    (:func:`_pathspec_element`), and no global option is passed.
     """
     if output_name_key("A") == "A":
         return ("--literal-pathspecs",)
-    return ("--noglob-pathspecs", "--icase-pathspecs")
+    return ()
+
+
+def _pathspec_element(relative: str) -> str:
+    """The pathspec that names *relative* literally, and without regard to case
+    where the filesystem compares names that way: ``:(literal,icase)<relative>``
+    there, whose long-form magic ends at ``)`` and leaves the rest a name whatever
+    it starts with; ``.`` and, under ``--literal-pathspecs``, *relative* itself
+    elsewhere."""
+    if relative == "." or output_name_key("A") == "A":
+        return relative
+    return f":(literal,icase){relative}"
 
 
 def _names_below(listed: str, relative: str) -> List[str]:
@@ -583,7 +597,8 @@ def git_index_below(
     on the command line (``--git-dir`` and ``--work-tree``), so nothing inside
     *directory* decides which repository answers; *directory* is the pathspec,
     taken literally, and without regard to case where the filesystem compares
-    names that way (:func:`_pathspec_options`). A *directory* that git tracks as
+    names that way (:func:`_pathspec_options`, :func:`_pathspec_element`). A
+    *directory* that git tracks as
     a link or a submodule is listed as the entry ``""``. ``core.fsmonitor`` is turned off and
     ``core.hooksPath`` pointed at ``/dev/null`` for the call (:func:`git_argv`),
     so the repository's own config cannot start a program, and the variables that
@@ -667,7 +682,7 @@ def _index_listing(
     # the orchestrator before any scanner runs, outside a scanner's sandbox.
     from automated_security_helper.utils.subprocess_utils import spawn_run
 
-    pathspec = "." if relative == "." else relative
+    pathspec = _pathspec_element(relative)
     try:
         result = spawn_run(
             git_argv(
