@@ -2694,23 +2694,36 @@ def test_an_integration_that_no_longer_resolves_at_scan_time_is_missing(
 ):
     """The dependency check found shellcheck; by the time scan() resolves it
     again it is gone. An enabled integration is never run quietly off: the
-    scan is MISSING, as the dependency check would have made it."""
-    answers = ["/usr/bin/shellcheck"]
+    scan is MISSING, as the dependency check would have made it.
+
+    The lookups are counted: the explicit dependency check and the one scan()
+    runs before its own resolution both find shellcheck, and the lookup after
+    them, the scan's own, is the one that finds nothing. Without the count, a
+    check that failed or ran twice would pass this test with no scan-time
+    resolution at all."""
+    answers = ["/usr/bin/shellcheck", "/usr/bin/shellcheck"]
+    looked_up: list = []
 
     def find(name):
         if name == "actionlint":
             return FAKE_ACTIONLINT
-        if name == "shellcheck" and answers:
-            return answers.pop(0)
+        if name == "shellcheck":
+            looked_up.append(name)
+            return answers.pop(0) if answers else None
         return None
 
     monkeypatch.setattr(module, "find_absolute_executable", find)
     scanner = _scanner(repo, shellcheck="shellcheck")
     fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
 
+    assert scanner.validate_plugin_dependencies() is True
+    assert looked_up == ["shellcheck"]
+
     assert scanner.scan(target=repo, target_type="source") is False
 
     assert fake.calls == []
+    assert looked_up == ["shellcheck"] * 3
+    assert answers == []
     assert "shellcheck" in scanner.dependency_unavailable_reason
     assert scanner.dependencies_satisfied is False
 
