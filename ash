@@ -316,6 +316,14 @@ require_mountable() {
 # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks both
 # lists against the real commands and options.
 ASH_SUBCOMMANDS="scan build-image report merge mcp get-genai-guide config dependencies inspect plugin"
+# The subcommands whose own -o is NOT the container runtime: get-genai-guide's -o is
+# its --output, config's its --output-dir. After one of these, -o is the
+# subcommand's and is forwarded. After scan, whose -o is the CLI's own alias of
+# --oci-runner, after build-image, and after every other subcommand, -o is still
+# this script's runner, as it is with no subcommand: `./ash scan -o podman` picks
+# podman. Forwarding -o after every subcommand sent `scan -o podman` into the
+# container while this script picked the first runner on PATH.
+ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
 # The root ash options that take a value. A value can be a subcommand's name
 # (`--phases report`, `--phases inspect`), so the token after one of these is
 # the option's value, not the subcommand.
@@ -926,9 +934,11 @@ CONFIG_INLINE="NO"
 INNER_VALUE_PENDING="NO"
 # YES once a word naming an ash subcommand has been read (forward_word, below): -v
 # before any subcommand is this script's --version, -v after one is the subcommand's
-# --verbose, and a short option such as -o after one is the subcommand's, not this
-# script's.
+# --verbose. SUBCOMMAND_WORD is the first such word: -o after get-genai-guide or
+# config is that subcommand's own option (ASH_DASH_O_IS_THE_SUBCOMMANDS), -o after
+# scan or any other subcommand is this script's runner.
 SUBCOMMAND_SEEN="NO"
+SUBCOMMAND_WORD=""
 
 # Forward word $1 to the scan, as the argument loop's fall-through does: appended to
 # ASH_ARGS, with the loop remembering whether it was a value-taking inner option (the
@@ -940,6 +950,9 @@ forward_word() {
   elif [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" $1 "* ]]; then
     INNER_VALUE_PENDING="YES"
   elif [[ " ${ASH_SUBCOMMANDS} " == *" $1 "* ]]; then
+    if [[ "${SUBCOMMAND_SEEN}" = "NO" ]]; then
+      SUBCOMMAND_WORD="$1"
+    fi
     SUBCOMMAND_SEEN="YES"
   elif [[ "$1" == -[!-]?* ]]; then
     # Clustered short options, as click reads them: the first letter that
@@ -955,6 +968,18 @@ forward_word() {
     done
   fi
   ASH_ARGS="${ASH_ARGS} $1"
+}
+
+# True when a -o word at this point in the line is the subcommand's, not this
+# script's runner: it is the value of a value-taking inner option that is still
+# open, or it follows a subcommand whose own -o is not the runner
+# (ASH_DASH_O_IS_THE_SUBCOMMANDS). After scan, build-image or any other subcommand,
+# and with no subcommand, -o is this script's --oci-runner.
+dash_o_is_the_subcommands() {
+  if [[ "${INNER_VALUE_PENDING}" = "YES" ]]; then
+    return 0
+  fi
+  [[ "${SUBCOMMAND_SEEN}" = "YES" && " ${ASH_DASH_O_IS_THE_SUBCOMMANDS} " == *" ${SUBCOMMAND_WORD} "* ]]
 }
 
 while (("$#")); do
@@ -995,11 +1020,14 @@ while (("$#")); do
       OCI_RUNNER="${OWN_VALUE}"
       ;;
     -o)
-      # -o is this script's --oci-runner only ahead of a subcommand's name. After one
-      # it is the subcommand's own (`./ash get-genai-guide -o guide.md` writes the
-      # guide there; read as the runner, it ran a command named guide.md), and as the
-      # value of a value-taking inner option it is that option's value.
-      if [[ "${SUBCOMMAND_SEEN}" = "YES" || "${INNER_VALUE_PENDING}" = "YES" ]]; then
+      # -o is this script's --oci-runner with no subcommand and after scan or
+      # build-image (the CLI's scan defines -o as its own alias of --oci-runner, so
+      # `./ash scan -o podman` picks podman here). It is the subcommand's own after
+      # get-genai-guide (`./ash get-genai-guide -o guide.md` writes the guide there;
+      # read as the runner, it ran a command named guide.md) and after config (its
+      # --output-dir), and as the value of a value-taking inner option it is that
+      # option's value.
+      if dash_o_is_the_subcommands; then
         forward_word "$1"
       else
         own_value "$1" "$#" "${2-}"
@@ -1024,13 +1052,13 @@ while (("$#")); do
     # the scan got a runner, UID or GID word it has no use for while this script built
     # and ran with its defaults. A blank attached value is refused as a missing one.
     -o?*)
-      # The attached spelling follows the spaced -o above: this script's runner only
-      # ahead of a subcommand's name, the subcommand's own after it (`./ash
-      # get-genai-guide -oguide.md` writes the guide to guide.md), and the value of a
-      # pending inner option when one is open. -u?* and -g?* below take no such
-      # guard because their spaced forms take none: the script owns the container
-      # UID and GID in every position.
-      if [[ "${SUBCOMMAND_SEEN}" = "YES" || "${INNER_VALUE_PENDING}" = "YES" ]]; then
+      # The attached spelling follows the spaced -o above: this script's runner with
+      # no subcommand and after scan or build-image, the subcommand's own after
+      # get-genai-guide or config (`./ash get-genai-guide -oguide.md` writes the guide
+      # to guide.md), and the value of a pending inner option when one is open. -u?*
+      # and -g?* below take no such guard because their spaced forms take none: the
+      # script owns the container UID and GID in every position.
+      if dash_o_is_the_subcommands; then
         forward_word "$1"
       else
         require_value "-o" 2 "${1:2}"

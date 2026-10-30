@@ -4,7 +4,8 @@
 """How `./ash` finds its own root, its runner and its options' edges.
 
 The repo root is the script file's directory, a symlinked ./ash followed; --help and
---version exit with the host CLI's status; -o after a subcommand is the subcommand's;
+--version exit with the host CLI's status; -o after get-genai-guide or config is the
+subcommand's, while -o after scan or build-image is still this script's runner;
 --offline reaches the scan; a run refused after the output directory is made leaves
 it in place, as it always did; a non-numeric container UID is shown, not written raw; a runner found on PATH under a
 directory with a space runs; a runner given with arguments is still recognized by its
@@ -264,6 +265,56 @@ def test_attached_dash_o_after_a_subcommand_is_the_subcommands(
         "get-genai-guide",
         "-oguide.md",
     ], inner
+
+
+@pytest.mark.parametrize(
+    "subcommand, spelling",
+    [
+        pytest.param("scan", "spaced", id="scan"),
+        pytest.param("scan", "attached", id="scan-attached"),
+        pytest.param("build-image", "spaced", id="build-image"),
+    ],
+)
+def test_dash_o_after_scan_or_build_image_names_the_runner(
+    runner, source, tmp_path, subcommand, spelling
+):
+    """The CLI's scan defines -o as its own alias of --oci-runner, so `./ash scan -o
+    podman` means podman here, as it always did. Forwarding -o after every subcommand
+    sent `scan -o podman` into the container while this script picked the first
+    runner on PATH, so a host with docker and podman scanned under docker."""
+    other = _executable(tmp_path / "bin" / "other-runner", RECORDING_RUNNER)
+    dash_o = ["-o", str(other)] if spelling == "spaced" else [f"-o{other}"]
+
+    result, calls = _run(
+        runner,
+        ["--no-build", "--source-dir", str(source), subcommand, *dash_o],
+        cwd=tmp_path,
+        name_the_runner=False,
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    assert f"Resolved OCI_RUNNER to: {other}" in result.stderr, result.stderr
+    run = _only(calls, "run", shown)
+    inner = _after_image(run)
+    assert "-o" not in inner and f"-o{other}" not in inner, inner
+    assert str(other) not in inner, inner
+
+
+def test_dash_o_after_config_is_the_subcommands(runner, source, tmp_path):
+    """config's -o is its --output-dir, so after `config` the word is forwarded, as
+    after get-genai-guide, and this script keeps the runner it was given."""
+    result, calls = _run(
+        runner,
+        ["--no-build", "--source-dir", str(source), "config", "-o", "out"],
+        cwd=tmp_path,
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    run = _only(calls, "run", shown)
+    inner = _after_image(run)
+    assert inner[inner.index("config") :][:3] == ["config", "-o", "out"], inner
 
 
 def test_dash_o_before_a_subcommand_names_the_runner(runner, source, tmp_path):
