@@ -2063,10 +2063,11 @@ class Evaluator:
         argument), so that the calls found are all the calls there are. A
         call that leaves the parameter out gives the parameter's default.
         Each argument is read in the scope of the function the call sits in, the
-        module's for a call at module level (:meth:`_call_scope`), so a name the
-        calling function binds is read as that function's and never as a module
-        name it shadows. A call inside a lambda, a comprehension or a class body
-        leaves the parameter unread.
+        module's for a call at module level or in a function's header
+        (:meth:`_call_scope`), so a name the calling function binds is read as
+        that function's and never as a module name it shadows. A call inside a
+        lambda's body, a comprehension or a class body leaves the parameter unread
+        unless what it passes is a literal, which needs no scope.
         """
         if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
             return None
@@ -2082,7 +2083,7 @@ class Evaluator:
         calls = [
             (m, c)
             for m, c in self._constructions(func.name)
-            if self._names_function(c.func, m, func)
+            if self._names_function(c, m, func)
         ]
         found: Optional[Shape] = None
         if func.name not in self._renamed_imports and uses.get(func.name, 0) == len(
@@ -2092,8 +2093,13 @@ class Evaluator:
         self._passed_memo[key] = found
         return found
 
-    def _names_function(self, expr: ast.expr, module: _Module, func: ast.AST) -> bool:
-        ref = self._ref_of(expr, _Scope(module=module))
+    def _names_function(self, call: ast.Call, module: _Module, func: ast.AST) -> bool:
+        """Whether ``call`` calls ``func``, resolved where the call sits, so a
+        parameter or local that shadows the function's name is not the function
+        (a call this reader cannot place then makes the name's use count exceed
+        its calls, and :meth:`_passed_through` gives up)."""
+        scope = self._call_scope(module, call) or _Scope(module=module)
+        ref = self._ref_of(call.func, scope)
         return ref is not None and ref.kind == "function" and ref.node is func
 
     def _call_arguments(
