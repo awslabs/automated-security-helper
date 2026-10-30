@@ -16,6 +16,7 @@ directory ``work`` where every other component derives ``converted``.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -77,6 +78,25 @@ class TestAnOutputDirHoldingAShardIsRefused:
 
         assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
         assert shard_file.read_bytes() == before
+
+    def test_a_hard_link_to_a_shards_results_file_is_refused(self, tmp_path):
+        """The same file under another path: compared as the file system
+        identifies it, not by the text of two resolved paths."""
+        shard_paths = write_shards(
+            tmp_path / "artifacts", build_shards(2), as_dirs=False
+        )
+        output_dir = tmp_path / "elsewhere"
+        output_dir.mkdir()
+        try:
+            os.link(shard_paths[0], output_dir / RESULTS_FILE_NAME)
+        except (OSError, NotImplementedError) as exc:  # pragma: no cover
+            pytest.skip(f"hard links are unavailable here: {exc}")
+        before = Path(shard_paths[0]).read_bytes()
+
+        result = _MergeCli()._invoke(_args(shard_paths, output_dir))
+
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert Path(shard_paths[0]).read_bytes() == before
 
     def test_an_output_dir_beside_the_shards_merges(self, tmp_path):
         """The control: a sibling directory is not the shard's."""

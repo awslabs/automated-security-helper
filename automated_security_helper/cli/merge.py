@@ -197,6 +197,7 @@ across shards is not recorded.
 from __future__ import annotations
 
 import copy
+import os
 import functools
 import hashlib
 import json
@@ -3656,18 +3657,21 @@ def _results_file_the_merge_would_overwrite(
 ) -> Optional[Path]:
     """The ``--results`` file the merged results file would replace, if any.
 
-    Compared by resolved path, so the same file named two ways is caught, and a
-    results directory given as ``--results`` is compared by the file resolved
-    inside it. None when the output directory holds no shard's results file.
+    Compared as the file system identifies a file (``os.path.samefile``: device
+    and inode, or the handle on Windows), so the same file named two ways, a
+    hard link to it, and a spelling that differs only in case on a file system
+    that ignores case are all caught; comparing resolved path text missed the
+    last two. A results directory given as ``--results`` is compared by the
+    file inside it. None when nothing is at the output path yet (no file can be
+    the same as a file that does not exist) or when the output directory holds
+    no shard's results file.
     """
     target = output_dir.joinpath(RESULTS_FILE_NAME)
-    try:
-        target_resolved = target.resolve()
-    except OSError:
+    if not target.exists():
         return None
     for results_file, _ in loaded:
         try:
-            if results_file.resolve() == target_resolved:
+            if os.path.samefile(target, results_file):
                 return results_file
         except OSError:
             continue
