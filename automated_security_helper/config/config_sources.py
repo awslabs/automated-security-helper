@@ -1534,7 +1534,10 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
 _LINK_HOPS = 40
 
 
-_DRIVE_LETTER_ROOT = re.compile(r"[A-Za-z]:(?:\\|$)")
+#: A drive letter and its separator. Behind the extended or device prefix a bare
+#: ``C:`` with no separator names the volume's device object (``\\.\C:`` opens a
+#: raw volume), not a directory on it, so the separator is required.
+_DRIVE_LETTER_ROOT = re.compile(r"[A-Za-z]:\\")
 
 
 def _may_reach_the_network(target: str) -> bool:
@@ -1542,7 +1545,8 @@ def _may_reach_the_network(target: str) -> bool:
 
     True for a UNC path, ``\\\\server\\share`` or ``//server/share``, and for a
     path in the extended or device form (``\\\\?\\...``, ``\\\\.\\...`` or the
-    native ``\\??\\...``) unless its next part is a drive letter. The form is
+    native ``\\??\\...``) unless its next part is a drive letter and a
+    separator (a bare ``\\\\.\\C:`` is the volume's device). The form is
     what ``os.readlink`` returns for a junction, so ``\\\\?\\C:\\repo`` is a
     local volume; ``\\\\?\\UNC\\server\\share``, ``\\\\?\\GLOBALROOT\\Device\\Mup\\...``,
     ``\\\\?\\GLOBALROOT\\??\\UNC\\...`` and ``\\\\.\\pipe\\...`` can reach a host or
