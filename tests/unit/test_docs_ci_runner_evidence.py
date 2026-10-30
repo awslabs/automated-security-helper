@@ -349,6 +349,18 @@ def test_failure_reads_every_ancestor_of_a_job():
     assert sorted(failing) == ["last", "mid", "scan"], sorted(failing)
     passing = plan(load(chain.format(command="ash scan --no-fail-on-findings .")), {})
     assert sorted(passing) == ["mid", "scan"], sorted(passing)
+    # The implicit success() of a job with no `if` (and the written `success()`) reads
+    # the same ancestors: `last` needs only `mid`, which ran and passed under always(),
+    # yet GitHub and act skip `last` after the scan failed, because a job it needs
+    # transitively failed. After a passing scan it runs.
+    for condition in ("", "    if: success()\n"):
+        no_if = chain.replace("    if: failure()\n", condition)
+        failing = plan(load(no_if.format(command="ash scan .")), {})
+        assert sorted(failing) == ["mid", "scan"], (condition, sorted(failing))
+        passing = plan(
+            load(no_if.format(command="ash scan --no-fail-on-findings .")), {}
+        )
+        assert sorted(passing) == ["last", "mid", "scan"], (condition, sorted(passing))
 
 
 @pytest.mark.unit

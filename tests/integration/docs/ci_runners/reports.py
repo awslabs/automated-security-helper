@@ -504,22 +504,28 @@ class _JobCondition:
         return value is not False
 
     def _success(self, needs: list[str]) -> bool:
-        """``success()``: every job in ``needs`` ended as success."""
-        return all(self.results.get(str(need)) == "success" for need in needs)
+        """``success()``: every job in ``needs``, and every job they need, transitively,
+        ended as success, as GitHub and act read it (act walks the needs closure): a
+        job below an ``always()`` job that ran after a failed job does not start
+        without an ``if`` of its own, although its direct need succeeded."""
+        return all(self.results.get(job) == "success" for job in self._ancestors(needs))
 
     def _failure(self, needs: list[str]) -> bool:
         """``failure()``: a job in ``needs``, or one they need, transitively, failed."""
+        return any(self.results.get(job) == "failure" for job in self._ancestors(needs))
+
+    def _ancestors(self, needs: list[str]) -> list[str]:
+        """``needs`` and every job they need, transitively, each once; a cycle in
+        ``needs_of`` ends when every job in it has been seen."""
         pending = [str(need) for need in needs]
-        seen: set[str] = set()
+        seen: list[str] = []
         while pending:
             job = pending.pop()
             if job in seen:
                 continue
-            seen.add(job)
-            if self.results.get(job) == "failure":
-                return True
+            seen.append(job)
             pending += [str(need) for need in self.needs_of.get(job, [])]
-        return False
+        return seen
 
     def evaluate(self, text: str, needs: list[str]) -> Any:
         """The value of expression ``text`` alone, without the implicit ``success()``."""
