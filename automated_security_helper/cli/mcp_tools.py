@@ -2180,6 +2180,18 @@ async def mcp_scan_directory(
                 environment_values=environment_values,
             )
             registered = True
+            # The runner's claim on the entry, recorded here rather than by the
+            # runner's first step: between the set-aside below and that step a
+            # progress poll read a PENDING entry with no runner, which the
+            # registry closes from the results file (check_scan_progress), and
+            # the file was just set aside, so the scan was closed FAILED before
+            # it ran. Every way out of this tool that leaves no runner to settle
+            # the entry marks the runner done (the mkdir arm below and
+            # _give_back_a_scan_that_did_not_start), so the claim does not keep
+            # the directory held (occupies_its_directory).
+            claimed_entry = registry.get_scan(scan_id)
+            if claimed_entry is not None:
+                claimed_entry.has_runner = True
 
             # Created only now that the registry has given this scan the
             # directory, so a refused scan leaves nothing in the scanned
@@ -2201,6 +2213,11 @@ async def mcp_scan_directory(
                 registry.finish_scan(
                     scan_id, MCScanStatus.FAILED, error_message=unmakeable
                 )
+                # No runner will settle this entry: the claim made at
+                # registration is released, or the closed entry would hold
+                # its directory for the server's life.
+                if claimed_entry is not None:
+                    claimed_entry.runner_done.set()
                 unmakeable_response = create_error_response(
                     error=MCPResourceError(
                         unmakeable,
@@ -2517,6 +2534,19 @@ def _give_back_a_scan_that_did_not_start(
         _logger.error(
             f"Scan {scan_id}: could not close the scan that did not start: "
             f"{error_text(finish_error, environment_values)}"
+        )
+    # The tool claimed the runner's ownership of the entry at registration
+    # (mcp_scan_directory); no runner will mark it done, so this does, or the
+    # closed entry would hold its directory for the server's life
+    # (occupies_its_directory).
+    try:
+        entry = registry.get_scan(scan_id)
+        if entry is not None:
+            entry.runner_done.set()
+    except Exception as claim_error:  # noqa: BLE001
+        _logger.error(
+            f"Scan {scan_id}: could not release the runner's claim of the scan "
+            f"that did not start: {error_text(claim_error, environment_values)}"
         )
     if not previous_results_moved:
         return
