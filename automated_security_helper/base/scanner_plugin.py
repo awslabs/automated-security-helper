@@ -411,14 +411,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
     A FIELD RATHER THAN AN EXCEPTION, AND THAT IS THE WHOLE POINT. Construction
     runs ``_process_config_options`` from ``model_post_init``, so a subclass that
-    raised there destroyed its own instance. ``ScanPhase`` creates every scanner
-    inside a ``try/except Exception`` that logs one line and does not append to
-    ``scanner_instances`` -- and both hooks the repository built for "cannot run
-    here", ``validate_plugin_dependencies`` and ``unsupported_platform_reason``,
-    are consulted only on entries in that list. So a scanner that refused at
-    construction did not land as MISSING or SKIPPED; it left the run entirely,
-    with the five status counters summing correctly over the scanners that
-    remained. A consumer could not tell that scan from a complete one.
+    raised there produced no instance. ``ScanPhase`` creates every scanner inside
+    a ``try/except Exception`` and records one that did not construct as an ERROR
+    row ("could not be constructed, so it did not run"), or as SKIPPED when the
+    operator did not select it, so the scan is not mistaken for a complete one.
+    That row says the scanner was reached and gave no result and carries no
+    remediation: the instance is not in ``scanner_instances``, and both hooks the
+    repository built for "cannot run here", ``validate_plugin_dependencies`` and
+    ``unsupported_platform_reason``, are consulted only on entries in that list.
+    So a scanner that raised at construction could never land as MISSING.
 
     Recording the reason instead keeps the instance, which is what lets the
     existing MISSING path do its job. It carries the remediation text, so the
