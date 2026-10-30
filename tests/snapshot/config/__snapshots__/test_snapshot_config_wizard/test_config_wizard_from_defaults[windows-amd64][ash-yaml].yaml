@@ -163,7 +163,7 @@ scanners:
       ignore_nosec: false
       excluded_paths: []
       additional_formats: []
-      tool_version: '>=1.7.0,<2.0.0'
+      tool_version: '>=1.7.8,<2.0.0'
       install_timeout: 300
   cdk-nag:
     enabled: true
