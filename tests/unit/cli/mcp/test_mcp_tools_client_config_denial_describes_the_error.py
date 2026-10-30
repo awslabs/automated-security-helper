@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp.profile_registry import (
@@ -30,7 +30,6 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
 )
 from automated_security_helper.config import client_config_policy
-from automated_security_helper.config.ash_config import AshConfig
 
 pytestmark = pytest.mark.unit
 
@@ -72,13 +71,26 @@ def _upload(files: Dict[str, str]) -> Path:
     )
 
 
+class _ConfigThatQuotesItsInput(BaseModel):
+    """A config-shaped model whose validation errors quote the input.
+
+    AshConfig hides inputs in its own errors (``hide_input_in_errors``), so an
+    error built from it carries no token for the denial to strip, and the
+    stand-in's own precondition below fails before the arm under test is
+    reached. This model keeps pydantic's default, which quotes the refused
+    value as ``input_value=...``, so the control holds.
+    """
+
+    global_settings: Dict[str, Any]
+
+
 def _a_validation_error_quoting(value: str) -> ValidationError:
     try:
-        AshConfig.model_validate({"global_settings": value})
+        _ConfigThatQuotesItsInput.model_validate({"global_settings": value})
     except ValidationError as exc:
         assert value in str(exc), "the stand-in error does not quote its input"
         return exc
-    raise AssertionError("AshConfig accepted a string for global_settings")
+    raise AssertionError("the stand-in model accepted a string for global_settings")
 
 
 def test_a_check_that_raises_describes_the_error(monkeypatch, caplog) -> None:

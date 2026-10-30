@@ -114,4 +114,8 @@ def test_diff_scan_results_reads_both_files_as_utf8(results_file, tmp_path) -> N
 
     result = mcp_diff_scan_results(str(results_file), str(after))
 
-    assert result.get("success") is True, result
+    # A diff carries no success flag: its answer is the three lists, and a
+    # refused or unreadable file is answered as {"success": False, "error": ...}
+    # instead. Two reads of the same bytes leave every list empty.
+    assert "error" not in result, result
+    assert result == {"new": [], "resolved": [], "severity_changed": []}, result
