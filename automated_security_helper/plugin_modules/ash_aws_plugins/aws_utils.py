@@ -1083,13 +1083,20 @@ def validate_bedrock_model(
         # Extract model IDs from the available models
         available_model_ids = [model.get("modelId") for model in available_models]
         # Converse takes a model's ARN and an inference profile's ARN as a model
-        # identifier too, so an ARN the listing carries names a listed model.
-        listed_arns = {
-            arn
-            for model in available_models
-            for arn in (model.get("modelArn"), model.get("inferenceProfileArn"))
-            if arn and arn != "unknown"
-        }
+        # identifier too, so an ARN the listing carries names a listed model: a
+        # foundation-model ARN names an ON_DEMAND entry, a profile ARN an
+        # INFERENCE_PROFILE entry. A profile entry carries its model's ARN as
+        # well, but Converse refuses that ARN for a model only a profile routes
+        # ("with on-demand throughput isn't supported"), so it is not an
+        # identifier the check may say yes to.
+        listed_arns = set()
+        for model in available_models:
+            if model.get("inferenceType") == "ON_DEMAND":
+                arn = model.get("modelArn")
+            else:
+                arn = model.get("inferenceProfileArn")
+            if arn and arn != "unknown":
+                listed_arns.add(arn)
 
         # Check if the requested model is in the available models
         if model_id in available_model_ids or model_id in listed_arns:

@@ -246,3 +246,18 @@ def test_an_arn_the_listing_carries_names_a_listed_model(identifier):
     check = validate_bedrock_model(client, identifier)
 
     assert check[0] is True, check
+
+
+def test_a_profile_only_models_foundation_arn_is_not_a_listed_identifier():
+    """A model only a profile routes is listed under its profile, and that
+    entry carries the model's own ARN too; Converse refuses that ARN as a model
+    identifier ("with on-demand throughput isn't supported"), so the check must
+    not say yes to it and send the first call into a ValidationException."""
+    client = _client(profiles=[_profile(US_PROFILE, US_PROFILE_ARN, PROFILED_ARN)])
+
+    check = validate_bedrock_model(client, PROFILED_ARN)
+
+    assert check[0] is False, check
+    # The controls: the two identifiers Converse does take still validate.
+    assert validate_bedrock_model(client, US_PROFILE_ARN)[0] is True
+    assert validate_bedrock_model(client, ON_DEMAND_ARN)[0] is True
