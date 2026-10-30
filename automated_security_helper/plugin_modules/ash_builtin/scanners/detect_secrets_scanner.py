@@ -338,6 +338,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     # checks it again, so a verification filter added afterwards does not run.
     _verification_permitted: bool = PrivateAttr(default=False)
 
+    # ``id()`` of each ``filters_used`` entry the operator's own configuration
+    # holds, as the settings stand after the baseline's filters were added
+    # beside them and the trust rules ran. The scan matches an operator entry's
+    # exclude patterns against the scan root, where the operator wrote them, and
+    # the baseline's against the baseline's own anchor (_baseline_anchor).
+    _operator_filter_ids: Set[int] = PrivateAttr(default_factory=set)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = DetectSecretsScannerConfig()
@@ -998,6 +1005,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 if id(item) in config_filter_ids
             },
         )
+        # The operator's entries that survived both rules, by identity (the
+        # rules rebuild the list but keep the objects); the scan reads this to
+        # match each exclude pattern where its author wrote it.
+        self._operator_filter_ids = {
+            id(item)
+            for item in self.config.options.scan_settings.filters_used
+            if id(item) in config_filter_ids
+        }
 
         # Skipped when the library is absent: the plugin list has to be read out of
         # detect-secrets itself, and there is no scan to configure for a scanner that
@@ -1573,6 +1588,38 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         )
         return patterns
 
+    def _exclude_patterns_by_author(
+        self, values: Tuple[str, ...] = ()
+    ) -> Tuple[List[re.Pattern], List[re.Pattern]]:
+        """The compiled ``should_exclude_file`` patterns, the operator's apart from the baseline's.
+
+        Each pattern is matched against a path relative to the directory its
+        author wrote it for: the operator's (the ``filters_used`` entries of the
+        operator's own configuration, ``_operator_filter_ids``) against the scan
+        root, the baseline's against the baseline's anchor. Matched as one set
+        against the baseline's anchor, an operator's ``^tests/`` stopped matching
+        under a re-anchored monorepo baseline (``service/tests/x.py``), and the
+        files it excluded were scanned with no warning. An entry not recorded as
+        the operator's is read as the baseline's, which is the one-anchor
+        behavior for a scanner whose settings were set after it was configured.
+
+        Returns:
+            ``(operator_patterns, baseline_patterns)``.
+        """
+        entries = list(self.config.options.scan_settings.filters_used)
+        own = [item for item in entries if id(item) in self._operator_filter_ids]
+        others = [item for item in entries if id(item) not in self._operator_filter_ids]
+
+        def _dump(items: List[Any]) -> Dict[str, Any]:
+            return {
+                "filters_used": [item.model_dump(exclude_none=True) for item in items]
+            }
+
+        return (
+            self._get_baseline_exclude_patterns(_dump(own), values),
+            self._get_baseline_exclude_patterns(_dump(others), values),
+        )
+
     @staticmethod
     def _root_relative(path: str, root: Optional[Path]) -> str:
         """``path`` relative to ``root``, ``/``-separated, as a baseline names a file.
@@ -2089,10 +2136,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         link keys the same way the scan set does. A converted-files scan keeps
         the work directory: the baseline's paths name source files, and the
         converted copies are keyed under the work directory as before.
+
+        Only a baseline the scan HAS is anchored: a chosen file that turned out
+        malformed left ``_baseline_real`` set but no document, and the anchor
+        still moved to the file's directory, where it met no baseline path at
+        all and moved the operator's own exclude patterns (see ``scan``).
         """
         if (
             target_type != "source"
             or self._baseline_real is None
+            or self._baseline_document is None
             or self._baseline_from_option
         ):
             return scan_root
@@ -2455,24 +2508,24 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # file I/O and entropy calculations on excluded files, which is
             # critical for performance on large repos (e.g. 400+ JSON test files).
             #
-            # Matched against each file's path relative to the scan root, the
-            # form the patterns were written for (_root_relative). The filter is
-            # then left out of the settings the worker gets: detect-secrets
-            # applies it to the absolute path it is handed, where an anchored
-            # pattern matched nothing and an unanchored one that matched a
-            # directory above the checkout matched every file, and a pattern
-            # written as one string was read as one pattern per character. The
-            # files it would exclude are already gone from the scan set here.
+            # Matched against each file's path relative to the directory its
+            # author wrote it for (_root_relative): the operator's patterns
+            # against the scan root, the baseline's against the baseline's
+            # anchor (_exclude_patterns_by_author). The filter is then left out
+            # of the settings the worker gets: detect-secrets applies it to the
+            # absolute path it is handed, where an anchored pattern matched
+            # nothing and an unanchored one that matched a directory above the
+            # checkout matched every file, and a pattern written as one string
+            # was read as one pattern per character. The files it would exclude
+            # are already gone from the scan set here.
             #
             # Bounded by this scanner's scan_timeout, the limit the worker's
             # own run gets: the patterns are the baseline's, and one that
             # backtracks heavily held the scan here for as long as it liked,
             # before the worker's limit ever started.
             scan_timeout = self.config.options.scan_timeout
-            exclude_patterns = self._get_baseline_exclude_patterns(
-                scan_settings_dict, values
-            )
-            if exclude_patterns:
+            own_patterns, baseline_patterns = self._exclude_patterns_by_author(values)
+            if own_patterns or baseline_patterns:
                 pre_filter_count = len(scannable)
                 pattern_source = (
                     "the should_exclude_file filter of scan_settings.filters_used"
@@ -2484,7 +2537,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
                 scannable = self._apply_file_exclusions(
                     scannable,
-                    exclude_patterns,
+                    own_patterns,
+                    scan_root,
+                    timeout=scan_timeout,
+                    source=pattern_source,
+                )
+                scannable = self._apply_file_exclusions(
+                    scannable,
+                    baseline_patterns,
                     baseline_anchor,
                     timeout=scan_timeout,
                     source=pattern_source,

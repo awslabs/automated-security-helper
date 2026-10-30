@@ -44,9 +44,12 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+    SHOULD_EXCLUDE_FILE_FILTER,
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
     DetectSecretsScannerConfigOptions,
+    DetectSecretsScanSettings,
+    DetectSecretsScanSettingsFiltersUsed,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
@@ -477,6 +480,201 @@ def test_a_baseline_in_an_enclosing_checkout_is_read_relative_to_its_own_directo
     assert any(Path(path).name == "settings.py" for path in seen["paths"]), seen[
         "paths"
     ]
+
+
+def _monorepo_service(tmp_path: Path, shared_text: str) -> tuple[Path, PluginContext]:
+    """``repo/service`` under a git-shaped ``repo``, its ``.secrets.baseline`` a link
+    to ``repo/.secrets.baseline`` holding ``shared_text``; three files: ``settings.py``
+    (the kept secret), ``tests/fixture.py`` and ``docs/notes.py`` (new secrets)."""
+    checkout = tmp_path / "repo"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    service = checkout / "service"
+    (service / "tests").mkdir(parents=True)
+    (service / "docs").mkdir()
+    (service / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
+    (service / "tests" / "fixture.py").write_text(
+        f"KEY = '{NEW_SECRET}'\n", encoding="utf-8"
+    )
+    (service / "docs" / "notes.py").write_text(
+        f"KEY = '{NEW_SECRET}'\n", encoding="utf-8"
+    )
+    (checkout / ".secrets.baseline").write_text(shared_text, encoding="utf-8")
+    try:
+        (service / ".secrets.baseline").symlink_to(Path("..") / ".secrets.baseline")
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlinks unavailable on this platform: {exc}")
+    context = PluginContext(
+        source_dir=service,
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    context.output_dir.mkdir(parents=True)
+    return service, context
+
+
+def _shared_baseline_excluding(pattern: str) -> dict:
+    """The checkout's baseline: ``service/settings.py`` known, one exclude pattern."""
+    document = _baseline(
+        {
+            "service/settings.py": [
+                {
+                    "type": SECRET_TYPE,
+                    "hashed_secret": _hash(KEPT_SECRET),
+                    "line_number": 1,
+                    "is_secret": False,
+                }
+            ]
+        }
+    )
+    document["filters_used"] = [
+        {"path": SHOULD_EXCLUDE_FILE_FILTER, "pattern": [pattern]}
+    ]
+    return document
+
+
+def _operator_excluding(pattern: str, **settings) -> DetectSecretsScannerConfig:
+    """The operator's own config: one ``should_exclude_file`` pattern, written
+    relative to the scanned directory, plus any other scan setting."""
+    return DetectSecretsScannerConfig(
+        options=DetectSecretsScannerConfigOptions(
+            scan_settings=DetectSecretsScanSettings(
+                filters_used=[
+                    DetectSecretsScanSettingsFiltersUsed(
+                        path=SHOULD_EXCLUDE_FILE_FILTER, pattern=[pattern]
+                    )
+                ],
+                **settings,
+            )
+        )
+    )
+
+
+def _recording_known_worker(scanner, monkeypatch) -> dict:
+    """A worker that records the scan paths and returns the kept secret in
+    ``settings.py`` (so the known-entry rule is exercised too)."""
+    from detect_secrets.core.potential_secret import PotentialSecret
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        _detect_secrets_api,
+    )
+
+    seen: dict = {}
+
+    def scanned(self, *, baseline, scan_paths, scan_settings_dict, **kwargs):
+        seen["paths"] = list(scan_paths)
+        collection_cls, _, _ = _detect_secrets_api()
+        collection = collection_cls()
+        collection.root = self._secrets_collection.root
+        collection["settings.py"].add(
+            PotentialSecret(
+                SECRET_TYPE, "settings.py", secret=KEPT_SECRET, line_number=1
+            )
+        )
+        return collection
+
+    monkeypatch.setattr(type(scanner), "_scan_in_worker", scanned)
+    return seen
+
+
+def _relative(seen: dict, root: Path) -> list[str]:
+    return sorted(Path(path).relative_to(root).as_posix() for path in seen["paths"])
+
+
+def test_the_operators_own_exclude_patterns_keep_the_scan_root_under_a_re_anchored_baseline(
+    tmp_path, monkeypatch
+):
+    """The monorepo above, with the operator's own ``^tests/`` and the
+    baseline's ``^service/docs/``. The operator's ``should_exclude_file`` entry
+    takes precedence over the baseline's for that path (the baseline's entry is
+    not loaded beside it; test_detect_secrets_operator_filters_keep_precedence),
+    so the one pattern in play is the operator's, written relative to the
+    scanned directory, and it is matched there. Matched against the checkout,
+    the anchor of the baseline's keys, ``^tests/`` was tested against
+    ``service/tests/fixture.py``, stopped matching, and that file was scanned
+    with no warning. ``docs/notes.py`` stays scanned: the baseline's pattern
+    yielded to the operator's entry by the precedence rule, not by the anchor."""
+    monkeypatch.chdir(tmp_path)
+    service, context = _monorepo_service(
+        tmp_path, json.dumps(_shared_baseline_excluding("^service/docs/"))
+    )
+    scanner = DetectSecretsScanner(
+        context=context, config=_operator_excluding("^tests/")
+    )
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_document is not None
+    assert [
+        item.pattern
+        for item in scanner.config.options.scan_settings.filters_used
+        if item.path == SHOULD_EXCLUDE_FILE_FILTER
+    ] == [["^tests/"]], "the operator's exclude entry should be the only one in play"
+    seen = _recording_known_worker(scanner, monkeypatch)
+
+    report = scanner.scan(target=service, target_type="source")
+
+    assert _relative(seen, service) == ["docs/notes.py", "settings.py"], seen
+    # The baseline's key is still read relative to the checkout: known, marked.
+    assert _findings(report) == [("settings.py", 1)]
+    assert len(_suppressed(report)["settings.py"]) == 1
+
+
+def test_an_operators_pinned_scan_settings_keep_their_patterns_at_the_scan_root(
+    tmp_path, monkeypatch
+):
+    """The operator set ``scan_settings.version``, so the baseline's own filters
+    are never loaded (the settings gate) and every pattern in play is the
+    operator's. The anchor still moves for the baseline's KEYS, which the
+    baseline wrote from the checkout; the operator's ``^tests/`` must not move
+    with it. It did: ``tests/fixture.py`` was scanned, and ``docs/notes.py``
+    stays scanned because the baseline's pattern was never loaded."""
+    monkeypatch.chdir(tmp_path)
+    service, context = _monorepo_service(
+        tmp_path, json.dumps(_shared_baseline_excluding("^service/docs/"))
+    )
+    scanner = DetectSecretsScanner(
+        context=context, config=_operator_excluding("^tests/", version="1.5.0")
+    )
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_document is not None
+    assert not any(
+        item.pattern == ["^service/docs/"]
+        for item in scanner.config.options.scan_settings.filters_used
+    ), "the baseline's filters were loaded past the operator's pinned settings"
+    seen = _recording_known_worker(scanner, monkeypatch)
+
+    report = scanner.scan(target=service, target_type="source")
+
+    assert _relative(seen, service) == ["docs/notes.py", "settings.py"], seen
+    assert _findings(report) == [("settings.py", 1)]
+    assert len(_suppressed(report)["settings.py"]) == 1
+
+
+def test_a_malformed_linked_baseline_moves_no_anchor(tmp_path, monkeypatch):
+    """The same link, to a file that is not a baseline. The chosen path stays
+    recorded (``_baseline_real``) but there is no document, so no baseline path
+    is in play; the anchor used to move to the file's directory anyway, and the
+    operator's ``^tests/`` was matched there. Nothing is anchored without a
+    document, and the operator's pattern excludes from the scanned directory."""
+    monkeypatch.chdir(tmp_path)
+    service, context = _monorepo_service(tmp_path, json.dumps([]))
+    scanner = DetectSecretsScanner(
+        context=context, config=_operator_excluding("^tests/")
+    )
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_real is not None
+    assert scanner._baseline_document is None
+
+    assert scanner._baseline_anchor(service, "source") == service
+
+    seen = _recording_known_worker(scanner, monkeypatch)
+    scanner.scan(target=service, target_type="source")
+    names = _relative(seen, service)
+    # The operator's pattern excluded from the scanned directory; the baseline's
+    # (never loaded) excluded nothing. Whether the link itself is in the scan set
+    # is the scan set's call, not this test's.
+    assert "tests/fixture.py" not in names, names
+    assert {"docs/notes.py", "settings.py"} <= set(names), names
 
 
 def test_an_operator_baseline_beside_the_tree_is_read_relative_to_the_scanned_directory(
