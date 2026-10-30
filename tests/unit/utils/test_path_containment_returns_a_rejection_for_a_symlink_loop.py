@@ -67,6 +67,20 @@ def test_a_root_through_a_symlink_loop_is_rejected_not_raised(tmp_path):
     assert "root" in result.error.message
 
 
+def test_a_root_that_is_itself_the_symlink_loop_is_rejected(tmp_path):
+    """With the candidate ``.`` the joined path IS the root, so the loop is the
+    last component; a probe that followed every component but the last read the
+    link itself and accepted it on 3.13, where 3.10-3.12 refused."""
+    loop = _loop(tmp_path)
+
+    result = validate_contained_path(".", loop)
+
+    assert not result.ok
+    assert result.error is not None
+    assert result.error.violation is PathContainmentViolation.SYMLINK
+    assert "root" in result.error.message
+
+
 def test_control_a_plain_candidate_is_still_accepted(tmp_path):
     root = tmp_path / "ws"
     (root / "project").mkdir(parents=True)
