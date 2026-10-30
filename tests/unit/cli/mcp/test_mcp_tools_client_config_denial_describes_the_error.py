@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import logging
 import zipfile
 from pathlib import Path
 from typing import Any, Dict
@@ -80,7 +81,7 @@ def _a_validation_error_quoting(value: str) -> ValidationError:
     raise AssertionError("AshConfig accepted a string for global_settings")
 
 
-def test_a_check_that_raises_describes_the_error(monkeypatch) -> None:
+def test_a_check_that_raises_describes_the_error(monkeypatch, caplog) -> None:
     error = _a_validation_error_quoting(QUOTED_INPUT)
     source = _upload({"ash.yaml": CONFIG})
 
@@ -89,29 +90,40 @@ def test_a_check_that_raises_describes_the_error(monkeypatch) -> None:
 
     monkeypatch.setattr(client_config_policy, "apply_client_config_rules", broken)
 
-    response = mcp_tools._client_config_denial(
-        str(source / "ash.yaml"), source, REMOTE, "scan_directory"
-    )
+    with caplog.at_level(logging.DEBUG):
+        response = mcp_tools._client_config_denial(
+            str(source / "ash.yaml"), source, REMOTE, "scan_directory"
+        )
 
     assert response is not None and response["success"] is False, response
     assert response["error_type"] == "scan_start_failure", response
     assert "ValidationError" in response["error"], response
     assert QUOTED_INPUT not in response["error"], response
+    # The log line the module docstring names: described, never quoting.
+    assert QUOTED_INPUT not in caplog.text, caplog.text
 
 
-def test_rules_that_cannot_be_read_describe_the_error(monkeypatch) -> None:
+def test_rules_that_cannot_be_read_describe_the_error(monkeypatch, caplog) -> None:
     error = _a_validation_error_quoting(QUOTED_INPUT)
     source = _upload({"ash.yaml": CONFIG})
 
-    def unreadable(session_id: Any, **kwargs: Any) -> Any:
+    # Whatever the call's shape: a stub that took one positional argument raised
+    # its own TypeError when the caller passed two, and the response then
+    # described that error, without the quoted input, so the test passed
+    # without reaching the arm it exists for.
+    def unreadable(*args: Any, **kwargs: Any) -> Any:
         raise error
 
     monkeypatch.setattr(mcp_tools, "_session_client_rules", unreadable)
 
-    response = mcp_tools._client_config_denial(
-        str(source / "ash.yaml"), source, REMOTE, "scan_directory"
-    )
+    with caplog.at_level(logging.DEBUG):
+        response = mcp_tools._client_config_denial(
+            str(source / "ash.yaml"), source, REMOTE, "scan_directory"
+        )
 
     assert response is not None and response["success"] is False, response
     assert response["error_type"] == mcp_tools.CONFIG_POLICY_UNREADABLE, response
+    # The arm was reached: the error it describes is the stand-in's own kind.
+    assert "ValidationError" in response["error"], response
     assert QUOTED_INPUT not in response["error"], response
+    assert QUOTED_INPUT not in caplog.text, caplog.text

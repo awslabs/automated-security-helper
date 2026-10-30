@@ -99,6 +99,32 @@ def test_the_refusal_is_a_registry_error_and_a_runtime_error() -> None:
     assert "select_profile" in str(refused.value)
 
 
+def test_a_workspace_that_cannot_be_written_is_the_same_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second cause the module docstring names: the profile stays registered
+    but the session's workspace cannot be written again. The writer's OSError is
+    wrapped into the same BoundProfileUnavailableError (a ProfileRegistryError
+    and a RuntimeError), naming the cause, so every caller's refusal arm catches
+    it instead of the catch-all reporting an internal error."""
+    from automated_security_helper.cli.mcp import profile_registry
+
+    _bind_then_remove_the_copy(SESSION)
+
+    def cannot_write(sid, config, patched):
+        raise PermissionError(13, "Permission denied", "config")
+
+    monkeypatch.setattr(profile_registry, "materialize_session_binding", cannot_write)
+
+    with pytest.raises(BoundProfileUnavailableError) as refused:
+        resolve_session_config_path(SESSION)
+
+    assert isinstance(refused.value, ProfileRegistryError)
+    assert isinstance(refused.value, RuntimeError)
+    assert "could not be written" in str(refused.value), str(refused.value)
+    assert "Permission denied" in str(refused.value), str(refused.value)
+
+
 def test_the_scan_runner_records_the_refusal_instead_of_leaving_the_entry_pending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

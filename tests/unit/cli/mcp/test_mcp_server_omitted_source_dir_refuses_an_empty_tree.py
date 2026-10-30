@@ -30,7 +30,11 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _clean_session_registry():
+def _clean_session_registry(monkeypatch):
+    # A header-less ctx is the stdio session only while no HTTP transport is
+    # set in the environment; with one set, the blank source_dir case is refused
+    # before the branch it pins, for a reason that is not this file's.
+    monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     saved = dict(sd._SESSION_SOURCE_DIRS)
     sd._SESSION_SOURCE_DIRS.clear()
     yield

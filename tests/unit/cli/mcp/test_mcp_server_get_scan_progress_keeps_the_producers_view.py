@@ -82,7 +82,12 @@ def _producer_without_counts(scan_id: str) -> Dict[str, Any]:
     return view
 
 
-def _call(tmp_path: Path, monkeypatch, producer=_producer) -> Dict[str, Any]:
+def _call(
+    tmp_path: Path, monkeypatch, producer=_producer, *, link: bool = True
+) -> Dict[str, Any]:
+    """Run get_scan_progress over one results file; with ``link``, also a
+    scanner directory that is a link elsewhere (a privilege on Windows, so the
+    cases that need no link ask for none and run there too)."""
     from automated_security_helper.cli import mcp_server
 
     output = tmp_path / "project" / ".ash" / "ash_output"
@@ -92,12 +97,13 @@ def _call(tmp_path: Path, monkeypatch, producer=_producer) -> Dict[str, Any]:
     )
     bandit = {"severity_counts": {"high": 1, "off-ladder": 3}, "status": "PASSED"}
     _write(output / "scanners" / "bandit" / "source" / "ASH.ScanResults.json", bandit)
-    elsewhere = tmp_path / "elsewhere"
-    _write(
-        elsewhere / "source" / "ASH.ScanResults.json",
-        {"severity_counts": {"critical": 9}, "status": "FAILED"},
-    )
-    os.symlink(elsewhere, output / "scanners" / "linked", target_is_directory=True)
+    if link:
+        elsewhere = tmp_path / "elsewhere"
+        _write(
+            elsewhere / "source" / "ASH.ScanResults.json",
+            {"severity_counts": {"critical": 9}, "status": "FAILED"},
+        )
+        os.symlink(elsewhere, output / "scanners" / "linked", target_is_directory=True)
 
     monkeypatch.setattr(
         mcp_server,
@@ -115,11 +121,9 @@ def _call(tmp_path: Path, monkeypatch, producer=_producer) -> Dict[str, Any]:
     return result
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="directory links need a privilege on Windows"
-)
 def test_the_producers_counts_and_scanners_are_kept(tmp_path, monkeypatch) -> None:
-    result = _call(tmp_path, monkeypatch)
+    # No link: this case reads the producer's view only, so it runs on Windows too.
+    result = _call(tmp_path, monkeypatch, link=False)
 
     assert result["severity_counts"]["unknown"] == 2, result["severity_counts"]
     assert result["severity_counts"]["high"] == 1
