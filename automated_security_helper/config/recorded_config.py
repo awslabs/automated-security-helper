@@ -451,13 +451,21 @@ def take_own_values(
             _set_value(record, segments, value)
             # When the operator's own value was read from the environment, the
             # record keeps its reference too (config_validator.record_of_config).
+            # The value is the whole field, so every reference written inside
+            # it is carried: a list field written entry by entry has one at each
+            # entry's index, and matching the field's path alone carried none.
+            field_path = [_normalized(segment) for segment in segments]
             for rewrite in getattr(own, "_written_references", None) or []:
-                if rewrite.kind == "value" and [
-                    _normalized(str(segment)) for segment in rewrite.path
-                ] == [_normalized(segment) for segment in segments]:
+                written_path = [_normalized(str(segment)) for segment in rewrite.path]
+                if (
+                    rewrite.kind == "value"
+                    and written_path[: len(field_path)] == field_path
+                ):
                     record._written_references = [
                         *(getattr(record, "_written_references", None) or []),
-                        rewrite._replace(path=tuple(segments)),
+                        rewrite._replace(
+                            path=(*segments, *rewrite.path[len(segments) :])
+                        ),
                     ]
     if missing and refuse_unless_supplied is not None:
         named = "; ".join(
