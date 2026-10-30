@@ -1296,6 +1296,65 @@ def test_a_thread_run_of_a_non_callable_stays_unread(planted_executor_contracts)
     assert [type(v) for v in literal.response.variants] == [reader.UnreadV]
 
 
+PLANTED_SELF_READING_TOOLS = """
+class Boom(RuntimeError):
+    error_type = "boom"
+
+    def __init__(self, detail):
+        super().__init__(detail)
+        self.detail = detail
+
+
+def helper(flag):
+    try:
+        raise Boom("first")
+    except Boom as e:
+        detail = e.detail if flag else "second"
+        raise Boom(detail)
+
+
+def run(flag):
+    try:
+        helper(flag)
+    except Boom as e:
+        return {"success": False, "error_type": e.error_type, "detail": e.detail}
+    return {"success": True}
+"""
+
+
+@pytest.mark.unit
+def test_a_construction_that_reads_a_caught_exception_of_its_own_class_ends(
+    tmp_path: Path,
+):
+    """``raise Boom(detail)`` under ``except Boom as e`` with ``detail`` read from
+    ``e``: reading the caught Boom reads its constructions, one of which reads a
+    caught Boom, which reads its constructions again. Each construction's argument
+    is read in a scope of its own, so the name guard never sees the repeat; the
+    class-level guard does, and the inner read is unread while the outer one
+    stands. Before the guard this read ended in a RecursionError, which made every
+    tool of a package with such a handler unreadable."""
+    package = _plant_server(
+        tmp_path,
+        """
+        from automated_security_helper.cli.tools import run
+
+        mcp = object()
+
+
+        @mcp.tool()
+        def planted(flag):
+            return run(flag)
+        """,
+    )
+    (package / "cli" / "tools.py").write_text(
+        textwrap.dedent(PLANTED_SELF_READING_TOOLS).lstrip("\n"), encoding="utf-8"
+    )
+    planted = _reader().tool_contracts(package)["planted"]
+    assert planted.error_types == ("boom",)
+    assert planted.error_types_unread == ()
+    assert {"success", "error_type", "detail"} <= set(planted.response.keys())
+
+
 @pytest.mark.unit
 def test_the_runners_the_reader_follows_are_defined_by_the_server():
     reader = _reader()
