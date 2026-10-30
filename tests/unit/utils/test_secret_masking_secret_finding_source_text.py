@@ -233,6 +233,83 @@ class TestASecretFindingsOwnSourceText:
         assert root.markdown == "Finding: " + HARDCODED + "'" + masked + "' in a module"
         assert root.arguments == [masked]
 
+    def test_every_leaf_of_the_resource_is_masked_whatever_its_key(self):
+        """The resource is the finding's own excerpt: an embedded document's
+        lowercase ``uri`` (an OpenAPI body) and a number are leaves of it too,
+        not identifiers worth keeping."""
+        resource = {
+            "Type": "AWS::ApiGateway::RestApi",
+            "Properties": {
+                "Body": {
+                    "paths": {"/": {"uri": "https://user:" + PLAINTEXT + "@host"}}
+                },
+                "Port": 5432,
+                "Enabled": True,
+            },
+        }
+        model = _results(
+            _result(
+                "AwsSolutions-APIG-1",
+                "template.yaml",
+                3,
+                "The API password must not be a plaintext string.",
+                "cdk-nag",
+                extra={"properties": {"cfn_resource": resource}},
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        masked = getattr(_first(model).properties, "cfn_resource")
+        assert masked["Properties"]["Body"]["paths"]["/"]["uri"] == MASKED_LINE
+        assert masked["Properties"]["Port"] == MASKED_LINE
+        assert masked["Properties"]["Enabled"] is True
+        assert PLAINTEXT not in json.dumps(masked)
+
+    def test_a_fenced_block_with_no_closing_fence_is_masked_to_the_end(self):
+        """A message cut short after its opening fence is still a code block to
+        the reports."""
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected\n\n```python\n" + ASSIGN_LINE,
+                "detect-secrets",
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        text = _first(model).message.root.text
+        assert VALUE not in text
+        assert text == (
+            "Secret of type 'Keyword' detected\n\n```"
+            + MASKED_LINE
+            + "\n"
+            + MASKED_LINE
+            + "\n"
+        )
+
+    def test_a_tilde_fenced_block_in_the_message_is_masked(self):
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected\n\n~~~\n" + ASSIGN_LINE + "~~~",
+                "detect-secrets",
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        text = _first(model).message.root.text
+        assert VALUE not in text
+        assert (
+            text == "Secret of type 'Keyword' detected\n\n~~~\n" + MASKED_LINE + "\n~~~"
+        )
+
 
 class TestAnOverlappingFindingsSourceText:
     def _secret(self):
@@ -305,3 +382,43 @@ class TestAnOverlappingFindingsSourceText:
         replacement = _replacement(neighbor)
         assert replacement.deletedRegion.snippet.text == OTHER_LINE
         assert replacement.insertedContent.text == "import sys\n"
+
+    def test_a_fenced_block_of_a_finding_at_a_reported_line_is_masked_whole(self):
+        """A detect-secrets finding exposes no value, so the line it reports is
+        masked by position: a neighbor's fenced block quoting that line has no
+        line numbers to place it by and is masked whole."""
+        model = _results(
+            self._secret(),
+            _result(
+                "B404",
+                "app.py",
+                2,
+                "import\n\n```python\n" + ASSIGN_LINE + "```",
+                "bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        text = model.sarif.runs[0].results[1].message.root.text
+        assert VALUE not in text
+        assert text.startswith("import\n\n```")
+        assert MASKED_LINE in text
+
+    def test_a_fenced_block_away_from_every_reported_line_is_kept(self):
+        """Control."""
+        model = _results(
+            self._secret(),
+            _result(
+                "B404",
+                "app.py",
+                9,
+                "import\n\n```python\n" + OTHER_LINE + "```",
+                "bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        text = model.sarif.runs[0].results[1].message.root.text
+        assert text == "import\n\n```python\n" + OTHER_LINE + "```"

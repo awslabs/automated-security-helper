@@ -1429,6 +1429,25 @@ def _line_spans(physical: Any) -> List[Tuple[Optional[int], Optional[int]]]:
     return spans
 
 
+def _overlaps_a_secret(result: Any, index: _SecretIndex) -> bool:
+    """Whether a location of ``result`` lies on a line a secret finding reports."""
+    for physical in _physical_locations_of(result, related=True):
+        placed = index.lines_for(
+            getattr(getattr(physical, "artifactLocation", None), "uri", None)
+        )
+        if placed is None:
+            continue
+        whole, lines = placed
+        if whole:
+            return True
+        for first, last in _line_spans(physical):
+            if first is None or lines.overlaps(
+                first, last if last is not None else first
+            ):
+                return True
+    return False
+
+
 def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
     """The values of the secret findings whose location ``result`` overlaps."""
     found: Set[str] = set()
@@ -1774,12 +1793,21 @@ def _mask_text_whole(text: str) -> str:
     return _mask_lines(text, None, True, _LineRanges())
 
 
-def _mask_source_whole(node: Any, seen: Set[int], parent: Optional[str] = None) -> Any:
-    """Mask every line of every string in ``node`` in place; returns a string node's replacement."""
+def _mask_source_whole(node: Any, seen: Set[int]) -> Any:
+    """Mask every leaf of ``node`` in place; returns a leaf node's replacement.
+
+    ``node`` is a secret finding's own excerpt of the secret (a ``cfn_resource``
+    with every property value, a ``snippet``), so nothing in it is an identifier
+    worth keeping: every string, under whatever key, and every number (a port, a
+    PIN) is replaced. Only an enum member, which a model refuses any other value
+    for, is left alone.
+    """
     if isinstance(node, Enum):
         return node
     if isinstance(node, str):
         return _mask_text_whole(node)
+    if isinstance(node, (int, float)) and not isinstance(node, bool):
+        return MASKED_LINE
     if id(node) in seen:
         return node
     if isinstance(node, BaseModel):
@@ -1787,50 +1815,55 @@ def _mask_source_whole(node: Any, seen: Set[int], parent: Optional[str] = None) 
         names = list(type(node).model_fields)
         names.extend((node.__pydantic_extra__ or {}).keys())
         for name in names:
-            if _is_skipped_field(type(node), name):
+            if _is_enum_annotated(type(node), name):
                 continue
             value = getattr(node, name, None)
             if value is None:
                 continue
             masked = _mask_source_whole(value, seen)
-            if isinstance(value, str) and masked != value:
+            if masked is not value and not isinstance(value, (BaseModel, list, dict)):
                 setattr(node, name, masked)
         return node
     if isinstance(node, list):
         seen.add(id(node))
         for position, item in enumerate(node):
-            masked = _mask_source_whole(item, seen, parent)
-            if isinstance(item, str) and masked != item:
+            masked = _mask_source_whole(item, seen)
+            if masked is not item and not isinstance(item, (BaseModel, list, dict)):
                 node[position] = masked
         return node
     if isinstance(node, dict):
         seen.add(id(node))
         for key in list(node):
-            if isinstance(key, str) and _is_skipped_key(key, parent):
-                continue
             item = node[key]
-            masked = _mask_source_whole(
-                item, seen, key if isinstance(key, str) else None
-            )
-            if isinstance(item, str) and masked != item:
+            masked = _mask_source_whole(item, seen)
+            if masked is not item and not isinstance(item, (BaseModel, list, dict)):
                 node[key] = masked
         return node
     return node
 
 
+#: Markdown code fences, backticks and tildes.
+_CODE_FENCES = ("```", "~~~")
+
+
 def _mask_fenced_code(text: str) -> str:
-    """``text`` with every line inside a pair of triple-backtick fences masked.
+    """``text`` with every line inside a code fence masked.
 
     The flat model reads the first fenced block of a message as the finding's
-    code (``_extract_snippet_from_message``) and the HTML and text reports print
-    it, so a secret finding's fenced block is its snippet by another name.
+    code (``_extract_snippet_from_message`` splits on the backtick fence wherever
+    it stands) and the HTML and text reports print it, so a secret finding's
+    fenced block is its snippet by another name. The text after an opening fence
+    with no closing one (a message cut short) is masked to the end: it is code
+    the reports print as a block too.
     """
-    if "```" not in text:
-        return text
-    parts = text.split("```")
-    for position in range(1, len(parts) - 1, 2):
-        parts[position] = _mask_text_whole(parts[position])
-    return "```".join(parts)
+    for fence in _CODE_FENCES:
+        if fence not in text:
+            continue
+        parts = text.split(fence)
+        for position in range(1, len(parts), 2):
+            parts[position] = _mask_text_whole(parts[position])
+        text = fence.join(parts)
+    return text
 
 
 def _extra_of(node: Any) -> Dict[str, Any]:
@@ -1882,7 +1915,7 @@ def _mask_own_source_text(result: Any, index: _SecretIndex) -> None:
             if value is None:
                 continue
             masked = _mask_source_whole(value, set())
-            if isinstance(value, str) and masked != value:
+            if masked is not value and not isinstance(value, (list, dict)):
                 _set_extra(properties, name, masked)
     for _, replacement in _replacements_of(result):
         _mask_region(getattr(replacement, "deletedRegion", None), whole_file)
@@ -2032,6 +2065,19 @@ def _mask_tree(
                         _mask_lines(snippet, first, whole, lines),
                     )
                     break
+            # A fenced code block in the message of a finding that overlaps a
+            # secret finding's lines is that finding's excerpt of the same
+            # lines, with no line numbers to place it by: masked whole, as its
+            # properties.snippet and fixes are at those lines.
+            if _overlaps_a_secret(node, index):
+                message = getattr(node, "message", None)
+                root: Any = getattr(message, "root", message)
+                for name in ("text", "markdown"):
+                    text = getattr(root, name, None) if root is not None else None
+                    if isinstance(text, str):
+                        masked = _mask_fenced_code(text)
+                        if masked != text:
+                            setattr(root, name, masked)
         elif ("tool" in fields or "driver" in fields) and "results" in fields:
             # A run (or an external property set): its tool components are rule
             # metadata and are skipped (_METADATA_FIELDS), but the scanner
