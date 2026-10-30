@@ -1954,6 +1954,12 @@ def _project_config_with_policy(
     return config
 
 
+#: Section bodies that cannot carry an ``enabled`` field: the resolver's
+#: ``_section_is_on`` reads every one of them as off (a bare boolean is that
+#: boolean), so a policy that requires the scanner meets them here.
+_NO_SECTION_BODY = (bool, str, bytes, int, float, list, tuple, set, frozenset)
+
+
 def _enable_policy_scanners(config: Any, names: Iterable[str]) -> None:
     """Switch on every scanner ``workspace.additional_scanners`` requires.
 
@@ -2042,7 +2048,12 @@ def _enable_policy_scanners(config: Any, names: Iterable[str]) -> None:
             continue
         for target in targets:
             entry = getattr(segment, target, None)
-            if entry is None:
+            if entry is None or isinstance(entry, _NO_SECTION_BODY):
+                # No body, a bare boolean (``acme: false``), another scalar or a
+                # list: nothing in it can carry ``enabled``, which is why the
+                # resolver read the section as off and listed the scanner as
+                # policy-added. Replaced with a body that can; assigning
+                # ``.enabled`` on a bool raised AttributeError here.
                 setattr(segment, target, {"name": name, "enabled": True})
             elif isinstance(entry, dict):
                 entry["enabled"] = True

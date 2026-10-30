@@ -189,6 +189,30 @@ def test_control_one_disabled_section_is_switched_on_by_the_policy():
     assert config.get_plugin_config("scanner", SNYK_CODE)["enabled"] is True
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(False, id="bare-false"),
+        pytest.param("off", id="string"),
+        pytest.param([], id="list"),
+    ],
+)
+def test_a_section_with_no_usable_body_is_replaced_when_the_policy_requires_it(
+    body,
+):
+    """``acme: false`` (or a string, or a list) is read as off by the resolver, so
+    the plan lists ``acme`` as policy-added; at scan time the section has to be
+    switched on. Red at the base: the body is not a mapping or a model, and
+    ``entry.enabled = True`` raised AttributeError on it."""
+    config = _config({"acme": body})
+
+    _enable_policy_scanners(config, ("acme",))
+
+    section = config.get_plugin_config("scanner", "acme")
+    assert section["enabled"] is True
+    assert section["name"] == "acme"
+
+
 @pytest.mark.parametrize("sections", TWINS)
 def test_a_twinned_scanner_is_listed_only_when_the_lookup_reads_it_enabled(sections):
     """With no policy the scan runs the section the lookup reads, whichever of the
