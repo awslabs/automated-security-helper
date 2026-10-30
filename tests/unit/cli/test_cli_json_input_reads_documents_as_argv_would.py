@@ -102,6 +102,25 @@ def test_a_file_uri_with_a_host_is_refused(tmp_path):
     assert "share.example" in _flat(result.output)
 
 
+@pytest.mark.parametrize(
+    ("uri", "path"),
+    [
+        ("file://C:\\dir\\pa%20rams.json", "C:\\dir\\pa rams.json"),
+        ("file://c:/dir/params.json", "c:/dir/params.json"),
+    ],
+    ids=["backslashes", "slashes"],
+)
+def test_a_file_uri_with_a_drive_letter_names_the_drive_not_a_host(uri, path):
+    """`file://C:\\dir\\params.json`, the two-slash spelling a Windows path is
+    pasted into, puts the drive letter where a URI's host goes (with backslashes
+    the whole path, since no "/" ends the authority); it was refused as a remote
+    host, and every Windows caller of the file:// form was turned away. The
+    drive letter starts the path, which is read as written, percent-decoded."""
+    from automated_security_helper.cli.json_input import _document_path
+
+    assert _document_path(uri, None) == path
+
+
 def test_a_document_nested_too_deeply_is_refused_not_a_traceback(tmp_path, monkeypatch):
     """A document the parser cannot follow is refused like one that does not
     parse. Whether a given depth raises RecursionError depends on the interpreter

@@ -48,7 +48,7 @@ import warnings
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
 import typer
@@ -307,12 +307,21 @@ def _document_path(source: str, ctx: Context) -> str:
 
     The URI's path is percent-decoded and, on Windows, its ``/C:/...`` form made
     a drive path (``url2pathname``), so a URI a tool wrote is read as the file it
-    names, not as the literal text after the prefix. A host other than the local
-    one is refused: this command reads local files only.
+    names, not as the literal text after the prefix. A drive letter in the host
+    field (``file://C:\\dir\\params.json``, the two-slash spelling) is the start
+    of the path. A host other than the local one is refused: this command reads
+    local files only.
     """
     if not source.startswith(_FILE_URI_PREFIX):
         return source
     parts = urlsplit(source)
+    if re.match(r"[A-Za-z]:(?:[\\/]|$)", parts.netloc):
+        # `file://C:\dir\params.json` or `file://C:/dir/params.json`, the two-slash
+        # spelling a Windows path is pasted into: the host field holds the drive
+        # letter and, with backslashes (no "/" ends the authority), the whole
+        # path. No host is spelled that way, so it is the path, percent-decoded
+        # and otherwise as written; url2pathname is for the `/C:/...` form.
+        return unquote(parts.netloc + parts.path)
     if parts.netloc not in ("", "localhost"):
         raise _refused(
             f"{CLI_JSON_INPUT_FLAG}: {source} names the host {parts.netloc}; a "
