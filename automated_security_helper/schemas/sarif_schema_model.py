@@ -2893,17 +2893,24 @@ def _detach_run_scoped_references(
 ) -> None:
     """Make a result copied out of *incoming* stand without that run's tables.
 
-    SARIF scopes three kinds of reference to the run that holds the result:
+    SARIF scopes several kinds of reference to the run that holds the result:
     ``artifactLocation.index`` (into ``run.artifacts``), ``logicalLocation.index``
     and ``threadFlowLocation.index`` (into ``run.logicalLocations`` and
-    ``run.threadFlowLocations``), and ``artifactLocation.uriBaseId`` (into
-    ``run.originalUriBaseIds``). The merge folds results into the aggregate's
-    first run, which has its own tables, so every such reference in the copy
-    pointed into the wrong run: a result naming its file by index alone named
-    whatever the aggregate held at that position, and ``SRCROOT`` meant the
-    aggregate's root, not the scanned target's. ``ruleIndex`` was already dropped
-    for the same reason; the rest is handled here, on the dumped copy, before it
-    is rebuilt as a ``Result``.
+    ``run.threadFlowLocations``), ``artifactLocation.uriBaseId`` (into
+    ``run.originalUriBaseIds``), a taxon reference's indices (into the tool's
+    extensions and their ``taxa``), and the indices of a web request, a web
+    response and an address (into ``run.webRequests``, ``run.webResponses`` and
+    ``run.addresses``). The merge folds results into the aggregate's first run,
+    which has its own tables, so every such reference in the copy pointed into
+    the wrong run: a result naming its file by index alone named whatever the
+    aggregate held at that position, and ``SRCROOT`` meant the aggregate's root,
+    not the scanned target's. ``ruleIndex`` was already dropped for the same
+    reason; the rest is handled here, on the dumped copy, before it is rebuilt
+    as a ``Result``. The copy is walked whole, so the references under a fix,
+    an attachment, a stack, a graph, a provenance record or a suppression are
+    detached as the ones under the primary locations are; property bags are
+    left alone. A graph traversal's ``runGraphIndex`` and a provenance
+    ``invocationIndex`` still count positions in the incoming run.
 
     An artifact index is resolved first: a location with no ``uri`` takes the
     ``uri`` (and ``uriBaseId``) of ``incoming.artifacts[index].location``, then
@@ -3017,36 +3024,95 @@ def _detach_run_scoped_references(
         if remaining is not None:
             location["uriBaseId"] = remaining
 
-    def detach_location(location: object) -> None:
-        if not isinstance(location, dict):
+    def detach_logical_location(logical: object) -> None:
+        if not isinstance(logical, dict):
             return
-        physical = location.get("physicalLocation")
-        if isinstance(physical, dict):
-            detach_artifact_location(physical.get("artifactLocation"))
-        for logical in location.get("logicalLocations") or []:
-            if isinstance(logical, dict):
-                fill_from_table(logical, logical_table)
-                logical.pop("index", None)
-                logical.pop("parentIndex", None)
+        fill_from_table(logical, logical_table)
+        logical.pop("index", None)
+        logical.pop("parentIndex", None)
 
-    detach_artifact_location(dumped.get("analysisTarget"))
-    for location in dumped.get("locations") or []:
-        detach_location(location)
-    for location in dumped.get("relatedLocations") or []:
-        detach_location(location)
-    for flow in dumped.get("codeFlows") or []:
-        if not isinstance(flow, dict):
-            continue
-        for thread in flow.get("threadFlows") or []:
-            if not isinstance(thread, dict):
+    def detach_descriptor_reference(reference: object) -> None:
+        """A taxon reference: its ``index`` points into the ``taxa`` of the
+        component its ``toolComponent`` names in the incoming run's tool, and
+        that component reference's own ``index`` into the run's extensions. The
+        id is read from the incoming run when the reference carries none, then
+        both indices are dropped; the component's name and guid stay, since they
+        name the component by content, not by position (the same shape
+        ``_keep_the_rule_by_id`` gives a result's ``rule``)."""
+        if not isinstance(reference, dict):
+            return
+        component_reference = reference.get("toolComponent")
+        if reference.get("id") is None and reference.get("guid") is None:
+            component = _referenced_tool_component(component_reference, incoming.tool)
+            taxa = (getattr(component, "taxa", None) or []) if component else []
+            index = reference.get("index")
+            if isinstance(index, int) and 0 <= index < len(taxa) and taxa[index].id:
+                reference["id"] = taxa[index].id
+        # -1 is the schema's "no index" (the field is required on a reference
+        # without a guid), so the rebuilt reference still validates.
+        reference["index"] = -1
+        if isinstance(component_reference, dict):
+            component_reference.pop("index", None)
+            if (
+                component_reference.get("name") is None
+                and component_reference.get("guid") is None
+            ):
+                reference.pop("toolComponent", None)
+
+    def detach_indexed_row(entry: object, table: Sequence) -> None:
+        """A web request, a web response or an address written as an index into
+        the run's table takes its row and loses the index (an address's
+        ``parentIndex`` points into the same table)."""
+        if not isinstance(entry, dict):
+            return
+        fill_from_table(entry, table)
+        entry.pop("index", None)
+        entry.pop("parentIndex", None)
+
+    def walk(node: object) -> None:
+        """Detach every reference under *node*, by the key the schema gives it.
+        One walk over the whole dump, so a fix's artifact change, an attachment,
+        a stack frame, a graph node, a provenance conversion source and a
+        suppression's location are reached as the primary locations are; the
+        hand-written list of result fields this replaces missed them all."""
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        for key, value in list(node.items()):
+            if key == "properties":
+                # A property bag is the scanner's own text; a key in it that
+                # spells a SARIF field is not a reference into any table.
                 continue
-            for step in thread.get("locations") or []:
-                if isinstance(step, dict):
-                    # The cached row first: its location can itself name its
-                    # artifact by index, which the detach below then resolves.
-                    fill_from_table(step, thread_table)
-                    step.pop("index", None)
-                    detach_location(step.get("location"))
+            if key in ("artifactLocation", "analysisTarget"):
+                detach_artifact_location(value)
+            elif key == "logicalLocations" and isinstance(value, list):
+                for logical in value:
+                    detach_logical_location(logical)
+            elif key == "threadFlows" and isinstance(value, list):
+                for thread in value:
+                    if isinstance(thread, dict):
+                        for step in thread.get("locations") or []:
+                            if isinstance(step, dict):
+                                # The cached row first: its location can name
+                                # its artifact by index, which the walk into
+                                # the step then resolves.
+                                fill_from_table(step, thread_table)
+                                step.pop("index", None)
+            elif key == "taxa" and isinstance(value, list):
+                for reference in value:
+                    detach_descriptor_reference(reference)
+            elif key == "webRequest":
+                detach_indexed_row(value, incoming.webRequests or [])
+            elif key == "webResponse":
+                detach_indexed_row(value, incoming.webResponses or [])
+            elif key == "address":
+                detach_indexed_row(value, incoming.addresses or [])
+            walk(value)
+
+    walk(dumped)
 
 
 def _same_tool_component(

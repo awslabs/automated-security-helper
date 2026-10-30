@@ -355,16 +355,27 @@ def _located(uri=None, index=None, uri_base_id=None, **extra) -> dict:
 
 
 def _run_with_tables(
-    driver: str, results, artifacts=None, bases=None, logical=None, steps=None
+    driver: str,
+    results,
+    artifacts=None,
+    bases=None,
+    logical=None,
+    steps=None,
+    extensions=None,
+    web_requests=None,
 ) -> Run:
     """A run whose own tables the folded results used to point into."""
     fields: dict = {"tool": {"driver": {"name": driver}}, "results": results}
+    if extensions is not None:
+        fields["tool"]["extensions"] = extensions
     if artifacts is not None:
         fields["artifacts"] = [{"location": {"uri": uri}} for uri in artifacts]
     if logical is not None:
         fields["logicalLocations"] = logical
     if steps is not None:
         fields["threadFlowLocations"] = steps
+    if web_requests is not None:
+        fields["webRequests"] = web_requests
     if bases is not None:
         # A plain string is the base's uri; a dict is the whole definition, for
         # a base that sits on another (``{"uri": "src/", "uriBaseId": "REPOROOT"}``).
@@ -723,6 +734,254 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         artifact = step.location.physicalLocation.root.artifactLocation
         assert artifact.uri == "second/step.py"
         assert artifact.index in (None, -1)
+
+    def test_a_fixs_artifact_change_named_by_index_takes_its_uri(self):
+        """The detach reached the primary, related and code-flow locations only;
+        a fix, an attachment, a stack frame, a graph node or a provenance source
+        that named its file by index still pointed into the incoming run."""
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            fixes=[
+                                {
+                                    "artifactChanges": [
+                                        {
+                                            "artifactLocation": {"index": 0},
+                                            "replacements": [
+                                                {"deletedRegion": {"startLine": 1}}
+                                            ],
+                                        }
+                                    ]
+                                }
+                            ],
+                        )
+                    ],
+                    artifacts=["second/fix.py"],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        change = aggregated.runs[0].results[0].fixes[0].artifactChanges[0]
+        assert change.artifactLocation.uri == "second/fix.py"
+        assert change.artifactLocation.index in (None, -1)
+
+    def test_an_attachments_location_named_by_index_takes_its_uri(self):
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_finding("T-1", attachments=[{"artifactLocation": {"index": 0}}])],
+                    artifacts=["second/shot.png"],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        attachment = aggregated.runs[0].results[0].attachments[0]
+        assert attachment.artifactLocation.uri == "second/shot.png"
+        assert attachment.artifactLocation.index in (None, -1)
+
+    def test_a_stack_frames_location_named_by_index_takes_its_uri(self):
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            stacks=[
+                                {
+                                    "frames": [
+                                        {
+                                            "location": {
+                                                "physicalLocation": {
+                                                    "artifactLocation": {"index": 0}
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            ],
+                        )
+                    ],
+                    artifacts=["second/frame.py"],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        frame = aggregated.runs[0].results[0].stacks[0].frames[0]
+        artifact = frame.location.physicalLocation.root.artifactLocation
+        assert artifact.uri == "second/frame.py"
+        assert artifact.index in (None, -1)
+
+    def test_a_graph_nodes_location_named_by_index_takes_its_uri(self):
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            graphs=[
+                                {
+                                    "nodes": [
+                                        {
+                                            "id": "n1",
+                                            "location": {
+                                                "physicalLocation": {
+                                                    "artifactLocation": {"index": 0}
+                                                }
+                                            },
+                                        }
+                                    ]
+                                }
+                            ],
+                        )
+                    ],
+                    artifacts=["second/node.py"],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        node = aggregated.runs[0].results[0].graphs[0].nodes[0]
+        artifact = node.location.physicalLocation.root.artifactLocation
+        assert artifact.uri == "second/node.py"
+        assert artifact.index in (None, -1)
+
+    def test_a_provenance_conversion_source_named_by_index_takes_its_uri(self):
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            provenance={
+                                "conversionSources": [
+                                    {"artifactLocation": {"index": 0}}
+                                ]
+                            },
+                        )
+                    ],
+                    artifacts=["second/source.sarif"],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        source = aggregated.runs[0].results[0].provenance.conversionSources[0]
+        assert source.root.artifactLocation.uri == "second/source.sarif"
+        assert source.root.artifactLocation.index in (None, -1)
+
+    def test_a_taxon_named_by_index_gains_its_id_and_loses_the_indices(self):
+        """A taxon reference's index points into the taxa of the component its
+        toolComponent names, and that reference's own index into the incoming
+        run's extensions; neither position exists in the aggregate. The id is
+        read from the incoming run and both indices are dropped; the name
+        stays, since it names the component by content."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            taxa=[
+                                {
+                                    "index": 1,
+                                    "toolComponent": {"index": 0, "name": "cwe"},
+                                }
+                            ],
+                        )
+                    ],
+                    extensions=[
+                        {"name": "cwe", "taxa": [{"id": "CWE-1"}, {"id": "CWE-79"}]}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        taxon = aggregated.runs[0].results[0].taxa[0].root
+        assert taxon.id == "CWE-79"
+        assert taxon.index in (None, -1)
+        assert taxon.toolComponent.name == "cwe"
+        assert taxon.toolComponent.index in (None, -1)
+
+    def test_a_web_request_named_by_index_takes_its_row_from_the_runs_table(self):
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_finding("T-1", webRequest={"index": 0})],
+                    web_requests=[
+                        {"protocol": "http", "method": "GET", "target": "/x"}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        request = aggregated.runs[0].results[0].webRequest
+        assert (request.method, request.target) == ("GET", "/x")
+        assert request.index in (None, -1)
+
+    def test_a_property_bag_key_spelled_like_a_field_is_left_as_written(self):
+        """The control: a property bag is the scanner's own text, not a place
+        the walk reads references from."""
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            properties={"artifactLocation": {"index": 0}},
+                        )
+                    ],
+                    artifacts=["second/b.py"],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        bag = aggregated.runs[0].results[0].properties
+        assert bag.model_dump(exclude_none=True)["artifactLocation"] == {"index": 0}
 
     def test_the_first_run_adopted_whole_keeps_its_own_indices(self):
         """The control: an adopted run carries its tables, so nothing is detached."""
