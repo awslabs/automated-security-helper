@@ -134,7 +134,10 @@ from automated_security_helper.utils.content_databases import (
 )
 from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.output_excerpt import head_and_tail
+from automated_security_helper.utils.output_excerpt import (
+    head_and_tail,
+    tool_output_excerpt,
+)
 from automated_security_helper.utils.subprocess_utils import spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -149,6 +152,10 @@ class ContentDatabaseAbsent(ValueError):
 
 
 INVOCATION_PROPERTY = "ash_content_databases"
+#: The longest text ``parse_timestamp`` is given from a file ASH reads a build or
+#: download time out of: an RFC 3339 timestamp with nanoseconds and an offset is
+#: 35 characters.
+_TIMESTAMP_TEXT_LIMIT = 64
 OPT_OUT_HINT = (
     "To scan against it anyway, pass --allow-stale-content-db or set "
     "`content_db_staleness: warn` in the ASH config."
@@ -260,7 +267,17 @@ class ContentDbAgeRecord:
                 "The scan fails: a clean result from a stale database is not evidence of a "
                 "clean target."
             )
-            tail = f"To refresh it, {self.refresh}. {OPT_OUT_HINT}"
+            if self.policy_source:
+                # An override entry holds this database to fail: the scan-wide
+                # setting the hint names may already be warn, and changes
+                # nothing for it. The entry is what to change.
+                tail = (
+                    f"To refresh it, {self.refresh}. It is held to fail by the "
+                    f"{self.policy_source}; to scan against it anyway, change that "
+                    "entry's policy to warn or remove it from the ASH config."
+                )
+            else:
+                tail = f"To refresh it, {self.refresh}. {OPT_OUT_HINT}"
         else:
             because = (
                 f"the {self.policy_source} sets it to warn"
@@ -353,12 +370,15 @@ def _iso(value: datetime) -> str:
     # isoformat rather than strftime: on glibc ``%Y`` writes a year under 1000 without
     # zero padding ("1-01-01" for Go's zero time), which ``parse_timestamp`` cannot
     # read back, so such a record vanished from every read-back of the results.
-    return (
-        value.astimezone(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    try:
+        value = value.astimezone(timezone.utc)
+    except (OverflowError, ValueError, OSError):
+        # A time at the edge of datetime's range with a non-UTC offset: the
+        # conversion leaves the range. Written with its own offset instead, which
+        # parse_timestamp reads back; raised, it broke the "never raises" callers
+        # (measure, assess_scanner) that quote the time in a message.
+        pass
+    return value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def format_age(age: Optional[timedelta]) -> str:
@@ -455,10 +475,13 @@ def _policy_for(
         chosen = str(getattr(override.policy, "value", override.policy)).lower()
         if chosen not in STALENESS_POLICIES:
             break
+        # The reason is a config field, which an operator can fill from the
+        # environment: escapes removed, controls escaped, cut to a line's worth.
+        reason = tool_output_excerpt(str(override.reason), 300)
         ASH_LOGGER.info(
             f"Content database {entry.name} is held to {chosen} rather than "
             f"{held_to} by a content_db_staleness_overrides entry until {expires}: "
-            f"{override.reason}"
+            f"{reason}"
         )
         return chosen, (
             f"content_db_staleness_overrides entry for {entry.name}, which expires at "
@@ -533,6 +556,10 @@ def _run_json(
         command,
         capture_output=True,
         text=True,
+        # Replacement, not the strict default: a byte the locale encoding does
+        # not read in the probe's output is a probe that failed to parse (a
+        # record of unknown age), not a UnicodeDecodeError out of the measurer.
+        errors="replace",
         env=dict(env),
         cwd=_probe_cwd(ctx),
         timeout=_PROBE_TIMEOUT_SECONDS,
@@ -573,24 +600,27 @@ def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
         ctx=ctx,
     )
     built = status.get("built") if isinstance(status, dict) else None
-    if not built:
-        from automated_security_helper.utils.error_text import shown_tool_stderr
-
-        error = str(status.get("error") or "") if isinstance(status, dict) else ""
-        path = status.get("path") if isinstance(status, dict) else None
-        if "does not exist" in error or (
-            isinstance(path, str) and path and not Path(path).exists()
-        ):
-            # The error and path are grype's own output: REDACTED BEFORE the cut.
-            raise ContentDatabaseAbsent(
-                shown_tool_stderr(
-                    f"`grype db status` reports no database at {path}: {error}",
-                    ctx.values,
-                )[:300]
+    error = str(status.get("error") or "") if isinstance(status, dict) else ""
+    path = status.get("path") if isinstance(status, dict) else None
+    # Absence first, whatever ``built`` says: a status document for a database
+    # that does not exist can still carry a zero-time ``built``, which read as
+    # a build time graded merely stale, under a policy warn can relax.
+    if "does not exist" in error or (
+        isinstance(path, str) and path and not Path(path).exists()
+    ):
+        # The error and path are grype's own output: values hidden, escapes
+        # and controls removed, then cut (tool_output_excerpt).
+        raise ContentDatabaseAbsent(
+            tool_output_excerpt(
+                f"`grype db status` reports no database at {path}: {error}",
+                300,
+                ctx.values,
             )
-        # The status document is grype's own output: REDACTED BEFORE the cut.
-        shown = shown_tool_stderr(f"{status!r}", ctx.values)
-        raise ValueError(f"`grype db status` reported no build time: {shown}"[:300])
+        )
+    if not built:
+        # The status document is grype's own output: shown the same way.
+        shown = tool_output_excerpt(f"{status!r}", 300, ctx.values)
+        raise ValueError(f"`grype db status` reported no build time: {shown}")
     return parse_timestamp(str(built)), "`built` in `grype db status -o json`"
 
 
@@ -624,6 +654,21 @@ def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
     db = version.get("VulnerabilityDB") if isinstance(version, dict) else None
     updated = db.get("UpdatedAt") if isinstance(db, dict) else None
     if not updated:
+        # trivy omits VulnerabilityDB both when no database is in the cache and
+        # when the database's metadata file is there but could not be read. Only
+        # the first is absence (ERROR whatever the policy); the second is a
+        # database of unknown age, which the policy decides. The metadata file is
+        # what trivy reads for the field (pkg/db/db.go, metadata.json beside the
+        # database), so its presence tells the two apart.
+        metadata = (
+            Path(ctx.cache_dir) / "db" / "metadata.json" if ctx.cache_dir else None
+        )
+        if metadata is not None and metadata.exists():
+            raise ValueError(
+                "`trivy version --format json` reported no VulnerabilityDB.UpdatedAt "
+                f"although {metadata.as_posix()} exists; the database's metadata "
+                "could not be read, so its age is unknown"
+            )
         raise ContentDatabaseAbsent(
             "`trivy version --format json` reported no VulnerabilityDB.UpdatedAt; "
             "no trivy database was found in the cache directory trivy reads"
@@ -638,17 +683,29 @@ def _built_from_ruleset_dir(ctx: ProbeContext) -> tuple[datetime, str]:
     if not ctx.cache_dir:
         raise ContentDatabaseAbsent("no offline rules cache directory is configured")
     cache = Path(ctx.cache_dir)
-    manifest = cache / RULESET_FETCHED_AT_FILE
-    if manifest.is_file():
-        return (
-            parse_timestamp(manifest.read_text(encoding="utf-8").strip()),
-            f"the download time recorded in {RULESET_FETCHED_AT_FILE}",
-        )
+    # The rules files are counted before the manifest is read: a directory holding
+    # the fetch-time record and no rules is an absent ruleset, whatever the record
+    # says, and reading the manifest first reported it fresh.
     rules = [
         p for p in cache.rglob("*") if p.is_file() and p.suffix in {".yml", ".yaml"}
     ]
     if not rules:
         raise ContentDatabaseAbsent(f"no rules files found in {cache.as_posix()}")
+    manifest = cache / RULESET_FETCHED_AT_FILE
+    if manifest.is_file():
+        text = manifest.read_text(encoding="utf-8").strip()
+        if len(text) > _TIMESTAMP_TEXT_LIMIT:
+            # Not a timestamp (one is under 40 characters): refused before
+            # parse_timestamp quotes it whole into the record's error, its
+            # message and every report.
+            raise ValueError(
+                f"{RULESET_FETCHED_AT_FILE} holds no timestamp: "
+                f"{tool_output_excerpt(text, 60)!r}"
+            )
+        return (
+            parse_timestamp(text),
+            f"the download time recorded in {RULESET_FETCHED_AT_FILE}",
+        )
     oldest = min(p.stat().st_mtime for p in rules)
     return (
         datetime.fromtimestamp(oldest, timezone.utc),
@@ -808,8 +865,21 @@ def attach_records(sarif_report: Any, records: List[ContentDbAgeRecord]) -> None
     stale = [record for record in records if record.stale]
     if stale:
         notifications = list(invocation.toolConfigurationNotifications or [])
-        notifications.extend(_notification(record) for record in stale)
+        failures: List[str] = []
+        for record in stale:
+            # One record at a time: a record whose notification cannot be built
+            # must not keep every other stale database's notification out of the
+            # report, which is what the exit-code gate and the reports read.
+            try:
+                notifications.append(_notification(record))
+            except Exception as exc:  # noqa: BLE001 - the others still attach
+                failures.append(f"{record.name} ({record.scanner}): {exc}")
         invocation.toolConfigurationNotifications = notifications
+        if failures:
+            raise RuntimeError(
+                "could not record a stale-database notification for "
+                + "; ".join(failures)
+            )
 
 
 def assess_scanner(
@@ -853,6 +923,10 @@ def assess_scanner(
             ctx = scanner_plugin.content_database_probe_context()
         except Exception as exc:  # noqa: BLE001
             failure = f"{type(exc).__name__}: {exc}"
+        if ctx is None and not failure:
+            # A probe context of None is a scanner that could not say where its
+            # database is, not a failure that raised: the record says which.
+            failure = "content_database_probe_context() returned None"
 
     now = now or datetime.now(timezone.utc)
     records: List[ContentDbAgeRecord] = []
@@ -891,6 +965,9 @@ def assess_scanner(
     try:
         attach_records(sarif_report, records)
     except Exception as exc:  # noqa: BLE001
+        # attach_records attaches what it can before it raises, so a record it
+        # named here is the only one missing from the report; the executor still
+        # acts on every returned record.
         ASH_LOGGER.error(
             f"Could not record content database ages for {scanner_name} in its SARIF "
             f"report: {exc}"
@@ -907,6 +984,36 @@ def _extra(props: Any) -> Dict[str, Any]:
     if isinstance(props, dict):
         return props
     return dict(getattr(props, "model_extra", None) or {})
+
+
+def _unreadable_record(
+    raw: Any, error: Exception, measured_at: Optional[datetime] = None
+) -> ContentDbAgeRecord:
+    """The record for a results-file entry that does not parse back.
+
+    Stale, with the parse failure as its error and whatever name and scanner the
+    entry carries: a record ASH wrote and cannot read is no evidence of a fresh
+    database, and dropped it left the exit-code gate and the reports with nothing
+    where the scan had recorded a failure. The bound is unknown, so the record
+    carries none; ``recorded_stale`` keeps it stale whatever the bound.
+    """
+    data = raw if isinstance(raw, Mapping) else {}
+    text = str(error) or type(error).__name__
+    return ContentDbAgeRecord(
+        name=str(data.get("name") or "unknown"),
+        scanner=str(data.get("scanner") or "unknown"),
+        built=None,
+        measured_by=str(data.get("measured_by") or ""),
+        max_age=timedelta(0),
+        measured_at=measured_at or datetime.now(timezone.utc),
+        policy=str(data.get("policy") or DEFAULT_STALENESS_POLICY),
+        bound_source=str(data.get("bound_source") or ""),
+        bound_is_tool_default=False,
+        refresh=str(data.get("refresh") or ""),
+        error=f"the recorded measurement could not be read back ({text})",
+        timestamp_label=str(data.get("timestamp_label") or "built"),
+        recorded_stale=True,
+    )
 
 
 def content_db_records(results: Any) -> List[ContentDbAgeRecord]:
@@ -929,10 +1036,14 @@ def content_db_records(results: Any) -> List[ContentDbAgeRecord]:
                 try:
                     record = ContentDbAgeRecord.from_dict(raw)
                 except Exception as exc:  # noqa: BLE001
-                    ASH_LOGGER.debug(
-                        f"Unreadable content database record {raw!r}: {exc}"
+                    # Kept, as a stale record of unknown age: dropped, a
+                    # measurement ASH wrote and cannot read vanished from
+                    # every report.
+                    ASH_LOGGER.warning(
+                        f"Unreadable content database record {raw!r}: {exc}; "
+                        "reported as a database of unknown age"
                     )
-                    continue
+                    record = _unreadable_record(raw, exc)
                 key = (record.name, record.scanner)
                 current = by_key.get(key)
                 if current is None or record.stale or not current.stale:
@@ -971,8 +1082,17 @@ def stale_content_databases(
                 try:
                     record = ContentDbAgeRecord.from_dict(raw)
                 except Exception as exc:  # noqa: BLE001
-                    ASH_LOGGER.debug(f"Unreadable stale-database record {raw!r}: {exc}")
-                    continue
+                    # Kept, stale, under the notification's own level: the
+                    # scan recorded a stale database here, and a record that
+                    # does not parse back must not take it out of the gate.
+                    ASH_LOGGER.warning(
+                        f"Unreadable stale-database record {raw!r}: {exc}; kept "
+                        "as a stale database of unknown age"
+                    )
+                    when = getattr(notification, "timeUtc", None)
+                    record = _unreadable_record(
+                        raw, exc, when if isinstance(when, datetime) else None
+                    )
                 # The level is authoritative for whether it fails the scan.
                 record.policy = STALENESS_FAIL if level == "error" else STALENESS_WARN
                 if enforced_only and not record.enforced:
