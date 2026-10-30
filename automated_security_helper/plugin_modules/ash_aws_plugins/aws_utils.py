@@ -305,6 +305,10 @@ def retry_with_backoff(
 #: failure of the SDK.
 UNEXPECTED_LISTING_ERROR = "unexpected error"
 
+#: The ``modelLifecycle.status`` values of a foundation model Bedrock serves:
+#: ACTIVE, and LEGACY for a model on its way out that still answers.
+SERVED_LIFECYCLES = frozenset({"ACTIVE", "LEGACY"})
+
 
 def _botocore_error_name(error: BaseException) -> Optional[str]:
     """The class name of a failure botocore raised on the client side (a missing
@@ -625,16 +629,19 @@ def get_available_models(
             profile_failure = error
             model_profile_map = {}
         ASH_LOGGER.debug("Fetching available foundation models...")
-        # Get foundation models
+        # Get foundation models. A LEGACY model is one Bedrock still serves
+        # while it is being retired; it answers Converse as an ACTIVE one does,
+        # so it is listed too, and an operator who configured it is not told it
+        # is unavailable.
         response = bedrock_client.list_foundation_models()
         active_models = [
             item
             for item in response.get("modelSummaries", [])
-            if item.get("modelLifecycle", {}).get("status", "NA") == "ACTIVE"
+            if item.get("modelLifecycle", {}).get("status", "NA") in SERVED_LIFECYCLES
             and "TEXT" in item.get("inputModalities", [])
             and "TEXT" in item.get("outputModalities", [])
         ]
-        ASH_LOGGER.debug(f"Found {len(active_models)} active foundation models")
+        ASH_LOGGER.debug(f"Found {len(active_models)} served foundation models")
         for model in active_models:
             if "ON_DEMAND" in model.get("inferenceTypesSupported", []):
                 final_model_list.append(
@@ -743,16 +750,62 @@ def get_available_models(
         )
 
 
+#: The area prefix of the cross-region inference profiles the fallback chains
+#: are written with. A configured model under another area (``eu.``, ``apac.``,
+#: ``global.``, ``us-gov.``) gets the same chain under its own area.
+_CHAIN_AREA = "us"
+
+#: The model every chain ends in, and the fallback for a model of no known
+#: family, under the configured model's area.
+_DEFAULT_FALLBACK = "amazon.nova-pro-v1:0"
+
+
+def _profile_area(model_id: str) -> Optional[str]:
+    """The area prefix of a cross-region inference profile id
+    (``eu.anthropic.claude-...`` names ``eu``), or None for a model id with
+    none (``anthropic.claude-...``, ``amazon.titan-...``). A profile id is
+    ``<area>.<provider>.<model>`` and a model id ``<provider>.<model>``, and no
+    provider or model name holds a dot, so the id with two dots has an area."""
+    area, _, rest = model_id.partition(".")
+    if not area or "." not in rest:
+        return None
+    return area
+
+
 def get_fallback_model(current_model_id: str) -> Optional[str]:
     """
     Get a fallback model ID if the current model is unavailable.
+
+    The chains are written as the ``us.`` cross-region profiles. A model under
+    another area (``eu.anthropic.claude-...``) is looked up as its ``us.``
+    spelling and its fallback is answered under its own area
+    (``eu.anthropic.claude-...``), so a run outside the US regions is offered
+    candidates its region can route; whether the region does is the walk's
+    check. Before this every such model fell straight to the ``us.`` default,
+    which no non-US region lists.
 
     Args:
         current_model_id: The current model ID that failed
 
     Returns:
-        A fallback model ID or None if no suitable fallback is available
+        A fallback model ID: the next model of the current model's chain, the
+        chain's first model when the current one is not in it, or the default
+        model (``_DEFAULT_FALLBACK`` under the current model's area) for a
+        model of no known family and for a chain's last member. The walk ends
+        a chain on a repeat, never on None here.
     """
+    area = _profile_area(current_model_id)
+    lookup = current_model_id
+    if area is not None and area != _CHAIN_AREA:
+        lookup = f"{_CHAIN_AREA}.{current_model_id[len(area) + 1 :]}"
+
+    def under_area(model: str) -> str:
+        if area is None or area == _CHAIN_AREA:
+            return model
+        if model.startswith(f"{_CHAIN_AREA}."):
+            return f"{area}.{model[len(_CHAIN_AREA) + 1 :]}"
+        return model
+
     # Define fallback chains for different model families
     fallback_chains = {
         "anthropic.claude-": [
@@ -789,20 +842,20 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
 
     # Find the appropriate fallback chain
     for prefix, models in fallback_chains.items():
-        if current_model_id.startswith(prefix):
+        if lookup.startswith(prefix):
             # Find the current model in the chain
             try:
-                current_index = models.index(current_model_id)
+                current_index = models.index(lookup)
                 # Return the next model in the chain if available
                 if current_index < len(models) - 1:
-                    return models[current_index + 1]
+                    return under_area(models[current_index + 1])
             except ValueError:
                 # If the current model isn't in our predefined list,
                 # return the first model in the chain
-                return models[0]
+                return under_area(models[0])
 
     # If no specific fallback chain is found, return a default model
-    return "us.amazon.nova-pro-v1:0"
+    return under_area(f"{_CHAIN_AREA}.{_DEFAULT_FALLBACK}")
 
 
 class _ModelCheckType(type):
@@ -820,11 +873,13 @@ class _ModelCheckType(type):
         transient: bool = False,
         listing_failure: Optional[str] = None,
         listing_client_side: bool = False,
+        model_id: Optional[str] = None,
     ) -> Any:
         check = super().__call__((is_valid, reason))
         check.transient = transient
         check.listing_failure = listing_failure
         check.listing_client_side = listing_client_side
+        check.model_id = model_id
         return check
 
 
@@ -854,11 +909,18 @@ class ModelCheck(Tuple[bool, Optional[str]], metaclass=_ModelCheckType):  # noqa
     missing credential or region, a refused parameter, a failed connection):
     ``listing_failure`` then holds the error's class name. It is False for a
     service's own answer, a denied call included.
+
+    ``model_id`` is set on a True: the model id as the listing spells it, which
+    is the id to call Converse with. It differs from the id that was checked
+    when the check matched it case-insensitively; the check used to answer
+    True then and the caller kept calling with its own spelling, which the
+    service does not know. It is None on a False.
     """
 
     transient: bool
     listing_failure: Optional[str]
     listing_client_side: bool
+    model_id: Optional[str]
 
     if TYPE_CHECKING:
         # The call shape, for a type checker only. At run time the metaclass's
@@ -879,6 +941,7 @@ class ModelCheck(Tuple[bool, Optional[str]], metaclass=_ModelCheckType):  # noqa
             transient: bool = False,
             listing_failure: Optional[str] = None,
             listing_client_side: bool = False,
+            model_id: Optional[str] = None,
         ) -> Self: ...
 
 
@@ -904,6 +967,14 @@ def check_listing_client_side(check: Any) -> bool:
     for a service's own answer, for any other answer, and for a pair a caller
     built."""
     return bool(getattr(check, "listing_client_side", False))
+
+
+def check_model_id(check: Any) -> Optional[str]:
+    """The model id a True ``validate_bedrock_model`` answer names, as the
+    listing spells it: the id to call Converse with. None for a False, and for
+    a pair a caller built."""
+    model_id = getattr(check, "model_id", None)
+    return model_id if isinstance(model_id, str) and model_id else None
 
 
 def _profile_listing_failed(
@@ -1023,9 +1094,11 @@ def validate_bedrock_model(
         # Check if the requested model is in the available models
         if model_id in available_model_ids or model_id in listed_arns:
             ASH_LOGGER.debug(text_without_values(f"Model {shown} is available", values))
-            return ModelCheck(True)
+            return ModelCheck(True, model_id=model_id)
 
-        # If model not found directly, try to find a matching model ID (case insensitive)
+        # If model not found directly, try to find a matching model ID (case
+        # insensitive). The answer names the listed spelling: Converse knows
+        # that one, not the spelling that was checked.
         for available_id in available_model_ids:
             if available_id and model_id and available_id.lower() == model_id.lower():
                 ASH_LOGGER.debug(
@@ -1035,7 +1108,7 @@ def validate_bedrock_model(
                         values,
                     )
                 )
-                return ModelCheck(True)
+                return ModelCheck(True, model_id=available_id)
 
         # If still not found, check if it's an inference profile model
         for model in available_models:
@@ -1049,7 +1122,7 @@ def validate_bedrock_model(
                         values,
                     )
                 )
-                return ModelCheck(True)
+                return ModelCheck(True, model_id=model_id)
 
         if getattr(available_models, "profile_listing_failure", None):
             # The on-demand models were listed and this is not one of them; the
