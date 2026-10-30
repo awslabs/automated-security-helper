@@ -26,13 +26,19 @@ def handle_scan_completion_logging(*args, **kwargs) -> bool:
         bool: True to indicate successful handling of the event
     """
     remaining_count = kwargs.get("remaining_count", 0)
-    remaining_scanners = kwargs.get("remaining_scanners", [])
-    message = kwargs.get(
-        "message",
-        f"Remaining scanners ({remaining_count}): {','.join(remaining_scanners)}",
-    )
+    # The default message is built only when the emitter gave none: built
+    # eagerly as the default argument of kwargs.get, its join ran on every
+    # event, so a None or non-list remaining_scanners raised TypeError although
+    # the emitter had supplied a message the join never reached.
+    message = kwargs.get("message")
+    if not isinstance(message, str):
+        remaining_scanners = kwargs.get("remaining_scanners") or []
+        if isinstance(remaining_scanners, (str, bytes)):
+            remaining_scanners = [str(remaining_scanners)]
+        names = ",".join(str(name) for name in remaining_scanners)
+        message = f"Remaining scanners ({remaining_count}): {names}"
     # Log information about remaining scanners
-    if remaining_count > 0:
+    if isinstance(remaining_count, (int, float)) and remaining_count > 0:
         ASH_LOGGER.info(message)
     else:
         ASH_LOGGER.info("All scanners completed!")
