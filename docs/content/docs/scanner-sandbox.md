@@ -251,12 +251,9 @@ it needs.
   (`OutputLinkRefused`, an `OSError`). Nothing is written where the link points, the
   link is left in place, and the scanner whose write was refused is `ERROR`. A file
   there that another name also refers to (a hard link, which an extracted archive can
-  hold) is refused the same way by the writers that open the file in place, before
-  anything in it is changed, with "`<path>` was not written: `<n>` names refer to it"
-  (`OutputHardLinkRefused`); so is one already below a sandboxed scanner's results
-  directory when the scanner starts. The atomic writers (the aggregated results file
-  and the other files written through a staging file) replace the entry at the name
-  instead and leave the other name's file as it was, so they refuse no hard link.
+  hold) is refused the same way, before anything in it is changed, with "`<path>`
+  was not written: `<n>` names refer to it" (`OutputHardLinkRefused`); so is one
+  already below a sandboxed scanner's results directory when the scanner starts.
   Links at or above the output directory itself are not examined, as above. On
   Windows, which has no way to open a path relative to a directory without
   following a link, ASH checks each component by name before it opens the file,

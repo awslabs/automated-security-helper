@@ -410,23 +410,17 @@ class TestTheAtomicStreamingWriter:
         assert _entries(victim.parent) == [victim.name]
 
     @needs_symlinks
-    def test_a_file_another_name_refers_to_is_replaced_and_the_other_name_spared(
-        self, output, victim
-    ):
-        """The atomic writer renames a staging file over the name, so the entry is
-        replaced and the file the other name refers to is left as it was; there is
-        nothing at the name for a hard-link refusal to protect, and none is made."""
+    def test_a_file_another_name_refers_to_is_refused(self, output, victim):
         import os
 
         target = output / "ash_aggregated_results.json"
         os.link(victim, target)
 
-        with fs_guard.open_for_atomic_write(target, root=output) as handle:
-            handle.write("{}")
+        with pytest.raises(OutputHardLinkRefused):
+            with fs_guard.open_for_atomic_write(target, root=output) as handle:
+                handle.write("{}")
 
-        assert target.read_text() == "{}"
         assert victim.read_text() == ORIGINAL
-        assert os.stat(target).st_nlink == 1
 
     @needs_symlinks
     def test_a_registered_root_guards_it_without_a_named_root(self, tmp_path, victim):

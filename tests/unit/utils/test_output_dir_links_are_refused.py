@@ -623,12 +623,7 @@ class TestAtomicWrites:
         assert path.is_symlink()
         assert [p.name for p in output.iterdir() if p.name.endswith(".tmp")] == []
 
-    def test_a_file_another_name_refers_to_is_replaced_and_the_other_name_spared(
-        self, layout
-    ):
-        """The atomic write renames a staging file over the name: the entry is
-        replaced, the file the other name refers to is left as it was, and no
-        hard-link refusal is made, since nothing at the name needs one."""
+    def test_a_file_another_name_refers_to_is_refused(self, layout):
         from automated_security_helper.utils.atomic_write import write_text_atomically
 
         source, output, target = layout
@@ -636,11 +631,10 @@ class TestAtomicWrites:
         path = output / "ash_aggregated_results.json"
         os.link(target, path)
 
-        write_text_atomically(path, "{}")
+        with pytest.raises(fs_guard.OutputHardLinkRefused):
+            write_text_atomically(path, "{}")
 
-        assert path.read_text() == "{}"
         assert target.read_bytes() == ORIGINAL.encode()
-        assert os.stat(path).st_nlink == 1
 
     def test_a_regular_file_there_is_replaced(self, layout):
         from automated_security_helper.utils.atomic_write import write_text_atomically

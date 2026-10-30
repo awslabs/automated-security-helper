@@ -6,11 +6,12 @@
 open_for_atomic_write gives its staging file the mode of the regular file already
 at the target name, so a 0o600 report is not replaced by a 0o644 one. It copied
 the whole mode, so an entry a scanner put at the name handed its setuid, setgid
-or sticky bit to the results file, and a hard-linked entry (a file another name
-refers to, which the writer deliberately spares) handed over its mode as well.
-Only the read, write and execute bits are copied now, and only from a file no
-other name refers to; a hard-linked entry leaves the new file at its
-umask-derived mode.
+or sticky bit to the results file, and, outside every registered root (where no
+hard-link refusal runs and the writer replaces the entry), a hard-linked entry
+handed over its mode as well. Only the read, write and execute bits are copied
+now, and only from a file no other name refers to; a hard-linked entry outside
+every root leaves the new file at its umask-derived mode. Below a root a
+hard-linked entry is refused before any of this (test_link_refusal_family.py).
 """
 
 import os
@@ -60,9 +61,11 @@ def test_a_setuid_bit_at_the_name_is_not_carried_onto_the_new_file(tmp_path):
 
 
 def test_a_hard_linked_file_at_the_name_lends_the_new_file_no_mode(tmp_path):
-    """The writer spares the file the other name refers to; it also takes no
-    mode from it. The new file has the mode a fresh file gets, and the other
-    name keeps its bytes and its whole mode, setuid bit included."""
+    """Outside every registered root (tmp_path is not one) the writer replaces
+    the entry and spares the file the other name refers to; it also takes no mode
+    from it. The new file has the mode a fresh file gets, and the other name keeps
+    its bytes and its whole mode, setuid bit included. Below a root the same entry
+    is refused with OutputHardLinkRefused before the staging file is made."""
     target = tmp_path / "report.json"
     other = tmp_path / "other-name"
     _plant(target, 0o4755)

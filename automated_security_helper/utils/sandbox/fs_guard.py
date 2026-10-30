@@ -16,9 +16,7 @@ that:
   name also refers to (a hard link) is refused with :class:`OutputHardLinkRefused`
   before it is truncated. :func:`open_for_atomic_write` is the same guard for a
   file a reader may open while it is written: it writes a staging file and renames
-  it over the name, and ``atomic_write.write_text_atomically`` calls it. The rename
-  replaces the entry at the name and leaves the file another name refers to as it
-  was, so that writer refuses no hard link: nothing at the name needs the refusal.
+  it over the name, and ``atomic_write.write_text_atomically`` calls it.
 * :func:`sweep_writable` runs after every sandboxed spawn and removes every entry
   under the writable directories that is not a regular file or a directory.
 
@@ -908,18 +906,16 @@ def _check_beneath_by_name(
     root: Path,
     relative: Tuple[str, ...],
     target: Path,
-    hard_links: bool = True,
 ) -> Optional[os.stat_result]:
     """Without directory descriptors: refuse a link on the way to ``target``.
 
     Each directory component below ``root`` is examined with lstat and created
     when missing; a symlink or reparse point (a junction, say) raises
     OutputLinkRefused, and so does one at the file name. A regular file at the
-    name that another name refers to raises OutputHardLinkRefused, unless
-    ``hard_links`` is False (a writer that replaces the entry rather than its
-    content). This refuses a link that is already there, as one committed with
-    the scanned tree is. A link made between this check and the caller's open is
-    not caught. Returns the file's lstat, or None when nothing is at the name.
+    name that another name refers to raises OutputHardLinkRefused. This refuses a
+    link that is already there, as one committed with the scanned tree is. A link
+    made between this check and the caller's open is not caught. Returns the
+    file's lstat, or None when nothing is at the name.
     """
     os.makedirs(root, exist_ok=True)
     current = root
@@ -946,7 +942,7 @@ def _check_beneath_by_name(
         return None
     if _is_link_status(status):
         raise OutputLinkRefused(target, target)
-    if hard_links and stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
+    if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
         raise OutputHardLinkRefused(target, status.st_nlink)
     return status
 
@@ -1123,14 +1119,10 @@ def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> b
         os.close(fd)
 
 
-def _refuse_link_at(
-    name: str, dir_fd: int, target: Path, hard_links: bool = True
-) -> Optional[os.stat_result]:
+def _refuse_link_at(name: str, dir_fd: int, target: Path) -> Optional[os.stat_result]:
     """Raise if ``name`` in ``dir_fd`` is a symlink, or a file another name refers to.
 
-    The hard-link refusal is skipped with ``hard_links`` False, for a writer that
-    replaces the entry rather than the file. Returns the entry's lstat, or None
-    when nothing is at the name.
+    Returns the entry's lstat, or None when nothing is at the name.
     """
     try:
         status = os.lstat(name, dir_fd=dir_fd)
@@ -1138,7 +1130,7 @@ def _refuse_link_at(
         return None
     if stat.S_ISLNK(status.st_mode):
         raise OutputLinkRefused(target, target)
-    if hard_links and stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
+    if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
         raise OutputHardLinkRefused(target, status.st_nlink)
     return status
 
@@ -1315,11 +1307,12 @@ def open_for_atomic_write(
     Guarded as open_for_write is: below a registered root, or below ``root`` when
     the caller names one, each directory component is opened without following a
     link and created when missing; a link at any of them, or at the file name,
-    raises OutputLinkRefused. A file at the name that another name refers to is
-    not refused here, unlike open_for_write: the rename replaces the entry at the
-    name and leaves the file the other name refers to as it was, so there is
-    nothing to protect that name from (replace_without_following reads the same
-    way). The name is checked again just before the rename, so a link made there
+    raises OutputLinkRefused. A regular file at the name that another name refers
+    to (a hard link) raises OutputHardLinkRefused and is left as it was, as
+    open_for_write refuses it: the rename would not write through the other name,
+    but a hard link planted at a results path is a tamper signal, and the output
+    tree's contract is that no writer accepts one (refuse_links_below reads the
+    same way). The name is checked again just before the rename, so a link made there
     while the block ran is refused and left in place rather than replaced. The
     staging file is created and renamed relative to the directory's descriptor.
     Outside every root the rename replaces whatever entry is at the name, a link
@@ -1328,8 +1321,9 @@ def open_for_atomic_write(
     A regular file already at the name keeps its read, write and execute bits:
     the staging file is given them before the rename, where a fresh file would
     otherwise have replaced a 0o600 file with a 0o644 one. Its setuid, setgid and
-    sticky bits are not carried over, and a file another name refers to lends
-    nothing: the new file keeps its umask-derived mode.
+    sticky bits are not carried over. Outside every root, where no hard-link
+    refusal runs, a file another name refers to is replaced and lends nothing:
+    the new file keeps its umask-derived mode.
 
     On a platform without directory descriptors (Windows) the components below a
     root are checked by name before the staging file is created and again before
@@ -1362,9 +1356,9 @@ def open_for_atomic_write(
 
     def refuse_a_link_at_the_name() -> Optional[os.stat_result]:
         if dir_fd is not None:
-            return _refuse_link_at(path.name, dir_fd, path, hard_links=False)
+            return _refuse_link_at(path.name, dir_fd, path)
         if anchor is not None:
-            return _check_beneath_by_name(anchor, relative, path, hard_links=False)
+            return _check_beneath_by_name(anchor, relative, path)
         try:
             status = _lstat(path)
         except FileNotFoundError:
@@ -1397,9 +1391,10 @@ def open_for_atomic_write(
                     # The read, write and execute bits of the file being
                     # replaced, and only those: a setuid, setgid or sticky bit
                     # on an entry a scanner put at the name is not carried onto
-                    # the results file. A file another name refers to (a hard
-                    # link a scanner planted) lends it nothing either: the new
-                    # file keeps the umask-derived mode it was created with.
+                    # the results file. Below a root a file another name refers
+                    # to was refused above; outside every root it is replaced
+                    # and lends nothing: the new file keeps the umask-derived
+                    # mode it was created with.
                     os.fchmod(fd, stat.S_IMODE(existing.st_mode) & 0o777)
                 handle = os.fdopen(fd, open_mode, **text)
             except BaseException:
