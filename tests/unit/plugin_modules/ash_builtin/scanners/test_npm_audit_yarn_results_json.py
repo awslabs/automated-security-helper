@@ -56,8 +56,12 @@ def plugin_context(tmp_path, monkeypatch):
 
 
 def _project(root):
+    """A yarn project named after its directory, so the responder can tell
+    ``a`` from ``b`` by the manifest it finds in the audit's working directory."""
     root.mkdir(parents=True, exist_ok=True)
-    (root / "package.json").write_text('{"name": "app"}\n', encoding="utf-8")
+    (root / "package.json").write_text(
+        json.dumps({"name": root.name}) + "\n", encoding="utf-8"
+    )
     (root / "yarn.lock").write_text("# yarn lockfile v1\n", encoding="utf-8")
 
 
