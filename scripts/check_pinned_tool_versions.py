@@ -1563,12 +1563,32 @@ def image_ruby(apt_pins: Iterable[AptPin]) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def _base_image_codename(image: str) -> str:
+    """The Debian codename in an image reference's tag, or ``""`` when it holds none.
+
+    A digest (``@sha256:...``) is not the tag, and a port in the registry
+    (``localhost:5000/python``) is not a tag separator. Of the ``-`` parts of the tag,
+    an image variant (``slim``) and anything that is not a lowercase word (a version, a
+    build date) are not a codename; the last part left is.
+    """
+    name, _, tag = image.split("@", 1)[0].rpartition(":")
+    if not name or "/" in tag:
+        return ""
+    words = [
+        part
+        for part in tag.split("-")
+        if part not in _IMAGE_VARIANTS and re.fullmatch(r"[a-z]+", part)
+    ]
+    return words[-1] if words else ""
+
+
 def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
     """The indexes apt reads in the image the Dockerfile builds.
 
-    The Debian codename is the last ``-`` part of the ``BASE_IMAGE`` default's tag
-    that is not an image variant (``python:3.12-slim-bookworm``,
-    ``debian:bookworm-slim``), and the NodeSource repository is the one
+    The Debian codename is the last word among the ``-`` parts of the ``BASE_IMAGE``
+    default's tag that is not an image variant (``python:3.12-slim-bookworm``,
+    ``debian:bookworm-slim``, ``debian:bookworm-20241016-slim``), with any
+    ``@sha256:...`` digest left out. The NodeSource repository is the one
     ``NODE_MAJOR`` names, so a base-image or Node bump moves the lookup with it.
 
     Raises:
@@ -1579,14 +1599,9 @@ def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
             the report would name an older version to pin.
     """
     text = dockerfile.read_text(encoding="utf-8")
-    base = re.search(r"^ARG BASE_IMAGE=\S+:(?P<tag>\S+)$", text, re.MULTILINE)
-    tag_parts = (
-        [part for part in base.group("tag").split("-") if part not in _IMAGE_VARIANTS]
-        if base
-        else []
-    )
-    codename = tag_parts[-1] if tag_parts else ""
-    if not re.fullmatch(r"[a-z]+", codename):
+    base = re.search(r"^ARG BASE_IMAGE=(?P<image>\S+)$", text, re.MULTILINE)
+    codename = _base_image_codename(base.group("image")) if base else ""
+    if not codename:
         raise PinEnumerationError(
             f"cannot read a Debian codename from {dockerfile.name}'s ARG BASE_IMAGE; "
             "the apt pins cannot be looked up without knowing which suite apt reads."
