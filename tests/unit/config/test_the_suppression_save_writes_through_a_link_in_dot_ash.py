@@ -7,13 +7,18 @@ The save writes a symlinked config through to its target only when the target
 stays inside a confinement. That confinement was the config path's own
 directory, so the documented ``.ash/.ash.yaml`` linked to a config beside
 ``.ash/`` (``.ash/.ash.yaml -> ../.ash.yaml``) was refused, where it had saved
-before. The root is now ``default_confinement_root(config_path)``, the directory
-the config's own chain is confined to when a scan resolves it with no source
-directory: the config's directory, or the directory holding ``.ash/`` for a
-config in it. A link out of that root is still refused.
+before. The root is now the one the config's own chain is confined to when a
+scan resolves it with no source directory: the config's directory, or the
+directory holding ``.ash/`` for a config in it, taken from the config path AS
+SPELLED (where the link sits). Taken from the path's resolution it would be the
+target's own directory and confine nothing, so ``default_confinement_root``,
+which resolves first, is not what the save uses. A link out of that root is
+still refused.
 
 Red at the base: the save of ``.ash/.ash.yaml -> ../.ash.yaml`` raised the
-left-unchanged refusal and wrote nothing.
+left-unchanged refusal and wrote nothing. The two refusal tests were red at an
+intermediate cut that took the root from the resolved path: both links saved
+through.
 """
 
 from __future__ import annotations

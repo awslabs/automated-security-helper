@@ -3776,22 +3776,25 @@ def _write_checked(
             f"saving the suppression would write a config that {problem}",
             config_path,
         )
-    from automated_security_helper.config.config_sources import (
-        default_confinement_root,
-    )
-
     target = _resolved_for_save(config_path, config_path)
     # The file the save writes stays inside the directory the config's own
-    # chain is confined to (default_confinement_root, as resolve_config_document
-    # confines a root's bases with no source directory given): the config's
-    # directory, or the directory holding ``.ash/`` for a config in it. A
+    # chain is confined to, the root resolve_config_document uses for a root
+    # config with no source directory given: the config's directory, or the
+    # directory holding ``.ash/`` for a config in it. The root is taken from
+    # the config path AS SPELLED, where a link sits, never from its resolution:
+    # the resolved path is the link's target itself, so a root taken from it
+    # would hold the target wherever the link led and confine nothing
+    # (default_confinement_root resolves first, so it is not used here). A
     # symlinked config is written through to its target (so the link stays a
-    # link), but only to a target inside that directory, as resolved. A link
-    # placed in a repository that pointed outside it (dangling or not) made the
-    # save create or edit a file wherever the link led, with no confinement;
-    # the documented ``.ash/.ash.yaml`` linked to a config beside ``.ash/``
-    # stays inside the root and saves through.
-    inside = _resolved_for_save(default_confinement_root(config_path), config_path)
+    # link), but only to a target inside that root, as resolved. A link placed
+    # in a repository that pointed outside it (dangling or not) made the save
+    # create or edit a file wherever the link led, with no confinement; the
+    # documented ``.ash/.ash.yaml`` linked to a config beside ``.ash/`` stays
+    # inside the root and saves through.
+    anchor = config_path.parent
+    if anchor.name == ".ash":
+        anchor = anchor.parent
+    inside = _resolved_for_save(anchor, config_path)
     if inside not in target.parents:
         raise _left_unchanged(
             "the config is a link to a file outside its own directory (for a "
