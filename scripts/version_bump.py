@@ -56,9 +56,26 @@ def format_version(major: int, minor: int, patch: int) -> str:
     return f"{major}.{minor}.{patch}"
 
 
+def leads_up_to_its_release(version: Version) -> bool:
+    """Whether ``version`` comes before the final release its numbers name.
+
+    2.0.0rc1 and 2.0.0.dev1 sort before 2.0.0; 2.0.0.post1 and 2.0.0.post1.dev1
+    sort after it. A pre-release part decides it, post-release part or not
+    (2.0.0rc1.post1 still precedes 2.0.0); a development part alone does only
+    when there is no post-release part.
+    """
+    return version.pre is not None or (version.dev is not None and version.post is None)
+
+
 def bump_version(current_version: str, bump_type: str) -> str:
     """
     Bump version based on type (major, minor, patch).
+
+    A version that comes before its own release (2.0.0rc1, 2.0.0.dev1) is bumped
+    the way semver and commitizen do it: the bump that names that release
+    finalizes it instead of passing it. Patch gives X.Y.Z; minor gives X.Y.0 when
+    the patch number is 0; major gives X.0.0 when the minor and patch numbers are
+    0. Any other bump counts from the release numbers, as for a final version.
 
     Args:
         current_version: Current version string
@@ -67,7 +84,15 @@ def bump_version(current_version: str, bump_type: str) -> str:
     Returns:
         New version string
     """
-    major, minor, patch = parse_version(current_version)
+    parsed = _read_version(current_version)
+    major, minor, patch = parsed.release
+
+    if leads_up_to_its_release(parsed) and (
+        bump_type == "patch"
+        or (bump_type == "minor" and patch == 0)
+        or (bump_type == "major" and minor == 0 and patch == 0)
+    ):
+        return format_version(major, minor, patch)
 
     if bump_type == "major":
         major += 1
@@ -201,14 +226,21 @@ class VersionBumper:
             return False
 
         current = Version(current_version)
-        if current.is_prerelease or current.is_postrelease or current.is_devrelease:
-            # Only the release numbers are counted; say so instead of dropping
-            # the pre-release, post-release or development part silently.
-            print(
-                f"Note: {current_version} is not a final release. The {bump_type} "
-                "bump counts from its release numbers alone, so that part is "
-                f"dropped and {new_version} follows."
-            )
+        if leads_up_to_its_release(current):
+            if new_version == current.base_version:
+                print(
+                    f"Note: {current_version} is not a final release. The "
+                    f"{bump_type} bump finalizes it: {new_version} follows."
+                )
+            else:
+                # The bump is past the release the version leads up to: only the
+                # release numbers are counted. Say so instead of dropping the
+                # pre-release or development part silently.
+                print(
+                    f"Note: {current_version} is not a final release. The "
+                    f"{bump_type} bump counts from its release numbers alone, so "
+                    f"that part is dropped and {new_version} follows."
+                )
 
         return self.set_version(new_version)
 
