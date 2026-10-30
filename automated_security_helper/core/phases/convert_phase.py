@@ -253,16 +253,21 @@ def _redaction_values_or(plugin_instance: Any, run_config: Any, fallback: Any) -
 def _unproductive_reason(row: Any) -> str | None:
     """Why a converter's row explains an empty conversion, or None.
 
-    The row's ``failure``; else the count of its failed inputs that are not
-    accepted (the gate's count); else, for a converter that was not turned off,
-    the reason its tool was unavailable. The last was left out, and a run whose
-    only converter had been dropped for a missing tool logged the bare "No files
-    were converted by any converter plugins" beside a gate that fails the run on
-    that very row.
+    The row's ``failure``; else the archives it refused whole over an extraction
+    limit (a loss the completeness gate counts too); else the count of its failed
+    inputs that are not accepted (the gate's count); else, for a converter that
+    was not turned off, the reason its tool was unavailable. The refusal was left
+    out, so a run whose only converter refused an archive logged the bare "No
+    files were converted by any converter plugins" beside a gate that fails the
+    run on that very row. So was the last, for a run whose only converter had
+    been dropped for a missing tool.
     """
     failure = getattr(row, "failure", None)
     if failure:
         return str(failure)
+    refused = _refused_over_limit(row)
+    if refused:
+        return refused
     unaccepted = _unaccepted_failed_inputs(row)
     if unaccepted:
         return f"{len(unaccepted)} could not be converted"
