@@ -55,9 +55,12 @@ _SEMVER = r"\d+\.\d+\.\d+"
 # `--branch v<version>` that belongs to a clone of this repository from one that
 # belongs to another project.
 _SAME_COMMAND = r"(?:\\\n|[^\n;&|`)\]])*"
-# This repository as a URL names it, up to where its name ends: a sibling such as
-# `<name>-plugins` is another project.
-_ASH_REPOSITORY = rf"[/:]{_REPO_NAME}(?:\.git)?(?![\w.-])"
+# This repository's name where it is a whole name, with its optional `.git`: not the
+# end of another name (`fork-<name>`, `my.<name>`) and not the start of one
+# (`<name>-plugins`). Every anchor below is built from it.
+_ASH_NAME = rf"(?<![\w.-]){_REPO_NAME}(?:\.git)?(?![\w.-])"
+# This repository as a URL or a path names it.
+_ASH_REPOSITORY = rf"[/:]{_ASH_NAME}"
 
 
 def _in_an_ash_command(prefix: str) -> Tuple[str, str]:
@@ -93,12 +96,12 @@ ASH_PIN_PATTERNS = {
     "@ (git URL, uses:)": (
         # The ellipsis form is prose for "the workflow of this repository":
         # `uses: ...@v<version>`.
-        rf"((?<![\w./-])@v|\.\.\.@v|{_REPO_NAME}(?:\.git)?(?:/[\w./-]+)?@v){_SEMVER}",
+        rf"((?<![\w./-])@v|\.\.\.@v|{_ASH_NAME}(?:/[\w./-]+)?@v){_SEMVER}",
     ),
     "--branch": _in_an_ash_command(_FORM_PREFIX["--branch"]),
     "rev:": (
         (
-            rf"(repo:[ \t]*\S*[/:]{_REPO_NAME}(?:\.git)?/?[\"']?[ \t]*(?:#[^\n]*)?\n"
+            rf"(repo:[ \t]*\S*{_ASH_REPOSITORY}/?[\"']?[ \t]*(?:#[^\n]*)?\n"
             rf"(?:[ \t]*(?:#[^\n]*)?\n)*[ \t]*rev:[ \t]+v){_SEMVER}"
         ),
     ),

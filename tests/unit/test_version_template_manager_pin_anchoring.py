@@ -249,6 +249,12 @@ OTHER_PROJECTS_PINS = {
     ),
     "a clone of another project": f"git clone --branch v2.0.0 {OTHER_URL}.git\n",
     "a third-party action": "      - uses: actions/checkout@v4.1.2\n",
+    "an action whose name ends with this repository's": (
+        f"      - uses: example/fork-{REPO}@v1.0.0\n"
+    ),
+    "a package whose name has a dot before this repository's": (
+        f"      - uses: example/my.{REPO}@v1.0.0\n"
+    ),
     "another project's reusable workflow": (
         "      uses: example/other-project/.github/workflows/x.yml@v1.0.0\n"
     ),
@@ -343,6 +349,22 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
         converted = _convert(text)
         assert "3.4.0" not in converted, converted
         assert "{{VERSION}}" in converted, converted
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            f"      - uses: awslabs/{REPO}@v3.4.0\n",
+            f"      - uses: {REPO}@v3.4.0\n",
+            f"      uses: awslabs/{REPO}/.github/workflows/run.yml@v3.4.0\n",
+            f"uvx --from=git+{ASH_URL}@v3.4.0 ash\n",
+        ],
+    )
+    def test_the_action_and_workflow_forms_are_still_ash_s_pin(self, text):
+        """The control for the left boundary of the repository name in the `@` form."""
+        manager = VersionTemplateManager(REPO_ROOT)
+        assert manager.release_pins(text) == {"3.4.0"}
+        assert manager.unrecognized_pins(text) == []
+        assert "3.4.0" not in _convert(text)
 
     def test_the_ellipsis_form_is_ash_s_pin(self):
         """Red before: the bare form refuses a `@` after a dot, so the page's prose
