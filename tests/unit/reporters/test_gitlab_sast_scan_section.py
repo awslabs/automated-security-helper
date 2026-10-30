@@ -18,6 +18,7 @@ Three things the report used to get wrong:
 
 import json
 import re
+import sys
 
 import pytest
 
@@ -145,6 +146,54 @@ class TestScanStatusReportsScannersThatDidNotComplete:
         assert any(
             "bandit" in m["value"] and "ERROR" in m["value"]
             for m in report["scan"]["messages"]
+        )
+
+    @pytest.mark.parametrize("status", [ScannerStatus.MISSING, ScannerStatus.ERROR])
+    def test_the_operators_gate_off_keeps_success_and_still_warns(
+        self, reporter, status
+    ):
+        """``fail_on_incomplete_scanners: false`` is the operator accepting an
+        incomplete scan: the exit code is 0, and this report said ``failure``
+        beside it. The gap is still a ``warn`` message; the status follows the
+        operator's gate, as the exit code does."""
+        model = self._with_scanner(status)
+        model.ash_config = AshConfig(
+            project_name="scan-status-test", fail_on_incomplete_scanners=False
+        )
+
+        report = json.loads(reporter.report(model))
+
+        assert report["scan"]["status"] == "success"
+        values = [m["value"] for m in report["scan"]["messages"]]
+        assert any("bandit" in v and status.value in v for v in values), values
+        assert all(m["level"] == "warn" for m in report["scan"]["messages"])
+
+    def test_the_gate_defaults_on_when_the_model_carries_no_config(self, reporter):
+        """A results object with no config answers as the exit code's resolver
+        does with no config at all: the gate is on."""
+        model = self._with_scanner(ScannerStatus.MISSING)
+        model.ash_config = None
+
+        report = json.loads(reporter.report(model))
+
+        assert report["scan"]["status"] == "failure"
+
+    def test_a_scan_module_that_cannot_be_imported_keeps_the_vulnerabilities(
+        self, reporter, monkeypatch
+    ):
+        """The import of the scan entry point sat outside the guard, so an import
+        failure reached ``report()`` and became the failure artefact with no
+        vulnerabilities, the very loss the guard exists to prevent."""
+        model = self._with_scanner(ScannerStatus.MISSING, _result("B105", "x = 's'"))
+        monkeypatch.setitem(
+            sys.modules, "automated_security_helper.interactions.run_ash_scan", None
+        )
+
+        report = json.loads(reporter.report(model))
+
+        assert len(report["vulnerabilities"]) == 1
+        assert not any(
+            m["level"] == "fatal" for m in report["scan"].get("messages", [])
         )
 
 

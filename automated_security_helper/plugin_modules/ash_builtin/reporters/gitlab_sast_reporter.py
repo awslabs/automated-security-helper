@@ -566,9 +566,16 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # The same holds for a scan that ran fewer scanners than it was asked
         # to: a scanner at ERROR or MISSING produced no findings, so a report
         # that said "success" with no message was byte-identical to a clean
-        # scan of the same tree.
+        # scan of the same tree. The messages are always written; whether the
+        # gap also fails the scan is the operator's fail_on_incomplete_scanners,
+        # the same answer the exit code gives, so a pip install without the cdk
+        # extra that the operator has accepted does not read "failure" here
+        # while the scan exits 0.
         coverage_messages = self._coverage_messages(model)
         messages.extend(coverage_messages)
+        coverage_fails_the_scan = bool(coverage_messages) and self._completeness_gate(
+            model
+        )
 
         # Determine scan status. "success" says the scan ran to completion and
         # this report carries everything it found.
@@ -578,7 +585,9 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # scan that completed with findings was indistinguishable from one
         # that broke. The findings themselves decide the exit code elsewhere.
         scan_status = (
-            "success" if not skipped_results and not coverage_messages else "failure"
+            "success"
+            if not skipped_results and not coverage_fails_the_scan
+            else "failure"
         )
 
         # Create the final report structure matching the reference
@@ -621,15 +630,19 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         Read through ``scan_incompleteness``, the same question the exit code
         asks, with the gate on so the facts are reported whatever the operator's
         ``fail_on_incomplete_scanners`` says: GitLab's widget reads this report,
-        not the exit code. An empty list means every selected scanner reached a
-        verdict. Guarded because a model this cannot read is not a reason to
-        lose the vulnerabilities already transformed.
+        not the exit code. Whether the facts also turn ``scan.status`` to
+        failure is :meth:`_completeness_gate`'s question. An empty list means
+        every selected scanner completed. Guarded, the import included,
+        because a model this cannot read, or a scan module that cannot be
+        imported, is not a reason to lose the vulnerabilities already
+        transformed: an exception out of here would reach ``report()`` and
+        become ``_failure_report`` with no vulnerabilities at all.
         """
-        from automated_security_helper.interactions.run_ash_scan import (
-            scan_incompleteness,
-        )
-
         try:
+            from automated_security_helper.interactions.run_ash_scan import (
+                scan_incompleteness,
+            )
+
             coverage = scan_incompleteness(model, gate=True)
             rows = [(str(name), str(status)) for name, status in coverage.scanners]
             no_scanner_ran = bool(coverage.no_scanner_ran)
@@ -657,6 +670,26 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 }
             )
         return messages
+
+    @staticmethod
+    def _completeness_gate(model: "AshAggregatedResults") -> bool:
+        """Whether an incomplete scanner fails this scan, as the operator set it.
+
+        ``run_ash_scan._resolve_fail_on_incomplete_scanners`` answers the exit
+        code's question from the command line, then the config the scan ran
+        under, then the config file, then the model default (on). The command
+        line is not recorded in the results, so this reads the two sources the
+        model carries: ``ash_config.fail_on_incomplete_scanners`` when it is a
+        real bool (a ``MagicMock`` model answers with a truthy non-answer, and
+        a partially built one with None), else the default the resolver falls
+        back to. A MISSING cdk-nag the operator accepted with
+        ``fail_on_incomplete_scanners: false`` is then a warning in the report
+        and not a ``failure`` beside an exit code of 0.
+        """
+        value = getattr(
+            getattr(model, "ash_config", None), "fail_on_incomplete_scanners", None
+        )
+        return value if isinstance(value, bool) else True
 
     @staticmethod
     def _scan_timestamp(model: "AshAggregatedResults") -> str:
