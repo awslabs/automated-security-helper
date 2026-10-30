@@ -941,11 +941,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         self._run_model: Optional[str] = None
         self._configured_error: Optional[str] = None
         self._walk_exhausted: Optional[CallOutcome] = None
-        # The configured model as the listing spells it, when
-        # validate_plugin_dependencies matched it case-insensitively: the id
-        # the run's calls go to, since Converse knows that spelling. Kept
-        # across report(), which the check precedes.
-        self._listed_model_id: Optional[str] = None
+        # The configured model and, as the listing spells it, the id the run's
+        # calls go to, when validate_plugin_dependencies matched it
+        # case-insensitively (Converse knows the listing's spelling). Kept as a
+        # pair across report(), which the check precedes, so the listed
+        # spelling is used only while the configured id is still the one it
+        # was computed for.
+        self._listed_spelling: Optional[Tuple[str, str]] = None
 
     def _session(self) -> Any:
         """The boto3 session every client of this reporter is built from: the
@@ -1101,8 +1103,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             is_valid, error_message = check
             # The listing's spelling of a model matched case-insensitively is
             # the one the run calls; the configured spelling is not known to
-            # Converse.
-            self._listed_model_id = check_model_id(check) if is_valid else None
+            # Converse. Kept with the configured id it was computed for.
+            listed = check_model_id(check) if is_valid else None
+            self._listed_spelling = (model_id, listed) if listed else None
 
             if not is_valid:
                 self._plugin_log(
@@ -1931,16 +1934,24 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         retries = self.config.options.max_retries
         return DEFAULT_MODEL_CALL_RETRIES if retries is None else retries
 
+    def _model_id_to_call(self) -> str:
+        """The id the run's calls go to: the listing's spelling when the
+        dependency check matched the configured id case-insensitively and the
+        configured id is still the one that check was made for, else the
+        configured id. Read with a default: a reporter built by
+        ``model_construct`` (the retry-config tests) has not run ``__init__``,
+        so the attribute may not exist."""
+        configured = self.config.options.model_id
+        listed = getattr(self, "_listed_spelling", None)
+        if listed is not None and listed[0] == configured:
+            return listed[1]
+        return configured
+
     def _make_model_client(self, bedrock_runtime: Any) -> BedrockModelClient:
         opts = self.config.options
         return BedrockModelClient(
             bedrock_runtime=bedrock_runtime,
-            # The listing's spelling when the dependency check matched the
-            # configured id case-insensitively: Converse knows that one. Read
-            # with a default: a reporter built by ``model_construct`` (the
-            # retry-config tests) has not run ``__init__``, so the attribute
-            # may not exist, and then the configured id is the one to call.
-            model_id=getattr(self, "_listed_model_id", None) or opts.model_id,
+            model_id=self._model_id_to_call(),
             temperature=opts.temperature,
             max_tokens=opts.max_tokens,
             top_p=opts.top_p,
@@ -2189,14 +2200,19 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             if not check[0]:
                 leave_unchecked(model, check)
             else:
-                called.append(model)
-                outcome = call_model(model)
+                # A candidate the listing matched case-insensitively is called
+                # by the listing's spelling, the one Converse knows.
+                called_id = check_model_id(check) or model
+                called.append(called_id)
+                outcome = call_model(called_id)
                 if outcome.ok:
                     ASH_LOGGER.info(
-                        text_without_values(f"Fallback model {model} succeeded", values)
+                        text_without_values(
+                            f"Fallback model {called_id} succeeded", values
+                        )
                     )
                     if keep_as_run_model:
-                        self._run_model = model
+                        self._run_model = called_id
                     return outcome
                 if not outcome.model_specific:
                     # No connection, no credentials, the service down: every

@@ -18,6 +18,7 @@ No test here calls AWS: the sessions and clients are doubles.
 
 from unittest.mock import MagicMock
 
+import botocore.exceptions
 import pydantic
 import pytest
 
@@ -331,6 +332,82 @@ def test_the_run_calls_the_spelling_the_listing_carries(monkeypatch, tmp_path):
     client = reporter._make_model_client(runtime)
 
     assert client._model_id == LISTED
+
+
+def test_a_stale_listed_spelling_is_not_used_for_another_configured_model(
+    monkeypatch, tmp_path
+):
+    """The listed spelling belongs to the configured id it was computed for:
+    when the options later name another model, the client is built on that
+    one, not on the earlier listing's spelling."""
+    runtime = RuntimeDouble()
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session",
+        _session_double(runtime, ControlPlaneDouble(LISTED)),
+    )
+    reporter = BedrockSummaryReporter(
+        context=plugin_context_in(tmp_path),
+        config=BedrockSummaryReporterConfig(
+            options=BedrockSummaryReporterConfigOptions(
+                aws_region=REGION, model_id=LISTED.upper()
+            )
+        ),
+    )
+    assert reporter.validate_plugin_dependencies() is True
+    assert reporter._make_model_client(runtime)._model_id == LISTED
+
+    reporter.config = BedrockSummaryReporterConfig(
+        options=BedrockSummaryReporterConfigOptions(
+            aws_region=REGION, model_id=PRIMARY_MODEL
+        )
+    )
+
+    assert reporter._make_model_client(runtime)._model_id == PRIMARY_MODEL
+
+
+class _RuntimeThatRefusesOne:
+    """A runtime that refuses one model id with a model-specific error and
+    answers every other call; records the ids it was called with."""
+
+    def __init__(self, refused):
+        self.refused = refused
+        self.models = []
+
+    def converse(self, **kwargs):
+        self.models.append(kwargs["modelId"])
+        if kwargs["modelId"] == self.refused:
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "ResourceNotFoundException", "Message": "gone"}},
+                "Converse",
+            )
+        return {
+            "output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}}
+        }
+
+
+def test_the_walk_calls_a_candidate_by_the_listings_spelling(monkeypatch, tmp_path):
+    """A fallback candidate the listing matched case-insensitively is called
+    with the listing's spelling, and that spelling is the run's model from
+    then on."""
+    runtime = _RuntimeThatRefusesOne(PRIMARY_MODEL)
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session",
+        _session_double(runtime, ControlPlaneDouble(PRIMARY_MODEL, LISTED)),
+    )
+    # The chain names the candidate in another case; the walk ends on the
+    # repeat of the configured model.
+    monkeypatch.setattr(
+        f"{MODULE}.get_fallback_model",
+        {PRIMARY_MODEL: LISTED.upper(), LISTED.upper(): PRIMARY_MODEL}.get,
+    )
+    reporter = make_reporter(plugin_context_in(tmp_path), max_retries=0)
+    client = reporter._make_model_client(runtime)
+
+    outcome = reporter._outcome_with_fallback(client, "prompt", "system")
+
+    assert outcome.ok is True, outcome.text
+    assert runtime.models == [PRIMARY_MODEL, LISTED], runtime.models
+    assert reporter._run_model == LISTED
 
 
 def test_a_reporter_built_without_init_calls_the_configured_model():
