@@ -11,7 +11,10 @@ missing file, and falling back to the default configuration for one would run a
 scan with settings the operator did not choose. Windows reports a link it cannot
 resolve as EINVAL, the same errno as an invalid name, so an EINVAL whose path is
 itself a symbolic link (``os.lstat``, which does not follow it) is the loop, not
-a missing path. ``Path.exists()`` and
+a missing path. Windows gives EINVAL to every error it has no errno for (a share's
+logon failure, a network name deleted), so on Windows only ERROR_INVALID_NAME
+(``winerror`` 123) is an invalid name; any other EINVAL is unreadable.
+``Path.exists()`` and
 ``Path.is_file()`` cannot tell these apart, and before Python 3.14 they raise
 the stat's PermissionError for a path under an unsearchable directory instead
 of answering, so the same path got a different answer on each interpreter.
@@ -40,6 +43,9 @@ _CANNOT_TAKE = frozenset(
     for code in (getattr(errno, "EINVAL", None), getattr(errno, "ENAMETOOLONG", None))
     if code is not None
 )
+#: Windows's ERROR_INVALID_NAME: the one Windows error behind an EINVAL that means
+#: the path is a name the OS cannot take (one holding ``<`` or ``?``).
+_ERROR_INVALID_NAME = 123
 #: ELOOP, or Windows's EINVAL on a path that is itself a symbolic link: a
 #: symbolic link loop.
 LOOP = "loop"
@@ -98,10 +104,22 @@ def stat_named_path(
     except OSError as error:
         number = error.errno
         strerror = error.strerror if isinstance(error.strerror, str) else ""
+        # Set on Windows only: the Windows error the errno was made from.
+        winerror = getattr(error, "winerror", None)
     except ValueError:
         return StatProblem(MISSING, "", None)
     if number == errno.EINVAL and _names_a_symbolic_link(path):
         return StatProblem(LOOP, errno.errorcode[number], number)
+    if (
+        number == errno.EINVAL
+        and winerror is not None
+        and winerror != _ERROR_INVALID_NAME
+    ):
+        # Windows gives EINVAL to every error it has no errno for (a share's
+        # logon failure, a network name deleted, a file the system cannot
+        # access): the path may be there and cannot be read, so it is not the
+        # "not found" that sends a scan to the default configuration.
+        return StatProblem(UNREADABLE, errno.errorcode[number], number)
     if number in (errno.ENOENT, errno.ENOTDIR) or number in _CANNOT_TAKE:
         return StatProblem(MISSING, errno.errorcode[number], number)
     if number == errno.ELOOP:
