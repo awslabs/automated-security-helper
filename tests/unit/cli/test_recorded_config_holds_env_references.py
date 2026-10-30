@@ -351,9 +351,6 @@ def test_no_output_holds_an_env_value(runs, command, directory):
     assert leaked == [], leaked
 
 
-@pytest.mark.parametrize(
-    "command, directory", [("merge", "merged"), ("report", "shard/reports")]
-)
 def _report_document(stdout: str) -> Tuple[dict, str]:
     """The pretty-printed document ``ash report`` writes to stdout when no output
     file is asked for (its ``{`` and ``}`` stand on lines of their own), and the
@@ -367,6 +364,9 @@ def _report_document(stdout: str) -> Tuple[dict, str]:
     return document, "".join(lines[:first] + lines[last + 1 :])
 
 
+@pytest.mark.parametrize(
+    "command, directory", [("merge", "merged"), ("report", "shard/reports")]
+)
 def test_no_output_holds_an_override_value(runs, command, directory):
     channels = _channels(runs, command, runs["root"] / directory)
     if command == "report":
