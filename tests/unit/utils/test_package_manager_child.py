@@ -193,6 +193,33 @@ class TestLinkedDirectories:
             ("packages/vendored/package.json", LINK_LEAVES_TREE)
         ]
 
+    def test_a_linked_directory_leaving_the_tree_is_refused_without_a_top_manifest(
+        self, tmp_path
+    ):
+        """The outside tree holds members only deeper down (``/elsewhere/x``),
+        so the link's own manifest does not exist. It was listed only when it
+        existed, so nothing was listed and nothing refused, and in-place yarn
+        expanded ``packages/**`` into the outside tree. The link's manifest is
+        listed whether or not it exists; the refusal reads the link."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        outside = tmp_path / "outside"
+        _manifest(outside / "x", "x-outside")
+        (package / "packages").mkdir()
+        os.symlink(outside, package / "packages" / "ext", target_is_directory=True)
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+        refused = refused_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/ext/package.json",
+            "yarn.lock",
+        ]
+        assert [(p.relative_to(package).as_posix(), why) for p, why in refused] == [
+            ("packages/ext/package.json", LINK_LEAVES_TREE)
+        ]
+
     def test_a_link_back_into_the_walked_tree_ends(self, tmp_path):
         """A link to an ancestor would walk forever; each real directory is
         walked once. The link's own manifest is still a file yarn reads at that

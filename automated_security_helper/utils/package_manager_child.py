@@ -330,9 +330,11 @@ def package_manager_inputs(
     directory or an ancestor of it, which would walk the scanned tree again under
     the link's name; the latter has only its own ``package.json`` listed. A
     linked directory that resolves outside every root has only its own
-    ``package.json`` listed, which ``input_refusal`` then refuses, so nothing
-    below it is read and a link to a large tree elsewhere is never walked. With
-    no ``roots`` no linked directory is walked.
+    ``package.json`` listed, present or not, which ``input_refusal`` then refuses
+    for resolving outside the tree, so the package is refused and nothing below
+    the link is read: a link to a large tree elsewhere is never walked. With no
+    ``roots`` no linked directory is walked and only a manifest that exists at
+    the link's top is listed.
     """
     package_dir = Path(package_dir)
     manifest = package_dir / "package.json"
@@ -408,7 +410,14 @@ def package_manager_inputs(
                             inputs.append(linked / "package.json")
                         continue
                     _walk(linked)
-                elif (linked / "package.json").exists():
+                elif bounds or (linked / "package.json").exists():
+                    # Outside every root the link's own manifest is listed
+                    # whether or not it exists: input_refusal refuses it for
+                    # resolving outside the tree either way, and a link whose
+                    # target holds members only deeper down (packages/ext ->
+                    # /elsewhere with /elsewhere/x/package.json) was listed
+                    # for nothing, so nothing was refused and in-place yarn
+                    # read those members from outside the tree.
                     inputs.append(linked / "package.json")
 
     _walk(package_dir)
