@@ -458,6 +458,21 @@ class CommandSafeStream:
     def fileno(self) -> int:
         return self.target.fileno()
 
+    def __copy__(self) -> "CommandSafeStream":
+        """A fresh wrap of the same target, with the same buffer rule.
+
+        A shallow copy shared this wrap's lock, its list of deferred writes and
+        its checked buffer view (whose owner stayed this wrap), while text written
+        through the copy used the copy's own line state: two line models over one
+        stream, and a write on the copy drained items this wrap had deferred in
+        the middle of its own write, the order deferral exists to keep. A new wrap
+        has a line state, a lock and a pending list of its own, as a second wrap
+        of one stream always has.
+        """
+        return CommandSafeStream(
+            self._target, check_buffer=self._checked_buffer is not None
+        )
+
     @property
     def encoding(self) -> str:
         return getattr(self.target, "encoding", None) or "utf-8"

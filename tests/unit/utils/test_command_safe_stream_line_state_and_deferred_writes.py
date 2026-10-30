@@ -193,6 +193,25 @@ def test_copy_copy_of_the_wrap_does_not_recurse():
     assert isinstance(copy.copy(wrap), css.CommandSafeStream)
 
 
+def test_copy_copy_of_the_wrap_is_a_fresh_wrap_of_the_same_target():
+    """The copy shares the target and the buffer rule, and nothing of this wrap's
+    state: a shallow copy shared the lock, the deferred-write list and the checked
+    view (still owned by the original), so the two wraps kept two line models over
+    one stream and drained each other's deferred writes."""
+    target = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", write_through=True)
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    wrap._mid_write = True
+    wrap.write("deferred\n")
+    duplicate = copy.copy(wrap)
+    assert duplicate.target is wrap.target
+    assert duplicate._pending == [] and duplicate._pending is not wrap._pending
+    assert duplicate._lock is not wrap._lock
+    assert duplicate.buffer is not wrap.buffer
+    assert duplicate.buffer._owner is duplicate
+    plain = copy.copy(css.CommandSafeStream(lambda: target))
+    assert plain._checked_buffer is None
+
+
 @pytest.mark.parametrize("cls", [css.CommandSafeStream, css.CommandSafeBuffer])
 def test_an_attribute_read_on_an_uninitialized_instance_is_an_attribute_error(cls):
     """What copy.copy does before it fills the new instance's __dict__ in: a
