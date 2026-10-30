@@ -25,7 +25,6 @@ import errno
 import stat
 import subprocess  # nosec B404
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -229,11 +228,15 @@ class TestTheVerdictMemoExpires:
         verify_pre_installed_tool(str(tool), "bandit", uv_executable="/opt/uv")
         verify_pre_installed_tool(str(tool), "bandit", uv_executable="/opt/uv")
         assert len(probes) == 1, "the second check inside the window is answered"
-        real_monotonic = time.monotonic
-        monkeypatch.setattr(
-            pre_installed_tool.time,
-            "monotonic",
-            lambda: real_monotonic() + pre_installed_tool._VERDICT_MEMO_SECONDS + 1,
+        # The one stored verdict is backdated past the window. Not a patched
+        # clock: pre_installed_tool.time is the time module itself, so a
+        # patched monotonic would move every deadline and lock wait in the
+        # process for the rest of the test.
+        (key, (verdict, stored_at)), *others = pre_installed_tool._verdict_cache.items()
+        assert others == [], "the memo holds exactly this one verdict"
+        pre_installed_tool._verdict_cache[key] = (
+            verdict,
+            stored_at - pre_installed_tool._VERDICT_MEMO_SECONDS - 1,
         )
         verify_pre_installed_tool(str(tool), "bandit", uv_executable="/opt/uv")
         assert len(probes) == 2, "a verdict past the window is probed again"
