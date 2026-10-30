@@ -39,6 +39,10 @@ from automated_security_helper.utils.content_databases import (
 
 pytestmark = pytest.mark.unit
 
+#: trivy's probe as the module defines it, read at import, before the autouse
+#: unit tool guard replaces the module attribute for each test.
+_REAL_TRIVY_PROBE = staleness._built_from_trivy
+
 NOW = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
 
@@ -128,13 +132,17 @@ def test_trivy_with_a_metadata_file_but_no_updated_at_is_unknown_age(
     ctx = staleness.ProbeContext(
         env={}, executable="/bin/trivy", cache_dir=str(tmp_path), values=()
     )
+    # The probe as written, not the stand-in the unit tool guard puts on the
+    # module for every test (tests/utils/tool_guard.py): this test reads the
+    # probe's own answers, with its one command stubbed above.
+    probe = _REAL_TRIVY_PROBE
     with pytest.raises(ValueError) as raised:
-        staleness._built_from_trivy(ctx)
+        probe(ctx)
     assert not isinstance(raised.value, staleness.ContentDatabaseAbsent)
     # The control: with no metadata file the database is absent.
     (tmp_path / "db" / "metadata.json").unlink()
     with pytest.raises(staleness.ContentDatabaseAbsent):
-        staleness._built_from_trivy(ctx)
+        probe(ctx)
 
 
 def test_a_rules_directory_with_a_manifest_and_no_rules_is_absent(tmp_path):
