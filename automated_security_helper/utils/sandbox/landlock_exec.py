@@ -97,6 +97,12 @@ REAP_DEADLINE_SECONDS = 5.0
 #: reaps leaves what its scanner started running, so a stop is finished well
 #: inside a grace of half a second.
 STOP_REAP_DEADLINE_SECONDS = 0.25
+#: How long the reap goes on after the scanner's exit on a stop, at least. A
+#: scanner that ignores the stop signal is SIGKILLed when STOP_REAP_DEADLINE_SECONDS
+#: ends, the moment the reap deadline would end too, which left what it started
+#: one reap pass and no second look; this keeps a short window of passes after
+#: it. Both together stay inside ASH's PROMPT_STOP_GRACE_SECONDS (0.5).
+STOP_REAP_MINIMUM_SECONDS = 0.1
 # prctl(PR_SET_SECCOMP) rather than seccomp(2): the syscall number differs per arch.
 PR_SET_SECCOMP = 22
 SECCOMP_MODE_FILTER = 2
@@ -886,6 +892,27 @@ def _die_of(died_of: int) -> int:
     return 128 + died_of
 
 
+def _reap_deadline(exited_at: float, stopped_at: Optional[float]) -> float:
+    """When the reap after the scanner's exit (at ``exited_at``) ends.
+
+    REAP_DEADLINE_SECONDS after the exit when nothing asked the wrapper to stop.
+    After a stop (``stopped_at``, the first stop signal's clock) it ends sooner:
+    STOP_REAP_DEADLINE_SECONDS from that signal, as ASH SIGKILLs a wrapper that
+    outlives its grace, but never before STOP_REAP_MINIMUM_SECONDS after the exit,
+    so a scanner the timer had to SIGKILL at that same deadline still leaves time
+    for more than one pass over what it started. The exit-based bound caps both.
+    """
+    if stopped_at is None:
+        return exited_at + REAP_DEADLINE_SECONDS
+    return min(
+        exited_at + REAP_DEADLINE_SECONDS,
+        max(
+            stopped_at + STOP_REAP_DEADLINE_SECONDS,
+            exited_at + STOP_REAP_MINIMUM_SECONDS,
+        ),
+    )
+
+
 def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     """Run the scanner and, once it exits, kill whatever it left running.
 
@@ -937,12 +964,8 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     exited_at = time.monotonic()
 
     def deadline() -> float:
-        if stopped_at:
-            return min(
-                exited_at + REAP_DEADLINE_SECONDS,
-                stopped_at[0] + STOP_REAP_DEADLINE_SECONDS,
-            )
-        return exited_at + REAP_DEADLINE_SECONDS
+        # Read again at every ask: a stop that arrives during the reap moves it.
+        return _reap_deadline(exited_at, stopped_at[0] if stopped_at else None)
 
     survivors = _reap_leftovers(deadline)
     if survivors:

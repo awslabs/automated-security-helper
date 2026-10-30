@@ -660,6 +660,29 @@ def test_a_stop_after_the_scanner_exited_is_recorded_and_sends_nothing(stop_call
     assert stopped_at == [10.0]
 
 
+def test_the_reap_after_a_stop_keeps_a_minimum_window_once_the_scanner_exited():
+    """A scanner that ignores the stop is SIGKILLed when the stop deadline ends,
+    which is when the reap used to end too, leaving its tree one pass: the reap
+    now runs at least STOP_REAP_MINIMUM_SECONDS past the exit, and the two
+    together stay inside the half second ASH gives a prompt stop."""
+    stop, quarter = 10.0, landlock_exec.STOP_REAP_DEADLINE_SECONDS
+    minimum = landlock_exec.STOP_REAP_MINIMUM_SECONDS
+
+    # Exited at once on the signal: the deadline is the stop's, unchanged.
+    assert landlock_exec._reap_deadline(stop + 0.05, stop) == stop + quarter
+    # SIGKILLed at the stop deadline: a minimum window follows the exit.
+    assert landlock_exec._reap_deadline(stop + quarter, stop) == (
+        stop + quarter + minimum
+    )
+    # No stop: the full reap after a clean exit.
+    assert landlock_exec._reap_deadline(stop, None) == (
+        stop + landlock_exec.REAP_DEADLINE_SECONDS
+    )
+    # A stop long before the exit: the exit-based bounds alone.
+    assert landlock_exec._reap_deadline(stop, stop - 60.0) == stop + minimum
+    assert quarter + minimum < 0.5
+
+
 def test_the_socket_filter_route_restores_the_dispositions_before_its_exec(
     monkeypatch,
 ):
