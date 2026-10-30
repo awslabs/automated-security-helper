@@ -5,7 +5,11 @@ from typing import Literal
 
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.utils.console import ash_console
-from automated_security_helper.utils.log import ASH_LOGGER, run_handler
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    ShownHandlerErrors,
+    run_handler,
+)
 from automated_security_helper.utils.rich_log_handler import (
     LiveDisplayLogHandler,
     RichLogPanel,
@@ -28,6 +32,15 @@ from rich.progress import (
 
 
 ExecutionPhaseType = Literal["convert", "scan", "report", "inspect"]
+
+
+class _ConsoleSink(ShownHandlerErrors, logging.StreamHandler):
+    """The standard-error sink the display falls back to without a panel.
+
+    A record it cannot write is reported shown (:class:`ShownHandlerErrors`),
+    as every other handler ASH puts on its logger reports one: a plain
+    StreamHandler printed the failed record's traceback and arguments as given.
+    """
 
 
 class LiveProgressDisplay:
@@ -212,7 +225,7 @@ class LiveProgressDisplay:
     @staticmethod
     def _console_sink(level: int) -> logging.Handler:
         """A standard-error log sink at *level*, marked as the run's handler."""
-        sink = logging.StreamHandler(sys.stderr)
+        sink = _ConsoleSink(sys.stderr)
         sink.setLevel(level)
         sink.setFormatter(logging.Formatter("%(message)s"))
         return run_handler(sink)
