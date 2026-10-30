@@ -624,21 +624,22 @@ def _ash_traceback(exc_type, exc, tb) -> None:
     its own shown report.
     """
     import typer
+    import typer.main
     from typer.main import _typer_developer_exception_attr_name
 
-    # As typer's hook decides: the tag Typer.__call__ put on the exception says
-    # whether the app wants a pretty traceback and its locals. Its name is bound
-    # to this read and nothing else in the module: the locals check
-    # (tests/unit/utils/test_debug_locals_on_ci.py) accepts a setting read back
-    # from typer's tag only through such a name.
-    tag = getattr(exc, _typer_developer_exception_attr_name, None)
-    standard = os.getenv(
-        "TYPER_STANDARD_TRACEBACK", os.getenv("_TYPER_STANDARD_TRACEBACK")
-    )
-    if standard or tag is None or not tag.pretty_exceptions_enable:
+    # As typer's hook decides, read once for this module in _standard_traceback
+    # (which _installed_hook asks too, so the two cannot drift apart): the plain
+    # traceback under TYPER_STANDARD_TRACEBACK, or when the exception carries no
+    # tag asking for a pretty one.
+    if _standard_traceback(exc, typer.main):
         detail = "".join(traceback.format_exception(exc_type, exc, tb))
         _emit(_shown(detail), sys.stderr)
         return
+    # The tag Typer.__call__ put on the exception, for its locals setting. Its
+    # name is bound to this read and nothing else in the module: the locals check
+    # (tests/unit/utils/test_debug_locals_on_ci.py) accepts a setting read back
+    # from typer's tag only through such a name.
+    tag = getattr(exc, _typer_developer_exception_attr_name, None)
 
     from rich.traceback import Traceback
 
