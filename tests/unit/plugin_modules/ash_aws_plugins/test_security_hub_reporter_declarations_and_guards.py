@@ -384,3 +384,57 @@ def test_a_scan_target_longer_than_a_product_field_still_archives(tmp_path):
     assert document["archived"] == 1
     archived = {f["Id"]: f for f in imports.findings}[stored["Id"]]
     assert archived["RecordState"] == "ARCHIVED"
+
+
+# A directory whose scope string (``source=<dir>;converted=<yes|no>``) is longer
+# than a ProductFields value: stored cut, it loses its ``;converted=`` part.
+LONG_SOURCE = "d" * (MAX_PRODUCT_FIELD_VALUE_LENGTH - 10)
+
+
+def _long_source_model(results, *, converted: bool):
+    model = _model(results, completed=("bandit",), scan_source=LONG_SOURCE)
+    reports = {"source": {"target_type": "source", "status": "PASSED"}}
+    if converted:
+        reports["converted"] = {"target_type": "converted", "status": "PASSED"}
+    model.additional_reports["bandit"] = reports
+    return model
+
+
+def test_a_scope_longer_than_a_product_field_archives_nothing(tmp_path):
+    """A converted-tree scan and a plain scan of the same long directory store
+    the same cut scope, so neither can tell the other's findings from its own;
+    compared cut, the plain scan archived what only the converted tree
+    reported. Nothing is archived instead, and the receipt says why."""
+    reporter = _reporter(tmp_path, archive=True)
+    [from_converted_tree] = reporter.build_asff_findings(
+        _long_source_model([_result(rule_id="B105", line=5)], converted=True),
+        account_id=ACCOUNT,
+        region=REGION,
+    )
+    [from_plain_scan] = reporter.build_asff_findings(
+        _long_source_model([_result()], converted=False),
+        account_id=ACCOUNT,
+        region=REGION,
+    )
+    # The mechanism: both stored scopes are the same cut string.
+    assert len(from_converted_tree["ProductFields"]["ash/scope"]) == (
+        MAX_PRODUCT_FIELD_VALUE_LENGTH
+    )
+    assert (
+        from_converted_tree["ProductFields"]["ash/scope"]
+        == from_plain_scan["ProductFields"]["ash/scope"]
+    )
+    stored = _stored(from_converted_tree)
+
+    document, imports, _queries = _archive_run(
+        tmp_path,
+        _long_source_model([_result()], converted=False),
+        [stored],
+        expected_sent=1,
+        reporter=reporter,
+    )
+
+    assert stored["Id"] not in {f["Id"] for f in imports.findings}
+    assert document["archived"] == 0
+    assert "scope" in document["archive_skipped"]
+    assert str(MAX_PRODUCT_FIELD_VALUE_LENGTH) in document["archive_skipped"]

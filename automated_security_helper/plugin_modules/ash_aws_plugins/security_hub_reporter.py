@@ -1057,6 +1057,19 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 "so their scope cannot be compared. The scan could not tell which "
                 f"directory of which repository it scanned: {NO_SCAN_SOURCE_CASES}"
             )
+        if len(scope) > MAX_PRODUCT_FIELD_VALUE_LENGTH:
+            # A finding stores the scope cut at the field's length, which drops
+            # its trailing ";converted=<yes|no>" part (and the end of a long
+            # directory), so a converted-tree scan and a plain scan of the same
+            # directory would read as the same scope and archive each other's
+            # findings. Compared cut, the scope tells scans apart no more;
+            # nothing is archived rather than the wrong thing.
+            return None, (
+                "the scan scope (source=<dir>;converted=<yes|no>) is longer than "
+                f"a ProductFields value ({MAX_PRODUCT_FIELD_VALUE_LENGTH} "
+                "characters), so the stored findings' scope cannot be compared "
+                "with this scan's; shorten the scanned directory's path"
+            )
         failed_converters = sorted(
             name
             for name, info in (model.converter_results or {}).items()
@@ -1106,7 +1119,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         Recorded on every finding as ``ash/scope``; a finding is archived only by
         a scan of the same scope, so a narrower ``--source-dir`` under the same
         findings_scope, or a run whose converted tree was empty, refused or gone
-        (the last notebook deleted), archives nothing the other one found.
+        (the last notebook deleted), archives nothing the other one found. A
+        scope longer than a ProductFields value is stored cut, which loses that
+        distinction, so ``_archive_scope`` archives nothing for such a scan.
         """
         source = getattr(model.metadata, "scan_source", None)
         if not isinstance(source, str) or not source.strip():
