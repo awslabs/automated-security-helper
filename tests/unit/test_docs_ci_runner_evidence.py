@@ -333,6 +333,67 @@ def test_an_input_given_as_an_expression_is_unknown_before_the_run():
 
 
 @pytest.mark.unit
+def test_the_expression_reader_follows_githubs_literals_and_coercions():
+    """GitHub's expression rules the plan must share: the literals ``true``, ``false``
+    and ``null`` have their values (a job behind ``if: ${{ false }}`` never runs);
+    ``==`` across types coerces both sides to numbers, so a boolean input compared to
+    the string ``'true'`` is false (``1`` against ``NaN``); any non-empty string is true,
+    the quoted ``"false"`` included; and an ``if`` the reader cannot parse still carries
+    the implicit ``success()`` when it names no status function."""
+    load = _api("reports", "load_workflow")
+    plan = _api("reports", "act_job_plan")
+    scan = "on:\n  push:\njobs:\n  scan:\n    steps:\n      - run: {command}\n"
+    after = "  after:\n    needs: scan\n    if: {condition}\n    steps:\n      - run: echo\n"
+    passing = scan.format(command="ash scan --no-fail-on-findings .")
+    failing = scan.format(command="ash scan .")
+    for condition, expected in [
+        ("${{ false }}", False),
+        ("${{ true }}", True),
+        ("${{ null }}", False),
+        ("always() && false", False),
+        ("always() && null", False),
+        ("${{ 1 == 1 }}", True),
+        ("${{ 0 }}", False),
+        ("${{ null == '' }}", True),
+        ("${{ 'A' == 'a' }}", True),
+        # An unknown function: the value is unknown, so the job stays expected.
+        ("${{ contains(needs.scan.result, 'x') }}", True),
+    ]:
+        jobs = plan(load(passing + after.format(condition=condition)), {})
+        assert ("after" in jobs) is expected, (condition, sorted(jobs))
+    # The same unparsable `if` on a dependent of a FAILED scan: the implicit success()
+    # still applies (the text names no status function), so the job is left out; with
+    # always() in the text it stays expected.
+    unparsable = after.format(condition="${{ contains(needs.scan.result, 'x') }}")
+    assert "after" not in plan(load(failing + unparsable), {})
+    kept = after.format(condition="${{ always() && contains(needs.scan.result, 'x') }}")
+    assert "after" in plan(load(failing + kept), {})
+    caller = (
+        "on:\n  push:\njobs:\n  call:\n    uses: ./.github/workflows/quiet.yml\n"
+        "    with:\n      quiet: {value}\n"
+    )
+
+    def loud(value: str, condition: str) -> bool:
+        workflows = {
+            "quiet.yml": load(
+                "on:\n  workflow_call:\n    inputs:\n      quiet:\n"
+                "        type: boolean\n        default: false\n"
+                f"jobs:\n  loud:\n    if: {condition}\n    steps:\n      - run: echo\n"
+            )
+        }
+        return "loud" in plan(load(caller.format(value=value)), workflows)
+
+    # A boolean input against the string 'true': 1 against NaN, false under GitHub.
+    assert loud("true", "${{ inputs.quiet == 'true' }}") is False
+    assert loud("true", "${{ inputs.quiet == true }}") is True
+    assert loud("false", "${{ inputs.quiet == false }}") is True
+    # A quoted "false" is a non-empty string, which GitHub reads as true.
+    assert loud('"false"', "${{ inputs.quiet }}") is True
+    assert loud("false", "${{ inputs.quiet }}") is False
+    assert loud("true", "${{ inputs.quiet }}") is True
+
+
+@pytest.mark.unit
 def test_failure_reads_every_ancestor_of_a_job():
     """GitHub's ``failure()`` is true when any ancestor job failed, not only a job in
     the direct ``needs``: a job two below the gated scan, behind an ``always()`` job,

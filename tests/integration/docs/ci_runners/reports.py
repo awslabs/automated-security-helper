@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import math
 import os
 import re
 import shutil
@@ -449,8 +450,12 @@ class JobPlan:
 _EXPRESSION_WRAP = re.compile(r"^\s*\$\{\{(?P<body>.*)\}\}\s*$", re.DOTALL)
 _EXPRESSION_TOKEN = re.compile(
     r"\s*(?:(?P<string>'(?:[^']|'')*')|(?P<op>&&|\|\||==|!=|!|\(|\))"
-    r"|(?P<path>[A-Za-z_][\w.-]*(?:\(\))?))"
+    r"|(?P<number>-?\d+(?:\.\d+)?)|(?P<path>[A-Za-z_][\w.-]*(?:\(\))?))"
 )
+#: The literals GitHub's expressions know, as the values this reader uses for them:
+#: ``null`` is the empty string, which reads false and compares as GitHub's null does
+#: (both become the number 0).
+_LITERALS: dict[str, Any] = {"true": True, "false": False, "null": ""}
 
 
 class _JobCondition:
@@ -498,7 +503,12 @@ class _JobCondition:
             if rest:
                 raise ValueError(f"unread tail {rest!r}")
         except ValueError:
-            return True
+            # An ``if`` this reader cannot parse (a function it does not know) has an
+            # unknown value, but the implicit ``success()`` still applies when its text
+            # names no status function: a dependent of a failed job does not start.
+            if any(function in str(condition) for function in _STATUS_FUNCTIONS):
+                return True
+            return _and_values(self._success(needs), None) is not False
         if not any(token in _STATUS_FUNCTIONS for token in tokens):
             value = _and_values(self._success(needs), value)
         return value is not False
@@ -567,7 +577,7 @@ class _JobCondition:
             other, rest = self._primary(tokens[1:], needs)
             if value is None or other is None:
                 return None, rest
-            equal = str(value).lower() == str(other).lower()
+            equal = _github_equal(value, other)
             return (equal if tokens[0] == "==" else not equal), rest
         return value, tokens
 
@@ -582,6 +592,10 @@ class _JobCondition:
             return value, rest[1:]
         if token.startswith("'"):
             return token[1:-1].replace("''", "'"), rest
+        if token in _LITERALS:
+            return _LITERALS[token], rest
+        if token[0].isdigit() or (token[0] == "-" and len(token) > 1):
+            return float(token), rest
         return self._path(token, needs), rest
 
     def _path(self, token: str, needs: list[str]) -> Any:
@@ -647,12 +661,48 @@ def _tokens(text: str) -> list[str]:
 
 
 def _truth(value: Any) -> bool | None:
-    """GitHub's truth of an expression value: false, '' and 0 are false; None is unknown."""
+    """GitHub's truth of an expression value: false, null (read as ''), the empty
+    string, 0 and NaN are false; every other string is true, the strings 'false' and
+    '0' included (a boolean input a caller writes in quotes is such a string); None is
+    unknown."""
     if value is None:
         return None
     if isinstance(value, str):
-        return value.lower() not in ("", "false", "0")
+        return value != ""
+    if isinstance(value, float):
+        return value != 0 and not math.isnan(value)
     return bool(value)
+
+
+def _as_number(value: Any) -> float:
+    """GitHub's coercion of an expression value to a number for a comparison of two
+    values of different types: null and '' are 0, booleans 1 and 0, a string that
+    reads as a number is that number and any other string is NaN."""
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if text == "":
+        return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        return math.nan
+
+
+def _github_equal(left: Any, right: Any) -> bool:
+    """GitHub's loose equality: two strings compare without case; values of different
+    types are both coerced to numbers (_as_number), and NaN equals nothing, so a
+    boolean input compared to the string 'true' reads false."""
+    if isinstance(left, str) and isinstance(right, str):
+        return left.lower() == right.lower()
+    if isinstance(left, bool) and isinstance(right, bool):
+        return left == right
+    a, b = _as_number(left), _as_number(right)
+    if math.isnan(a) or math.isnan(b):
+        return False
+    return a == b
 
 
 def _and_values(left: Any, right: Any) -> bool | None:
