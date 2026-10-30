@@ -3649,7 +3649,8 @@ def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, 
     """The could-not-remove warning names the entry, the root and the OS
     error, and any of them can hold an env-read value (a tool names files
     after options it was given). The record is redacted with the sweep's
-    values before it is logged."""
+    values before it is logged, and the refusal the sweep raises at its end
+    for the entry it could not remove repeats the logged line, nothing more."""
     import logging
 
     from automated_security_helper.utils.sandbox import fs_guard
@@ -3665,7 +3666,8 @@ def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, 
     monkeypatch.setattr(fs_guard.os, "unlink", _refuse)
 
     with caplog.at_level(logging.WARNING, logger="ash"):
-        fs_guard.sweep_writable([root], (value,))
+        with pytest.raises(OSError) as refused:
+            fs_guard.sweep_writable([root], (value,))
 
     lines = [
         record.getMessage()
@@ -3674,16 +3676,20 @@ def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, 
     ]
     assert lines, [record.getMessage() for record in caplog.records]
     assert not any(value in line for line in lines), lines
+    assert value not in str(refused.value), str(refused.value)
 
 
 def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
     """Build a scope for a plugin whose values hook is ``hook``, plan a spawn
     inside it, and run the plan's sweep over a results directory that holds a
     special file named after the value, whose removal fails. Returns the
-    sweep's could-not-remove notes and the results directory.
+    sweep's could-not-remove notes, the refusal it raised at its end among
+    them, and the results directory.
 
     The sweep runs from the plan's cleanup, so the scope's values are its
-    only redaction source."""
+    only redaction source. A removal that fails is a refusal the sweep raises
+    once it has finished (the plan's run_cleanup records it, best effort); the
+    step is called directly here, so the raise reaches the test."""
     import logging
 
     from automated_security_helper.utils.sandbox import fs_guard
@@ -3715,7 +3721,8 @@ def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
         plan = prepare_spawn(["/usr/bin/true"], {"PATH": "/usr/bin"}, None)
     assert plan is not None
     with caplog.at_level(logging.WARNING, logger="ash"):
-        plan.cleanup[0]()
+        with pytest.raises(OSError) as refused:
+            plan.cleanup[0]()
 
     notes = [
         record.getMessage()
@@ -3723,6 +3730,7 @@ def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
         if "Could not remove" in record.getMessage()
     ]
     assert notes, [record.getMessage() for record in caplog.records]
+    notes.append(str(refused.value))
     return notes, results
 
 
@@ -3939,8 +3947,13 @@ def test_a_raising_redaction_returns_a_value_free_note(monkeypatch):
 def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypatch):
     """fs_guard's sweep records a removal failure from inside its except
     block. A raise from the redaction there stopped the os.fwalk sweep
-    partway: symlinks after that point stayed, and the error escaped
-    sweep_writable into the executor's post-scan sweep."""
+    partway: symlinks after that point stayed, and the redactor's error
+    escaped sweep_writable into the executor's post-scan sweep.
+
+    The sweep still refuses the entry it could not remove, once, after it has
+    walked everything else: the raise read here is that refusal (an OSError),
+    never the redactor's RuntimeError, and the link after the failed one is
+    gone before it is raised."""
     from automated_security_helper.utils.sandbox import fs_guard
     from automated_security_helper.utils.sandbox import scope as scope_module
 
@@ -3963,13 +3976,16 @@ def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypat
 
     monkeypatch.setattr(scope_module, "active_scope", raising)
 
-    removed = fs_guard.sweep_writable([root], ("EDGESECRET-9912",))
+    with pytest.raises(OSError):
+        fs_guard.sweep_writable([root], ("EDGESECRET-9912",))
 
-    assert removed == 1, "the sweep must go on past the recorded failure"
     # os.path.lexists, not Path.exists(follow_symlinks=False): the keyword
     # arrived in Python 3.12 and CI's 3.10 leg raises TypeError on it.
     assert not os.path.lexists(root / "zzz-link"), (
         "the symlink after the failed one must still be removed"
+    )
+    assert os.path.lexists(root / "aaa-link"), (
+        "the entry whose removal failed is what the refusal is about"
     )
 
 
