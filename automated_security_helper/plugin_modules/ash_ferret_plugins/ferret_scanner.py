@@ -1550,11 +1550,19 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         if results_file and self.args.output_arg:
             args.extend([self.args.output_arg, Path(results_file).as_posix()])
 
-        # Add extra args
+        # Add extra args. A value may be a number or a bool (ToolExtraArg), and
+        # a spawn takes text only; a bool is spelled as a config file spells it,
+        # the rule ScannerPluginBase._resolve_arguments applies, which this
+        # override does not call.
         for tool_extra_arg in self.args.extra_args:
             args.append(tool_extra_arg.key)
-            if tool_extra_arg.value is not None:
-                args.append(str(tool_extra_arg.value))
+            value = tool_extra_arg.value
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            elif value is not None and not isinstance(value, str):
+                value = str(value)
+            if value is not None:
+                args.append(value)
 
         # Add target path
         if self.args.scan_path_arg:
