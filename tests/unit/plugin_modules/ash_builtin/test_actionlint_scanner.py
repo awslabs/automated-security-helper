@@ -210,6 +210,24 @@ def _run(scanner, monkeypatch, stdout, returncode, **extra) -> FakeRun:
     return fake
 
 
+class FakeRuns:
+    """Stands in for ``_run_subprocess`` with one return code per call, in order,
+    the last repeating; a run that exits 0 answers *stdout*, any other run
+    answers no output, as actionlint does when it ends before linting."""
+
+    def __init__(self, scanner, stdout: str, returncodes: list):
+        self.scanner = scanner
+        self.stdout = stdout
+        self.codes = list(returncodes)
+        self.calls: list = []
+
+    def __call__(self, command, **kwargs):
+        self.calls.append((list(command), kwargs))
+        code = self.codes.pop(0) if len(self.codes) > 1 else self.codes[0]
+        self.scanner.exit_code = code
+        return {"returncode": code, "stdout": self.stdout if code == 0 else ""}
+
+
 # --------------------------------------------------------------------------- #
 # A builtin scanner, on by default
 # --------------------------------------------------------------------------- #
@@ -988,39 +1006,52 @@ def test_the_scanned_trees_actionlint_config_is_not_read(
 
 @pytest.mark.parametrize("name", ["actionlint.yaml", "actionlint.yml"])
 @pytest.mark.unit
-def test_a_tree_config_that_does_not_parse_moves_the_run_to_a_copy_outside_the_tree(
+def test_a_tree_config_actionlint_refuses_moves_the_run_to_a_copy_outside_the_tree(
     repo, monkeypatch, on_path, caplog, name
 ):
-    """actionlint reads the tree's config while it looks for the project root,
-    whatever -config-file names, and exits 3 on one it cannot parse; the run
-    moves to a copy of the workflows that holds no project root."""
-    (repo / ".github" / name).write_text("paths: [\n")
+    """actionlint decodes the project's own config into its typed struct while
+    it looks for the project root, whatever -config-file names, and exits 3 on
+    one it cannot read or parse: a string where a list belongs passes any YAML
+    check and still ends the run. ASH does not parse the file; it reads
+    actionlint's exit 3 with a config present at a project root and runs the
+    batch again from a copy that holds no project root."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / name).write_text("self-hosted-runner:\n  labels: my-runner\n")
     scanner = _scanner(repo)
-    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+    fake = FakeRuns(scanner, '{"version":"1","errors":[]}', [3, 0])
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
 
     with caplog.at_level(logging.WARNING):
-        scanner.scan(target=repo, target_type="source")
+        report = scanner.scan(target=repo, target_type="source")
 
-    ((argv, kwargs),) = fake.calls
-    run_root = Path(kwargs["cwd"])
+    assert isinstance(report, SarifReport)
+    (first_argv, first), (second_argv, second) = fake.calls
+    assert Path(first["cwd"]) == repo
+    run_root = Path(second["cwd"])
     assert not run_root.resolve().is_relative_to(repo.resolve())
     assert not (run_root / ".git").exists()
-    workflows = argv[argv.index("--") + 1 :]
+    assert second_argv == first_argv
+    workflows = second_argv[second_argv.index("--") + 1 :]
     assert workflows
     for rel in workflows:
         assert (run_root / rel).read_bytes() == (repo / rel).read_bytes()
-    config = Path(argv[argv.index("-config-file") + 1])
+    config = Path(second_argv[second_argv.index("-config-file") + 1])
     assert _ashs_own(config, repo)
-    assert f".github/{name} in the scanned tree cannot be read as YAML" in caplog.text
+    assert scanner.exit_code == 0
+    assert (
+        "actionlint exited 3 with a repository actionlint config present" in caplog.text
+    )
     assert "local `uses: ./...` references are not resolved" in caplog.text
 
 
 @pytest.mark.unit
-def test_a_tree_config_that_parses_keeps_the_run_in_the_tree(
+def test_a_regular_tree_config_keeps_the_run_in_the_tree(
     repo, monkeypatch, on_path, caplog
 ):
-    """Aliases, which actionlint and PyYAML's safe loader both accept, are not a
-    reason to leave the tree; only a file actionlint would refuse is."""
+    """A plain regular file inside the tree is actionlint's own to read: the run
+    stays in the tree, and a run that exits cleanly needed no copy. Nothing of
+    ASH's reads or parses the file."""
+    (repo / ".git").mkdir()
     (repo / ".github" / "actionlint.yaml").write_text(
         "self-hosted-runner:\n  labels: &l [x]\nconfig-variables: *l\n"
     )
@@ -1032,99 +1063,151 @@ def test_a_tree_config_that_parses_keeps_the_run_in_the_tree(
 
     ((_, kwargs),) = fake.calls
     assert kwargs["cwd"] == repo
-    assert "cannot be read as YAML" not in caplog.text
-
-
-@pytest.mark.parametrize("body", ["paths: [\n", ": : :\n"])
-@pytest.mark.unit
-def test_tree_config_problem_names_the_first_candidate_and_its_problem(tmp_path, body):
-    """actionlint reads ``actionlint.yaml`` before ``actionlint.yml`` and takes
-    the first that exists, so the parseable ``.yml`` beside it changes nothing."""
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "actionlint.yaml").write_text(body)
-    (tmp_path / ".github" / "actionlint.yml").write_text("paths: {}\n")
-
-    problem = module.tree_config_problem(tmp_path)
-
-    assert problem is not None
-    name, text = problem
-    assert name == ".github/actionlint.yaml"
-    assert text
-
-
-@pytest.mark.unit
-def test_tree_config_problem_is_none_without_a_config_or_with_a_parseable_one(
-    tmp_path,
-):
-    (tmp_path / ".github").mkdir()
-    assert module.tree_config_problem(tmp_path) is None
-    (tmp_path / ".github" / "actionlint.yml").write_text("paths: {}\n")
-    assert module.tree_config_problem(tmp_path) is None
-
-
-@pytest.mark.unit
-def test_tree_config_problem_reads_at_most_its_bound_and_never_parses_past_it(
-    tmp_path, monkeypatch
-):
-    """A large file in a scanned tree costs ASH one bounded read, not a parse:
-    the bound is monkeypatched small so the test writes a few bytes, and the
-    loader is replaced by one that fails the test if it is ever called."""
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "actionlint.yaml").write_text("paths: {}\n" * 4)
-    monkeypatch.setattr(module, "TREE_CONFIG_READ_BOUND", 16)
-
-    def never(_text):
-        raise AssertionError("a file past the bound must not be parsed")
-
-    monkeypatch.setattr(module.yaml, "safe_load", never)
-
-    problem = module.tree_config_problem(tmp_path)
-
-    assert problem is not None
-    assert problem[0] == ".github/actionlint.yaml"
-    assert "longer than 16 bytes" in problem[1]
-
-
-@pytest.mark.parametrize(
-    ("body", "fragment"),
-    [
-        (b"\xef\xbb\xbfpaths: [\n", "line"),
-        ('key: "\\UFFFFFFFF"\n'.encode(), ""),
-    ],
-)
-@pytest.mark.unit
-def test_tree_config_problem_answers_a_bom_prefixed_or_escape_broken_file(
-    tmp_path, body, fragment
-):
-    """Read by its byte-order mark as actionlint reads it, and an escape outside
-    Unicode (which PyYAML's scanner lets chr() raise on) is an answer, never an
-    exception out of the check."""
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "actionlint.yaml").write_bytes(body)
-
-    problem = module.tree_config_problem(tmp_path)
-
-    assert problem is not None
-    assert problem[0] == ".github/actionlint.yaml"
-    assert fragment in problem[1]
+    assert "linted from a copy outside the tree" not in caplog.text
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.parametrize("shape", ["link", "directory"])
 @pytest.mark.unit
-def test_tree_config_problem_follows_a_link_as_actionlint_does(tmp_path):
-    """actionlint's os.ReadFile follows a linked config, so a link to a malformed
-    file is a problem and a link to a parseable one is not."""
-    (tmp_path / ".github").mkdir()
-    bad = tmp_path / "bad.yaml"
-    bad.write_text("paths: [\n")
-    good = tmp_path / "good.yaml"
-    good.write_text("paths: {}\n")
-    link = tmp_path / ".github" / "actionlint.yaml"
-    link.symlink_to(bad)
-    assert module.tree_config_problem(tmp_path) is not None
-    link.unlink()
-    link.symlink_to(good)
-    assert module.tree_config_problem(tmp_path) is None
+def test_a_config_that_is_a_link_or_not_a_regular_file_moves_the_run_first(
+    repo, tmp_path, monkeypatch, on_path, caplog, shape
+):
+    """actionlint's os.ReadFile follows a link and blocks on anything that is not
+    a plain file, so a candidate of such a shape is never run against in the
+    tree: judged by stat alone, the run moves to the copy before actionlint, or
+    ASH, could read through it (the outside file's content is not quoted)."""
+    (repo / ".git").mkdir()
+    candidate = repo / ".github" / "actionlint.yaml"
+    if shape == "link":
+        outside = tmp_path / "outside.yaml"
+        outside.write_text("self-hosted-runner:\n  labels: [OUTSIDE-MARKER]\n")
+        candidate.symlink_to(outside)
+        expected = "is a link"
+    else:
+        candidate.mkdir()
+        expected = "is not a regular file"
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((_, kwargs),) = fake.calls
+    run_root = Path(kwargs["cwd"])
+    assert not run_root.resolve().is_relative_to(repo.resolve())
+    assert f".github/actionlint.yaml at {repo.as_posix()} {expected}" in caplog.text
+    assert "OUTSIDE-MARKER" not in caplog.text
+
+
+@pytest.mark.unit
+def test_a_target_with_no_project_root_is_not_staged_and_an_exit_3_is_an_error(
+    repo, monkeypatch, on_path, caplog
+):
+    """Without a .git actionlint finds no project for the workflows and reads no
+    repository config, so a broken file there changes nothing, and an exit 3 has
+    some other cause: one run, in the tree, reported as before."""
+    (repo / ".github" / "actionlint.yaml").write_text("paths: [\n")
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, "", 3)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ScannerError, match="exited 3"):
+            scanner.scan(target=repo, target_type="source")
+
+    ((_, kwargs),) = fake.calls
+    assert kwargs["cwd"] == repo
+    assert "linted from a copy outside the tree" not in caplog.text
+
+
+@pytest.mark.unit
+def test_a_copy_directory_under_a_project_root_is_refused(repo, monkeypatch, on_path):
+    """The run directory falls back to the output directory, inside the scanned
+    tree in the default layout, when the temporary directory is unusable; a copy
+    there has the tree as its project root, so actionlint would read the very
+    config the copy exists to keep from it and resolve local references against
+    a directory never judged. Refused, naming the root."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "actionlint.yaml").mkdir()
+    inside = repo / ".ash" / "ash_output" / "actionlint-workflows"
+
+    def under_the_tree(name, *, context):
+        inside.mkdir(parents=True, exist_ok=True)
+        return inside
+
+    monkeypatch.setattr(module, "empty_tool_directory", under_the_tree)
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with pytest.raises(ScannerError, match="holds .github/workflows and .git"):
+        scanner.scan(target=repo, target_type="source")
+
+
+@pytest.mark.unit
+def test_project_roots_are_the_nearest_directory_with_workflows_and_git(tmp_path):
+    """actionlint's project search, per workflow: the nearest ancestor holding
+    both .github/workflows and .git (a file counts), through and above the
+    scanned tree. A nested project is its own root; a directory with workflows
+    and no .git is not one, so its workflow's root is the next ancestor that is;
+    a scanned subdirectory of a repository has the repository as its root."""
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".git").mkdir()
+    sub = tmp_path / "sub"
+    (sub / ".github" / "workflows").mkdir(parents=True)
+    (sub / ".git").write_text("gitdir: ../.git/modules/sub\n")
+    plain = tmp_path / "plain"
+    (plain / ".github" / "workflows").mkdir(parents=True)
+
+    roots = module.project_roots(
+        tmp_path,
+        [
+            ".github/workflows/a.yml",
+            "sub/.github/workflows/b.yml",
+            "plain/.github/workflows/c.yml",
+        ],
+    )
+
+    assert roots == [tmp_path.absolute(), sub.absolute()]
+    assert module.project_roots(plain, [".github/workflows/c.yml"]) == [
+        tmp_path.absolute()
+    ]
+    assert module.project_root_above(sub / "x") == sub.absolute()
+    assert module.project_root_above(tmp_path / "x") == tmp_path.absolute()
+    assert module.project_root_above(tmp_path) is None
+
+
+@pytest.mark.unit
+def test_config_to_avoid_judges_a_candidate_by_its_stat_alone(tmp_path):
+    """The first of .yaml and .yml that exists is actionlint's; an absent one or
+    a plain regular file inside the tree keeps the run in place, a link or a
+    non-file moves it, and so does a regular file at a root above the scanned
+    tree. Nothing is opened."""
+    root = tmp_path / "repo"
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".git").mkdir()
+    assert module.config_to_avoid(root, [root]) is None
+    assert not module.config_present([root])
+
+    (root / ".github" / "actionlint.yaml").write_text("self-hosted-runner: 1\n")
+    assert module.config_to_avoid(root, [root]) is None
+    assert module.config_present([root])
+
+    above = tmp_path
+    (above / ".github" / "workflows").mkdir(parents=True)
+    (above / ".git").mkdir()
+    (above / ".github" / "actionlint.yml").write_text("x: 1\n")
+    assert module.config_to_avoid(root, [above]) == (
+        above,
+        ".github/actionlint.yml",
+        "outside the scanned tree",
+    )
+
+    (root / ".github" / "actionlint.yaml").unlink()
+    (root / ".github" / "actionlint.yaml").mkdir()
+    assert module.config_to_avoid(root, [root]) == (
+        root,
+        ".github/actionlint.yaml",
+        "not a regular file",
+    )
 
 
 @pytest.mark.parametrize("operator", [True, False])

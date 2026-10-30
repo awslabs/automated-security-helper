@@ -92,7 +92,8 @@ Decisions, and why
    ancestor holding ``.github/workflows`` and ``.git``), before the file the flag
    names is consulted, and exits 3 on one it cannot read. So when the tree's
    config does not parse, the workflows are linted from a copy made outside the
-   tree for this run (``tree_config_problem``, ``_stage_workflows``), with a
+   tree for this run (``config_to_avoid``, the exit-3 retry in ``scan``,
+   ``_stage_workflows``), with a
    warning: the findings and their paths are the same, and the copy has no
    project root, so local ``uses: ./...`` references are not resolved on that run.
    An operator's file that
@@ -176,6 +177,7 @@ import re
 import time
 from pathlib import Path, PurePosixPath
 from typing import (
+    Iterable,
     Annotated,
     Any,
     ClassVar,
@@ -229,10 +231,7 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.path_probe import probe_path
-from automated_security_helper.utils.sandbox.fs_guard import (
-    open_for_write,
-    read_bytes_at_most,
-)
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import (
@@ -676,64 +675,91 @@ def config_ignore_patterns(config_path: Path) -> List[str]:
     return sorted(patterns)
 
 
-#: The most of a scanned tree's own actionlint config ``tree_config_problem`` reads
-#: and parses in ASH's process. An actionlint config is a few lines (runner labels,
-#: config variables, ignore patterns); one past this is treated as a file that does
-#: not parse, so a large file in a scanned tree costs ASH one bounded read, never
-#: an unbounded parse (actionlint, in its own bounded subprocess, still reads it).
-TREE_CONFIG_READ_BOUND = 1 << 20
+def _is_project_root(directory: Path) -> bool:
+    """Whether actionlint's project search ends at *directory*: it holds a
+    ``.github/workflows`` directory and a ``.git`` (a directory, or the file a
+    submodule or a linked worktree carries). Stat only; nothing is opened."""
+    return probe_path(directory / ".github" / "workflows", "is_dir") and probe_path(
+        directory / ".git", "exists"
+    )
 
 
-def tree_config_problem(target: Path) -> Optional[Tuple[str, str]]:
-    """``(name, problem)`` when the scanned tree's own actionlint config cannot be
-    read as YAML, or None.
+def project_roots(target: Path, workflows: Iterable[str]) -> List[Path]:
+    """The project roots actionlint 1.7.12 finds for *workflows* (paths relative to
+    *target*), each once, in the order the workflows name them.
 
-    actionlint 1.7.12 reads ``.github/actionlint.yaml``, then ``.yml``, from the
-    project root it finds for a workflow (``loadRepoConfig`` in ``NewProject``),
-    whatever ``-config-file`` names, and a file it cannot read or parse ends the
-    run with exit 3 before any workflow is linted. The first candidate that
-    exists is the one it reads, so only that one is checked here. Read as
-    actionlint's YAML reader reads it, following a link as its ``os.ReadFile``
-    does and by its byte-order mark, through the bounded guarded read (at most
-    ``TREE_CONFIG_READ_BOUND`` bytes; a longer file is reported as a problem
-    without being parsed, and anything but a regular file is refused by the
-    read), and parsed with PyYAML's safe loader, which accepts the aliases
-    actionlint accepts and constructs an alias by reference, not by copy. A file
-    PyYAML cannot parse and actionlint can (a date in a shape PyYAML rejects,
-    deeper nesting than its recursion allows) is reported here too, which costs
-    that run its local-reference resolution and nothing else; the reverse (a
-    ``paths`` glob doublestar refuses, a duplicate key) is not seen here and is
-    reported by actionlint as before. Every failure of the read or the parse is
-    an answer, never an exception out of here: the escape outside Unicode that
-    PyYAML's scanner hands to ``chr()`` (a ValueError, or an OverflowError past
-    the C int), a MemoryError from the parse, an unreadable file.
+    For each workflow actionlint walks up from the workflow's directory, through
+    and above the scanned tree, to the nearest directory holding both
+    ``.github/workflows`` and ``.git``, and reads THAT directory's
+    ``.github/actionlint.yaml`` (then ``.yml``) before the ``-config-file`` it is
+    given; a file it cannot read or parse ends the run with exit 3 before any
+    workflow is linted. A workflow under no such directory has no project, and
+    actionlint reads no repository config for it. The scanned tree's own root is
+    one such directory only when it carries both markers, and a nested project
+    (``sub/.git`` beside ``sub/.github/workflows``) is another, with its own
+    config.
     """
-    for name in _DEFAULT_CONFIG_CANDIDATES:
-        path = target / name
-        if not path.is_file():
-            continue
-        try:
-            data = read_bytes_at_most(
-                Path(os.path.realpath(path)), TREE_CONFIG_READ_BOUND + 1
-            )
-            if len(data) > TREE_CONFIG_READ_BOUND:
-                problem = (
-                    f"longer than {TREE_CONFIG_READ_BOUND} bytes, more than an "
-                    "actionlint config holds; not parsed"
-                )
-                return name, problem
-            yaml.safe_load(decode_workflow(data))
-        except yaml.YAMLError as exc:
-            return name, _yaml_problem(exc)
-        except (
-            OSError,
-            ValueError,
-            OverflowError,
-            RecursionError,
-            MemoryError,
-        ) as exc:
-            return name, str(exc) or exc.__class__.__name__
-        return None
+    base = Path(target).absolute()
+    roots: List[Path] = []
+    for rel in workflows:
+        start = (base / rel).parent
+        for directory in (start, *start.parents):
+            if _is_project_root(directory):
+                if directory not in roots:
+                    roots.append(directory)
+                break
+    return roots
+
+
+def config_to_avoid(
+    target: Path, roots: Iterable[Path]
+) -> Optional[Tuple[Path, str, str]]:
+    """``(root, name, shape)`` for the first repository actionlint config, among
+    *roots*, that actionlint would read and ASH must keep it from reading: a
+    link, anything but a regular file, or a file outside the scanned tree.
+
+    actionlint picks the first of ``.github/actionlint.yaml`` and ``.yml`` that
+    ``os.Stat`` finds at a project root (a dangling link is passed over) and reads
+    it with ``os.ReadFile``, which follows a link and blocks on a FIFO. The run
+    stays in the tree only when every root's candidate is absent or is a plain
+    regular file inside the scanned tree; actionlint then reads that file itself,
+    and a file it refuses is caught by its exit code (the batch is run again from
+    a copy outside the tree). Nothing here opens a file: a candidate of any other
+    shape is judged by its stat alone, and the run is moved to the copy before
+    actionlint, or ASH, could read through it.
+    """
+    tree = Path(target).absolute()
+    for root in roots:
+        for name in _DEFAULT_CONFIG_CANDIDATES:
+            path = root / name
+            if not probe_path(path, "exists"):
+                continue
+            if probe_path(path, "is_symlink"):
+                return root, name, "a link"
+            if not probe_path(path, "is_file"):
+                return root, name, "not a regular file"
+            if root != tree and tree not in root.parents:
+                return root, name, "outside the scanned tree"
+            break
+    return None
+
+
+def config_present(roots: Iterable[Path]) -> bool:
+    """Whether any project root among *roots* holds a repository actionlint config
+    actionlint would read (by stat, as its own search finds it)."""
+    return any(
+        probe_path(root / name, "exists")
+        for root in roots
+        for name in _DEFAULT_CONFIG_CANDIDATES
+    )
+
+
+def project_root_above(path: Path) -> Optional[Path]:
+    """The nearest ancestor of *path* (not *path* itself) actionlint would take as a
+    project root, or None."""
+    for directory in Path(path).absolute().parents:
+        if _is_project_root(directory):
+            return directory
     return None
 
 
@@ -1608,18 +1634,37 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         """A copy of *workflows* (every selected path, relative to *target*) outside
         the tree, made once before the batches run.
 
-        For a tree whose own actionlint config does not parse (see
-        ``tree_config_problem``): made new for this run in the scanner run's
-        directory outside the scanned tree (``empty_tool_directory``), removed
-        when the run ends, with the same relative layout under it and no ``.git``,
-        so actionlint finds no project root there, reads no config of the tree's
-        and reports the same relative paths it would have reported in the tree.
-        Each file is read from the tree (the selection already refused links that
-        leave it) and written through the output guard with the copy's directory
-        as its root, so a link planted at a copy's name, or at any directory
-        between, is refused rather than followed.
+        For a tree whose own actionlint config actionlint must not read (see
+        ``config_to_avoid`` and the exit-3 retry in ``scan``): made new for this
+        run in the scanner run's directory outside the scanned tree
+        (``empty_tool_directory``), removed when the run ends, with the same
+        relative layout under it and no ``.git``, so actionlint finds no project
+        root there, reads no config of the tree's and reports the same relative
+        paths it would have reported in the tree. The copy is root-free only when
+        no ancestor of its directory is a project root (``.github/workflows`` and
+        ``.git`` together): actionlint would take such an ancestor as the root,
+        read ITS config and resolve ``uses: ./../...`` against a directory
+        ``_reference_outside_the_tree`` never judged, so a directory under one is
+        refused, naming it; the run directory falls back to the output directory
+        when the temporary directory is unusable, and the output directory sits
+        inside the scanned tree in the default layout. Each file is read from the
+        tree (the selection already refused links that leave it) and written
+        through the output guard with the copy's directory as its root, so a link
+        planted at a copy's name, or at any directory between, is refused rather
+        than followed.
         """
         root = empty_tool_directory("actionlint-workflows", context=self.context)
+        above = project_root_above(root)
+        if above is not None:
+            raise ScannerError(
+                f"the directory ASH made for a copy of the workflows, "
+                f"{root.as_posix()}, lies under {above.as_posix()}, which holds "
+                ".github/workflows and .git, so actionlint would take that "
+                "directory as the project root, read its config and resolve local "
+                "references against it. Set TMPDIR to a directory under no git "
+                "checkout, or fix the scanned tree's actionlint config so the run "
+                "can stay in the tree."
+            )
         source = Path(target).absolute()
         for rel in workflows:
             data = (source / rel).read_bytes()
@@ -1802,23 +1847,34 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 )
 
             # Where actionlint runs: the target, whose relative paths the
-            # findings carry, unless the tree's own config would end the run
-            # before it starts (decision 3): then a copy of the workflows outside
-            # the tree, laid out the same, so the paths are unchanged.
+            # findings carry, unless a repository config actionlint would read
+            # while it looks for a workflow's project root must be kept from it
+            # (decision 3): then a copy of the workflows outside the tree, laid
+            # out the same, so the paths are unchanged. Two cases move the run.
+            # Before it starts: a config whose shape ASH will not let actionlint
+            # (or itself) read through, a link, a FIFO, a file outside the tree
+            # (config_to_avoid; judged by stat, never opened). After a batch:
+            # actionlint exited 3 with a repository config present, the code it
+            # gives a config it cannot read or parse (a wrong type, a duplicate
+            # key, an invalid glob), which no check of ASH's own could tell
+            # apart from one it accepts; the batch is run again from the copy.
             run_root: Path = Path(target)
-            tree_problem = tree_config_problem(Path(target))
-            if tree_problem is not None:
-                name, problem = tree_problem
+            roots = project_roots(Path(target), workflows)
+            avoided = config_to_avoid(Path(target), roots)
+            retry_from_copy = avoided is None and config_present(roots)
+            if avoided is not None:
+                root, name, shape = avoided
                 run_root = self._stage_workflows(target, workflows)
                 self._plugin_log(
-                    f"{name} in the scanned tree cannot be read as YAML ({problem}). "
-                    "actionlint parses a repository's own config while it looks for "
-                    "the project root, before the -config-file it is given is "
-                    "consulted, and exits 3 on one it cannot read, so the workflows "
-                    "are linted from a copy outside the tree. The findings and "
-                    "their paths are the same; local `uses: ./...` references are "
-                    "not resolved on this run, since the copy has no project root. "
-                    "Fix or remove the file to lint in place.",
+                    f"{name} at {root.as_posix()} is {shape}. actionlint reads a "
+                    "project's own config while it looks for the project root, "
+                    "before the -config-file it is given is consulted, and ASH "
+                    "does not let it read through a file of that shape, so the "
+                    "workflows are linted from a copy outside the tree. The "
+                    "findings and their paths are the same; local `uses: ./...` "
+                    "references are not resolved on this run, since the copy has "
+                    "no project root. Replace the file with a regular one inside "
+                    "the tree, or remove it, to lint in place.",
                     target_type=target_type,
                     level=logging.WARNING,
                 )
@@ -1891,6 +1947,59 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 )
                 # This run's code, not the largest of the batches so far.
                 self._record_target_exit_code(response)
+
+                if (
+                    retry_from_copy
+                    and run_root == Path(target)
+                    and self.exit_code == 3
+                    and not (isinstance(response, dict) and response.get("timed_out"))
+                ):
+                    # actionlint found a project root for a workflow in this
+                    # batch and refused the repository config there (its exit 3
+                    # before any file is linted). From here every batch runs
+                    # from the copy, where it finds no project root and so reads
+                    # no config of the tree's.
+                    run_root = self._stage_workflows(target, workflows)
+                    self._plugin_log(
+                        "actionlint exited 3 with a repository actionlint config "
+                        "present at a project root of the scanned tree ("
+                        + ", ".join(root.as_posix() for root in roots)
+                        + "). It parses that file while it looks for the project "
+                        "root, before the -config-file it is given is consulted, "
+                        "and exits 3 on one it cannot read or parse (a wrong type, "
+                        "a duplicate key, an invalid glob), so the workflows are "
+                        "linted from a copy outside the tree. The findings and "
+                        "their paths are the same; local `uses: ./...` references "
+                        "are not resolved on this run, since the copy has no "
+                        "project root. Fix or remove the file to lint in place.",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                    )
+                    retry_timeout = effective_timeout
+                    if deadline is not None:
+                        retry_timeout = deadline - time.monotonic()
+                        if retry_timeout <= 0:
+                            limit = self._timeout_limit_token(effective_timeout)
+                            raise ScannerError(
+                                text_without_values(
+                                    f"actionlint timed out after {limit}: the run "
+                                    "over this target's workflows used the whole "
+                                    "limit before it could be run again from a copy "
+                                    "outside the tree. Raise "
+                                    "scanners.actionlint.options.scan_timeout if "
+                                    "this target legitimately needs longer.",
+                                    self._values_to_redact(),
+                                )
+                            )
+                    response = self._run_subprocess(
+                        command=final_args,
+                        results_dir=results_dir,
+                        stdout_preference="return",
+                        stderr_preference="write",
+                        cwd=run_root,
+                        timeout=retry_timeout,
+                    )
+                    self._record_target_exit_code(response)
 
                 if isinstance(response, dict) and response.get("timed_out"):
                     # The limit through the shared token, so an environment-read
