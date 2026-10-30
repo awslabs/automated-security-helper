@@ -314,9 +314,13 @@ def rewrite_checkov_paths(
                 if isinstance(record, dict) and isinstance(
                     record.get("file_abs_path"), str
                 ):
-                    record["repo_file_path"] = _source_relative_path(
-                        record["file_abs_path"], cwd
-                    )
+                    # The same choice _uri makes for the SARIF report: checkov
+                    # wrote the path as the scanned directory was given, so a
+                    # symlinked source directory is relative to the given
+                    # spelling, and the two reports agree on the file.
+                    written = os.path.abspath(record["file_abs_path"])
+                    base = given if _within(written, given) else cwd
+                    record["repo_file_path"] = _source_relative_path(written, base)
 
 
 def _directory_as_one_token(argv: List[str]) -> List[str]:
@@ -750,17 +754,27 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 "checkov's terraform scan, so checkov would read the file it points at."
             )
         skips.extend(links)
-        ignored = self._ignore_skip_patterns(target, global_ignore_paths)
+        # Directory entries (ending in "/") first: one of them keeps checkov out of
+        # a whole tree for a few characters, where per-file entries use the budget
+        # up one file at a time; a stable sort keeps each group's own order.
+        ignored = sorted(
+            self._ignore_skip_patterns(target, global_ignore_paths),
+            key=lambda value: not value.endswith("/"),
+        )
         budgeted: List[str] = []
         used = 0
         for value in ignored:
             used += len(value) + len("--skip-path") + 2
             if used > _IGNORE_SKIP_PATH_CHAR_BUDGET:
-                ASH_LOGGER.debug(
+                # WARNING, not DEBUG: paths are often ignored because checkov
+                # chokes on them, so a cut here can come back as a stall or a
+                # finding in an ignored file with no visible cause.
+                ASH_LOGGER.warning(
                     f"Not passing {len(ignored) - len(budgeted)} of {len(ignored)} "
                     "ignored paths to checkov --skip-path: together they take more "
                     f"than {_IGNORE_SKIP_PATH_CHAR_BUDGET} characters of command "
-                    "line. ASH drops checkov's findings there.",
+                    "line. checkov still reads those files; ASH drops its findings "
+                    "there.",
                     extra=NO_MARKUP,
                 )
                 break

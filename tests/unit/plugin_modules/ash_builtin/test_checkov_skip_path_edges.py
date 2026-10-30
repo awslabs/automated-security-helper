@@ -166,3 +166,69 @@ def test_a_source_directory_behind_a_symlink_gives_relative_uris(tmp_path):
     ]["uri"]
     assert uri == "sub/a.tf", uri
     assert not re.match(r"^(/|[A-Za-z]:)", uri)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="symbolic links on POSIX")
+def test_the_json_report_agrees_with_the_sarif_report_behind_a_symlink(tmp_path):
+    """At the base the JSON branch made ``file_abs_path`` relative to the source's
+    real path while the SARIF branch used the path as given, so a symlinked source
+    gave ``/link/a.tf`` in one report and ``a.tf`` in the other."""
+    real = tmp_path / "real"
+    (real / "sub").mkdir(parents=True)
+    (real / "sub" / "a.tf").write_text("", encoding="utf-8")
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    def repo_file_path(source: Path) -> str:
+        document = {
+            "results": {
+                "failed_checks": [{"file_abs_path": str(source / "sub" / "a.tf")}]
+            }
+        }
+        rewrite_checkov_paths(
+            document, ran_in="/", source_dir=str(source), scanned_dirs=[str(source)]
+        )
+        return document["results"]["failed_checks"][0]["repo_file_path"]
+
+    assert repo_file_path(link) == repo_file_path(real)
+    assert "link" not in repo_file_path(link)
+
+
+def test_directory_entries_go_first_and_a_cut_is_a_warning(tmp_path):
+    """Past the budget the rest is dropped: a directory entry keeps checkov out of
+    a whole tree for a few characters, so it goes before the per-file entries, and
+    the cut is logged at WARNING (at the base DEBUG, so a stall or a finding in an
+    ignored file came back with no visible cause)."""
+    source = tmp_path / "src"
+    output = tmp_path / "out"
+    output.mkdir(parents=True)
+    source.mkdir()
+    files = [f"^{source.as_posix()}/gen/file-{i:05d}[.]tf$" for i in range(3000)]
+    directory = f"^{source.as_posix()}/vendor/"
+    scanner = _scanner(source, output)
+
+    with (
+        patch.object(
+            CheckovScanner, "_ignore_skip_patterns", return_value=[*files, directory]
+        ),
+        patch.object(checkov_scanner.ASH_LOGGER, "warning") as warning,
+        patch.object(checkov_scanner.ASH_LOGGER, "debug") as debug,
+    ):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    passed = [v for v in _skip_values(argv) if "/gen/file-" in v or "/vendor/" in v]
+    assert passed[0] == directory, passed[:2]
+    assert len(passed) < 3001
+    cut_lines = [
+        str(call.args[0])
+        for call in warning.call_args_list
+        if "ignored paths to checkov --skip-path" in str(call.args[0])
+    ]
+    assert len(cut_lines) == 1, warning.call_args_list
+    assert not any(
+        "ignored paths to checkov --skip-path" in str(call.args[0])
+        for call in debug.call_args_list
+    )
