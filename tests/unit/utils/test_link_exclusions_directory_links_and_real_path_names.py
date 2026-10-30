@@ -30,7 +30,9 @@ from types import SimpleNamespace
 import pytest
 
 from automated_security_helper.utils.link_exclusions import (
+    _ignore_entries,
     grep_ignore_names,
+    ignored_entries,
     inside_tree_directory_links,
     syft_excludes,
 )
@@ -147,6 +149,28 @@ def test_a_link_to_a_directory_the_walk_found_no_file_in_is_not_hidden(tmp_path)
     values = syft_excludes(target, target, _ignore("third_party/"))
 
     assert values == ["./third_party/vendor.py"]
+
+
+@pytest.mark.parametrize("function", [ignored_entries, _ignore_entries])
+def test_the_directory_links_default_is_not_a_shared_mapping(function):
+    """The default is ``None``, resolved inside the call, not a ``{}`` literal that
+    every call would share (``test_mutable_defaults_fix`` reads the whole package
+    for that shape)."""
+    import inspect
+
+    assert inspect.signature(function).parameters["directory_links"].default is None
+
+
+def test_omitting_the_directory_links_reads_as_no_link(tmp_path):
+    """A caller with no links to report (checkov, ferret-scan) gets the answer an
+    empty mapping gives: the whole ignored directory, hidden whole."""
+    tree, target = _tree(tmp_path)
+    files = ["dir/a.txt", "other/b.txt"]
+
+    omitted = ignored_entries(target, target, _ignore("dir/"), files)
+    empty = ignored_entries(target, target, _ignore("dir/"), files, directory_links={})
+
+    assert omitted == empty == ["dir/"]
 
 
 def _aliased(tmp_path, ignored_name: str):

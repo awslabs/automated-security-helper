@@ -212,7 +212,7 @@ def ignored_entries(
     ignore_paths: Iterable[object],
     files: Sequence[str],
     matches: Callable[[str, str], bool] = ignore_path_matches,
-    directory_links: Mapping[str, str] = {},
+    directory_links: Mapping[str, str] | None = None,
 ) -> List[str]:
     """The paths below ``target`` that ``ignore_paths`` ignore, as few as possible.
 
@@ -224,8 +224,9 @@ def ignored_entries(
 
     ``directory_links`` are the links to directories the walk did not enter, each
     with the directory it leads to (``inside_tree_directory_links``), relative to
-    ``target``. The files behind such a link are not among ``files`` under the
-    link's name, and a tool that follows the link (syft) reads them there. A link
+    ``target``; none when omitted. The files behind such a link are not among
+    ``files`` under the link's name, and a tool that follows the link (syft) reads
+    them there. A link
     leading to a directory that holds a walked file the patterns do not ignore
     keeps every directory holding the link, at any depth, from being returned
     whole, since ``./<dir>/**`` would tell the tool to skip those files with the
@@ -291,7 +292,7 @@ def ignored_entries(
     # whose destination's walked files are all ignored is skipped under its own
     # name.
     links_to_ignored: List[str] = []
-    for link, leads_to in directory_links.items():
+    for link, leads_to in (directory_links or {}).items():
         walked = total.get(leads_to, 0)
         if walked == 0 or walked > hit.get(leads_to, 0):
             parts = link.split("/")
@@ -315,7 +316,7 @@ def _ignore_entries(
     source_dir: str | Path | None,
     ignore_paths: Iterable[object] | None,
     files: Sequence[str],
-    directory_links: Mapping[str, str] = {},
+    directory_links: Mapping[str, str] | None = None,
 ) -> List[str]:
     """``ignored_entries``, or none when no source directory or ignore path is given."""
     if source_dir is None or not ignore_paths:
