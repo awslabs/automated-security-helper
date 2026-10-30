@@ -1,11 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Two readings of utils/inner_run_outcome.py.
+"""Three readings of utils/inner_run_outcome.py.
 
 A second report phase over the same results (``ash merge`` with an off-host
 reporter) used to replace the first phase's record of the reports written, so
-the ``ash.sarif`` entry the exit code is read from was lost. And
+the ``ash.sarif`` entry the exit code is read from was lost; the record is
+extended only when this process wrote it, so one an earlier run left in results
+that were loaded with it is replaced, not extended. And
 read_refusal_outcome opened the inner run's outcome file with a plain open after
 a separate lstat check, so a link put at the name in between was followed.
 """
@@ -58,6 +60,42 @@ def test_an_empty_second_phase_still_records_the_first_phases_files():
     record_reports_written(results, [])
 
     assert report_file_written_as(results, "sarif") == "ash.sarif"
+
+
+def _earlier_run_record(**metadata):
+    return {
+        "type": "reports_written",
+        "severity": "info",
+        "message": "The report files this run wrote.",
+        "metadata": {"files": ["old.sarif"], "formats": {"old.sarif": "sarif"}}
+        | metadata,
+    }
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [{}, {"run_token": "a-token-from-another-process"}],
+    ids=["no token", "another process's token"],
+)
+def test_a_record_another_run_wrote_is_replaced_not_extended(metadata):
+    results = SimpleNamespace(validation_checkpoints=[_earlier_run_record(**metadata)])
+
+    record_reports_written(results, [("ash.html", "html")])
+
+    assert report_file_written_as(results, "sarif") is None
+    assert report_file_written_as(results, "html") == "ash.html"
+    (record,) = results.validation_checkpoints
+    assert record["metadata"]["files"] == ["ash.html"]
+
+
+def test_an_empty_phase_does_not_keep_the_files_another_run_wrote():
+    results = SimpleNamespace(validation_checkpoints=[_earlier_run_record()])
+
+    record_reports_written(results, [])
+
+    assert report_file_written_as(results, "sarif") is None
+    (record,) = results.validation_checkpoints
+    assert record["metadata"]["files"] == []
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")

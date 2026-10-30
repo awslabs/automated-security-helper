@@ -102,6 +102,12 @@ _OUTCOME_TYPES = (RUN_COMPLETED_CHECKPOINT, REPORT_PATH_REFUSED_CHECKPOINT)
 _RUN_RECORD_TYPES = (*_OUTCOME_TYPES, REPORTS_WRITTEN_CHECKPOINT)
 _RUN_ID = re.compile(r"[0-9a-f]{32}")
 
+#: Names this process. The ``reports_written`` record it writes carries it, and
+#: ``record_reports_written`` extends only a record that does: one an earlier run
+#: wrote into results this process loaded is replaced, whether or not the loader
+#: stripped the run records first.
+_PROCESS_TOKEN = uuid.uuid4().hex
+
 #: The last ASH release whose inner run does not record its completion. v3.7.1 and
 #: every release before it write no marker, so an image built from one of them is
 #: never read back.
@@ -201,16 +207,20 @@ def record_reports_written(
     the run wrote no report file only when there is none yet (run_ash_scan calls
     it that way for a run whose report phase did not run).
 
-    Only this process's own record is ever extended: results read back from a
-    file carry no such record, because every loader strips the run records
-    first (:func:`without_run_records`: the orchestrator for ``--use-existing``,
-    ``ash merge`` for each shard and the merged model). A loader that did not
-    would hand this function an earlier run's files as this run's, so a new
-    loader of persisted results strips them the same way.
+    Only this process's own record is ever extended. The record carries a
+    token for the process that wrote it, and a record with another token, or
+    none, is replaced: results read back from a file carry an earlier run's
+    record unless the loader stripped the run records first
+    (:func:`without_run_records`, which the orchestrator does for
+    ``--use-existing`` and ``ash merge`` for each shard and the merged model),
+    and a loader that did not would otherwise hand this function that run's
+    files as this run's.
     """
     if results is None:
         return
     earlier = _reports_written(results)
+    if earlier is not None and earlier.get("run_token") != _PROCESS_TOKEN:
+        earlier = None
     formats: Dict[str, Optional[str]] = {}
     if earlier is not None and isinstance(earlier.get("formats"), dict):
         formats.update(
@@ -235,6 +245,7 @@ def record_reports_written(
             "severity": "info",
             "message": "The report files this run wrote.",
             "metadata": {
+                "run_token": _PROCESS_TOKEN,
                 "files": sorted(formats),
                 "formats": {name: formats[name] for name in sorted(formats)},
             },
