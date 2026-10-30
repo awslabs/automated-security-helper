@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Every form in which a command names the ASH ref it installs: the text in front of the
 # `v` of a release tag, and the same form naming a branch instead. `@` covers git URLs
 # (`git+https://...@v`, `uvx --from=git+...@v`) and `uses: ...@v`. The repository name is
-# interpolated for the reason the flake pattern in find_version_references gives.
+# interpolated for the reason the flake entry of ASH_PIN_PATTERNS gives.
 #
 # One list for three readers: scripts/docs_versions.py check reads which release a built
 # page pins (release_pins) and requires the main version to name main in every form a
@@ -100,26 +100,87 @@ _LOOSE_PREFIX = {
 # reusable-workflow form); `--branch` and `refs/tags/` in a command that names this
 # repository; `rev:` in the pre-commit entry whose `repo:` is this repository. Only
 # blank and comment lines may sit between the `repo:` line and its `rev:` line, so the
-# match cannot reach into the next entry. The reasons for each anchor are with the
-# `convert` patterns in find_version_references.
+# match cannot reach into the next entry. The reason for each anchor is with its entry.
 ASH_PIN_PATTERNS = {
+    # `@v<version>` in inline text (a page's "pinned versions (`@v3.4.0`)"), and the
+    # forms naming this repository: `git+<url>[.git]@v<version>`, the action
+    # `<owner>/<this repository>@v<version>`, and the reusable workflow
+    # `<owner>/<this repository>/.github/workflows/<file>.yml@v<version>`, which is the
+    # form the CI pages document. The repository name is interpolated, not written out,
+    # for the reason the flake entry gives: the tree walk in
+    # tests/unit/test_agent_plugin_ash_version.py reads a literal
+    # `<repository>@v<something>` in a comment as an install pin.
+    # Bare means not glued to a preceding path or name: unanchored, the pattern also
+    # templatized third-party pins such as a `uses: actions/checkout@v4.1.2` line in a
+    # CI example, and `generate` then stamped ASH's version into another project's
+    # reference. Anchored on the repository name followed directly by `@v`, it missed
+    # the reusable-workflow form, whose `@v` follows the workflow's path, so `convert`
+    # wrote that pin into the template as a literal and `generate` never moved it
+    # again. The optional path after the repository name admits that form; a
+    # third-party workflow has another repository name in front of its path and is
+    # still left alone.
     "@ (git URL, uses:)": (
         # The ellipsis form is prose for "the workflow of this repository":
         # `uses: ...@v<version>`. It stands alone: after a path or a name it is a
         # shortened reference to another project (`actions/...@v4.1.2`).
         rf"((?<![\w./-])@v|(?<![\w./-])\.\.\.@v|{_ASH_NAME}(?:/[\w./-]+)?@v){_SEMVER}",
     ),
+    # `--branch v<version>`, in a command that names this repository. Unanchored, the
+    # pattern also templatized the tag of any other project cloned in a page's example
+    # (`git clone --branch v1.2.3 <another repository>`), and `generate` then stamped
+    # ASH's version into that command. The repository can come before the flag or
+    # after it, in the same command. The name must end where the repository's does: a
+    # sibling such as `<this repository>-plugins` is another project.
     "--branch": _in_an_ash_command(_FORM_PREFIX["--branch"]),
+    # `rev: v<version>` (pre-commit config), in the entry whose `repo:` is this
+    # repository. A pre-commit config pins every hook repository with a `rev:`, so
+    # unanchored the pattern also templatized the pin of each other repository a
+    # page's example lists.
     "rev:": (
         (
             rf"(repo:[ \t]*\S*{_ASH_REPOSITORY}/?[\"']?[ \t]*(?:#[^\n]*)?\n"
             rf"(?:[ \t]*(?:#[^\n]*)?\n)*[ \t]*rev:[ \t]+v){_SEMVER}"
         ),
     ),
+    # The tag lookup, `git ls-remote <this repository> refs/tags/v<version>`, in a
+    # command that names this repository, as `--branch` does. The reader of a built
+    # page counts it as a pin, so `convert` has to move it too.
     "refs/tags/ (git ls-remote)": _in_an_ash_command(
         _FORM_PREFIX["refs/tags/ (git ls-remote)"]
     ),
+    # A Nix flake reference, `github:<owner>/<repo>/v<version>`.
+    #
+    # Every entry above keys on `@v`, `--branch v` or `rev: v`, because every install
+    # reference this repository had first carried used one of them. A flake ref
+    # separates the ref from the repository with a SLASH, so it was invisible to all of
+    # them -- and to `[tool.commitizen] version_files`, and to the three `@v`-anchored
+    # patterns in tests/unit/test_agent_plugin_ash_version.py. Five mechanisms with one
+    # blind spot, because all five had encoded the same incidental delimiter as though
+    # it were part of what a reference is.
+    #
+    # It was not hypothetical. docs/content/docs/installation-guide.md documented an
+    # ASH_NIX_FLAKE_REF override in the flake form, under a heading reading "Override
+    # it with:", as a runnable copy-paste. It sat two minor releases behind the
+    # shipped version and no mechanism could see it. `nix develop` resolves a git ref
+    # like every other consumer here, so it succeeded and supplied an old ASH with an
+    # old scanner set.
+    #
+    # The offending value is described rather than quoted. This file is read by the
+    # tree walk in tests/unit/test_agent_plugin_ash_version.py, so pasting the stale
+    # literal into this comment would be reported as a real stale pin -- the comment
+    # explaining the hazard would BE the hazard. The same applies to the `/v` prefix
+    # with nothing after it, which that walk reads as a truncated ref, which is why
+    # the repository name is interpolated instead of written inline.
+    #
+    # The OWNER is deliberately unanchored: `resolve_flake_ref()` builds its ref from
+    # `ASH_REPO_URL`, so a fork's docs carry a fork's owner. The repository NAME is
+    # anchored, because without it a flake ref to an unrelated project -- nixpkgs,
+    # say -- would be rewritten to ASH's version.
     "flake ref": (rf"({_FORM_PREFIX['flake ref']}v){_SEMVER}",),
+    # The build flag and the action input name this repository by themselves. The
+    # reader of a built page counts a pin in either, so leaving them out meant
+    # `convert` wrote the stale literal into a template that the check would then
+    # report as a pin it never moved.
     "--ash-revision-to-install": (
         rf"({_FORM_PREFIX['--ash-revision-to-install']}v){_SEMVER}",
     ),
@@ -258,113 +319,19 @@ class VersionTemplateManager:
 
         Returns list of (old_pattern, new_pattern) tuples.
         """
-        # Every pattern is one of ASH_PIN_PATTERNS, which match any v3.x.y reference to
-        # this repository; the blocks below say why each one is anchored as it is. The
-        # form `git+https://github.com/<owner>/<this repository>[.git]@v3.x.y` is the
-        # `@` form's repository alternative, so it needs no pattern of its own.
-        patterns = []
-
-        # Pattern 1: --branch v3.x.y, in a command that names this repository. Unanchored,
-        # the pattern also templatized the tag of any other project cloned in a page's
-        # example (`git clone --branch v1.2.3 <another repository>`), and `generate`
-        # then stamped ASH's version into that command. The repository can come before
-        # the flag or after it, in the same command. The name must end where the
-        # repository's does: a sibling such as `<this repository>-plugins` is another
-        # project. The patterns are ASH_PIN_PATTERNS', which the readers of a built
-        # page's pins use too, so what `convert` leaves alone is not read as a pin.
-        branch_replacement = rf"\g<1>{self.version_placeholder}"
-        for branch_pattern in ASH_PIN_PATTERNS["--branch"]:
-            if re.search(branch_pattern, content):
-                patterns.append((branch_pattern, branch_replacement))
-
-        # Pattern 2: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)"),
-        # and the two `uses:` forms naming this repository: the action,
-        # `<owner>/<this repository>@v<version>`, and the reusable workflow,
-        # `<owner>/<this repository>/.github/workflows/<file>.yml@v<version>`,
-        # which is the form the CI pages document. The repository name is
-        # interpolated below, not written out, for the reason the flake pattern
-        # gives: the tree walk in tests/unit/test_agent_plugin_ash_version.py
-        # reads a literal `<repository>@v<something>` in a comment as an install
-        # pin.
-        # Bare means not glued to a preceding path or name: unanchored, the
-        # pattern also templatized third-party pins such as a
-        # `uses: actions/checkout@v4.1.2` line in a CI example, and `generate`
-        # then stamped ASH's version into another project's reference. Anchored
-        # on the repository name followed directly by `@v`, it missed the
-        # reusable-workflow form, whose `@v` follows the workflow's path, so
-        # `convert` wrote that pin into the template as a literal and `generate`
-        # never moved it again. The optional path after the repository name
-        # admits that form; a third-party workflow has another repository name
-        # in front of its path and is still left alone.
-        (at_version_pattern,) = ASH_PIN_PATTERNS["@ (git URL, uses:)"]
-        at_version_replacement = rf"\g<1>{self.version_placeholder}"
-        if re.search(at_version_pattern, content):
-            patterns.append((at_version_pattern, at_version_replacement))
-
-        # Pattern 3: rev: v3.x.y (pre-commit config), in the entry whose `repo:` is this
-        # repository. A pre-commit config pins every hook repository with a `rev:`, so
-        # unanchored the pattern also templatized the pin of each other repository a
-        # page's example lists. Only blank and comment lines may sit between the
-        # `repo:` line and its `rev:` line, so the match cannot reach into the next entry.
-        (rev_pattern,) = ASH_PIN_PATTERNS["rev:"]
-        rev_replacement = rf"\g<1>{self.version_placeholder}"
-        if re.search(rev_pattern, content):
-            patterns.append((rev_pattern, rev_replacement))
-
-        # Pattern 4: a Nix flake reference -- `github:<owner>/<repo>/v3.x.y`.
-        #
-        # Every pattern above keys on `@v`, because every install reference this
-        # repository had ever carried used an `@`: `git+...@v`, `--branch v`, `rev: v`.
-        # A flake ref separates the ref from the repository with a SLASH, so it was
-        # invisible to all four -- and to `[tool.commitizen] version_files`, and to the
-        # three `@v`-anchored patterns in tests/unit/test_agent_plugin_ash_version.py.
-        # Five mechanisms with one blind spot, because all five had encoded the same
-        # incidental delimiter as though it were part of what a reference is.
-        #
-        # It was not hypothetical. docs/content/docs/installation-guide.md documented an
-        # ASH_NIX_FLAKE_REF override in the flake form, under a heading reading "Override
-        # it with:", as a runnable copy-paste. It sat two minor releases behind the
-        # shipped version and no mechanism could see it. `nix develop` resolves a git ref
-        # like every other consumer here, so it succeeded and supplied an old ASH with an
-        # old scanner set.
-        #
-        # The offending value is described rather than quoted. This file is read by the
-        # tree walk in tests/unit/test_agent_plugin_ash_version.py, so pasting the stale
-        # literal into this comment would be reported as a real stale pin -- the comment
-        # explaining the hazard would BE the hazard. The same applies to the `/v` prefix
-        # with nothing after it, which that walk reads as a truncated ref, which is why
-        # the repository name below is interpolated instead of written inline.
-        #
-        # The OWNER is deliberately unanchored: `resolve_flake_ref()` builds its ref from
-        # `ASH_REPO_URL`, so a fork's docs carry a fork's owner. The repository NAME is
-        # anchored, because without it a flake ref to an unrelated project -- nixpkgs,
-        # say -- would be rewritten to ASH's version.
-        (flake_pattern,) = ASH_PIN_PATTERNS["flake ref"]
-        flake_replacement = rf"\g<1>{self.version_placeholder}"
-        if re.search(flake_pattern, content):
-            patterns.append((flake_pattern, flake_replacement))
-
-        # Pattern 5: every other form of INSTALL_REF_FORMS, the tag lookup
-        # (`git ls-remote <this repository> refs/tags/v3.x.y`), the build flag and the
-        # action input. The reader of a built page counts a pin in any of them, so
-        # leaving them out meant `convert` wrote the stale literal into a template that
-        # the check would then report as a pin it never moved. Each form here names
-        # this repository by itself or in the same command, as above.
-        handled = {
-            "--branch",
-            "@ (git URL, uses:)",
-            "rev:",
-            "flake ref",
-        }
-        rest_replacement = rf"\g<1>{self.version_placeholder}"
-        for form, form_patterns in ASH_PIN_PATTERNS.items():
-            if form in handled:
-                continue
-            for rest_pattern in form_patterns:
-                if re.search(rest_pattern, content):
-                    patterns.append((rest_pattern, rest_replacement))
-
-        return patterns
+        # Every pattern of every form of INSTALL_REF_FORMS, ASH_PIN_PATTERNS' own: the
+        # same ones the readers of a built page's pins use, so what `convert` leaves
+        # alone is not read as a pin. Each ends in the version number after the `v`
+        # and has one group before it, so the replacement keeps what the pattern
+        # anchored on and swaps only the number. The reason for each anchor is with
+        # its entry in ASH_PIN_PATTERNS.
+        replacement = rf"\g<1>{self.version_placeholder}"
+        return [
+            (pattern, replacement)
+            for form_patterns in ASH_PIN_PATTERNS.values()
+            for pattern in form_patterns
+            if re.search(pattern, content)
+        ]
 
     def render(self, content: str, version: str) -> str:
         """A template rendered for a release: both placeholders become the version."""
