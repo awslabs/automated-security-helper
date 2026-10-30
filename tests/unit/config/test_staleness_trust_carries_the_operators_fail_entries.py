@@ -9,8 +9,10 @@ when it equals the operator's. With the operator on ``warn`` scan-wide and a
 repository config that repeats the ``warn`` and leaves the entry out would hold
 that database to warn, laxer than the operator's setting for it. The confinement
 carries the operator's ``fail`` entries for the databases the config has no entry
-for; its ``warn`` entries are not copied in, and a config's own entry for the
-database stands as written.
+for; its ``warn`` entries are not copied in. A config's own ``fail`` entry for the
+database stands; an own entry laxer than the operator's (a ``warn`` the operator
+did not set) is dropped first, so the operator's ``fail`` entry is carried in its
+place.
 """
 
 from __future__ import annotations
