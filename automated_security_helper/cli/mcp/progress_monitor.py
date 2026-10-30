@@ -442,6 +442,21 @@ async def _send_initial_progress(ctx: Context) -> bool:
     )
 
 
+async def _report_lost_scan(
+    ctx: Context, scan_id: str, progress_info: dict, connection_alive: bool
+) -> bool:
+    """Tell the client the registry stopped answering for ``scan_id``."""
+    message = raw_controls_on_one_line(
+        f"Scan {scan_id} is no longer tracked by the server: "
+        f"{progress_info.get('error', 'Unknown error')}"
+    )
+    return await _safe_send(
+        connection_alive,
+        lambda: ctx.error(message),
+        "Failed to send lost-scan error",
+    )
+
+
 async def _run_monitor_loop(
     ctx: Context,
     scan_id: str,
@@ -482,6 +497,13 @@ async def _run_monitor_loop(
         progress_info = await mcp_get_scan_progress(
             scan_id=scan_id, **_in_session(session_id)
         )
+        if not progress_info.get("success", False):
+            # The registry no longer answers for the scan: its entry is gone, or
+            # the session that owns it ended. No status will ever arrive, so
+            # this is an ending, reported once; polling on left the monitor
+            # running for the rest of _MAX_WAIT_SECONDS on a scan nobody tracks.
+            await _report_lost_scan(ctx, scan_id, progress_info, connection_alive)
+            return
         status = progress_info.get("status")
         if status == "completed":
             await _handle_scan_completed(
