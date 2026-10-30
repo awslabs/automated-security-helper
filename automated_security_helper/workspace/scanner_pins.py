@@ -40,7 +40,12 @@ Outside it, and therefore UNDECIDABLE: pre-releases (``1.0rc1``), post-releases
 explicit epochs (``1!1.0``), any operator not in the list, and any text that is
 not a specifier at all. ``===X`` is modelled only when ``X`` is itself a plain
 release version; PEP 440 defines it as arbitrary string equality, so
-``===some-build`` names a version this module cannot order.
+``===some-build`` names a version this module cannot order. As string equality
+it is satisfied by the one version spelled exactly ``X``: ``===1.0`` and
+``===1.0.0`` name two strings, so no version satisfies both, where ``==1.0``
+and ``==1.0.0`` are one padded version. The release tuple is compared without
+padding for it, so a leading zero (``===01.0``) is the one spelling difference
+this reading does not see.
 
 UNDECIDABLE is refused by the caller, not assumed compatible. The asymmetry is
 the same one that runs through workspace mode: refusing a workspace that would
@@ -52,22 +57,22 @@ How emptiness is decided
 Both pins are converted to constraint lists and a witness is searched for: a
 version satisfying every constraint on both sides. The search is over candidates
 derived from the boundary versions mentioned by either pin -- each boundary
-itself, one step above and below it, and the same boundary with a deeper release
-segment appended. This is sufficient because every constraint's boundary lies in
-that set, so a non-empty feasible region must contain either a boundary or a
-point in an open interval between two consecutive ones, and an appended segment
-lands inside such an interval.
+itself, one step above and below it, the same boundary with a deeper release
+segment appended, and the boundary zero-padded to the longest boundary's length
+with one more segment ``1`` appended. This is sufficient because every
+constraint's boundary lies in that set, so a non-empty feasible region must
+contain either a boundary or a point in an open interval between two consecutive
+ones; the padded-and-appended candidate of the lower boundary lies in every such
+interval, whatever the two boundaries' depths (``>1, <1.0.1`` has the witness
+``1.0.0.1``; ``>1.0, <1.0.0.1`` has ``1.0.0.0.1``).
 
 Two candidates cover the unbounded ends: ``0`` for a region open below, and one
 past the largest major seen for a region open above.
 
 Failure modes and known limitations
 -----------------------------------
-* The witness search is not complete for boundaries nested more than two release
-  segments deep. Pins of the form ``>1.0, <1.0.0.1`` have a feasible region
-  (``1.0.0.0.1`` satisfies both) that the candidate set does not reach, and the
-  verdict comes back INCOMPATIBLE. That errs toward refusal, which is the safe
-  direction, and no real scanner pin has that shape.
+* The witness search is complete for the modelled subset, by the argument
+  above; a wrong answer here would be a defect, not a documented gap.
 * Ordering ignores everything but the release segment, which is exactly why
   anything carrying a pre/post/dev/local marker is rejected as UNDECIDABLE
   rather than compared on its release segment alone -- ``1.0rc1`` and ``1.0``
@@ -119,9 +124,12 @@ class PinVerdict(str, Enum):
 
 
 class _Op(str, Enum):
-    """The modelled comparison kinds, after ``~=`` and ``===`` are expanded."""
+    """The modelled comparison kinds, after ``~=`` is expanded."""
 
     EQUAL = "=="
+    #: ``===``: the one version spelled exactly as written, release tuple
+    #: compared without padding (``1.0`` is not ``1.0.0`` here).
+    ARBITRARY_EQUAL = "==="
     NOT_EQUAL = "!="
     PREFIX_EQUAL = "==prefix"
     PREFIX_NOT_EQUAL = "!=prefix"
@@ -209,8 +217,10 @@ def _parse_specifier(specifier: str) -> Optional[List[_Constraint]]:
         ]
     if operator == "===":
         # Arbitrary equality. Modelled only because the version text happened to
-        # be an orderable release version; see the module docstring.
-        return [_Constraint(_Op.EQUAL, version)]
+        # be an orderable release version; see the module docstring. Not EQUAL:
+        # that pads, and "===1.0" with "===1.0.0" then read COMPATIBLE though
+        # no string is both.
+        return [_Constraint(_Op.ARBITRARY_EQUAL, version)]
     if operator == "~=":
         return _expand_compatible_release(version)
     if operator == ">=":
@@ -258,6 +268,9 @@ def _satisfies(candidate: ReleaseTuple, constraint: _Constraint) -> bool:
         return _matches_prefix(candidate, constraint.version)
     if constraint.op is _Op.PREFIX_NOT_EQUAL:
         return not _matches_prefix(candidate, constraint.version)
+    if constraint.op is _Op.ARBITRARY_EQUAL:
+        # The spelling, not the padded version: (1, 0) is not (1, 0, 0).
+        return candidate == constraint.version
 
     order = _compare(candidate, constraint.version)
     if constraint.op is _Op.EQUAL:
@@ -277,9 +290,12 @@ def _candidates(constraints: List[_Constraint]) -> Set[ReleaseTuple]:
     """Build the witness search space from the boundaries the pins mention.
 
     For each boundary: the boundary itself, one step above and below it in its
-    last component, and the boundary with a deeper release segment appended --
-    the last of these is what reaches inside an open interval between two
-    consecutive boundaries. A prefix boundary also contributes the start of the
+    last component, the boundary with a deeper release segment appended, and the
+    boundary zero-padded to the longest boundary's length with a ``1`` appended
+    -- the last of these is what reaches inside an open interval between two
+    consecutive boundaries of any depths: ``>1`` with ``<1.0.1`` is satisfied by
+    ``1.0.0.1`` and by nothing shallower, so the shallower candidates alone read
+    the pair INCOMPATIBLE. A prefix boundary also contributes the start of the
     next prefix, which is where its range ends.
 
     ``0`` and one past the largest major cover regions open below and above.
@@ -288,10 +304,12 @@ def _candidates(constraints: List[_Constraint]) -> Set[ReleaseTuple]:
     candidates: Set[ReleaseTuple] = {(0,), (1,)}
 
     boundaries = [constraint.version for constraint in constraints]
+    longest = max((len(boundary) for boundary in boundaries), default=1)
     for boundary in boundaries:
         candidates.add(boundary)
         candidates.add(boundary + (1,))
         candidates.add(boundary + (0, 1))
+        candidates.add(_pad(boundary, longest) + (1,))
         candidates.add(boundary[:-1] + (boundary[-1] + 1,))
         if boundary[-1] > 0:
             candidates.add(boundary[:-1] + (boundary[-1] - 1,))
