@@ -76,14 +76,30 @@ def test_not_as_init_nothing_is_reaped_and_the_group_read_stands():
 
 @skip_on_windows
 def test_a_killed_group_of_zombies_is_not_recorded_as_a_refused_stop():
-    """At the base the group of zombies kept existing and _note_stop_refused ran."""
+    """At the base the group of zombies kept existing and _note_stop_refused ran.
+
+    A member is still running when the stop begins, so the read before the
+    kill finds the group and the SIGKILL is sent; the kill leaves behind the
+    exited child this process, as init, has yet to reap, and it is that
+    survivor read after the kill that this test exercises."""
     process = _reaped_child(_NO_SUCH_PID)
-    zombies = {777}
+    zombies: set = set()
+    alive = [True]
+    sent = []
 
     def group_signal(pgid, signum):
-        # SIGKILL reaches the group; the existence probe (signal 0) sees the
-        # zombie until it is reaped.
-        return signum == signal.SIGKILL or bool(zombies)
+        if signum == signal.SIGKILL:
+            # The kill ends the live member; what it leaves is a zombie child
+            # of this process until something reaps it.
+            sent.append(signum)
+            alive[0] = False
+            zombies.add(777)
+            return True
+        if signum != 0:
+            sent.append(signum)
+        # The existence probe (signal 0) sees the group while a member lives
+        # or an exited one is unreaped.
+        return alive[0] or bool(zombies)
 
     def reap(pid, options):
         zombies.discard(pid)
@@ -102,8 +118,9 @@ def test_a_killed_group_of_zombies_is_not_recorded_as_a_refused_stop():
         patch.object(subprocess_utils, "_note_stop_refused") as refused,
     ):
         subprocess_utils._stop_tree(process, grace=0)
+    assert sent == [signal.SIGKILL], sent
     refused.assert_not_called()
-    assert zombies == set()
+    assert zombies == set(), "the survivor read after the kill reaped the orphan"
 
 
 @skip_on_windows
