@@ -28,7 +28,11 @@ The contract these cases pin:
 - a project whose future is already done when the poll overruns it keeps its
   completed outcome;
 - the commit-or-abandon decision is taken once: a worker that has claimed its
-  write cannot be abandoned afterwards, and an abandoned worker cannot claim.
+  write cannot be abandoned afterwards, and an abandoned worker cannot claim;
+- a scan stopped by its abandon's cancel (``ScanCancelled`` escapes the worker's
+  ``except Exception``) has what it wrote before the cancel discarded too;
+- the discard removes the two things a scan writes, the results file and the
+  report directory, and leaves everything else an operator may have kept there.
 """
 
 from __future__ import annotations
@@ -36,10 +40,10 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-import time
 
 import pytest
 
+from automated_security_helper.core.cancellation import ScanCancelled
 from automated_security_helper.models.workspace import ProjectRunStatus
 from automated_security_helper.workspace import execution
 from tests.unit.workspace.test_execution import (
@@ -53,7 +57,10 @@ from tests.unit.workspace.test_execution import (
 pytestmark = pytest.mark.unit
 
 PROJECT_TIMEOUT = 0.3
-ABANDONED_LATE = "finished after being abandoned"
+
+needs_symlinks = pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -65,24 +72,48 @@ def _reset_fake():
     FakeOrchestrator.behaviour = {}
 
 
-def _wait_for_the_late_worker(caplog, deadline_seconds=5.0):
-    """Block until the abandoned worker has run its discard, or the deadline.
+@pytest.fixture
+def discard_done(monkeypatch):
+    """An event set once the real discard has run, for the late-worker cases.
 
     ``_run`` returns with the pool shut down ``wait=False``, so the worker is
     still blocked when it returns and the scan's files do not exist yet. An
-    assertion made then passes with or without the discard; the worker's own
-    warning is the signal that it has finished and acted.
+    assertion made then passes with or without the discard. The signal used to be
+    a log line any late worker in the same xdist worker could have written; the
+    discard itself is tied to this call.
     """
-    deadline = time.monotonic() + deadline_seconds
-    while time.monotonic() < deadline:
-        if any(ABANDONED_LATE in record.getMessage() for record in caplog.records):
-            return True
-        time.sleep(0.02)
-    return False
+    done = threading.Event()
+    real = execution._discard_project_output
+
+    def wrapped(project_output):
+        try:
+            real(project_output)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(execution, "_discard_project_output", wrapped)
+    return done
 
 
-def test_the_output_the_scan_saved_is_removed_after_an_abandon(tmp_path, caplog):
-    caplog.set_level(logging.WARNING, logger="ash")
+class _SavesThenRaises(FakeOrchestrator):
+    """A scan that saved its results and reports, then ended in *error*.
+
+    ``FakeOrchestrator`` raises before it writes; the cases below need the
+    other order, a scan that left files behind on its way out.
+    """
+
+    error: BaseException = RuntimeError("boom")
+
+    def execute_scan(self, phases=None):
+        (self.output_dir / "reports").mkdir(parents=True, exist_ok=True)
+        (self.output_dir / "ash_aggregated_results.json").write_text(
+            "{}", encoding="utf-8"
+        )
+        (self.output_dir / "reports" / "ash.sarif").write_text("{}", encoding="utf-8")
+        raise type(self).error
+
+
+def test_the_output_the_scan_saved_is_removed_after_an_abandon(tmp_path, discard_done):
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"))
     release = threading.Event()
     FakeOrchestrator.behaviour["wedged"] = {
@@ -97,11 +128,11 @@ def test_the_output_the_scan_saved_is_removed_after_an_abandon(tmp_path, caplog)
         # Let the abandoned worker finish: the scan saves its file and its
         # reports, then the workspace layer sees the abandon.
         release.set()
-        finished = _wait_for_the_late_worker(caplog)
+        finished = discard_done.wait(5.0)
     finally:
         release.set()
 
-    assert finished, "the abandoned worker never reported finishing"
+    assert finished, "the abandoned worker never ran its discard"
     entry = outcome.payload.projects[0]
     assert entry.status is ProjectRunStatus.FAILED
     assert entry.finding_count == 0
@@ -116,6 +147,7 @@ def test_the_output_the_scan_saved_is_removed_after_an_abandon(tmp_path, caplog)
     assert (project_output / "scanners" / "bandit" / "raw.json").exists()
 
 
+@needs_symlinks
 def test_the_discard_leaves_the_tools_output_and_every_link_alone(tmp_path):
     project_output = tmp_path / "out" / "projects" / "api"
     (project_output / "reports").mkdir(parents=True)
@@ -125,6 +157,8 @@ def test_the_discard_leaves_the_tools_output_and_every_link_alone(tmp_path):
     (project_output / "scanners" / "bandit" / "raw.json").write_text(
         "{}", encoding="utf-8"
     )
+    # Not the scan's: a file an operator kept beside the output.
+    (project_output / "notes.txt").write_text("kept\n", encoding="utf-8")
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "kept.txt").write_text("outside\n", encoding="utf-8")
@@ -135,13 +169,41 @@ def test_the_discard_leaves_the_tools_output_and_every_link_alone(tmp_path):
     assert not (project_output / "ash_aggregated_results.json").exists()
     assert not (project_output / "reports").exists()
     assert (project_output / "scanners" / "bandit" / "raw.json").exists()
+    assert (project_output / "notes.txt").read_text(encoding="utf-8") == "kept\n", (
+        "the discard removed a file the scan did not write"
+    )
     assert (project_output / "linked").is_symlink()
     assert (outside / "kept.txt").read_text(encoding="utf-8") == "outside\n"
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+@needs_symlinks
+def test_the_discard_goes_through_no_link_at_the_names_it_removes(tmp_path):
+    """``reports`` as a link to an outside directory, and the results file as a
+    link to an outside file: the two names the discard removes, where a removal
+    through the link would reach outside ``projects/<key>/``. Both links are left
+    as they are and their targets untouched."""
+    project_output = tmp_path / "out" / "projects" / "api"
+    project_output.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    (outside / "reports").mkdir(parents=True)
+    (outside / "reports" / "ash.sarif").write_text("kept\n", encoding="utf-8")
+    (outside / "results.json").write_text("kept too\n", encoding="utf-8")
+    (project_output / "reports").symlink_to(
+        outside / "reports", target_is_directory=True
+    )
+    (project_output / "ash_aggregated_results.json").symlink_to(
+        outside / "results.json"
+    )
+
+    execution._discard_project_output(project_output)
+
+    assert (project_output / "reports").is_symlink()
+    assert (project_output / "ash_aggregated_results.json").is_symlink()
+    assert (outside / "reports" / "ash.sarif").read_text(encoding="utf-8") == "kept\n"
+    assert (outside / "results.json").read_text(encoding="utf-8") == "kept too\n"
+
+
+@needs_symlinks
 def test_the_discard_follows_no_link_nested_below_the_projects_output(tmp_path):
     """A link below a directory the discard removes is unlinked, never followed.
 
@@ -214,23 +276,67 @@ def test_a_worker_that_raises_claims_the_gate_so_a_later_abandon_cannot_land(
 
 
 def test_a_worker_abandoned_before_it_raised_discards_what_the_scan_left(tmp_path):
-    """Must-not-regress control: an abandon that came first still discards."""
+    """Must-not-regress control: an abandon that came first still discards.
+
+    The scan ran and raised (the error names ``boom`` and an orchestrator was
+    built), so the discard measured here is the exception arm's, not an early
+    return on an already-abandoned gate.
+    """
     _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"))
-    FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
+    _SavesThenRaises.error = RuntimeError("boom")
     project_output = tmp_path / "out" / "projects" / "broken"
-    (project_output / "reports").mkdir(parents=True)
-    (project_output / "ash_aggregated_results.json").write_text("{}", encoding="utf-8")
-    (project_output / "reports" / "ash.sarif").write_text("{}", encoding="utf-8")
     gate = execution._AbandonGate()
     assert gate.set() is True
 
     run = execution._scan_one_project(
-        plan.projects[0], _settings(tmp_path), FakeOrchestrator.create, gate
+        plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
     )
 
+    assert FakeOrchestrator.built, "no orchestrator was built: the scan never ran"
     assert run.outcome.status is ProjectRunStatus.FAILED
+    assert "boom" in (run.outcome.error or ""), run.outcome.error
     assert not (project_output / "ash_aggregated_results.json").exists()
     assert not (project_output / "reports").exists()
+
+
+def test_a_worker_stopped_by_its_abandons_cancel_discards_what_the_scan_left(tmp_path):
+    """``ScanCancelled`` is a BaseException: the ``except Exception`` arm never
+    sees it, and the worker records the project cancelled. The abandon's cancel
+    is the ordinary way an abandoned scan stops, so the output it saved before
+    the cancel reached it has to go the same way as a raise's."""
+    _, plan = _make_workspace(tmp_path, ("stopped", "MEDIUM"))
+    _SavesThenRaises.error = ScanCancelled("the scan was cancelled")
+    project_output = tmp_path / "out" / "projects" / "stopped"
+    gate = execution._AbandonGate()
+    assert gate.set() is True
+
+    with pytest.raises(ScanCancelled):
+        execution._scan_one_project(
+            plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
+        )
+
+    assert not (project_output / "ash_aggregated_results.json").exists(), (
+        "the results file the scan saved before its cancel survived beside the "
+        "FAILED verdict"
+    )
+    assert not (project_output / "reports").exists()
+
+
+def test_a_cancel_that_is_not_an_abandon_leaves_the_scans_output(tmp_path):
+    """Must-not-flag control: a cancel of the run (the gate untaken) discards
+    nothing; the run writes no unified results, so nothing is contradicted."""
+    _, plan = _make_workspace(tmp_path, ("stopped", "MEDIUM"))
+    _SavesThenRaises.error = ScanCancelled("the run was cancelled")
+    project_output = tmp_path / "out" / "projects" / "stopped"
+    gate = execution._AbandonGate()
+
+    with pytest.raises(ScanCancelled):
+        execution._scan_one_project(
+            plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
+        )
+
+    assert (project_output / "ash_aggregated_results.json").exists()
+    assert gate.set() is False, "the cancelled worker claimed its gate"
 
 
 class _QueuedFuture:

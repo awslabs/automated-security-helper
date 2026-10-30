@@ -22,7 +22,11 @@ The contract these cases pin:
 - a stale database of a non-gating policy scanner is reported and does not fail
   the project; with the gate on it does;
 - the masking pass skips a project whose output directory the scan refused as
-  a link, and re-masks the others.
+  a link, and re-masks the others;
+- the masking pass skips a project that failed before an orchestrator existed
+  for it (a previous run's files are not this run's to rewrite), and re-masks a
+  project whose scan raised after writing its reports (those files are this
+  run's, and quote the other projects' values).
 """
 
 from __future__ import annotations
@@ -34,12 +38,14 @@ import pytest
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.workspace import execution
+from automated_security_helper.workspace.execution import execute_workspace
 from tests.unit.workspace.test_execution import (
     FakeOrchestrator,
     _make_workspace,
     _run,
     _sarif,
     _scanner,
+    _settings,
 )
 
 pytestmark = pytest.mark.unit
@@ -140,7 +146,13 @@ def test_the_masking_pass_skips_a_project_whose_output_was_a_refused_link(
 
 
 def test_the_masking_pass_skips_a_project_this_run_never_scanned(tmp_path, monkeypatch):
-    """A previous run's projects/<key> is not rewritten for a project that failed before scanning."""
+    """A previous run's projects/<key> is not rewritten for a project that failed before scanning.
+
+    The refusal is raised where the executor raises it, from the config
+    resolution that runs before an orchestrator is built (``_project_config_with_policy``):
+    an orchestrator that raised after it was built is the case below, and it IS
+    masked.
+    """
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
     masked: list = []
@@ -150,11 +162,16 @@ def test_the_masking_pass_skips_a_project_this_run_never_scanned(tmp_path, monke
         "_mask_project_output",
         lambda project_output, values, shapes: masked.append(project_output.name),
     )
+    real_resolution = execution._project_config_with_policy
+
+    def refuse_brokens_config(project, settings):
+        if project.key == "broken":
+            raise ASHConfigValidationError("fixture: the config is invalid")
+        return real_resolution(project, settings)
+
+    monkeypatch.setattr(execution, "_project_config_with_policy", refuse_brokens_config)
     _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("broken", "MEDIUM"))
     FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(count=1)}
-    FakeOrchestrator.behaviour["broken"] = {
-        "raise": ASHConfigValidationError("fixture: the config is invalid")
-    }
     # What a previous run left under the never-scanned project's output tree.
     stale = tmp_path / "out" / "projects" / "broken" / "ash_aggregated_results.json"
     stale.parent.mkdir(parents=True)
@@ -164,4 +181,47 @@ def test_the_masking_pass_skips_a_project_this_run_never_scanned(tmp_path, monke
 
     statuses = {p.project: p.status.value for p in outcome.payload.projects}
     assert statuses["broken"] == "failed", statuses
+    assert [b.key for b in FakeOrchestrator.built] == ["api"], (
+        "an orchestrator was built for the refused project"
+    )
     assert masked == ["api"]
+
+
+class _WritesThenRaises(FakeOrchestrator):
+    """A scan that wrote its reports, then raised: its files are this run's."""
+
+    def execute_scan(self, phases=None):
+        reports = self.output_dir / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "ash.html").write_text("<pre>partial</pre>\n", encoding="utf-8")
+        raise RuntimeError("the report phase broke after ash.html")
+
+
+def test_the_masking_pass_covers_a_project_whose_scan_raised_after_writing(
+    tmp_path, monkeypatch
+):
+    """Partial write, then a raise: the reports left behind quote what the
+    other projects exposed, so they are masked like a finished project's. An
+    implementation that skips every FAILED project passes the two skip cases
+    above and leaves another project's secret in clear here."""
+    masked: list = []
+    monkeypatch.setattr(execution, "exposed_secret_values", lambda results: {"hunter2"})
+    monkeypatch.setattr(
+        execution,
+        "_mask_project_output",
+        lambda project_output, values, shapes: masked.append(project_output.name),
+    )
+    _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("broken", "MEDIUM"))
+    FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(count=1)}
+
+    def factory(**kwargs):
+        if kwargs["source_dir"].name == "broken":
+            return _WritesThenRaises(**kwargs)
+        return FakeOrchestrator(**kwargs)
+
+    outcome = execute_workspace(plan, _settings(tmp_path), orchestrator_factory=factory)
+
+    statuses = {p.project: p.status.value for p in outcome.payload.projects}
+    assert statuses["broken"] == "failed", statuses
+    assert (tmp_path / "out" / "projects" / "broken" / "reports" / "ash.html").exists()
+    assert sorted(masked) == ["api", "broken"], masked

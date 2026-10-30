@@ -564,9 +564,11 @@ class _ProjectRun:
     #: The project's ``metadata.plugin_load_errors``, for the workspace results'
     #: own: the modules its scan could not import, with the error.
     plugin_load_errors: Dict[str, str] = field(default_factory=dict)
-    #: The scan ran and wrote under ``projects/<key>`` this run, so what is there
-    #: is this run's output and the cross-project masking rewrites it. False for
-    #: a project the workspace never handed to an orchestrator, or whose
+    #: An orchestrator ran for this project this run, so what is under
+    #: ``projects/<key>`` is this run's output and the cross-project masking
+    #: rewrites it: a finished scan's, a scan that raised after writing its
+    #: reports, or the tools' output an abandoned worker's discard left. False
+    #: for a project the workspace never handed to an orchestrator, or whose
     #: abandoned worker has not come back: what is there then is an earlier
     #: run's, or still being written.
     output_written: bool = False
@@ -1266,6 +1268,12 @@ def _scan_one_project(
         )
     project_output.mkdir(parents=True, exist_ok=True)
 
+    # True once an orchestrator exists for this project: from then on whatever
+    # the scan writes under projects/<key>/ is this run's, however the scan ends.
+    # The failed outcomes below carry it as output_written, so the cross-project
+    # masking rewrites the reports a scan saved before it raised, and leaves a
+    # previous run's files alone for a project that never reached a scan.
+    handed = False
     try:
         resolved_config = _project_config_with_policy(project, settings)
 
@@ -1337,7 +1345,20 @@ def _scan_one_project(
                 ),
             },
         )
+        handed = True
         results = orchestrator.execute_scan(phases=list(settings.phases))
+    except ScanCancelled:
+        # A BaseException, so the arm below does not see it: the worker records
+        # the project cancelled. Before it does, the output the scan saved
+        # before the cancel reached it goes the way of a raise's when the cancel
+        # was this project's abandon (the gate is taken): the results and
+        # reports it wrote hold findings the FAILED verdict says do not exist.
+        # Claimed through the gate for the reason given in the arm below. A
+        # cancel that is not an abandon (the run's, or the caller's) takes the
+        # claim and leaves the output; the run then writes no unified results.
+        if handed and abandoned is not None and not _claim_commit(abandoned):
+            _discard_project_output(project_output)
+        raise
     except ASHConfigValidationError as exc:
         # The label the single-directory CLI prints ("Scan refused" for committed
         # files in the way), and the text logged as data: a committed file's name
@@ -1351,16 +1372,18 @@ def _scan_one_project(
         ASH_LOGGER.error(
             f"Project '{project.key}': {label}: {error_text(exc)}", extra=NO_MARKUP
         )
-        return _failed_outcome(
+        refused = _failed_outcome(
             project,
             settings,
             f"{label}: {error_text(exc)}",
             invalid_config=True,
             duration_seconds=time.monotonic() - started,
         )
+        refused.output_written = handed
+        return refused
     except Exception as exc:  # noqa: BLE001 -- one project must not sink the workspace
         ASH_LOGGER.error(f"Project '{project.key}' failed: {error_text(exc)}")
-        if abandoned is not None and not _claim_commit(abandoned):
+        if handed and abandoned is not None and not _claim_commit(abandoned):
             # The scan may have saved its results and reports under
             # projects/<key>/ before it raised; the workspace already recorded
             # this project FAILED at its timeout, so those leftovers go too.
@@ -1370,12 +1393,18 @@ def _scan_one_project(
             # worker that raised owns its FAILED outcome, and the poll can no
             # longer abandon it.
             _discard_project_output(project_output)
-        return _failed_outcome(
+        failed = _failed_outcome(
             project,
             settings,
             f"{type(exc).__name__}: {error_text(exc)}",
             duration_seconds=time.monotonic() - started,
         )
+        # A scan that raised after writing its reports left this run's files
+        # under projects/<key>/, with the other projects' secret values in
+        # clear where it quoted them; the masking pass rewrites them like any
+        # finished project's. Before this every FAILED project was skipped.
+        failed.output_written = handed
+        return failed
 
     # Before _extract_run, so the tag is present in both the model written to
     # projects/<key>/ and the dict carried into the unified file.
@@ -2452,6 +2481,16 @@ def _close_never_started(future: Any, gate: Any, key: str) -> bool:
     return True
 
 
+#: What a project's scan writes under ``projects/<key>/`` that an abandon has to
+#: take back: the results file the scan phase saves and the report phase's
+#: directory. Named, rather than "everything but the tools' output", because the
+#: directory can hold what an operator kept: ``keep_previous_results`` passes
+#: through to the project's orchestrator, and an abandon that lands before the
+#: scan rewrote the directory would otherwise remove an earlier run's files that
+#: were never this run's to remove.
+_SCAN_OUTPUT_NAMES = frozenset({RESULTS_FILENAME, "reports"})
+
+
 def _discard_project_output(project_output: Path) -> None:
     """Remove what a scan wrote under ``projects/<key>/`` before it was abandoned.
 
@@ -2460,10 +2499,16 @@ def _discard_project_output(project_output: Path) -> None:
     project's own reports beside it, before ``_scan_one_project`` can see that
     the project was abandoned. Declining the workspace's own write left all of
     that in place: real findings in the project's subtree beside a unified file
-    recording the project FAILED with none. Everything there is this run's own
-    output under the workspace output directory, except the tools' own output
-    (``_TOOL_OUTPUT_DIRS``), which this run never rewrites. A link at any name
-    is left alone and never followed, as every other write here refuses to.
+    recording the project FAILED with none. Those two names (``_SCAN_OUTPUT_NAMES``)
+    are what is removed, and they are removed whatever run wrote them: a
+    results file beside a FAILED verdict contradicts it whether this run or an
+    earlier one left it, and this run's reporters rewrite the same report names.
+    A report an earlier run wrote in a format this run did not select goes with
+    the directory; that is the one thing ``keep_previous_results`` kept that an
+    abandon does not. Everything else there (the tools' own output,
+    ``_TOOL_OUTPUT_DIRS``; a file this run did not write) is left as it was. A
+    link at any name is left alone and never followed, as every other write here
+    refuses to.
     """
     import shutil
 
@@ -2479,7 +2524,7 @@ def _discard_project_output(project_output: Path) -> None:
         )
         return
     for path in entries:
-        if path.name in _TOOL_OUTPUT_DIRS or path.is_symlink():
+        if path.name not in _SCAN_OUTPUT_NAMES or path.is_symlink():
             continue
         try:
             if path.is_dir():
@@ -2712,13 +2757,16 @@ def execute_workspace(
             ):
                 # Nothing of this run's is under projects/<key> for a project the
                 # workspace never handed to an orchestrator (an unchanged skip, a
-                # link refusal, a config error, never started) or whose abandoned
-                # worker has not come back. What is there is a previous run's
-                # output, or still being written; rewriting it gave stale results
-                # a fresh mtime and nothing else. An abandoned project whose
-                # worker did come back has only the tools' own output there (the
-                # worker discarded the reports with the results), which the walk
-                # below leaves alone as it does for every finished project.
+                # link refusal, a config refused before the scan, never started)
+                # or whose abandoned worker has not come back. What is there is a
+                # previous run's output, or still being written; rewriting it
+                # gave stale results a fresh mtime and nothing else. A project
+                # whose scan raised after an orchestrator existed is NOT skipped:
+                # the reports it saved before the raise are this run's and quote
+                # the other projects' values. An abandoned project whose worker
+                # did come back has only the tools' own output there (the worker
+                # discarded the reports with the results), which the walk below
+                # leaves alone as it does for every finished project.
                 continue
             project_output = _project_output_dir(settings, project)
             # The same refusal the scan made before writing there. A project whose
