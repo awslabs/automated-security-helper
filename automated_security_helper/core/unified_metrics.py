@@ -746,11 +746,21 @@ def get_unified_scanner_metrics(
             # executor assigned a findings list's counts carries its findings
             # in raw_results and no severity_counts, so 0 actionable there says
             # nothing, and the row's FAILED is the only evidence the gate failed.
+            # And only when the reports record the level they were graded
+            # against: a results file written before that was recorded is
+            # re-graded here at whatever level the configuration record
+            # resolves to now, so a scan that failed at LOW read as 0
+            # actionable at MEDIUM and its row flipped PASSED, and
+            # _populate_scanner_results_from_unified_metrics then wrote PASSED
+            # over the one record of the scan's own graded status.
             status = (
                 "PASSED"
                 if getattr(recorded_status, "value", recorded_status)
                 == ScannerStatus.FAILED.value
                 and not ScannerStatisticsCalculator.dict_counts_unrecorded(
+                    asharp_model, scanner_name
+                )
+                and ScannerStatisticsCalculator.graded_level_recorded(
                     asharp_model, scanner_name
                 )
                 else recorded_status

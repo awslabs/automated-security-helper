@@ -606,6 +606,29 @@ class ScannerStatisticsCalculator:
         return False
 
     @staticmethod
+    def graded_level_recorded(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> bool:
+        """True when *scanner_name*'s target reports record the one level they were
+        graded against (``_recorded_graded_level``).
+
+        The executor writes that level on every report it files, so a results
+        file this ASH wrote answers True for any scanner with a report. An older
+        file answers False: its reports carry no level, and a read-back grades
+        its finding counts against whatever threshold the configuration record
+        resolves to now, which can be a stricter level than the scan used (a
+        LOW scan through an environment-read threshold reads as MEDIUM, so its
+        LOW findings count as nothing actionable). A reading that would
+        override the recorded status on those counts must not run then.
+        """
+        return (
+            ScannerStatisticsCalculator._recorded_graded_level(
+                asharp_model, scanner_name
+            )
+            is not None
+        )
+
+    @staticmethod
     def _get_scanner_name_from_result(result: Any) -> Optional[str]:
         """Extract the scanner name from a SARIF result.
 
