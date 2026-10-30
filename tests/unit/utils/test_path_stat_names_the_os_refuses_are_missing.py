@@ -38,12 +38,13 @@ pytestmark = pytest.mark.unit
         (errno.ELOOP, path_stat.LOOP),
     ],
 )
-def test_the_errno_decides_the_kind(monkeypatch, number, kind):
-    def refusing(path):
-        raise OSError(number, os.strerror(number), path)
-
-    monkeypatch.setattr(os, "stat", refusing)
-    problem = path_stat.stat_named_path("some/path")
+def test_the_errno_decides_the_kind(number, kind):
+    # The fake stat is installed around the one call only (_refused_with): left
+    # on the process-wide os module until the test's own monkeypatch unwound, it
+    # was what the unit fixtures' teardown reached, and that teardown raised the
+    # planted error (a TypeError: the fake took no follow_symlinks) in place of
+    # the test's own result.
+    problem = _refused_with(number, _file_stat())
     assert isinstance(problem, path_stat.StatProblem)
     assert problem.kind == kind
     assert problem.code == errno.errorcode[number]

@@ -49,7 +49,14 @@ def _stat_failing_with(error, path):
     [
         (FileNotFoundError(errno.ENOENT, "No such file"), MISSING, "ENOENT"),
         (NotADirectoryError(errno.ENOTDIR, "Not a directory"), MISSING, "ENOTDIR"),
-        (OSError(errno.ELOOP, "Too many levels of symbolic links"), LOOP, "ELOOP"),
+        # The code is the errno's name as this platform's errno module spells
+        # it: on Windows ELOOP and WSAELOOP share a number, and errorcode names
+        # it WSAELOOP.
+        (
+            OSError(errno.ELOOP, "Too many levels of symbolic links"),
+            LOOP,
+            errno.errorcode[errno.ELOOP],
+        ),
         (PermissionError(errno.EACCES, "Permission denied"), UNREADABLE, "EACCES"),
         (OSError(errno.EIO, "Input/output error"), UNREADABLE, "EIO"),
         (OSError("stat failed without an errno"), UNREADABLE, "no error code"),

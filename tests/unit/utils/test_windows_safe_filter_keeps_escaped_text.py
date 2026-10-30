@@ -82,12 +82,17 @@ def test_an_ascii_message_with_ascii_arguments_is_left_as_logged():
 
 
 def test_a_message_the_console_cannot_write_is_folded_and_shown():
-    record = _filtered_plain("path %s", ("café ::x",))
+    """The folded text is shown once: the letter the console cannot write as its
+    escape, and a CI command form broken. A "::" is a command only at the start
+    of a line (an ARN's "::" is mid-line and stays readable), so the argument
+    puts one there."""
+    record = _filtered_plain("%s", ("::add-mask::café",))
 
     assert record.args == ()
     assert record.getMessage().isascii()
     assert "caf\\xe9" in record.getMessage()
-    assert "::x" not in record.getMessage()
+    assert not record.getMessage().startswith("::")
+    assert "add-mask::caf" in record.getMessage()
 
 
 def _suggested_ignore_paths(message: str) -> list:

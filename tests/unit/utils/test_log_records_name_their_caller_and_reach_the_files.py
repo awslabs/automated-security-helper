@@ -100,8 +100,11 @@ def test_the_windows_safe_filter_puts_the_arguments_in_ascii(monkeypatch):
     # put in ASCII, with the character written as its escape, not dropped: the
     # file sinks write the record as it was logged, and the console gets every
     # character as text or as an escape. Nothing is left for a sink to put in.
+    # The mapping travels as the one-tuple logging's callers hand LogRecord,
+    # which unwraps it; handed the mapping itself, LogRecord read it as a
+    # tuple and failed on its first index.
     record = logging.LogRecord(
-        "ash", logging.INFO, "f", 1, "%(k)s", {"k": "caf" + chr(0xE9)}, None
+        "ash", logging.INFO, "f", 1, "%(k)s", ({"k": "caf" + chr(0xE9)},), None
     )
     assert safe.filter(record)
     assert record.args == ()
