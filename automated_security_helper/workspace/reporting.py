@@ -133,11 +133,16 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.base.plugin_config import (
+    declared_config_model,
+    plugin_config_key,
+    section_enabled,
+)
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
+    ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
     off_host_reporter_refused,
     reporter_classes_for_run,
@@ -465,11 +470,73 @@ def _default_reporter_classes(plugin_modules: Sequence[str] = ()) -> List[type]:
     return reporter_classes_for_run(plugin_modules)
 
 
+@dataclass
+class _ConstructionFailure:
+    """Why a reporter never became an instance, and whether that owed a report.
+
+    ``skipped`` is the ``SKIP_*`` reason the step would have given the reporter
+    had it been built: ``SKIP_DISABLED`` when its config section turns it off
+    (or an off-host reporter is refused), ``SKIP_NOT_REQUESTED`` when
+    ``--output-format`` names other reporters. ``None`` means the step would
+    have run it, so the failure is the step's: the operator asked for its report
+    and nothing could be built to write one. A reporter nobody asked for, or
+    that the default config leaves off (the AWS reporters, a plugin's), is
+    recorded in the manifest and does not fail the run: before this, a disabled
+    reporter raising in ``__init__`` turned a run with ``--output-format sarif``
+    into exit 1 after every project was scanned, where ``ash --source-dir`` on
+    the same project passed.
+    """
+
+    error: str
+    skipped: Optional[str]
+
+
+def _construction_skip_reason(
+    reporter_class: type, key: str, config: Any, output_formats: Sequence[str]
+) -> Optional[str]:
+    """The ``SKIP_*`` reason a reporter that could not be built would have had.
+
+    Decided from the two inputs that need no instance: the config section the
+    default config holds for the reporter (a dict, read as ``section_enabled``
+    reads every section), or, for a reporter the default config has no section
+    for (a plugin's), the defaults its declared config model states, which is
+    what the base builds such a reporter on; and the requested formats, matched
+    as ``reporter_matches_requested_formats`` matches them, by the configured
+    name. ``--python-based-plugins-only`` asks the instance, so under that flag
+    an unbuildable reporter counts as one the step would have run.
+    """
+    enabled = True
+    name: Any = None
+    if config is not None:
+        enabled = section_enabled(config) and not off_host_reporter_refused(
+            reporter_class, config
+        )
+        name = (
+            config.get("name")
+            if isinstance(config, Mapping)
+            else getattr(config, "name", None)
+        )
+    else:
+        declared = declared_config_model(reporter_class, ReporterPluginConfigBase)
+        field = (getattr(declared, "model_fields", None) or {}).get("enabled")
+        if field is not None and getattr(field, "default", True) is False:
+            enabled = False
+    if not enabled:
+        return SKIP_DISABLED
+    if isinstance(output_formats, str):
+        output_formats = (output_formats,) if output_formats else ()
+    if not output_formats:
+        return None
+    requested = {str(getattr(fmt, "value", fmt)) for fmt in output_formats}
+    return None if str(name or key) in requested else SKIP_NOT_REQUESTED
+
+
 def _build_instance(
     reporter_class: type,
     context,
     config_lookup,
-    construction_failures: Optional[Dict[str, str]] = None,
+    construction_failures: Optional[Dict[str, _ConstructionFailure]] = None,
+    output_formats: Sequence[str] = (),
 ) -> Optional[ReporterPluginBase]:
     """Construct *reporter_class*, or record why it could not be.
 
@@ -478,13 +545,20 @@ def _build_instance(
     manifest can carry an entry for a reporter that never became an instance.
     Before this the reporter was absent from the manifest and from
     ``failed_reporters`` alike, the silence the manifest exists to prevent.
+    Whether the failure fails the step is decided here too
+    (:class:`_ConstructionFailure`), from *output_formats* and the config.
+
+    The name and the config are read once, before the constructor: a
+    ``plugin_config_key`` that raises is recorded under the class name instead
+    of escaping from the handler and taking the step down with no manifest.
     """
     plugin_name = getattr(reporter_class, "__name__", "Unknown")
+    key = plugin_name
+    config = None
     try:
-        return reporter_class(
-            context=context,
-            config=config_lookup(plugin_config_key(reporter_class)),
-        )
+        key = plugin_config_key(reporter_class)
+        config = config_lookup(key)
+        return reporter_class(context=context, config=config)
     except Exception as exc:  # noqa: BLE001 -- mirrors ReportPhase's tolerance
         described = f"{type(exc).__name__}: {error_text(exc)}"
         ASH_LOGGER.error(
@@ -492,8 +566,11 @@ def _build_instance(
             f"reporting: {described}"
         )
         if construction_failures is not None:
-            construction_failures[plugin_config_key(reporter_class)] = (
-                f"the reporter could not be constructed: {described}"
+            construction_failures[key] = _ConstructionFailure(
+                error=f"the reporter could not be constructed: {described}",
+                skipped=_construction_skip_reason(
+                    reporter_class, key, config, output_formats
+                ),
             )
         return None
 
@@ -552,7 +629,7 @@ def _selected_reporters(
     reporter_classes: Optional[Sequence[type]],
     check_dependencies: bool = True,
     plugin_modules: Sequence[str] = (),
-    construction_failures: Optional[Dict[str, str]] = None,
+    construction_failures: Optional[Dict[str, _ConstructionFailure]] = None,
 ):
     """Every constructible reporter, with its declared behaviour and skip reason.
 
@@ -587,7 +664,11 @@ def _selected_reporters(
     )
     for reporter_class in classes:
         instance = _build_instance(
-            reporter_class, context, config_lookup, construction_failures
+            reporter_class,
+            context,
+            config_lookup,
+            construction_failures,
+            output_formats=output_formats,
         )
         if instance is None:
             continue
@@ -922,7 +1003,7 @@ def emit_workspace_reports(
     per_project: List[str] = []
     unsupported: List[str] = []
     failures: Dict[str, str] = {}
-    construction_failures: Dict[str, str] = {}
+    construction_failures: Dict[str, _ConstructionFailure] = {}
 
     # Loaded lazily, so a workspace whose every reporter is per-project never
     # pays the cost of materialising the whole model. A load that fails is
@@ -967,8 +1048,11 @@ def emit_workspace_reports(
 
     for key, failure in construction_failures.items():
         # A reporter that never became an instance still gets its entry, under
-        # its declared name, and fails the step: the operator asked for its
-        # report and nothing could even be built to write one.
+        # its declared name. It fails the step only when the step would have run
+        # it (the operator asked for its report and nothing could even be built
+        # to write one); one the config leaves off or the formats exclude is
+        # recorded with that reason, as a built one would be, and fails nothing
+        # (_ConstructionFailure).
         manifest_reporters[key] = {
             "behaviour": None,
             "considered": False,
@@ -976,9 +1060,16 @@ def emit_workspace_reports(
             "workspace_artifact": None,
             "per_project_artifacts": [],
             "missing_per_project_artifacts": [],
-            "error": failure,
+            "error": failure.error,
         }
-        failures[key] = failure
+        if failure.skipped is not None:
+            manifest_reporters[key]["skipped"] = failure.skipped
+            ASH_LOGGER.debug(
+                f"Reporter {key} could not be constructed and would not have run "
+                f"at workspace level ({failure.skipped}); recorded, not a failure."
+            )
+            continue
+        failures[key] = failure.error
 
     for instance, behaviour, skipped in selection:
         name = _reporter_name(instance)

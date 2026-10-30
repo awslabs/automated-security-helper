@@ -42,6 +42,7 @@ from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.reporting import (
     MANIFEST_FILENAME,
     REPORTS_DIR_NAME,
+    SKIP_DISABLED,
     SKIP_NOT_PYTHON_ONLY,
     SKIP_NOT_REQUESTED,
     emit_workspace_reports,
@@ -178,6 +179,25 @@ class FakeUnconstructibleReporter(ReporterPluginBase[_UnconstructibleConfig]):
 
     def model_post_init(self, context):
         raise RuntimeError("cannot be built")
+
+    def report(self, model) -> str:  # pragma: no cover - never constructed
+        raise AssertionError("never constructed")
+
+
+class _UnconstructibleOffConfig(ReporterPluginConfigBase):
+    name: str = "fake-unconstructible-off"
+    extension: str = "unconstructible-off.txt"
+    enabled: bool = False
+
+
+class FakeUnconstructibleOffReporter(ReporterPluginBase[_UnconstructibleOffConfig]):
+    """Off in its config, and raises in its constructor: the shape of a disabled
+    AWS reporter whose ``__init__`` reaches for credentials."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+
+    def model_post_init(self, context):
+        raise RuntimeError("cannot be built either")
 
     def report(self, model) -> str:  # pragma: no cover - never constructed
         raise AssertionError("never constructed")
@@ -371,6 +391,84 @@ class TestEveryReporterIsAccountedFor:
         }
         assert (output_dir / REPORTS_DIR_NAME / "ash.twin-a.txt").is_file()
         assert (output_dir / REPORTS_DIR_NAME / "ash.twin-b.txt").is_file()
+
+
+class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
+    """A construction failure fails the step only for a reporter the step would
+    have run. A disabled or unrequested one is recorded with its skip reason, as
+    a built one would be: before this, a disabled reporter raising in its
+    constructor turned a run with ``--output-format sarif`` into exit 1 after
+    every project was scanned, where a single-directory scan of the same project
+    passed."""
+
+    def test_a_disabled_reporter_that_cannot_be_built_does_not_fail_the_run(
+        self, workspace
+    ):
+        _, output_dir, _ = workspace
+        outcome = _emit(workspace, FakeUnconstructibleOffReporter, FakeMergedReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-unconstructible-off"]
+        assert "could not be constructed" in entry["error"]
+        assert entry["skipped"] == SKIP_DISABLED
+        assert entry["considered"] is False
+        assert "fake-unconstructible-off" not in outcome.failed_reporters
+        assert outcome.failed is False
+        assert "fake-merged" in outcome.workspace_artifacts
+
+    def test_an_unrequested_reporter_that_cannot_be_built_does_not_fail_the_run(
+        self, workspace
+    ):
+        _, output_dir, _ = workspace
+        outcome = _emit(
+            workspace,
+            FakeUnconstructibleReporter,
+            FakeMergedReporter,
+            output_formats=("fake-merged",),
+        )
+
+        entry = _manifest(output_dir)["reporters"]["fake-unconstructible"]
+        assert "could not be constructed" in entry["error"]
+        assert entry["skipped"] == SKIP_NOT_REQUESTED
+        assert "fake-unconstructible" not in outcome.failed_reporters
+        assert outcome.failed is False
+
+    def test_a_requested_reporter_that_cannot_be_built_still_fails(self, workspace):
+        """The control: asked for by name, the missing report is the step's."""
+        _, output_dir, _ = workspace
+        outcome = _emit(
+            workspace,
+            FakeUnconstructibleReporter,
+            FakeMergedReporter,
+            output_formats=("fake-unconstructible", "fake-merged"),
+        )
+
+        entry = _manifest(output_dir)["reporters"]["fake-unconstructible"]
+        assert "skipped" not in entry
+        assert "fake-unconstructible" in outcome.failed_reporters
+        assert outcome.failed is True
+
+    def test_a_name_that_cannot_be_read_is_recorded_under_the_class_name(
+        self, workspace, monkeypatch
+    ):
+        """The handler re-read ``plugin_config_key``; when that is what raised,
+        the error escaped and the step died with no manifest."""
+        _, output_dir, _ = workspace
+        real_key = reporting.plugin_config_key
+
+        def key(reporter_class):
+            if reporter_class is FakeUnconstructibleReporter:
+                raise RuntimeError("no name can be read")
+            return real_key(reporter_class)
+
+        monkeypatch.setattr(reporting, "plugin_config_key", key)
+
+        outcome = _emit(workspace, FakeUnconstructibleReporter, FakeMergedReporter)
+
+        assert outcome.manifest_path is not None
+        entry = _manifest(output_dir)["reporters"]["FakeUnconstructibleReporter"]
+        assert "no name can be read" in entry["error"]
+        assert "FakeUnconstructibleReporter" in outcome.failed_reporters
+        assert "fake-merged" in outcome.workspace_artifacts
 
 
 class TestFailuresAreRecordedNotRaised:
