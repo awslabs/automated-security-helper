@@ -125,6 +125,7 @@ def test_missing_extra_is_named(tool_env):
     assert verdict.status == "unsatisfied"
     assert verdict.missing_extras == ("sarif",)
     assert "missing extra: sarif" in verdict.detail
+    assert "missing extra: sarif" in verdict.summary
 
 
 @pytest.mark.integration

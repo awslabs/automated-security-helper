@@ -1126,15 +1126,18 @@ def _judge(
         else ()
     )
     reasons = []
-    # The summary's parallel parts name no extra, no constraint text and no
-    # path: the caller's own shown requirement (and the verdict's
-    # missing_extras field) carry what was asked, in redacted form.
+    # The summary's parallel parts name no constraint text and no path. They
+    # do name the missing extras: those are the caller's own requirement's
+    # words, which the reason that carries the summary already shows, and a
+    # refusal that says only "missing extra" tells the reader nothing the
+    # remedy does not have to repeat.
     summary_parts = []
     if missing:
-        reasons.append(
+        named_missing = (
             f"missing extra{'s' if len(missing) > 1 else ''}: {', '.join(missing)}"
         )
-        summary_parts.append(f"missing extra{'s' if len(missing) > 1 else ''}")
+        reasons.append(named_missing)
+        summary_parts.append(named_missing)
     if (
         version_constraint
         and _dry_run(
