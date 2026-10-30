@@ -23,7 +23,8 @@ findings, so a syft entry instead marks each SBOM component it would have
 dropped (``mark_sbom_components``).
 
 An entry is the operator's when the option's default has it, the trusted config
-has it, or a file of the chain that no client delivered has it. Those stay in
+has it, or a file of the chain that no client delivered has it, in its
+``scanners`` section or in a ``patch`` operation it carries. Those stay in
 the option and apply as before; a client entry that repeats an operator's path
 is replaced in the option by the operator's own entry, so the operator's reason
 and expiration govern it, never the client's copy. A client entry that has
@@ -81,19 +82,29 @@ on a finding's path after the fact:
   components, a pattern with no ``/`` matches a file or directory of that name
   at any depth, and a ``/`` inside the pattern, a leading ``/`` or a leading
   ``./`` anchors it at the scan root, unless it starts with ``**/``. A match on
-  a directory excludes everything under it (``glob_excludes``).
+  a directory excludes everything under it (``glob_excludes``). ferret-scan is
+  given its ``exclude_patterns`` joined with commas, so an entry holding a
+  comma was several patterns to it and is matched as each of them.
 * trivy and trivy-repo ``ignore_file``: the file lists finding IDs. Each
   unexpired ID becomes an entry that matches a finding of that scanner with
-  that rule ID (an ``AVD-`` prefix on either side is ignored); in a
-  ``.trivyignore.yaml`` an entry's ``paths`` limit it to the files those globs
-  name, matched whole from the scan root as trivy matches them
-  (``trivy_path_matches``), and an entry with ``purls`` is not applied at all,
-  since the packages it is limited to are not matched here. The file is read
-  only when it is a regular file inside the tree being scanned, opened without
-  following a link (``utils/scanned_tree.open_in_scanned_tree``). A file
-  elsewhere, or a link to one, is not read, since its contents would then reach
-  the results, and its entries are not applied; the scan's warnings say so
-  without quoting it.
+  that rule ID, compared exactly as trivy compares them (an ``AVD-`` prefix on
+  either side aside, since trivy matches a misconfiguration by its ID and by
+  its AVD ID); in a ``.trivyignore.yaml`` an entry's ``paths`` limit it to the
+  files those globs name, matched whole from the scan root as trivy matches
+  them (``trivy_path_matches``), and an entry with ``purls`` is not applied at
+  all, since the packages it is limited to are not matched here. The file is
+  read only when it is a regular file inside the tree being scanned, opened
+  without following a link (``utils/scanned_tree.open_in_scanned_tree``). A
+  file elsewhere, or a link to one, is not read, since its contents would then
+  reach the results, and its entries are not applied; the scan's warnings say
+  so without quoting it. A relative value a delivered file gives is taken from
+  the scanned tree's root, not from the file's own directory as the option
+  documents for an operator's file: the delivered file sits outside the tree,
+  and only a file inside the tree is read.
+* A finding whose path the SARIF step could not make relative to the source
+  directory arrives absolute. The scanner read its exclusion over the scanned
+  tree, so such a finding names no file of it and no exclusion hides it: it is
+  reported, never suppressed on a guess.
 
 Known limitations
 -----------------
@@ -110,7 +121,11 @@ Known limitations
   re-applied here.
 * The glob matching above is an approximation of each tool's own rules. A
   finding it misses is reported unsuppressed, which can fail a scan the
-  client's exclusion would have passed; it is never hidden.
+  client's exclusion would have passed; it is never hidden. One known
+  difference: semgrep and opengrep anchor a leading ``/``, and a pattern with
+  a ``/`` inside, at their project root, the top level of the repository the
+  scanned tree is in, while the matching here anchors at the scan root. The
+  two are one directory when the scanned tree is the repository's root.
 * A regular expression still running at its bound cannot be interrupted: the
   thread evaluating it is left behind and holds one core until it finishes or
   the process exits (``evaluated_within``). The scan it was part of fails.
@@ -129,6 +144,7 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import os
 import re
 import threading
 from dataclasses import dataclass
@@ -230,23 +246,47 @@ class ClientScannerExclusion(BaseModel):
     def hides(self, *, relative: str, absolute: str, rule_id: Optional[str]) -> bool:
         """Whether the scanner would have left out a finding at this location.
 
+        ``relative`` is the finding's path from the scan root. The SARIF step
+        leaves a path it could not make relative to the source directory
+        absolute, and such a finding names no file of the scanned tree the
+        scanner read its exclusion over, so no path pattern hides it (an ID
+        alone, with no ``paths`` limit, still does). Before, an absolute
+        ``relative`` was matched as a run of directories, so an unanchored
+        glob or a checkov substring took the directories above the scan root.
+
         Raises:
             ScannerError: a checkov regular expression of this entry ran past
                 ``scan_timeout`` (``checkov_skips``).
         """
         if self.kind == "bandit":
             return bandit_would_skip(self.pattern, relative=relative, absolute=absolute)
+        outside = Path(relative).is_absolute()
         if self.kind == "checkov":
-            return checkov_skips(
+            return not outside and checkov_skips(
                 self.pattern, absolute, relative, timeout=self.scan_timeout
             )
         if self.kind == "glob":
-            return glob_excludes(self.pattern, relative)
+            return not outside and any(
+                glob_excludes(pattern, relative) for pattern in self._globs()
+            )
         if not rule_id or not _same_trivy_id(rule_id, self.pattern):
             return False
         if not self.paths:
             return True
-        return any(trivy_path_matches(path, relative) for path in self.paths)
+        return not outside and any(
+            trivy_path_matches(path, relative) for path in self.paths
+        )
+
+    def _globs(self) -> List[str]:
+        """The globs the scanner read ``pattern`` as.
+
+        ferret-scan is given ``exclude_patterns`` as one ``--exclude`` value
+        joined with commas, so an entry holding a comma was several patterns
+        to it. Matched whole before, such an entry excluded nothing here.
+        """
+        if self.scanner == "ferret-scan":
+            return self.pattern.split(",")
+        return [self.pattern]
 
     def justification(self) -> str:
         what = (
@@ -380,7 +420,7 @@ def checkov_skips(
     None, a literal pattern, or one that did not compile is searched inline.
     """
     candidates = [absolute]
-    parts = [part for part in relative.replace("\\", "/").split("/") if part]
+    parts = [part for part in _slashed(relative).split("/") if part]
     base = absolute[: len(absolute) - len("/".join(parts))].rstrip("/")
     for end in range(1, len(parts)):
         candidates.append(f"{base}/{'/'.join(parts[:end])}")
@@ -419,6 +459,20 @@ def _checkov_pattern(pattern: str) -> Optional[re.Pattern[str]]:
         return None
 
 
+def _slashed(text: str) -> str:
+    """``text`` with ``/`` for each backslash, where a backslash separates segments.
+
+    That is on Windows. On POSIX a backslash is a character of a file's name,
+    and the SARIF step keeps it (``utils/sarif_utils._with_slash_separators``),
+    so a finding's path arrives with it. Rewritten to ``/`` here before, the
+    POSIX file ``a\\b.py`` was matched as ``a/b.py``: a client ``b.py`` entry
+    hid it, though its scanner had read the whole name. ``bandit_would_skip``
+    keeps its own rewrite: bandit's glob builder does the same to the pattern
+    (``bandit_scanner.bandit_excluded_path_globs``), so the two agree.
+    """
+    return text.replace("\\", "/") if os.sep == "\\" else text
+
+
 def _components_match(pattern_parts: Sequence[str], path_parts: Sequence[str]) -> bool:
     """Whether glob components match path components end to end.
 
@@ -449,15 +503,13 @@ def trivy_path_matches(pattern: str, relative: str) -> bool:
     The any-depth glob of the grep family was used before, so an ID limited to
     one path applied to that name at every depth.
     """
-    candidate = pattern.strip().replace("\\", "/")
+    candidate = _slashed(pattern.strip())
     while candidate.startswith("./"):
         candidate = candidate[2:]
     candidate = candidate.strip("/")
     if not candidate:
         return False
-    parts = [
-        part for part in relative.replace("\\", "/").split("/") if part not in ("", ".")
-    ]
+    parts = [part for part in _slashed(relative).split("/") if part not in ("", ".")]
     return _components_match([part for part in candidate.split("/") if part], parts)
 
 
@@ -478,7 +530,7 @@ def glob_excludes(pattern: str, relative: str) -> bool:
     pattern anchored nothing (``src/vendor`` took ``x/src/vendor/a.py``): findings
     the tool had reported were suppressed as if it had excluded them.
     """
-    candidate = pattern.strip().replace("\\", "/")
+    candidate = _slashed(pattern.strip())
     anchored = candidate.startswith("/")
     while candidate.startswith("./"):
         anchored = True
@@ -493,9 +545,7 @@ def glob_excludes(pattern: str, relative: str) -> bool:
     if not candidate:
         return False
     pattern_parts = [part for part in candidate.split("/") if part]
-    parts = [
-        part for part in relative.replace("\\", "/").split("/") if part not in ("", ".")
-    ]
+    parts = [part for part in _slashed(relative).split("/") if part not in ("", ".")]
     starts = range(1) if anchored else range(len(parts))
     for start in starts:
         for end in range(start + 1, len(parts) + 1):
@@ -505,13 +555,19 @@ def glob_excludes(pattern: str, relative: str) -> bool:
 
 
 def _same_trivy_id(rule_id: str, entry: str) -> bool:
-    """Whether trivy reads ignore-file ID ``entry`` as finding ``rule_id``'s."""
+    """Whether trivy reads ignore-file ID ``entry`` as finding ``rule_id``'s.
+
+    trivy compares the two exactly (``IgnoreFindings.Match`` keeps looking while
+    ``id != finding.ID``), and matches a misconfiguration by its ID and by its
+    AVD ID, which the ``AVD-`` prefix tolerance stands for. Folded to upper case
+    before, so a ``cve-2020-0001`` line suppressed ``CVE-2020-0001``, a finding
+    trivy itself would have reported.
+    """
 
     def bare(value: str) -> str:
-        value = value.strip()
-        return value[4:] if value.upper().startswith("AVD-") else value
+        return value.strip().removeprefix("AVD-")
 
-    return bare(rule_id).upper() == bare(entry).upper()
+    return bare(rule_id) == bare(entry)
 
 
 def exclusion_option_at(
@@ -670,7 +726,7 @@ def strip_client_scanner_exclusions(
                             f"{operator_spelling!r}."
                         )
                 elif value:
-                    trusted = _trusted_ignore_file(base, spec)
+                    trusted = _operator_ignore_file(spec, operator_documents, base)
                     _set(options, spec.option, trusted)
                     if not is_read:
                         warnings.append(
@@ -1010,21 +1066,17 @@ def _operator_entries(
     directory, so a relative operator value compares with the anchored absolute
     path the merged config holds.
     """
-    from automated_security_helper.config.ash_config import (
-        plugin_key_lookup_names,
-        reduced_plugin_name,
-    )
-
     found: Dict[str, Any] = {pattern: pattern for pattern in spec.default}
 
     def take(value: Any, directory: Optional[Path]) -> None:
         if spec.kind == "trivy-ignore-file":
-            if isinstance(value, str) and value:
-                found.setdefault(value, value)
-                found.setdefault(Path(value).as_posix(), value)
-                anchored = Path(value) if directory is None else directory / value
+            text = _path_text(value)
+            if text:
+                found.setdefault(text, text)
+                found.setdefault(Path(text).as_posix(), text)
+                anchored = Path(text) if directory is None else directory / text
                 try:
-                    found.setdefault(anchored.resolve().as_posix(), value)
+                    found.setdefault(anchored.resolve().as_posix(), text)
                 except (OSError, RuntimeError, ValueError):
                     pass
             return
@@ -1041,27 +1093,110 @@ def _operator_entries(
     read = base.get_plugin_config("scanner", spec.scanner) if base is not None else None
     if isinstance(read, dict):
         take(_get(read.get("options") or {}, spec.option), None)
-    wanted = reduced_plugin_name(spec.scanner)
     for path, document in operator_documents:
-        scanners = document.get("scanners") if isinstance(document, dict) else None
-        if not isinstance(scanners, dict):
-            continue
+        for value in _document_values(document, spec):
+            take(value, Path(path).parent)
+    return found
+
+
+def _document_values(document: Any, spec: ScannerExclusionOption) -> List[Any]:
+    """The values one chain file writes at ``spec``'s option, in the file's order.
+
+    Each value under a ``scanners`` section the scanner reads, then each value a
+    ``patch`` operation of the file writes there (``config_sources.PATCH_KEY``):
+    a file of the chain may carry its changes as JSON-patch operations, and
+    ``documents`` holds the file as written. Read from ``scanners`` alone
+    before, an operator file's patched-in entries were nobody's: a client entry
+    repeating one was moved out and marked, and a client copy of one the
+    operator let expire revived it. An operation that appends one entry (its
+    pointer ends in ``-`` or an index) is returned as a one-entry list.
+    """
+    from automated_security_helper.config.ash_config import (
+        plugin_key_lookup_names,
+        reduced_plugin_name,
+    )
+    from automated_security_helper.config.config_sources import PATCH_KEY
+
+    if not isinstance(document, dict):
+        return []
+    wanted = reduced_plugin_name(spec.scanner)
+    values: List[Any] = []
+    scanners = document.get("scanners")
+    if isinstance(scanners, dict):
         for key, section in scanners.items():
             if key != spec.scanner and wanted not in plugin_key_lookup_names(str(key)):
                 continue
             options = _options_of(section) if isinstance(section, dict) else None
             if isinstance(options, dict):
-                take(_get(options, spec.option), Path(path).parent)
-    return found
+                values.append(_get(options, spec.option))
+    ops = document.get(PATCH_KEY)
+    for op in ops if isinstance(ops, list) else []:
+        if not isinstance(op, dict) or "value" not in op:
+            continue
+        if op.get("op") not in ("add", "replace"):
+            continue
+        pointer = op.get("path")
+        if not isinstance(pointer, str) or not pointer.startswith("/"):
+            continue
+        segments = [
+            part.replace("~1", "/").replace("~0", "~")
+            for part in pointer[1:].split("/")
+        ]
+        located = exclusion_option_at(segments)
+        if located is None or located[0] != spec:
+            continue
+        value = op["value"]
+        values.append([value] if located[1] and not isinstance(value, list) else value)
+    return values
+
+
+def _path_text(value: Any) -> Optional[str]:
+    """A trivy ``ignore_file`` value as text, or None when it names no file.
+
+    The option is typed ``Path | str | None``, and the trusted config's dump
+    hands a Path back as a Path. Read as a string alone before, a Path was
+    neither the operator's own file nor the trusted value to restore, so the
+    operator's ignore file was replaced with None.
+    """
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, str) and value:
+        return value
+    return None
 
 
 def _trusted_ignore_file(base: Any, spec: ScannerExclusionOption) -> Optional[str]:
     read = base.get_plugin_config("scanner", spec.scanner) if base is not None else None
     if isinstance(read, dict):
-        value = _get(read.get("options") or {}, spec.option)
-        if isinstance(value, str) and value:
-            return value
+        return _path_text(_get(read.get("options") or {}, spec.option))
     return None
+
+
+def _operator_ignore_file(
+    spec: ScannerExclusionOption,
+    operator_documents: List[Tuple[Path, Any]],
+    base: Any,
+) -> Optional[str]:
+    """The ``ignore_file`` the option holds once a delivered value is taken out of it.
+
+    The value of the last file of the chain that no client delivered and sets
+    the option, a relative one anchored at that file's directory as the loader
+    anchors it (``operator_paths.anchored_path``); with none, the trusted
+    config's. The trusted config's value alone was restored before, so an
+    ignore file an operator file of the chain set was dropped whenever a
+    delivered file overrode the option.
+    """
+    from automated_security_helper.config.operator_paths import anchored_path
+
+    found: Optional[str] = None
+    for path, document in operator_documents:
+        for value in _document_values(document, spec):
+            text = _path_text(value)
+            if text:
+                found = anchored_path(text, Path(path).parent, expands_variables=False)
+    if found is not None:
+        return found
+    return _trusted_ignore_file(base, spec)
 
 
 def _trivy_ignore_exclusions(
@@ -1151,11 +1286,16 @@ def parse_trivy_ignore_file(
 ) -> List[Tuple[str, Tuple[str, ...]]]:
     """(ID, paths) for each unexpired entry of a trivy ignore file.
 
-    The plain format has one ID per line, ``#`` starts a comment, and an
-    ``exp:YYYY-MM-DD`` field after the ID sets when the entry stops applying. The
-    YAML format (``.trivyignore.yaml``) lists entries with ``id``, optional
-    ``paths`` and optional ``expired_at`` under ``vulnerabilities``,
-    ``misconfigurations``, ``secrets`` and ``licenses``.
+    The plain format has one ID per line, read as trivy reads it: a line whose
+    first field starts with ``#`` is a comment, the first field of any other
+    line is the ID, and an ``exp:YYYY-MM-DD`` field anywhere after it sets the
+    day from which the entry no longer applies. A ``#`` later in the line is
+    text, not a comment: the line was cut at its first ``#`` before, so
+    ``CVE-X # exp:2020-01-01`` lost its expiry and applied, while trivy reads
+    the field and drops the expired entry. The YAML format (``.trivyignore.yaml``)
+    lists entries with ``id``, optional ``paths`` and optional ``expired_at``
+    under ``vulnerabilities``, ``misconfigurations``, ``secrets`` and
+    ``licenses``.
     """
     today = today or date.today()
     found: List[Tuple[str, Tuple[str, ...]]] = []
@@ -1206,8 +1346,8 @@ def parse_trivy_ignore_file(
                 )
         return found
     for line in text.splitlines():
-        fields = line.split("#", 1)[0].split()
-        if not fields:
+        fields = line.split()
+        if not fields or fields[0].startswith("#"):
             continue
         expiry = next(
             (field[len("exp:") :] for field in fields[1:] if field.startswith("exp:")),
@@ -1220,10 +1360,18 @@ def parse_trivy_ignore_file(
 
 
 def _expired(value: Any, today: date) -> bool:
+    """Whether a trivy ignore entry with this expiry no longer applies on ``today``.
+
+    From the start of the day named, as trivy reads it (the entry is dropped
+    once its date is before the time of the scan) and as ASH's own rule reads
+    an ``expiration`` (``models/core.expiration_has_passed``). A strict
+    less-than before, so an entry still applied on the day itself, which both
+    drop it on.
+    """
     if not value:
         return False
     try:
-        return date.fromisoformat(str(value)[:10]) < today
+        return date.fromisoformat(str(value)[:10]) <= today
     except ValueError:
         ASH_LOGGER.debug(
             f"Unreadable trivy ignore expiry {value!r}; treated as unexpired"
