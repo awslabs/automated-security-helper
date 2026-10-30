@@ -26,6 +26,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_report
     workspace_converter_invocations,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    Invocation,
     PropertyBag,
     Run,
     SarifReport,
@@ -169,6 +170,47 @@ def test_two_converters_give_two_invocations_on_the_projects_run(
         "jupyter",
     ]
     assert all(i["executionSuccessful"] is False for i in web_run["invocations"])
+
+
+def _scanner_invocation(scanner: str) -> Invocation:
+    """What a run carries before the reporter sees it: a scanner's own
+    invocation (a content-database age, a notification of its own)."""
+    return Invocation(
+        executionSuccessful=True,
+        properties=PropertyBag.model_validate({"ash_scanner": scanner}),
+    )
+
+
+def test_a_scanners_own_invocations_survive_beside_the_converters(
+    test_plugin_context,
+):
+    """A real run already carries invocations when the reporter reaches it. The
+    converter shortfall is appended after them, in place; a reporter that wrote
+    the converter list over the run's invocations would pass every other test in
+    this file and drop the scanners' invocations from the workspace document."""
+    model = _workspace_model(
+        _project("api", sarif_run_index=0),
+        _project(
+            "web", sarif_run_index=1, incomplete_converters={"archive": "crashed"}
+        ),
+    )
+    model.sarif.runs[0].invocations = [_scanner_invocation("semgrep")]
+    model.sarif.runs[1].invocations = [_scanner_invocation("bandit")]
+
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+
+    api_run, web_run = doc["runs"]
+    assert [i["properties"]["ash_scanner"] for i in api_run["invocations"]] == [
+        "semgrep"
+    ]
+    assert [
+        i["properties"].get("ash_scanner") or i["properties"].get("ash_converter")
+        for i in web_run["invocations"]
+    ] == ["bandit", "archive"]
+    assert [i["executionSuccessful"] for i in web_run["invocations"]] == [
+        True,
+        False,
+    ]
 
 
 def _stamped_model(*stamps: str, projects):
