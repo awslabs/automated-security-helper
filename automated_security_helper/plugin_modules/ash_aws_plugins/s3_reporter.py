@@ -9,7 +9,7 @@ from typing import Annotated, Literal, Optional, TYPE_CHECKING, Tuple
 
 import boto3
 import botocore.exceptions
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -39,8 +39,13 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         Optional[str],
         Field(
-            default_factory=lambda: os.environ.get(
-                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
+            # An empty value is unset: AWS_REGION="" does not hide
+            # AWS_DEFAULT_REGION, and an empty region is named as the missing
+            # setting rather than refused by the pattern or sent to AWS.
+            default_factory=lambda: (
+                os.environ.get("AWS_REGION")
+                or os.environ.get("AWS_DEFAULT_REGION")
+                or None
             ),
             # Every region name AWS publishes: the two-letter areas plus mx and
             # the eusc, us-isof and eu-isoe partitions, with an optional
@@ -53,14 +58,17 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     aws_profile: Annotated[
         Optional[str],
         Field(
-            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
+            # An empty AWS_PROFILE is no profile, not a profile named "".
+            default_factory=lambda: os.environ.get("AWS_PROFILE") or None,
             description="AWS profile to use for authentication",
         ),
     ]
     bucket_name: Annotated[
         Optional[str],
         Field(
-            default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME", None),
+            # An empty value is unset, so it is named as missing instead of
+            # reaching PutObject as an empty bucket name.
+            default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME") or None,
             description="Name of the S3 bucket to store reports",
         ),
     ]
@@ -202,18 +210,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
-        missing = False
-        if self.config.options.aws_region is None:
-            report_missing_setting(
-                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
-            )
-            missing = True
-        if self.config.options.bucket_name is None:
-            report_missing_setting(
-                self.config.name, "bucket_name", ("ASH_S3_BUCKET_NAME",)
-            )
-            missing = True
-        if missing:
+        if self._settings_missing():
             return self.dependencies_satisfied
         try:
             session = boto3.Session(
@@ -250,14 +247,37 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         except Exception as e:
             # error_text with the config's environment values: botocore's
             # exceptions name the profile, bucket or region they were given.
+            # At ERROR, like report_missing_setting: the report phase leaves
+            # the reporter out on False, so under --quiet a WARNING was the
+            # only word of why an enabled upload did not happen, and --quiet
+            # hid it.
             self._plugin_log(
                 "Error when validating S3 access: "
                 f"{error_text(e, self._environment_values())}",
-                level=logging.WARNING,
+                level=logging.ERROR,
                 target_type="source",
                 append_to_stream="stderr",
             )
         return self.dependencies_satisfied
+
+    def _settings_missing(self) -> bool:
+        """Name each required setting that is unset or empty; True when one is.
+
+        ``not`` rather than ``is None``: an environment variable set to the empty
+        string reaches the options as "", which is not a region or a bucket.
+        """
+        missing = False
+        if not self.config.options.aws_region:
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+            )
+            missing = True
+        if not self.config.options.bucket_name:
+            report_missing_setting(
+                self.config.name, "bucket_name", ("ASH_S3_BUCKET_NAME",)
+            )
+            missing = True
+        return missing
 
     def report(self, model: "AshAggregatedResults") -> str | None:
         """Upload the results to S3 and return a JSON receipt, or None on failure.
@@ -268,18 +288,21 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         """
         if isinstance(self.config, dict):
             self.config = S3ReporterConfig.model_validate(self.config)
-        missing = False
-        if self.config.options.aws_region is None:
-            report_missing_setting(
-                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+        if self._settings_missing():
+            return None
+        if isinstance(getattr(model, "workspace", None), BaseModel):
+            # A workspace's unified results: each project's own scan already
+            # uploaded its object (the class docstring says why the rollup is
+            # not uploaded), and `ash report` on the workspace output
+            # directory is the one path that reaches here with them.
+            self._plugin_log(
+                "s3 uploads one project's results at a time, and these are a "
+                "workspace's unified results, which each project's own scan "
+                "already uploaded. Run ash report with --output-dir set to a "
+                "project's directory under the workspace output.",
+                level=logging.ERROR,
+                append_to_stream="stderr",
             )
-            missing = True
-        if self.config.options.bucket_name is None:
-            report_missing_setting(
-                self.config.name, "bucket_name", ("ASH_S3_BUCKET_NAME",)
-            )
-            missing = True
-        if missing:
             return None
 
         # Create a key for the S3 object. generated_at is set when the model is
@@ -294,10 +317,12 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         file_extension = "json" if self.config.options.file_format == "json" else "yaml"
         project = getattr(model.metadata, "workspace_project", None)
         project_segment = f"{project}/" if isinstance(project, str) and project else ""
-        s3_key = (
-            f"{self.config.options.key_prefix}{project_segment}"
-            f"ash-report-{timestamp}.{file_extension}"
-        )
+        # A prefix written without its trailing slash ("ash-reports") is still a
+        # prefix: joined with one, so it does not fuse with the file name.
+        key_prefix = self.config.options.key_prefix
+        if key_prefix and not key_prefix.endswith("/"):
+            key_prefix = f"{key_prefix}/"
+        s3_key = f"{key_prefix}{project_segment}ash-report-{timestamp}.{file_extension}"
 
         # Format the results based on the specified format. to_simple_dict()
         # carries the metadata, the configuration record and the scanner
