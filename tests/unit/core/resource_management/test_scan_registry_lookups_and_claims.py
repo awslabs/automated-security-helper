@@ -21,8 +21,10 @@ Each test is pinned against the behavior it replaced:
   entry cancelled, so its cancel event was never set.
 * ``check_scan_progress`` raised for an ended scan whose output directory was
   gone, closed a PENDING entry a runner had claimed from the previous scan's
-  results file, and recorded a file-derived failure message without the
-  environment-value redaction every other closing message gets.
+  results file (and, once that was fixed, still reported that file's scanners
+  and counts under the claimed entry's id), and recorded a file-derived failure
+  message without the environment-value redaction every other closing message
+  gets.
 * ``get_scan_statistics`` did not exist; three separate reads could disagree.
 """
 
@@ -60,7 +62,7 @@ def _register(registry, project: Path, output=None, **kw) -> str:
     )
 
 
-def _write_results(output: Path, scanner="bandit") -> None:
+def _write_results(output: Path, scanner="bandit", finding_count=0) -> None:
     output.mkdir(parents=True, exist_ok=True)
     (output / "ash_aggregated_results.json").write_text(
         json.dumps(
@@ -69,7 +71,9 @@ def _write_results(output: Path, scanner="bandit") -> None:
                     "generated_at": "2024-01-01T00:00:00",
                     "summary_stats": {},
                 },
-                "scanner_results": {scanner: {"status": "PASSED", "finding_count": 0}},
+                "scanner_results": {
+                    scanner: {"status": "PASSED", "finding_count": finding_count}
+                },
             }
         ),
         encoding="utf-8",
@@ -201,6 +205,41 @@ class TestARunnerClaimCannotReopenAnEndedScan:
         assert progress["status"] == "pending"
         assert progress["is_complete"] is False
         assert registry.get_scan(scan_id).status is MCScanStatus.PENDING
+
+    def test_a_claimed_entry_does_not_report_the_previous_scans_results(self, tmp_path):
+        """The claimed entry's status was already its own (the test above). Its
+        scanners, counts and scanner statuses were still read from the output
+        tree, which holds the previous scan's files until the runner writes, so
+        the response carried the previous scan's results under the new id."""
+        registry = ScanRegistry()
+        project = _project(tmp_path, "proj")
+        _write_results(project / ".ash" / "ash_output", "semgrep", finding_count=3)
+        scan_id = _register(registry, project)
+        registry.get_scan(scan_id).has_runner = True
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert progress["status"] == "pending"
+        assert progress["scanners"] == {}
+        assert progress["total_scanners"] == 0
+        assert progress["total_findings"] == 0
+        assert progress["skipped_scanners"] == []
+        # Not the restore marker's case: the tree holds a leftover, not a
+        # put-back, and the key keeps that meaning.
+        assert progress["output_holds_previous_results"] is False
+        assert registry.get_scan(scan_id).status is MCScanStatus.PENDING
+
+    def test_an_entry_no_runner_claimed_still_reads_the_file(self, tmp_path):
+        registry = ScanRegistry()
+        project = _project(tmp_path, "proj")
+        _write_results(project / ".ash" / "ash_output", "semgrep", finding_count=3)
+        scan_id = _register(registry, project)
+
+        progress = registry.check_scan_progress(scan_id)
+
+        assert "semgrep" in progress["scanners"]
+        assert progress["total_scanners"] == 1
+        assert registry.get_scan(scan_id).closed_from_file is True
 
 
 class TestFinishScanIncompleteNeedsAGap:

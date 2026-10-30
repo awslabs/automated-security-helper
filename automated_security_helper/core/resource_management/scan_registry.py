@@ -2008,7 +2008,21 @@ class ScanRegistry:
                 previous_only = entry.output_holds_previous_results
                 superseded_by = self._later_scans_holding(entry)
                 superseded = entry.status in ENDED and bool(superseded_by)
-                foreign_output = previous_only or superseded or output_missing
+                # A PENDING entry a runner has claimed (has_runner) has had
+                # nothing of its own written yet: the runner marks RUNNING
+                # before the orchestrator sets the previous results aside, so
+                # whatever the tree holds at this moment is the previous
+                # scan's. Read as this scan's, those files reported the
+                # previous scan's scanners, counts and scanner statuses under
+                # the new id while the status said pending. A PENDING entry no
+                # runner owns keeps the file read: that file is what closes it
+                # (closed_from_file, the arms below).
+                claimed_pending = (
+                    entry.status == MCScanStatus.PENDING and entry.has_runner
+                )
+                foreign_output = (
+                    previous_only or superseded or output_missing or claimed_pending
+                )
                 scan_progress = (
                     ScanProgress(scan_id=scan_id)
                     if foreign_output
@@ -2018,8 +2032,9 @@ class ScanRegistry:
 
                 # A PENDING entry a runner has claimed (has_runner) is the
                 # runner's to close, as a RUNNING one is: the file on disk is
-                # the previous scan's until the runner writes. Only a PENDING
-                # entry with no runner takes its status from the file.
+                # the previous scan's until the runner writes, and is not read
+                # (claimed_pending above). Only a PENDING entry with no runner
+                # takes its status from the file.
                 owned_by_a_runner = entry.status == MCScanStatus.RUNNING or (
                     entry.status == MCScanStatus.PENDING and entry.has_runner
                 )
