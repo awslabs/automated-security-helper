@@ -317,6 +317,11 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "StdioServerPresence._another_server_is_live",
         "open",
     ): (1, _MCP_SESSIONS),
+    (
+        f"{_ASH}/cli/mcp/sessions.py",
+        "StdioServerPresence.a_server_is_live",
+        "open",
+    ): (1, _MCP_SESSIONS),
     (f"{_ASH}/cli/mcp/sessions.py", "_a_scan_holds", "open"): (1, _MCP_SESSIONS),
     (
         f"{_ASH}/cli/mcp/profile_registry.py",
