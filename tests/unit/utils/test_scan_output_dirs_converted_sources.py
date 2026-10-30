@@ -17,6 +17,7 @@ and never the scan.
 
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import List
 
@@ -27,6 +28,7 @@ from automated_security_helper.utils.scan_output_dirs import (
     converted_sources_of,
     record_converted_sources,
 )
+from automated_security_helper.utils.undecodable_text import text_of_undecodable
 
 pytestmark = pytest.mark.unit
 
@@ -89,6 +91,29 @@ class TestRecordConvertedSources:
         assert json.loads(written.read_text(encoding="utf-8")) == {
             "archive/lib__bundle__zip/": "lib/bundle.zip"
         }
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="a name that is not UTF-8 is a POSIX shape"
+    )
+    def test_a_name_that_is_not_utf8_is_keyed_in_the_record_form(self, tmp_path):
+        """``mark_converted_results`` writes ``converted_path`` in the record form,
+        each lone surrogate as six characters of text; a key that held the
+        surrogate itself matched no finding, so the filter could not place the
+        file."""
+        work = tmp_path / "out" / "converted"
+        results_dir = work / "jupyter"
+        results_dir.mkdir(parents=True)
+        lone_surrogate = chr(0xDCFF)
+        name = f"nb{lone_surrogate}__ipynb-converted.py"
+        converted = results_dir / name
+        converted.write_text("x = 1\n", encoding="utf-8")
+
+        written = record_converted_sources(results_dir, work, {converted: "nb.ipynb"})
+
+        (key,) = json.loads(written.read_text(encoding="utf-8"))
+        assert key == f"jupyter/{text_of_undecodable(name)}"
+        assert lone_surrogate not in key
+        assert "udcff" in key
 
     def test_nothing_is_written_for_an_empty_mapping(self, tmp_path):
         work = tmp_path / "out" / "converted"
