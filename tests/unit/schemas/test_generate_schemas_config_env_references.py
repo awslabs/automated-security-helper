@@ -152,15 +152,35 @@ def test_a_reference_in_a_constrained_string_field_is_valid(config_validator):
     assert _messages(config_validator, outside) != []
 
 
+def _reference_branch(section: dict) -> dict:
+    """The environment-reference branch of ``severity_threshold`` in a schema's
+    global-settings section: the string branch with a pattern."""
+    branches = section["properties"]["severity_threshold"]["anyOf"]
+    (reference,) = [branch for branch in branches if "pattern" in branch]
+    return reference
+
+
 def test_the_reference_branch_says_the_loader_resolves_it(schemas):
     """The configuration file's branch describes what happens to a reference
     there: the loader resolves it. The results schema's branch says the field is
     read with its default, which is true of a stored results file and false of a
-    configuration file, so the two schemas carry different descriptions."""
-    import json
+    configuration file, so the two schemas carry different descriptions. Read
+    at the field, not as a phrase anywhere in the document, so a field
+    description that happens to use the words changes nothing here."""
+    from automated_security_helper.schemas.generate_schemas import (
+        CONFIG_FILE_REFERENCE_JSON_SCHEMA,
+        ENV_REFERENCE_JSON_SCHEMA,
+    )
 
-    config_text = json.dumps(schemas["AshConfig"])
-    results_text = json.dumps(schemas["AshAggregatedResults"])
-    assert "resolved to the variable's value when the file is loaded" in config_text
-    assert "read with its default" not in config_text
-    assert "read with its default" in results_text
+    in_config = _reference_branch(
+        schemas["AshConfig"]["$defs"]["AshConfigGlobalSettingsSection"]
+    )
+    in_results = _reference_branch(
+        schemas["AshAggregatedResults"]["$defs"]["AshConfigGlobalSettingsSection"]
+    )
+    assert in_config == CONFIG_FILE_REFERENCE_JSON_SCHEMA
+    assert in_results == ENV_REFERENCE_JSON_SCHEMA
+    assert in_config["pattern"] == in_results["pattern"]
+    assert in_config["description"] != in_results["description"]
+    assert "resolved to the variable's value" in in_config["description"]
+    assert "read with its default" in in_results["description"]

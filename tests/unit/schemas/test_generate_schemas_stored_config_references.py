@@ -18,9 +18,6 @@ configuration's models only: a fixed-choice field elsewhere in the results
 
 from __future__ import annotations
 
-import json
-import re
-
 import jsonschema
 import pytest
 
@@ -217,6 +214,16 @@ def test_the_shape_keeping_serializers_are_exactly_the_models_any_typed_ones():
     }
 
 
+def _the_schema_admits(text: str) -> bool:
+    """Whether a JSON Schema validator admits ``text`` as a reference.
+
+    The schema's pattern is applied the way a validator applies it: unanchored,
+    a search (python-jsonschema uses re.search), so a missing ``^`` or ``$`` in
+    the pattern is visible here where ``re.match`` would hide the former.
+    """
+    return jsonschema.Draft202012Validator(ENV_REFERENCE_JSON_SCHEMA).is_valid(text)
+
+
 @pytest.mark.parametrize(
     "text",
     ["${X}", "${X:default}", "!ENV ${X}", "${X:a}b}", "${long_name_1:}"],
@@ -224,15 +231,20 @@ def test_the_shape_keeping_serializers_are_exactly_the_models_any_typed_ones():
 def test_the_schema_pattern_and_the_loader_agree_on_a_reference(text):
     from automated_security_helper.config.recorded_config import _is_reference
 
-    assert re.match(ENV_REFERENCE_JSON_SCHEMA["pattern"], text)
+    assert _the_schema_admits(text)
     assert _is_reference(text)
 
 
-@pytest.mark.parametrize("text", ["BOGUS", "$X", "${}", "MEDIUM", ""])
+@pytest.mark.parametrize(
+    "text", ["BOGUS", "$X", "${}", "MEDIUM", "", "BOGUS${X}", "x !ENV ${X}"]
+)
 def test_the_schema_pattern_and_the_loader_agree_on_a_non_reference(text):
+    """``BOGUS${X}`` holds a reference after position 0: a pattern without its
+    start anchor would admit it under a validator's search, and the loader's
+    re.match refuses it, so this is the case that pins the ``^``."""
     from automated_security_helper.config.recorded_config import _is_reference
 
-    assert not re.match(ENV_REFERENCE_JSON_SCHEMA["pattern"], text)
+    assert not _the_schema_admits(text)
     assert not _is_reference(text)
 
 
@@ -247,9 +259,22 @@ def test_the_schema_pattern_is_anchored_at_the_end():
     """
     from automated_security_helper.config.recorded_config import _is_reference
 
-    for text in ("${X}BOGUS", "${A B}"):
-        assert not re.match(ENV_REFERENCE_JSON_SCHEMA["pattern"], text), text
-        assert _is_reference(text), text
+    assert not _the_schema_admits("${X}BOGUS")
+    assert _is_reference("${X}BOGUS")
+
+
+def test_the_schema_refuses_a_variable_name_the_loader_accepts():
+    """A second, separate difference: the schema's ``\\w+`` name admits word
+    characters only, while the loader's pattern takes ``${A B}`` as a reference.
+    The record never writes such a name (a configuration file's reference names
+    an environment variable, and a shell variable name holds no blank), so the
+    schema's stricter name costs nothing; this test keeps the difference named
+    rather than letting it hide inside the trailing-text case above."""
+    from automated_security_helper.config.recorded_config import _is_reference
+
+    assert not _the_schema_admits("${A B}")
+    assert _is_reference("${A B}")
+    assert _the_schema_admits("${A_B}")
 
 
 def test_the_stored_configuration_is_described_in_serialization_mode(results_schema):
@@ -265,7 +290,8 @@ def test_the_stored_configuration_is_described_in_serialization_mode(results_sch
     refs = {branch.get("$ref") for branch in ash_config.get("anyOf", [ash_config])}
     assert "#/$defs/AshConfig" in refs, ash_config
     assert "AshConfigGlobalSettingsSection" in results_schema["$defs"]
-    assert "skipped_projects" in json.dumps(results_schema), (
+    workspace = results_schema["$defs"]["WorkspaceResults"]["properties"]
+    assert "skipped_projects" in workspace, (
         "the computed field serialization mode exists for is missing"
     )
 
