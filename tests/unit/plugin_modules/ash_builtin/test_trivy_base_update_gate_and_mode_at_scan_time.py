@@ -150,6 +150,27 @@ def test_a_scan_that_names_no_scanner_updates_for_trivys_default_set(
     assert len(updates) == 1
 
 
+# --- the database counts as in use by the same reading the update is gated on ----
+
+
+def test_the_database_is_not_in_use_when_trivys_settings_leave_out_vuln(
+    tmp_path, monkeypatch
+):
+    """``scanners: []`` passes no ``--scanners``; with ``TRIVY_SCANNERS=secret`` trivy
+    never opens the database and the update is skipped, so the age check must not
+    then hold the scan to a database trivy did not read."""
+    monkeypatch.setenv("TRIVY_SCANNERS", "secret")
+    scanner = _scanner(tmp_path, scanners=[])
+
+    assert scanner.content_databases_in_use() == []
+
+
+def test_control_the_database_is_in_use_for_trivys_default_scanner_set(tmp_path):
+    scanner = _scanner(tmp_path, scanners=[])
+
+    assert scanner.content_databases_in_use() != []
+
+
 # --- the mode is read when the scan runs ------------------------------------------
 
 
@@ -194,6 +215,9 @@ def test_a_scanner_built_offline_and_run_online_updates_and_drops_the_offline_fl
     assert command.count("--skip-db-update") == 1
     assert "--skip-check-update" not in command, command
     assert len(updates) == 1
+    # The update was asked for in the mode the scan runs in, not the stale one
+    # the scanner was built in.
+    assert updates[0]["offline"] is False, updates
 
 
 def test_control_a_consistent_online_command_keeps_its_shape(tmp_path, updates, ran):
@@ -206,6 +230,7 @@ def test_control_a_consistent_online_command_keeps_its_shape(tmp_path, updates, 
 
     (command,) = ran
     cache = [arg for arg in command if arg.startswith("--cache-dir=")]
+    assert len(cache) == 1, command
     assert command == [
         "trivy",
         "repository",

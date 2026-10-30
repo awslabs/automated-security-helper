@@ -181,6 +181,12 @@ def test_grype_control_a_planted_tilde_directory_in_the_tree_is_never_handed_ove
     )
 
     (named,) = spawn.values("--config")
+    # An absolute path to the empty file ASH writes: the raw "~/..." value handed
+    # through unchanged would also differ from the decoy's spelling, and grype,
+    # run from the scanned source, would resolve it to the decoy.
+    assert Path(named).is_absolute(), spawn.command
+    assert Path(named).name == "grype-config-empty.yaml", spawn.command
+    assert Path(named).read_text(encoding="utf-8") == "{}\n"
     assert Path(named) != decoy
     assert not _inside(Path(named), context.source_dir), spawn.command
 
@@ -203,6 +209,9 @@ def test_syft_control_a_planted_tilde_file_in_the_tree_is_never_handed_over(
     spawn = _scan(_syft(context, config_file="~/.syft.yaml"), context, monkeypatch)
 
     (named,) = spawn.values("--config")
+    assert Path(named).is_absolute(), spawn.command
+    assert Path(named).name == "syft-config-empty.yaml", spawn.command
+    assert Path(named).read_text(encoding="utf-8") == "{}\n"
     assert Path(named) != decoy
     assert not _inside(Path(named), context.source_dir), spawn.command
 
@@ -252,3 +261,52 @@ def test_syft_refusal_warning_does_not_call_an_in_tree_config_a_work_product(
     assert not_used, [record.getMessage() for record in caplog.records]
     assert all("work product" not in message for message in not_used), not_used
     assert all("empty config file" in message for message in not_used), not_used
+    # The line the warning points at: the refusal's own, naming the key and the
+    # reason (path_trust), so the operator is pointed at something that was logged.
+    refusals = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("Ignoring scanners.syft.options.config_file")
+    ]
+    assert refusals, [record.getMessage() for record in caplog.records]
+
+
+# --- grype's declared database bound reads the operator's file as grype does ------
+
+
+def _online(monkeypatch) -> None:
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.delenv("GRYPE_DB_MAX_ALLOWED_BUILT_AGE", raising=False)
+    monkeypatch.delenv("GRYPE_DB_VALIDATE_AGE", raising=False)
+
+
+def test_grype_db_bound_is_not_declared_over_a_home_config_that_sets_it(
+    context, home, monkeypatch
+):
+    """Online, ASH exports grype's database-age bound unless the operator's config
+    sets ``db.max-allowed-built-age`` itself (grype puts the environment above the
+    file, so the export would override it). The file is read as grype reads it:
+    ``~/.grype/config.yaml`` is the home file, not ``<cwd>/~/...``, which the path
+    as configured named and could not read."""
+    _online(monkeypatch)
+    operator = home / ".grype" / "config.yaml"
+    operator.parent.mkdir()
+    operator.write_text("db:\n  max-allowed-built-age: 1h\n")
+
+    scanner = _grype(context, config_file="~/.grype/config.yaml")
+
+    assert "GRYPE_DB_MAX_ALLOWED_BUILT_AGE" not in scanner.extra_env, scanner.extra_env
+    assert "GRYPE_DB_VALIDATE_AGE" in scanner.extra_env, scanner.extra_env
+
+
+def test_grype_control_a_home_config_without_db_settings_gets_the_declared_bound(
+    context, home, monkeypatch
+):
+    _online(monkeypatch)
+    operator = home / ".grype" / "config.yaml"
+    operator.parent.mkdir()
+    operator.write_text("output: sarif\n")
+
+    scanner = _grype(context, config_file="~/.grype/config.yaml")
+
+    assert "GRYPE_DB_MAX_ALLOWED_BUILT_AGE" in scanner.extra_env, scanner.extra_env

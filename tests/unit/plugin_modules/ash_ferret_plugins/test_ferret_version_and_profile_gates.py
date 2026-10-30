@@ -132,6 +132,33 @@ def test_the_bundled_config_names_its_redaction_profiles():
     assert "ci" not in bundled_redaction_profiles()
 
 
+@pytest.fixture
+def fresh_profile_read():
+    """The bundled file's cached read, cleared before and after the test."""
+    ferret_scanner._bundled_redaction_profiles_read.cache_clear()
+    yield
+    ferret_scanner._bundled_redaction_profiles_read.cache_clear()
+
+
+def test_a_failed_read_of_the_bundled_config_is_not_cached(
+    tmp_path, fresh_profile_read
+):
+    """One transient read error must not turn the redaction refusal off for the
+    rest of the process: the known names stay, and the next call reads the file
+    again (here one that adds a profile, which proves the read happened)."""
+    extra = tmp_path / "ferret-config.yaml"
+    extra.write_text(
+        "profiles:\n  extra-redaction:\n    redaction:\n      enabled: true\n",
+        encoding="utf-8",
+    )
+
+    with patch.object(ferret_scanner, "DEFAULT_FERRET_CONFIG", tmp_path / "missing"):
+        assert bundled_redaction_profiles() == {"redaction", "secure-redaction"}
+    with patch.object(ferret_scanner, "DEFAULT_FERRET_CONFIG", extra):
+        assert "extra-redaction" in bundled_redaction_profiles()
+        assert {"redaction", "secure-redaction"} <= bundled_redaction_profiles()
+
+
 @pytest.mark.parametrize("profile", ["redaction", "secure-redaction"])
 def test_a_bundled_redaction_profile_is_refused(
     mock_plugin_context, binary_present, profile

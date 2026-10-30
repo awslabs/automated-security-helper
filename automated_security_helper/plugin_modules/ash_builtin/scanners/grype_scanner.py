@@ -226,12 +226,19 @@ def _declared_grype_db_bound(
     environ: Mapping[str, str],
     grype_config: Path | None,
     values: Iterable[str] = (),
+    *,
+    shown: Path | None = None,
 ) -> dict[str, str]:
     """The grype-db bound from the registry, minus anything the user set themselves.
 
-    *values*, the config's environment values, are redacted from the DEBUG line
-    about a config it could not read: the config's path can come from the
-    environment, and ash.log keeps DEBUG lines under --debug.
+    *grype_config* is the file as grype will read it (``~`` expanded, a relative
+    value taken from the source directory, links resolved): the path as configured
+    read ``<cwd>/~/...`` or a planted ``<source>/~/...`` instead of the operator's
+    home file, so the operator's own ``db`` settings went unseen and ASH's bound
+    was exported over them. *shown*, the path as configured, names the file in the
+    DEBUG line; *values*, the config's environment values, are redacted from it:
+    the config's path can come from the environment, and ash.log keeps DEBUG lines
+    under --debug.
     """
     from automated_security_helper.utils.content_databases import get
     from automated_security_helper.utils.error_text import text_without_values
@@ -247,9 +254,10 @@ def _declared_grype_db_bound(
             db_section = _lowercase_keys(loaded).get("db")
             user_config_keys = set(_lowercase_keys(db_section))
         except Exception as exc:  # nosec B110 - an unreadable config is grype's to report
+            named = shown if shown is not None else grype_config
             ASH_LOGGER.debug(
                 text_without_values(
-                    f"Could not read {grype_config} for db settings: {exc}", values
+                    f"Could not read {named} for db settings: {exc}", values
                 )
             )
     config_key_for_env = {
@@ -642,7 +650,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         if not offline:
             self.extra_env.update(
                 _declared_grype_db_bound(
-                    snapshot_environ(), configured_config, environment_values
+                    snapshot_environ(),
+                    resolved_config,
+                    environment_values,
+                    shown=configured_config,
                 )
             )
 

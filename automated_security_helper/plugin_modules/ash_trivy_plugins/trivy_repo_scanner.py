@@ -167,7 +167,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
 
     The option-to-flag mapping, install commands and package identity are shared
     with the ``trivy`` scanner of this module through ``TrivyScannerBase``; this class
-    keeps its own config and its own ``scan()``, so what it reports is unchanged.
+    keeps its own config and its own ``scan()``. Its names and output files are
+    unchanged; its results carry trivy's own severity, and its command ASH's scan
+    timeout as trivy's deadline and ``--skip-dirs`` for ASH's output directories,
+    as the builtin scanner's do.
     """
 
     #: trivy is a native binary. See ScannerPluginBase.python_only.
@@ -282,15 +285,16 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         ]
 
     def content_databases_in_use(self) -> list:
-        """trivy-db, unless the scan's ``--scanners`` leave out ``vuln``.
+        """trivy-db, unless the scan's effective scanners leave out ``vuln``.
 
-        The secret, misconfiguration and license scanners never open it. An empty
-        ``scanners`` list passes no ``--scanners``, so trivy runs its own default
-        (``vuln,secret``, pkg/flag/scan_flags.go) or what a trivy.yaml says, and the
-        database is held to its bounds then too.
+        The secret, misconfiguration and license scanners never open it. The set
+        is read as trivy reads it (``TrivyScannerBase._effective_scanners``: the
+        option, else ``TRIVY_SCANNERS``, else the config file's ``scan.scanners``,
+        else trivy's own ``vuln,secret`` default), the same reading the database
+        update is gated on: a run whose scanners never open the database skips the
+        update, and must not then be held to that database's age.
         """
-        scanners = self.config.options.scanners or []
-        if scanners and "vuln" not in scanners:
+        if "vuln" not in self._effective_scanners():
             return []
         return super().content_databases_in_use()
 

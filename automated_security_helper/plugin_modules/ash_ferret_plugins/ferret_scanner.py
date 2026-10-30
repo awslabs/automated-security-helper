@@ -90,22 +90,22 @@ DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
 _GLOB_ONLY_EXCLUDE_VERSION = "2.5.0"
 
 
-@functools.lru_cache(maxsize=1)
-def bundled_redaction_profiles() -> frozenset[str]:
-    """The profiles of the bundled config that turn ferret-scan's redaction on.
+#: The bundled profiles known to turn redaction on. Kept whatever the bundled file
+#: reads as, so the refusal in ``_process_config_options`` cannot fail open on a
+#: read error; the file is read for a profile added there later.
+_BUNDLED_REDACTION_PROFILES_FLOOR = frozenset({"redaction", "secure-redaction"})
 
-    Redaction is unsupported in ASH (see ``UNSUPPORTED_FERRET_OPTIONS``): it rewrites
-    files, and the bundled ``redaction`` and ``secure-redaction`` profiles name their
-    output directory and index file as relative paths, which ferret-scan resolves
-    against the working directory ASH runs it from, the filesystem root
-    (``_subprocess_cwd``). Read from the bundled file so a profile added there later
-    is covered too; empty when the file cannot be read.
+
+@functools.lru_cache(maxsize=1)
+def _bundled_redaction_profiles_read() -> frozenset[str]:
+    """The bundled config's redaction profiles, read from the file.
+
+    Raises what the read or the parse raises (``OSError``, ``ValueError``,
+    ``yaml.YAMLError``): ``lru_cache`` keeps only a value, so a failed read is
+    tried again at the next call instead of being kept for the process.
     """
-    try:
-        with open(DEFAULT_FERRET_CONFIG, "r", encoding="utf-8") as handle:
-            document = yaml.safe_load(handle)
-    except (OSError, ValueError, yaml.YAMLError):
-        return frozenset()
+    with open(DEFAULT_FERRET_CONFIG, "r", encoding="utf-8") as handle:
+        document = yaml.safe_load(handle)
     profiles = document.get("profiles") if isinstance(document, dict) else None
     if not isinstance(profiles, dict):
         return frozenset()
@@ -115,6 +115,27 @@ def bundled_redaction_profiles() -> frozenset[str]:
         if isinstance(redaction, dict) and redaction.get("enabled"):
             found.add(str(name))
     return frozenset(found)
+
+
+def bundled_redaction_profiles() -> frozenset[str]:
+    """The profiles of the bundled config that turn ferret-scan's redaction on.
+
+    Redaction is unsupported in ASH (see ``UNSUPPORTED_FERRET_OPTIONS``): it rewrites
+    files, and the bundled ``redaction`` and ``secure-redaction`` profiles name their
+    output directory and index file as relative paths, which ferret-scan resolves
+    against the working directory ASH runs it from, the filesystem root
+    (``_subprocess_cwd``). The known names are a floor
+    (``_BUNDLED_REDACTION_PROFILES_FLOOR``); the bundled file is read on top of it
+    so a profile added there later is covered too. A file that cannot be read or
+    parsed gives the floor alone, and that failed read is not cached: one
+    transient error (EMFILE in a long-running server, say) used to leave an empty,
+    cached answer that turned the refusal off for every later scan.
+    """
+    try:
+        found = _bundled_redaction_profiles_read()
+    except (OSError, ValueError, yaml.YAMLError):
+        found = frozenset()
+    return _BUNDLED_REDACTION_PROFILES_FLOOR | found
 
 
 # ============================================================================
