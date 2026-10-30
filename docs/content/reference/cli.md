@@ -217,7 +217,7 @@ ash config lint [OPTIONS]
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
 | <a id="config-lint--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. |
-| <a id="config-lint--output-dir"></a>`--output-dir`, `-o` | text | not set |  | Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output |
+| <a id="config-lint--output-dir"></a>`--output-dir`, `-o` | text | not set |  | Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output under --source-dir when that is given, else to the one beside the config file (its project's .ash/ash_output, then ash_output) |
 | <a id="config-lint--fix"></a>`--fix` | flag | off |  | Auto-fix fixable issues (internal fields, missing line_end, expired suppressions, multi-line suppression reasons). A TOML file, and a file that reads the environment (${VAR} or !ENV), are not rewritten: fix those by hand |
 | <a id="config-lint--fix-unused"></a>`--fix-unused` | flag | off |  | Comment out unused suppressions based on the last scan's unused suppressions report. A TOML file, and a JSON file (which holds no comments), are not rewritten: remove those by hand |
 | <a id="config-lint--non-interactive"></a>`--non-interactive`, `--yes`, `-y` | flag | off |  | Accept all changes without prompting. Useful for pre-commit hooks and CI/CD |
@@ -233,9 +233,10 @@ Update an existing configuration file with the specified modifications.
 This command applies changes to an ASH configuration file using the same syntax as --config-overrides.
 
 Nothing is written, and the command exits 3, when the file is not a valid
-configuration or a --set cannot be applied. A file that uses extends or
-patch, or reads the environment (${VAR} or !ENV references), or a TOML
-file, is refused with exit 1: rewriting it would lose what those express.
+configuration, a --set cannot be applied, or the file changed while the
+command read it. A file that uses extends or patch, or reads the environment
+(${VAR} or !ENV references), or a TOML file, is refused with exit 1:
+rewriting it would lose what those express.
 
 ```text
 ash config update [OPTIONS] [config_path]
@@ -251,6 +252,7 @@ ash config update [OPTIONS] [config_path]
 |--------|------|---------|----------------------|-------------|
 | <a id="config-update--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. |
 | <a id="config-update--set"></a>`--set` | text, repeatable | not set |  | Configuration modifications specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. |
+| <a id="config-update--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ash scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
 | <a id="config-update--verbose"></a>`--verbose`, `-v` / `--no-verbose` | flag | off |  | Enable verbose logging |
 | <a id="config-update--debug"></a>`--debug`, `-d` / `--no-debug` | flag | off |  | Enable debug logging |
 | <a id="config-update--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
@@ -343,10 +345,10 @@ ash config validate-plugin-dependencies [OPTIONS] [config_path]
 
 Interactive configuration wizard.
 
-Reads the existing config (the one a scan of the current directory would
-use, or --config), walks through scanner, reporter, offline-mode, and
-community-plugin settings interactively, then writes the result back.
-With no config yet, it creates .ashrc.yaml.
+Reads the existing config (the one a scan of --source-dir, or the current
+directory, would use, or --config), walks through scanner, reporter,
+offline-mode, and community-plugin settings interactively, then writes the
+result back. With no config yet, it creates .ashrc.yaml there.
 
 ```text
 ash config wizard [OPTIONS]
@@ -356,6 +358,7 @@ ash config wizard [OPTIONS]
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
 | <a id="config-wizard--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | Path to read/write the configuration file. By default, the config a scan of the current directory would use, or a new .ashrc.yaml when there is none. |
+| <a id="config-wizard--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ash scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
 | <a id="config-wizard--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="config-wizard--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="config-wizard--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
@@ -453,7 +456,7 @@ ash inspect findings [OPTIONS]
 |--------|------|---------|----------------------|-------------|
 | <a id="inspect-findings--output-dir"></a>`--output-dir` | path | not set |  | Path to the output directory containing an ASH Aggregated Results JSON report file to analyze. |
 | <a id="inspect-findings--report-file"></a>`--report-file` | text | `ash_aggregated_results.json` |  | Name of the report file to analyze. Defaults to 'ash_aggregated_results.json'. |
-| <a id="inspect-findings--config"></a>`--config`, `-c` | path | not set | `ASH_CONFIG` | Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. With none found, suppressions go to a new .ashrc.yaml in the current directory. |
+| <a id="inspect-findings--config"></a>`--config`, `-c` | path | not set | `ASH_CONFIG` | Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used in the scanned directory (the one holding the results' .ash/ash_output), or in the current directory when the results sit elsewhere. With none found, suppressions go to a new .ashrc.yaml there. |
 
 ### <a id="inspect-sarif-fields"></a>`ash inspect sarif-fields`
 
