@@ -1705,16 +1705,46 @@ def _check_rule_compiles(rule: str, base_path: str | Path) -> None:
     cannot match. No path is asked about, so the answer does not depend on what the
     tree holds: asking a parser to match ``<base>/probe`` skipped the directory-only
     rules when a file of that name existed.
+
+    The check leans on igittigitt internals (its ``_globmatch``, the parser's
+    ``rules`` and each rule's ``pattern_glob``), and the pin allows any 2.x. When
+    they are not what this is written for, it asks about a path that is not a file,
+    as before, instead of reading the difference as a rule that cannot compile: a
+    changed signature raises ``TypeError``, which the caller counts as a bad rule,
+    and every rule would be skipped, ``.git`` among them.
     """
     probe = IgnoreParser()
     probe.add_rule(rule, base_path=base_path)
-    glob_match = getattr(_igittigitt_module, "_globmatch", None)
-    if glob_match is None:
-        # A release without that function: ask about a path that is not a file.
+    glob_match = _igittigitt_glob_function()
+    built_rules = getattr(probe, "rules", None)
+    if (
+        glob_match is None
+        or built_rules is None
+        or not all(hasattr(built, "pattern_glob") for built in built_rules)
+    ):
         probe.match(Path(os.path.abspath(base_path)) / "probe")
         return
-    for built in probe.rules:
+    for built in built_rules:
         glob_match("", built.pattern_glob)
+
+
+def _igittigitt_glob_function():
+    """igittigitt's glob-compiling match function, or None when it is not the one
+    :func:`_check_rule_compiles` is written for.
+
+    Called once with a glob that compiles, which tells a changed signature (a
+    ``TypeError`` or ``AttributeError`` here) from a rule that cannot compile (what
+    the caller's own call raises). Looked up on each call and not once at import, so
+    a test that stands a function in its place is read.
+    """
+    glob_match = getattr(_igittigitt_module, "_globmatch", None)
+    if glob_match is None:
+        return None
+    try:
+        glob_match("", "*")
+    except (TypeError, AttributeError):
+        return None
+    return glob_match
 
 
 def get_ash_ignorespec_with_attribution(

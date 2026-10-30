@@ -420,6 +420,47 @@ class TestARuleIgittigittCannotCompile:
             warning
         )
 
+    def test_a_changed_glob_function_is_not_taken_for_a_bad_rule(
+        self, tmp_path, monkeypatch
+    ):
+        """A release whose ``_globmatch`` takes other arguments raises ``TypeError``
+        from the check, which the caller counts as a rule that cannot compile; every
+        rule, ``.git`` among them, would be skipped. The check asks about a path that
+        is not a file instead."""
+        asked = []
+
+        class RecordingParser(IgnoreParser):
+            def match(self, file_path):
+                asked.append(file_path)
+                return False
+
+        monkeypatch.setattr(gss, "IgnoreParser", RecordingParser)
+        monkeypatch.setattr(igittigitt_module, "_globmatch", lambda glob: False)
+
+        gss._check_rule_compiles(".git", tmp_path)
+
+        assert gss._igittigitt_glob_function() is None
+        assert len(asked) == 1, asked
+
+    def test_the_installed_glob_function_is_used_without_asking_a_path(
+        self, tmp_path, monkeypatch
+    ):
+        """The control for the test above: with igittigitt's own function in place the
+        rule's glob is compiled directly and no path is asked about."""
+        asked = []
+
+        class RecordingParser(IgnoreParser):
+            def match(self, file_path):
+                asked.append(file_path)
+                return False
+
+        monkeypatch.setattr(gss, "IgnoreParser", RecordingParser)
+
+        gss._check_rule_compiles(".git", tmp_path)
+
+        assert gss._igittigitt_glob_function() is not None
+        assert asked == []
+
     def test_a_negation_it_cannot_compile_is_skipped_too(self, tmp_path, monkeypatch):
         """The check holds the rule alone, so it has to compile a negation without a
         positive rule before it matching first. A parser that kept negations apart
