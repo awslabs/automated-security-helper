@@ -2356,6 +2356,47 @@ class TestTheWrappersListsAreTheClis:
         # With no command named, ash scans, and takes --sandbox there too.
         assert "sandbox" in {param.name for param in root.params}
 
+    @staticmethod
+    def _options_under(command) -> list:
+        """The option params of a click command and of every command under it."""
+        found = [p for p in command.params if p.param_type_name == "option"]
+        for sub in getattr(command, "commands", {}).values():
+            found.extend(TestTheWrappersListsAreTheClis._options_under(sub))
+        return found
+
+    def test_the_commands_whose_dash_o_is_their_own_are_the_ones_that_define_one(self):
+        """ASH_DASH_O_IS_THE_SUBCOMMANDS names the commands after which ./ash forwards
+        -o as the command's own option instead of taking it as its runner: every
+        command that defines a -o of its own (on itself or a command under it) that
+        is not the CLI's alias of --oci-runner. scan's -o is that alias, so -o after
+        scan stays the runner, as it does with no command and after a command that
+        defines no -o at all (the containerized CLI would refuse it there). Derived
+        from the click commands, as the other lists are, so a command that gains a
+        non-runner -o fails here until the list names it, instead of having its -o
+        eaten as the runner."""
+        root = self._root()
+        dash_o_is_the_commands = {
+            name
+            for name, command in root.commands.items()
+            if any(
+                "-o" in option.opts and "--oci-runner" not in option.opts
+                for option in self._options_under(command)
+            )
+        }
+
+        assert (
+            self._bash_list("ASH_DASH_O_IS_THE_SUBCOMMANDS") == dash_o_is_the_commands
+        )
+        # The runner's side of the rule: scan's own -o is the runtime alias.
+        scan_dash_o = [
+            option
+            for option in self._options_under(root.commands["scan"])
+            if "-o" in option.opts
+        ]
+        assert [
+            set(option.opts) >= {"-o", "--oci-runner"} for option in scan_dash_o
+        ] == [True], scan_dash_o
+
 
 @pytest.mark.unit
 class TestThePowerShellRefusalAsText:
