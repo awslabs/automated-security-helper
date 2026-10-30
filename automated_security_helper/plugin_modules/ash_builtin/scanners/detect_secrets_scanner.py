@@ -1174,7 +1174,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         scan, as did an entry without the package or without those keys.
 
         A relative name is anchored where the entry was written: the directory
-        of the baseline it came from, else the source directory. The entry is
+        of the file that named it, per entry (``_wordlist_anchor``). The entry is
         kept with the resolved absolute path and the defaults detect-secrets'
         own ``initialize`` uses for the keys it lacks; one its source may not
         supply, one whose file is not a regular file, or one whose package is
@@ -1244,19 +1244,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
         path = Path(os.path.expanduser(file_name))
         if not path.is_absolute():
-            anchor = (
-                self._baseline_real.parent
-                if from_baseline and self._baseline_real is not None
-                else Path(getattr(self.context, "source_dir", None) or ".")
-            )
-            path = Path(anchor) / path
+            path = self._wordlist_anchor(from_baseline) / path
         real = Path(os.path.realpath(path))
         if not real.is_file():
             return (
                 "its word list file (file_name) is not a regular file where the "
                 "entry names it; the worker reads it from its own working "
-                "directory, so a relative name is taken from the baseline's "
-                "directory, or the source directory for a configured entry"
+                "directory, so a relative name is taken from the directory of "
+                "the file that named the entry: the baseline's for a baseline "
+                "entry, the config file's for a configured one (the source "
+                "directory when the config was not read from a file)"
             )
         setattr(item, "file_name", real.as_posix())
         if getattr(item, "min_length", None) is None:
@@ -1264,6 +1261,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if getattr(item, "file_hash", None) is None:
             setattr(item, "file_hash", "")
         return None
+
+    def _wordlist_anchor(self, from_baseline: bool) -> Path:
+        """The directory a relative word list name is taken from.
+
+        A relative ``file_name`` was written relative to the file that named the
+        entry, so it is read from that file's directory: the baseline's for an
+        entry the baseline's settings supplied, the config file's
+        (``AshConfig._loaded_from``, the file resolve_config read the config
+        from) for an entry the operator's config wrote. A config that was not
+        read from a file (the defaults, or one built in code) anchors at the
+        source directory. Judged per entry: before, one flag for the whole pass
+        sent a configured entry's relative name to the baseline's directory
+        whenever the baseline's filters were loaded beside it.
+        """
+        if from_baseline and self._baseline_real is not None:
+            return self._baseline_real.parent
+        loaded_from = getattr(
+            getattr(self.context, "config", None), "_loaded_from", None
+        )
+        if loaded_from:
+            return Path(os.path.realpath(loaded_from)).parent
+        return Path(os.path.realpath(getattr(self.context, "source_dir", None) or "."))
 
     def _untrusted_baseline_reason(
         self, record: Optional[UntrustedDetectSecretsSettings]

@@ -21,6 +21,9 @@ Each test pins one behavior the scanner lacked:
 * the tree's own baseline could name a word list of values to drop from the
   report, and the entry reached the worker unjudged by the settings-trust rule
   the verification filter and ``file://`` entries follow;
+* a configured wordlist entry's relative name was anchored at the baseline's
+  directory whenever the baseline's filters were loaded, not at the config
+  file that wrote it;
 * a non-string exclude pattern raised TypeError past the ``re.error`` handler;
 * a request the scanner could not serialize was left part-written in the
   results directory;
@@ -315,15 +318,22 @@ def test_an_untrusted_baselines_word_list_is_refused_before_it_is_read(
     assert _handed_wordlists(scanner, monkeypatch) == []
 
 
-def test_the_operators_own_word_list_entry_is_kept_beside_an_untrusted_baseline(
-    tmp_path, monkeypatch
-):
-    """Judged by the entry's source, not by which baseline is in use: the
-    operator's configured entry stays, anchored at the source directory."""
+def _configured_wordlist_scanner(tmp_path, monkeypatch, *, config_file: bool):
+    """A config-written wordlist entry beside the tree's own baseline, whose
+    filters are loaded beside it. With ``config_file`` the config was read from
+    ``<tmp>/cfg/ash.yaml`` and the list sits beside that file; otherwise the
+    config has no file and the list sits in the source directory."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(module, "_module_importable", lambda name: True)
     context = _context(tmp_path)
-    (context.source_dir / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    if config_file:
+        cfg = tmp_path / "cfg"
+        cfg.mkdir()
+        context.config._loaded_from = cfg / "ash.yaml"
+        home = cfg
+    else:
+        home = context.source_dir
+    (home / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
     (context.source_dir / ".secrets.baseline").write_text(
         json.dumps(_WORDLIST_BASELINE), encoding="utf-8"
     )
@@ -333,9 +343,35 @@ def test_the_operators_own_word_list_entry_is_kept_beside_an_untrusted_baseline(
             filters_used=[{"path": WORDLIST_FILTER, "file_name": "words.txt"}]
         ),
     )
+    return scanner, Path(os.path.realpath(home / "words.txt"))
+
+
+def test_the_operators_own_word_list_entry_is_kept_beside_an_untrusted_baseline(
+    tmp_path, monkeypatch
+):
+    """Judged by the entry's source, not by which baseline is in use: the
+    operator's configured entry stays, anchored at the source directory when
+    the config was not read from a file."""
+    scanner, expected = _configured_wordlist_scanner(
+        tmp_path, monkeypatch, config_file=False
+    )
     (entry,) = _wordlist_entries(scanner)
-    expected = Path(os.path.realpath(context.source_dir / "words.txt"))
     assert entry.file_name == expected.as_posix()
+    assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
+
+
+def test_a_configured_word_list_is_anchored_at_the_config_file_not_the_baseline(
+    tmp_path, monkeypatch
+):
+    """A relative name is taken from the directory of the file that wrote the
+    entry, per entry: the config's list sits beside the config file, and the
+    baseline's filters being loaded beside it does not move it."""
+    scanner, expected = _configured_wordlist_scanner(
+        tmp_path, monkeypatch, config_file=True
+    )
+    (entry,) = _wordlist_entries(scanner)
+    assert entry.file_name == expected.as_posix()
+    assert expected.parent == Path(os.path.realpath(tmp_path / "cfg"))
     assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
 
 
