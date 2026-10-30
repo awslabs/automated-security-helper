@@ -121,6 +121,7 @@ from automated_security_helper.utils.path_stat import (
     stat_named_path,
 )
 from automated_security_helper.config.environment_record import (
+    ENVIRONMENT_VALUE_SHOWN,
     WrittenKeyMapping,
     mappings_with_written_reference_keys,
 )
@@ -219,7 +220,10 @@ def find_config_file(
         for candidate in discovery_candidates(Path(search_dir)):
             if not permit(candidate):
                 raise _discovered_config_not_permitted(candidate, Path(search_dir))
-    selected = discover_config_source(search_dir).selected
+    # Discovery takes the gate too: it checks each source by the path it
+    # resolves to before anything opens it, so a pyproject.toml that appears
+    # between the pass above and this read is not read for its table ungated.
+    selected = discover_config_source(search_dir, permit=permit).selected
     if selected is None:
         return None
     if permit is not None and not permit(selected.path):
@@ -403,6 +407,16 @@ def _apply_config_override(
             current[final_key].append(parsed_value)
         ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
         return resolved_keys, parsed_value, True
+    elif append_mode and current.get(final_key) is None:
+        # An append onto a list the document does not hold yet, or holds as
+        # None, starts the list: as a plain set, a scalar appended stored a
+        # bare string a list field refuses, and a list appended replaced the
+        # field's None with no word of the append.
+        current[final_key] = (
+            list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
+        )
+        ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
+        return resolved_keys, parsed_value, True
     else:
         # Set the value
         current[final_key] = parsed_value
@@ -419,6 +433,38 @@ def _parsed_list_item(item: str) -> Any:
     if len(item) >= 2 and item[0] == item[-1] and item[0] in "'\"":
         return item[1:-1]
     return _parse_config_value(item)
+
+
+def _split_list_items(body: str) -> List[str]:
+    """The items of ``body``, the inside of a bracketed list that is not JSON,
+    split at the commas outside quotes and outside nested brackets or braces,
+    each stripped. A split at every comma cut a quoted item holding one in two
+    and broke a nested list (``[[a, b], [c]]``) into fragments."""
+    items: List[str] = []
+    piece: List[str] = []
+    depth = 0
+    quote: Optional[str] = None
+    for character in body:
+        if quote is not None:
+            piece.append(character)
+            if character == quote:
+                quote = None
+        elif character in "'\"":
+            quote = character
+            piece.append(character)
+        elif character in "[{":
+            depth += 1
+            piece.append(character)
+        elif character in "]}":
+            depth = max(depth - 1, 0)
+            piece.append(character)
+        elif character == "," and depth == 0:
+            items.append("".join(piece).strip())
+            piece = []
+        else:
+            piece.append(character)
+    items.append("".join(piece).strip())
+    return items
 
 
 def _parse_config_value(value: str) -> Any:
@@ -443,11 +489,14 @@ def _parse_config_value(value: str) -> Any:
             # Try to parse as JSON
             return json.loads(bracketed)
         except json.JSONDecodeError:
-            # If not valid JSON, try a simpler approach for basic lists
-            items = [item.strip() for item in bracketed[1:-1].split(",")]
+            # If not valid JSON, try a simpler approach for basic lists: the
+            # items split at the top-level commas, each parsed as a value.
+            items = _split_list_items(bracketed[1:-1])
             return [_parsed_list_item(item) for item in items if item]
 
-    # Check for dict syntax: {key1: value1, key2: value2, ...}
+    # An object is read as JSON only: {"key": "value"}. Text in braces that is
+    # not JSON (the YAML flow form {key: value}) is kept as a string, which a
+    # typed field refuses and an untyped plugin option stores as it is.
     if bracketed.startswith("{") and bracketed.endswith("}"):
         try:
             # Try to parse as JSON
@@ -456,12 +505,14 @@ def _parse_config_value(value: str) -> Any:
             # If not valid JSON, return as string
             return value
 
-    # Handle boolean values
-    if value.lower() == "true":
+    # Handle boolean and null values, with the whitespace around them removed
+    # as a number's is: "false\r" from a CRLF file and "null " were strings.
+    word = bracketed.lower()
+    if word == "true":
         return True
-    elif value.lower() == "false":
+    elif word == "false":
         return False
-    elif value.lower() in ("null", "none"):
+    elif word in ("null", "none"):
         return None
 
     # Try numeric conversions
@@ -485,13 +536,14 @@ def _validated_with_overrides(
     """``config_dict`` validated as an AshConfig, with a string field's refusal
     of an override typed as a number cured by the override's own text.
 
-    _parse_config_value types "007" as the int 7 and "1.10" as a float, so an
-    override could never set a str option to digit text (an account id, a
-    tool version). Where the model refuses such a value as not a string at
-    the place the override landed (``applied``, with the text of each override
-    in ``raw_values``), the value is set back to the text the operator wrote
-    and the document is validated once more. The retyped text is written back
-    into ``applied`` too, in place: the values a section's lines hide
+    _parse_config_value types "007" as the int 7 and "1.10" as a float, "true"
+    as a bool and "null" as None, so an override could never set a str option
+    to such text (an account id, a tool version, the word "true"). Where the
+    model refuses such a value as not a string at the place the override
+    landed (``applied``, with the text of each override in ``raw_values``),
+    the value is set back to the text the operator wrote and the document is
+    validated once more. The retyped text is written back into ``applied``
+    too, in place: the values a section's lines hide
     (AshConfig._override_values) are the string leaves of ``applied``, and
     the number the parse produced is not one, so the text the model now holds
     (an account id among the shapes) would otherwise print in clear. Any
@@ -511,8 +563,7 @@ def _validated_with_overrides(
             ):
                 if (
                     appended
-                    or isinstance(parsed, bool)
-                    or not isinstance(parsed, (int, float))
+                    or isinstance(parsed, (str, list, dict))
                     or tuple(segments) != place
                 ):
                     continue
@@ -610,7 +661,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
         key_path, separator, value = override.partition("=")
         if not separator or not key_path.strip():
             raise ASHConfigValidationError(
-                f"Invalid config override: '{key_path}'. "
+                f"Invalid config override: {_override_shown(key_path)}. "
                 "Expected format: key.path=value"
             )
         keys.append(key_path)
@@ -2114,6 +2165,7 @@ def resolve_config(
         untrusted=untrusted_config,
         overrides=list(operator_overrides),
         reads=reads,
+        default_config=(carried_default_config[0] if carried_default_config else None),
     )
     if overlay is not None and isinstance(overlay.data, dict):
         # The overlay's merged document is the operator's by construction
@@ -2704,6 +2756,7 @@ def resolve_config(
         documents=reads,
         chain=view_chain,
         remedy=tier_two_source.remedy,
+        environment_paths=environment_paths,
     )
     # The same for honor_ignore_files: a false the trusted config, or the file
     # ASH_CONFIG names beside a config of the project's own, wrote in a chain
@@ -2829,9 +2882,17 @@ def resolve_config(
 
 #: The sandbox settings confine_sandbox_grants replaces with the trusted base's,
 #: in the dump's keys. ``mode`` is one of a few names, and is kept as it is.
+#: Every list confine_sandbox_grants puts the trusted base's value in place of
+#: (sandbox_grants.confine_sandbox_grants): the references at each take the
+#: trusted base's. With the last two missing, an in-tree file's reference at
+#: sandbox.read_path_scanners or sandbox.env_scanners kept describing a value
+#: the configuration no longer held, and the trusted value there was not
+#: redacted.
 _CONFINED_SANDBOX_SETTINGS = (
     ("sandbox", "network_scanners"),
     ("sandbox", "extra_read_paths"),
+    ("sandbox", "read_path_scanners"),
+    ("sandbox", "env_scanners"),
 )
 
 
@@ -3982,6 +4043,13 @@ def _with_operator_chain_scanners(
         chain, repository_files, reads, environment_paths, warn=False, roots=roots
     ):
         own = reads.get(Path(file).resolve())
+        if isinstance(own, dict):
+            # As the chain walk read the file for the configuration: each
+            # operator file's relative tool paths taken from its own directory
+            # (config/operator_paths.py). The raw parse held the path as
+            # written, which never equaled the anchored value the scanner
+            # passes, so an operator's relative tool path read as unnamed.
+            own = anchor_document_paths(own, Path(file).resolve().parent)
         scanners = own.get("scanners") if isinstance(own, dict) else None
         if not isinstance(scanners, dict):
             continue
@@ -4559,7 +4627,9 @@ def _resolve_config(
             documents_out.update(overlay.documents)
         if names_out is not None:
             names_out.update(overlay.names)
-        overlaid = AshConfig.model_validate(overlay.data, strict=True)
+        overlaid = AshConfig.model_validate(
+            overlay.data, strict=True, context={"strict_file_load": True}
+        )
         # The overlay is the whole configuration here, so its environment
         # reads are the configuration's: values, rewrites, key mappings and
         # references, as a loaded chain's are.
@@ -5155,7 +5225,13 @@ def validate_config_document(
     that holds pydantic's text.
     """
     try:
-        return AshConfig.model_validate(document.data, strict=True)
+        # The strict_file_load context, as build_config validates a document:
+        # it selects the named refusal of a typed field's environment reference
+        # (RedactedSection's validator), where pydantic's own message calls the
+        # resolved text not-an-integer and names no variable.
+        return AshConfig.model_validate(
+            document.data, strict=True, context={"strict_file_load": True}
+        )
     except ValidationError as e:
         if unquoted is None:
             # Not pydantic's own text, which quotes every input: a mapping key
@@ -5219,9 +5295,26 @@ def split_config_override(override: str) -> Tuple[str, str]:
     key_path, separator, value = override.partition("=")
     if not separator or not key_path.strip():
         raise ASHConfigValidationError(
-            f"Invalid config override: '{override}'. Expected format: key.path=value"
+            f"Invalid config override: {_override_shown(override)}. "
+            "Expected format: key.path=value"
         )
     return key_path, value
+
+
+#: The shape of a key path: dotted names with the separators an override key
+#: may hold, and no blank. An entry with no ``=`` that has this shape is a key
+#: typed without its value, and is quoted; anything else may be a value.
+_KEY_SHAPED_OVERRIDE = re.compile(r"^[A-Za-z0-9_.+$-]{1,80}$")
+
+
+def _override_shown(override: str) -> str:
+    """How a refusal names an override that has no ``=``: quoted when it is
+    key-shaped, else by its length alone. Override refusals name keys and
+    never values (apply_config_overrides), and an entry with no separator can
+    be a value whose key the operator forgot."""
+    if _KEY_SHAPED_OVERRIDE.match(override):
+        return f"'{override}'"
+    return f"an entry of {len(override)} characters with no '=' (not shown)"
 
 
 def _is_a_client_file(path: Path | str) -> bool:
@@ -5503,6 +5596,7 @@ def confine_honor_ignore_files(
     documents: Optional[Mapping[Path, Any]] = None,
     chain: Sequence[Path] = (),
     remedy: str = KEEP_A_SETTING,
+    environment_paths: Collection[Path] = frozenset(),
 ) -> Optional[Tuple[Path, bool]]:
     """Take ``honor_ignore_files`` from the trusted base, never from an untrusted file.
 
@@ -5536,6 +5630,10 @@ def confine_honor_ignore_files(
             of these that is not in *in_tree*.
         remedy: How to keep the setting, ending the warning. ``KEEP_A_SETTING``,
             unless a file's walk stopped.
+        environment_paths: The files of the chain an ``extends`` entry chose
+            with a value read from the environment, which the warning names
+            ``<value>`` as the other confinement warnings do: the path is the
+            variable's value.
 
     Returns:
         None, or, when the operator's own file decided the value (the last file
@@ -5556,7 +5654,7 @@ def confine_honor_ignore_files(
     config.honor_ignore_files = trusted.honor_ignore_files
     if not writers:
         return None
-    files = ", ".join(describe_config_path(path) for path in writers)
+    files = ", ".join(_owned_file_shown(path, environment_paths) for path in writers)
     ASH_LOGGER.warning(
         f"Ignoring honor_ignore_files from {files}: {reason}, and whether the "
         "scanned repository's own .gitignore and .ignore files are honored is the "
@@ -5710,11 +5808,16 @@ def _operator_paths(
     untrusted: bool,
     overrides: Optional[List[str]],
     reads: Optional[Dict[Path, Any]] = None,
+    default_config: Optional[AshConfig] = None,
 ) -> OperatorPaths:
     """Which tool paths in the config the operator named; see path_trust.
 
     The chain's merged ``document`` (or, with no config file, the default
-    config's) when every file of the chain is the operator's
+    config's: ``default_config``, the configuration the load carried out of
+    its one read of the ASH_CONFIG chain, so this record describes the files
+    that load read; without it the chain is resolved again here, a second
+    read outside the load's confinement and caches that a file changed in
+    between could skew) when every file of the chain is the operator's
     (:func:`_operator_wrote`, under every name); only the selected file's own
     writes when that file is the operator's and a base it extends is not; and
     what ``overrides`` set. With no ``scan_root`` there is nothing to judge the
@@ -5733,7 +5836,10 @@ def _operator_paths(
         return record
     if all(_operator_wrote(path, scan_root) for path in [*chain, *names]):
         if document is None:
-            document = get_default_config().model_dump()
+            if default_config is not None:
+                document = default_config.model_dump()
+            else:
+                document = get_default_config().model_dump()
         record.documents = [document]
     elif chain and all(
         _operator_wrote(path, scan_root) for path in [chain[-1], *root_names]
@@ -6937,7 +7043,15 @@ def _load_overlay(
     in the cache, and a base both chains extend is parsed once.
     """
     path = Path(overlay_config_path)
-    if not path.is_file():
+    # os.stat, not Path.is_file: before Python 3.14 is_file raises for an error
+    # other than "not found" (a directory above that cannot be searched), a
+    # raw PermissionError in place of this refusal (check_config_path does the
+    # same). A NUL in the path is a ValueError, refused the same way.
+    try:
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        regular = False
+    if not regular:
         raise ASHConfigSourceError(
             f"Config file '{describe_config_path(path)}' does not exist or is not "
             "a file."
@@ -6996,9 +7110,18 @@ def _refuse_unless_the_operators(
     root = overlay.chain[-1]
     reasons = []
     places: List[str] = []
+    # A base an extends entry chose with a value read from the environment is
+    # named <value>, as every other message names such a file: its path is
+    # the variable's value.
+    hidden = set(overlay.environment_paths)
     for path in others:
         reason, place = _whose_file(path, trees, overlay.names)
-        reasons.append(f"'{describe_config_path(path)}' {reason}")
+        shown = (
+            ENVIRONMENT_VALUE_SHOWN
+            if path in hidden or Path(path).resolve() in hidden
+            else f"'{describe_config_path(path)}'"
+        )
+        reasons.append(f"{shown} {reason}")
         if place not in places:
             places.append(place)
     # A file of the scanned tree is refused for the repository's tier, which the
@@ -7059,11 +7182,21 @@ def operator_config_digest(operator_config_path: Path | str) -> str:
     the plan and the scan (another call rewriting a session's profile, an edit)
     is refused rather than scanned with settings ``--dry-run`` did not report.
     """
+    from automated_security_helper.config.config_sources import read_config_bytes
+
     path = Path(operator_config_path)
     document = resolve_config_document(path, confine_to=default_confinement_root(path))
     digest = hashlib.sha256()
     for member in document.chain:
-        data = Path(member).read_bytes()
-        digest.update(f"{Path(member).as_posix()}\0{len(data)}\0".encode("utf-8"))
+        # The bounded, non-blocking reader the loaders use (the
+        # ASH_CONFIG_MAX_FILE_BYTES bound, no FIFO wait): a plain read_bytes
+        # read without either. A file name the file system encoding cannot
+        # carry is encoded with its escapes, where "utf-8" alone raised.
+        data = read_config_bytes(Path(member))
+        digest.update(
+            f"{Path(member).as_posix()}\0{len(data)}\0".encode(
+                "utf-8", "surrogateescape"
+            )
+        )
         digest.update(data)
     return digest.hexdigest()
