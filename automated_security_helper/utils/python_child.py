@@ -146,11 +146,19 @@ def runs_module_or_code(argv: Sequence[str]) -> bool:
     attached to its module or code (``-mpip``, ``-cCODE``), or combined with other
     short options (``-Bc``), and ``-X``, ``-W`` and ``--check-hash-based-pycs`` take a
     value, attached or as the next argument, that is never the module.
+
+    Every argument is read as text the way subprocess reads it (``os.fsdecode``: a
+    str, bytes or a path-like), so a ``Path`` in argv, which plugins put there, is
+    a script and never an AttributeError out of the spawn.
     """
     if not argv or os.fspath(argv[0]) != sys.executable:
         return False
     options = iter(argv[1:])
-    for arg in options:
+    for raw in options:
+        try:
+            arg = os.fsdecode(raw)
+        except TypeError:
+            return False
         if not arg.startswith("-") or arg == "-" or arg.startswith("--"):
             if arg in _PYTHON_OPTIONS_WITH_A_VALUE:
                 next(options, None)
@@ -189,9 +197,13 @@ def python_module_arguments(options: Sequence[str]) -> Optional[Tuple[str, List[
     module in ASH: ``cli/dependencies.py`` and :func:`uv_child_overrides` both ask
     it, so a spelling one of them accepts the other accepts too.
     """
+    try:
+        words = [os.fsdecode(option) for option in options]
+    except TypeError:
+        return None  # An argument subprocess would refuse too: no module runs.
     index = 0
-    while index < len(options):
-        arg = os.fspath(options[index])
+    while index < len(words):
+        arg = words[index]
         if arg in _PYTHON_OPTIONS_WITH_A_VALUE:
             index += 2
             continue
@@ -207,11 +219,11 @@ def python_module_arguments(options: Sequence[str]) -> Optional[Tuple[str, List[
             value: Optional[str] = arg[position + 1 :]
             if not value:
                 index += 1
-                value = os.fspath(options[index]) if index < len(options) else None
+                value = words[index] if index < len(words) else None
             if letter == "c" or value is None:
                 return None
             if letter == "m":
-                return value, [os.fspath(a) for a in options[index + 1 :]]
+                return value, words[index + 1 :]
             break  # -W or -X took the rest of this argument, or the next one.
         index += 1
     return None

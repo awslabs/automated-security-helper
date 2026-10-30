@@ -90,6 +90,17 @@ def test_runs_module_or_code_stops_at_the_script(argv):
     assert runs_module_or_code(argv) is False
 
 
+def test_a_path_in_argv_is_a_script_and_never_an_error():
+    """Plugins put Paths in argv and subprocess accepts them: a scanner's command
+    `[python, Path("worker.py"), ...]` is a script, read as text. It used to raise
+    AttributeError out of the spawn, so the command never ran."""
+    assert runs_module_or_code([sys.executable, Path("worker.py"), "-m"]) is False
+    assert runs_module_or_code([sys.executable, b"-m", b"uv"]) is True
+    assert uv_child_overrides([sys.executable, Path("worker.py"), "x"]) == {}
+    assert python_module_arguments([Path("worker.py")]) is None
+    assert python_module_arguments([3]) is None  # subprocess refuses it too
+
+
 @pytest.mark.parametrize(
     "options, expected",
     [
