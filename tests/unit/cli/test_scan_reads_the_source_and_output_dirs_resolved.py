@@ -24,7 +24,10 @@ import typer
 
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
-from automated_security_helper.utils.output_dir_links import OUTPUT_WORKING_DIRS
+from automated_security_helper.utils.output_dir_links import (
+    OUTPUT_GITIGNORE_TEXT,
+    OUTPUT_WORKING_DIRS,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -166,19 +169,23 @@ class TestAnOutputDirectoryThatWouldClearTheScannedTreeIsRefused:
                     '"filename": "scan.py", "lineno": 12, "message": "started"}\n'
                 ),
             ),
-            (
+            pytest.param(".gitignore", OUTPUT_GITIGNORE_TEXT, id="gitignore"),
+            pytest.param(
                 ".gitignore",
-                "# ASH's output directory, not part of the scanned tree.\n*\n",
+                OUTPUT_GITIGNORE_TEXT.replace("\n", "\r\n"),
+                id="gitignore-crlf",
             ),
         ],
     )
     def test_an_output_directory_ash_wrote_before_is_still_cleared(
         self, tmp_path, marker, text
     ):
+        """The ``.gitignore`` is written in text mode, so on Windows ASH's own
+        copy has ``\\r\\n`` line ends; the marker is the text, not the bytes."""
         out = tmp_path / "src" / "out"
         (out / "reports").mkdir(parents=True)
         (out / "reports" / "ash.summary.txt").write_text("old\n")
-        (out / marker).write_text(text)
+        (out / marker).write_bytes(text.encode("utf-8"))
 
         run = _scan(source_dir="src", output_dir="src/out")
 

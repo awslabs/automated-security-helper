@@ -343,7 +343,11 @@ def _ash_output_dir(source_dir: str, output_resolved: Path) -> bool:
         if head is not None and _written_by_ash(name, head):
             return True
     head = _marker_head(output_resolved.joinpath(OUTPUT_GITIGNORE))
-    return head is not None and head == OUTPUT_GITIGNORE_TEXT.encode("utf-8")
+    if head is None:
+        return False
+    # ASH writes the file in text mode (output_dir_links.ignore_output_dir_in_git),
+    # so on Windows its line ends are \r\n; the text is compared, not the bytes.
+    return head.replace(b"\r\n", b"\n") == OUTPUT_GITIGNORE_TEXT.encode("utf-8")
 
 
 def _not_clearable(directory: Path) -> Optional[str]:
