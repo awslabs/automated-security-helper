@@ -32,22 +32,42 @@ pytestmark = [
 ]
 
 
+#: A value of the shape the masking propagates to other files: at least
+#: ``MIN_PROPAGATED_VALUE_LENGTH`` characters, not letters alone, not repetitive
+#: (``secret_masking._propagates``). A short word-like value such as ``hunter2``
+#: is below that floor and is left where it stands, so a test that plants one
+#: measures the floor, not the walk.
+VALUE = "zzReportValue0071Kq"
+
+
 def test_a_report_behind_a_linked_directory_is_left_as_it_was(tmp_path):
     project_output = tmp_path / "out" / "projects" / "api"
     (project_output / "reports").mkdir(parents=True)
     inside = project_output / "reports" / "ash.summary.txt"
-    inside.write_text("token=hunter2\n", encoding="utf-8")
+    inside.write_text(f"token={VALUE}\n", encoding="utf-8")
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     reached = outside / "notes.txt"
-    reached.write_text("token=hunter2\n", encoding="utf-8")
+    reached.write_text(f"token={VALUE}\n", encoding="utf-8")
     (project_output / "linked").symlink_to(outside, target_is_directory=True)
 
-    _mask_project_output(project_output, {"hunter2"}, [])
+    _mask_project_output(project_output, {VALUE}, [])
 
     # The report inside the tree is masked; the file behind the link is not
     # touched, and the link itself still points where it did.
-    assert "hunter2" not in inside.read_text(encoding="utf-8")
-    assert reached.read_text(encoding="utf-8") == "token=hunter2\n"
+    assert VALUE not in inside.read_text(encoding="utf-8")
+    assert reached.read_text(encoding="utf-8") == f"token={VALUE}\n"
     assert (project_output / "linked").is_symlink()
     assert (project_output / "linked").resolve() == outside.resolve()
+
+
+def test_a_value_below_the_propagation_floor_is_left_in_the_report(tmp_path):
+    """Must-not-flag control: the walk reaches the file, the floor keeps the value."""
+    project_output = tmp_path / "out" / "projects" / "api"
+    (project_output / "reports").mkdir(parents=True)
+    inside = project_output / "reports" / "ash.summary.txt"
+    inside.write_text("token=hunter2\n", encoding="utf-8")
+
+    _mask_project_output(project_output, {"hunter2"}, [])
+
+    assert inside.read_text(encoding="utf-8") == "token=hunter2\n"

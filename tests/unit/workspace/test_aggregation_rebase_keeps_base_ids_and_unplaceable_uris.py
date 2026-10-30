@@ -129,6 +129,23 @@ def test_a_relative_uri_under_a_scanners_own_base_is_placed_through_that_base():
     assert unconvertible == 0
 
 
+def test_a_relative_uri_under_a_deeper_base_is_placed_through_that_base():
+    """Control for the root-base case: a base with a path of its own joins too."""
+    rebased, unconvertible = rebase_run_for_project(
+        _run(
+            {"uri": "api/src/app.py", "uriBaseId": "%SRCROOT%"},
+            base_ids={"%SRCROOT%": {"uri": "file:///ws/"}},
+        ),
+        PROJECT,
+    )
+
+    artifact = _artifact(rebased)
+    assert artifact["uri"] == "api/src/app.py"
+    assert artifact["uriBaseId"] == "%SRCROOT%"
+    assert rebased["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
+    assert unconvertible == 0
+
+
 def test_a_relative_uri_under_a_base_outside_the_project_is_counted_not_anchored():
     rebased, unconvertible = rebase_run_for_project(
         _run(

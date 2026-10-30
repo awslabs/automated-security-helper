@@ -522,7 +522,15 @@ def rebase_run_for_project(
                     # path read back through the project, or the two
                     # coordinates name two files. The artifact itself stays as
                     # the scanner wrote it: its uri and its uriBaseId agree.
-                    joined = base_uri.rstrip("/") + "/" + str(uri).lstrip("/")
+                    # Joined as a SARIF consumer joins them (3.4.4: a base ends
+                    # with its separator). Not `rstrip("/")` on the base: that
+                    # ate the scheme's own slashes of a filesystem-root base,
+                    # `file:///` -> `file:`, and the joined text then read as
+                    # unrooted, so the uri was placed at the project root as if
+                    # it had no base at all.
+                    joined = (
+                        base_uri if base_uri.endswith("/") else base_uri + "/"
+                    ) + str(uri).lstrip("/")
                     anchored = project_relative_uri(joined, project.path)
                     if anchored is None:
                         # Inside the base, outside this project: counted, and
