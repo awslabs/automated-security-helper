@@ -1,3 +1,4 @@
+require 'json'
 require 'cfn-nag/custom_rules/base'
 require 'cfn-nag/violation'
 require 'cfn-model/parser/policy_document_parser'
@@ -20,10 +21,15 @@ class ResourcePolicyStarAccessVerbPolicyRule < BaseRule
   def audit_impl(cfn_model)
     logical_resource_ids = []
     unread_actions = []
+    unread_policies = []
     limited_resources = []
     cfn_model.resources.values.each do |resource|
 
-      # If the resource has an IAM resource access policy
+      # If the resource has an IAM resource access policy. Only the AccessPolicies
+      # property is read: it is the resource policy of an Elasticsearch or OpenSearch
+      # domain. A policy a resource carries under another name (an S3 BucketPolicy's
+      # PolicyDocument, a KMS key's KeyPolicy, an SQS QueuePolicy, an SNS TopicPolicy)
+      # is not read here; cfn_nag ships rules of its own for those resources.
       unless (resource.accessPolicies.nil?) then
         # cfn_model is passed because PolicyDocumentParser#parse requires it; see the same
         # call in StarResourceAccessPolicyRule.rb for why the one-argument form was wrong
@@ -33,6 +39,15 @@ class ResourcePolicyStarAccessVerbPolicyRule < BaseRule
         # first branch when it parses, so a public value in the second would not be seen.
         document, limited = AccessPolicyReading.policy_document(cfn_model, resource)
         limited_resources << resource.logical_resource_id if limited
+        # A JSON string, or an Fn::Sub or Fn::Join cfn-model resolved to one, is parsed
+        # before it reaches PolicyDocumentParser; see StarResourceAccessPolicyRule.rb.
+        if document.is_a?(String) then
+          document = parse_policy_text(document)
+          if document.nil? then
+            unread_policies << resource.logical_resource_id
+            next
+          end
+        end
         parsed_resource_policy = PolicyDocumentParser.new().parse(cfn_model, document)
         parsed_resource_policy.statements.each do |statement|
 
@@ -107,8 +122,29 @@ class ResourcePolicyStarAccessVerbPolicyRule < BaseRule
       $stderr.puts(AccessPolicyReading.limit_warning(self.class.name, logical_id))
     end
 
+    unread_policies.uniq.each do |logical_id|
+      $stderr.puts(
+        format(
+          "WARNING: ResourcePolicyStarAccessVerbPolicyRule: the AccessPolicies of %s is a " \
+          "string that is not a JSON document; the rule cannot read it, so the policy was " \
+          "not checked",
+          logical_id
+        )
+      )
+    end
+
     # A resource is added once per match: once per matching statement, and once per
     # matching action in a statement. The result lists each resource once.
     logical_resource_ids.uniq
+  end
+
+  private
+
+  # The policy document a JSON string holds, or nil when the string is not one.
+  def parse_policy_text(text)
+    parsed = JSON.parse(text)
+    parsed.is_a?(Hash) ? parsed : nil
+  rescue JSON::ParserError
+    nil
   end
 end
