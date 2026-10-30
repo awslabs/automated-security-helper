@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import contextlib
+import copy
 import os
 import stat
 import uuid
@@ -210,6 +211,15 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
     refuse unknown keys. So a computed field is described and never required
     (``model_fields_schema``), and an excluded field is described and never
     required (``field_is_present``, ``field_is_required``).
+
+    A model that loads a field by its Python name as well as by its alias
+    (``validate_by_name``: the CycloneDX models, whose ``bom-ref`` and
+    ``mime-type`` a results file written before their dumps used aliases holds
+    as ``bom_ref`` and ``mime_type``) is described with both names
+    (``model_schema``): the alias as the dump writes it, and the Python name
+    beside it with the same schema, so a file the load accepts is not refused
+    by the model's ``additionalProperties: false``. A required aliased field is
+    required under either name.
     """
 
     def field_is_present(self, field: Any) -> bool:
@@ -269,7 +279,40 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
             self._under_default.pop()
         if is_model and issubclass(cls, _stored_config_bases()):
             json_schema["additionalProperties"] = True
+        if is_model and self.by_alias and cls.model_config.get("validate_by_name"):
+            self._describe_python_names(cls, json_schema)
         return json_schema
+
+    @staticmethod
+    def _describe_python_names(cls: Any, json_schema: Any) -> None:
+        """Describe each aliased field of ``cls`` under its Python name too.
+
+        The load reads either name (``validate_by_name``), so the schema admits
+        either: the Python name gets a copy of the alias's schema, and a field
+        the alias makes required is required under one name or the other
+        instead of under the alias alone.
+        """
+        properties = json_schema.get("properties")
+        if not isinstance(properties, dict):
+            return
+        required = list(json_schema.get("required", []))
+        either_name = []
+        for name, info in cls.model_fields.items():
+            alias = info.serialization_alias or info.alias
+            if not alias or alias == name or alias not in properties:
+                continue
+            properties.setdefault(name, copy.deepcopy(properties[alias]))
+            if alias in required:
+                required.remove(alias)
+                either_name.append(
+                    {"anyOf": [{"required": [alias]}, {"required": [name]}]}
+                )
+        if either_name:
+            if required:
+                json_schema["required"] = required
+            else:
+                json_schema.pop("required", None)
+            json_schema.setdefault("allOf", []).extend(either_name)
 
     def _admits_reference(self) -> bool:
         """Whether the field being generated is a defaulted field of a stored
