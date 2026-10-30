@@ -59,6 +59,13 @@ def project_dir(tmp_path: Path, monkeypatch, snapshot_normalizer) -> Path:
     project = tmp_path / "demo-project"
     project.mkdir()
     monkeypatch.chdir(project)
+    # The wizard writes no config whose ash_plugin_modules a scan would refuse,
+    # and a scan refuses a module that fails to import (exit 3, "which failed to
+    # import"), so the module the answers add is a real, empty package on the
+    # import path for the test; it declares no plugins, which is admitted.
+    (tmp_path / "my_org_ash_plugins").mkdir()
+    (tmp_path / "my_org_ash_plugins" / "__init__.py").write_text("", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
     for spelling in (PurePosixPath(DISPLAYED_CWD), PureWindowsPath(DISPLAYED_CWD)):
         snapshot_normalizer.add_root(spelling, "WORKSPACE")
     return project
