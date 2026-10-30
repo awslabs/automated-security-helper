@@ -2479,9 +2479,11 @@ def test_the_bash_wrapper_refuses_when_it_cannot_judge_another_checkout():
     assert 'refuse_unjudged "${given}" "${reason}"' in judged, judged
     assert judged.count("refuse_unjudged ") == 1, "one undecided exit, one refusal"
 
-    helper = bash.index("refuse_unjudged() {")
-    # The function's body, to its closing brace at column 0.
-    body = bash[helper : bash.index("\n}\n", helper) + 3]
+    # The function's body, to its closing brace at column 0, read in the raw text:
+    # _flat folds every newline into a space, so the brace line is found in ``raw``
+    # and the body is flattened afterwards for the same whitespace-blind reads.
+    helper = raw.index("refuse_unjudged() {")
+    body = _flat(raw[helper : raw.index("\n}\n", helper) + 3])
     assert body.index("refuse ") < body.index("could not be judged"), body
     assert "git checkout other than the scanned one" in body, body
     assert "without the mark a local scan's judgment would give it" in body, body
