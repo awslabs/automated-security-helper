@@ -85,10 +85,19 @@ class SandboxScope:
     network_limit: Optional[List[str]] = None
     read_path_scanners: List[str] = field(default_factory=list)
     env_scanners: List[str] = field(default_factory=list)
-    #: Spawns this scope refused (the backend could not plan them), and why the last
-    #: one was. A converter's row reads them: a refused spawn converted nothing.
+    #: Spawns this scope refused (``SandboxUnavailable``: the policy or the backend
+    #: would not have them), and why the last one was. A converter's row reads
+    #: them: a refused spawn converted nothing.
     refused_spawns: int = 0
     last_refusal: Optional[str] = None
+    #: Spawns whose planning failed some other way (a program the backend could not
+    #: find, a private directory it could not make), and the last failure's type and
+    #: text. Kept apart from the refusals: the sandbox did not refuse these, and a
+    #: converter's row names them for what they are. A backend that only meets the
+    #: failure once the child starts (bwrap's missing program is Popen's
+    #: ``FileNotFoundError``) never counts here, so the count is a floor.
+    failed_spawns: int = 0
+    last_failure: Optional[str] = None
     #: The owning plugin's env-read values, for the one line this module logs
     #: itself: a planned argv can carry a value the plugin's config read from
     #: the environment.
@@ -138,6 +147,10 @@ class RefusingScope:
     #: Spawns refused under this scope; see ``SandboxScope.refused_spawns``.
     refused_spawns: int = 0
     last_refusal: Optional[str] = None
+    #: Never counted here (every spawn under this scope is refused before any
+    #: planning), kept so a converter's row reads one shape from either scope.
+    failed_spawns: int = 0
+    last_failure: Optional[str] = None
 
 
 _ACTIVE: contextvars.ContextVar["SandboxScope | RefusingScope | None"] = (
@@ -766,7 +779,8 @@ def converter_run_scope(
     spawns get a scanner's policy, with the converter's results directory as the one
     writable place. When the sandbox cannot be provided the scope refuses every spawn,
     so a tool never runs unsandboxed. Yields the scope, None with the sandbox off: its
-    ``refused_spawns`` says whether the converter lost inputs to a refusal.
+    ``refused_spawns`` says whether the converter lost inputs to a refusal, and its
+    ``failed_spawns`` whether it lost them to a plan that failed some other way.
     """
     if not sandbox_requested(context):
         yield None
@@ -1054,9 +1068,15 @@ def prepare_spawn(
 ) -> Optional[SpawnPlan]:
     """The sandboxed command for this spawn, or None when no scope is active.
 
-    A spawn the plan refuses (SandboxUnavailable) and one the planning failed
-    for any other way are both counted on the scope: either way the spawn did
-    not run, and a converter's row reads the count for what it lost.
+    A spawn the plan refuses (SandboxUnavailable) is counted on the scope as a
+    refusal; one whose planning failed any other way (a program the backend could
+    not find, a private directory it could not make) is counted apart, as a
+    failure. Either way the spawn did not run and a converter's row reads both
+    counts for what it lost, but only the first was the sandbox's refusal: the
+    second is the same error the spawn would have raised unsandboxed, met at
+    planning time by a backend that resolves the program itself (Landlock) and
+    at Popen time by one that does not (bwrap), so a converter's row must not
+    call it a refusal.
     """
     scope = _ACTIVE.get()
     if scope is None:
@@ -1072,8 +1092,8 @@ def prepare_spawn(
         scope.last_refusal = str(refusal)
         raise
     except Exception as failure:
-        scope.refused_spawns += 1
-        scope.last_refusal = f"{type(failure).__name__}: {failure}"
+        scope.failed_spawns += 1
+        scope.last_failure = f"{type(failure).__name__}: {failure}"
         raise
 
 

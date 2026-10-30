@@ -17,6 +17,12 @@ the plan's writable-root registrations had been made and before anything could
 release them, and ran two arguments holding blanks into one. The record now shows
 each argument's ``str``, shell-quoted; an env-read value whose quoted spelling
 differs from its text is hidden in both spellings.
+
+``prepare_spawn`` used to count a plan that failed for any reason as a sandbox
+refusal, so a program Landlock could not find read on a converter's row as "the
+scanner sandbox refused" it while the same missing program under bwrap, failing at
+Popen, was never counted. A failed plan is now counted apart (``failed_spawns``,
+``last_failure``), and only a ``SandboxUnavailable`` is a refusal.
 """
 
 from __future__ import annotations
@@ -260,9 +266,9 @@ class _Logger:
         pass
 
 
-def _scope(tmp_path, **fields) -> scope.SandboxScope:
+def _scope(tmp_path, backend=None, **fields) -> scope.SandboxScope:
     return scope.SandboxScope(
-        backend=_PlanningBackend(),
+        backend=backend or _PlanningBackend(),
         scanner_name="scanner",
         requirements=SandboxRequirements(),
         source_dir=tmp_path / "src",
@@ -395,3 +401,69 @@ def test_a_value_that_is_not_text_does_not_stop_the_spawn(tmp_path, debug_record
 
     assert plan.argv == ["tool", "--x=it's-text"]
     assert len(debug_record.debug_lines) == 1
+
+
+class _ProgramlessBackend:
+    """A backend that resolves the program itself and finds none, as Landlock does."""
+
+    name = "landlock"
+
+    def plan(self, argv, env, policy):
+        raise FileNotFoundError(f"no program named {argv[0]!r} was found")
+
+
+def test_a_program_the_backend_cannot_find_is_a_failed_spawn_not_a_refusal(
+    tmp_path, debug_record
+):
+    """Under Landlock a missing program fails at planning time; under bwrap the
+    same program fails at Popen and the scope never sees it. Counting the first as
+    a sandbox refusal made the converter's row differ by backend for one missing
+    tool; it is counted as a failed plan, with the error's type and text."""
+    sandbox_scope = _scope(tmp_path, backend=_ProgramlessBackend())
+
+    with scope.sandbox_scope(sandbox_scope):
+        with pytest.raises(FileNotFoundError):
+            scope.prepare_spawn(["tool", "--version"], {}, None)
+
+    # Red at the parent: refused_spawns 1, last_refusal "FileNotFoundError: ...".
+    assert sandbox_scope.failed_spawns == 1
+    assert (sandbox_scope.last_failure or "").startswith("FileNotFoundError: ")
+    assert "'tool'" in (sandbox_scope.last_failure or "")
+    assert sandbox_scope.refused_spawns == 0
+    assert sandbox_scope.last_refusal is None
+
+
+def test_a_refusal_is_counted_as_a_refusal_only(tmp_path, monkeypatch):
+    """The control: a SandboxUnavailable from the plan is a refusal, and the
+    failure counter does not move."""
+
+    def refusing(sandbox_scope, argv, env, cwd):
+        raise SandboxUnavailable("the policy has no writable root for this tool")
+
+    monkeypatch.setattr(scope, "_plan_spawn", refusing)
+    sandbox_scope = _scope(tmp_path)
+
+    with scope.sandbox_scope(sandbox_scope):
+        with pytest.raises(SandboxUnavailable):
+            scope.prepare_spawn(["tool"], {}, None)
+
+    assert sandbox_scope.refused_spawns == 1
+    assert sandbox_scope.last_refusal == "the policy has no writable root for this tool"
+    assert sandbox_scope.failed_spawns == 0
+    assert sandbox_scope.last_failure is None
+
+
+def test_a_refusing_scope_counts_refusals_and_carries_the_failure_fields():
+    """A RefusingScope refuses before any planning, so it counts refusals only, and
+    it carries the failure fields so a converter's row reads one shape from either
+    scope."""
+    refusing = scope.RefusingScope(scanner_name="tool", reason="no backend")
+
+    with scope.sandbox_scope(refusing):
+        with pytest.raises(SandboxUnavailable):
+            scope.prepare_spawn(["tool"], {}, None)
+
+    assert refusing.refused_spawns == 1
+    assert "no backend" in (refusing.last_refusal or "")
+    assert refusing.failed_spawns == 0
+    assert refusing.last_failure is None

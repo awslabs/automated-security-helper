@@ -194,17 +194,30 @@ def _refused_over_limit(plugin_instance: Any) -> str:
 def _conversion_failure(run_scope: Any) -> str | None:
     """Why a converter that returned normally still lost coverage, or None.
 
-    The spawns the scanner sandbox refused while its ``convert()`` ran, which
-    converted nothing. The inputs a converter itself could not convert are its
-    ``failed_inputs`` (``_input_record_fields``).
+    The spawns the scanner sandbox refused while its ``convert()`` ran, and the
+    ones whose sandbox plan failed some other way (a program the backend could
+    not find, a private directory it could not make); either converted nothing.
+    The two are named apart: only the first is the sandbox's refusal, and a
+    failed plan is the error the spawn would have raised unsandboxed. The inputs
+    a converter itself could not convert are its ``failed_inputs``
+    (``_input_record_fields``).
     """
     refused = getattr(run_scope, "refused_spawns", 0) or 0
-    if not refused:
+    failed = getattr(run_scope, "failed_spawns", 0) or 0
+    if not refused and not failed:
         return None
-    return (
-        f"could not convert: the scanner sandbox refused {refused} process(es) it "
-        f"started ({getattr(run_scope, 'last_refusal', None) or 'no reason given'})"
-    )
+    reasons = []
+    if refused:
+        reasons.append(
+            f"the scanner sandbox refused {refused} process(es) it started "
+            f"({getattr(run_scope, 'last_refusal', None) or 'no reason given'})"
+        )
+    if failed:
+        reasons.append(
+            f"the sandbox could not plan {failed} process(es) it started "
+            f"({getattr(run_scope, 'last_failure', None) or 'no reason given'})"
+        )
+    return "could not convert: " + "; ".join(reasons)
 
 
 def _failure_field(failure: str | None) -> Dict[str, Any]:

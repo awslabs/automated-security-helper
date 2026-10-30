@@ -317,6 +317,68 @@ class TestRefusedSpawnsAreNotNothingToConvert:
         assert any("No files to convert" in d for d in _descriptions(progress))
 
 
+class TestFailedPlansAreNotRefusals:
+    """A spawn whose sandbox plan failed is lost coverage, named for what it is.
+
+    Under Landlock a program that is not installed fails at planning time
+    (``_landlock_program`` raises ``FileNotFoundError``); the scope counts it as
+    a failed spawn, not a refusal, and the converter's row says the sandbox
+    could not plan it instead of saying the sandbox refused it.
+    """
+
+    @pytest.fixture
+    def failed(self, monkeypatch):
+        @contextlib.contextmanager
+        def scope(plugin, context):
+            yield SimpleNamespace(
+                refused_spawns=0,
+                last_refusal=None,
+                failed_spawns=1,
+                last_failure="FileNotFoundError: no program named 'tool' was found",
+            )
+
+        monkeypatch.setattr(convert_phase, "converter_run_scope", scope)
+
+    def test_the_row_names_a_failed_plan(self, plugin_context, failed):
+        results, events, progress = _observed(
+            plugin_context, [_converter("plan-failed")]
+        )
+
+        # Red at the parent: the row read "No files to convert", because only
+        # refused_spawns was read and a failed plan was not counted there.
+        failure = results.converter_results["plan-failed"].failure
+        assert failure is not None
+        assert "could not plan 1 process" in failure
+        assert "FileNotFoundError" in failure
+        assert "refused" not in failure
+        mine = [d for d in _descriptions(progress) if "plan-failed" in d]
+        assert any("could not plan 1 process" in d for d in mine), mine
+        assert not any("No files to convert" in d for d in mine), mine
+        complete = [kw["message"] for name, kw in events if "CONVERT_COMPLETE" in name]
+        assert len(complete) == 1 and "could not plan 1 process" in complete[0]
+        assert len(incomplete_converters(results)) == 1
+
+    def test_a_refusal_and_a_failed_plan_are_both_named(
+        self, plugin_context, monkeypatch
+    ):
+        @contextlib.contextmanager
+        def scope(plugin, context):
+            yield SimpleNamespace(
+                refused_spawns=2,
+                last_refusal="denied by the test",
+                failed_spawns=1,
+                last_failure="RuntimeError: plan exploded",
+            )
+
+        monkeypatch.setattr(convert_phase, "converter_run_scope", scope)
+        results = _run(plugin_context, [_converter("both")])
+
+        failure = results.converter_results["both"].failure
+        assert "sandbox refused 2 process" in failure
+        assert "could not plan 1 process" in failure
+        assert "RuntimeError" in failure
+
+
 class TestNoConverterRanSaysWhy:
     def test_a_missing_tool_is_not_conversion_turned_off(self, plugin_context, caplog):
         missing = _converter("tool-missing", answer=False)
