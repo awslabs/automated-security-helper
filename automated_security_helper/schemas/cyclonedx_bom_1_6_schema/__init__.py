@@ -12,10 +12,8 @@ from enum import Enum
 from typing import Annotated, List, Literal, Optional, Union
 
 from pydantic import (
-    AnyUrl,
     BaseModel,
     ConfigDict,
-    EmailStr,
     Field,
     RootModel,
     StringConstraints,
@@ -36,6 +34,32 @@ OpenCreIdentifier = Annotated[str, StringConstraints(pattern=r"^CRE:[0-9]+-[0-9]
 # passes none, so the flag on CycloneDXReport alone left a nested `bom_ref` under
 # its Python name in a default dump, and the dumped document then failed
 # re-validation under extra="forbid".
+#
+# Not from the codegen: a BOM is a scanner's document that ASH stores and
+# re-emits, so the model keeps its values as written.
+# - Contact and action e-mails are text (the schema's format is idn-email, an
+#   annotation). The codegen's EmailStr refused what email-validator calls
+#   undeliverable (a dotless or special-use domain) and rewrote what it accepted
+#   (the domain casefolded), so one such address refused the whole BOM or changed
+#   it on the way through, and the refusal quoted the address.
+# - A spec default on an optional field ("required" for Component.scope,
+#   "affected" for Versions.status, "text/plain" for Attachment.contentType, the
+#   Volume mode and the Swid defaults) is a consumer's assumption, not a value the
+#   BOM carries, so those fields default to None. As plain strings on enum-typed
+#   fields they raised a serializer warning on every dump, and the full dump a
+#   results file keeps wrote them, so the SBOM `ash report` re-emitted stated
+#   fields the scanner never wrote.
+# - LicenseChoice entries are typed (LicenseEntry, LicenseExpression) where the
+#   codegen left a bare list, so a malformed entry is refused and a license's
+#   fields are validated; a license id, known to the SPDX list in this snapshot
+#   or not, is kept as the text the BOM carries (the schema still lists the known
+#   ids), because the SPDX list grows faster than this snapshot and a scanner's
+#   BOM may carry a newer id, which must not refuse the stored BOM when a results
+#   file is read by another ASH version. The spec's rule that a BOM holds
+#   either license entries or exactly one expression is not enforced: a scanner
+#   may write several expression entries, and that BOM still loads.
+# - Signer.algorithm is text where the codegen used AnyUrl, which re-emitted a
+#   URI normalized (a trailing slash added to a path-less one).
 
 
 class BomFormat(str, Enum):
@@ -145,7 +169,7 @@ class OrganizationalContact(BaseModel):
         examples=["Contact name"],
         title="Name",
     )
-    email: Optional[EmailStr] = Field(
+    email: Optional[str] = Field(
         None,
         description="The email address of the contact.",
         examples=["firstname.lastname@example.com"],
@@ -191,7 +215,7 @@ class Attachment(BaseModel):
     )
 
     contentType: Optional[str] = Field(
-        "text/plain",
+        None,
         description="Specifies the format and nature of the data being attached, helping systems correctly interpret and process the content. Common content type examples include `application/json` for JSON data and `text/plain` for plan text documents.\n [RFC 2045 section 5.1](https://www.ietf.org/rfc/rfc2045.html#section-5.1) outlines the structure and use of content types. For a comprehensive list of registered content types, refer to the [IANA media types registry](https://www.iana.org/assignments/media-types/media-types.xhtml).",
         examples=["text/plain", "application/json", "image/png"],
         title="Content-Type",
@@ -260,8 +284,44 @@ class LicenseAcknowledgementEnumeration(str, Enum):
     concluded = "concluded"
 
 
+class LicenseEntry(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    license: License = Field(
+        ...,
+        description="A license by SPDX identifier or by name, with its optional details.",
+        title="License",
+    )
+
+
+class LicenseExpression(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        serialize_by_alias=True,
+    )
+
+    expression: str = Field(
+        ...,
+        description="A valid SPDX license expression.\nRefer to https://spdx.org/specifications for syntax requirements",
+        examples=[
+            "Apache-2.0 AND (MIT OR GPL-2.0-only)",
+            "GPL-3.0-only WITH Classpath-exception-2.0",
+        ],
+        title="SPDX License Expression",
+    )
+    acknowledgement: Optional[LicenseAcknowledgementEnumeration] = None
+    bom_ref: Optional[RefType] = Field(
+        None,
+        alias="bom-ref",
+        description="An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+        title="BOM Reference",
+    )
+
+
 class LicenseChoice(RootModel):
-    root: List = Field(
+    root: List[Union[LicenseEntry, LicenseExpression]] = Field(
         ...,
         description="EITHER (list of SPDX licenses and/or named licenses) OR (tuple of one SPDX License Expression)",
         title="License Choice",
@@ -359,7 +419,7 @@ class IdentifiableAction(BaseModel):
         description="The name of the individual who performed the action",
         title="Name",
     )
-    email: Optional[EmailStr] = Field(
+    email: Optional[str] = Field(
         None,
         description="The email address of the individual who performed the action",
         title="E-mail",
@@ -1126,7 +1186,7 @@ class Volume(BaseModel):
         None, description="The name of the volume instance", title="Name"
     )
     mode: Optional[Mode] = Field(
-        "filesystem", description="The mode for the volume instance.", title="Mode"
+        None, description="The mode for the volume instance.", title="Mode"
     )
     path: Optional[str] = Field(
         None,
@@ -1828,15 +1888,15 @@ class Swid(BaseModel):
         ..., description="Maps to the name of a SoftwareIdentity.", title="Name"
     )
     version: Optional[str] = Field(
-        "0.0", description="Maps to the version of a SoftwareIdentity.", title="Version"
+        None, description="Maps to the version of a SoftwareIdentity.", title="Version"
     )
     tagVersion: Optional[int] = Field(
-        0,
+        None,
         description="Maps to the tagVersion of a SoftwareIdentity.",
         title="Tag Version",
     )
     patch: Optional[bool] = Field(
-        False, description="Maps to the patch of a SoftwareIdentity.", title="Patch"
+        None, description="Maps to the patch of a SoftwareIdentity.", title="Patch"
     )
     text: Optional[Attachment] = Field(
         None,
@@ -2010,6 +2070,8 @@ class License1(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        # A recognized SPDX id is stored as its plain string, as an unknown one is.
+        use_enum_values=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2018,7 +2080,7 @@ class License1(BaseModel):
         description="An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
         title="BOM Reference",
     )
-    id: spdx.Schema = Field(
+    id: Union[spdx.Schema, str] = Field(
         ...,
         description="A valid SPDX license identifier. If specified, this value must be one of the enumeration of valid SPDX license identifiers defined in the spdx.schema.json (or spdx.xml) subschema which is synchronized with the official SPDX license list.",
         examples=["Apache-2.0"],
@@ -2207,6 +2269,8 @@ class License2(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         serialize_by_alias=True,
+        # A recognized SPDX id is stored as its plain string, as an unknown one is.
+        use_enum_values=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2215,7 +2279,7 @@ class License2(BaseModel):
         description="An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
         title="BOM Reference",
     )
-    id: Optional[spdx.Schema] = Field(
+    id: Optional[Union[spdx.Schema, str]] = Field(
         None,
         description="A valid SPDX license identifier. If specified, this value must be one of the enumeration of valid SPDX license identifiers defined in the spdx.schema.json (or spdx.xml) subschema which is synchronized with the official SPDX license list.",
         examples=["Apache-2.0"],
@@ -2480,7 +2544,7 @@ class Versions(BaseModel):
         title="Version Range",
     )
     status: Optional[AffectedStatus] = Field(
-        "affected",
+        None,
         description="The vulnerability status for the version or range of versions.",
         title="Status",
     )
@@ -2500,7 +2564,7 @@ class Versions1(BaseModel):
         title="Version Range",
     )
     status: Optional[AffectedStatus] = Field(
-        "affected",
+        None,
         description="The vulnerability status for the version or range of versions.",
         title="Status",
     )
@@ -2729,7 +2793,7 @@ class Signer(BaseModel):
         extra="forbid",
     )
 
-    algorithm: Union[Algorithm, AnyUrl]
+    algorithm: Union[Algorithm, str]
     keyId: Optional[str] = Field(
         None,
         description="Optional. Application specific string identifying the signature key.",
@@ -4612,7 +4676,7 @@ class Component(BaseModel):
         title="Component Description",
     )
     scope: Optional[Scope] = Field(
-        "required",
+        None,
         description="Specifies the scope of the component. If scope is not specified, 'required' scope SHOULD be assumed by the consumer of the BOM.",
         title="Component Scope",
     )
@@ -5080,6 +5144,8 @@ class CycloneDXReport(BaseModel):
     )
 
 
+LicenseEntry.model_rebuild()
+LicenseChoice.model_rebuild()
 Service.model_rebuild()
 Targets.model_rebuild()
 CycloneDXReport.model_rebuild()
