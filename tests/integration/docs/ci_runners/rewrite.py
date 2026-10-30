@@ -3862,6 +3862,10 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
     applied: list[Applied] = []
     text = _rewrite_artifact_actions(text, where, applied)
     document = _load(text, where)
+    # The action pins are checked on the text as given: the swap above has already
+    # moved the two artifact actions to their pinned releases, so a tag or a branch on
+    # either ("@v4", "@main") would pass a check of the swapped text.
+    original_jobs = _load(original, where).get("jobs")
     root = _compose(text, where)
     env = document.get("env") if isinstance(document, dict) else None
     source = env.get("ASH_UVX_SOURCE") if isinstance(env, dict) else None
@@ -3959,13 +3963,18 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
                 'ASH only through uvx --from "${ASH_UVX_SOURCE}", so this '
                 "could run an ASH other than the one the print records"
             )
-    for job_id, body in parsed_jobs.items():
+    checked_jobs = original_jobs if isinstance(original_jobs, dict) else parsed_jobs
+    for job_id, body in checked_jobs.items():
+        if not isinstance(body, dict):
+            continue
         if "uses" in body:
             raise RewriteError(
                 f"{where}: the job {job_id} uses {body['uses']}, a workflow whose "
                 "steps the checks do not read"
             )
         for step in body.get("steps") or ():
+            if not isinstance(step, dict):
+                continue
             uses = step.get("uses")
             name, at, pin = str(uses).rpartition("@")
             if uses is not None and not (

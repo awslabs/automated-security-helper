@@ -3673,6 +3673,16 @@ def test_a_bump_of_the_scan_workflow_s_action_pins_is_kept(pin):
     with pytest.raises(error) as raised:
         rewrite_called("run-ash-security-scan.yml", tagged, where="tagged")
     assert f"uses {name}@v1, an action other than" in str(raised.value)
+    # The two artifact actions are swapped to their pinned releases before the checks
+    # run, so the pin check reads the workflow as given: a tag or a branch on either is
+    # refused as on any other action, not passed because the swap pinned it.
+    upload = re.search(r"uses: (actions/upload-artifact)@([0-9a-f]{40})", text)
+    assert upload, "the scan workflow uploads an artifact"
+    for ref in ("v4", "main"):
+        moved = text.replace(f"{upload[1]}@{upload[2]}", f"{upload[1]}@{ref}", 1)
+        with pytest.raises(error) as raised:
+            rewrite_called("run-ash-security-scan.yml", moved, where="moved")
+        assert f"uses {upload[1]}@{ref}, an action other than" in str(raised.value), ref
 
 
 def _here_document_step(opening: str) -> str:
