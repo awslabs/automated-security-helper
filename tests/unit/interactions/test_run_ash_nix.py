@@ -246,9 +246,9 @@ class TestShownFlakeRef:
     def test_a_urls_userinfo_is_not_shown(self):
         # A token an operator put in ASH_NIX_FLAKE_REF so nix can fetch the flake is a
         # credential; the line reaches the console and ash.log in the output directory.
-        shown = shown_flake_ref("git+https://user:token-1@host/org/repo?ref=main")
+        shown = shown_flake_ref("git+https://alice:token-1@host/org/repo?ref=main")
         assert "token-1" not in shown
-        assert "user" not in shown
+        assert "alice" not in shown
         assert shown == "git+https://<userinfo>@host/org/repo?ref=main"
 
     def test_a_token_alone_before_the_host_is_not_shown(self):
