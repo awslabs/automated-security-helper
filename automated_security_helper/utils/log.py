@@ -43,6 +43,17 @@ from automated_security_helper.utils.terminal_text import (
 )
 
 
+#: The frames a level method of ASHLogger (verbose, trace, the ones
+#: addLoggingLevel installs) adds to the stacklevel a caller asked for, so a
+#: record names the caller's file and line rather than the wrapper's. One on
+#: Python 3.11 and later, where findCaller starts at its own frame and counts
+#: outward past logging's own frames only, so the wrapper's frame is the one the
+#: extra step skips; none before 3.11, where findCaller started three frames up,
+#: at the wrapper itself, and stepped back once on its own, so the extra step
+#: named the caller's caller there.
+_WRAPPER_FRAME = 1 if sys.version_info >= (3, 11) else 0
+
+
 def addLoggingLevel(levelName, levelNum, methodName=None):
     """
     Adapted from: https://stackoverflow.com/a/35804945
@@ -95,8 +106,8 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
 
     def logForLevel(self, message, *args, **kwargs):
         if self.isEnabledFor(levelNum):
-            # The caller's frame, not this wrapper's (see ASHLogger.verbose).
-            kwargs["stacklevel"] = kwargs.get("stacklevel", 1) + 1
+            # The caller's frame, not this wrapper's (see _WRAPPER_FRAME).
+            kwargs["stacklevel"] = kwargs.get("stacklevel", 1) + _WRAPPER_FRAME
             self._log(levelNum, message, args, **kwargs)
 
     def logToRoot(message, *args, **kwargs):
@@ -130,17 +141,18 @@ class ASHLogger(logging.Logger):
     def __init__(self, name: str, level: int = logging.NOTSET):
         super().__init__(name=name, level=level)
 
-    # One frame more than the caller asked for, as logging's own info() and
-    # debug() are to _log: without it the record's file and line were this
-    # method's, not the caller's, on Python 3.11 and later.
+    # The wrapper's frame added to the stacklevel where findCaller counts it
+    # (_WRAPPER_FRAME): without it the record's file and line were this
+    # method's, not the caller's, on Python 3.11 and later; with it on every
+    # version they were the caller's caller before 3.11.
     def verbose(self, msg, *args, **kws):
         if self.isEnabledFor(VERBOSE_LEVEL):
-            kws["stacklevel"] = kws.get("stacklevel", 1) + 1
+            kws["stacklevel"] = kws.get("stacklevel", 1) + _WRAPPER_FRAME
             self._log(VERBOSE_LEVEL, msg, args, **kws)
 
     def trace(self, msg, *args, **kws):
         if self.isEnabledFor(TRACE_LEVEL):
-            kws["stacklevel"] = kws.get("stacklevel", 1) + 1
+            kws["stacklevel"] = kws.get("stacklevel", 1) + _WRAPPER_FRAME
             self._log(TRACE_LEVEL, msg, args, **kws)
 
     def callHandlers(self, record: logging.LogRecord) -> None:
