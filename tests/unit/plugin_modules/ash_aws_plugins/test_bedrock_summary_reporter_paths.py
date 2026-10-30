@@ -1087,8 +1087,10 @@ class TestRealPathFallback:
         ),
         pytest.param(
             {"include_sections": ["executive_summary", "technical_analysis"]},
+            # One finding: with nothing to analyze the technical section sends
+            # no prompt, and this site would make one call instead of two.
             lambda r, rt: r._write_markdown_files(
-                rt, sarif_model([]), [], [], "summary body"
+                rt, sarif_model([]), [{"level": "error"}], [], "summary body"
             ),
             2,
             id="markdown-executive-and-technical",
@@ -1216,8 +1218,10 @@ class TestTheFallbackWalkContract:
     def test_the_control_plane_client_is_built_once_for_the_run(
         self, context, monkeypatch
     ):
-        """Three calls whose walks all find nothing build one control-plane
-        client between them, not one per call."""
+        """Two calls whose walks both find nothing build one control-plane
+        client between them, not one per call. (Two, not three: the synthesis
+        is not asked for when no batch answered, so only the two batch calls
+        reach the model.)"""
         reporter = make_reporter(
             context, batch_processing=True, max_findings_to_analyze=1
         )
@@ -1235,8 +1239,8 @@ class TestTheFallbackWalkContract:
             runtime, sarif_model([]), [{"level": "error"}, {"level": "warning"}]
         )
 
-        # The control: each of the three calls reached the configured model.
-        assert runtime.models.count(PRIMARY_MODEL) == 3, runtime.models
+        # The control: each of the two batch calls reached the configured model.
+        assert runtime.models.count(PRIMARY_MODEL) == 2, runtime.models
         assert len(sessions.control_clients) + len(default_clients) == 1
 
     def test_the_fallback_that_answered_is_the_runs_model(self, context, monkeypatch):

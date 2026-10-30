@@ -486,8 +486,10 @@ def test_cloudwatch_publish_failure(tmp_path, logged, monkeypatch):
         "Error when publishing results to CloudWatch Logs after retries",
         group,
     )
-    assert "does not exist" in returned, returned
-    assert "ENVCANARY-absent" not in returned, returned
+    # A failed publish produces no report: the error is in the log, redacted,
+    # and report() returns None (a text would be written as the report).
+    assert returned is None
+    _no_value_in([*logged, *reporter.errors], "does not exist", "ENVCANARY-absent")
 
 
 @pytest.mark.parametrize("code", ["AccessDeniedException", None])

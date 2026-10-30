@@ -401,6 +401,14 @@ def test_a_secrets_only_scan_sends_no_placeholder_prompt(context, monkeypatch): 
         output_markdown=False,
         compliance_frameworks=["SOC 2"],
         group_by_severity=False,
+        # The secret advice is a section of its own; it is asked for only when
+        # the section is included, which the default list does not do.
+        include_sections=[
+            "executive_summary",
+            "risk_assessment",
+            "compliance_impact",
+            "secret_findings",
+        ],
     )
     runtime = Runtime()
 

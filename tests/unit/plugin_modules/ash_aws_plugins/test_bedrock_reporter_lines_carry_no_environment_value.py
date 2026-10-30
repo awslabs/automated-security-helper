@@ -315,7 +315,11 @@ def test_written_reports_carry_no_environment_value(
         # A real empty model: the writer now opens every file with the
         # emitter-built scan outcome, which reads the aggregated model.
         model=AshAggregatedResults(),
-        all_findings=[],
+        # One finding, so the technical section has something to analyze and
+        # calls the model: with nothing to analyze the writer sends no prompt
+        # and writes a fixed line instead, and there would be no error to
+        # redact in that file.
+        all_findings=[{"level": "error"}],
         secret_findings=[],
         summary="summary body",
     )

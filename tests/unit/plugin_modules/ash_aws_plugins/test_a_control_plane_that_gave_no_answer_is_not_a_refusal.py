@@ -82,8 +82,12 @@ class ControlPlane:
         self.model_listings = 0
 
     def _failure(self):
-        """The failure both listings share, or None when they answer."""
-        if self.throttled or self.listings <= self.throttle_first:
+        """The failure both listings share, or None when they answer.
+
+        ``throttle_first`` counts profile listings, so a model listing made
+        before any (the dependency check's reachability probe) is not throttled
+        by it; one made alongside the k-th profile listing shares its fate."""
+        if self.throttled or 0 < self.listings <= self.throttle_first:
             return _error("ThrottlingException", "Rate exceeded")
         if self.listing_error is not None:
             return _error(self.listing_error, "the listing was refused")

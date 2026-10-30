@@ -105,8 +105,10 @@ class TestBedrockPromptBuilder:
         assert "FINDING 2" in prompt
 
     def test_severity_analysis_empty_findings(self):
+        """Nothing to analyze is no prompt: the pipeline skips an empty one
+        instead of sending the model a placeholder sentence."""
         prompt = self.builder.severity_analysis([], "error")
-        assert "No findings" in prompt
+        assert prompt == ""
 
     def test_executive_summary_includes_scan_overview(self):
         findings = [_make_finding(level="error"), _make_finding(level="warning")]
@@ -151,8 +153,9 @@ class TestBedrockPromptBuilder:
         assert "2" in prompt
 
     def test_secret_advice_empty(self):
+        """No secret findings is no prompt, for the same reason."""
         prompt = self.builder.secret_advice([])
-        assert "No secret findings" in prompt
+        assert prompt == ""
 
     def test_technical_analysis_includes_rule_id(self):
         findings = [_make_finding(rule_id="BANDIT-101")]
