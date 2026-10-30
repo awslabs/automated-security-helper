@@ -156,6 +156,30 @@ def test_an_operator_document_under_a_respelled_scanner_section_is_credited():
     assert not paths.named("scanners.syft.options.config_file", "/ops/other.yaml")
 
 
+def test_a_value_carrying_dot_dot_is_not_credited_by_its_normalized_form():
+    """The operator wrote ``/ops/syft.yaml``. A configuration value spelled
+    ``/ops/x/../syft.yaml`` normalizes to the same text, but the operating
+    system walks ``..`` through whatever ``/ops/x`` is at run time (a link the
+    scanned repository plants, say), so the value is not the operator's and is
+    judged by the scanned-tree tier. The operator's own spelling is still
+    normalized: ``/ops/./syft.yaml`` in the operator's file names the anchored
+    form a scanner holds."""
+    paths = OperatorPaths(
+        documents=[
+            {"scanners": {"syft": {"options": {"config_file": "/ops/syft.yaml"}}}}
+        ]
+    )
+    dotted = OperatorPaths(
+        documents=[
+            {"scanners": {"syft": {"options": {"config_file": "/ops/./syft.yaml"}}}}
+        ]
+    )
+
+    assert not paths.named("scanners.syft.options.config_file", "/ops/x/../syft.yaml")
+    assert paths.named("scanners.syft.options.config_file", "/ops/syft.yaml")
+    assert dotted.named("scanners.syft.options.config_file", "/ops/syft.yaml")
+
+
 def test_an_override_under_a_respelled_scanner_section_is_credited():
     paths = OperatorPaths(
         overrides=[("scanners.DetectSecrets.options.baseline_file", "/ops/base.json")]

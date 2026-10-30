@@ -196,16 +196,24 @@ def _leaves(
 def _same_path(leaf: Any, value: Union[str, Path]) -> bool:
     """Whether a config value names ``value``; a ``file://...::name`` entry by its file.
 
-    Compared as normalized paths (``os.path.normpath``), so a value written
-    ``./rules/a.yaml`` and the anchored form a scanner holds compare the way
-    the anchoring normalized them; a relative value against an absolute one
-    still differs, since the document's directory is not known here.
+    ``leaf`` is what the operator wrote and is compared as written and as
+    ``os.path.normpath`` normalizes it, so an operator spelling such as
+    ``/ops/./rules.yaml`` or ``/ops//rules.yaml`` names the anchored form a
+    scanner holds. ``value`` is the configuration's value, which a repository
+    file may have written, and it is compared ONLY as written: a value carrying
+    ``..`` that normalizes to the operator's spelling is not the operator's,
+    because the operating system walks ``..`` through whatever the path's
+    parent is at run time (a link the repository plants, say), while the
+    lexical normalization does not; crediting it would judge such a value by
+    the operator's tier. A relative value against an absolute one differs,
+    since the document's directory is not known here.
     """
     if not isinstance(leaf, str):
         return False
     if leaf.startswith("file://"):
         leaf = leaf[len("file://") :].partition("::")[0]
-    return leaf == str(value) or os.path.normpath(leaf) == os.path.normpath(str(value))
+    written = str(value)
+    return leaf == written or os.path.normpath(leaf) == written
 
 
 @dataclass
