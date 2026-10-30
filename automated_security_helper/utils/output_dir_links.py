@@ -121,12 +121,26 @@ def is_junction(path: PathLike) -> bool:
 
 
 def is_link(path: PathLike) -> bool:
-    """Whether ``path`` is a symlink or a directory junction."""
-    return Path(path).is_symlink() or is_junction(path)
+    """Whether ``path`` is a symlink or a directory junction.
+
+    Read from ``os.lstat`` directly, with every ``OSError`` answering False: on
+    CPython 3.10-3.12 ``Path.is_symlink`` lets a ``PermissionError`` from an
+    unsearchable parent through, which turned the pre-run link checks into
+    tracebacks where no link was there to refuse.
+    """
+    try:
+        found = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISLNK(found.st_mode) or is_junction(path)
 
 
 def _kind(path: Path) -> str:
-    return "a symlink" if path.is_symlink() else "a directory junction"
+    try:
+        is_symlink = stat.S_ISLNK(os.lstat(path).st_mode)
+    except OSError:
+        is_symlink = False
+    return "a symlink" if is_symlink else "a directory junction"
 
 
 def _identity(path: PathLike) -> Optional[Tuple[int, int]]:
@@ -191,8 +205,15 @@ def linked_output_component(
     - each component below ``root`` on the way to the output directory, walked as
       spelled with ``..`` included, so that a link a later ``..`` steps back out of
       is still seen; "below" is decided by name or by device and inode (_is_below),
-      so the way either path is spelled does not matter;
-    - the output directory itself, wherever it is;
+      so the way either path is spelled does not matter. A ``..`` is applied as
+      the kernel applies it, to the directory the components before it lead to
+      with their links followed: a link below ``root`` is refused the moment it is
+      reached, so the links a ``..`` steps back from are the operator's own, above
+      the tree, and stepping back from one lexically examined the components
+      after it at paths the lookup never uses, while a repository link at the
+      path it does use (``/opt/link/../x`` with ``/opt/link`` leading into the
+      tree is ``<root>/x``, not ``/opt/x``) went unexamined;
+    - the output directory itself, wherever it is, as that walk reaches it;
     - for an output directory below ``root``, that its real path is below the real
       path of ``root`` too, which catches a redirection out of the tree that the
       walk cannot see;
@@ -214,7 +235,7 @@ def linked_output_component(
     current = Path(spelled.anchor)
     for part in spelled.parts[1:]:
         if part == "..":
-            current = current.parent
+            current = _real_path(current).parent
             continue
         if part in ("", "."):
             continue
@@ -228,16 +249,19 @@ def linked_output_component(
                 f"{current.as_posix()} is {_kind(current)}, on the way to the "
                 f"output directory {spelled.as_posix()}"
             )
-    if is_link(spelled):
-        return f"the output directory {spelled.as_posix()} is {_kind(spelled)}"
-    lexical = Path(os.path.abspath(spelled))
-    inside_root = root_path is not None and _is_below(lexical, root_path, root_identity)
+    # The output directory as the lookup reaches it: the spelling with every
+    # ``.`` and ``..`` applied. The same path as the spelling when it holds none.
+    reached = current
+    where = _shown(spelled, reached)
+    if is_link(reached):
+        return f"the output directory {where} is {_kind(reached)}"
+    inside_root = root_path is not None and _is_below(reached, root_path, root_identity)
     if root_path is not None and inside_root:
         real_root = _real_path(root_path)
-        actual = _real_path(lexical)
+        actual = _real_path(reached)
         if not _is_below(actual, real_root, root_identity):
             return (
-                f"the output directory {lexical.as_posix()} resolves to "
+                f"the output directory {reached.as_posix()} resolves to "
                 f"{actual.as_posix()}, outside {root_path.as_posix()}"
             )
     names: Tuple[str, ...] = (
@@ -248,10 +272,17 @@ def linked_output_component(
     if inside_root:
         names += (OUTPUT_GITIGNORE,)
     for name in names:
-        entry = spelled / name
+        entry = reached / name
         if is_link(entry):
             return f"{entry.as_posix()} is {_kind(entry)}"
     return None
+
+
+def _shown(spelled: Path, reached: Path) -> str:
+    """``spelled`` for a message, with the path the lookup reaches when it differs."""
+    if os.path.normcase(os.path.abspath(spelled)) == os.path.normcase(reached):
+        return spelled.as_posix()
+    return f"{spelled.as_posix()} (reached as {reached.as_posix()})"
 
 
 def refuse_linked_output_dir(
@@ -285,27 +316,46 @@ def ignore_output_dir_in_git(source_dir: PathLike, output_dir: PathLike) -> bool
 
     Nothing is written when the output directory is not below ``source_dir`` or does
     not exist, or when something is already at the name: a ``.gitignore`` there is
-    the repository's or an earlier run's, and is left as it is. A link at the name
-    is refused, never followed: linked_output_component names it before the run,
-    and the write itself is fs_guard.open_for_write with the output directory as its
-    root and O_EXCL, which refuses one made since with OutputLinkRefused.
+    the repository's or an earlier run's, and is left as it is. Nothing is written
+    either when git lists files committed under the output directory
+    (``scan_output_dirs.git_index_below``): the directory is then partly the
+    repository's, and an ignore-everything rule there would make git ignore every
+    new file a developer adds beside the committed ones. A link at the name is
+    refused, never followed: linked_output_component names it before the run, and
+    the write itself is fs_guard.open_for_write with the output directory as its
+    root and O_EXCL, which refuses one made since with OutputLinkRefused. Any other
+    failure of the write (a read-only output directory, say) answers False: the
+    file is a courtesy to tools that read the tree themselves, and a scan is not
+    aborted over it.
 
     Returns:
         Whether it wrote the file.
     """
     source = Path(os.path.abspath(source_dir))
     output = Path(os.path.abspath(output_dir))
-    if not output.is_dir() or not _is_below(output, source, _identity(source)):
+    try:
+        is_dir = output.is_dir()
+    except OSError:
         return False
-    # Imported here: fs_guard imports this module (see open_no_follow).
+    if not is_dir or not _is_below(output, source, _identity(source)):
+        return False
+    # Imported here: fs_guard imports this module (see open_no_follow), and
+    # scan_output_dirs is above it.
     from automated_security_helper.utils.sandbox import fs_guard
+    from automated_security_helper.utils.scan_output_dirs import git_index_below
 
+    if git_index_below(output).names:
+        return False
     try:
         with fs_guard.open_for_write(
             output / OUTPUT_GITIGNORE, root=output, exclusive=True
         ) as handle:
             handle.write(OUTPUT_GITIGNORE_TEXT)
+    except OutputDirLinkRefused:
+        raise
     except FileExistsError:
+        return False
+    except OSError:
         return False
     return True
 
