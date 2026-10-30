@@ -117,6 +117,28 @@ def test_an_unexaminable_tools_directory_gives_no_lock(layout, monkeypatch):
     assert policy_module._uv_directories() == []
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="hard links need os.link on a POSIX filesystem"
+)
+def test_a_uv_lock_with_another_name_on_disk_is_not_granted(layout, monkeypatch):
+    """A hard-linked .lock is left out; the same file with one name is granted (control)."""
+    data = layout.home.parent / "data"
+    tools = data / "uv" / "tools"
+    tools.mkdir(parents=True)
+    monkeypatch.setenv("XDG_DATA_HOME", str(data))
+    lock = tools / ".lock"
+    lock.write_text("")
+
+    assert policy_module._uv_tool_locks() == [lock.absolute()]
+
+    other = layout.home.parent / "other-name"
+    os.link(lock, other)
+    assert policy_module._uv_tool_locks() == []
+
+    other.unlink()
+    assert policy_module._uv_tool_locks() == [lock.absolute()]
+
+
 def test_the_spelled_prefix_of_a_linked_interpreter_is_mounted_too(layout, monkeypatch):
     """A tool's bin/python passes through a symlinked minor-version directory."""
     data = layout.home.parent / "data"
