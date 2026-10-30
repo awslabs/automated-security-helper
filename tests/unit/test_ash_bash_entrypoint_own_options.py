@@ -386,7 +386,8 @@ def test_a_failing_host_cli_fails_the_version_check(runner, tmp_path, words):
     could not run the CLI at all (no python, no package), so a health check on
     `./ash -v` could never fail. Here a planted `python` first on PATH prints a
     marker and exits 7, and the wrapper exits 7 with it."""
-    planted_bin = tmp_path / "bin"
+    # Not tmp_path/"bin": the runner fixture already keeps the fake runner there.
+    planted_bin = tmp_path / "planted-bin"
     planted_bin.mkdir()
     _executable(
         planted_bin / "python",
