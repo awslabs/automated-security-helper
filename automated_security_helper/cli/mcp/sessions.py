@@ -540,7 +540,8 @@ class MCPSessionRegistry:
         resolving the parent. Neither refuses the session: :meth:`session_for`
         creates nothing on disk, and :meth:`get_or_create`, which does, resolves
         the path again and lets that error out to the caller that needs the
-        directory.
+        directory. :meth:`disconnect` resolves it again too, so a session handed
+        out with no path still has its directory removed when it ends.
         """
         try:
             return session_directory(self._workspace_parent, session_id)
@@ -637,7 +638,17 @@ class MCPSessionRegistry:
             session = self._sessions.pop(session_id, None)
             if session is None:
                 return
-            doomed = self._rename_for_removal_locked(session.id, session.workspace_root)
+            workspace = session.workspace_root
+            if workspace is None:
+                # Handed out while the root could not be resolved
+                # (_workspace_for answered None for a passing failure), and no
+                # get_or_create resolved it since. The source-delivery tools
+                # resolve the root themselves and may have built the directory
+                # meanwhile, so it is resolved again here, as get_or_create
+                # does, and removed with the session; a root that still cannot
+                # be resolved leaves nothing to remove.
+                workspace = self._workspace_for(session.id)
+            doomed = self._rename_for_removal_locked(session.id, workspace)
         if doomed is not None:
             self._remove_workspace(doomed)
 
