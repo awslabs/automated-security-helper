@@ -239,6 +239,42 @@ def _untrusted_ancestor(path: Path) -> Optional[Path]:
     return None
 
 
+#: The settings files yarn reads from the copy's directory and every parent.
+_YARN_SETTINGS_FILES: Tuple[str, ...] = (".npmrc", ".yarnrc", ".yarnrc.yml")
+
+
+def _settings_file_ancestor(path: Path) -> Optional[Tuple[Path, str]]:
+    """The nearest directory at or above ``path`` that holds a yarn settings
+    file, with the file's name, or None.
+
+    yarn reads ``.npmrc``, ``.yarnrc`` and ``.yarnrc.yml`` from every parent of
+    its directory, so a copy below a directory that holds one runs under that
+    file's registry and settings whoever wrote it. The ownership check
+    (``_untrusted_ancestor``) does not see this case: an output directory
+    inside a checkout above the scanned tree (``--source-dir ./src
+    --output-dir ./ash-out``) has ancestors the operator owns, and the
+    checkout's root holds the repository's own ``.npmrc``. The operator's home
+    directory is left out: the files there are the operator's, and yarn reads
+    them wherever it runs.
+    """
+    try:
+        home: Optional[Path] = Path.home()
+    except (KeyError, RuntimeError):
+        home = None
+    current = Path(os.path.abspath(path))
+    for directory in (current, *current.parents):
+        if home is not None and directory == home:
+            continue
+        for name in _YARN_SETTINGS_FILES:
+            try:
+                present = (directory / name).exists()
+            except OSError:
+                present = False
+            if present:
+                return directory, name
+    return None
+
+
 def _yarn_copy_parent(
     parent: Path, scan_root: Optional[Path]
 ) -> Tuple[Optional[Path], Tuple[str, ...]]:
@@ -257,11 +293,13 @@ def _yarn_copy_parent(
     directory (``--output-dir /tmp/ash-out`` or ``XDG_CACHE_HOME=/tmp/cache`` put
     ``/tmp``, which every account can write, back on it), when any directory at
     or above it is writable by, or owned by, another account
-    (``_untrusted_ancestor``; an output directory inside a larger checkout above
-    the scanned tree puts that checkout's ``.npmrc`` and ``.yarnrc`` on the path,
-    and those files are the repository's), or when it cannot be made. None, with
-    every reason, when no candidate will do: yarn then runs in place with every
-    settings file dropped.
+    (``_untrusted_ancestor``), when a directory at or above it other than the
+    operator's home holds a settings file yarn would read
+    (``_settings_file_ancestor``; an output directory inside a larger checkout
+    above the scanned tree puts that checkout's ``.npmrc`` and ``.yarnrc`` on
+    the path, and those files are the repository's, whoever owns the
+    directories), or when it cannot be made. None, with every reason, when no
+    candidate will do: yarn then runs in place with every settings file dropped.
     """
     passed_over: List[str] = []
     temp_root = Path(tempfile.gettempdir())
@@ -288,6 +326,14 @@ def _yarn_copy_parent(
             passed_over.append(
                 f"{what} {candidate} is below {shared}, which another account "
                 "owns or can write"
+            )
+            continue
+        settings = _settings_file_ancestor(candidate)
+        if settings is not None:
+            holder, name = settings
+            passed_over.append(
+                f"{what} {candidate} is below {holder}, which holds {name}, a "
+                "settings file yarn would read"
             )
             continue
         try:

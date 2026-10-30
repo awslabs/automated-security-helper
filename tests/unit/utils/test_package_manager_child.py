@@ -237,6 +237,63 @@ class TestWhereYarnsCopyGoes:
         assert chosen == cache_home / "ash", (chosen, passed_over)
         assert len(passed_over) == 1 and str(tmp_path / "mono") in passed_over[0]
 
+    def test_a_candidate_below_a_directory_holding_a_settings_file_is_passed_over(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """``--source-dir ./src --output-dir ./ash-out`` inside a checkout the
+        operator owns: every ancestor passes the ownership check, and the
+        checkout's root holds the repository's own .npmrc, which yarn would read
+        from the copy below it. The settings-file check names that directory
+        and the file; the cache directory is used instead."""
+        checkout = tmp_path / "checkout"
+        repo = checkout / "src"
+        _yarn_package(repo)
+        parent = checkout / "ash-out"
+        parent.mkdir()
+        (checkout / ".npmrc").write_text(
+            "registry=https://registry.example/\n", encoding="utf-8"
+        )
+        cache_home = tmp_path / "cache-home"
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+
+        chosen, passed_over = child_module._yarn_copy_parent(parent, repo)
+
+        assert chosen == cache_home / "ash", (chosen, passed_over)
+        assert len(passed_over) == 1, passed_over
+        assert str(checkout) in passed_over[0] and ".npmrc" in passed_over[0]
+
+    def test_the_operators_own_settings_file_does_not_disqualify_the_home(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """Control: ~/.npmrc is the operator's and yarn reads it wherever it
+        runs, so the cache directory below the home is still taken."""
+        home = tmp_path / "home"
+        (home / ".cache").mkdir(parents=True)
+        (home / ".npmrc").write_text("registry=https://mine.example/\n")
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
+        repo = tmp_path / "repo"
+        _yarn_package(repo)
+        parent = repo / "out"
+
+        chosen, passed_over = child_module._yarn_copy_parent(parent, repo)
+
+        assert chosen == home / ".cache" / "ash", (chosen, passed_over)
+
+    def test_the_settings_file_check_names_the_nearest_holder(self, tmp_path):
+        """Read with the real check: the nearest directory above the candidate
+        that holds one of the three files is named, with the file."""
+        outer = tmp_path / "outer"
+        inner = outer / "inner"
+        inner.mkdir(parents=True)
+        (outer / ".yarnrc").write_text("", encoding="utf-8")
+        (inner / ".yarnrc.yml").write_text("", encoding="utf-8")
+
+        assert child_module._settings_file_ancestor(inner / "ash" / "copies") == (
+            inner,
+            ".yarnrc.yml",
+        )
+
     def test_the_ancestor_check_names_a_world_writable_directory(self, tmp_path):
         """Read with the real check: a directory any account can write, planted
         above the candidate, is named; the nearest such directory is returned,
