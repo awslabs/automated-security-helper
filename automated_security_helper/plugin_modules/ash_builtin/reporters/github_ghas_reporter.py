@@ -632,15 +632,24 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
 
     @staticmethod
     def _original_uri_base_ids(run: Any) -> Dict[str, Dict[str, str]]:
-        """The run's ``originalUriBaseIds`` as plain dicts, uri only."""
+        """The run's ``originalUriBaseIds`` as plain dicts: each base's ``uri``
+        and, when the base is itself anchored to another (SARIF 3.4.4, as
+        ``{"SRCROOT": {"uri": "src/", "uriBaseId": "REPOROOT"}}``), its
+        ``uriBaseId``; kept uri-only, a chained base was emitted as a relative
+        base with nothing to resolve against."""
         bases = getattr(run, "originalUriBaseIds", None)
         if not isinstance(bases, dict):
             return {}
         out: Dict[str, Dict[str, str]] = {}
         for key, location in bases.items():
             uri = getattr(location, "uri", None)
-            if uri:
-                out[str(key)] = {"uri": str(uri)}
+            if not uri:
+                continue
+            entry = {"uri": str(uri)}
+            base_id = getattr(location, "uriBaseId", None)
+            if base_id:
+                entry["uriBaseId"] = str(base_id)
+            out[str(key)] = entry
         return out
 
     def _emits_automation_details(self) -> bool:
@@ -967,10 +976,13 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
 
     @staticmethod
     def _slim_suppression(suppression: Any) -> Dict[str, Any]:
-        """The SARIF suppression object's kind, state and justification."""
-        slim: Dict[str, Any] = {
-            "kind": _level_value(getattr(suppression, "kind", None))
-        }
+        """The SARIF suppression object's kind, state and justification, each
+        written only when the suppression has it: ``_level_value(None)`` is the
+        text "None", which is no suppression kind (SARIF 3.35.3)."""
+        slim: Dict[str, Any] = {}
+        kind = getattr(suppression, "kind", None)
+        if kind is not None:
+            slim["kind"] = _level_value(kind)
         state = getattr(suppression, "state", None)
         if state is not None:
             slim["state"] = _level_value(state)

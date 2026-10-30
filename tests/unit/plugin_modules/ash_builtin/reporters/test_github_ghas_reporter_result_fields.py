@@ -19,6 +19,7 @@
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -154,6 +155,18 @@ class TestSuppressions:
             {"kind": "external", "state": "accepted", "justification": "reviewed"}
         ]
 
+    def test_a_suppression_with_no_kind_carries_no_kind_key(self):
+        """``_level_value(None)`` is the text "None", which is no suppression
+        kind; the key is left out instead."""
+        suppression = SimpleNamespace(
+            kind=None, state=State.accepted, justification="reviewed"
+        )
+
+        assert GHASReporter._slim_suppression(suppression) == {
+            "state": "accepted",
+            "justification": "reviewed",
+        }
+
     def test_an_unsuppressed_result_carries_no_suppressions_key(self, reporter):
         result = Result(ruleId="R", level=Level.error, message=Message(text="m"))
 
@@ -193,6 +206,38 @@ class TestUriBaseIds:
         ]
         assert artifact == {"uri": "src/a.py", "uriBaseId": "%SRCROOT%"}
         assert out["originalUriBaseIds"] == {"%SRCROOT%": {"uri": "file:///repo/"}}
+
+    def test_a_chained_base_keeps_its_own_base_id(self, reporter):
+        """A base anchored to another base (SARIF 3.4.4) kept only its uri, so
+        it was emitted as a relative base with nothing to resolve against."""
+        result = Result(
+            ruleId="R",
+            level=Level.error,
+            message=Message(text="m"),
+            locations=[
+                Location(
+                    physicalLocation=PhysicalLocation(
+                        artifactLocation=ArtifactLocation(
+                            uri="a.py", uriBaseId="SRCROOT"
+                        ),
+                    )
+                )
+            ],
+        )
+        run = _run(
+            result,
+            originalUriBaseIds={
+                "SRCROOT": ArtifactLocation(uri="src/", uriBaseId="REPOROOT"),
+                "REPOROOT": ArtifactLocation(uri="file:///repo/"),
+            },
+        )
+
+        out = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        assert out["originalUriBaseIds"] == {
+            "SRCROOT": {"uri": "src/", "uriBaseId": "REPOROOT"},
+            "REPOROOT": {"uri": "file:///repo/"},
+        }
 
     def test_a_rebased_workspace_uri_carries_no_base_id(self, reporter):
         def project_run(path: str) -> Run:
