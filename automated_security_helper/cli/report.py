@@ -148,6 +148,39 @@ def _is_json_document(content: str) -> bool:
 TEXT_OR_JSON_FORMATS = frozenset({"unused-suppressions"})
 
 
+# The longest content of a JSON format that failed the JSON check the error
+# quotes. A reporter's error text in the report's place is one short line, and
+# the line is the reason. Anything longer, on more than one line, or shaped like a
+# JSON document (a truncated or malformed one, minified on one line) is a report
+# that holds finding snippets, which can hold detected secrets, and the error goes
+# to stderr, the CI log, where an operator who redirected stdout to a file kept
+# the report out. Such content is described, by its decode error and its length,
+# as this file describes the pydantic errors it refuses to quote the input of.
+_QUOTED_REASON_CHARS = 200
+
+
+def _non_json_report_text(content: str, error: ValueError) -> str:
+    """What the error says about *content*, which failed ``json.loads``.
+
+    A short one-line text that does not start as a JSON document is the reason
+    and is returned as it is. Everything else is described: a reporter's error
+    text never starts with ``{`` or ``[``, so content that does is a document
+    that failed to parse, and quoting its first 200 characters would quote the
+    findings in them.
+    """
+    reason = content.strip()
+    if (
+        len(reason) <= _QUOTED_REASON_CHARS
+        and "\n" not in reason
+        and "\r" not in reason
+        and not _is_json_document(reason)
+    ):
+        return reason
+    return (
+        f"{error_text(error)}; the {len(content)} characters it returned are not shown"
+    )
+
+
 # Reporters whose output is Markdown, rendered with rich's Markdown on an
 # interactive terminal.
 MARKDOWN_STDOUT_FORMATS = frozenset({"markdown", "bedrock-summary-reporter"})
@@ -1017,22 +1050,25 @@ def report_command(
             report_format.lower() not in TEXT_OR_JSON_FORMATS
             or _is_json_document(report_content)
         ):
-            # A reporter whose report is a JSON document returns its error text
-            # in its place when it could not produce one (the cloudwatch-logs
-            # reporter, after a publish that failed its retries), and the
+            # A reporter whose report is a JSON document may return its error
+            # text in its place when it could not produce one (the cloudwatch-logs
+            # reporter did, after a publish that failed its retries), and the
             # command took any text as a report: off a terminal the text went to
             # stdout as the document and the exit was 0, and on a terminal the
             # json.loads in _write_report failed, so a decode error stood in
             # for the reporter's reason. The text is the reason, so it is the
-            # error, and the exit says the report was not produced.
+            # error, and the exit says the report was not produced. Content that
+            # is long, on more than one line, or shaped like a JSON document is a
+            # report, not a reason, and is described, not quoted
+            # (_non_json_report_text).
             try:
                 json.loads(report_content)
-            except ValueError:
+            except ValueError as exc:
                 _print_error(
                     "[red]Error: reporter '{}' did not produce a JSON document: "
                     "{}[/red]",
                     report_format,
-                    report_content,
+                    _non_json_report_text(report_content, exc),
                 )
                 raise typer.Exit(1)
         _write_report(

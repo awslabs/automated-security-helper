@@ -3,13 +3,16 @@
 
 """``ash report`` on a JSON format fails when the reporter returns no JSON document.
 
-A reporter whose report is a JSON document returns its error text in its place
-when it could not produce one: the cloudwatch-logs reporter does, after a
-publish that failed its retries. The command took any text as the report, so
-off a terminal the error text went to stdout as the document and the exit was
-0, and on a terminal the JSON re-indenting failed and a decode error stood in
-for the reporter's reason. The text is the reason: it is printed as the error,
-to stderr, and the exit says the report was not produced.
+A reporter whose report is a JSON document may return its error text in its
+place when it could not produce one (the cloudwatch-logs reporter did, after a
+publish that failed its retries, before it returned None). The command took any
+text as the report, so off a terminal the error text went to stdout as the
+document and the exit was 0, and on a terminal the JSON re-indenting failed and
+a decode error stood in for the reporter's reason. The text is the reason: it
+is printed as the error, to stderr, and the exit says the report was not
+produced. Content that is long, on more than one line, or shaped like a JSON
+document is a report, which can hold detected secrets, and is described by its
+decode error and its length, never quoted.
 """
 
 from __future__ import annotations
@@ -64,6 +67,51 @@ def test_error_text_in_place_of_a_json_document_is_the_error_not_the_report(
     assert "did not produce a JSON document" in result.stderr
     assert REASON in result.stderr
     assert "'sarif'" in result.stderr
+
+
+PLANTED_SNIPPET = "finding-snippet-planted-for-this-test"
+
+
+def test_a_multi_line_non_json_report_is_described_not_quoted(results_dir):
+    """A report that is not JSON (here, YAML) holds finding snippets, which can
+    hold detected secrets; the error names the decode error and the length and
+    carries none of the content to stderr, the CI log."""
+    document = f"version: 2.1.0\nruns:\n  - snippet: {PLANTED_SNIPPET}\n"
+    with patch(SARIF_REPORT, return_value=document):
+        result = _report(results_dir)
+
+    assert result.exit_code == 1, result.output
+    assert result.stdout == ""
+    assert "did not produce a JSON document" in result.stderr
+    assert PLANTED_SNIPPET not in result.stderr
+    assert "line 1 column 1" in result.stderr
+    assert f"{len(document)} characters" in result.stderr
+
+
+def test_a_long_one_line_non_json_report_is_described_not_quoted(results_dir):
+    document = "not json " * 40 + PLANTED_SNIPPET
+    with patch(SARIF_REPORT, return_value=document):
+        result = _report(results_dir)
+
+    assert result.exit_code == 1, result.output
+    assert PLANTED_SNIPPET not in result.stderr
+    assert f"{len(document)} characters" in result.stderr
+
+
+def test_a_short_one_line_malformed_json_document_is_described_not_quoted(
+    results_dir,
+):
+    """Minified reporter output is one line and can be short; a reporter's error
+    text never starts a JSON document, so content that does is a report whose
+    findings must not reach stderr however short it is."""
+    document = f'{{"runs":[{{"snippet":"{PLANTED_SNIPPET}"'
+    assert len(document) <= 200
+    with patch(SARIF_REPORT, return_value=document):
+        result = _report(results_dir)
+
+    assert result.exit_code == 1, result.output
+    assert PLANTED_SNIPPET not in result.stderr
+    assert f"{len(document)} characters" in result.stderr
 
 
 def test_a_json_document_is_still_written_as_the_report(results_dir):
