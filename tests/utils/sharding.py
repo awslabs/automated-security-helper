@@ -118,6 +118,16 @@ shows on the run page and is not silently green; and the fuller shape, not taken
 is an allowlist of admitted reasons or a dedicated marker for "does not apply on this
 runner", which would change every test module that declares such a ``skipif``.
 
+One more limit, from reading ``report.keywords`` for both ``leg_assertion`` and
+``skipif``: the keywords also hold node names and, for a parametrized test, its
+callspec id, so a parametrize id equal to ``leg_assertion``, ``skipif`` or ``skip``
+changes how that case is counted or read. tests/conftest.py reads markers and not
+``item.keywords`` for the tier markers for the same reason, but its collection hook does
+not reject such an id, so the rule is only this note: do not name a parametrize id after
+one of these markers. The fuller shape, not taken, sends the node ids of the leg
+assertions back from each xdist worker through ``workeroutput`` and uses
+``get_closest_marker`` where xdist is not running.
+
 ``ASH_TEST_TIER_FLOOR=warn`` opts in like ``1`` and reports instead of failing: the
 same line is printed with a warning prefix, followed by a GitHub warning annotation
 (``::warning title=tier run executed no test::<the line>``), and the exit status is left
@@ -396,6 +406,10 @@ def skipif_reason(report: Any) -> Optional[str]:
     ``skipif``. A ``skipif`` with no condition is an unconditional skip too, but it
     carries no ``skip`` keyword and its report reads exactly like a held ``skipif``, so
     it is still admitted: a limit of reading reports, not items.
+
+    Another limit of the same kind: ``report.keywords`` holds node names and, for a
+    parametrized test, its callspec id, so a parametrize id of ``skipif`` or ``skip``
+    changes the answer. See the note at :data:`LEG_ASSERTION_MARKER`.
     """
     if getattr(report, "when", None) != "setup":
         return None
@@ -527,6 +541,18 @@ WORKEROUTPUT_KEY = "ash_shard_deselected"
 #: property would be published in the JUnit XML as a ``<property>`` inside the
 #: ``<testcase>``, which pytest's documentation says breaks validation against the
 #: xunit2 schema.
+#:
+#: Known limit: ``report.keywords`` also holds the item's node names and, for a
+#: parametrized test, its callspec id, so a parametrize id equal to this name reads as the
+#: marker and that case drops out of both counts; an id equal to ``skipif`` or ``skip``
+#: misleads :func:`skipif_reason` the same way. tests/conftest.py draws the same line
+#: between markers and ``item.keywords`` for the tier markers (the comment above
+#: ``_TEST_TIERS``, about :1168-:1172), but its collection hook only checks the tier
+#: markers and does not reject a marker-named id, so nothing enforces it here: do not
+#: give a parametrize id one of these names. The effect is small, since a leg has to
+#: hinge on that one test. The fuller shape, not taken, has each xdist worker send the
+#: node ids of its leg assertions back through ``workeroutput`` (as it does the
+#: deselected count) and reads ``get_closest_marker`` where xdist is not running.
 LEG_ASSERTION_MARKER = "leg_assertion"
 
 
