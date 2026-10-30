@@ -32,7 +32,6 @@ from automated_security_helper.config.operator_only_options import (
     RepositorySettings,
     _confine_scanner_options,
     _sections_in,
-    _set_scanner_option,
     ignored_operator_only_options,
     mark_operator_only_options,
 )
@@ -97,6 +96,13 @@ def test_the_write_back_types_one_field_without_revalidating_the_whole_model():
     on the missing field before the value was ever typed. The write-back reads
     the one field, with its own constraints (the limit is held above zero), and
     leaves the rest of the model as it is."""
+    # Imported here, not at module level: the helper is this change's own
+    # addition, so a module-level import would stop the whole module from
+    # collecting against a product that predates it, and the other tests in
+    # this module would go unread there.
+    from automated_security_helper.config.operator_only_options import (
+        _set_scanner_option,
+    )
 
     class _TwoFields(BaseModel):
         limit: Annotated[int, Field(gt=0)] = 1
