@@ -28,6 +28,7 @@ import logging
 from contextlib import contextmanager
 
 import pytest
+import typer
 from rich.console import Console
 
 from automated_security_helper.cli.inspect import inspect_findings_app as tui
@@ -237,9 +238,12 @@ def test_a_load_error_is_shown_once_on_the_console(tmp_path, monkeypatch, capsys
         raise ValueError(f"bad report {VALUE}")
 
     monkeypatch.setattr(tui.AshAggregatedResults, "load_model", refuse)
-    tui.findings_command(
-        output_dir=tmp_path, report_file="report.json", config=tmp_path / ".a.yaml"
-    )
+    # A report that does not load leaves nothing to show, so the command exits 1
+    # after it prints the error.
+    with pytest.raises(typer.Exit):
+        tui.findings_command(
+            output_dir=tmp_path, report_file="report.json", config=tmp_path / ".a.yaml"
+        )
 
     captured = capsys.readouterr()
     printed = captured.out + captured.err
@@ -275,9 +279,10 @@ def test_a_load_error_hides_a_value_a_complete_code_splits(
         raise error
 
     monkeypatch.setattr(tui.AshAggregatedResults, "load_model", refuse)
-    tui.findings_command(
-        output_dir=tmp_path, report_file="report.json", config=tmp_path / ".a.yaml"
-    )
+    with pytest.raises(typer.Exit):
+        tui.findings_command(
+            output_dir=tmp_path, report_file="report.json", config=tmp_path / ".a.yaml"
+        )
 
     captured = capsys.readouterr()
     printed = captured.out + captured.err

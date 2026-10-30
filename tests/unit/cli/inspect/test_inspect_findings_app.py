@@ -1281,12 +1281,15 @@ class TestFindingsCommand:
             original_cwd = os.getcwd()
             try:
                 os.chdir(tmpdir)
-                findings_command(
-                    output_dir=None, report_file="ash_aggregated_results.json"
-                )
+                # No results to show: the command says so and exits 1.
+                with pytest.raises(typer.Exit) as exited:
+                    findings_command(
+                        output_dir=None, report_file="ash_aggregated_results.json"
+                    )
             finally:
                 os.chdir(original_cwd)
 
+        assert exited.value.exit_code == 1
         mock_echo.assert_called_once()
         assert "No model" in mock_echo.call_args[0][0]
 
