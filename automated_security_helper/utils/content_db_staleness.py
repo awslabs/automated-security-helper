@@ -92,7 +92,8 @@ and ``grype db status`` reported the planted database's time (2099-01-01), so a
 repository scanned with ``cd repo && ash --offline`` could carry a stale database past
 this check. So each probe runs from ``ProbeContext.cwd``, outside the scanned tree, passes
 ``content_db_shared.EMPTY_TOOL_CONFIG`` as its config file, the one the refresh passes
-(neither tool then looks for one), and names ``ProbeContext.cache_dir``, the directory the scanner pointed its scan at,
+when the caller gives it no operator config of its own (neither tool then looks for
+one), and names ``ProbeContext.cache_dir``, the directory the scanner pointed its scan at,
 with the flag or variable that beats any config file (``--cache-dir``,
 ``GRYPE_DB_CACHE_DIR``).
 """

@@ -76,6 +76,14 @@ reads the setting the way trivy 0.75.0 does, measured case by case in
 ``tests/unit/utils/test_content_db_refresh.py``; a form it does not recognize leaves
 the update in, and trivy's refusal then fails the scan with trivy's own message.
 
+grype has one such setting, ``GRYPE_DB_AUTO_UPDATE`` (``db.auto-update`` in its
+config), read as false by Go's ``strconv.ParseBool`` to turn its own scan-time
+download off; ``grype_update_opt_outs`` honors it the same way, so an operator who
+keeps grype off the database registry keeps ASH's update off too. It is read from the
+environment the refresh runs with, which is the process's own: ASH hands sandboxed
+grype ``GRYPE_PREPARED_ENV`` (the same value) through the child's environment only,
+never through ``os.environ``, so the refresh does not read its own setting back.
+
 Concurrency and repetition
 --------------------------
 Serialized by ``utils/file_lock.exclusive_lock`` on a lock file in the cache
@@ -616,8 +624,10 @@ def _commands(
 ) -> List[Tuple[List[str], Dict[str, str], str]]:
     """The update commands, each with its environment and what it updates.
 
-    ``config_file`` is ``EMPTY_TOOL_CONFIG``, or for trivy the operator's file.
-    ``what`` is a key of ``TRIVY_UPDATE_OPT_OUTS`` for the commands that have one.
+    ``config_file`` is ``EMPTY_TOOL_CONFIG``, or the operator's own file for either
+    tool (``-c`` for grype, ``--config`` for trivy). ``what`` is a key of
+    ``TRIVY_UPDATE_OPT_OUTS`` for trivy's commands and ``database``, the key of
+    ``grype_update_opt_outs``, for grype's.
     """
     env = dict(env)
     config = config_file.as_posix()
