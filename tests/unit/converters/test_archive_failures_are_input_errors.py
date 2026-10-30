@@ -25,6 +25,7 @@ import errno
 import gzip
 import io
 import lzma
+import os
 import tarfile
 import zipfile
 import zlib
@@ -354,6 +355,57 @@ def test_a_run_error_while_probing_a_tar_is_a_tool_error_no_suppression_accepts(
     assert failed.accepted is False
     assert not waives_gate(failed)
     assert "PermissionError" in failed.reason
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows raises its own errors for a member under a file; the fallback "
+    "is read where the extractor raises the two errors it catches",
+)
+def test_a_member_pair_the_admission_check_misses_is_the_archives_own_input_error(
+    test_plugin_context, monkeypatch
+):
+    """The extraction-time fallback: a member the extractor cannot write because
+    an earlier member made a file where its directory should be (NotADirectoryError),
+    or a directory where its file should be (IsADirectoryError), is the archive's
+    layout, recorded as an input error on the whole archive that a reviewed
+    suppression accepts and that waives the gate. The admission check refuses such
+    a pair before anything is written now, so the branch is reached here with that
+    check switched off: it is kept as defense in depth for a pair the check's
+    reading of the names misses, and this is the one test that drives it. The
+    reason's exception name is not pinned (it differs by platform)."""
+    from automated_security_helper.models.asharp_model import waives_gate
+
+    monkeypatch.setattr(
+        archive_converter, "_written_prefix_keys", lambda member_name, kind: []
+    )
+    source = Path(test_plugin_context.source_dir)
+    archive = source / "under.zip"
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_STORED) as sound:
+        sound.writestr(zipfile.ZipInfo("x.js"), b"x\n")
+        sound.writestr(zipfile.ZipInfo("x.js/y.js"), b"y\n")
+    archive.write_bytes(zipped.getvalue())
+    test_plugin_context.config.global_settings.suppressions = [
+        AshSuppression(
+            rule_id="ash-unconverted-input",
+            path="under.zip",
+            reason="a reviewed fixture",
+        )
+    ]
+    converter = _converter(test_plugin_context, monkeypatch, archive)
+
+    results = converter.convert()
+
+    assert results == []
+    # Nothing was refused by name: the pair reached the extractor, which raised.
+    assert converter.refused_inputs == []
+    (failed,) = converter.failed_inputs
+    assert failed.path == "under.zip"
+    assert failed.kind == "input"
+    assert failed.accepted is True
+    assert failed.accepted_reason == "a reviewed fixture"
+    assert waives_gate(failed)
 
 
 def test_a_scan_set_path_outside_the_tree_is_not_skipped_and_does_not_raise(
