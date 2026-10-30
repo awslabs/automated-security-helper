@@ -323,6 +323,47 @@ def test_the_tar_probe_answers_not_a_tar_only_for_the_archives_own_errors(
     assert handle.tell() == 0
 
 
+@pytest.mark.parametrize(
+    ("error", "raised"),
+    [
+        pytest.param(zlib.error("Error -3 while decompressing"), False, id="damaged"),
+        pytest.param(EOFError("Compressed file ended"), False, id="cut"),
+        pytest.param(PermissionError(errno.EACCES, "denied"), True, id="permission"),
+        pytest.param(MemoryError(), True, id="memory"),
+        pytest.param(AttributeError("defect in the stream"), True, id="defect"),
+    ],
+)
+def test_the_order_probe_keeps_the_archives_errors_apart_from_the_runs(
+    monkeypatch, error, raised
+):
+    """Where a stream carries gzip's magic and its first block also spells a tar
+    header, the decompressor is asked first. Its own refusal (damaged or cut
+    data) sends the stream to the plain tar reading, whose first block here is
+    gzip bytes and no header, so the probe answers "not a tar"; an error of the
+    run is raised, as every tar probe raises it, for convert() to grade."""
+
+    class Failing(io.RawIOBase):
+        def __init__(self, raw):
+            super().__init__()
+
+        def readable(self):
+            return True
+
+        def read(self, size=-1):
+            raise error
+
+    monkeypatch.setattr(archive_converter, "_GzipMembersStream", Failing)
+    monkeypatch.setattr(archive_converter, "_spells_a_tar_header", lambda block: True)
+    handle = io.BytesIO(gzip.compress(b"x" * 1024))
+
+    if raised:
+        with pytest.raises(type(error)):
+            archive_converter._holds_a_tar(handle)
+    else:
+        assert archive_converter._holds_a_tar(handle) is False
+    assert handle.tell() == 0
+
+
 def test_a_run_error_while_probing_a_tar_is_a_tool_error_no_suppression_accepts(
     test_plugin_context, monkeypatch
 ):

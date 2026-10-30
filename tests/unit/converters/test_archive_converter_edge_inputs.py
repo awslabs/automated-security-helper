@@ -12,7 +12,11 @@
   per-member header allowance, so a tar of thousands of such members was refused
   as unreadable once the 4 MiB base was spent.
 - An uncompressed tar whose first member is named ``BZh...`` was read as bzip2,
-  failed to decompress, and was recorded as unreadable.
+  failed to decompress, and was recorded as unreadable. The fix read a first block
+  whose tar checksum held as a tar before any compressor's magic, which made a
+  gzip whose header spelled a tar header read as that tar and never as the gzip
+  a consumer unpacks: the magic decides first now, and the header only once the
+  decompressor has refused the stream.
 - A .tar.gz followed by bytes that are not another gzip member failed whole: the
   listing reads every byte there is, and GzipFile raises at the first byte after
   the last member that is not a member header.
@@ -234,6 +238,87 @@ def test_a_tar_whose_first_member_spells_the_whole_bzip2_head_is_a_tar(
     (extracted,) = results
     assert (extracted / "a.py").read_text(encoding="utf-8") == "x = 1\n"
     assert converter.failed_inputs == []
+
+
+# ---------------------------------------------------------------- sniff order
+
+
+def test_a_compressors_magic_is_read_before_the_tar_header(
+    test_plugin_context, monkeypatch
+):
+    """The order pin: a stream whose first bytes carry a compressor's magic is
+    read through that decompressor, and its first block is read as a tar header
+    only once the decompressor has refused it. With the header test answering
+    True for every block, a gzip-compressed tar is still opened as gzip and its
+    member extracted. Read header-first, as it was, it was the tar its bytes
+    spelled: not one at all, so the archive was not read."""
+    monkeypatch.setattr(archive_converter, "_spells_a_tar_header", lambda block: True)
+    raw = tar_bytes({"a.py": "x = 1\n"}, gz=True)
+    plain = tar_bytes({"a.py": "x = 1\n"})
+
+    with archive_converter._tar_stream(io.BytesIO(raw)) as stream:
+        assert stream.read(tarfile.BLOCKSIZE) == plain[: tarfile.BLOCKSIZE]
+    assert archive_kind("src.tar.gz", io.BytesIO(raw)) == "tar"
+
+    converter, results = _convert_one(
+        test_plugin_context, monkeypatch, "src.tar.gz", raw
+    )
+    (extracted,) = results
+    assert (extracted / "a.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert converter.failed_inputs == []
+
+
+def test_a_tar_with_no_compressors_magic_is_read_as_a_tar(
+    test_plugin_context, monkeypatch
+):
+    """The control: with no magic there is no decompressor to consult, so a bare
+    tar is read as a tar whatever the header test says."""
+    monkeypatch.setattr(archive_converter, "_spells_a_tar_header", lambda block: True)
+    raw = tar_bytes({"a.py": "x = 1\n"})
+
+    with archive_converter._tar_stream(io.BytesIO(raw)) as stream:
+        assert stream.read(tarfile.BLOCKSIZE) == raw[: tarfile.BLOCKSIZE]
+    assert archive_kind("src.tar", io.BytesIO(raw)) == "tar"
+
+    converter, results = _convert_one(test_plugin_context, monkeypatch, "src.tar", raw)
+    (extracted,) = results
+    assert (extracted / "a.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert converter.failed_inputs == []
+
+
+@pytest.mark.parametrize(
+    ("header_answer", "opened"),
+    [
+        pytest.param(False, 1, id="plain-gzip-bytes"),
+        pytest.param(True, 2, id="bytes-that-also-spell-a-header"),
+    ],
+)
+def test_the_decompressor_is_probed_only_where_the_block_also_spells_a_header(
+    monkeypatch, header_answer, opened
+):
+    """A gzip whose first block spells no tar header is opened once, for the
+    read. One whose first block does spell a header is opened twice: once to ask
+    whether the decompressor reads it (it does, so the stream is gzip), then for
+    the read. Read header-first, as it was, the second case opened no gzip at all."""
+    opens = {"n": 0}
+    real = archive_converter._GzipMembersStream
+
+    class Counting(real):
+        def __init__(self, raw):
+            opens["n"] += 1
+            super().__init__(raw)
+
+    monkeypatch.setattr(archive_converter, "_GzipMembersStream", Counting)
+    monkeypatch.setattr(
+        archive_converter, "_spells_a_tar_header", lambda block: header_answer
+    )
+    raw = tar_bytes({"a.py": "x = 1\n"}, gz=True)
+    plain = tar_bytes({"a.py": "x = 1\n"})
+
+    with archive_converter._tar_stream(io.BytesIO(raw)) as stream:
+        assert stream.read(tarfile.BLOCKSIZE) == plain[: tarfile.BLOCKSIZE]
+
+    assert opens["n"] == opened
 
 
 # ---------------------------------------------------------------- gzip trailing bytes

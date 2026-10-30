@@ -22,6 +22,7 @@ from typing import (
     Annotated,
     Any,
     BinaryIO,
+    Callable,
     Dict,
     FrozenSet,
     Iterator,
@@ -786,11 +787,13 @@ def _is_bzip2_head(head: bytes) -> bool:
 def _spells_a_tar_header(block: bytes) -> bool:
     """Whether ``block`` holds a tar member header whose checksum holds.
 
-    The test that reads a stream as an uncompressed tar before any compressor's
-    magic is consulted. A short block, a block of zeros (the end-of-archive
-    block) and a block whose checksum fails all read False here, so those
-    streams keep the magic sniff; how an end-of-archive block counts for a
-    caller that asks "is this a tar" is _is_tar_header's decision, not this one.
+    The test that lets a stream whose first bytes carry a compressor's magic be
+    read as an uncompressed tar once that decompressor has refused it
+    (_tar_stream): a member name is free to spell the magic, and the checksum
+    says the block is a header. A short block, a block of zeros (the
+    end-of-archive block) and a block whose checksum fails all read False here;
+    how an end-of-archive block counts for a caller that asks "is this a tar" is
+    _is_tar_header's decision, not this one.
     """
     try:
         tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
@@ -799,36 +802,79 @@ def _spells_a_tar_header(block: bytes) -> bool:
     return True
 
 
+def _decompressor_for(head: bytes) -> Optional[Callable[[BinaryIO], Any]]:
+    """The decompressor the first six bytes of a stream name, or None when they
+    carry no compressor's magic: gzip (through _GzipMembersStream, which ends at
+    bytes after the gzip data instead of failing on them), bzip2 (by its six-byte
+    head, _is_bzip2_head), xz, and zstd where this Python has it."""
+    if head[:2] == b"\x1f\x8b":
+        return _GzipMembersStream
+    if _is_bzip2_head(head):
+        return bz2.BZ2File
+    if head == b"\xfd7zXZ\x00":
+        return lzma.LZMAFile
+    if head[:4] == b"\x28\xb5\x2f\xfd" and _zstd_file_class() is not None:
+        return _zstd_file_class()
+    return None
+
+
+def _decompresses_a_first_block(
+    opener: Callable[[BinaryIO], Any], handle: BinaryIO
+) -> bool:
+    """Whether the decompressor ``opener`` reads a first block from ``handle``.
+
+    The archive's own errors (a damaged or invalid stream, as _failure_kind
+    grades them) answer False: the bytes are not the compressed stream their
+    magic names. An error of the run (no permission or memory, a device
+    failure, a defect in the stream classes) is raised, as _holds_a_tar raises
+    it, so convert() records a failure of the run's kind and no suppression
+    accepts it. The handle is left at its start.
+    """
+    handle.seek(0)
+    try:
+        with opener(handle) as inner:
+            inner.read(tarfile.BLOCKSIZE)
+    except Exception as error:
+        if _failure_kind(error) == "tool":
+            raise
+        return False
+    finally:
+        handle.seek(0)
+    return True
+
+
 @contextlib.contextmanager
 def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
     """The archive's tar stream, decompressed by its leading bytes, and bounded.
 
-    A first block that is a tar header (_spells_a_tar_header: its checksum
-    holds) is an uncompressed tar whatever its first bytes spell, since a member name is
-    free to start with a compressor's signature (``BZh91AY&SY-notes.txt`` spells
-    bzip2's whole head) and no compressed stream carries a valid tar checksum.
-    Otherwise the decompressor is chosen from the magic bytes rather than by
-    letting tarfile try each in turn: gzip (through _GzipMembersStream, which
-    ends at bytes after the gzip data instead of failing on them), bzip2 (by
-    its six-byte head, _is_bzip2_head), xz, and zstd where this Python has it.
-    Any other content is read as an uncompressed tar. archive_kind probes a tar
-    through this same stream, so what it accepts and what is extracted agree.
+    The compressor's magic decides first, in tarfile's own order (its compressed
+    openers are tried before the plain one): a stream whose first bytes carry a
+    magic (_decompressor_for) is read through that decompressor, so what ASH
+    scans is what ``tar xzf``, pip and npm unpack. A first block whose tar
+    checksum holds does not change that by itself: a gzip header's extra field
+    (FEXTRA) is free bytes a header can be spelled in, so a tar-header-first
+    order read such a gzip as the small tar its header spelled and never
+    reached the deflate payload a consumer gets. Only a stream the decompressor
+    refuses on its first block (_decompresses_a_first_block: the archive's own
+    error, not the run's), and whose first block is a tar header
+    (_spells_a_tar_header), is read as an uncompressed tar: one whose first
+    member's name spells the magic (``BZh91AY&SY-notes.txt`` spells bzip2's
+    whole head), which read as bzip2 was recorded as unreadable. The
+    decompressor is chosen from the magic rather than by letting tarfile try
+    each in turn. Content with no magic is read as an uncompressed tar.
+    archive_kind probes a tar through this same stream, so what it accepts and
+    what is extracted agree.
     """
     block = handle.read(tarfile.BLOCKSIZE)
     handle.seek(0)
-    head = block[:6]
+    opener = _decompressor_for(block[:6])
     with contextlib.ExitStack() as stack:
         inner: Any = handle
-        if _spells_a_tar_header(block):
-            pass
-        elif head[:2] == b"\x1f\x8b":
-            inner = stack.enter_context(_GzipMembersStream(handle))
-        elif _is_bzip2_head(head):
-            inner = stack.enter_context(bz2.BZ2File(handle))
-        elif head == b"\xfd7zXZ\x00":
-            inner = stack.enter_context(lzma.LZMAFile(handle))
-        elif head[:4] == b"\x28\xb5\x2f\xfd" and _zstd_file_class() is not None:
-            inner = stack.enter_context(_zstd_file_class()(handle))
+        if opener is not None and (
+            not _spells_a_tar_header(block)
+            or _decompresses_a_first_block(opener, handle)
+        ):
+            inner = stack.enter_context(opener(handle))
         yield _BoundedTarStream(inner)
 
 
