@@ -28,6 +28,9 @@ from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.plugin_modules.ash_aws_plugins import aws_utils
+from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+    BedrockSummaryReporterConfigOptions,
+)
 from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
     CloudWatchLogsReporter,
     CloudWatchLogsReporterConfig,
@@ -239,3 +242,38 @@ def test_a_published_region_name_is_accepted_in_config(region):
 def test_a_name_that_is_no_region_is_refused_in_config():
     with pytest.raises(ValidationError):
         S3ReporterConfigOptions(aws_region="nowhere-1", bucket_name="a-bucket")
+
+
+# A region written as a YAML block scalar keeps its final newline, so the value
+# the model sees is "us-east-1\n". The pattern is anchored at both ends and the
+# engine of record (pydantic-core) reads "$" as the end of the value, so the
+# newline is refused as a configuration error; the same name on one line is
+# accepted. Before the anchors the pattern was a search and admitted any value
+# holding a region name, this one included.
+_REGION_OPTIONS = [
+    pytest.param(BedrockSummaryReporterConfigOptions, {}, id="bedrock"),
+    pytest.param(
+        CloudWatchLogsReporterConfigOptions,
+        {"log_group_name": "a-log-group"},
+        id="cloudwatch",
+    ),
+    pytest.param(S3ReporterConfigOptions, {"bucket_name": "a-bucket"}, id="s3"),
+]
+
+
+@pytest.mark.parametrize(("options_type", "required"), _REGION_OPTIONS)
+def test_a_block_scalar_region_keeps_its_newline_and_is_refused(options_type, required):
+    region = yaml.safe_load("aws_region: |\n  us-east-1\n")["aws_region"]
+    assert region == "us-east-1\n"
+
+    with pytest.raises(ValidationError):
+        options_type(aws_region=region, **required)
+
+
+@pytest.mark.parametrize(("options_type", "required"), _REGION_OPTIONS)
+def test_the_same_region_on_one_line_is_accepted(options_type, required):
+    region = yaml.safe_load("aws_region: us-east-1\n")["aws_region"]
+
+    options = options_type(aws_region=region, **required)
+
+    assert options.aws_region == "us-east-1"
