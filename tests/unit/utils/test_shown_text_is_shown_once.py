@@ -261,7 +261,12 @@ def test_a_shown_message_is_shown_once_on_a_windows_ci_runner(
     """On Windows under CI, get_logger's WindowsSafeFilter rewrites each message
     for a console that cannot encode it. It rebuilt a shown message as plain text,
     so the sink showed it again: ESC printed as the text "\\\\x1b". Its other
-    characters outside ASCII are written as escapes, not dropped."""
+    characters outside ASCII are written as escapes, not dropped.
+
+    The filter sits on the logger, so ash.log's handler sees the rewrite too; the
+    record keeps what was logged, and the file formatter writes that, since the
+    file is UTF-8 and the rewrite is for the console (log.py, _UNFILTERED_ATTR).
+    So ash.log keeps the accented letter and the check mark, shown once."""
     from automated_security_helper.utils import log as log_module
     from tests.utils.windows_console import windows_logging_kept_in_the_test
 
@@ -280,9 +285,14 @@ def test_a_shown_message_is_shown_once_on_a_windows_ci_runner(
         capsys=capsys,
     )
 
-    assert "key C:\\\\x64 caf\\xe9 [OK] a\\x1b[2Kb" in written, repr(written)
+    if sink == "console":
+        assert "key C:\\\\x64 caf\\xe9 [OK] a\\x1b[2Kb" in written, repr(written)
+        assert written.isascii(), repr(written)
+    else:
+        kept = f"key C:\\\\x64 caf{_E_ACUTE} {_CHECK_MARK} a\\x1b[2Kb"
+        assert kept in written, repr(written)
+        assert "caf\\xe9" not in written and "[OK]" not in written, repr(written)
     assert "\\\\\\" not in written and "\\\\x1b" not in written, repr(written)
-    assert written.isascii(), repr(written)
 
 
 def test_escape_markup_shows_shown_text_once():
