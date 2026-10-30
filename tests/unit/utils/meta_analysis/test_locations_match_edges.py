@@ -80,3 +80,12 @@ def test_a_posix_path_whose_third_character_is_a_colon_keeps_its_slash():
     assert _normalize_file_path("file:///1:/file.py") == "/1:/file.py"
     assert _normalize_file_path("file:///C:/proj/a.py") == "C:/proj/a.py"
     assert file_paths_match("file:///1:/file.py", "/1:/file.py")
+
+
+def test_a_percent_escape_in_a_uri_is_decoded():
+    # A location URI is a URI: a%20b.py names "a b.py", as aggregation writes it.
+    assert _normalize_file_path("file:///work/a%20b.py") == "/work/a b.py"
+    assert _normalize_file_path("src/caf%C3%A9.py") == "src/café.py"
+    assert file_paths_match("file:///work/app/src/a%20b.py", "src/a b.py")
+    # A name with no escape in it is untouched.
+    assert _normalize_file_path("src/100%.py") == "src/100%.py"

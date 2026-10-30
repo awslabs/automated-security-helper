@@ -174,3 +174,26 @@ def test_two_relative_uris_with_one_as_the_others_tail_are_two_files():
     assert [field["path"] for field in missing] == [
         "locations[0].physicalLocation.artifactLocation.uri"
     ]
+
+
+def test_an_empty_list_the_aggregate_filled_is_not_a_lost_field():
+    """Aggregation appends suppressions to a result that came with none; the
+    filled list, compared with the original's ``[]``, read as a lost field."""
+    original = {"ruleId": "R1", "suppressions": [], "properties": {}}
+    aggregated = {
+        "ruleId": "R1",
+        "suppressions": [{"kind": "external"}],
+        "properties": {"scanner_name": "bandit"},
+    }
+
+    assert compare_result_fields(original, aggregated) == []
+
+
+def test_an_empty_container_is_still_lost_when_absent_or_of_another_type():
+    original = {"ruleId": "R1", "suppressions": [], "properties": {}}
+    aggregated = {"ruleId": "R1", "properties": "bandit"}
+
+    assert [field["path"] for field in compare_result_fields(original, aggregated)] == [
+        "suppressions",
+        "properties",
+    ]

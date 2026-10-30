@@ -156,3 +156,37 @@ def test_an_aggregated_result_already_taken_is_not_offered_again():
     taken = {id(aggregated[0])}
     assert find_matching_result(original, aggregated, exclude_ids=taken) is None
     assert find_matching_result(original, aggregated) is aggregated[0]
+
+
+def _ranged(rule_id, uri, start, end):
+    result = _located(rule_id, uri, start)
+    result["locations"][0]["physicalLocation"]["region"]["endLine"] = end
+    return result
+
+
+def test_the_result_at_the_exact_lines_is_preferred_over_an_overlapping_one():
+    """Two findings of one rule two lines apart both overlap the original's
+    range; the first in file order used to take the match, so the original's
+    exact copy, offered later, was left to be counted as unmatched."""
+    original = _ranged("R1", "src/a.py", 10, 12)
+    nearby = _ranged("R1", "src/a.py", 12, 14)
+    exact = _ranged("R1", "src/a.py", 10, 12)
+
+    assert find_matching_result(original, [nearby, exact]) is exact
+    assert find_matching_result(original, [exact, nearby]) is exact
+
+
+def test_an_overlapping_result_still_matches_when_no_exact_one_exists():
+    original = _ranged("R1", "src/a.py", 10, 12)
+    nearby = _ranged("R1", "src/a.py", 12, 14)
+
+    assert find_matching_result(original, [nearby]) is nearby
+
+
+def test_a_percent_encoded_uri_matches_its_decoded_relative_form():
+    """Aggregation decodes the URI it makes relative, so ``a%20b.py`` and
+    ``a b.py`` are one file; compared as text they were two."""
+    original = _located("R1", "file:///work/app/src/a%20b.py", 10)
+    aggregated = [_located("R1", "src/a b.py", 10)]
+
+    assert find_matching_result(original, aggregated) is aggregated[0]

@@ -307,6 +307,11 @@ def find_matching_result(
     *scanner_name*, an aggregated result that records another scanner
     (``properties.scanner_name``) is not a match: one scanner's finding was
     paired with another scanner's result of the same rule id at the same place.
+    Among the located results that match, one at the original's own file and
+    lines is preferred over one whose range merely overlaps: the first
+    overlapping result in file order used to win, so a second finding of the
+    same rule a few lines away took the first original's place and left the
+    exact copy to be reported as unmatched.
 
     Args:
         original_result: Result from original scanner report
@@ -333,6 +338,10 @@ def find_matching_result(
     location_info = extract_location_info(original_result)
     original_located = _has_location(location_info)
 
+    # The first result whose location overlaps the original's without being at
+    # its exact file and lines; returned only when no exact one follows.
+    overlapping_match: Optional[Dict] = None
+
     # Try to find a match
     for agg_result in aggregated_results:
         if exclude_ids and id(agg_result) in exclude_ids:
@@ -356,7 +365,10 @@ def find_matching_result(
             ):
                 if rule_id is None and not _messages_agree(original_result, agg_result):
                     continue
-                return agg_result
+                if _locations_equal(location_info, agg_location):
+                    return agg_result
+                if overlapping_match is None:
+                    overlapping_match = agg_result
             continue
 
         # No location on either side; fall back to the message text
@@ -373,7 +385,27 @@ def find_matching_result(
         if original_target and original_target == agg_target:
             return agg_result
 
-    return None
+    return overlapping_match
+
+
+def _locations_equal(location_info: Dict, other: Dict) -> bool:
+    """Whether two ``extract_location_info`` dicts name one file and one line
+    range: the same file once the URIs are read as paths, and equal start and
+    end lines once digit strings are read as the integers they spell."""
+    from automated_security_helper.utils.meta_analysis.locations_match import (
+        _line_number,
+        file_paths_match,
+    )
+
+    file_one, file_two = location_info.get("file_path"), other.get("file_path")
+    if (file_one is None) != (file_two is None):
+        return False
+    if file_one is not None and not file_paths_match(file_one, file_two):
+        return False
+    return all(
+        _line_number(location_info.get(key)) == _line_number(other.get(key))
+        for key in ("start_line", "end_line")
+    )
 
 
 def _messages_agree(original_result: Dict, agg_result: Dict) -> bool:

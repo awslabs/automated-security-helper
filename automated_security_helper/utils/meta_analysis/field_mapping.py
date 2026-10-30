@@ -381,8 +381,13 @@ def _leaf_values_equivalent(path: str, original: Any, aggregated: Any) -> bool:
 
     A location's file URI is compared as a path (``file:///work/src/a.py`` and
     ``src/a.py`` name one file once aggregation has made the URI relative to
-    the scan root); every other leaf goes through ``are_values_equivalent``.
+    the scan root). An empty container on the original side (``suppressions:
+    []``) is carried by any container of the same type on the aggregated side:
+    aggregation fills such lists, and the filled list read as a lost field.
+    Every other leaf goes through ``are_values_equivalent``.
     """
+    if isinstance(original, (dict, list)) and not original:
+        return isinstance(aggregated, type(original))
     if (
         path.endswith(_LOCATION_URI_LEAF)
         and isinstance(original, str)

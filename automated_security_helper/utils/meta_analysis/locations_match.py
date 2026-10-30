@@ -1,4 +1,5 @@
 from typing import Dict, Optional
+from urllib.parse import unquote
 
 
 def locations_match(loc1: Dict, loc2: Dict) -> bool:
@@ -155,8 +156,14 @@ def _line_ranges_compatible(start1, end1, start2, end2) -> bool:
 
 def _normalize_file_path(path: str) -> str:
     """*path* as aggregation would write it: a POSIX path without a ``file://``
-    scheme, ``./`` prefix or trailing separator."""
+    scheme, ``./`` prefix, trailing separator or percent-escapes.
+
+    A location URI is a URI, so ``a%20b.py`` names ``a b.py``; aggregation
+    decodes it when it makes the URI relative to the scan root, and the two
+    spellings compared as text read as two files."""
     text = str(path).replace("\\", "/")
+    if "%" in text:
+        text = unquote(text)
     if text.startswith("file://"):
         text = text[len("file://") :]
         # file:///C:/x -> C:/x. Only a drive letter: a POSIX path such as
