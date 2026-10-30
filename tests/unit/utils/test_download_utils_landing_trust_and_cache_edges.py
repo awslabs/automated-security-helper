@@ -71,6 +71,9 @@ class _Body(io.BytesIO):
     def __init__(self, payload: bytes, landed_at=None):
         super().__init__(payload)
         self._landed_at = landed_at
+        # _copy_whole_body reads the response headers for Content-Length; a
+        # stand-in without them raised AttributeError at the copy.
+        self.headers: dict = {}
 
     def __enter__(self):
         return self
