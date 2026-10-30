@@ -292,11 +292,19 @@ def test_running_the_module_as_main_registers_it_once(monkeypatch):
     """entrypoint.main imports automated_security_helper.cli.main; run as
     __main__, that import executed this file a second time."""
     calls: list = []
-    monkeypatch.setattr(entrypoint, "main", lambda: calls.append("ran"))
+    # The stub records what an import of the module would find AT THE CALL:
+    # checking the registration only after _run_as_main returns would also pass
+    # a shape that registers the module after running main, which is the double
+    # import this guards against.
+    monkeypatch.setattr(
+        entrypoint,
+        "main",
+        lambda: calls.append(sys.modules.get("automated_security_helper.cli.main")),
+    )
     monkeypatch.delitem(sys.modules, "automated_security_helper.cli.main")
     as_main = types.ModuleType("__main__")
 
     _run_as_main(as_main)
 
-    assert calls == ["ran"]
+    assert calls == [as_main]
     assert sys.modules["automated_security_helper.cli.main"] is as_main
