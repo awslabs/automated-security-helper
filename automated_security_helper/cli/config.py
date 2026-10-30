@@ -1895,8 +1895,12 @@ def _apply_unused_fixes(
     color: bool,
 ) -> bool:
     """Comment out unused suppressions in the config file. Returns whether the
-    file was written."""
-    from automated_security_helper.config.config_linter import ConfigLinter
+    file was written. A list the fixer cannot edit (a repeated key, a flow
+    sequence, an alias) is reported with its reason and exits 1."""
+    from automated_security_helper.config.config_linter import (
+        ConfigLinter,
+        UnusedSuppressionsNotEditable,
+    )
 
     # Check report age first
     report_info = ConfigLinter.get_unused_report_age(config_path, output_dir)
@@ -1934,12 +1938,25 @@ def _apply_unused_fixes(
                 secho("Aborted.", fg=typer.colors.YELLOW)
                 raise typer.Exit(0)
 
-    # Compute the fix, to show what it would comment out.
-    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(
-        config_path, output_dir
-    )
+    def compute_fix():
+        # Lint just listed the unused entries; saying "nothing to comment out"
+        # for a list the fixer cannot edit would contradict it. The file is
+        # unchanged when the fixer refuses.
+        try:
+            return ConfigLinter.fix_unused_suppressions(config_path, output_dir)
+        except UnusedSuppressionsNotEditable as exc:
+            secho(
+                f"\n❌ The unused suppressions could not be commented out: {exc}. "
+                f"{config_path} is unchanged.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
 
-    if not fixed_issues:
+    # Compute the fix, to show what it would comment out.
+    fixed_content, fixed_issues, _ = compute_fix()
+
+    if not fixed_issues or fixed_content is None:
+        # No content comes back only with no issues (the config did not read).
         secho("✅ No unused suppressions to comment out.", fg=typer.colors.GREEN)
         return False
 
@@ -1956,11 +1973,9 @@ def _apply_unused_fixes(
             raise typer.Exit(0)
         # Computed again from the file as it is now: the text computed before
         # the prompt was written after it, over any edit made while the prompt
-        # waited.
-        fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(
-            config_path, output_dir
-        )
-        if not fixed_issues:
+        # waited (an edit that made the list uneditable is refused the same way).
+        fixed_content, fixed_issues, _ = compute_fix()
+        if not fixed_issues or fixed_content is None:
             secho("✅ No unused suppressions to comment out.", fg=typer.colors.GREEN)
             return False
 

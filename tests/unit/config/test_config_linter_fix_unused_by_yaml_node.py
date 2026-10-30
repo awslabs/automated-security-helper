@@ -30,7 +30,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from automated_security_helper.config.config_linter import ConfigLinter
+from automated_security_helper.config.config_linter import (
+    ConfigLinter,
+    UnusedSuppressionsNotEditable,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -126,8 +129,10 @@ def test_a_block_scalar_line_starting_with_the_key_does_not_reset_the_count(
     )
 
 
-def test_a_flow_sequence_is_left_as_it_is_and_nothing_is_reported_fixed(tmp_path):
-    """Red at the base: the text was unchanged while two fixes were reported."""
+def test_a_flow_sequence_is_refused_with_a_reason_and_left_as_it_is(tmp_path):
+    """Red at the base: the text was unchanged while two fixes were reported.
+    The refusal now names the shape, so the CLI can say the file could not be
+    edited instead of "nothing to comment out" after lint listed the entries."""
     config_path = _setup(
         tmp_path,
         "project_name: demo\n"
@@ -141,10 +146,10 @@ def test_a_flow_sequence_is_left_as_it_is_and_nothing_is_reported_fixed(tmp_path
     )
     before = config_path.read_text(encoding="utf-8")
 
-    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+    with pytest.raises(UnusedSuppressionsNotEditable, match="flow sequence"):
+        ConfigLinter.fix_unused_suppressions(config_path)
 
-    assert fixed_issues == []
-    assert fixed_content == before
+    assert config_path.read_text(encoding="utf-8") == before
 
 
 def test_every_entry_commented_out_leaves_an_empty_list_in_a_crlf_file(tmp_path):
@@ -297,9 +302,9 @@ def test_a_second_entry_whose_dash_is_on_the_files_last_line_is_counted(
     assert [s["path"] for s in data["global_settings"]["suppressions"]] == kept_paths
 
 
-def test_a_repeated_suppressions_key_is_left_alone(tmp_path):
+def test_a_repeated_suppressions_key_is_refused_with_a_reason(tmp_path):
     """The loader keeps the last list, a text walk would edit the first; the
-    file is left as it is and nothing is reported commented out."""
+    file is left as it is and the refusal names the repeated key."""
     config_path = _setup(
         tmp_path,
         "project_name: demo\n"
@@ -313,6 +318,24 @@ def test_a_repeated_suppressions_key_is_left_alone(tmp_path):
         "      rule_id: B101\n"
         "      reason: one\n",
         [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
+    )
+    before = config_path.read_text(encoding="utf-8")
+
+    with pytest.raises(UnusedSuppressionsNotEditable, match="more than once"):
+        ConfigLinter.fix_unused_suppressions(config_path)
+
+    assert config_path.read_text(encoding="utf-8") == before
+
+
+def test_a_list_with_nothing_unused_in_it_is_not_refused_for_its_shape(tmp_path):
+    """The shape is checked only when there is something to comment out: a
+    flow sequence whose entries are all in use reads as nothing to do."""
+    config_path = _setup(
+        tmp_path,
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions: [{path: src/a.py, rule_id: B101, reason: one}]\n",
+        [],
     )
     before = config_path.read_text(encoding="utf-8")
 

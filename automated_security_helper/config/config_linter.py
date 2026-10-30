@@ -255,6 +255,17 @@ class LintResult:
         return sum(1 for i in self.issues if i.severity == LintSeverity.INFO)
 
 
+class UnusedSuppressionsNotEditable(ValueError):
+    """``fix_unused_suppressions`` found entries to comment out but cannot edit
+    the file's suppressions list line by line: the list is a flow sequence
+    (``[{...}]``), an alias of a list written elsewhere, a key written more
+    than once (the loader keeps the last, a text walk would edit the first),
+    or a list whose entries the tokens and the node count differently. The
+    message says which; the file is left as it is, and the caller tells the
+    operator the file could not be edited instead of reporting nothing to do.
+    """
+
+
 class ConfigLinter:
     """Lints ASH configuration files for issues and can auto-fix them."""
 
@@ -557,7 +568,10 @@ class ConfigLinter:
 
         The content is None when the config could not be read or parsed (lint
         reported that); every other return carries the file's text, changed
-        only where the returned issues say.
+        only where the returned issues say. Raises
+        ``UnusedSuppressionsNotEditable`` when entries are to be commented out
+        but the list cannot be edited line by line (a flow sequence, an alias,
+        a repeated key); the caller reports that instead of nothing to do.
 
         Instead of removing unused suppressions entirely, this method comments them out
         with a note including the date and reason. This is safer because a suppression
@@ -901,14 +915,21 @@ class ConfigLinter:
             return None
         # A repeated key: the constructor keeps the last mapping, this walk
         # would edit the first, and the two lists can hold the same count.
-        # Nothing is edited on a document whose list cannot be told apart.
-        if cls._key_count(root, "global_settings") != 1:
-            return None
+        # Nothing is edited on a document whose list cannot be told apart,
+        # and the caller is told why rather than that there was nothing to do.
+        if cls._key_count(root, "global_settings") > 1:
+            raise UnusedSuppressionsNotEditable(
+                "the key 'global_settings' is written more than once, so the "
+                "suppressions list to edit cannot be told apart; keep one"
+            )
         settings = cls._mapping_value(root, "global_settings")
         if not isinstance(settings, yaml.MappingNode):
             return None
-        if cls._key_count(settings, "suppressions") != 1:
-            return None
+        if cls._key_count(settings, "suppressions") > 1:
+            raise UnusedSuppressionsNotEditable(
+                "the key 'global_settings.suppressions' is written more than "
+                "once, so the list to edit cannot be told apart; keep one"
+            )
         key_node = None
         for key, _value in settings.value:
             if isinstance(key, yaml.ScalarNode) and key.value == "suppressions":
@@ -917,8 +938,14 @@ class ConfigLinter:
         if key_node is None:
             return None
         sequence = cls._mapping_value(settings, "suppressions")
-        if not isinstance(sequence, yaml.SequenceNode) or sequence.flow_style:
+        if not isinstance(sequence, yaml.SequenceNode):
             return None
+        if sequence.flow_style:
+            raise UnusedSuppressionsNotEditable(
+                "'global_settings.suppressions' is a flow sequence ([{...}]), "
+                "which cannot be commented out entry by entry; write it as a "
+                "block list (one '- ' per entry)"
+            )
         key_line = key_node.start_mark.line
         # An alias: the list's text is somewhere before the key that refers
         # to it, and belongs to every other alias of the anchor too.
@@ -926,7 +953,11 @@ class ConfigLinter:
             key_node.start_mark.line,
             key_node.start_mark.column,
         ):
-            return None
+            raise UnusedSuppressionsNotEditable(
+                "'global_settings.suppressions' is an alias of a list written "
+                "elsewhere in the file, which every other use of the anchor "
+                "shares; write the list under the key"
+            )
         column = sequence.start_mark.column
         first_line = sequence.start_mark.line
         end_line = sequence.end_mark.line
@@ -948,7 +979,11 @@ class ConfigLinter:
         if len(dash_positions) != len(sequence.value):
             # The tokens and the node disagree on the entry count; nothing is
             # edited on a reading this cannot check.
-            return None
+            raise UnusedSuppressionsNotEditable(
+                f"'global_settings.suppressions' has {len(sequence.value)} "
+                f"entries but {len(dash_positions)} list dashes were found at "
+                "its column, so the entries' lines cannot be told apart"
+            )
         return key_line, dash_positions, end_line, key_node.start_mark.column
 
     @staticmethod

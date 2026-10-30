@@ -1356,6 +1356,59 @@ class TestConfigLintCLI:
         assert len(suppressions) == 1
         assert suppressions[0]["path"] == "src/still_needed.py"
 
+    def test_lint_fix_unused_says_when_the_list_cannot_be_edited(
+        self, cli_runner, tmp_path
+    ):
+        """A repeated suppressions key: lint lists the unused entries, and the
+        fixer, which cannot tell the two lists apart, says so and leaves the
+        file unchanged, instead of printing that there was nothing to comment
+        out (exit 1, since the operator asked for an edit that could not be
+        made)."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_text = (
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - path: src/x.py\n"
+            "      rule_id: B101\n"
+            "      reason: shadowed\n"
+            "  suppressions:\n"
+            "    - path: src/a.py\n"
+            "      rule_id: B101\n"
+            "      reason: one\n"
+        )
+        config_path.write_text(config_text, encoding="utf-8")
+        reports = tmp_path / ".ash" / "ash_output" / "reports"
+        reports.mkdir(parents=True)
+        (reports / "ash.unused-suppressions.json").write_text(
+            json.dumps(
+                {
+                    "unused_suppressions": [
+                        {"path": "src/a.py", "rule_id": "B101", "reason": "one"}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = cli_runner.invoke(
+            config_app,
+            [
+                "lint",
+                "--config",
+                str(config_path),
+                "--fix-unused",
+                "--non-interactive",
+            ],
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "could not be commented out" in result.output
+        assert "written more than once" in result.output
+        assert "No unused suppressions to comment out" not in result.output
+        assert config_path.read_text(encoding="utf-8") == config_text
+
     def test_lint_non_interactive_no_prompts(
         self, cli_runner, config_with_internal_fields
     ):
