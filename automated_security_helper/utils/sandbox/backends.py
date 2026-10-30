@@ -984,10 +984,15 @@ class FirejailBackend(SandboxBackend):
         home_variable = _real(policy.home)
         tmp_root = _real(_TMP_ROOT)
         # What the scan needs to see: a --blacklist value spelled with ? must not
-        # match any of these (_firejail_hidden_path).
+        # match any of these (_firejail_hidden_path). The program and the working
+        # directory are usually inside read_only already; a name that resolves
+        # nowhere fails at the spawn, so nothing is added for it here.
+        program = argv[0] if os.path.isabs(argv[0]) else _sandbox_program(argv[0])
         granted = [
             _real(p)
             for p in [
+                *([Path(program)] if program else []),
+                *([policy.cwd] if policy.cwd else []),
                 *policy.read_only,
                 *policy.cache,
                 *policy.writable,

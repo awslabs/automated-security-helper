@@ -438,6 +438,37 @@ def test_firejail_refuses_a_hidden_pattern_that_would_also_hide_a_granted_path(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="firejail's plan reads os.getuid()")
+@pytest.mark.parametrize("needed", ["cwd", "program"])
+def test_firejail_refuses_a_hidden_pattern_that_would_hide_the_cwd_or_program(
+    layout, needed
+):
+    """The working directory and the program are needed as the policy's paths are.
+
+    HOME names ``wor~``, a directory firejail does not treat as the home, so it is
+    blacklisted; spelled ``wor?`` the value also matches ``work`` beside it, which is
+    the scan's working directory, or holds its program. Neither is in the policy's
+    read paths here, and the plan is refused all the same, naming the matched path.
+    """
+    odd_home = layout.tmp / "wor~"
+    odd_home.mkdir()
+    work = layout.tmp / "work"
+    (work / "bin").mkdir(parents=True)
+    program = work / "bin" / "scan"
+    program.write_bytes(b"\x7fELF")
+    program.chmod(0o755)
+    backend = FirejailBackend()
+    backend._executable = "/fj"
+    if needed == "cwd":
+        argv, policy = ["/bin/true"], _policy(layout, home=odd_home, cwd=work)
+    else:
+        argv, policy = [program.as_posix()], _policy(layout, home=odd_home)
+
+    with pytest.raises(SandboxUnavailable, match="wor") as refused:
+        backend.plan(argv, {}, policy)
+    assert _real(work).as_posix() in str(refused.value)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="firejail's plan reads os.getuid()")
 def test_firejail_refuses_a_path_it_would_read_as_a_pattern(layout):
     odd = layout.tmp / "out[1]"
     odd.mkdir()
