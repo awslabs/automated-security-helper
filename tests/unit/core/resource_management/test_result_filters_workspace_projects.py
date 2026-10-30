@@ -160,6 +160,24 @@ class TestEachProjectIsJudgedByItsOwnGates:
         # dropped from the actionable view where the recorded verdict counted it.
         assert "LEGACY-POLICY" in kept
 
+    def test_a_policy_finding_in_an_unlisted_project_is_kept(self):
+        """Control, green on both sides: the filters never excluded such a finding.
+
+        Pinned so the two readers (this and the JUnit reporter) agree: only a
+        listed project with its gate explicitly off excludes a policy finding;
+        an unlisted project leaves it to the threshold.
+        """
+        document = _workspace_document()
+        document["raw_results"]["sarif"]["runs"][0]["results"].append(
+            _result(
+                "GHOST-POLICY", "ghost", "semgrep", "HIGH", origin="workspace-policy"
+            )
+        )
+
+        kept = _rule_ids(filter_actionable_only(document))
+
+        assert "GHOST-POLICY" in kept
+
     def test_a_finding_no_project_claims_is_judged_by_the_map(self):
         """Control: the scanner-keyed map still governs an unattributed finding."""
         kept = _rule_ids(filter_actionable_only(_workspace_document()))

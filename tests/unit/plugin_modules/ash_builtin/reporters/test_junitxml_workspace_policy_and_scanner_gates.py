@@ -176,6 +176,46 @@ def test_a_policy_finding_in_a_record_without_the_field_is_an_error(
     assert _outcome(cases["POLICY-LEGACY"]) == "actionable"
 
 
+def test_a_policy_finding_in_an_unlisted_project_is_graded_by_the_threshold(
+    tmp_path, workspace_model
+):
+    """A project the workspace block does not list has no recorded gate.
+
+    The result filters already judged such a finding by the threshold; the
+    reporter's lookup defaulted the missing gate to False and skipped it, so the
+    two readers disagreed. Only a listed project with its gate explicitly off
+    excludes a finding.
+    """
+    (result,) = [
+        r for r in workspace_model.sarif.runs[0].results if r.ruleId == "POLICY-WATCH"
+    ]
+    result.properties.__pydantic_extra__["workspace_project"] = "ghost"
+
+    cases = _cases(tmp_path, workspace_model)
+
+    # RED at the base: Skipped "policy-not-gating" for a project nothing recorded.
+    assert _outcome(cases["POLICY-WATCH"]) == "actionable"
+
+
+def test_a_single_scan_policy_tagged_finding_is_graded_by_the_threshold(
+    tmp_path, workspace_model
+):
+    """In a single-directory scan the gate table is empty.
+
+    A producer can write ``workspace_project`` and a ``workspace-policy`` origin
+    into a result's property bag; with no workspace block to say a verdict
+    excluded it, the finding is graded by the threshold as the exit code grades it.
+    """
+    workspace_model.workspace = None
+
+    cases = _cases(tmp_path, workspace_model)
+
+    # RED at the base: every policy-tagged finding rendered Skipped in the
+    # single-scan report while the exit code counted it.
+    assert _outcome(cases["POLICY-WATCH"]) == "actionable"
+    assert _outcome(cases["POLICY-STRICT"]) == "actionable"
+
+
 def test_a_policy_tag_alone_marks_the_finding(tmp_path, workspace_model):
     """The executor writes the tag beside ``origin``; a reader of tags agrees."""
     (result,) = [
