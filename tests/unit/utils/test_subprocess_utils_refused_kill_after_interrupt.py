@@ -4,8 +4,14 @@
 (a setuid program the tool became). Raised from the stop arms it replaced the
 KeyboardInterrupt the caller re-raises, or the TimeoutExpired the grace arm
 swallows, with an unexplained OSError.
+
+The same holds for the Ctrl-C escalations inside ``_stop`` and ``_stop_tree``:
+the SIGKILL that follows an interrupt during the grace is still attempted, and
+a kernel that refuses it leaves the interrupt as what the caller handles.
 """
 
+import os
+import signal
 import subprocess  # nosec B404 - the module under test wraps subprocess
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +20,52 @@ import pytest
 from automated_security_helper.utils import subprocess_utils
 
 pytestmark = pytest.mark.unit
+
+POSIX_ONLY = pytest.mark.skipif(
+    os.name == "nt", reason="process groups are the POSIX arm of _stop_tree"
+)
+
+#: Outside any real pid range this test could collide with.
+_NO_SUCH_PGID = 2**30 + 4343
+
+
+def test_an_interrupt_during_the_plain_stops_grace_survives_a_refused_kill():
+    process = _child_the_kernel_will_not_kill()
+    process.poll.return_value = None
+    with patch.object(
+        subprocess_utils, "_wait_out_grace", side_effect=KeyboardInterrupt
+    ):
+        with pytest.raises(KeyboardInterrupt):
+            subprocess_utils._stop(process, grace=0.01)
+    process.terminate.assert_called_once()
+    # The escalation was attempted; the refusal did not become the error raised.
+    process.kill.assert_called_once()
+
+
+@POSIX_ONLY
+def test_an_interrupt_during_the_tree_stops_grace_survives_a_refused_kill():
+    process = MagicMock(spec=subprocess.Popen)
+    process.pid = _NO_SUCH_PGID
+    process.returncode = None
+    process.poll.return_value = None
+    sent = []
+
+    def signal_group(pgid, signum):
+        sent.append(signum)
+        if signum == signal.SIGKILL:
+            raise PermissionError(1, "Operation not permitted")
+        return True
+
+    with (
+        patch.object(subprocess_utils, "_group_survives", return_value=True),
+        patch.object(subprocess_utils, "_signal_group", side_effect=signal_group),
+        patch.object(
+            subprocess_utils, "_wait_out_grace", side_effect=KeyboardInterrupt
+        ),
+    ):
+        with pytest.raises(KeyboardInterrupt):
+            subprocess_utils._stop_tree(process, grace=0.01)
+    assert sent == [signal.SIGTERM, signal.SIGKILL]
 
 
 def _child_the_kernel_will_not_kill() -> MagicMock:

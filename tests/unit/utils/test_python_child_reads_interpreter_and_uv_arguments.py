@@ -9,7 +9,9 @@ Properties of ``utils/python_child.py`` that nothing else pins:
   (``-mpip``), combined with other short options (``-Bc``), and behind an
   option that takes the next argument (``--check-hash-based-pycs always``);
 - ``python_code_argv`` builds a source that compiles when it opens with a
-  compound statement or a ``from __future__`` import;
+  compound statement or a ``from __future__`` import, and the dropping
+  statement runs before anything of the caller's source, a one-line source
+  with a leading future import included;
 - ``uv_child_overrides`` takes a path-like program, reads the subcommand past
   the value of a global option it does not know, counts a ``UV_SYSTEM_PYTHON``
   uv reads as false as no choice, and decides from the environment the child
@@ -18,6 +20,7 @@ Properties of ``utils/python_child.py`` that nothing else pins:
 
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 
@@ -92,17 +95,56 @@ def test_runs_module_or_code_stops_at_the_script(argv):
         "from __future__ import annotations\nx: int = 1\n",
         "# a comment first\n\nfrom __future__ import annotations\ndef f():\n    pass\n",
         "import os; print(os.getcwd())",
+        "from __future__ import annotations; import os; print(os.getcwd())",
     ],
-    ids=["if", "for", "future import", "comment then future", "one line"],
+    ids=[
+        "if",
+        "for",
+        "future import",
+        "comment then future",
+        "one line",
+        "future on the one line",
+    ],
 )
 def test_python_code_argv_builds_a_source_that_compiles(source):
     argv = python_code_argv(source)
     assert argv[-2] == "-c"
     compile(argv[-1], "<python_code_argv>", "exec")
-    # The dropping statement is still the first real statement after any
-    # future import, and the caller's source follows it whole.
+    # The dropping statement is the first statement, always, and the caller's
+    # source follows it whole, as its own compiled unit.
     assert "sys.path[:1] = []" in argv[-1]
     assert source.strip().splitlines()[-1] in argv[-1]
+
+
+def test_the_drop_runs_before_a_one_line_source_with_a_leading_future_import():
+    """Nothing of the caller's source runs ahead of the working-directory drop.
+
+    The earlier shape moved every leading ``from __future__ import`` LINE ahead of
+    the drop, whole. The one caller writes its source as a single ``;``-joined
+    line, so a future import at its head would have carried the rest of the line,
+    the package import among it, in front of the drop: the import this helper
+    exists to keep out of the working directory ran with that directory first on
+    ``sys.path``. Now the source is one compiled unit behind the drop, and the
+    future import is the first statement of that unit, where it is legal.
+    """
+    source = "from __future__ import annotations; import os; print(os.getcwd())"
+    program = python_code_argv(source)[-1]
+    statements = ast.parse(program).body
+    # The drop's two statements come first; no statement of the source is at the
+    # program's top level, future import included.
+    assert isinstance(statements[0], ast.Import)
+    assert statements[0].names[0].name == "sys"
+    assert isinstance(statements[1], ast.Assign)
+    assert not any(isinstance(node, ast.ImportFrom) for node in statements)
+    # The source runs behind the drop as one unit, and it compiles there with its
+    # future import first.
+    run = statements[-1]
+    assert isinstance(run, ast.Expr) and isinstance(run.value, ast.Call)
+    assert run.value.func.id == "exec"
+    compiled = run.value.args[0]
+    assert isinstance(compiled, ast.Call) and compiled.func.id == "compile"
+    assert compiled.args[0].value == source
+    compile(source, "<ash>", "exec")
 
 
 def test_uv_overrides_take_a_path_like_program():

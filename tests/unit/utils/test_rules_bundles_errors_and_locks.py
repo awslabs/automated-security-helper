@@ -87,7 +87,11 @@ def bundle_zip(tmp_path) -> tuple:
 
 
 def _fake_download(archive: Path, calls: list):
-    def download_file(url, destination, rename_to=None, expected_sha256=None):
+    # ``mode`` as the real helper takes it: the bundle is data, and the caller
+    # says so; the stand-in lands bytes and reads nothing from it.
+    def download_file(
+        url, destination, rename_to=None, expected_sha256=None, *, mode=None
+    ):
         calls.append((url, expected_sha256))
         target = Path(destination) / (rename_to or url.rsplit("/", 1)[-1])
         target.write_bytes(archive.read_bytes())
@@ -97,7 +101,9 @@ def _fake_download(archive: Path, calls: list):
 
 
 def _failing_download(error: BaseException, calls: list):
-    def download_file(url, destination, rename_to=None, expected_sha256=None):
+    def download_file(
+        url, destination, rename_to=None, expected_sha256=None, *, mode=None
+    ):
         calls.append((url, expected_sha256))
         raise error
 

@@ -16,8 +16,9 @@ Properties of ``utils/download_utils.py`` that nothing else pins:
 - the installed name comes from the URL's path, decoded, and a URL that names a
   directory is refused where the URL is named;
 - a download that fails leaves no temporary file behind;
-- ``download_file`` lands data at 0o644, and the pinned-tool install never
-  reopens the landed binary by name to set its mode;
+- ``download_file`` lands what it fetched executable unless the caller names a
+  mode, a data caller lands 0o644 by saying so, and the pinned-tool install
+  never reopens the landed binary by name to set its mode;
 - the post-rename digest is read on the landed file itself, so a link swapped in
   at the target is refused;
 - ``make_executable`` sets the mode on the file it opened, never on a link's
@@ -200,9 +201,23 @@ def test_a_failed_download_leaves_no_temporary_file(monkeypatch, tmp_path):
 
 
 @POSIX_ONLY
-def test_download_file_lands_data_without_the_execute_bit(monkeypatch, tmp_path):
+def test_download_file_lands_an_executable_unless_told_otherwise(monkeypatch, tmp_path):
+    """The public helper's default is the mode every caller got before the mode
+    parameter existed: a plugin that downloads a binary through it, with nothing
+    in its own code changed, gets a file it can run."""
+    _fetch(monkeypatch, b"#!/bin/sh\nexit 0\n")
+    landed = du.download_file("https://example.com/tool", tmp_path)
+    assert stat.S_IMODE(landed.stat().st_mode) == 0o755
+
+
+@POSIX_ONLY
+def test_a_data_caller_lands_its_download_without_the_execute_bit(
+    monkeypatch, tmp_path
+):
+    """A caller fetching data says so, and the rules bundle and the release
+    archive do (``mode=0o644``); nothing is landed executable on their behalf."""
     _fetch(monkeypatch, b"rules: []\n")
-    landed = du.download_file("https://example.com/rules.yaml", tmp_path)
+    landed = du.download_file("https://example.com/rules.yaml", tmp_path, mode=0o644)
     assert stat.S_IMODE(landed.stat().st_mode) == 0o644
 
 

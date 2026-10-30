@@ -25,6 +25,8 @@ Properties of ``utils/subprocess_utils.py``:
 - a string command is the program's name, a tuple is copied, and a failure of
   the resolution itself is a spawn failure;
 - the child's own PATH is searched when the caller gave one;
+- a refused stop reaps a leader that has ended before it reads the leader's
+  group, so the zombie's own group id is not read as a survivor;
 - the lookup cache is bounded and keeps no miss;
 - a shell command refused under a sandbox scope is counted;
 - a streamed run stops its child on the scan's cancel and starts none in a
@@ -144,6 +146,44 @@ def test_the_lookup_cache_is_bounded_and_keeps_no_miss(monkeypatch):
     assert len(keys) <= 2
     assert "missing" not in keys
     assert "c" in keys
+
+
+class _EndedLeader:
+    """A child that has exited and is not yet reaped: a zombie leading its group."""
+
+    pid = _FAKE_PID
+    returncode = None
+
+    def __init__(self) -> None:
+        self.events: List[str] = []
+
+    def poll(self):
+        self.events.append("poll")
+        self.returncode = 0
+        return 0
+
+
+@POSIX_ONLY
+def test_a_refused_stop_reaps_an_ended_leader_before_reading_its_group(monkeypatch):
+    """A zombie leader keeps its group id alive by itself, so read before the reap
+    the group of a tool that had ended before the stop looked like one the stop
+    could not end, and the record kept the refusal instead of the exit code."""
+    process = _EndedLeader()
+    monkeypatch.setattr(spu, "_has_exited", lambda child: True)
+
+    def group_survives(pgid):
+        process.events.append("group")
+        # The kernel keeps the id while the leader is a zombie, and releases it
+        # once the leader is reaped.
+        return "poll" not in process.events
+
+    monkeypatch.setattr(spu, "_group_survives", group_survives)
+    started = spu._StartedChild()
+    with started.recording():
+        started.process = process
+        spu._note_stop_refused(process)
+    assert process.events == ["poll", "group"]
+    assert started.stop_refused is False
 
 
 def test_the_childs_own_path_is_searched_when_the_caller_gave_one(

@@ -99,30 +99,36 @@ def test_make_executable_unix(tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(
-    sys.platform.lower() != "windows",
-    reason="Windows specific test",
-)
-@patch("pathlib.Path.chmod")
-def test_make_executable_windows(mock_chmod):
-    """Test make_executable on Windows."""
-    # Mock platform.system to return Windows
-    with patch("platform.system", return_value="Windows"):
-        # Call function
-        make_executable(Path("/test/file"))
+def test_make_executable_on_windows_leaves_the_mode_alone(tmp_path):
+    """On Windows make_executable sets nothing, so a real file's mode is unchanged.
 
-        # Verify chmod was not called
-        mock_chmod.assert_not_called()
+    The test this replaces skipped on every platform (``sys.platform`` reads
+    ``win32`` on Windows, never ``windows``) and patched ``Path.chmod``, which the
+    implementation no longer calls, so it measured nothing anywhere. The Windows
+    branch is the subject here, so the platform is faked and the test runs
+    everywhere.
+    """
+    target = tmp_path / "file"
+    target.write_bytes(b"x")
+    before = stat.S_IMODE(target.stat().st_mode)
+    with patch("platform.system", return_value="Windows"):
+        make_executable(target)
+    assert stat.S_IMODE(target.stat().st_mode) == before
 
 
 @pytest.mark.unit
 @pytest.mark.skipif(
     sys.platform.lower() != "darwin",
-    reason="Windows specific test",
+    reason="macOS specific test",
 )
 @patch("automated_security_helper.utils.download_utils.run_command")
 def test_unquarantine_macos_binary(mock_run_command):
-    """Test unquarantine_macos_binary on macOS."""
+    """Test unquarantine_macos_binary on macOS.
+
+    The attribute is removed from the file itself: ``xattr -d`` names the one
+    installed binary, never ``-r`` over a path that could have become a directory.
+    """
+    mock_run_command.return_value.returncode = 0
     # Mock platform.system to return Darwin (macOS)
     with patch("platform.system", return_value="Darwin"):
         # Call function
@@ -130,7 +136,7 @@ def test_unquarantine_macos_binary(mock_run_command):
 
         # Verify run_command was called with correct arguments
         mock_run_command.assert_called_once_with(
-            ["xattr", "-r", "-d", "com.apple.quarantine", "/test/file"]
+            ["xattr", "-d", "com.apple.quarantine", "/test/file"]
         )
 
 
