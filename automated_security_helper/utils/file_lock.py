@@ -75,7 +75,10 @@ except ImportError:  # Windows
 
 #: How long ``exclusive_lock`` waits for another process's lock before it gives
 #: up with ``TimeoutError``: longer than a tool's database download, shorter than
-#: forever.
+#: forever. It is the backstop for a holder that is gone: a healthy holder that
+#: runs several commands under one lock, each with its own timeout, can hold it
+#: longer than this, and such a caller passes its own bound as ``timeout=``
+#: (``exclusive_lock``).
 LOCK_TIMEOUT_SECONDS = 1800.0
 
 #: How often a waiting ``exclusive_lock`` asks for the OS lock again.
@@ -184,8 +187,19 @@ def exclusive_lock(
     """Hold an exclusive lock on ``path`` (created if missing) for the block.
 
     ``timeout`` bounds the wait for another process's lock, in seconds; None waits
-    without bound. The wait for another thread of this process is not bounded: it
+    without bound. The default, :data:`LOCK_TIMEOUT_SECONDS`, is sized for a holder
+    that is gone, not for a healthy one: a caller that holds the lock across
+    several commands, each bounded by its own timeout, passes the sum of those
+    bounds (plus a margin) here, or a waiting process gives up on a holder that is
+    still working. The wait for another thread of this process is not bounded: it
     is the same scan's other scanner, which the scan's own timeout covers.
+
+    Raises:
+        TimeoutError: the wait for another process's lock ran out; the message
+            names the lock file.
+        OSError: the lock file could not be opened, or is not a regular file
+            (``errno.EINVAL``; see ``_open_lock_file``). A caller with its own
+            error contract wraps both in its own type.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
