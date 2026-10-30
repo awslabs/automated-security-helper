@@ -197,9 +197,18 @@ class ContentDbAgeRecord:
     #: differ at the edge, and an error-level notification then read back as not
     #: enforced and left the exit-code gate.
     recorded_stale: Optional[bool] = None
+    #: The age the scan measured, in whole seconds, when the record was read back from
+    #: a results file (``age_seconds``); None for a record this process measured. The
+    #: file's timestamps are written to the second, so an age recomputed from them can
+    #: differ from the scan's by up to a second, and at the bound that read as "past
+    #: its bound" beside an age equal to the bound. The recorded age keeps ``age`` and
+    #: the message consistent with the recorded decision.
+    recorded_age_seconds: Optional[int] = None
 
     @property
     def age(self) -> Optional[timedelta]:
+        if self.recorded_age_seconds is not None:
+            return timedelta(seconds=self.recorded_age_seconds)
         if self.built is None:
             return None
         return self.measured_at - self.built
@@ -343,6 +352,14 @@ class ContentDbAgeRecord:
             # the field was written (no boolean) is measured from its timestamps.
             recorded_stale=(
                 data["stale"] if isinstance(data.get("stale"), bool) else None
+            ),
+            # The scan's own age, so the read-back age and message agree with its
+            # decision rather than with second-truncated timestamps.
+            recorded_age_seconds=(
+                data["age_seconds"]
+                if isinstance(data.get("age_seconds"), int)
+                and not isinstance(data.get("age_seconds"), bool)
+                else None
             ),
         )
 

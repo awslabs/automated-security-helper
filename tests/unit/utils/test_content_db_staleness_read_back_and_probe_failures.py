@@ -194,3 +194,20 @@ def test_an_error_whose_tool_could_not_be_stopped_stays_incomplete():
         {"source": _report(["grype-db is stale"], could_not_stop="a tool, pid 1")}
     )
     assert staleness.scanners_in_error_for_a_stale_database(results) == set()
+
+
+def test_a_read_back_record_keeps_the_age_the_scan_measured():
+    """The file carries timestamps to the second and the age in whole seconds. An
+    age recomputed from the timestamps can differ from the scan's by a second (here
+    the fractions push the difference up by one), so the message and the decision
+    disagreed at the bound; the read-back record carries the scan's own age."""
+    built = datetime(2026, 10, 29, 10, 0, 0, 900000, tzinfo=timezone.utc)
+    measured_at = datetime(2026, 10, 29, 12, 0, 0, 100000, tzinfo=timezone.utc)
+    record = _record(built=built, max_age=timedelta(hours=1), measured_at=measured_at)
+    data = record.to_dict()
+    assert data["age_seconds"] == 7199
+    read_back = staleness.ContentDbAgeRecord.from_dict(data)
+    assert read_back.age == timedelta(seconds=7199)
+    assert read_back.recorded_age_seconds == 7199
+    # The hour the message prints is the scan's ("1h"), not the recomputed "2h".
+    assert staleness.format_age(read_back.age) == data["age"]
