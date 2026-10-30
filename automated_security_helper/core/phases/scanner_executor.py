@@ -140,12 +140,20 @@ def _failure_text(error: BaseException, values: Iterable[str]) -> str:
     or ended in nothing, and never said what the plugin did. The exit is named
     with its code; a message the plugin passed (``sys.exit("no rules")``) is the
     code and follows the name once.
+
+    The code's text goes through the same redaction as the rest of the row's
+    error text (``text_without_values`` with the row's environment values):
+    a plugin can exit with a message that quotes a value the configuration read
+    from the environment, and the named exit reaches ash.log, the row's errors,
+    the failure dict and the ERROR event; written from the raw code, it carried
+    the value in clear beside a description that had hidden it.
     """
     described = error_text(error, values)
     if not isinstance(error, SystemExit):
         return described
-    named = f"the scanner called sys.exit({error.code!r})"
-    if not described or described == str(error.code):
+    code_text = text_without_values(repr(error.code), values)
+    named = f"the scanner called sys.exit({code_text})"
+    if not described or described == text_without_values(str(error.code), values):
         return named
     return f"{named}: {described}"
 
