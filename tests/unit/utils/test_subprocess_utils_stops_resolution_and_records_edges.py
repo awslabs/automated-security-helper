@@ -600,15 +600,20 @@ def test_a_string_command_is_the_programs_name_and_the_callers_list_is_copied(
 ):
     seen: Dict[str, Any] = {}
     monkeypatch.setattr(spu, "_runner", _fake_runner(seen=seen))
+    seen_by_resolution: List[Any] = []
 
     def resolve_into(args, *rest):
         # The resolution writes the program's path into the list it is given,
         # as the real one does; the caller's own list must not be that list.
+        seen_by_resolution.append(list(args))
         args[0] = "/opt/bin/tool"
         return None
 
     monkeypatch.setattr(spu, "_resolved_or_refused", resolve_into)
-    spu.run_command("ash-u26-no-such-tool")
+    # The whole string is the program's name, spaces included: a split on
+    # whitespace would hand the resolution three words.
+    spu.run_command("ash-u26 no such tool")
+    assert seen_by_resolution == [["ash-u26 no such tool"]]
     assert seen["args"] == ["/opt/bin/tool"]
     given = ["ash-u26-no-such-tool", "--x"]
     spu.run_command(given)
