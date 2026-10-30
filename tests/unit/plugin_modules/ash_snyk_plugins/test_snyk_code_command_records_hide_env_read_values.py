@@ -178,7 +178,11 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
     # records name the scanned directory.
     assert argv[0] == str(snyk_on_path) or argv[0] == "snyk", argv
     source = tmp_path / MARKED_DIRECTORY / "src"
-    copy = Path(next(a for a in argv[3:] if not a.startswith("--")))
+    # The argv element as the command spelled it (as_posix), kept as a string for
+    # the record check below: str(Path(...)) re-spells it with backslashes on
+    # Windows, where the log line carries the forward slashes the command did.
+    copy_argument = next(a for a in argv[3:] if not a.startswith("--"))
+    copy = Path(copy_argument)
     assert copy.resolve() != source.resolve(), copy
     assert copy.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()), copy
     assert running, "the scan did not reach the Running command log call"
@@ -192,8 +196,8 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
     # does reach the command). The SARIF's own location fields still name the
     # scanned directory: redaction covers the command records, not where the
     # findings are.
-    assert MARKED_DIRECTORY not in str(copy), copy
-    assert any(str(copy) in message for message in running), running
+    assert MARKED_DIRECTORY not in copy_argument, copy_argument
+    assert any(copy_argument in message for message in running), running
     assert all(MARKED_DIRECTORY not in message for message in running), running
 
 
