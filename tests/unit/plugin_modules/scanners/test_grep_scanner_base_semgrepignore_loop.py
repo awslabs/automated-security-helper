@@ -123,9 +123,13 @@ def test_the_unresolvable_file_is_named_as_the_repositorys(
     # The config's own list of resolution warnings, which the note is appended to.
     warnings = test_plugin_context.config._resolution_warnings
 
+    # Enabled on every platform: the default turns semgrep off on Windows, and a
+    # disabled scanner writes no note.
     SemgrepScanner(
         context=test_plugin_context,
-        config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False)),
+        config=SemgrepScannerConfig(
+            enabled=True, options=SemgrepScannerConfigOptions(offline=False)
+        ),
     )
 
     assert any(
