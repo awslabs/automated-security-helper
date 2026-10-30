@@ -104,6 +104,22 @@ async def _settle(pilot, turns: int = 6) -> None:
         await pilot.pause()
 
 
+def _logged(record: logging.LogRecord) -> str:
+    """The record's message as it was logged, which is what the log files write.
+
+    On a Windows console or CI runner the log module's filter rewrites a record's
+    text in ASCII for the console, the raw escape in a value shown as its text,
+    and keeps the message and arguments as logged on the record for the file
+    sinks (``_ash_unfiltered``). A test that asks what the log got reads those,
+    as the files do; ``getMessage()`` alone read the console form there.
+    """
+    unfiltered = getattr(record, "_ash_unfiltered", None)
+    if unfiltered is None:
+        return record.getMessage()
+    msg, args = unfiltered
+    return str(msg) % args if args else str(msg)
+
+
 @contextmanager
 def _records():
     """The ASH log records made inside the block, at every level."""
@@ -191,7 +207,7 @@ async def test_the_suppress_dialog_and_a_failed_save(tmp_path, monkeypatch):
 
     # The log gets the raw value, which its sink shows once.
     (error,) = [r for r in records if r.levelno == logging.ERROR]
-    assert f"cannot write {VALUE}" in error.getMessage(), error.getMessage()
+    assert f"cannot write {VALUE}" in _logged(error), _logged(error)
 
 
 @pytest.mark.asyncio
@@ -225,7 +241,7 @@ def test_a_refused_source_read_logs_the_raw_name(tmp_path):
         finding["file"] = "src/link.py"
         assert tui._source_excerpt(finding, tmp_path) is None
 
-    messages = [r.getMessage() for r in records]
+    messages = [_logged(r) for r in records]
     assert any(VALUE in message for message in messages), messages
     assert not any(ONCE in message for message in messages), messages
 
