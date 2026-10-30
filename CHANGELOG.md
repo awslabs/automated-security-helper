@@ -1338,6 +1338,15 @@
   the schema sees it; the schema does not enforce it, so a depth outside the range
   reaches the tool and gets its own answer.
 
+- **A detect-secrets baseline entry audited as a real secret (`is_secret: true`)
+  is reported as an ordinary finding, whichever baseline lists it.** A
+  `baseline_file` the operator's own settings name used to remove every
+  candidate it listed from the report, audited real or not, so a confirmed
+  secret still in its file was cleared by the record of it. A gate that passed
+  on such a baseline can now fail: remove the secret, or audit the entry as a
+  false positive if it is one. An entry audited as a false positive, or not
+  audited, is still removed by an operator-named baseline.
+
 ### Behavior changes
 
 - `./ash scan -v` and `./ash report -v` now reach the subcommand as its `--verbose`,
@@ -5382,6 +5391,23 @@
   directory such as `node_modules/.bin`, put that directory on PATH by its absolute
   path.
 
+- **The candidates a repository's own detect-secrets baseline lists stay in the
+  report as suppressed findings.** A `.secrets.baseline` or
+  `.ash/.secrets.baseline` found in the scanned tree, or a `baseline_file` named
+  by a config the operator did not write, is the repository's record: its known
+  candidates are reported suppressed, with the baseline named as the reason, so
+  the count stays visible and a repository cannot hide a secret still in its
+  files by listing the hash in a file it commits. They used to be removed from
+  the report. Only a `baseline_file` the operator's own settings name
+  (`--config-overrides` included) removes its known candidates. A baseline read
+  through an in-tree link into the enclosing checkout (a monorepo's
+  `service/.secrets.baseline` pointing at the checkout's own baseline) has its
+  result keys and `should_exclude_file` patterns read relative to the directory
+  the baseline sits in, as detect-secrets wrote them; a link that leaves the
+  nearest checkout is not read. The worker is never seeded with the baseline,
+  so an entry whose secret has left its file is not reported at the baseline's
+  stale line, and a `--slim` baseline's entries no longer fail the scan.
+
 ### Fixes
 
 - **What an archive does to itself is an input error; what the run does is a tool
@@ -7804,6 +7830,24 @@
   runs only on Windows starts a real batch file, plain and with its arguments inside a
   parenthesized block, with each argument ASH accepts and compares what the program
   receives.
+
+- **A non-absolute `GITLEAKS_CONFIG` is read where the operator set it.**
+  gitleaks resolves a relative path against its working directory, which ASH
+  sets to the scanned source directory, so `GITLEAKS_CONFIG=rules.toml` was read
+  from the scanned tree: the repository supplied the config. The same held for
+  `GITLEAKS_CONFIG=~/rules.toml`, which a CI `env:` block, a `.env` file or
+  `--env-file` leaves unexpanded and gitleaks does not expand either. Outside the
+  scanner sandbox such a value is now anchored to the directory ASH runs in,
+  with `~` expanded, and passed as `--config`; the re-scan of the ignore file's
+  copies uses the same anchor. An absolute `GITLEAKS_CONFIG`, and
+  `GITLEAKS_CONFIG_TOML`, are left to gitleaks as before.
+
+- **The operator's own `file://` detect-secrets filters keep the operator's
+  judgment beside a baseline's filters.** Authorship of a `filters_used` entry
+  was judged per option: once the baseline in use had any filter, every retained
+  operator `file://` filter was checked as the baseline's, so one under the
+  scan's own output or work directory, which the operator's configuration may
+  name, was refused with a warning. Each entry is now judged by its own writer.
 
 ### Reporting changes
 
