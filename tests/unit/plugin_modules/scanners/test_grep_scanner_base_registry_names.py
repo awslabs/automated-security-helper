@@ -49,29 +49,33 @@ def _offline_scanner(test_plugin_context, config: str) -> SemgrepScanner:
 
 
 @pytest.mark.parametrize(
-    "name",
+    ("name", "in_source_tree"),
     [
-        "p/ci",
-        "r/python.lang.security.audit",
-        "s/some-snippet",
-        "auto",
-        "policy",
-        "secrets",
+        pytest.param("p/ci", True, id="p/ci"),
+        pytest.param("r/python.lang.security.audit", True, id="r/..."),
+        pytest.param("s/some-snippet", True, id="s/..."),
+        pytest.param("auto", True, id="auto"),
+        pytest.param("policy", False, id="policy"),
+        pytest.param("secrets", False, id="secrets"),
     ],
 )
 def test_a_registry_name_is_not_local_rules_even_when_a_path_of_that_name_exists(
-    test_plugin_context, tmp_path, monkeypatch, name
+    test_plugin_context, tmp_path, monkeypatch, name, in_source_tree
 ):
     """Fails at the base: the existing ``p/ci`` directory was read as local rules,
     so no cache reason was recorded and the directory became ``--config``.
 
-    The directory exists both in ASH's working directory and in the source
+    A registry name is planted in both ASH's working directory and the source
     directory, the two places a relative path has been taken from, and neither
-    copy is read: the name is the registry's, or one of the product names semgrep
-    reserves (``policy``, ``secrets``), which the tool resolves before any path.
+    copy is read. A reserved product name (``policy``, ``secrets``) is planted in
+    the working directory only: a same-named directory in the source tree makes
+    the value ambiguous and is a path-trust question (the rules path-trust tests),
+    while a copy in ASH's working directory, where the base resolved relative
+    values, must change nothing.
     """
     source_dir = Path(test_plugin_context.source_dir)
-    for root in (tmp_path, source_dir):
+    roots = (tmp_path, source_dir) if in_source_tree else (tmp_path,)
+    for root in roots:
         (root / name).mkdir(parents=True, exist_ok=True)
         (root / name / "x.yaml").write_text(RULE, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -80,13 +84,10 @@ def test_a_registry_name_is_not_local_rules_even_when_a_path_of_that_name_exists
     scanner = _offline_scanner(test_plugin_context, name)
 
     assert "SEMGREP_RULES_CACHE_DIR" in (scanner.dependency_unavailable_reason or "")
-    # The two directories by resolved path, as the scanner emits them: a bare
+    # The planted directories by resolved path, as the scanner emits them: a bare
     # substring test would read "auto" inside the bundled rules' own path
     # (automated_security_helper/...).
-    planted = {
-        Path(os.path.realpath(root / name)).as_posix()
-        for root in (tmp_path, source_dir)
-    }
+    planted = {Path(os.path.realpath(root / name)).as_posix() for root in roots}
     assert not planted.intersection(_configs(scanner)), _configs(scanner)
 
 

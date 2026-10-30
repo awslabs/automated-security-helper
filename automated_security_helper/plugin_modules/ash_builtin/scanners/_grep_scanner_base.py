@@ -506,12 +506,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     def _passes_through_as_written(self, configured: str) -> bool:
         """Whether a configured value is one the tool reads itself, not a path ASH
         resolves: a URL, a registry entry name (``_is_registry_name``), or a bare
-        token the tool knows (``_is_tool_spelling``: semgrep's reserved ``policy``,
-        ``supply-chain`` and ``secrets`` products, or a bare ruleset name that
-        names no file or directory in the source tree). An unreserved bare token
-        that does name one there is a path, and goes through path trust like any
-        other (the source directory is the tool's working directory, where the
-        tool itself would read the name as that path)."""
+        token the tool knows (``_is_tool_spelling``: semgrep's ``policy``,
+        ``supply-chain`` and ``secrets`` products, or a bare ruleset name) that
+        names no file or directory in the source tree. A bare token that does name
+        one there is ambiguous, is read as the path, and goes through path trust
+        like any other (the source directory is the tool's working directory, where
+        the tool could read the name as that path)."""
         if "://" in configured or _is_registry_name(configured):
             return True
         source_dir = getattr(self.context, "source_dir", None)
@@ -854,17 +854,21 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
 
         Every other exclude pattern the operator wrote stays as written, on this
         target too; one that happens to match every converted file is the
-        operator's choice, and the scanned-nothing refusal names it.
+        operator's choice, and the scanned-nothing refusal names it. The two drops
+        tell ASH's values from the operator's by FORM: the operator's patterns
+        travel in the joined form (``--exclude=<pattern>``, one key, no value;
+        _process_config_options), ASH's re-passed defaults in the split form (key
+        ``--exclude``, the pattern as the value), so a drop keyed on the split form
+        reaches only what ASH itself appended, and an operator's ``build/`` stays.
         """
         if self._scan_target_type != "converted":
             return list(self.args.extra_args)
-        # The operator's patterns travel in the joined form (_process_config_options).
         dropped = f"--exclude={CONVERTED_FILE_EXCLUDE}"
+        below_root = _parts_of_target_below_root(target)
         covering = {
             pattern
             for pattern in SEMGREP_DEFAULT_IGNORES
-            if pattern.endswith("/")
-            and pattern[:-1] in _parts_of_target_below_root(target)
+            if pattern.endswith("/") and pattern[:-1] in below_root
         }
         return [
             arg
@@ -1105,35 +1109,28 @@ def _is_registry_name(configured: str) -> bool:
 #: Suffixes that make a bare token a rule FILE name rather than a tool spelling.
 _RULE_FILE_SUFFIXES = (".yaml", ".yml")
 
-#: The product names semgrep's ``--config`` reserves. The tool resolves these
-#: before it reads a value as a local path, so a directory of the same name in
-#: the scanned tree does not make them one: ``policy/`` and ``secrets/`` are
-#: common in IAM, OPA and Kubernetes repositories, and ``config: policy`` beside
-#: one was declined as a path inside the scanned tree.
-_RESERVED_TOOL_SPELLINGS: frozenset[str] = frozenset(
-    {"policy", "supply-chain", "secrets"}
-)
-
 
 def _is_tool_spelling(configured: str, source_dir: Optional[Path]) -> bool:
     """Whether ``configured`` is a bare token the tool reads itself, not a path.
 
     semgrep's ``--config`` takes, beside paths and URLs and the registry entries
     ``_is_registry_name`` knows, product names such as ``policy``, ``supply-chain``
-    and ``secrets``, and the set grows with the tool. The names the tool reserves
-    (``_RESERVED_TOOL_SPELLINGS``) always pass through: the tool matches them
-    before it treats a value as a path, so a same-named directory in the tree
-    changes nothing. For the rest ASH keeps no list: a token with no path separator
-    and no rule-file suffix is read as the tool's own spelling and passed through,
-    as the base passed every value, UNLESS a file or directory of that name exists
-    in the source tree, where the tool, run in the source directory, would read the
-    token as that path; that case is a path and goes through path trust, so a
-    repository cannot smuggle its own rules in under a bare name.
+    and ``secrets``, and the set grows with the tool. ASH keeps no list: a token
+    with no path separator and no rule-file suffix is read as the tool's own
+    spelling and passed through, as the base passed every value, UNLESS a file or
+    directory of that name exists in the source tree. Then the value is AMBIGUOUS:
+    which of the two the tool, run in the source directory, resolves first is not
+    established from the tool's own source, and the two readings differ in what
+    runs (the product's rules, or a directory the repository ships), so the token
+    is read as the path and goes through path trust, which declines an in-tree one.
+    That holds for the reserved product names as for any other token: a
+    ``policy/`` directory in the tree beside ``config: policy`` is declined, and
+    the operator names the rules unambiguously (``p/...``, an absolute path, or
+    a directory outside the tree). A repository therefore cannot smuggle its own
+    rules in under a bare name.
     """
     if not configured or "/" in configured or "\\" in configured:
         return False
-    if configured in _RESERVED_TOOL_SPELLINGS:
-        return True
     if configured.lower().endswith(_RULE_FILE_SUFFIXES):
         return False
     if source_dir is not None and Path(source_dir).joinpath(configured).exists():

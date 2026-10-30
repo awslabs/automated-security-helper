@@ -626,7 +626,7 @@ def test_a_bare_name_that_exists_in_the_source_tree_is_a_path_and_is_refused(
 @pytest.mark.parametrize(
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )
-def test_a_reserved_product_name_passes_through_beside_a_same_named_directory(
+def test_a_reserved_product_name_beside_a_same_named_directory_is_declined_as_ambiguous(
     scanner_cls,
     config_cls,
     options_cls,
@@ -635,14 +635,15 @@ def test_a_reserved_product_name_passes_through_beside_a_same_named_directory(
     monkeypatch,
     spelling,
 ):
-    """semgrep resolves its reserved product names before it reads a value as a
-    path, so a ``policy/`` or ``secrets/`` directory in the scanned tree (IAM, OPA
-    and Kubernetes repositories carry them) does not turn ``config: policy`` into
-    an in-tree path.
+    """A ``policy/`` or ``secrets/`` directory in the scanned tree (IAM, OPA and
+    Kubernetes repositories carry them) beside ``config: policy`` makes the value
+    ambiguous: which the tool resolves first is not established from its source,
+    and one reading runs a directory the repository ships. The token is read as
+    the path and declined by path trust, as any bare token naming an in-tree path
+    is; the same name with no such directory passes through (the test above).
 
-    Fails at the tip that judged every bare token by a same-named path's
-    existence: the scanner declined with a path-trust refusal naming the
-    repository's own directory.
+    Fails at the tip that let the reserved names skip the existence test: the
+    scanner passed ``policy`` to the tool beside the repository's own directory.
     """
     source_dir = Path(test_plugin_context.source_dir)
     (source_dir / spelling).mkdir(parents=True, exist_ok=True)
@@ -655,8 +656,11 @@ def test_a_reserved_product_name_passes_through_beside_a_same_named_directory(
         config=config_cls(options=options_cls(offline=False, config=spelling)),
     )
 
-    assert scanner.dependency_unavailable_reason is None
-    assert _configs(scanner) == [spelling]
+    _declined_for_its_config(scanner, scanner.config.name)
+    assert spelling not in _configs(scanner), _configs(scanner)
+    assert not any(value.endswith(f"/{spelling}") for value in _configs(scanner)), (
+        _configs(scanner)
+    )
 
 
 @pytest.mark.parametrize(
