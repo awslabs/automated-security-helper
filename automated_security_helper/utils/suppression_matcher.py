@@ -3,8 +3,10 @@
 
 """Utility functions for matching findings against suppression rules."""
 
+import codecs
 import fnmatch
 import re
+import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -48,6 +50,49 @@ _SLASH_NEXT_LINE_PATTERN = re.compile(
 
 _INLINE_PATTERNS = [_HASH_INLINE_PATTERN, _SLASH_INLINE_PATTERN]
 _NEXT_LINE_PATTERNS = [_HASH_NEXT_LINE_PATTERN, _SLASH_NEXT_LINE_PATTERN]
+
+# A quoted string that opens and closes on one line: double, single or backtick
+# quotes, a backslash escaping the next character. A quote that never closes on
+# its line (an apostrophe in prose, say) is no string, so it hides nothing.
+_QUOTED_STRING = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`")
+
+
+def _search_comment(pattern: "re.Pattern[str]", line: str) -> Optional["re.Match[str]"]:
+    """The first match of ``pattern`` in ``line`` that begins outside a quoted string.
+
+    Every pattern starts with the comment marker (``#`` or ``//``), so a match
+    inside a string literal is text that looks like a directive, not a comment:
+    ``x = "# ash-ignore: B101"`` suppresses nothing. A marker inside a string
+    never ends the search: the next match, if there is one, is looked at in turn.
+    """
+    spans: Optional[List[Tuple[int, int]]] = None
+    position = 0
+    while True:
+        match = pattern.search(line, position)
+        if match is None:
+            return None
+        if spans is None:
+            spans = [found.span() for found in _QUOTED_STRING.finditer(line)]
+        start = match.start()
+        if not any(begin <= start < end for begin, end in spans):
+            return match
+        position = start + 1
+
+
+def _decode_source(data: bytes) -> str:
+    """``data`` as text: UTF-32 or UTF-16 when it starts with that encoding's byte
+    order mark, else UTF-8, with anything undecodable replaced.
+
+    A source file saved as UTF-16 (a Windows editor's "Unicode") read as UTF-8
+    is a NUL between every two characters, so no directive in it was ever found.
+    A file with no byte order mark is read as UTF-8, as before: its encoding
+    cannot be told from its bytes.
+    """
+    if data.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        return data.decode("utf-32", errors="replace")
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return data.decode("utf-16", errors="replace")
+    return data.decode("utf-8", errors="replace")
 
 
 @dataclass(frozen=True)
@@ -120,7 +165,9 @@ def ignore_path_matches(file_path: Optional[str], ignore_path: str) -> bool:
 
 
 def warn_unmatched_directory_suppressions(
-    suppressions: Iterable[AshSuppression], used_ids: Iterable[str]
+    suppressions: Iterable[AshSuppression],
+    used_ids: Iterable[str],
+    recorded: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> None:
     """Warn once for each suppression whose path ends in ``/`` and matched nothing.
 
@@ -132,6 +179,15 @@ def warn_unmatched_directory_suppressions(
     file below the directory and not a file named ``build``, which ``build/**``
     would also cover. Called after the scan's last suppression pass, with the ids
     of the suppressions that pass used.
+
+    A path whose last component is ``**`` (``build/**/``) is not literal: the
+    matcher reads the trailing slash after ``**`` as part of it
+    (``path_matching._pattern_components``), so it is ``build/**``, which matches
+    files, and the warning does not apply to it.
+
+    ``recorded`` is ``recorded_suppressions(config)``. The warning then quotes a
+    path the config file read from the environment by its reference, as every
+    other message about a suppression does, and never by its value.
     """
     used = set(used_ids)
     for suppression in suppressions:
@@ -141,6 +197,12 @@ def warn_unmatched_directory_suppressions(
         directory = path.rstrip("/\\")
         if not directory:
             continue
+        if directory.replace("\\", "/").rsplit("/", 1)[-1] == "**":
+            continue
+        written = (recorded or {}).get(id(suppression), {}).get("path")
+        if isinstance(written, str) and written.rstrip("/\\"):
+            path = written
+            directory = written.rstrip("/\\")
         # A plain message: the log sinks show it, values included, once. Escaping
         # the values for Rich here showed them a second time.
         ASH_LOGGER.warning(
@@ -238,6 +300,13 @@ def should_suppress_finding(
     return False, None
 
 
+#: The entries _has_expired has warned about, by ``id()``. Weak, so the id a
+#: collected entry leaves behind is never read as a later entry's.
+_WARNED_UNREADABLE_EXPIRATION: "weakref.WeakValueDictionary[int, Any]" = (
+    weakref.WeakValueDictionary()
+)
+
+
 def _has_expired(entry: IgnorePathWithReason, where: str) -> bool:
     """Whether ``entry`` no longer applies because its ``expiration`` has passed.
 
@@ -266,10 +335,19 @@ def _has_expired(entry: IgnorePathWithReason, where: str) -> bool:
     try:
         expired = expiration_has_passed(entry.expiration)
     except ValueError:
-        ASH_LOGGER.warning(
-            f"Invalid expiration date format for {where}. Use YYYY-MM-DD; "
-            "the entry is not applied."
-        )
+        # Once for an entry: should_suppress_finding asks about every entry for
+        # every finding, so a warning per call wrote one line per finding for one
+        # bad date. An entry of a configuration loaded again is a new object and
+        # is warned about again.
+        if _WARNED_UNREADABLE_EXPIRATION.get(id(entry)) is not entry:
+            try:
+                _WARNED_UNREADABLE_EXPIRATION[id(entry)] = entry
+            except TypeError:
+                pass  # not weak-referenceable: warned about on every call
+            ASH_LOGGER.warning(
+                f"Invalid expiration date format for {where}. Use YYYY-MM-DD; "
+                "the entry is not applied."
+            )
         return True
     if expired:
         ASH_LOGGER.debug(f"{where} has expired")
@@ -375,12 +453,17 @@ def _expiring_within(
     """Entries whose expiration is today or within ``days_threshold`` days.
 
     One whose date does not parse is named by its location in ``where``, the
-    list's location, as in _has_expired.
+    list's location, as in _has_expired. One kept from a results file with a key
+    it does not declare is left out: it is never applied (_has_unknown_keys), so
+    it does not expire.
     """
     expiring = []
     today = current_date()
 
     for index, entry in enumerate(entries):
+        # ``is True``: a record built outside the model carries no such flag.
+        if getattr(entry, "has_unknown_keys", False) is True:
+            continue
         if entry.expiration:
             try:
                 expiration_date = datetime.strptime(entry.expiration, "%Y-%m-%d").date()
@@ -569,6 +652,11 @@ def find_inline_suppressions(
     * ``// ash-ignore: <rule-id> [reason]``  --  same (JS/TS/Java/C#/Go).
     * ``// ash-ignore-next-line: <rule-id> [reason]``  --  same.
 
+    A directive is a comment: the marker must begin outside a quoted string on
+    its line, so ``x = "# ash-ignore: B101"`` suppresses nothing. A file that
+    starts with a UTF-16 or UTF-32 byte order mark is read in that encoding, any
+    other as UTF-8.
+
     Args:
         file_path: Path to the source file to scan.
         scan_root: The scanned tree. When given, the file is read under the
@@ -594,7 +682,7 @@ def find_inline_suppressions(
                 file_path, scan_root, follow_links_inside=True
             ) as handle:
                 data = handle.read()
-        text = data.decode("utf-8", errors="replace")
+        text = _decode_source(data)
     except TreeInputRefused as refused:
         ASH_LOGGER.warning(
             f"Inline suppressions in '{refused.path}' were not read: {refused.reason}"
@@ -621,7 +709,7 @@ def find_inline_suppressions(
 
         matched = False
         for pattern in _INLINE_PATTERNS:
-            match = pattern.search(line)
+            match = _search_comment(pattern, line)
             if match:
                 rule_id = match.group(1)
                 reason = (match.group(2) or "").strip()
@@ -638,7 +726,7 @@ def find_inline_suppressions(
             continue
 
         for pattern in _NEXT_LINE_PATTERNS:
-            match = pattern.search(line)
+            match = _search_comment(pattern, line)
             if match:
                 rule_id = match.group(1)
                 reason = (match.group(2) or "").strip()
