@@ -318,15 +318,19 @@ def _scanner_state(
         if not group.unresolved:
             if bodies[group.read] is None:
                 continue
-            on = _section_is_on(bodies[group.read])
-            sections.append((group.read, on))
-            pin = _scanner_pin(bodies[group.read]) if on else None
+            # An extra section's pin is recorded whether or not the section is on:
+            # the scan may read it for the reduced name, and which section a
+            # plugin's registered name selects is not known until the modules
+            # load. The disabled-pin rule above is for declared scanners only.
+            sections.append((group.read, _section_is_on(bodies[group.read])))
+            pin = _scanner_pin(bodies[group.read])
         else:
             every_section_on = all(_section_is_on(body) for body in bodies.values())
             sections.append((group.read, every_section_on))
-            group_pins = {
-                _scanner_pin(body) for body in bodies.values() if _section_is_on(body)
-            }
+            # Every section of the pair counts, a section with no body included:
+            # one that sets no pin beside one that does means the pair does not
+            # agree, and the version is held, not recorded.
+            group_pins = {_scanner_pin(body) for body in bodies.values()}
             pin = group_pins.pop() if len(group_pins) == 1 else None
         if pin is not None:
             pins[group.read] = pin
