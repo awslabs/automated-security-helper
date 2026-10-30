@@ -201,12 +201,16 @@ def test_control_preprocessors_on_is_passed_as_the_bare_flag(mock_plugin_context
 
 
 def test_an_option_key_that_is_not_a_string_does_not_crash_the_validator():
-    try:
-        FerretScannerConfigOptions.model_validate({1: "x", "checks": "all"})
-    except AttributeError as error:  # pragma: no cover - the defect
-        pytest.fail(f"the validator read the key as a string: {error}")
-    except ValidationError:
-        pass
+    """The validator is called as the model calls it, with the raw mapping, so
+    the test can fail two ways: an AttributeError out of ``str`` methods on an
+    int key (the defect), or an unsupported key that is no longer refused (the
+    control). The earlier form let any outcome pass."""
+    data = {1: "x", "checks": "all"}
+
+    assert FerretScannerConfigOptions.validate_no_unsupported_options(data) is data
+
+    with pytest.raises(ValueError, match="Unsupported option 'FORMAT'"):
+        FerretScannerConfigOptions.validate_no_unsupported_options({"FORMAT": "json"})
 
 
 @pytest.mark.parametrize(
@@ -245,14 +249,21 @@ def test_the_walked_paths_under_an_ignored_directory_are_named(mock_plugin_conte
     assert ignored == {"vendor/x.py", "vendor/sub/leaving.py"}
 
 
+def _walk(files: list[str], links: list[str]) -> tuple[list[str], list[str]]:
+    """A walk tuple as ``walked_files`` returns one: ``files`` is every file the
+    walk found, the links among them, and ``links`` the links that leave the tree.
+    Each test here builds its tuple through this, so none feeds a link that is
+    absent from the files."""
+    return sorted({*files, *links}), sorted(links)
+
+
 @POSIX_ONLY
 def test_a_link_under_an_ignored_directory_needs_no_pattern(tmp_path):
     target = tmp_path / "src"
-    files = ["a.py", "vendor/x.py"]
-    links = ["vendor/leaving.py"]
+    walk = _walk(["a.py", "vendor/x.py"], ["vendor/leaving.py"])
 
     patterns = _link_exclude_patterns(
-        target, (files, links), ignored={"vendor/x.py", "vendor/leaving.py"}
+        target, walk, ignored={"vendor/x.py", "vendor/leaving.py"}
     )
 
     assert patterns == []
@@ -261,10 +272,9 @@ def test_a_link_under_an_ignored_directory_needs_no_pattern(tmp_path):
 @POSIX_ONLY
 def test_control_a_link_nothing_ignores_gets_its_pattern(tmp_path):
     target = tmp_path / "src"
+    walk = _walk(["a.py", "vendor/x.py"], ["vendor/leaving.py"])
 
-    patterns = _link_exclude_patterns(
-        target, (["a.py", "vendor/x.py"], ["vendor/leaving.py"]), ignored=set()
-    )
+    patterns = _link_exclude_patterns(target, walk, ignored=set())
 
     assert patterns == [os.fspath(target / "vendor" / "leaving.py")]
 
@@ -274,7 +284,7 @@ def test_an_ignored_file_is_not_another_walked_file_in_the_substring_test(tmp_pa
     """2.4.x also leaves out every path a pattern is a substring of; a path the
     ignore paths cover is not read by ferret-scan, so it does not refuse the link."""
     target = tmp_path / "src"
-    walk = (["conf.py", "conf.py.bak"], ["conf.py"])
+    walk = _walk(["conf.py.bak"], ["conf.py"])
 
     with pytest.raises(ScannerError, match="another file's path holds its path"):
         _link_exclude_patterns(target, walk, ignored=set())
@@ -501,12 +511,13 @@ def test_an_error_after_the_sarif_validated_is_not_called_a_bad_results_file(
     mock_plugin_context, monkeypatch
 ):
     root = _tree(mock_plugin_context.source_dir, ["a.txt"])
-    try:
+    with pytest.raises(ValidationError) as built:
         SarifReport.model_validate({"runs": "not a list"})
-    except ValidationError as error:
-        validation_error = error
+    validation_error = built.value
+    attached: list[dict] = []
 
     def attach(**kwargs):
+        attached.append(kwargs)
         raise validation_error
 
     monkeypatch.setattr(ferret_scanner, "attach_scanner_details", attach)
@@ -518,6 +529,10 @@ def test_an_error_after_the_sarif_validated_is_not_called_a_bad_results_file(
             root,
         )
 
+    # The error reached the catch-all FROM the attach step, not from the results
+    # file read: any wrapped error satisfied the two text assertions alone.
+    assert len(attached) == 1
+    assert raised.value.__context__ is validation_error
     assert "not SARIF" not in str(raised.value)
     assert "Ferret scan failed" in str(raised.value)
 
@@ -602,6 +617,101 @@ def test_every_artifact_location_in_the_run_is_resolved():
     notified = run["invocations"][0]["toolExecutionNotifications"][0]["locations"][0]
     assert notified["physicalLocation"]["artifactLocation"] == {"uri": base + "b.txt"}
     assert "originalUriBaseIds" not in run
+
+
+def _at(name: str) -> dict:
+    return {"uri": name, "uriBaseId": "%SRCROOT%"}
+
+
+def test_every_artifact_location_of_a_result_is_resolved():
+    """The places a result keeps a location besides ``locations``: its related
+    locations, its analysis target, its code flows and its fixes."""
+    base = "file:///work/src/"
+    result = {
+        "ruleId": "r",
+        "message": {"text": "x"},
+        "locations": [{"physicalLocation": {"artifactLocation": _at("c.txt")}}],
+        "relatedLocations": [{"physicalLocation": {"artifactLocation": _at("d.txt")}}],
+        "analysisTarget": _at("e.txt"),
+        "codeFlows": [
+            {
+                "threadFlows": [
+                    {
+                        "locations": [
+                            {
+                                "location": {
+                                    "physicalLocation": {
+                                        "artifactLocation": _at("f.txt")
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+        "fixes": [
+            {
+                "artifactChanges": [
+                    {"artifactLocation": _at("g.txt"), "replacements": []}
+                ]
+            }
+        ],
+    }
+    document = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "ferret-scan"}},
+                "originalUriBaseIds": {"%SRCROOT%": {"uri": base}},
+                "results": [result],
+            }
+        ],
+    }
+
+    _resolve_sarif_uri_base_ids(document)
+
+    assert result["locations"][0]["physicalLocation"]["artifactLocation"] == {
+        "uri": base + "c.txt"
+    }
+    assert result["relatedLocations"][0]["physicalLocation"]["artifactLocation"] == {
+        "uri": base + "d.txt"
+    }
+    assert result["analysisTarget"] == {"uri": base + "e.txt"}
+    flow = result["codeFlows"][0]["threadFlows"][0]["locations"][0]["location"]
+    assert flow["physicalLocation"]["artifactLocation"] == {"uri": base + "f.txt"}
+    assert result["fixes"][0]["artifactChanges"][0]["artifactLocation"] == {
+        "uri": base + "g.txt"
+    }
+    assert "originalUriBaseIds" not in document["runs"][0]
+
+
+def test_a_location_with_an_undeclared_base_is_left_as_written_and_the_table_kept():
+    base = "file:///work/src/"
+    document = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "ferret-scan"}},
+                "originalUriBaseIds": {"%SRCROOT%": {"uri": base}},
+                "artifacts": [
+                    {"location": _at("a.txt")},
+                    {"location": {"uri": "h.txt", "uriBaseId": "%ELSEWHERE%"}},
+                ],
+                "results": [],
+            }
+        ],
+    }
+
+    _resolve_sarif_uri_base_ids(document)
+
+    run = document["runs"][0]
+    assert run["artifacts"][0]["location"] == {"uri": base + "a.txt"}
+    assert run["artifacts"][1]["location"] == {
+        "uri": "h.txt",
+        "uriBaseId": "%ELSEWHERE%",
+    }
+    assert run["originalUriBaseIds"] == {"%SRCROOT%": {"uri": base}}
 
 
 # --- dependencies ---------------------------------------------------------------------

@@ -22,6 +22,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -127,15 +129,33 @@ def _scan(context, response: dict, document: dict | None = None):
 # --- helpers ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="flock is POSIX")
 def test_a_directory_that_cannot_be_opened_for_the_lock_is_unlocked_not_raised(
     tmp_path, monkeypatch
 ):
-    def refuse(*args, **kwargs):
-        raise OSError("open refused")
+    """Only the one directory's open is refused; the control shows the lock is
+    still taken elsewhere, so a None is the refusal's doing and not a flock that
+    never ran."""
+    refused = tmp_path / "refused"
+    other = tmp_path / "other"
+    refused.mkdir()
+    other.mkdir()
+    real_open = os.open
+
+    def refuse(path, *args, **kwargs):
+        if Path(path) == refused:
+            raise OSError("open refused")
+        return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(snyk_code_scanner.os, "open", refuse)
 
-    assert _hold(tmp_path) is None
+    assert _hold(refused) is None
+    held = _hold(other)
+    try:
+        assert held is not None
+    finally:
+        if held is not None:
+            os.close(held)
 
 
 def test_a_scan_set_line_loses_one_line_ending_and_nothing_more():
@@ -171,6 +191,39 @@ def test_control_exit_three_with_every_file_copied_evaluated_nothing(context):
     assert result is True
     assert scanner.targets_attempted == 0
     assert scanner.targets_failed == 0
+
+
+def test_the_refused_count_is_reset_per_target(context):
+    """Refusals on the source target, then the converted target (never staged, so
+    nothing refused) exits 3: the second is SKIPPED, not failed on the first's
+    count. The second scan runs the real _stage_source path (none for a converted
+    target), so the reset is the product's, not the patch's."""
+    scanner = _scanner(context)
+
+    def staged(self, target, ignore_paths, cleanup):
+        self._staged_refused = 2
+        return target
+
+    exit_three = _responds({"stdout": "", "stderr": "", "returncode": 3})
+    with (
+        patch.object(
+            SnykCodeScanner, "_stage_source", autospec=True, side_effect=staged
+        ),
+        patch.object(
+            SnykCodeScanner, "_run_subprocess", autospec=True, side_effect=exit_three
+        ),
+    ):
+        scanner.scan(target=context.source_dir, target_type="source")
+
+    assert scanner.targets_failed == 1
+
+    with patch.object(
+        SnykCodeScanner, "_run_subprocess", autospec=True, side_effect=exit_three
+    ):
+        scanner.scan(target=context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1
 
 
 # --- a refused target's end time -------------------------------------------------------
@@ -209,15 +262,24 @@ def test_a_results_file_left_by_an_earlier_run_is_not_read_as_this_runs(context)
     stale = Path(scanner.results_dir) / "source" / "results_sarif.sarif"
     stale.parent.mkdir(parents=True, exist_ok=True)
     stale.write_text(json.dumps(SNYK_SARIF), encoding="utf-8")
+    given: list[str] = []
+
+    def writes_nothing(self, command, **kwargs):
+        given.extend(
+            str(arg).split("=", 1)[1]
+            for arg in command
+            if str(arg).startswith("--sarif-file-output=")
+        )
+        return {"stdout": "", "stderr": "", "returncode": 0}
 
     with patch.object(
-        SnykCodeScanner,
-        "_run_subprocess",
-        autospec=True,
-        side_effect=_responds({"stdout": "", "stderr": "", "returncode": 0}),
+        SnykCodeScanner, "_run_subprocess", autospec=True, side_effect=writes_nothing
     ):
         result = scanner.scan(target=context.source_dir, target_type="source")
 
+    # The path cleared is the one snyk is given, read from the argv rather than
+    # assumed from another scanner's layout.
+    assert [Path(p) for p in given] == [stale]
     assert result is None
     assert not stale.exists()
 

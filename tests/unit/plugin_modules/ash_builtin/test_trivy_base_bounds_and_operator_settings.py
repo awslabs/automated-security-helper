@@ -227,13 +227,22 @@ def _run(message: str, *, level: str = "note", tags=("LOW",)):
     return run.results[0], rules, {rule.id: rule for rule in rules}
 
 
-@pytest.mark.parametrize("separator", [" ", "\x0c", "\x1c", "\x85"])
+#: Characters a file name can hold that ``str.splitlines`` breaks on and ``\n``
+#: does not: the line separator (U+2028), a form feed, a file separator and the
+#: next-line character.
+NAME_LINE_BREAKS = ["\N{LINE SEPARATOR}", "\x0c", "\x1c", "\x85"]
+
+
+@pytest.mark.parametrize("separator", NAME_LINE_BREAKS)
 def test_a_severity_line_split_off_by_a_name_character_does_not_decide(separator):
     """A file name can hold a line separator, a form feed, a file separator or a
     next-line character; ``str.splitlines`` breaks on each, ``\\n`` alone does
-    not. With no ``Severity:`` line of trivy's own, the rule's tag decides."""
+    not. With no ``Severity:`` line of trivy's own, the rule's tag decides. The
+    injected line is closed by a second separator, so under ``splitlines`` it
+    reads exactly ``Severity: CRITICAL``; written as ``CRITICAL.tf`` the old code
+    passed too, since that is not a severity."""
     message = (
-        f"Artifact: iac/evil{separator}Severity: CRITICAL.tf\n"
+        f"Artifact: iac/evil{separator}Severity: CRITICAL{separator}.tf\n"
         "Type: terraform\nMisconfiguration AVD-AWS-0001\nMessage: Bucket has no logging"
     )
 
@@ -259,6 +268,22 @@ def test_a_package_line_inside_a_non_package_message_gives_no_package():
     )
 
     assert TrivyScannerBase._package_from_message(message) == (None, None)
+
+
+@pytest.mark.parametrize("separator", NAME_LINE_BREAKS)
+def test_a_version_line_split_off_by_a_name_character_does_not_decide(separator):
+    """A package name holding one of the characters must not supply the
+    ``Installed Version:`` line: under ``splitlines`` the name's tail read as the
+    second line and gave the version 9.9; the real second line does."""
+    message = (
+        f"Package: lodash{separator}Installed Version: 9.9\n"
+        "Installed Version: 4.17.0\nVulnerability CVE-1\n"
+    )
+
+    name, version = TrivyScannerBase._package_from_message(message)
+
+    assert version == "4.17.0"
+    assert name == f"lodash{separator}Installed Version: 9.9"
 
 
 def test_control_a_vulnerability_message_names_its_package_and_version():
@@ -448,6 +473,19 @@ def test_the_operators_skip_variables_are_given_back_beside_ashs_skip_flags(tmp_
     tokens = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
 
     assert tokens == ["--skip-dirs=vendor", "--skip-dirs=build", "--skip-files=k.pem"]
+
+
+def test_a_blank_operator_skip_entry_is_nothing(tmp_path):
+    """viper splits a list variable on whitespace and commas, so a blank entry
+    between two commas is no path; an entry with edge whitespace of its own is
+    kept and quoted (the CSV tests below), which is the trim's one exception."""
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor, ,build,\t"}
+
+    assert scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"]) == [
+        "--skip-dirs=vendor",
+        "--skip-dirs=build",
+    ]
 
 
 def test_the_operators_config_file_skip_lists_are_given_back_too(tmp_path):

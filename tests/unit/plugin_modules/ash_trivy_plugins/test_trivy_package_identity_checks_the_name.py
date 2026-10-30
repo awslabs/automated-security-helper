@@ -138,3 +138,73 @@ def test_control_the_entry_the_result_names_gets_its_path(
     )
 
     assert got["package_path"] == TOP_KEY
+
+
+NESTED_KEY = "node_modules/a/node_modules/brace-expansion"
+SCOPED_KEY = "node_modules/@types/node"
+ALIAS_KEY = "node_modules/brace-alias"
+
+
+def test_a_nested_copy_gets_its_own_path(mock_plugin_context, tmp_path):
+    """The same name and version at the top level and nested: the line decides
+    which copy, and the nested key is the path."""
+    root = tmp_path / "src"
+    _, lines = write_lockfile(
+        root, {TOP_KEY: {"version": "5.0.9"}, NESTED_KEY: {"version": "5.0.9"}}
+    )
+
+    got = _attach(
+        mock_plugin_context,
+        root,
+        trivy_result("brace-expansion", "5.0.9", lines[NESTED_KEY]),
+    )
+
+    assert got["package_path"] == NESTED_KEY
+
+
+def test_a_scoped_package_is_matched_by_its_scoped_name(mock_plugin_context, tmp_path):
+    root = tmp_path / "src"
+    _, lines = write_lockfile(root, {SCOPED_KEY: {"version": "20.0.0"}})
+
+    got = _attach(
+        mock_plugin_context,
+        root,
+        trivy_result("@types/node", "20.0.0", lines[SCOPED_KEY]),
+    )
+
+    assert got["package_path"] == SCOPED_KEY
+    assert got["package_name"] == "@types/node"
+
+
+def test_an_aliased_install_is_matched_by_the_name_the_entry_states(
+    mock_plugin_context, tmp_path
+):
+    """``npm install brace-alias@npm:brace-expansion`` writes the key under the
+    alias and the real name in the entry; trivy names the real package."""
+    root = tmp_path / "src"
+    _, lines = write_lockfile(
+        root, {ALIAS_KEY: {"name": "brace-expansion", "version": "5.0.9"}}
+    )
+
+    got = _attach(
+        mock_plugin_context,
+        root,
+        trivy_result("brace-expansion", "5.0.9", lines[ALIAS_KEY]),
+    )
+
+    assert got["package_path"] == ALIAS_KEY
+
+
+def test_a_result_placed_at_line_one_gets_no_path(mock_plugin_context, tmp_path):
+    """Line 1 is the lockfile's opening brace, not a packages key: the result keeps
+    its name and version and claims no copy."""
+    root = tmp_path / "src"
+    write_lockfile(root, {TOP_KEY: {"version": "5.0.9"}})
+
+    got = _attach(
+        mock_plugin_context, root, trivy_result("brace-expansion", "5.0.9", 1)
+    )
+
+    assert "package_path" not in got
+    assert got["package_name"] == "brace-expansion"
+    assert got["package_version"] == "5.0.9"
