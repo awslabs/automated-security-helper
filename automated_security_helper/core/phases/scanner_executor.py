@@ -1,6 +1,7 @@
 """ScannerExecutor — owns scanner task lifecycle for ScanPhase."""
 
 import contextvars
+import sys
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -1024,11 +1025,32 @@ class ScannerExecutor:
                                     # case, which is when a process that outlived its
                                     # spawn is most likely), a post-run error, or a
                                     # scan() that raised.
-                                    sweep_writable(
-                                        [sandbox.results_dir],
-                                        sandbox.environment_values,
-                                        values_unread=sandbox.environment_values_unread,
-                                    )
+                                    #
+                                    # In its own handler: a raise from the sweep
+                                    # inside this finally would replace the exception
+                                    # already on its way out (a cancel, a keyboard
+                                    # interrupt, the scan's own failure) and be
+                                    # recorded as this target's error in its place,
+                                    # so a cancel would not end the scan and a failed
+                                    # scan would name the sweep. The sweep's error is
+                                    # logged, and raised only when nothing else is
+                                    # propagating.
+                                    propagating = sys.exc_info()[1]
+                                    try:
+                                        sweep_writable(
+                                            [sandbox.results_dir],
+                                            sandbox.environment_values,
+                                            values_unread=sandbox.environment_values_unread,
+                                        )
+                                    except Exception as sweep_error:
+                                        ASH_LOGGER.error(
+                                            f"Sweep of {scanner_name}'s results directory "
+                                            f"after the scan on {target_type} failed: "
+                                            f"{error_text(sweep_error, sandbox.environment_values)}",
+                                            extra=NO_MARKUP,
+                                        )
+                                        if propagating is None:
+                                            raise
                     else:
                         # NO_MARKUP, as the sibling records: the scanner name is
                         # data, and a "[/x]" in one is a closing Rich tag that

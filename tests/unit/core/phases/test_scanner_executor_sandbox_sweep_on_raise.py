@@ -7,6 +7,12 @@ gates, so every raise skipped it: a tool that could not start, a run that did no
 finish (the timeout and could-not-stop case, the one the sweep exists for), a
 post-run error, or a ``scan()`` that raised. The sweep now runs in a ``finally``.
 
+A raise from the sweep inside that ``finally`` would replace the exception already
+on its way out: a scan's own failure would be reported as the sweep's, and a
+keyboard interrupt (not an Exception, so not caught by the per-target handler)
+would be turned into this target's error and the scan would continue. The sweep's
+error is logged and raised only when nothing else is propagating.
+
 The sandbox is faked at the executor's seams (``scanner_sandbox_scope`` and
 ``sweep_writable``); no backend runs.
 """
@@ -47,7 +53,7 @@ class _Config(ScannerPluginConfigBase):
 
 
 class RaisingScanner(ScannerPluginBase):
-    """``scan()`` raises when ``boom`` is set, else returns an empty findings list."""
+    """``scan()`` raises ``raises`` when set, else returns an empty findings list."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
@@ -65,8 +71,8 @@ class RaisingScanner(ScannerPluginBase):
     def scan(self, target, target_type, global_ignore_paths=None, config=None):
         self._pre_scan(target=target, target_type=target_type, config=config)
         self._post_scan(target=target, target_type=target_type)
-        if self.boom:
-            raise RuntimeError("the tool was killed")
+        if self.raises is not None:
+            raise self.raises
         return {"findings": []}
 
 
@@ -97,9 +103,12 @@ def sweeps(monkeypatch, tmp_path):
         backend=SimpleNamespace(name="fake"),
     )
     recorded: list[list[Path]] = []
+    sweep_raises: list[BaseException] = []
 
     def fake_sweep(roots, values=(), *, values_unread=False):
         recorded.append([Path(root) for root in roots])
+        if sweep_raises:
+            raise sweep_raises[0]
         return 0
 
     monkeypatch.setattr(
@@ -107,13 +116,13 @@ def sweeps(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(scanner_executor, "refuse_links_below", lambda *a, **k: None)
     monkeypatch.setattr(scanner_executor, "sweep_writable", fake_sweep)
-    return results_dir, recorded
+    return results_dir, recorded, sweep_raises
 
 
-def _row(plugin_context, boom: bool):
+def _row(plugin_context, raises: BaseException | None):
     config = _Config()
     scanner = RaisingScanner(config=config, context=plugin_context)
-    scanner.boom = boom
+    scanner.raises = raises
     executor = ScannerExecutor(
         plugin_context=plugin_context, progress_display=MagicMock(), scanner_tasks=[]
     )
@@ -125,10 +134,14 @@ def _row(plugin_context, boom: bool):
     return row
 
 
-def test_the_sweep_runs_when_scan_raises(plugin_context, sweeps):
-    results_dir, recorded = sweeps
+def _reason(row) -> str:
+    return " ".join(str(error) for error in row.errors)
 
-    row = _row(plugin_context, boom=True)
+
+def test_the_sweep_runs_when_scan_raises(plugin_context, sweeps):
+    results_dir, recorded, _ = sweeps
+
+    row = _row(plugin_context, RuntimeError("the tool was killed"))
 
     assert row.status == ScannerStatus.ERROR
     assert recorded == [[results_dir]], recorded
@@ -136,9 +149,43 @@ def test_the_sweep_runs_when_scan_raises(plugin_context, sweeps):
 
 def test_the_sweep_runs_once_when_scan_returns(plugin_context, sweeps):
     """Control: the one sweep after a scan that returned, as before."""
-    results_dir, recorded = sweeps
+    results_dir, recorded, _ = sweeps
 
-    row = _row(plugin_context, boom=False)
+    row = _row(plugin_context, None)
 
     assert row.status == ScannerStatus.PASSED
     assert recorded == [[results_dir]], recorded
+
+
+class TestASweepFailureKeepsTheExceptionAlreadyPropagating:
+    def test_the_scans_own_error_stays_the_rows_reason(self, plugin_context, sweeps):
+        _, _, sweep_raises = sweeps
+        sweep_raises.append(RuntimeError("the sweep broke"))
+
+        row = _row(plugin_context, RuntimeError("the tool was killed"))
+
+        assert row.status == ScannerStatus.ERROR
+        assert "the tool was killed" in _reason(row)
+        assert "the sweep broke" not in _reason(row)
+
+    def test_a_keyboard_interrupt_still_ends_the_scan(self, plugin_context, sweeps):
+        """Replaced by the sweep's Exception, the interrupt was caught by the
+        per-target handler as this target's error and the scan went on."""
+        _, _, sweep_raises = sweeps
+        sweep_raises.append(RuntimeError("the sweep broke"))
+
+        with pytest.raises(KeyboardInterrupt):
+            _row(plugin_context, KeyboardInterrupt())
+
+    def test_a_sweep_failure_after_a_clean_scan_is_the_rows_error(
+        self, plugin_context, sweeps
+    ):
+        """Control: with nothing else propagating the sweep's error is raised and
+        graded as this target's error, as before."""
+        _, _, sweep_raises = sweeps
+        sweep_raises.append(RuntimeError("the sweep broke"))
+
+        row = _row(plugin_context, None)
+
+        assert row.status == ScannerStatus.ERROR
+        assert "the sweep broke" in _reason(row)
