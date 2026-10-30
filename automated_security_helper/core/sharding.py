@@ -191,9 +191,13 @@ class ShardAssignment(StrippedRecordModel):
     in the provenance that said so.
     """
 
-    # Read from a results file, whose values an error does not quote.
+    # Read from a results file, whose values an error does not quote. Unknown
+    # keys are dropped, not refused: a results file written by a newer ASH can
+    # carry a provenance field this version does not know, and refusing it made
+    # ``ash merge`` report the shard as having no provenance at all, which
+    # named the wrong cause. Every field this version reads is still validated.
     model_config = ConfigDict(
-        str_strip_whitespace=True, extra="forbid", hide_input_in_errors=True
+        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
     )
 
     shard_index: int = Field(
@@ -325,8 +329,16 @@ def partition_scanners(
         when there are fewer scanners than shards.
 
     Raises:
-        ShardSelectionError: If the index and count are not a usable pair.
+        ShardSelectionError: If the index and count are not a usable pair, or if
+            neither is given. An unsharded scan has nothing to partition, so a
+            caller that reaches this with no selection has a defect, and it is
+            named here rather than surfacing as a TypeError from the arithmetic.
     """
+    if shard_index is None and shard_count is None:
+        raise ShardSelectionError(
+            "partition_scanners needs both --shard-index and --shard-count; an "
+            "unsharded scan has no partition to compute."
+        )
     validate_shard_selection(shard_index, shard_count)
     ordered = _normalized(scanner_names)
     return [
@@ -523,7 +535,17 @@ def _verify_selection_within_assignment(
             continue
         for scanner in _normalized(assignment.selected_scanners):
             holder = owner.get(scanner)
-            if holder is not None and holder != assignment.shard_index:
+            if holder is None:
+                # Selected by this shard and assigned to none. The selection is
+                # taken from the assignment, so a scanner outside every assignment
+                # was selected by a run whose exclusion did not take effect either,
+                # and two shards selecting it would count its findings twice while
+                # the overlap check, which reads assignments only, sees nothing.
+                trespasses.append(
+                    f"{shown_shard_text(scanner)} (selected by shard "
+                    f"{assignment.shard_index}, assigned to no shard)"
+                )
+            elif holder != assignment.shard_index:
                 trespasses.append(
                     f"{shown_shard_text(scanner)} (selected by shard "
                     f"{assignment.shard_index}, assigned to shard {holder})"
