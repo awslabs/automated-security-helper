@@ -11,15 +11,31 @@
 * a run's declared root must be its own project's directory, not a sibling's
   with the same relative paths;
 * a ``file://`` root is percent-decoded before it is resolved;
-* the path-loss accounting counts every result, properties or not;
-* the scan child's environment carries no ASH_* variable;
+* the path-loss accounting counts every located result, properties or not, and
+  leaves a result that offered no location out of its denominator;
+* the scan child's environment carries no ASH_* variable, and no PYTHONSAFEPATH;
 * a timed-out scan gets SIGTERM to its process group even when the child has
   already exited, and its output is read with a deadline and a final kill, so a
-  tool that outlives the child cannot hang the gate.
+  tool that outlives the child cannot hang the gate;
+* a non-object scanner_results is a shape violation, not a traceback;
+* sarif_run_index is read by the run's own index, refuses a negative value and
+  reads garbage as absent;
+* exchanged attributions are not also reported as markers in no run;
+* each location resolves against the base its own uriBaseId names, a dangling
+  base is reported, and an absolute or climbing URI never resolves under a root;
+* a project with no run is told so instead of being told to change the rule;
+* shared output directories are compared as paths and must stay inside the
+  output directory, and the rollup is compared per scanner;
+* a payload with no exit_code is reported, the root's execution knobs are
+  asserted, each selected scanner must have found something;
+* an unreadable results file is a FAIL report, --timeout is validated, the
+  cleanup hint is shell-quoted and a failed precondition leaves no directory.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import signal
 import subprocess
@@ -208,7 +224,16 @@ class TestPathLossAccounting:
                                     "workspace_uri": "project-a/src/marker.py",
                                 },
                             },
-                            {"ruleId": "B101"},
+                            {
+                                "ruleId": "B101",
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "src/marker.py"}
+                                        }
+                                    }
+                                ],
+                            },
                         ],
                     }
                 ]
@@ -217,7 +242,43 @@ class TestPathLossAccounting:
         runs = gate.collect_runs(results)
         assert runs[0].result_count == 2
         violations = gate.check_no_finding_lost_its_workspace_path(results, runs)
-        assert any("2 finding(s) are in the SARIF but only 1" in v for v in violations)
+        assert any(
+            "2 located finding(s) are in the SARIF but only 1" in v for v in violations
+        )
+
+    def test_a_result_with_no_location_is_not_a_lost_path(self, gate):
+        """At the base it was reported as a path lost silently, although the
+        aggregator correctly neither paths nor counts it."""
+        results = {
+            "workspace": {"unconvertible_finding_paths": 0},
+            "sarif": {
+                "runs": [
+                    {
+                        "properties": {"workspace_project": "project-a"},
+                        "results": [
+                            {
+                                "ruleId": "B101",
+                                "properties": {
+                                    "workspace_project": "project-a",
+                                    "workspace_uri": "project-a/src/marker.py",
+                                },
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "src/marker.py"}
+                                        }
+                                    }
+                                ],
+                            },
+                            {"ruleId": "B101"},
+                        ],
+                    }
+                ]
+            },
+        }
+        runs = gate.collect_runs(results)
+        assert runs[0].results_without_location == 1
+        assert gate.check_no_finding_lost_its_workspace_path(results, runs) == []
 
 
 class TestChildEnvironment:
@@ -226,6 +287,10 @@ class TestChildEnvironment:
         assert "ASH_SCANNERS" not in env
         assert env["PATH"] == "/usr/bin"
         assert env["PYTHONIOENCODING"] == "utf-8"
+
+    def test_pythonsafepath_is_dropped(self, gate):
+        env = gate.child_environment({"PATH": "/usr/bin", "PYTHONSAFEPATH": "1"})
+        assert "PYTHONSAFEPATH" not in env
 
 
 class _FakeProcess:
@@ -358,3 +423,379 @@ class TestStopProcessGroup:
                 tmp_path, tmp_path / "ws.yaml", tmp_path / "out", timeout=0.01
             )
         assert raised.value.output == "tail"
+
+
+def _run(gate, index, project, rules=None, **fields):
+    return gate.RunEvidence(
+        index=index,
+        attributed_project=project,
+        uri_base=None,
+        rules=rules or {},
+        result_projects=(project,) if project else (),
+        **fields,
+    )
+
+
+class TestIntegerReads:
+    def test_an_infinite_value_is_zero_or_absent(self, gate):
+        """At the base int(float('inf')) raised OverflowError past the except."""
+        assert gate._as_int(float("inf")) == 0
+        assert gate._as_optional_int(float("inf")) is None
+
+    def test_optional_int_reads_garbage_as_absent(self, gate):
+        assert gate._as_optional_int(None) is None
+        assert gate._as_optional_int("garbage") is None
+        assert gate._as_optional_int(True) is None
+        assert gate._as_optional_int(2.5) is None
+        assert gate._as_optional_int(3.0) == 3
+        assert gate._as_optional_int(-1) == -1
+
+
+class TestResultsShape:
+    def test_a_non_object_scanner_results_is_a_violation(self, gate, tmp_path):
+        """At the base the list reached .items() and the gate ended in a traceback."""
+        results = {
+            "workspace": {"projects": [{"project": "project-a"}]},
+            "sarif": {"runs": []},
+            "scanner_results": ["bandit"],
+        }
+        violations = gate.check_results_shape(results)
+        assert any("'scanner_results' is a list" in v for v in violations)
+        outcome = gate.evaluate_results(results, tmp_path)
+        assert not outcome.passed
+
+
+class TestSarifRunIndex:
+    def test_garbage_reads_as_absent(self, gate):
+        """At the base 'garbage' coerced to 0 and selected the first run."""
+        projects = gate.parse_projects(
+            {"workspace": {"projects": [{"project": "a", "sarif_run_index": "x"}]}}
+        )
+        assert projects[0].sarif_run_index is None
+
+    def test_a_negative_index_is_refused(self, gate):
+        """At the base -1 passed the upper bound and selected the last run."""
+        project = _project(gate, "project-a")
+        project = gate.ProjectOutcome(**{**project.__dict__, "sarif_run_index": -1})
+        runs = [_run(gate, 0, "project-a")]
+        violations = gate.check_one_run_per_project([project], runs)
+        assert any("not an index into the runs" in v for v in violations)
+
+    def test_the_index_is_the_runs_own_not_its_position(self, gate):
+        """At the base a skipped non-object run shifted every position."""
+        results = {
+            "workspace": {
+                "projects": [
+                    {
+                        "project": "project-a",
+                        "relative_path": "project-a",
+                        "status": "completed",
+                        "sarif_run_index": 1,
+                        "finding_count": 1,
+                    }
+                ]
+            },
+            "sarif": {
+                "runs": [
+                    "not a run object",
+                    {
+                        "properties": {"workspace_project": "project-a"},
+                        "originalUriBaseIds": {"ROOT": {"uri": "file:///ws/a/"}},
+                        "results": [],
+                    },
+                ]
+            },
+        }
+        projects = gate.parse_projects(results)
+        runs = gate.collect_runs(results)
+        assert runs[0].index == 1
+        violations = gate.check_one_run_per_project(projects, runs)
+        assert not [v for v in violations if "sarif_run_index" in v]
+
+    def test_two_runs_without_a_project_are_not_the_same_project(self, gate):
+        """At the base the message read 'claim the same project: [None, None]'."""
+        runs = [_run(gate, 0, None), _run(gate, 1, None)]
+        violations = gate.check_one_run_per_project([], runs)
+        assert not any("claim the same project" in v for v in violations)
+        assert sum("no properties.workspace_project" in v for v in violations) == 2
+
+
+class TestExchangedAttributions:
+    def test_a_marker_in_the_wrong_run_is_not_also_in_no_run(self, gate):
+        """At the base the exchanged pair was also reported as 'appear in no run at
+        all' with advice to edit MARKER_SOURCES."""
+        a_marker = gate.MARKER_RULE_BY_PROJECT["project-a"]
+        b_marker = gate.MARKER_RULE_BY_PROJECT["project-b"]
+        runs = [
+            _run(gate, 0, "project-a", {b_marker: (1, 0)}),
+            _run(gate, 1, "project-b", {a_marker: (1, 0)}),
+        ]
+        violations = gate.check_each_project_shows_only_its_own_marker_rule(runs)
+        assert any("belonging to" in v for v in violations)
+        assert not any(
+            "appear in no run at all" in v and a_marker in v for v in violations
+        )
+
+    def test_a_marker_absent_everywhere_is_still_reported(self, gate):
+        runs = [_run(gate, 0, "project-a", {"B307": (1, 0)})]
+        violations = gate.check_each_project_shows_only_its_own_marker_rule(runs)
+        assert any("appear in no run at all" in v for v in violations)
+
+
+class TestRunRootPerLocation:
+    @pytest.fixture
+    def workspace(self, tmp_path):
+        for key in ("project-a", "project-b"):
+            (tmp_path / key / "src").mkdir(parents=True)
+        (tmp_path / "project-a" / "src" / "insecure.py").write_text(
+            "x = 1\n", encoding="utf-8"
+        )
+        (tmp_path / "project-b" / "src" / "insecure.py").write_text(
+            "y = 2\n", encoding="utf-8"
+        )
+        return tmp_path
+
+    def test_a_location_resolves_against_its_own_base(self, gate, workspace):
+        """At the base every location resolved against the run's first base."""
+        root_a = (workspace / "project-a").as_uri() + "/"
+        root_other = (workspace / "project-a" / "src").as_uri() + "/"
+        run = gate.RunEvidence(
+            index=0,
+            attributed_project="project-a",
+            uri_base=root_a,
+            uri_bases={"PROJECTROOT": root_a, "SRCROOT": root_other},
+            raw_uris=("src/insecure.py",),
+            raw_uri_bases=("SRCROOT",),
+            result_projects=("project-a",),
+        )
+        violations = gate.check_result_paths_resolve_against_their_run_root([run])
+        assert any("do not resolve to a file under" in v for v in violations)
+
+    def test_a_dangling_base_id_is_reported(self, gate, workspace):
+        root_a = (workspace / "project-a").as_uri() + "/"
+        run = gate.RunEvidence(
+            index=0,
+            attributed_project="project-a",
+            uri_base=root_a,
+            uri_bases={"PROJECTROOT": root_a},
+            raw_uris=("src/insecure.py",),
+            raw_uri_bases=("MISSING",),
+            result_projects=("project-a",),
+        )
+        violations = gate.check_result_paths_resolve_against_their_run_root([run])
+        assert any("does not declare" in v and "MISSING" in v for v in violations)
+
+    @pytest.mark.parametrize("shape", ["climbing", "absolute"])
+    def test_a_uri_that_leaves_the_root_does_not_resolve(self, gate, workspace, shape):
+        """At the base an existing file anywhere satisfied the join-and-exists test."""
+        root_a = (workspace / "project-a").as_uri() + "/"
+        outside = workspace / "project-b" / "src" / "insecure.py"
+        uri = "../project-b/src/insecure.py" if shape == "climbing" else str(outside)
+        run = gate.RunEvidence(
+            index=0,
+            attributed_project="project-a",
+            uri_base=root_a,
+            uri_bases={"PROJECTROOT": root_a},
+            raw_uris=(uri,),
+            result_projects=("project-a",),
+        )
+        violations = gate.check_result_paths_resolve_against_their_run_root([run])
+        assert any("do not resolve to a file under" in v for v in violations)
+
+    def test_a_relative_uri_under_the_root_is_clean(self, gate, workspace):
+        root_a = (workspace / "project-a").as_uri() + "/"
+        run = gate.RunEvidence(
+            index=0,
+            attributed_project="project-a",
+            uri_base=root_a,
+            uri_bases={"PROJECTROOT": root_a},
+            raw_uris=("src/insecure.py",),
+            raw_uri_bases=("PROJECTROOT",),
+            result_projects=("project-a",),
+        )
+        assert gate.check_result_paths_resolve_against_their_run_root([run]) == []
+
+
+class TestSuppressionWithoutARun:
+    def test_a_project_with_no_run_is_told_so(self, gate):
+        """At the base it read 'rule B324 does not appear ... Update SUPPRESSED_RULE_ID'."""
+        runs = [_run(gate, 0, "project-a", {gate.SUPPRESSED_RULE_ID: (0, 1)})]
+        violations = gate.check_suppression_is_project_scoped(runs)
+        assert any("no SARIF run is attributed to 'project-b'" in v for v in violations)
+        assert not any(
+            "'project-b'" in v and "Update SUPPRESSED_RULE_ID" in v for v in violations
+        )
+
+
+class TestOutputSubtrees:
+    def test_two_spellings_of_one_directory_are_shared(self, gate, tmp_path):
+        """At the base the raw strings 'a/b' and 'a//b' read as two directories."""
+        projects = [
+            gate.ProjectOutcome(
+                **{**_project(gate, "project-a").__dict__, "output_path": "a/b"}
+            ),
+            gate.ProjectOutcome(
+                **{**_project(gate, "project-b").__dict__, "output_path": "a//b/"}
+            ),
+        ]
+        violations = gate.check_per_project_subtrees(projects, tmp_path)
+        assert any("share the output path" in v for v in violations)
+
+    def test_an_output_path_outside_the_output_dir_is_a_violation(self, gate, tmp_path):
+        project = gate.ProjectOutcome(
+            **{**_project(gate, "project-a").__dict__, "output_path": "../outside"}
+        )
+        violations = gate.check_per_project_subtrees([project], tmp_path / "out")
+        assert any("does not stay inside" in v for v in violations)
+
+
+class TestRollupPerScanner:
+    def _write(self, path: Path, counts: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "scanner_results": {
+                name: {"status": "PASSED", "finding_count": count}
+                for name, count in counts.items()
+            }
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_one_scanners_count_leaking_into_anothers_is_reported(self, gate, tmp_path):
+        """At the base only the cross-scanner totals were compared, which agree here."""
+        self._write(tmp_path / gate.RESULTS_FILENAME, {"bandit": 6, "checkov": 6})
+        self._write(tmp_path / "a" / gate.RESULTS_FILENAME, {"bandit": 2, "checkov": 4})
+        self._write(tmp_path / "b" / gate.RESULTS_FILENAME, {"bandit": 3, "checkov": 3})
+        projects = [
+            gate.ProjectOutcome(
+                **{**_project(gate, "project-a").__dict__, "output_path": "a"}
+            ),
+            gate.ProjectOutcome(
+                **{**_project(gate, "project-b").__dict__, "output_path": "b"}
+            ),
+        ]
+        violations = gate.check_scanner_rollup_per_scanner(projects, tmp_path)
+        assert len(violations) == 2
+        assert any(
+            "'bandit'" in v and "is 6" in v and "sum to 5" in v for v in violations
+        )
+        assert any(
+            "'checkov'" in v and "is 6" in v and "sum to 7" in v for v in violations
+        )
+
+    def test_agreeing_counts_are_clean(self, gate, tmp_path):
+        self._write(tmp_path / gate.RESULTS_FILENAME, {"bandit": 5, "checkov": 7})
+        self._write(tmp_path / "a" / gate.RESULTS_FILENAME, {"bandit": 2, "checkov": 4})
+        self._write(tmp_path / "b" / gate.RESULTS_FILENAME, {"bandit": 3, "checkov": 3})
+        projects = [
+            gate.ProjectOutcome(
+                **{**_project(gate, "project-a").__dict__, "output_path": "a"}
+            ),
+            gate.ProjectOutcome(
+                **{**_project(gate, "project-b").__dict__, "output_path": "b"}
+            ),
+        ]
+        assert gate.check_scanner_rollup_per_scanner(projects, tmp_path) == []
+
+
+class TestWorkspaceStatus:
+    def test_a_missing_exit_code_is_reported(self, gate):
+        """At the base it read as 0 and agreed with a process that exited 0."""
+        violations = gate.check_workspace_status(
+            {"workspace": {"status": "completed"}}, 0
+        )
+        assert len(violations) == 1
+        assert "absent or not an integer" in violations[0]
+
+
+class TestExecutionKnobs:
+    def test_the_roots_values_in_the_payload_are_clean(self, gate):
+        results = {
+            "workspace": {
+                "max_parallel_projects": gate.ROOT_MAX_PARALLEL_PROJECTS,
+                "project_timeout": float(gate.ROOT_PROJECT_TIMEOUT_SECONDS),
+            }
+        }
+        assert gate.check_execution_knobs_reached_the_run(results) == []
+
+    def test_knobs_that_did_not_reach_the_run_are_reported(self, gate):
+        """At the base the root config was written and never asserted."""
+        violations = gate.check_execution_knobs_reached_the_run(
+            {"workspace": {"max_parallel_projects": 1, "project_timeout": None}}
+        )
+        assert len(violations) == 2
+        assert all("did not reach the run" in v for v in violations)
+
+    def test_the_root_config_names_the_asserted_values(self, gate):
+        assert f"max_parallel_projects: {gate.ROOT_MAX_PARALLEL_PROJECTS}" in (
+            gate.WORKSPACE_ROOT_CONFIG
+        )
+        assert f"project_timeout: {gate.ROOT_PROJECT_TIMEOUT_SECONDS}" in (
+            gate.WORKSPACE_ROOT_CONFIG
+        )
+
+
+class TestGateScannersFoundSomething:
+    def test_a_selected_scanner_with_zero_findings_is_a_violation(self, gate):
+        """At the base nothing asserted that checkov produced a finding."""
+        results = {
+            "scanner_results": {
+                "bandit": {"status": "PASSED", "finding_count": 9},
+                "checkov": {"status": "PASSED", "finding_count": 0},
+            }
+        }
+        violations = gate.check_gate_scanners_found_something(results)
+        assert len(violations) == 1 and "checkov" in violations[0]
+
+    def test_a_missing_scanner_is_left_to_the_other_check(self, gate):
+        results = {
+            "scanner_results": {
+                "bandit": {"status": "PASSED", "finding_count": 9},
+                "checkov": {"status": "MISSING", "finding_count": 0},
+            }
+        }
+        assert gate.check_gate_scanners_found_something(results) == []
+
+
+class TestLoadResults:
+    def test_invalid_utf8_is_reported_not_raised_raw(self, gate, tmp_path):
+        """At the base UnicodeDecodeError escaped main as a traceback."""
+        (tmp_path / gate.RESULTS_FILENAME).write_bytes(b"\xff\xfe{}")
+        with pytest.raises(gate.ResultsUnreadable, match="not valid UTF-8"):
+            gate.load_results(tmp_path)
+
+
+class TestScanTimeout:
+    @pytest.mark.parametrize("text", ["nan", "inf", "0", "-5", "1800", "2000", "x"])
+    def test_an_unusable_timeout_is_refused(self, gate, text):
+        with pytest.raises(argparse.ArgumentTypeError):
+            gate._scan_timeout(text)
+
+    def test_a_timeout_under_the_budget_is_accepted(self, gate):
+        assert gate._scan_timeout("600") == 600.0
+
+
+class TestRemoveHint:
+    def test_the_hint_is_shell_quoted(self, gate, tmp_path):
+        hint = gate._remove_hint(tmp_path / "with space")
+        assert hint == f"rm -rf '{tmp_path / 'with space'}'"
+
+
+class TestPreconditionFailure:
+    def test_the_empty_temp_directory_is_removed(
+        self, gate, monkeypatch, tmp_path, capsys
+    ):
+        """At the base the mkdtemp directory stayed and paths never created were named."""
+        made = tmp_path / "ash-multi-project-x"
+        made.mkdir()
+        monkeypatch.setattr(gate.tempfile, "mkdtemp", lambda prefix: str(made))
+        monkeypatch.setattr(
+            gate, "check_paths_outside_repo", lambda *paths: ["inside the repository"]
+        )
+
+        def never(*args, **kwargs):  # pragma: no cover - the gate must not get here
+            raise AssertionError("the scan ran after a failed precondition")
+
+        monkeypatch.setattr(gate, "run_scan", never)
+        assert gate.main([]) == 1
+        assert not made.exists()
+        assert "EVIDENCE KEPT" not in capsys.readouterr().out

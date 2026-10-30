@@ -129,7 +129,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import shlex
 import shutil
 import signal
 import subprocess  # nosec B404 -- the gate runs ASH as a child process
@@ -152,8 +154,11 @@ STATUS_SKIPPED = "SKIPPED"
 # above threshold, 3 invalid project config, 4 workspace definition or policy error,
 # 5 a usage error (for example a --scanners selection no project could run).
 # The fixture is built to produce actionable findings in project-a and project-b,
-# so 2 is expected, and 0 is tolerated in case a future default turns
-# fail_on_findings off.
+# so 2 is expected. 0 is tolerated only when no completed project reports
+# exceeds_threshold (check_exit_code judges the code against the projects). The
+# fixture does not turn fail_on_findings off; if a future default did,
+# check_verdicts_match_their_counts would refuse the payload first, because
+# exceeds_threshold would then disagree with every non-zero actionable count.
 #
 # Tolerating 2 is safe precisely because the definition error is 4. Were they the
 # same number, this tuple would silently accept a workspace that resolved to
@@ -165,6 +170,12 @@ TOLERATED_EXIT_CODES = (0, 2)
 #: What a refused workspace exits with. Never tolerated: it means no project ran.
 WORKSPACE_ERROR_EXIT_CODE = 4
 
+# The job runs this script under timeout-minutes: 30 (1800 s). The scan timeout
+# has to stay under that, or GitHub cancels the job before this script prints its
+# tables. The 600 s between the two numbers is what the job's steps before the
+# scan (checkout, the ASH install, the tool downloads, the fixture build) run
+# in, so the margin, not the scan timeout, is what has to cover a slow setup.
+# --timeout is checked against the budget when parsed.
 JOB_TIMEOUT_BUDGET_SECONDS = 1800.0
 DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
 LOG_TAIL_LINES = 60
@@ -341,12 +352,19 @@ global_settings:
       reason: Fixture-only finding, suppressed to prove per-project scoping
 """
 
+#: The execution knobs the workspace root's config sets. The payload reports the
+#: values the run used, and check_execution_knobs_reached_the_run compares them:
+#: the config used to be written and never asserted, so the documented check
+#: that the knobs are read from the root could not fail.
+ROOT_MAX_PARALLEL_PROJECTS = 4
+ROOT_PROJECT_TIMEOUT_SECONDS = 600
+
 #: Read by the workspace root's config. Exercises that the execution knobs are
 #: picked up from the root rather than from a project.
-WORKSPACE_ROOT_CONFIG = """project_name: multi-project-gate
+WORKSPACE_ROOT_CONFIG = f"""project_name: multi-project-gate
 workspace:
-  max_parallel_projects: 4
-  project_timeout: 600
+  max_parallel_projects: {ROOT_MAX_PARALLEL_PROJECTS}
+  project_timeout: {ROOT_PROJECT_TIMEOUT_SECONDS}
 """
 
 
@@ -457,6 +475,15 @@ class RunEvidence:
     workspace_uris: Tuple[str, ...] = ()
     #: every raw artifact uri seen, in encounter order
     raw_uris: Tuple[str, ...] = ()
+    #: every originalUriBaseIds entry of the run: base id -> uri. ``uri_base`` is
+    #: the first of them; a result names its own with artifactLocation.uriBaseId.
+    uri_bases: Dict[str, str] = field(default_factory=dict)
+    #: the uriBaseId each raw uri was anchored to, parallel to ``raw_uris``; None
+    #: for a location that names none.
+    raw_uri_bases: Tuple[str | None, ...] = ()
+    #: results that offered no location at all. Such a finding has no path to
+    #: lose, so the path-loss accounting leaves it out of its denominator.
+    results_without_location: int = 0
     #: project keys named by results inside this run
     result_projects: Tuple[str, ...] = ()
     #: one (workspace_uri, artifact uris of the same result) pair for every result
@@ -477,11 +504,13 @@ class GateOutcome:
     runs: Tuple[RunEvidence, ...] = ()
     scanner_statuses: Dict[str, str] = field(default_factory=dict)
     #: Violations that explain other violations. A scanner reporting ERROR
-    #: produced no findings, so every downstream "rule X is missing from project
-    #: Y" and "two thresholds saw equal counts" follows from it rather than being
+    #: produced no findings, so a downstream "rule X is missing from project Y"
+    #: or "two thresholds saw equal counts" may follow from it rather than being
     #: an independent defect. Reporting one dead scanner as ten problems sends
-    #: the reader chasing nine symptoms. Kept as a subset of ``violations`` so
-    #: ``passed`` and the exit status are unchanged.
+    #: the reader chasing nine symptoms; the report groups the rest under it as
+    #: candidates, not as proven consequences, since a missing output directory
+    #: or a wrong exit code does not follow from a dead scanner. Kept as a
+    #: subset of ``violations`` so ``passed`` and the exit status are unchanged.
     root_violations: List[str] = field(default_factory=list)
 
     @property
@@ -520,17 +549,41 @@ def normalize_status(raw: Any) -> str:
 
 
 def _as_int(value: Any) -> int:
+    """``value`` as an int, or 0 for anything that is not one.
+
+    OverflowError is caught too: ``json.loads`` accepts ``Infinity``, and
+    ``int(float("inf"))`` raises it rather than ValueError.
+    """
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
+
+
+def _as_optional_int(value: Any) -> int | None:
+    """``value`` as an int, or None when it is absent or not an integer.
+
+    For a field whose absence means something (``sarif_run_index``,
+    ``workspace.exit_code``), reading garbage or nothing as 0 selected the first
+    run or matched a process that exited 0; None lets the check say so instead.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def check_results_shape(results: Any) -> List[str]:
     """Verify the keys every other check reads actually exist.
 
     Without this, a renamed key makes every downstream assertion vacuously true
-    and the gate reports success having inspected nothing.
+    and the gate reports success having inspected nothing. ``scanner_results``
+    is checked here too: a non-object value used to reach ``.items()`` in the
+    rollup check and end the gate in an AttributeError instead of a violation.
     """
     if not isinstance(results, Mapping):
         return [
@@ -562,6 +615,12 @@ def check_results_shape(results: Any) -> List[str]:
             "results has no top-level 'sarif' object -- the attribution "
             "assertions below would inspect nothing"
         )
+    scanner_results = results.get("scanner_results")
+    if scanner_results is not None and not isinstance(scanner_results, Mapping):
+        violations.append(
+            f"'scanner_results' is a {type(scanner_results).__name__}, not an "
+            "object -- the scanner rollup assertions below would inspect nothing"
+        )
     return violations
 
 
@@ -582,11 +641,9 @@ def parse_projects(results: Mapping[str, Any]) -> Tuple[ProjectOutcome, ...]:
                 ),
                 exceeds_threshold=bool(record.get("exceeds_threshold", False)),
                 output_path=str(record.get("output_path") or ""),
-                sarif_run_index=(
-                    _as_int(record.get("sarif_run_index"))
-                    if record.get("sarif_run_index") is not None
-                    else None
-                ),
+                # None for an absent value and for garbage alike: a non-integer
+                # used to coerce to 0 and select the first run.
+                sarif_run_index=_as_optional_int(record.get("sarif_run_index")),
                 error=(
                     str(record["error"]) if record.get("error") is not None else None
                 ),
@@ -606,20 +663,43 @@ def _result_property(result: Mapping[str, Any], name: str) -> str | None:
     return text or None
 
 
-def _location_uri(location: Any) -> str | None:
+def _artifact_location(location: Any) -> Mapping[str, Any] | None:
     if not isinstance(location, Mapping):
         return None
     physical = location.get("physicalLocation")
     if not isinstance(physical, Mapping):
         return None
     artifact = physical.get("artifactLocation")
-    if not isinstance(artifact, Mapping):
+    return artifact if isinstance(artifact, Mapping) else None
+
+
+def _location_uri(location: Any) -> str | None:
+    artifact = _artifact_location(location)
+    if artifact is None:
         return None
     uri = artifact.get("uri")
     if uri is None:
         return None
     text = str(uri).strip()
     return text or None
+
+
+def _location_base_id(location: Any) -> str | None:
+    """The ``uriBaseId`` a location anchors its uri to, or None for an unanchored one."""
+    artifact = _artifact_location(location)
+    if artifact is None:
+        return None
+    base_id = artifact.get("uriBaseId")
+    if base_id is None:
+        return None
+    text = str(base_id).strip()
+    return text or None
+
+
+def _scanner_results_of(results: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The ``scanner_results`` object, or an empty one when it is not an object."""
+    scanner_results = results.get("scanner_results")
+    return scanner_results if isinstance(scanner_results, Mapping) else {}
 
 
 def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
@@ -638,20 +718,22 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
         if isinstance(properties, Mapping) and properties.get("workspace_project"):
             attributed = str(properties["workspace_project"])
 
-        uri_base = None
+        uri_bases: Dict[str, str] = {}
         bases = run.get("originalUriBaseIds")
         if isinstance(bases, Mapping):
-            for value in bases.values():
+            for base_id, value in bases.items():
                 if isinstance(value, Mapping) and value.get("uri"):
-                    uri_base = str(value["uri"])
-                    break
+                    uri_bases[str(base_id)] = str(value["uri"])
+        uri_base = next(iter(uri_bases.values()), None)
 
         rules: Dict[str, Tuple[int, int]] = {}
         workspace_uris: List[str] = []
         raw_uris: List[str] = []
+        raw_uri_bases: List[str | None] = []
         result_projects: List[str] = []
         located_results: List[Tuple[str, Tuple[str, ...]]] = []
         result_count = 0
+        results_without_location = 0
 
         for result in run.get("results") or []:
             if not isinstance(result, Mapping):
@@ -676,7 +758,10 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
                 uri = _location_uri(location)
                 if uri:
                     raw_uris.append(uri)
+                    raw_uri_bases.append(_location_base_id(location))
                     result_uris.append(uri)
+            if not result_uris:
+                results_without_location += 1
             if workspace_uri:
                 located_results.append((workspace_uri, tuple(result_uris)))
 
@@ -688,9 +773,12 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
                 rules=rules,
                 workspace_uris=tuple(workspace_uris),
                 raw_uris=tuple(raw_uris),
+                uri_bases=uri_bases,
+                raw_uri_bases=tuple(raw_uri_bases),
                 result_projects=tuple(result_projects),
                 located_results=tuple(located_results),
                 result_count=result_count,
+                results_without_location=results_without_location,
             )
         )
     return tuple(evidence)
@@ -699,7 +787,7 @@ def collect_runs(results: Mapping[str, Any]) -> Tuple[RunEvidence, ...]:
 def collect_scanner_statuses(results: Mapping[str, Any]) -> Dict[str, str]:
     """The workspace-level per-scanner rollup, normalized."""
     statuses: Dict[str, str] = {}
-    for name, entry in (results.get("scanner_results") or {}).items():
+    for name, entry in _scanner_results_of(results).items():
         record: Mapping[str, Any] = entry if isinstance(entry, Mapping) else {}
         statuses[str(name)] = normalize_status(record.get("status"))
     return statuses
@@ -758,13 +846,46 @@ def check_no_scanner_errors(statuses: Mapping[str, str]) -> List[str]:
     """No scanner may report ERROR in the workspace rollup.
 
     ERROR means a scanner was invoked and broke. MISSING means the tool is not
-    installed on this runner, which is tolerated.
+    installed on this runner; for a scanner outside GATE_SCANNERS that is
+    tolerated, and for one of the two the gate selects it is reported by
+    check_gate_scanners_ran, which names the scanner, while the workspace's own
+    exit code moves to 1 as well.
     """
     return [
         f"scanner '{name}' reported status ERROR in the workspace rollup"
         for name, status in sorted(statuses.items())
         if status == STATUS_ERROR
     ]
+
+
+def check_gate_scanners_found_something(results: Mapping[str, Any]) -> List[str]:
+    """Each selected scanner must have reported findings in the rollup.
+
+    The fixture gives both scanners a file of their own to trip (``.py`` for
+    bandit, ``.tf`` for checkov), so a selected scanner that ran and found
+    nothing did not read its file. Nothing used to assert this, so the gate
+    went green as a bandit-only check whenever checkov found nothing.
+    """
+    scanner_results = _scanner_results_of(results)
+    violations: List[str] = []
+    for scanner in GATE_SCANNERS:
+        entry = scanner_results.get(scanner)
+        if not isinstance(entry, Mapping):
+            # check_gate_scanners_ran reports the absent scanner.
+            continue
+        status = normalize_status(entry.get("status"))
+        if status in (STATUS_MISSING, STATUS_SKIPPED, STATUS_ERROR):
+            # Reported by check_gate_scanners_ran or check_no_scanner_errors.
+            continue
+        if _as_int(entry.get("finding_count")) <= 0:
+            violations.append(
+                f"scanner '{scanner}' ran with status {status} and reported zero "
+                f"findings in the rollup. The fixture gives it its own file to "
+                f"trip in every project, so zero means it did not read them, and "
+                f"the gate would be asserting on one scanner family while "
+                f"claiming two"
+            )
+    return violations
 
 
 def check_gate_scanners_ran(statuses: Mapping[str, str]) -> List[str]:
@@ -816,7 +937,11 @@ def check_one_run_per_project(
             f"{len(runs)} run(s). Runs are attributed to: {attributed}"
         )
 
-    if len(set(attributed)) != len(attributed):
+    # Over the runs that name a project. Two runs without one used to read as
+    # "two runs claim the same project: [None, None]", which is a different
+    # defect and is reported per run below.
+    named = [project for project in attributed if project is not None]
+    if len(set(named)) != len(named):
         violations.append(
             f"two SARIF runs claim the same project: {attributed}. Per-project "
             "extraction by run index is then ambiguous"
@@ -841,25 +966,38 @@ def check_one_run_per_project(
             "sharing a root is the shape one merged run would have produced"
         )
 
+    # By the run's own index in the SARIF runs array, not by position in this
+    # tuple: collect_runs skips a non-object entry, so positions shift while the
+    # recorded indexes do not. A negative index is refused rather than read from
+    # the end of the tuple.
+    runs_by_index = {run.index: run for run in runs}
     for project in scanned:
         if project.sarif_run_index is None:
             violations.append(
-                f"project '{project.key}' completed but records no "
-                "sarif_run_index, so its run cannot be selected"
+                f"project '{project.key}' completed but records no usable "
+                "sarif_run_index (absent, or not an integer), so its run cannot "
+                "be selected"
             )
             continue
-        if project.sarif_run_index >= len(runs):
+        if project.sarif_run_index < 0:
             violations.append(
                 f"project '{project.key}' records sarif_run_index "
-                f"{project.sarif_run_index} but there are only {len(runs)} run(s)"
+                f"{project.sarif_run_index}, which is not an index into the runs"
             )
             continue
-        named = runs[project.sarif_run_index].attributed_project
-        if named != project.key:
+        run = runs_by_index.get(project.sarif_run_index)
+        if run is None:
+            violations.append(
+                f"project '{project.key}' records sarif_run_index "
+                f"{project.sarif_run_index} but no SARIF run has that index "
+                f"(runs present: {sorted(runs_by_index)})"
+            )
+            continue
+        if run.attributed_project != project.key:
             violations.append(
                 f"project '{project.key}' records sarif_run_index "
                 f"{project.sarif_run_index}, but that run is attributed to "
-                f"'{named}'"
+                f"'{run.attributed_project}'"
             )
     return violations
 
@@ -1036,7 +1174,14 @@ def check_each_project_shows_only_its_own_marker_rule(
         if expected in present:
             seen_markers[expected] = project
 
-    unclaimed = sorted(set(MARKER_RULE_BY_PROJECT.values()) - set(seen_markers))
+    # Against every run, not only the runs that showed their own marker: when
+    # two runs' attributions are exchanged each marker IS in a run, the wrong
+    # one, and that is reported above. Saying it appears in no run and advising
+    # an edit to MARKER_SOURCES was false in exactly that case.
+    present_anywhere = set()
+    for run in runs:
+        present_anywhere.update(run.rules)
+    unclaimed = sorted(set(MARKER_RULE_BY_PROJECT.values()) - present_anywhere)
     if unclaimed and runs:
         violations.append(
             f"marker rule(s) {unclaimed} appear in no run at all. The project(s) "
@@ -1123,6 +1268,14 @@ def check_result_paths_resolve_against_their_run_root(
     that happens to sit in a directory named after its project -- which is
     precisely the collision the ``src`` project exists to surface. Resolving
     against the declared root has no such ambiguity.
+
+    Each location is resolved against the base its own ``uriBaseId`` names. A
+    location anchored to a base the run does not declare is dangling and is
+    reported; one that names no base resolves against the run's first declared
+    base, as every location used to. "Under the root" is checked after a strict
+    resolution, so an absolute URI or one that climbs out with ``..`` is refused
+    even when the file it reaches exists: joining and testing existence alone
+    accepted both.
     """
     violations: List[str] = []
     for run in runs:
@@ -1148,23 +1301,56 @@ def check_result_paths_resolve_against_their_run_root(
                     f"would still resolve; the root itself is wrong"
                 )
         unresolvable: List[str] = []
-        for uri in run.raw_uris:
+        dangling: List[str] = []
+        base_ids = run.raw_uri_bases or (None,) * len(run.raw_uris)
+        for uri, base_id in zip(run.raw_uris, base_ids):
             normalized = uri.replace("\\", "/")
             while normalized.startswith("./"):
                 normalized = normalized[2:]
             if not normalized:
                 continue
-            if not (root / normalized).exists():
+            location_root = root
+            if base_id is not None:
+                declared = run.uri_bases.get(base_id)
+                if declared is None:
+                    dangling.append(f"{uri} (uriBaseId {base_id!r})")
+                    continue
+                location_root = _uri_base_to_path(declared)
+            if not _is_a_file_under(location_root, normalized):
                 unresolvable.append(uri)
+        if dangling:
+            violations.append(
+                f"SARIF run {run.index} (project '{run.attributed_project}') has "
+                f"artifact URI(s) anchored to a uriBaseId the run does not declare "
+                f"in originalUriBaseIds ({sorted(run.uri_bases) or 'none'}): "
+                f"{sorted(set(dangling))[:5]}. A consumer has no root to resolve "
+                "them against"
+            )
         if unresolvable:
             violations.append(
                 f"SARIF run {run.index} (project "
                 f"'{run.attributed_project}') has artifact URI(s) that do not "
                 f"resolve to a file under its own declared root '{root}': "
                 f"{sorted(set(unresolvable))[:5]}. Inside a run the paths must be "
-                "relative to that run's originalUriBaseIds entry"
+                "relative to that run's originalUriBaseIds entry, and must stay "
+                "under it"
             )
     return violations
+
+
+def _is_a_file_under(root: Path, relative: str) -> bool:
+    """Whether ``relative`` names an existing path under ``root``, after resolution.
+
+    ``(root / relative).exists()`` alone accepted an absolute ``relative`` (the
+    join discards ``root``) and a ``..`` that climbs out of the root, whenever
+    the file they reached existed somewhere.
+    """
+    try:
+        resolved_root = root.resolve(strict=True)
+        candidate = (root / relative).resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return candidate.is_relative_to(resolved_root)
 
 
 def _rule_counts(
@@ -1216,15 +1402,27 @@ def check_suppression_is_project_scoped(runs: Sequence[RunEvidence]) -> List[str
             )
         ]
 
+    attributed_runs = {run.attributed_project for run in runs}
     for key in others:
         rules = other_rules[key]
         live, suppressed = rules.get(SUPPRESSED_RULE_ID, (0, 0))
+        if key not in attributed_runs:
+            # No run at all is not "the rule no longer fires", and advising an
+            # edit to SUPPRESSED_RULE_ID for it sent the reader the wrong way.
+            violations.append(
+                f"no SARIF run is attributed to '{key}', so the suppression scope "
+                f"cannot be judged for it. check_one_run_per_project reports the "
+                f"missing run"
+            )
+            continue
         if live == 0 and suppressed == 0:
             violations.append(
-                f"rule {SUPPRESSED_RULE_ID} does not appear in '{key}' at all, so "
-                f"the gate cannot tell a working suppression from a rule that no "
-                f"longer fires. Update SUPPRESSED_RULE_ID to a rule the fixture "
-                f"still trips. Rules seen in '{key}': {sorted(rules)}"
+                f"rule {SUPPRESSED_RULE_ID} does not appear in '{key}' at all, "
+                f"neither live nor suppressed. Either bandit no longer reports it "
+                f"(then update SUPPRESSED_RULE_ID to a rule the fixture still "
+                f"trips), or the finding was removed rather than marked suppressed, "
+                f"which is what a leaked suppression that drops findings looks "
+                f"like. Rules seen in '{key}': {sorted(rules)}"
             )
             continue
         if suppressed:
@@ -1408,14 +1606,27 @@ def check_per_project_subtrees(
         if not project.output_path:
             violations.append(f"project '{project.key}' records no output_path")
             continue
-        if project.output_path in seen:
+        # Compared as a normalized path, not as the recorded string: two
+        # spellings of one directory ('a/b' and 'a//b', 'a/./b', a trailing
+        # separator) are one shared directory, and the string test read them as
+        # two.
+        same_dir = os.path.normpath(_forward_slashes(project.output_path))
+        if same_dir in seen:
             violations.append(
-                f"projects '{seen[project.output_path]}' and '{project.key}' "
+                f"projects '{seen[same_dir]}' and '{project.key}' "
                 f"share the output path '{project.output_path}'"
             )
-        seen[project.output_path] = project.key
+        seen[same_dir] = project.key
 
         subtree = output_dir / project.output_path
+        if not _is_under(output_dir, subtree):
+            violations.append(
+                f"project '{project.key}' names output_path "
+                f"'{project.output_path}', which does not stay inside the output "
+                f"directory '{output_dir}'. A subtree outside it is not the "
+                f"workspace's own output"
+            )
+            continue
         if not subtree.is_dir():
             violations.append(
                 f"project '{project.key}' names output_path "
@@ -1437,6 +1648,68 @@ def check_per_project_subtrees(
     return violations
 
 
+def _is_under(parent: Path, path: Path) -> bool:
+    """Whether ``path`` stays inside ``parent`` once both are made absolute."""
+    try:
+        return (
+            Path(os.path.abspath(path))
+            .resolve()
+            .is_relative_to(Path(os.path.abspath(parent)).resolve())
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def check_scanner_rollup_per_scanner(
+    projects: Sequence[ProjectOutcome], output_dir: Path
+) -> List[str]:
+    """Each scanner's rollup count must equal the sum of that scanner over the projects.
+
+    The cross-scanner totals compared by the rollup check cannot show one
+    scanner's count leaking into another's, which is the property checkov was
+    added to test. Each project writes its own results file in its subtree with
+    its own per-scanner ``scanner_results``, so the per-scanner sum is on disk;
+    the workspace rollup is read from the same file. A project whose own file
+    is missing or unreadable is left out here and reported by
+    check_per_project_subtrees.
+    """
+    aggregated = output_dir / RESULTS_FILENAME
+    try:
+        rollup = _scanner_results_of(json.loads(aggregated.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return []
+    per_scanner: Dict[str, int] = {}
+    for project in projects:
+        if project.status != "completed" or not project.output_path:
+            continue
+        own = output_dir / project.output_path / RESULTS_FILENAME
+        try:
+            own_results = json.loads(own.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(own_results, Mapping):
+            continue
+        for name, entry in _scanner_results_of(own_results).items():
+            if isinstance(entry, Mapping):
+                per_scanner[str(name)] = per_scanner.get(str(name), 0) + _as_int(
+                    entry.get("finding_count")
+                )
+    violations: List[str] = []
+    for scanner in GATE_SCANNERS:
+        entry = rollup.get(scanner)
+        if not isinstance(entry, Mapping) or scanner not in per_scanner:
+            continue
+        rolled = _as_int(entry.get("finding_count"))
+        if rolled != per_scanner[scanner]:
+            violations.append(
+                f"scanner_results['{scanner}'].finding_count is {rolled} in the "
+                f"workspace rollup but the projects' own results sum to "
+                f"{per_scanner[scanner]} for it. One scanner's count has leaked "
+                f"into another's, which the cross-scanner totals cannot show"
+            )
+    return violations
+
+
 def check_scanner_rollup_agrees_with_the_projects(
     results: Mapping[str, Any], projects: Sequence[ProjectOutcome]
 ) -> List[str]:
@@ -1449,7 +1722,7 @@ def check_scanner_rollup_agrees_with_the_projects(
     ``workspace.projects`` concluded a workspace with real findings had none.
     Fail-open, with the correct value two keys away in the same file.
     """
-    scanner_results = results.get("scanner_results") or {}
+    scanner_results = _scanner_results_of(results)
     if not scanner_results:
         return ["'scanner_results' is empty -- the rollup recorded no scanners"]
 
@@ -1509,8 +1782,12 @@ def check_no_finding_lost_its_workspace_path(
     located = sum(len(run.workspace_uris) for run in runs)
     # Every result, not only those carrying a project attribution. The two
     # properties are written together, so a result that lost both was absent
-    # from both sides of this accounting and passed silently.
-    total = sum(run.result_count for run in runs)
+    # from both sides of this accounting and passed silently. A result that
+    # offered no location at all is left out of the denominator: the aggregator
+    # correctly gives it no workspace path and counts it nowhere, so it is not
+    # a path lost silently and used to be reported as one.
+    unlocated = sum(run.results_without_location for run in runs)
+    total = sum(run.result_count for run in runs) - unlocated
     attributed = sum(len(run.result_projects) for run in runs)
 
     violations: List[str] = []
@@ -1523,8 +1800,9 @@ def check_no_finding_lost_its_workspace_path(
         )
     if total and located != total:
         violations.append(
-            f"{total} finding(s) are in the SARIF but only {located} carry a "
-            f"workspace_uri ({attributed} carry a project attribution), and "
+            f"{total} located finding(s) are in the SARIF but only {located} carry "
+            f"a workspace_uri ({attributed} carry a project attribution, "
+            f"{unlocated} offered no location and are left out), and "
             f"{counted} were counted as unconvertible. The difference is findings "
             f"that lost their path silently"
         )
@@ -1546,12 +1824,52 @@ def check_workspace_status(results: Mapping[str, Any], exit_code: int) -> List[s
             f"results file exists and projects ran. Exit code {exit_code} is then "
             f"indistinguishable from a refused workspace"
         )
-    recorded = _as_int(workspace.get("exit_code"))
-    if recorded != exit_code:
+    recorded = _as_optional_int(workspace.get("exit_code"))
+    if recorded is None:
+        # Read as 0 before, which agreed with a process that exited 0 and made
+        # the cross-check pass on a payload that recorded no exit code at all.
+        violations.append(
+            f"workspace.exit_code is absent or not an integer "
+            f"({workspace.get('exit_code')!r}) while the process exited "
+            f"{exit_code}; the payload does not say what it exited with"
+        )
+    elif recorded != exit_code:
         violations.append(
             f"workspace.exit_code is {recorded} but the process exited "
             f"{exit_code}; a consumer reading the payload would draw a different "
             f"conclusion than one reading the status"
+        )
+    return violations
+
+
+def check_execution_knobs_reached_the_run(results: Mapping[str, Any]) -> List[str]:
+    """The root config's execution knobs must be the values the run reports.
+
+    WORKSPACE_ROOT_CONFIG sets ``max_parallel_projects`` and ``project_timeout``
+    at the workspace root so the gate exercises that they are read from there,
+    and the payload records the values the run used. The config was written and
+    never asserted, so the exercise could not fail.
+    """
+    workspace = results.get("workspace") or {}
+    violations: List[str] = []
+    bound = _as_optional_int(workspace.get("max_parallel_projects"))
+    if bound != ROOT_MAX_PARALLEL_PROJECTS:
+        violations.append(
+            f"workspace.max_parallel_projects is "
+            f"{workspace.get('max_parallel_projects')!r} but the root config sets "
+            f"{ROOT_MAX_PARALLEL_PROJECTS}; the root's execution knobs did not "
+            f"reach the run"
+        )
+    timeout = workspace.get("project_timeout")
+    try:
+        timeout_seconds = float(timeout)
+    except (TypeError, ValueError):
+        timeout_seconds = None
+    if timeout_seconds != float(ROOT_PROJECT_TIMEOUT_SECONDS):
+        violations.append(
+            f"workspace.project_timeout is {timeout!r} but the root config sets "
+            f"{ROOT_PROJECT_TIMEOUT_SECONDS}; the root's execution knobs did not "
+            f"reach the run"
         )
     return violations
 
@@ -1653,7 +1971,9 @@ def check_exit_code(
         (
             f"the workspace scan exited {exit_code}; expected one of "
             f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
-            "1 is an internal error, 3 is an invalid project config and 5 is a "
+            "1 is an internal error or a selected scanner that did not run "
+            "(fail_on_incomplete_scanners defaults on; check_gate_scanners_ran "
+            "names the scanner), 3 is an invalid project config and 5 is a "
             "usage error: ASH refused this script's command line"
         )
     ]
@@ -1711,6 +2031,8 @@ def evaluate_results(
     scanner_gaps = check_gate_scanners_ran(statuses)
     outcome.violations.extend(scanner_gaps)
     outcome.root_violations.extend(scanner_gaps)
+    outcome.violations.extend(check_gate_scanners_found_something(results))
+    outcome.violations.extend(check_execution_knobs_reached_the_run(results))
     outcome.violations.extend(check_one_run_per_project(projects, runs))
     outcome.violations.extend(check_findings_are_attributed_to_their_own_project(runs))
     outcome.violations.extend(check_each_project_shows_only_its_own_marker_rule(runs))
@@ -1723,6 +2045,7 @@ def evaluate_results(
     )
     outcome.violations.extend(check_no_finding_lost_its_workspace_path(results, runs))
     outcome.violations.extend(check_per_project_subtrees(projects, output_dir))
+    outcome.violations.extend(check_scanner_rollup_per_scanner(projects, output_dir))
     if exit_code is not None:
         outcome.violations.extend(check_workspace_status(results, exit_code))
         outcome.violations.extend(check_exit_code(exit_code, projects))
@@ -1887,9 +2210,14 @@ def child_environment(base: Mapping[str, str] | None = None) -> Dict[str, str]:
     variables), so an operator's shell could change which run this gate judges
     with no trace in its output. The gate's inputs are its command line and the
     fixture it wrote. UTF-8 is forced both ways for the child's Rich table.
+
+    PYTHONSAFEPATH is dropped too: with it set, ``-m`` no longer puts the
+    working directory on ``sys.path``, so the child would import whatever ASH is
+    installed instead of the working tree this gate says it exercises.
     """
     source = os.environ if base is None else base
     env = {key: value for key, value in source.items() if not key.startswith("ASH_")}
+    env.pop("PYTHONSAFEPATH", None)
     env["PYTHONIOENCODING"] = "utf-8"
     env.setdefault("PYTHONUTF8", "1")
     return env
@@ -2003,11 +2331,58 @@ def run_scan(
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
+class ResultsUnreadable(Exception):
+    """The results file exists but could not be read or decoded.
+
+    Raised for invalid UTF-8 and for a read error, which used to escape ``main``
+    as a traceback in place of the gate's FAIL report and its scan log tail.
+    """
+
+
 def load_results(output_dir: Path) -> Any:
     results_path = output_dir / RESULTS_FILENAME
     if not results_path.exists():
         raise FileNotFoundError(str(results_path))
-    return json.loads(results_path.read_text(encoding="utf-8"))
+    try:
+        text = results_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as bad_bytes:
+        raise ResultsUnreadable(
+            f"the results file is not valid UTF-8: {bad_bytes}"
+        ) from bad_bytes
+    except OSError as unreadable:
+        raise ResultsUnreadable(
+            f"the results file could not be read: {unreadable}"
+        ) from unreadable
+    return json.loads(text)
+
+
+def _scan_timeout(text: str) -> float:
+    """The ``--timeout`` value: a finite number of seconds, positive and under the job budget.
+
+    ``type=float`` alone accepted 0, a negative number, ``nan`` and ``inf``,
+    none of which stops a hung scan before the job's own cancellation, and a
+    value at or above JOB_TIMEOUT_BUDGET_SECONDS, which the help text said must
+    stay under the budget but nothing enforced.
+    """
+    try:
+        seconds = float(text)
+    except ValueError as bad:
+        raise argparse.ArgumentTypeError(f"not a number of seconds: {text!r}") from bad
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError(
+            f"the timeout must be a positive, finite number of seconds, not {text!r}"
+        )
+    if seconds >= JOB_TIMEOUT_BUDGET_SECONDS:
+        raise argparse.ArgumentTypeError(
+            f"the timeout must stay under the job's {JOB_TIMEOUT_BUDGET_SECONDS:g}s "
+            f"budget so this script's diagnostics win the race, not {text!r}"
+        )
+    return seconds
+
+
+def _remove_hint(path: Path) -> str:
+    """The cleanup command printed for a kept temp directory, shell-quoted."""
+    return f"rm -rf {shlex.quote(str(path))}"
 
 
 def sanitize_for_console(text: str) -> str:
@@ -2148,12 +2523,12 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--timeout",
-        type=float,
+        type=_scan_timeout,
         default=DEFAULT_SCAN_TIMEOUT_SECONDS,
         help=(
             "seconds to allow the scan subprocess (default: "
-            f"{DEFAULT_SCAN_TIMEOUT_SECONDS:g}; must stay under the job's "
-            f"{JOB_TIMEOUT_BUDGET_SECONDS:g}s timeout-minutes budget so this "
+            f"{DEFAULT_SCAN_TIMEOUT_SECONDS:g}; a positive finite number under the "
+            f"job's {JOB_TIMEOUT_BUDGET_SECONDS:g}s timeout-minutes budget so this "
             "script's own diagnostics win the race)"
         ),
     )
@@ -2177,7 +2552,13 @@ def main(argv: Iterable[str] | None = None) -> int:
     workspace_root = temp_root / "workspace"
     output_dir = temp_root / "output"
 
+    # Set only on the success path; the failure messages point the reader at the
+    # kept evidence. Until the fixture is written there is nothing to keep: a
+    # failed precondition used to leave the empty temp directory behind (inside
+    # the checkout, when that was the precondition that failed) and name paths
+    # that were never created.
     succeeded = False
+    evidence_written = False
     try:
         precondition_violations = check_paths_outside_repo(
             repo_root, workspace_root, output_dir
@@ -2189,6 +2570,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             return 1
 
         definition = write_fixture(workspace_root)
+        evidence_written = True
         output_dir.mkdir(parents=True, exist_ok=True)
 
         print("ASH multi-project attribution gate")
@@ -2227,7 +2609,16 @@ def main(argv: Iterable[str] | None = None) -> int:
             _print_block("scan stderr (tail)", _tail(completed.stderr))
             return 1
         except json.JSONDecodeError as bad_json:
+            # The scan log says what wrote a half file; it used to be withheld
+            # on this path while the missing-file path printed it.
             print(f"FAIL: the results file is not valid JSON: {bad_json}")
+            _print_block("scan stdout (tail)", _tail(completed.stdout))
+            _print_block("scan stderr (tail)", _tail(completed.stderr))
+            return 1
+        except ResultsUnreadable as unreadable:
+            print(f"FAIL: {unreadable}")
+            _print_block("scan stdout (tail)", _tail(completed.stdout))
+            _print_block("scan stderr (tail)", _tail(completed.stderr))
             return 1
 
         outcome = evaluate_results(
@@ -2266,9 +2657,12 @@ def main(argv: Iterable[str] | None = None) -> int:
             if downstream:
                 print()
                 print(
-                    "DOWNSTREAM of the above -- a scanner that reported ERROR "
-                    "produced no findings, so these should clear once the root "
-                    "cause is fixed, and are not evidence of separate defects:"
+                    "LIKELY DOWNSTREAM of the above -- a scanner that reported "
+                    "ERROR or did not run produced no findings, so violations "
+                    "about missing rules, suppressions and thresholds may follow "
+                    "from it. Fix the root cause first, then re-read whatever is "
+                    "still reported; a missing output directory or a wrong exit "
+                    "code does not follow from it:"
                 )
                 for violation in downstream:
                     print(f"  - {violation}")
@@ -2285,7 +2679,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         _print_block("scan stderr (tail)", _tail(completed.stderr))
         return 1
     finally:
-        if succeeded and not args.keep_temp:
+        if not evidence_written or (succeeded and not args.keep_temp):
             _remove_tree(temp_root)
         else:
             reason = "--keep-temp" if succeeded else "the gate failed"
@@ -2293,7 +2687,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             print(f"EVIDENCE KEPT ({reason}):")
             print(f"  workspace:   {workspace_root}")
             print(f"  scan output: {output_dir}")
-            print(f"  remove with: rm -rf {temp_root}")
+            print(f"  remove with: {_remove_hint(temp_root)}")
 
 
 if __name__ == "__main__":
