@@ -13,6 +13,7 @@ configured alone never reached the model; and a finding that stands for several
 No test here calls AWS: the runtime is a MagicMock that answers by plan.
 """
 
+import logging
 from unittest.mock import MagicMock
 
 import botocore.exceptions
@@ -99,6 +100,33 @@ def test_a_refusal_that_names_no_sent_parameter_is_not_retried():
 
     assert outcome.ok is False and "Validation error" in outcome.text, outcome
     assert runtime.converse.call_count == 1
+
+
+def test_a_refused_pair_is_dropped_from_the_clients_later_calls(caplog):
+    """The repair is paid once per client: the second call sends the request
+    without the refused parameter from the start (three Converse requests for
+    two calls, not four), and the repaired refusal is said at verbose, not as a
+    "Bedrock API error" warning, because the call then answered."""
+    runtime = MagicMock()
+    runtime.converse.side_effect = [
+        _validation_error(
+            "`temperature` and `top_p` cannot both be specified for this model."
+        ),
+        _ok("first"),
+        _ok("second"),
+    ]
+    client = BedrockModelClient(runtime, "anthropic.claude-next", 0.5, 100, 0.9)
+
+    with caplog.at_level(logging.WARNING):
+        first = client.call("prompt", "system")
+        second = client.call("again", "system")
+
+    assert (first.text, second.text) == ("first", "second"), (first, second)
+    assert runtime.converse.call_count == 3
+    third = runtime.converse.call_args_list[2].kwargs
+    assert third["inferenceConfig"] == {"temperature": 0.5, "maxTokens": 100}
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [], warnings
 
 
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ import hashlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import botocore.exceptions
 
@@ -218,6 +218,11 @@ class BedrockModelClient:
         # the WARNINGs and DEBUG lines land in ash.log, and the "*Error ...*"
         # strings become report content the caller writes to files.
         self._values = list(value_tuple(values))
+        # The inference parameters this model refused on an earlier call (a
+        # deprecated one, or the second of a pair it takes one of). Left out of
+        # every later request, so the refusal and its retry are paid once per
+        # client, not once per report section.
+        self._dropped_params: Set[str] = set()
 
     def _redacted(self, text: str) -> str:
         """*text* redacted with the caller's environment values.
@@ -283,6 +288,10 @@ class BedrockModelClient:
         }
         if "claude" in self._model_id.lower():
             converse_args["additionalModelRequestFields"] = {"top_k": 200}
+        # A parameter this model refused on an earlier call of this client is
+        # left out from the start (see _dropped_params).
+        for name in list(self._dropped_params):
+            _drop_parameter(converse_args, name)
 
         # A model can reject more than one parameter, and it reports them one at a
         # time: the issue saw temperature rejected, then top_k on the next call.
@@ -345,6 +354,12 @@ class BedrockModelClient:
             except botocore.exceptions.ClientError as exc:
                 code = exc.response.get("Error", {}).get("Code", "")
                 msg = exc.response.get("Error", {}).get("Message", str(exc))
+                if code == "ValidationException" and self._repair_refused_parameter(
+                    converse_args, msg
+                ):
+                    # Repaired, and said so at verbose: the retry is the call's
+                    # own course, not a failure of the run, so no warning.
+                    continue
                 ASH_LOGGER.warning(
                     self._redacted(
                         f"Bedrock API error ({code}) with model {self._model_label}: {msg}"
@@ -362,30 +377,8 @@ class BedrockModelClient:
                         model_specific,
                     )
                 if code == "ValidationException":
-                    # Retry only when the model named a parameter we actually
-                    # sent. Anything else -- an over-long prompt, say -- cannot be
-                    # fixed by dropping a field, so retrying only adds latency.
-                    match = _DEPRECATED_PARAM_PATTERN.search(msg)
-                    if match and _drop_parameter(converse_args, match.group("name")):
-                        ASH_LOGGER.verbose(
-                            self._redacted(
-                                f"Model {self._model_label} rejected "
-                                f"'{match.group('name')}' as deprecated; retrying "
-                                "without it"
-                            )
-                        )
-                        continue
-                    pair = _EXCLUSIVE_PARAMS_PATTERN.search(msg)
-                    if pair and _drop_parameter(converse_args, pair.group("second")):
-                        ASH_LOGGER.verbose(
-                            self._redacted(
-                                f"Model {self._model_label} takes "
-                                f"'{pair.group('first')}' or '{pair.group('second')}' "
-                                f"but not both; retrying without "
-                                f"'{pair.group('second')}'"
-                            )
-                        )
-                        continue
+                    # Not a parameter we sent: an over-long prompt, say, which
+                    # dropping a field cannot fix, so the refusal is the answer.
                     return self._failed(
                         f"*Error: Validation error with model {self._model_label}: {msg}*",
                         model_specific,
@@ -422,6 +415,42 @@ class BedrockModelClient:
             "parameter as deprecated.*",
             model_specific=True,
         )
+
+    def _repair_refused_parameter(
+        self, converse_args: Dict[str, Any], msg: str
+    ) -> bool:
+        """Drop the inference parameter a ValidationException names, from this
+        request and from every later one of this client. Returns whether a
+        parameter we sent was dropped, which is what makes the retry worth
+        making: a refusal that names no sent parameter is not repaired.
+
+        Two shapes are read: a parameter the model calls deprecated, and the
+        second of a pair the model takes one of (``_EXCLUSIVE_PARAMS_PATTERN``).
+        """
+        match = _DEPRECATED_PARAM_PATTERN.search(msg)
+        if match and _drop_parameter(converse_args, match.group("name")):
+            self._dropped_params.add(match.group("name"))
+            ASH_LOGGER.verbose(
+                self._redacted(
+                    f"Model {self._model_label} rejected '{match.group('name')}' "
+                    "as deprecated; retrying without it, and leaving it out of "
+                    "this client's later calls"
+                )
+            )
+            return True
+        pair = _EXCLUSIVE_PARAMS_PATTERN.search(msg)
+        if pair and _drop_parameter(converse_args, pair.group("second")):
+            self._dropped_params.add(pair.group("second"))
+            ASH_LOGGER.verbose(
+                self._redacted(
+                    f"Model {self._model_label} takes '{pair.group('first')}' or "
+                    f"'{pair.group('second')}' but not both; retrying without "
+                    f"'{pair.group('second')}', and leaving it out of this "
+                    "client's later calls"
+                )
+            )
+            return True
+        return False
 
     def _failed(self, text: str, model_specific: bool) -> CallOutcome:
         """A failed call's outcome, its text redacted."""
