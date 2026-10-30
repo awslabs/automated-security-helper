@@ -754,3 +754,60 @@ def test_an_env_tag_on_a_collection_is_refused_by_both_readers(tmp_path, written
         refusals.append(str(excinfo.value).splitlines()[0])
     assert refusals[0] == refusals[1]
     assert refusals[0].startswith("expected a scalar node"), refusals[0]
+
+
+class TestTheOneNameRule:
+    """The loader's secret-name exclusion is ``is_refused_config_environment_name``.
+
+    The loader read the suffix tuple alone, so a qualified, glued or
+    digit-suffixed credential name (``ASH_API_KEY_PROD``, ``ASH_API_KEY2``,
+    ``ASH_APIKEY``) had no suffix match and was interpolated from an in-tree
+    config while the masking rule classed the same name as a secret. The one
+    rule reads the tuple, the listed names and the secret-shaped reading.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "ASH_API_KEY_PROD",
+            "ASH_API_KEY2",
+            "ASH_APIKEY",
+            "ASH_DB_PASSWORD_2",
+            "ASH_GITHUBTOKEN",
+        ],
+    )
+    def test_a_qualified_or_glued_secret_name_is_left_as_written(
+        self, tmp_path, monkeypatch, log_records, name
+    ):
+        monkeypatch.setenv(name, CANARY)
+        reference = REFERENCE.format(name=name)
+
+        config = _load(tmp_path, f"project_name: {reference}\n")
+
+        assert config.project_name == reference
+        assert CANARY not in config.model_dump_json()
+        assert _secret_shaped(name) and not config_env_var_is_interpolatable(name)
+        messages = [record.getMessage() for record in log_records]
+        assert not [m for m in messages if CANARY in m], messages
+
+    @pytest.mark.parametrize(
+        "name",
+        # A flag or a limit named after the word, not the word's value: the one
+        # rule admits these, as the tuple did.
+        [
+            "ASH_AUTH_ENABLED",
+            "ASH_PASS_THRESHOLD",
+            "ASH_KEYS_DIR",
+            "ASH_S3_BUCKET_NAME",
+        ],
+    )
+    def test_control_a_name_that_only_contains_the_word_still_resolves(
+        self, tmp_path, monkeypatch, name
+    ):
+        monkeypatch.setenv(name, CANARY)
+
+        config = _load(tmp_path, f"project_name: {REFERENCE.format(name=name)}\n")
+
+        assert config.project_name == CANARY
+        assert config_env_var_is_interpolatable(name)
+        assert not _secret_shaped(name)

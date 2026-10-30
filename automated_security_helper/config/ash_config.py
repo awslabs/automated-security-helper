@@ -58,10 +58,9 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
-    ASH_CONFIG_ENV_VAR_SECRET_NAMES,
-    ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES,
     ASH_DEFAULT_SEVERITY_LEVEL,
     is_readable_environment_name,
+    is_refused_config_environment_name,
 )
 from automated_security_helper.config.plugin_section_names import (
     # The one spelling rule for a known plugin's section name, shared with the
@@ -216,14 +215,18 @@ def config_env_var_is_interpolatable(var_name: str) -> bool:
 
 
 def config_env_var_is_secret_shaped(var_name: str) -> bool:
-    """Whether ``var_name`` ends like a credential's name, or is one listed.
+    """Whether ``var_name`` is a credential's name, so a config may not read it.
 
-    See ``ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES`` in ``core/constants.py``.
+    The one name rule, ``core.constants.is_refused_config_environment_name``: a
+    listed name, a name ending in one of ``ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES``,
+    and any name the masking rule classes as holding a secret
+    (``is_secret_shaped_environment_name``: a qualified, glued or
+    digit-suffixed form such as ``ASH_API_KEY_PROD``, ``ASH_API_KEY2`` or
+    ``ASH_APIKEY``). This loader read the suffix tuple alone, so it admitted
+    names the same module masked in the stream output; the config validator
+    reads this function too, so the two cannot drift again.
     """
-    upper = var_name.upper()
-    return upper in ASH_CONFIG_ENV_VAR_SECRET_NAMES or upper.endswith(
-        ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES
-    )
+    return is_refused_config_environment_name(var_name)
 
 
 # Group 2 captures the colon itself, so that ``${VAR}`` and ``${VAR:}`` can be
