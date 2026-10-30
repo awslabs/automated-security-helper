@@ -1801,23 +1801,33 @@ class AshAggregatedResults(RecordModel):
             )
 
         except Exception as e:
-            from automated_security_helper.utils.error_text import (
-                config_environment_values,
-                error_text,
-                traceback_text,
-            )
+            # Reporting the failure must not be a second one: this runs in
+            # save_model, and an error raised from here would keep the results
+            # file, the scan-complete marker, from being written.
+            try:
+                from automated_security_helper.utils.error_text import (
+                    config_environment_values,
+                    error_text,
+                    traceback_text,
+                )
 
-            # Shown as every unexpected error is: with no input a
-            # ValidationError quotes and no value the stored configuration read
-            # from the environment.
-            values = config_environment_values(self.ash_config)
-            ASH_LOGGER.error(
-                f"Error populating final metrics: {error_text(e, values)}",
-                extra=NO_MARKUP,
-            )
-            ASH_LOGGER.error(
-                f"Stack trace: {traceback_text(e, values)}", extra=NO_MARKUP
-            )
+                # Shown as every unexpected error is: with no input a
+                # ValidationError quotes and no value the stored configuration read
+                # from the environment.
+                values = config_environment_values(self.ash_config)
+                ASH_LOGGER.error(
+                    f"Error populating final metrics: {error_text(e, values)}",
+                    extra=NO_MARKUP,
+                )
+                ASH_LOGGER.error(
+                    f"Stack trace: {traceback_text(e, values)}", extra=NO_MARKUP
+                )
+            except Exception:
+                # The type alone: it names no input and no value.
+                ASH_LOGGER.error(
+                    f"Error populating final metrics: {type(e).__name__}",
+                    extra=NO_MARKUP,
+                )
             # Don't raise to avoid breaking the save operation
 
     @classmethod
