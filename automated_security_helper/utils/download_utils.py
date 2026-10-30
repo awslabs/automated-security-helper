@@ -1028,12 +1028,12 @@ def _already_installed(
     30-100MB binary.
     """
     target = destination.joinpath(installed_as)
-    # A regular file, not a link: ``is_file`` follows a symlink, so a link planted at
-    # the install path to a file with the installed bytes passed every check below
-    # and skipped every later install, while the scan ran whatever the link named
-    # by then. Not installed, so the install replaces the link through its staging
-    # rename.
-    if target.is_symlink() or not target.is_file():
+    # Not a link: a link planted at the install path to a file with the installed
+    # bytes passed every check below and skipped every later install, while the
+    # scan ran whatever the link named by then. Not installed, so the install
+    # replaces the link through its staging rename. This lookup is an early
+    # refusal only; what the file IS is read from the descriptor below.
+    if target.is_symlink():
         return False
     if expected_sha256 is None:
         return False
@@ -1049,33 +1049,60 @@ def _already_installed(
         # Written by an ASH that recorded only the archive digest. Treated as not
         # installed, so the next run replaces it with a receipt that can be checked.
         return False
+    # One descriptor for everything read or set about the file: what it is
+    # (fstat), its bytes (the digest) and its mode (the repair). The install
+    # directory may be writable by other users (the module docstring), so a
+    # digest read through one open and a chmod through another were not pinned
+    # to the same inode: the file could be swapped between them, and the mode
+    # set on bytes nobody hashed.
     try:
-        if sha256_file(target) != installed_digest:
+        fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not open {target} ({e}); treating as not installed")
+        return False
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return False
+        try:
+            matches = _sha256_of_open_file(fd) == installed_digest
+        except OSError as e:
+            ASH_LOGGER.debug(
+                f"Could not hash {target} ({e}); treating as not installed"
+            )
+            return False
+        if not matches:
             ASH_LOGGER.warning(
                 f"{target} no longer matches the digest recorded when it was "
                 "installed; reinstalling"
             )
             return False
-    except OSError as e:
-        ASH_LOGGER.debug(f"Could not hash {target} ({e}); treating as not installed")
-        return False
-    if platform.system() != "Windows" and not os.access(target, os.X_OK):
+        if platform.system() == "Windows" or info.st_mode & 0o111:
+            return True
         # The bytes match and the mode is wrong: a binary that lost its execute
         # bit was skipped as installed while no scan could run it. The bytes
-        # were just verified against the receipt, so the mode is put back on
-        # the file in place rather than the file downloaded again; a mode that
-        # cannot be set leaves it not installed, and the install replaces it.
+        # were just verified on this descriptor, so the mode is put back on the
+        # same descriptor rather than the file downloaded again. Only a file
+        # with this one name: a second hard link would have another name's
+        # mode changed with it, so that file is reinstalled instead (the
+        # staging rename replaces the name, never the shared inode).
+        if info.st_nlink != 1:
+            ASH_LOGGER.warning(
+                f"{target} is not executable and has another name on disk; "
+                "reinstalling it"
+            )
+            return False
         ASH_LOGGER.warning(f"{target} was not executable; making it executable")
         try:
-            make_executable(target)
+            os.fchmod(fd, stat.S_IMODE(info.st_mode) | 0o111)
         except OSError as e:
             ASH_LOGGER.warning(
                 f"Could not make {target} executable ({e}); reinstalling it"
             )
             return False
-        if not os.access(target, os.X_OK):
-            return False
-    return True
+        return bool(os.fstat(fd).st_mode & 0o111)
+    finally:
+        os.close(fd)
 
 
 def install_binary_from_url(
