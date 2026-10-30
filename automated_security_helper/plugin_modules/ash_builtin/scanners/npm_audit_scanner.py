@@ -1578,15 +1578,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 if not isinstance(via, dict):
                     continue
                 rule_id = self._advisory_id(name, via)
-                for node_path in info.get("nodes", []):
-                    identity = self._node_identity(
+                # One ref per copy, placed as the copy's own result is
+                # (``_node_place``), so the ref and the result share URI and
+                # identity. A root npm lists no node for has one result by
+                # name, and gets the one ref for it: with no ref, suppressing
+                # another root's advisory suppressed the transitive result
+                # while this root's advisory was live, and a chain whose every
+                # root had no node could not be reached by any advisory
+                # suppression. A null ``nodes`` raised here (iterating None)
+                # and failed the whole conversion.
+                for node_path in info.get("nodes") or [None]:
+                    pkg_location, identity = self._node_place(
                         name, node_path, lock_rel, lock_index
                     )
-                    location = str(node_path).replace("node_modules/", "")
                     ref = {"rule_id": rule_id}
                     if identity.get(PACKAGE_PATH_KEY):
                         ref["package_path"] = identity[PACKAGE_PATH_KEY]
-                    ref["uri"] = f"node_modules/{location}/package.json"
+                    ref["uri"] = f"node_modules/{pkg_location}/package.json"
                     roots[(rule_id, ref.get("package_path", ""), ref["uri"])] = ref
         return [roots[key] for key in sorted(roots)]
 

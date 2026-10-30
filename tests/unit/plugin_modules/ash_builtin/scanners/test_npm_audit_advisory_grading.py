@@ -272,6 +272,48 @@ def test_a_transitive_entry_with_no_nodes_still_produces_a_result(scanner):
     assert grades[("npm-audit-transitive-child", "*")] == "HIGH"
 
 
+def test_a_root_with_no_nodes_still_gives_the_transitive_result_a_ref(scanner):
+    """The transitive result's root_advisories names every root result, placed
+    as that result is, so a suppression on the advisory reaches it. A root npm
+    listed no node for has one result by name and got no ref: suppressing
+    another root's advisory then suppressed the transitive result while this
+    root's advisory was live."""
+    document = _report(
+        root=("high", [_via("root", "high", score=0, vector=None)], []),
+        child=("high", ["root"], ["node_modules/child"]),
+    )
+
+    report, _ = _graded(scanner, document)
+
+    by_rule = {r.ruleId: r for r in report.runs[0].results}
+    root_result = by_rule["GHSA-root-high"]
+    root_location = root_result.locations[0].model_dump(
+        by_alias=True, exclude_none=True
+    )
+    root_uri = root_location["physicalLocation"]["artifactLocation"]["uri"]
+    refs = by_rule["npm-audit-transitive-child"].properties.model_extra[
+        "root_advisories"
+    ]
+    assert refs == [{"rule_id": "GHSA-root-high", "uri": root_uri}], refs
+    assert root_uri == "node_modules/root/package.json"
+
+
+def test_a_null_nodes_list_on_a_root_does_not_fail_the_conversion(scanner):
+    document = _report(
+        root=("high", [_via("root", "high", score=0, vector=None)], []),
+        child=("high", ["root"], ["node_modules/child"]),
+    )
+    document["vulnerabilities"]["root"]["nodes"] = None
+
+    report, _ = _graded(scanner, document)
+
+    by_rule = {r.ruleId: r for r in report.runs[0].results}
+    refs = by_rule["npm-audit-transitive-child"].properties.model_extra[
+        "root_advisories"
+    ]
+    assert [ref["rule_id"] for ref in refs] == ["GHSA-root-high"], refs
+
+
 def test_a_yarn_or_pnpm_record_with_no_versions_still_produces_a_result(scanner):
     """The v1 and berry readers list each installed version under the record's
     versions map; a record with an empty map is still the tool's finding."""
