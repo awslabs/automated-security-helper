@@ -5,10 +5,10 @@
 
 The real CLI runs in-process. Only the lookup of the ``nix`` executable and the one
 call that would enter the shell (``run_ash_nix._enter_shell``) are replaced, so the flake reference
-ASH resolves, the command it builds from the caller's argv, the messages and the
-exit code are ASH's own. The fake records the command, which is part of each
-snapshot: it is what an operator sees with ``--debug``, and a flag lost on the way
-into the shell would show up there.
+ASH resolves, the command it builds from the scan's own options, the messages and
+the exit code are ASH's own. The fake records the command, which is part of each
+snapshot: it is what an operator sees with ``--debug``, and an option lost on the
+way into the shell would show up there.
 """
 
 from __future__ import annotations
@@ -108,8 +108,9 @@ def nix_shell(monkeypatch) -> FakeNixShell:
 def scan(run_cli, monkeypatch):
     """Run ``ash <args>`` with ``sys.argv`` set as a real ``ash`` process would have it.
 
-    Nix mode forwards the caller's argv into the shell verbatim, so in-process it
-    would otherwise forward pytest's.
+    The scan entry point builds the inner command from the call's own options, not
+    from this process's argv; ``sys.argv`` is still set as ``ash`` would have it so
+    that anything the CLI reads from it in-process reads the scan's, not pytest's.
     """
 
     def _scan(args):

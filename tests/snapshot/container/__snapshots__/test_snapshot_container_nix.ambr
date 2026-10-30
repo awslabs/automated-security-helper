@@ -35,21 +35,34 @@
         '<PYTHON>',
         '<SAFE_PATH_FLAGS>',
         '-c',
-        "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; import sys; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()",
+        '''
+          import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
+          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+        ''',
         'scan',
-        '--mode=local',
-        '--no-progress',
         '--source-dir',
-        'src',
+        '<TMP>/src',
         '--output-dir',
-        'out',
+        '<TMP>/out',
+        '--phases',
+        'convert',
+        '--phases',
+        'scan',
+        '--phases',
+        'report',
+        '--strategy',
+        'parallel',
+        '--no-progress',
+        '--mode',
+        'local',
+        '--no-show-summary',
       ]),
     ]),
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
-                   WARNING  Nix shell exited with code 1
-                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 1.
+      INFO     Entering Nix shell from flake: path:<REPO>
+      WARNING  Nix shell exited with code 1
+      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 1.
   
     ''',
   })
@@ -84,23 +97,35 @@
         '<PYTHON>',
         '<SAFE_PATH_FLAGS>',
         '-c',
-        "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; import sys; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()",
+        '''
+          import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
+          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+        ''',
         'scan',
+        '--source-dir',
+        '<TMP>/src',
+        '--output-dir',
+        '<TMP>/out',
+        '--phases',
+        'convert',
+        '--phases',
+        'scan',
+        '--phases',
+        'report',
+        '--strategy',
+        'parallel',
+        '--no-progress',
+        '--no-fail-on-incomplete-scanners',
         '--mode',
         'local',
-        '--no-progress',
-        '--source-dir',
-        'src',
-        '--output-dir',
-        'out',
-        '--no-fail-on-incomplete-scanners',
+        '--no-show-summary',
       ]),
     ]),
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
-                   WARNING  Nix shell exited with code 2
-                   ERROR    The nix run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. The inner run was started with this ASH's interpreter, <PYTHON>.
+      INFO     Entering Nix shell from flake: path:<REPO>
+      WARNING  Nix shell exited with code 2
+      ERROR    The nix run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. The inner run was started with this ASH's interpreter, <PYTHON>.
   
     ''',
   })
@@ -125,22 +150,34 @@
         '<PYTHON>',
         '<SAFE_PATH_FLAGS>',
         '-c',
-        "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; import sys; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()",
+        '''
+          import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
+          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+        ''',
         'scan',
+        '--source-dir',
+        '<TMP>/src',
+        '--output-dir',
+        '<TMP>/out',
+        '--phases',
+        'convert',
+        '--phases',
+        'scan',
+        '--phases',
+        'report',
+        '--strategy',
+        'parallel',
+        '--no-progress',
+        '--no-fail-on-incomplete-scanners',
         '--mode',
         'local',
-        '--no-progress',
-        '--source-dir',
-        'src',
-        '--output-dir',
-        'out',
-        '--no-fail-on-incomplete-scanners',
+        '--no-show-summary',
       ]),
     ]),
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
-                   WARNING  Nix shell exited with code 2
+      INFO     Entering Nix shell from flake: path:<REPO>
+      WARNING  Nix shell exited with code 2
       
       === ASH Scan Completed in <DURATION>: Next Steps ===
       View detailed findings...
@@ -190,21 +227,33 @@
         '<PYTHON>',
         '<SAFE_PATH_FLAGS>',
         '-c',
-        "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; import sys; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()",
+        '''
+          import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
+          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+        ''',
         'scan',
+        '--source-dir',
+        '<TMP>/src',
+        '--output-dir',
+        '<TMP>/out',
+        '--phases',
+        'convert',
+        '--phases',
+        'scan',
+        '--phases',
+        'report',
+        '--strategy',
+        'parallel',
+        '--no-progress',
         '--mode',
         'local',
-        '--no-progress',
-        '--source-dir',
-        'src',
-        '--output-dir',
-        'out',
+        '--no-show-summary',
       ]),
     ]),
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
-                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 0.
+      INFO     Entering Nix shell from flake: path:<REPO>
+      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 0.
   
     ''',
   })
@@ -229,22 +278,34 @@
         '<PYTHON>',
         '<SAFE_PATH_FLAGS>',
         '-c',
-        "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; import sys; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()",
+        '''
+          import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
+          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+        ''',
         'scan',
+        '--source-dir',
+        '<TMP>/src',
+        '--output-dir',
+        '<TMP>/out',
+        '--phases',
+        'convert',
+        '--phases',
+        'scan',
+        '--phases',
+        'report',
+        '--strategy',
+        'parallel',
+        '--no-progress',
         '--mode',
         'local',
-        '--no-progress',
-        '--source-dir',
-        'src',
-        '--output-dir',
-        'out',
+        '--no-show-summary',
       ]),
     ]),
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
-                   WARNING  Nix shell exited with code 1
-                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 1.
+      INFO     Entering Nix shell from flake: path:<REPO>
+      WARNING  Nix shell exited with code 1
+      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 1.
   
     ''',
   })
@@ -269,21 +330,33 @@
         '<PYTHON>',
         '<SAFE_PATH_FLAGS>',
         '-c',
-        "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; import sys; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()",
+        '''
+          import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
+          import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()
+        ''',
         'scan',
+        '--source-dir',
+        '<TMP>/src',
+        '--output-dir',
+        '<TMP>/out',
+        '--phases',
+        'convert',
+        '--phases',
+        'scan',
+        '--phases',
+        'report',
+        '--strategy',
+        'parallel',
+        '--no-progress',
         '--mode',
         'local',
-        '--no-progress',
-        '--source-dir',
-        'src',
-        '--output-dir',
-        'out',
+        '--no-show-summary',
       ]),
     ]),
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
-                   ERROR    Failed to parse results file <TMP>/out/ash_aggregated_results.json: Invalid value at '(top level)': Invalid JSON: key must be a string at line 1 column 2
+      INFO     Entering Nix shell from flake: path:<REPO>
+      ERROR    Failed to parse results file <TMP>/out/ash_aggregated_results.json: Invalid value at '(top level)': Invalid JSON: key must be a string at line 1 column 2
   
     ''',
   })
