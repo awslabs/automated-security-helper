@@ -369,6 +369,13 @@ def ignoring_patterns(
     Each path is matched as ASH matches it when it drops findings: its path below
     ``source_dir`` against each pattern. A path not below ``source_dir`` is not
     ignored.
+
+    ``source_dir`` is tried as spelled first and with its links resolved second,
+    in that order: a path below both (the source directory spelled through a
+    link to its own parent, say) is matched below the spelling the scan set
+    uses. The two roots were a set, iterated in hash order, so which relative
+    path such a path was matched by, and so whether it was ignored, varied from
+    one process to the next.
     """
     patterns = [
         str(getattr(entry, "path", "") or "")
@@ -377,10 +384,11 @@ def ignoring_patterns(
     ]
     if not patterns:
         return {}
-    roots = {
-        Path(os.path.abspath(source_dir)),
-        Path(os.path.realpath(source_dir)),
-    }
+    roots = list(
+        dict.fromkeys(
+            (Path(os.path.abspath(source_dir)), Path(os.path.realpath(source_dir)))
+        )
+    )
 
     def _below(path: str) -> str | None:
         for root in roots:
