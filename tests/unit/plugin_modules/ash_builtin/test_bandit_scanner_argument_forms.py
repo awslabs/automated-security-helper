@@ -127,6 +127,8 @@ def test_a_global_ignore_path_with_a_nul_is_not_passed(pattern):
 
 
 def test_a_nul_entry_leaves_the_other_exclusions_in_place(tmp_path, caplog):
+    """The excluded_paths entry's own warning: no ignore path is passed, so the
+    ignore-path NUL warning (the next test's) cannot stand in for it."""
     source = _tree(tmp_path, ["app.py"])
     with caplog.at_level(logging.WARNING):
         scanner = _scanner(
@@ -134,13 +136,17 @@ def test_a_nul_entry_leaves_the_other_exclusions_in_place(tmp_path, caplog):
             tmp_path,
             BanditScannerConfigOptions(excluded_paths=_ignore("ven\0dor", "vendor")),
         )
-        argv, _, _ = scanner._execute_scan(source, "source", _ignore("gen\0erated/**"))
+        argv, _, _ = scanner._execute_scan(source, "source", [])
 
     entries = _entries(argv)
     assert not any("\0" in entry for entry in entries), entries
     for entry in bandit_excluded_path_globs(source.as_posix(), "vendor"):
         assert entry in entries
-    nul_lines = [message for message in _warnings(caplog) if "NUL" in message]
+    nul_lines = [
+        message
+        for message in _warnings(caplog)
+        if "NUL" in message and "excluded_paths" in message
+    ]
     assert nul_lines, _warnings(caplog)
     # No warning carries the entry's NUL raw; the entry is written as its repr.
     assert not any("\0" in message for message in _warnings(caplog)), _warnings(caplog)
