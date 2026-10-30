@@ -118,19 +118,34 @@ def test_a_relative_state_dir_is_said_once(monkeypatch, logged):
 # ---------------------------------------------------------------------------
 
 
-def test_the_sweep_searches_temp_tmp_and_the_tempfile_default(tmp_path, monkeypatch):
-    for variable in ("TMPDIR", "TEMP", "TMP"):
-        monkeypatch.delenv(variable, raising=False)
+@pytest.mark.parametrize("variable", ["TMPDIR", "TEMP", "TMP"])
+def test_the_sweep_searches_each_temporary_directory_variable_alone(
+    tmp_path, monkeypatch, variable
+):
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(tempfile, "tempdir", None)
-    temp = tmp_path / "from-temp"
-    temp.mkdir()
-    monkeypatch.setenv("TEMP", str(temp))
+    place = tmp_path / "from-the-variable"
+    place.mkdir()
+    monkeypatch.setenv(variable, str(place))
 
     parents = leftovers._env_dir_parents()
 
-    assert os.path.normcase(os.path.abspath(str(temp))) in parents
-    assert os.path.normcase(os.path.abspath(tempfile.gettempdir())) in parents
+    assert parents[0] == os.path.normcase(os.path.abspath(str(place)))
+
+
+def test_the_sweep_searches_the_tempfile_default_when_no_variable_names_one(
+    monkeypatch,
+):
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(tempfile, "tempdir", None)
+    default = tempfile.gettempdir()
+    monkeypatch.setattr(tempfile, "tempdir", None)
+
+    parents = leftovers._env_dir_parents()
+
+    assert os.path.normcase(os.path.abspath(default)) in parents
 
 
 # ---------------------------------------------------------------------------

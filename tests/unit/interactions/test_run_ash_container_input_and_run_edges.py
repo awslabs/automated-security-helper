@@ -99,15 +99,20 @@ def test_a_direct_url_whose_url_is_not_a_string_falls_back(installed_record, log
     )
 
 
-def test_a_direct_url_whose_revision_is_not_a_string_falls_back(installed_record):
+def test_a_direct_url_whose_revision_is_not_a_string_falls_back(
+    installed_record, logged
+):
     installed_record.write_text(
         json.dumps({"url": "https://example.invalid/r", "vcs_info": {"commit_id": 7}}),
         encoding="utf-8",
     )
 
-    revision = rac.get_ash_revision(quiet=True)
+    revision = rac.get_ash_revision()
 
     assert revision is None or isinstance(revision, str)
+    assert any(
+        "Failed to read direct_url.json" in m for m in logged.messages(logging.WARNING)
+    ), logged.messages(logging.WARNING)
 
 
 def test_quiet_silences_the_local_path_line(installed_record, logged):
