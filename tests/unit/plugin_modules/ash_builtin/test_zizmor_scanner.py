@@ -726,7 +726,11 @@ def test_ash_offline_mode_overrides_online_audits(repo, monkeypatch):
 def test_the_scanners_own_offline_option_keeps_zizmor_offline(repo, monkeypatch):
     """options.offline is the per-scanner switch every scanner honors through the
     base class. zizmor consulted only ASH's global mode, so an operator who set
-    online_audits and offline on this scanner got online audits and the token."""
+    online_audits and offline on this scanner got online audits and the token.
+    ASH's global mode is cleared first: set in the shell, it alone would produce
+    --offline and strip the token, and the scanner's own option would go
+    untested."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.setenv("GH_TOKEN", "token-value")
     scanner = _scanner(repo, operator=True, online_audits=True, offline=True)
     final_args, _, env = _argv_and_env(scanner, repo)
