@@ -1488,8 +1488,9 @@ def test_a_tree_holding_only_a_link_leaving_it_sends_nothing(
     refusals_set_aside,
 ):
     """The scan set leaves the link out and warns about it, as it does for every
-    scanner, so snyk-code has nothing to send: a PASSED row, as for an all-ignored
-    tree, and snyk is not run."""
+    scanner, so snyk-code has nothing to send and snyk is not run. Nothing was
+    evaluated, so the row grades SKIPPED (targets_attempted 0), not PASSED with
+    exit code 0 for a tool that never ran."""
     (plugin_context.source_dir / "app.js").symlink_to(
         plugin_context.source_dir.parent / "outside.js"
     )
@@ -1500,7 +1501,7 @@ def test_a_tree_holding_only_a_link_leaving_it_sends_nothing(
     with caplog.at_level(logging.INFO):
         row = _executor_row(scanner, plugin_context, monkeypatch)
 
-    assert row.status == ScannerStatus.PASSED, row
+    assert row.status == ScannerStatus.SKIPPED, row
     subprocess_double.assert_not_called()
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert "Not scanning 'app.js': link leaves the scanned tree" in warnings, warnings

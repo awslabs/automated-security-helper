@@ -172,7 +172,11 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
     assert MARKED_DIRECTORY not in invocation.commandLine, invocation.commandLine
     assert "<value>" in invocation.commandLine, invocation.commandLine
     assert not any(MARKED_DIRECTORY in a for a in invocation.arguments)
-    assert MARKED_DIRECTORY not in report.model_dump_json()
+    # The verbose log record of the command hides it the same way. The SARIF's
+    # own location fields still name the scanned directory: redaction covers the
+    # command records, not where the findings are.
+    assert all(MARKED_DIRECTORY not in message for message in running), running
+    assert any("<value>" in message for message in running), running
 
 
 def test_a_directory_name_written_out_is_recorded_whole(

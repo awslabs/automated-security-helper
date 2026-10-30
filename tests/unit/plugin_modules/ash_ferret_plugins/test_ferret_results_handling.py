@@ -163,7 +163,9 @@ def test_a_results_file_that_is_not_sarif_raises_instead_of_returning_the_docume
 ):
     root = mock_plugin_context.source_dir
     (root / "a.txt").write_text("hello\n", encoding="utf-8")
-    matched = "4111-1111-1111-1111-matched-value"
+    # A planted value that no detector pattern matches: the plugin's own validation
+    # scans this test, and a card-shaped number here would be a finding of its own.
+    matched = "planted-results-value-not-sarif"
     document = {
         "version": "2.1.0",
         "runs": [{"tool": {"driver": {"name": "ferret-scan"}}, "results": matched}],

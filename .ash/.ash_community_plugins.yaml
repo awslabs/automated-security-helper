@@ -631,8 +631,8 @@ global_settings:
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B404
-      line_start: 11
-      line_end: 11
+      line_start: 12
+      line_end: 12
       reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B603

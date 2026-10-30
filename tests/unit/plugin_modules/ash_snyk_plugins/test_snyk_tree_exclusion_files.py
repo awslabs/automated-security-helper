@@ -220,11 +220,13 @@ def test_the_operator_can_accept_the_trees_exclusions(
     assert len(runs) == 1
 
 
-def test_a_file_under_git_counts_too(
+def test_a_file_under_git_never_reaches_snyk_so_it_does_not_refuse(
     context: PluginContext, runs: List[List[str]]
 ) -> None:
-    """snyk's native file filter collects rule files under .git as well."""
+    """snyk reads a copy of the scan set, and the scan set leaves ``.git`` out, so a
+    rule file under it is never in what snyk reads: the source target is judged on
+    the copy (``tree_exclusion_files`` on the staged directory), the file counts
+    for nothing, and snyk runs."""
     _write(context, ".git/.snyk", "exclude:\n  global:\n    - app.js\n")
-    with pytest.raises(ScannerError, match=r"\.git/\.snyk"):
-        _scan(context)
-    assert runs == []
+    _scan(context)
+    assert len(runs) == 1
