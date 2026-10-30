@@ -490,22 +490,34 @@ def test_a_parsed_file_is_still_counted_after_the_invocation_record(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("uri", "key"),
+    ("uri", "key", "windows"),
     [
-        ("file:///C:/proj/x.py", "C:\\proj\\x.py"),
-        ("file://server/share/proj/x.py", "\\\\server\\share\\proj\\x.py"),
-        ("file:///home/u/proj/x.py", "/home/u/proj/x.py"),
-        ("proj/x%41.py", "proj/x%41.py"),
+        ("file:///C:/proj/x.py", "C:\\proj\\x.py", True),
+        ("file://server/share/proj/x.py", "\\\\server\\share\\proj\\x.py", True),
+        ("file:///home/u/proj/x.py", "/home/u/proj/x.py", False),
+        ("file:///a:/proj/x.py", "/a:/proj/x.py", False),
+        ("proj/x%41.py", "proj/x%41.py", False),
     ],
-    ids=["drive", "unc", "posix", "relative-encoded"],
+    ids=["drive", "unc", "posix", "posix-colon-dir", "relative-encoded"],
 )
-def test_a_skipped_files_uri_spells_the_same_path_as_its_metrics_key(uri, key):
+def test_a_skipped_files_uri_spells_the_same_path_as_its_metrics_key(uri, key, windows):
     """bandit spells a skipped file as ``to_uri(fname)`` and its metrics key as
     ``fname`` walked; on Windows the URI of an absolute path starts
     ``file:///C:/`` and a UNC path's ``file://server/``, which dropping the
     prefix alone left as ``/C:/...`` and ``server/...`` against keys spelled
-    ``C:/...`` and ``//server/...``."""
-    assert _spelled_path(uri, uri=True) == _spelled_path(key, uri=False)
+    ``C:/...`` and ``//server/...``. On POSIX a root directory named ``a:``
+    is spelled ``file:///a:/``, and reading it as a drive dropped the slash
+    the key keeps."""
+    assert _spelled_path(uri, uri=True, windows=windows) == _spelled_path(
+        key, uri=False, windows=windows
+    )
+
+
+def test_the_platform_reading_of_a_skipped_files_uri_defaults_to_the_host():
+    """Without ``windows`` the spelling reads the running platform, so the
+    scanner's own calls need no argument."""
+    expected = _spelled_path("file:///C:/x.py", uri=True, windows=os.name == "nt")
+    assert _spelled_path("file:///C:/x.py", uri=True) == expected
 
 
 def test_a_skipped_file_with_a_percent_in_its_name_is_told_from_its_decoded_twin(

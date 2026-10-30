@@ -276,7 +276,7 @@ def _entries_no_path_holds_as_text(
     return kept
 
 
-def _spelled_path(text: str, *, uri: bool) -> str:
+def _spelled_path(text: str, *, uri: bool, windows: Optional[bool] = None) -> str:
     """A bandit metrics key (``uri=False``) or notification URI (``uri=True``) as one comparable path.
 
     bandit's SARIF names a skipped file as ``to_uri(fname)``: a ``file://`` URI
@@ -294,16 +294,24 @@ def _spelled_path(text: str, *, uri: bool) -> str:
     Dropping the prefix alone left ``/C:/x.py`` against ``C:/x.py`` and
     ``server/share/x.py`` against ``//server/share/x.py``, so no skipped file
     matched its key there and every one was counted as scanned.
+
+    Those two readings apply where bandit writes them, on Windows
+    (``windows``, the running platform by default). On POSIX a root directory
+    named like a drive, ``/a:/x.py``, is spelled ``file:///a:/x.py``, and
+    reading its ``/a:/`` as a drive dropped the slash the key keeps.
     """
     from urllib.parse import unquote
 
+    if windows is None:
+        windows = os.name == "nt"
     spelled = text
     if uri:
         spelled = unquote(spelled, errors="surrogateescape")
         if spelled.startswith("file://"):
             spelled = spelled[len("file://") :]
             if (
-                len(spelled) >= 3
+                windows
+                and len(spelled) >= 3
                 and spelled[0] == "/"
                 and spelled[1].isascii()
                 and spelled[1].isalpha()
@@ -311,7 +319,7 @@ def _spelled_path(text: str, *, uri: bool) -> str:
             ):
                 # ``file:///C:/x.py``: the key starts at the drive letter.
                 spelled = spelled[1:]
-            elif not spelled.startswith("/"):
+            elif windows and not spelled.startswith("/"):
                 # ``file://server/share/x.py``: the key is ``\\server\share\x.py``.
                 spelled = "//" + spelled
     spelled = spelled.replace("\\", "/")
