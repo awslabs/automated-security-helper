@@ -514,9 +514,7 @@ class MCPSessionRegistry:
                 "session state"
             )
         session_id = validated_path_component(session_id)
-        if not _is_the_stdio_session(session_id) and (
-            is_reserved_session_id(session_id) or _names_a_presence_lock(session_id)
-        ):
+        if not _is_the_stdio_session(session_id) and is_reserved_session_id(session_id):
             raise ValueError(
                 f"session_id {session_id!r} names a directory the server keeps "
                 "under its workspace root for itself, so it cannot name a session"
@@ -861,13 +859,11 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
     A session with no workspace directory has nothing a scan could be reading, and
     no registry is opened for it. A reserved name other than the stdio session's
     (``session_identity.is_reserved_session_id``: a presence registry, the
-    unidentified sentinel, a spelling of the stdio id that opens its directory
-    on a case-insensitive filesystem) never has a presence entry and has no
-    workspace of its own: what stands at the name under the root is the
-    server's, so only the in-memory state is cleared for it and nothing on disk
-    is touched. An id named for the registries' guard file
-    (:data:`PRESENCE_LOCK_NAME`), for which :class:`ScanPresence` registers
-    nothing, is removed without opening the registry. The stdio session is
+    registries' guard file :data:`PRESENCE_LOCK_NAME`, the unidentified sentinel,
+    a spelling of the stdio id that opens its directory on a case-insensitive
+    filesystem) never has a presence entry and has no workspace of its own: what
+    stands at the name under the root is the server's, so only the in-memory
+    state is cleared for it and nothing on disk is touched. The stdio session is
     shared by every stdio server of one user, and a scan of it in a sibling
     server holds a presence entry like a replica's scan of a session
     (:func:`_publishes_scan_presence`), so ending it reads the registry as for
@@ -925,11 +921,7 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
         # instead of answering False. The workspace may exist, so the removal
         # takes the guarded path below, as ``ScanPresence`` registers for it.
         has_workspace = True
-    if (
-        not has_workspace
-        or not _publishes_scan_presence(session_id)
-        or _names_a_presence_lock(session_id)
-    ):
+    if not has_workspace or not _publishes_scan_presence(session_id):
         _remove_session_state(session_id)
         return True
     holder = root / SCAN_PRESENCE_DIR / session_id
@@ -1230,24 +1222,13 @@ def session_scan_limit_refusal(
 STDIO_SERVERS_DIR = ".stdio-servers"
 
 #: The guard file of each presence registry, locked around every change to the
-#: registry. Not a session id either (:func:`_names_a_presence_lock`): under
+#: registry. Not a session id either (``session_identity.is_reserved_session_id``
+#: refuses it in any letter case, trailing periods and spaces dropped): under
 #: ``SCAN_PRESENCE_DIR`` a session's holder directory and the guard file share
 #: one parent, so a session of this name would have its holder where the file
 #: is, could register no scan, and could never be swept.
 PRESENCE_LOCK_NAME = ".lock"
 _STDIO_SERVERS_LOCK = PRESENCE_LOCK_NAME
-
-
-def _names_a_presence_lock(session_id: str) -> bool:
-    """True if ``session_id`` names the presence registries' guard file.
-
-    Compared as ``session_identity.is_reserved_session_id`` compares: casefolded,
-    with trailing periods and spaces dropped, because a case-insensitive
-    filesystem opens ``.LOCK`` as ``.lock`` and Windows drops the trailing
-    characters. The name is shorter than eight characters, so no generated 8.3
-    short name aliases it.
-    """
-    return session_id.casefold().rstrip(". ") == PRESENCE_LOCK_NAME
 
 
 class PresenceLockError(Exception):
@@ -1675,9 +1656,9 @@ class ScanPresence:
     and nothing is reported, for a session with no workspace on disk or no
     resolvable workspace root: nothing of the session's
     is there to protect, and a scan of a directory the operator granted creates
-    nothing under the root. Nothing is registered for a reserved name either, nor
-    for a session named for the registries' guard file
-    (:func:`_names_a_presence_lock`), whose holder directory would be where the
+    nothing under the root. Nothing is registered for a reserved name either
+    (``session_identity.is_reserved_session_id``), the registries' guard file's
+    among them: a session of that name would have its holder directory where the
     guard file is. A root whose registry can't be used leaves the scan
     unregistered rather than failing it, with a warning: a refused guard shares
     the process-wide warn-once latch (:func:`_warn_guard_refused_once`) with the
@@ -1706,9 +1687,7 @@ class ScanPresence:
         import uuid
 
         session_id = self._session_id
-        if not _publishes_scan_presence(session_id) or _names_a_presence_lock(
-            session_id
-        ):
+        if not _publishes_scan_presence(session_id):
             return self
         try:
             root = _workspace_root()

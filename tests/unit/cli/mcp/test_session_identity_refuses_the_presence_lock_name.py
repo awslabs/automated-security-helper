@@ -48,6 +48,39 @@ class TestTheGuardFileNameIsReserved:
             resolve_session_id({MCP_SESSION_ID_HEADER: spelling})
 
 
+class TestTheSessionLayerReadsTheNameThroughTheIdentityCheckAlone:
+    """The session registry refuses the name, and the session removal clears only
+    the in-memory state for it, each through ``is_reserved_session_id``. The
+    sessions module once compared the name a second time through a helper of its
+    own, after the identity check had already answered for every spelling, so
+    the second comparison could never be the one that decided; these pin what
+    the identity check alone gives, so the helper's removal changes nothing."""
+
+    @pytest.mark.parametrize(
+        "spelling", [s for s in RESERVED_SPELLINGS if s == s.rstrip(". ")]
+    )
+    def test_the_registry_refuses_the_guard_file_name(self, spelling):
+        from automated_security_helper.cli.mcp.sessions import get_default_registry
+
+        with pytest.raises(ValueError, match="names a directory the server keeps"):
+            get_default_registry().session_for(spelling)
+
+    @pytest.mark.parametrize("spelling", RESERVED_SPELLINGS)
+    def test_ending_the_guard_file_name_touches_nothing_on_disk(
+        self, spelling, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.cli.mcp.sessions import (
+            _remove_unless_a_scan_elsewhere_holds,
+        )
+
+        root = tmp_path / "workspaces"
+        root.mkdir()
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+
+        assert _remove_unless_a_scan_elsewhere_holds(spelling) is True
+        assert list(root.iterdir()) == [], "the removal opened a registry or a dir"
+
+
 class TestNamesThatOnlyResembleItStayOrdinary:
     """Positive control: the refusal reaches the guard file's name and no other."""
 
