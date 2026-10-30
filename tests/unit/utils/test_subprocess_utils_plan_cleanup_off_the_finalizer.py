@@ -54,6 +54,23 @@ def test_with_the_collector_off_the_cleanup_runs_inline():
     assert seen["thread"] == threading.get_ident()
 
 
+def test_a_thread_that_cannot_start_at_shutdown_runs_the_cleanup_inline():
+    """Thread.start raises RuntimeError at interpreter shutdown with gc still on."""
+    seen: dict = {}
+    done = threading.Event()
+    plan = _plan_recording_its_thread(seen, done)
+    assert gc.isenabled()
+    with patch.object(
+        threading.Thread,
+        "start",
+        side_effect=RuntimeError("can't create new thread at interpreter shutdown"),
+    ):
+        subprocess_utils._run_cleanup_off_the_finalizer(plan)
+    assert done.is_set()
+    assert seen["thread"] == threading.get_ident()
+    assert plan.cleanup == []
+
+
 @patch("subprocess.Popen")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_the_popen_finalizer_runs_the_cleanup_off_its_own_thread(

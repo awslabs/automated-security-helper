@@ -5242,11 +5242,19 @@ def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
     waits for the lock like any other caller. With the collector disabled
     (weakref.finalize's own exit pass runs that way, with no registry call in
     progress) no finalizer can interrupt an allocation, and the cleanup runs
-    inline so the temporary files are gone before the interpreter is.
+    inline so the temporary files are gone before the interpreter is. A thread
+    that cannot be started (the interpreter is shutting down with the collector
+    still on, where Thread.start raises RuntimeError) runs the cleanup inline
+    too, rather than leaving the plan's files behind: at that point no registry
+    call of this thread is in progress for the cleanup to wait on.
     """
     if not gc.isenabled():
         plan.run_cleanup()
         return
-    threading.Thread(
+    worker = threading.Thread(
         target=plan.run_cleanup, name="ash-sandbox-plan-cleanup", daemon=False
-    ).start()
+    )
+    try:
+        worker.start()
+    except RuntimeError:
+        plan.run_cleanup()
