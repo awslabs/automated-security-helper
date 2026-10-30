@@ -300,7 +300,9 @@ def test_the_helper_adds_no_directory_of_the_child_to_sys_path(tmp_path):
 #: ``refusing_install_command``.
 #:
 #: ``_ash_environment_install`` compares an install command's prefix with this
-#: list and starts nothing.
+#: list and starts nothing. ``_with_path_imported`` rebuilds a declared opengrep
+#: download command with ``Path`` imported and returns it; the rebuilt argv runs
+#: through ``run_command`` like the one it replaces.
 #:
 #: The cdk-nag worker: its ``-c`` source drops ``sys.path[0]`` before importing
 #: anything, and it starts in a directory it has just created; see
@@ -316,7 +318,7 @@ RAW_PYTHON_ARGV_ALLOWED = {
         "plugin_modules/ash_builtin/scanners/opengrep_scanner.py",
         "_refuse_unverified_install_command",
     ),
-    ("cli/dependencies.py", "install_dependencies"),
+    ("cli/dependencies.py", "_with_path_imported"),
     ("utils/cdk_nag_worker.py", "_run_child"),
 }
 
