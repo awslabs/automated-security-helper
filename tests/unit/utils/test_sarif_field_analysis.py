@@ -180,13 +180,15 @@ class TestInAggregatePercentage:
     def test_everything_aggregated_is_one_hundred(self, tmp_path, monkeypatch, capsys):
         aggregate = {k: v for k, v in self.SCANNER_RESULT.items() if k != "ruleIndex"}
         cells = self._percentage(tmp_path, monkeypatch, capsys, aggregate)
-        assert cells[1:] == ["9", "0", "0", "1", "100.0%"]
+        # Unique Fields counts the scanners that emit a field; the aggregate
+        # carries every field this scanner emits, so it is not one of them.
+        assert cells[1:] == ["9", "9", "0", "1", "100.0%"]
 
     def test_partial_aggregation_counts_only_included_fields(
         self, tmp_path, monkeypatch, capsys
     ):
         cells = self._percentage(tmp_path, monkeypatch, capsys, {"ruleId": "B1"})
-        assert cells[1:] == ["9", "8", "8", "1", "11.1%"]
+        assert cells[1:] == ["9", "9", "8", "1", "11.1%"]
 
 
 @pytest.mark.unit

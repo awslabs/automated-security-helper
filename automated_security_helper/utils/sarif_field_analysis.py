@@ -16,6 +16,7 @@ from automated_security_helper.utils.sandbox.fs_guard import (
 )
 
 from automated_security_helper.utils.meta_analysis.reporting import (
+    AGGREGATE_SCANNER_NAMES,
     generate_html_report,
 )
 from automated_security_helper.utils.meta_analysis.field_mapping import (
@@ -104,12 +105,15 @@ def _flatten_object(
             else:
                 result[new_prefix] = True
     elif isinstance(obj, list):
-        # For lists, use [] notation instead of specific indices
-        if obj and len(obj) > 0:
-            # Process the first item as representative
-            new_prefix = f"{prefix}[]" if not prefix.endswith("[]") else prefix
-            if isinstance(obj[0], (dict, list)):
-                _flatten_object(obj[0], new_prefix, result, excluded_result)
+        # For lists, use [] notation instead of specific indices. Every element
+        # is walked: the paths carry no index, so the fields of every element
+        # fold into one set, and a field that only a later element holds (a
+        # second location's region, a fix's description) used to be missed when
+        # only the first element was read as representative.
+        new_prefix = f"{prefix}[]" if not prefix.endswith("[]") else prefix
+        for item in obj:
+            if isinstance(item, (dict, list)):
+                _flatten_object(item, new_prefix, result, excluded_result)
             else:
                 result[new_prefix] = True
 
@@ -137,6 +141,37 @@ def get_scanner_name_from_path(file_path: str) -> str:
 
     # If not in scanners directory, use the filename without extension
     return Path(file_path).stem
+
+
+def _is_derived_report(file_path: str) -> bool:
+    """Whether a file in ``reports/`` is a reporter's rendering of the aggregate
+    rather than the aggregate itself: ``ash.ghas.sarif`` beside ``ash.sarif``.
+
+    Named by its stem, such a file was analyzed as a scanner called ``ash.ghas``
+    and its fields, derived from the aggregate, were judged against the aggregate.
+    """
+    stem = Path(file_path).stem
+    return any(stem.startswith(f"{name}.") for name in AGGREGATE_SCANNER_NAMES)
+
+
+def _under_a_link(file_path: str, root: str) -> bool:
+    """Whether a directory on *file_path* below *root* is a symbolic link.
+
+    ``glob.glob(recursive=True)`` follows a linked directory, so a link in the
+    scan output tree (a leftover of a sandboxed scanner) led the analysis out of
+    the output directory and, when the link pointed at an ancestor, multiplied
+    the walk. The file itself is read under the guard, which refuses a link.
+    """
+    try:
+        relative = Path(file_path).relative_to(root)
+    except ValueError:
+        return False
+    current = Path(root)
+    for part in relative.parts[:-1]:
+        current = current / part
+        if os.path.islink(current):
+            return True
+    return False
 
 
 def analyze_sarif_fields(
@@ -196,7 +231,14 @@ def analyze_sarif_fields(
     for pattern in search_patterns:
         # glob returns directory order, which varies by filesystem; sort so the
         # JSON and CSV outputs list fields and scanners in the same order everywhere.
-        all_sarif_files.extend(sorted(glob.glob(pattern, recursive=True)))
+        for found in sorted(glob.glob(pattern, recursive=True)):
+            if _under_a_link(found, str(sarif_dir)):
+                console.print(
+                    f"Skipping [cyan]{escape_markup(found)}[/cyan]: reached through "
+                    "a symbolic link"
+                )
+                continue
+            all_sarif_files.append(found)
 
     if not all_sarif_files:
         console.print(
@@ -218,8 +260,20 @@ def analyze_sarif_fields(
 
     sarif_files = []
 
-    # First, process files in reports directory
-    reports_files = [f for f in all_sarif_files if _relative_parts(f)[0] == "reports"]
+    # First, process files in reports directory. A reporter's rendering of the
+    # aggregate kept there (ash.ghas.sarif) is not a scanner's report and is not
+    # the aggregate, so it is left out.
+    reports_files = []
+    for found in all_sarif_files:
+        if _relative_parts(found)[0] != "reports":
+            continue
+        if _is_derived_report(found):
+            console.print(
+                f"Skipping [cyan]{escape_markup(found)}[/cyan]: a report derived "
+                "from the aggregate, not a scanner's"
+            )
+            continue
+        reports_files.append(found)
     sarif_files.extend(reports_files)
 
     # Then, process files in scanners directory
@@ -327,6 +381,9 @@ def analyze_sarif_fields(
         f"Wrote excluded fields CSV to [cyan]{escape_markup(excluded_csv_path)}[/cyan]"
     )
 
+    def _in_aggregate(scanners: Dict[str, bool]) -> bool:
+        return any(name in scanners for name in AGGREGATE_SCANNER_NAMES)
+
     # Generate HTML report
     # Convert results_dict to the format expected by generate_html_report
     field_presence = {}
@@ -334,7 +391,7 @@ def analyze_sarif_fields(
         field_presence[field_name] = {
             "type": ["unknown"],  # We don't have type information
             "scanners": sorted(scanners.keys()),
-            "in_aggregate": "ash-aggregated" in scanners or "ash" in scanners,
+            "in_aggregate": _in_aggregate(scanners),
             "intentionally_excluded": False,
         }
 
@@ -343,13 +400,16 @@ def analyze_sarif_fields(
         field_presence[field_name] = {
             "type": ["unknown"],
             "scanners": sorted(scanners.keys()),
-            "in_aggregate": "ash-aggregated" in scanners or "ash" in scanners,
+            "in_aggregate": _in_aggregate(scanners),
             "intentionally_excluded": True,
         }
 
-    # Create validation results structure for HTML report
+    # Create validation results structure for HTML report. The counts here are
+    # field paths, and the report labels them so (``unit``); they were shown as
+    # "Total Findings".
     validation_results = {
         "summary": {
+            "unit": "fields",
             "total_findings": len(field_presence),
             "matched_findings": sum(
                 1 for info in field_presence.values() if info["in_aggregate"]
@@ -368,6 +428,17 @@ def analyze_sarif_fields(
         all_scanners.update(scanners.keys())
     for scanners in excluded_dict.values():
         all_scanners.update(scanners.keys())
+
+    # The aggregate is a scanner in the tables above and is not one in the counts
+    # below: a field only one scanner emits and the aggregate preserves is still
+    # that scanner's alone, and "used by all scanners" means every scanner that
+    # contributed an included field.
+    aggregate_scanners = set(AGGREGATE_SCANNER_NAMES)
+    contributing_scanners = set()
+    for scanners in results_dict.values():
+        contributing_scanners.update(scanners.keys())
+    contributing_scanners -= aggregate_scanners
+    aggregate_analyzed = bool(all_scanners & aggregate_scanners)
 
     # Sorted: all_scanners is a set, and this loop's order becomes the order of
     # the scanner sections in the HTML report.
@@ -390,6 +461,7 @@ def analyze_sarif_fields(
         validation_results["match_statistics"][scanner] = {
             "total_results": total_fields,
             "matched_results": matched_fields,
+            "match_rate": match_rate,
             "field_preservation_rate": match_rate,
             "critical_fields_missing": 0,
             "important_fields_missing": 0,
@@ -403,10 +475,14 @@ def analyze_sarif_fields(
             "informational": [],
         }
 
-    # Generate HTML report
+    # Generate HTML report; its JQ examples name the directory analyzed here.
     html_report_path = os.path.join(output_dir, "sarif_validation_report.html")
     generate_html_report(
-        validation_results, html_report_path, field_presence, root=output_dir
+        validation_results,
+        html_report_path,
+        field_presence,
+        root=output_dir,
+        sarif_dir=str(sarif_dir),
     )
     console.print(
         f"Wrote HTML report to [cyan]{escape_markup(html_report_path)}[/cyan]"
@@ -421,17 +497,24 @@ def analyze_sarif_fields(
     table.add_row("Total unique fields (excluded)", str(len(excluded_dict)))
     table.add_row("Total unique scanners", str(len(all_scanners)))
 
-    # Find fields used by all scanners
+    # Find fields used by all scanners: every scanner that contributed an
+    # included field, the aggregate not among them. The count compared against
+    # every scanner seen, so one with only excluded fields, or the aggregate
+    # itself, made the row read 0.
     fields_in_all_scanners = [
         field
         for field, scanners in results_dict.items()
-        if len(scanners) == len(all_scanners)
+        if contributing_scanners
+        and contributing_scanners <= (set(scanners.keys()) - aggregate_scanners)
     ]
     table.add_row("Fields used by all scanners", str(len(fields_in_all_scanners)))
 
-    # Find fields used by only one scanner
+    # Find fields used by only one scanner, the aggregate not counted as one: a
+    # field one scanner emits and the aggregate preserves was never unique.
     fields_in_one_scanner = [
-        field for field, scanners in results_dict.items() if len(scanners) == 1
+        field
+        for field, scanners in results_dict.items()
+        if len(set(scanners.keys()) - aggregate_scanners) == 1
     ]
     table.add_row("Fields used by only one scanner", str(len(fields_in_one_scanner)))
 
@@ -447,7 +530,6 @@ def analyze_sarif_fields(
     scanner_table.add_column("% in Aggregate", style="magenta")
 
     # Calculate statistics for each scanner
-    aggregate_scanners = ["ash", "ash-aggregated"]
     has_unexpected_missing_fields = False
 
     for scanner in sorted(all_scanners):
@@ -467,11 +549,12 @@ def analyze_sarif_fields(
         ]
         excluded_count = len(excluded_scanner_fields)
 
-        # Count unique fields (fields that only this scanner has)
+        # Count unique fields (fields that only this scanner has). The aggregate
+        # is not another scanner: it carries the field because this one did.
         unique_fields = [
             field
             for field in scanner_fields
-            if sum(1 for s in results_dict[field].keys() if s != scanner) == 0
+            if not (set(results_dict[field].keys()) - aggregate_scanners - {scanner})
         ]
         unique_count = len(unique_fields)
 
@@ -485,8 +568,11 @@ def analyze_sarif_fields(
         ]
         missing_count = len(missing_from_aggregate)
 
-        # Track if there are any unexpected missing fields
-        if missing_count > 0:
+        # Track if there are any unexpected missing fields. With no aggregate
+        # analyzed there is nothing to be missing from: every scanner field read
+        # as unexpectedly missing when reports/ held no aggregate, or when it
+        # could not be read, and the run failed with a judgment about fields.
+        if missing_count > 0 and aggregate_analyzed:
             has_unexpected_missing_fields = True
 
         # Share of this scanner's included fields that reach the aggregate.
@@ -514,6 +600,12 @@ def analyze_sarif_fields(
 
     # Print the scanner statistics table
     console.print(scanner_table)
+
+    if not aggregate_analyzed:
+        console.print(
+            "[bold yellow]WARNING: no aggregate report (reports/ash.sarif) was "
+            "analyzed, so no field was checked against the aggregate[/bold yellow]"
+        )
 
     # Exit with non-zero code if there are unexpected missing fields
     if has_unexpected_missing_fields:
