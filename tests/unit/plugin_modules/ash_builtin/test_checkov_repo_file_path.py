@@ -92,14 +92,21 @@ def test_sarif_uris_from_a_root_run_become_source_relative(tmp_path):
     assert _uris(document) == ["sub/a%20b.yaml"]
 
 
-def test_sarif_uri_outside_the_source_keeps_checkovs_form(tmp_path):
+def test_sarif_uri_outside_the_source_keeps_its_climb(tmp_path):
+    """checkov's own form drops every ``/..``, which made ``../out/converted/x.yaml``
+    read as ``out/converted/x.yaml``, a path inside the source that names nothing
+    there; ASH keeps the climb so the path still leads to the file."""
     source = tmp_path / "repo"
     source.mkdir()
     outside = tmp_path / "out" / "converted" / "x.yaml"
     document = _sarif(outside.as_posix().lstrip("/"))
     rewrite_checkov_paths(document, ran_in="/", source_dir=str(source))
-    expected = checkov_repo_file_path(outside.as_posix(), str(source)).lstrip("/")
-    assert _uris(document) == [expected]
+    expected = os.path.relpath(outside, os.path.realpath(source))
+    assert expected.startswith("../")
+    assert _uris(document) == [quote(expected)]
+    assert _uris(document) != [
+        checkov_repo_file_path(outside.as_posix(), str(source)).lstrip("/")
+    ]
 
 
 def test_json_repo_file_path_is_recomputed_from_file_abs_path(tmp_path):
