@@ -1037,9 +1037,15 @@ def parse_aggregated_results(
 
     aggregated_results_path = output_dir / "ash_aggregated_results.json"
 
-    # A FIFO or a link at the results name is refused before any open: the
-    # readers of this file run under the registry lock, and safe_read_json_file's
-    # own check follows links.
+    # A FIFO or a link at the results name is refused before any open:
+    # safe_read_json_file's own check follows links, and a FIFO would hold the
+    # reader (the registry's readers hold its lock while they read). The lock
+    # is not what makes a read consistent: it serializes the registry's own
+    # readers, not the scan that replaces the file, so two reads of the file
+    # by one caller can be two documents. A caller that needs one view parses
+    # once and derives everything from that dict (get_scan_progress_info does;
+    # the registry's progress poll still reads the file more than once under
+    # its lock).
     if os.path.lexists(aggregated_results_path) and not is_regular_result_file(
         aggregated_results_path, max_bytes=None
     ):
@@ -1138,6 +1144,20 @@ def load_aggregated_results_model(
         raw = parse_aggregated_results(output_dir)
     except MCPResourceError:
         return None
+    return _results_model_of(raw, output_dir)
+
+
+def _results_model_of(
+    raw: Any, output_dir: Path | None
+) -> Optional[AshAggregatedResults]:
+    """The results model of an already-parsed document, or None.
+
+    The second half of :func:`load_aggregated_results_model`, for a caller that
+    has parsed the file itself and must not parse it again: a second read of
+    the file is a second document when the scan replaces the file in between,
+    so counts from one read beside coverage from the next described no scan
+    that ever existed. ``output_dir`` names the file in the log line only.
+    """
     if not isinstance(raw, dict):
         return None
     is_valid, _ = validate_result_structure(raw)
@@ -1556,10 +1576,15 @@ def get_scan_progress_info(
             # with fewer scanners while get_scan_results called it incomplete.
             # None when the document is not a results model, or the assessment
             # itself fails: coverage unknown, the file still reported.
+            #
+            # From the document this call already parsed. This path takes no
+            # lock, and a second read of the file was a second document when
+            # the scan replaced the file in between, so the counts of one
+            # write stood beside the coverage of the next.
             coverage_complete: Optional[bool] = None
             incomplete_scanners: List[Dict[str, Any]] = []
             try:
-                model = load_aggregated_results_model(output_dir)
+                model = _results_model_of(results, output_dir)
                 if model is not None:
                     _, coverage = assess_coverage(model)
                     coverage_complete = not coverage_has_gap(coverage)

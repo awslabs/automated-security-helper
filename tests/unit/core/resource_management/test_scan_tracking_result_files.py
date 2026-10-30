@@ -250,6 +250,43 @@ class TestEachResultFileIsReadOnceThroughTheGuard:
         assert len(reads) == 1
 
 
+class TestTheCompletedProgressInfoReadsTheFileOnce:
+    """get_scan_progress_info parsed ash_aggregated_results.json twice per call,
+    its own parse and then load_aggregated_results_model's, with no lock, so a
+    scan that replaced the file in between gave the counts of one document
+    beside the coverage of the next."""
+
+    def test_one_parse_per_call(self, tmp_path, monkeypatch):
+        import automated_security_helper.core.resource_management.scan_tracking as st
+
+        out = tmp_path / "ash_output"
+        out.mkdir()
+        (out / "ash_aggregated_results.json").write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        "bandit": {"status": "PASSED"},
+                        "semgrep": {"status": "FAILED"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        real_parse = st.parse_aggregated_results
+        parses = []
+        monkeypatch.setattr(
+            st,
+            "parse_aggregated_results",
+            lambda *args, **kwargs: parses.append(args) or real_parse(*args, **kwargs),
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["status"] == "completed"
+        assert info["coverage_complete"] is True
+        assert len(parses) == 1
+
+
 class TestCompletedScannersAreTheOnesThatRan:
     def test_missing_skipped_and_error_scanners_are_not_completed(self, tmp_path):
         out = tmp_path / "ash_output"
