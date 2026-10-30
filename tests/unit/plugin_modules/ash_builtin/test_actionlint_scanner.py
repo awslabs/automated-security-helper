@@ -1235,13 +1235,28 @@ def test_a_timeout_prints_the_limit_as_the_shared_token(repo, monkeypatch, on_pa
 def test_a_timeout_whose_stop_failed_does_not_say_the_tool_was_killed(
     repo, monkeypatch, on_path
 ):
+    """Driven through the base class with the response shape it reads for this
+    ending (a timeout carrying the could-not-stop record), so the marker the
+    scanner consults is set the way a real run sets it, not by hand."""
     scanner = _scanner(repo, scan_timeout=7)
-    _run(scanner, monkeypatch, "", 124, timed_out=True)
-    scanner._scan_could_not_stop = "the tool could not be stopped"
+    _through_the_base_class(
+        monkeypatch,
+        [
+            {
+                "returncode": 124,
+                "stdout": "",
+                "timed_out": True,
+                "could_not_stop": True,
+                "could_not_stop_pid": 4242,
+                "error": "the tool could not be stopped",
+            }
+        ],
+    )
 
     with pytest.raises(ScannerError) as caught:
         scanner.scan(target=repo, target_type="source")
 
+    assert scanner.scan_could_not_stop is not None
     message = str(caught.value)
     assert "timed out after '7' s" in message
     assert "was killed" not in message
@@ -1349,7 +1364,7 @@ def test_an_earlier_batchs_raw_output_is_not_kept_when_a_later_batch_fails(
     """The first run's stdout, password snippet included, became record lines;
     the second run fails before the redacted payload would replace them. The
     failed scan's records must hold a note, not the raw stdout."""
-    monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30, raising=False)
+    monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30)
     stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
     assert "hunter2" in stdout
     scanner = _scanner(repo)
