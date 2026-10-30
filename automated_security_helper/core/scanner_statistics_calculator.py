@@ -1165,13 +1165,33 @@ class ScannerStatisticsCalculator:
         # under "None" was a verdict: not ERROR, and with findings it rolled up
         # FAILED ("ran and found something") instead of ERROR, and the completeness
         # gate let it through. ``exception`` is the other mark a failure leaves.
-        raw_results = report.get("raw_results")
-        if (
-            isinstance(raw_results, dict) and raw_results.get("status") == "failed"
-        ) or report.get("exception"):
+        if ScannerStatisticsCalculator._is_failure_report(report):
             error = True
 
         return excluded, dependencies_missing, error
+
+    @staticmethod
+    def _is_failure_report(report: Dict[str, Any]) -> bool:
+        """True when one serialized container carries a failure's marks.
+
+        Two marks, either one enough: ``raw_results`` is a dict whose ``status``
+        is ``"failed"`` (the run modes' handlers write it on every failure row,
+        fresh or refiled), or ``exception`` is set (``set_exception`` writes it
+        on a row the handler refiles, ``for_failure`` on a fresh one, and a
+        merged or hand-written file can carry it alone). The one rule for the
+        three readers of a failure: ``_status_info_from_report`` grades such a
+        report ERROR whatever status it carries,
+        ``target_report_is_partial_loss`` refuses it (a crash's counters are
+        not a partial loss's), and ``recorded_error_is_partial_loss`` refuses an
+        ERROR row beside it. Spelled out in two of the three, a report with
+        partial counters, no ``raw_results`` and an ``exception`` read as a
+        crash when the scanner had a recorded row and as a partial loss when it
+        had none, so the same reports gave two statuses.
+        """
+        raw_results = report.get("raw_results")
+        if isinstance(raw_results, dict) and raw_results.get("status") == "failed":
+            return True
+        return bool(report.get("exception"))
 
     @staticmethod
     def reports_for(asharp_model: AshAggregatedResults, scanner_name: Any) -> Any:
@@ -1268,7 +1288,8 @@ class ScannerStatisticsCalculator:
         roll up FAILED beside a finding, and a killed tool would read as a graded partial
         audit. So the report must also be the grade its own counts give
         (``determine_status`` at *threshold* answers ERROR), and must carry neither
-        ``raw_results.status == "failed"`` nor ``could_not_stop``.
+        a failure's marks (``_is_failure_report``: ``raw_results.status ==
+        "failed"`` or an ``exception``) nor ``could_not_stop``.
 
         What this cannot tell apart: a tool killed on a tree whose own findings pass the
         gate. That tree's counters and counts are what a partial loss writes, and the
@@ -1284,8 +1305,7 @@ class ScannerStatisticsCalculator:
         if not (attempted > 0 and 0 < failed < attempted):
             return False
 
-        raw_results = report.get("raw_results")
-        if isinstance(raw_results, dict) and raw_results.get("status") == "failed":
+        if ScannerStatisticsCalculator._is_failure_report(report):
             return False
         if report.get("could_not_stop"):
             return False
@@ -1343,17 +1363,14 @@ class ScannerStatisticsCalculator:
         loss (``target_report_is_partial_loss``). A recorded ERROR for which no report is
         ERROR is not explained: a run that raised leaves FAILED containers and an ERROR
         row written by the completeness check, and that row is the only record of it.
-        Nor is one for which any report is a failure container (``raw_results.status``
-        ``failed``, or an ``exception``): a run that raised on one tree beside a partial
-        loss on another is a crash, and the partial loss does not explain it away.
-        Only this scanner's own reports are read (``_own_reports``).
+        Nor is one for which any report is a failure container (``_is_failure_report``:
+        ``raw_results.status`` ``failed``, or an ``exception``): a run that raised on one
+        tree beside a partial loss on another is a crash, and the partial loss does not
+        explain it away. Only this scanner's own reports are read (``_own_reports``).
         """
         reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
         for report in reports.values():
-            raw_results = report.get("raw_results")
-            if (
-                isinstance(raw_results, dict) and raw_results.get("status") == "failed"
-            ) or report.get("exception"):
+            if ScannerStatisticsCalculator._is_failure_report(report):
                 return False
         errored = [
             report
