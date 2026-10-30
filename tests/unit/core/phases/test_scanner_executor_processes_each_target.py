@@ -16,8 +16,11 @@ TARGET'S OWN ROW again with the failure added (status ERROR, the reason in its
 errors), so the report keeps what the scan recorded (a refused sandbox's own error
 text, say; tests/unit/core/phases/test_a_probing_scanner_under_a_refused_sandbox.py
 pins that it survives) and never replaces a merged target's file. The scanner
-stays out of ``completed_scanners`` so the completeness check records it, and is
-closed out (SCAN_COMPLETE, off the remaining list) as a scanner that returned.
+stays out of ``completed_scanners`` so the completeness check records it, and
+leaves the remaining list (a later SCAN_COMPLETE no longer names it as running)
+without a SCAN_COMPLETE of its own: a failure is not a completion, the rule the
+run-loop tests (tests/unit/core/phases/test_scanner_executor_rows_and_run_loops.py)
+pin for a scanner whose bookkeeping raised.
 """
 
 from __future__ import annotations
@@ -95,6 +98,7 @@ def _run(
     failing_target: str | None,
     parallel: bool = False,
     before_raise=None,
+    with_clean_scanner: bool = False,
 ):
     """Run one scanner over source and converted; the processor raises on one target.
 
@@ -102,7 +106,10 @@ def _run(
     tuple of names), the failure record filed for it included, so ``seen`` shows
     the record's target. ``before_raise`` is called with the container before each
     raise. The events the executor sends are collected on ``executor.events`` as
-    ``(event_type, kwargs)`` pairs.
+    ``(event_type, kwargs)`` pairs. ``with_clean_scanner`` queues a second scanner,
+    ``clean-tool``, after ``shape-tool``, whose containers the processor merges: its
+    SCAN_COMPLETE shows what the remaining list holds once the first scanner's turn
+    is over.
     """
     seen: list = []
     events: list = []
@@ -128,10 +135,14 @@ def _run(
         {"path": Path(plugin_context.source_dir), "type": "source"},
         {"path": tmp_path / "converted", "type": "converted"},
     ]
+    scanner_tasks = [("shape-tool", scanner, targets)]
+    if with_clean_scanner:
+        clean = CleanScanner(config=_Config(), context=plugin_context)
+        scanner_tasks.append(("clean-tool", clean, targets))
     executor = ScannerExecutor(
         plugin_context=plugin_context,
         progress_display=MagicMock(),
-        scanner_tasks=[("shape-tool", scanner, targets)],
+        scanner_tasks=scanner_tasks,
         process_results_fn=process,
         notify_fn=notify,
     )
@@ -246,29 +257,46 @@ def test_every_target_merged_completes_the_scanner(plugin_context, tmp_path):
     assert len(executor.completed_scanners) == 1
 
 
-class TestAProcessingFailureStillClosesTheScannerOut:
+class TestAProcessingFailureLeavesTheRemainingListUnannounced:
     """The scanner returned; one target's results could not be merged. The failure
-    is filed on that target's row, and the scanner's completion bookkeeping still
-    runs: it leaves ``remaining_scanners`` and SCAN_COMPLETE is sent, as it was
-    when the raise was swallowed inside the merge loop. Without it subscribers saw
-    a SCAN_START with no end event and every later SCAN_COMPLETE still listed the
-    scanner as remaining. It still stays out of ``completed_scanners``, so the
-    completeness check records it."""
+    is filed on that target's row, and the scanner's turn is over: it leaves
+    ``remaining_scanners``, so a later SCAN_COMPLETE no longer lists it as running,
+    but no SCAN_COMPLETE names the failed scanner itself (a failure is not a
+    completion, as the run-loop tests pin for a scanner whose bookkeeping raised).
+    It stays out of ``completed_scanners``, so the completeness check records it."""
 
     @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
-    def test_scan_complete_is_sent_and_the_scanner_leaves_remaining(
+    def test_no_scan_complete_names_the_failed_scanner_and_it_leaves_remaining(
+        self, plugin_context, tmp_path, parallel
+    ):
+        _, executor = _run(
+            plugin_context,
+            tmp_path,
+            failing_target="converted",
+            parallel=parallel,
+            with_clean_scanner=True,
+        )
+
+        (complete,) = _scan_complete_events(executor)
+        assert complete["scanner"] == "clean-tool"
+        assert complete["completed_count"] == 1
+        assert complete["total_count"] == 2
+        assert len(executor.completed_scanners) == 1
+        if not parallel:
+            # The failed scanner's turn ended before the clean one's began, so
+            # the clean scanner's SCAN_COMPLETE finds nothing left running.
+            assert complete["remaining_scanners"] == []
+            assert complete["remaining_count"] == 0
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_a_failed_scanner_alone_sends_no_scan_complete(
         self, plugin_context, tmp_path, parallel
     ):
         _, executor = _run(
             plugin_context, tmp_path, failing_target="converted", parallel=parallel
         )
 
-        (complete,) = _scan_complete_events(executor)
-        assert complete["scanner"] == "shape-tool"
-        assert complete["remaining_scanners"] == []
-        assert complete["remaining_count"] == 0
-        assert complete["completed_count"] == 1
-        assert complete["total_count"] == 1
+        assert _scan_complete_events(executor) == []
         assert executor.completed_scanners == []
 
     @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
