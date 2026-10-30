@@ -352,12 +352,15 @@ def test_no_output_holds_an_env_value(runs, command, directory):
 
 
 def _report_document(stdout: str) -> Tuple[dict, str]:
-    """The pretty-printed document ``ash report`` writes to stdout when no output
-    file is asked for (its ``{`` and ``}`` stand on lines of their own), and the
-    rest of stdout around it."""
+    """The JSON document ``ash report`` writes to stdout when no output file is
+    asked for, and the rest of stdout around it.
+
+    The document may be printed on one line or pretty-printed over many: it runs
+    from the first line that opens an object to the last line that closes one,
+    and a log line printed before it starts with its level, not with a brace."""
     lines = stdout.splitlines(keepends=True)
-    opens = [index for index, line in enumerate(lines) if line.strip() == "{"]
-    closes = [index for index, line in enumerate(lines) if line.strip() == "}"]
+    opens = [index for index, line in enumerate(lines) if line.lstrip().startswith("{")]
+    closes = [index for index, line in enumerate(lines) if line.rstrip().endswith("}")]
     assert opens and closes, stdout
     first, last = opens[0], closes[-1]
     document = json.loads("".join(lines[first : last + 1]))
