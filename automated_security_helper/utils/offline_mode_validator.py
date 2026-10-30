@@ -6,7 +6,7 @@
 import os
 from pathlib import Path
 from typing import List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from automated_security_helper.utils.content_databases import (
     get as get_content_database,
@@ -77,8 +77,13 @@ def _database_age(newest: Path) -> timedelta:
     A file dated in the future (a clock that moved, a copy that kept a later
     host's time) gave a negative age, which ``timedelta.days`` prints as -1. The
     floor is zero: the file is at least as new as now.
+
+    Both instants are taken in UTC. Two naive local times straddling the zone's
+    clock change differ by an hour from the elapsed time, so a database written
+    thirty days before a read made after that change read "29 days old".
     """
-    age = datetime.now() - datetime.fromtimestamp(newest.stat().st_mtime)
+    written = datetime.fromtimestamp(newest.stat().st_mtime, timezone.utc)
+    age = datetime.now(timezone.utc) - written
     return max(age, timedelta(0))
 
 

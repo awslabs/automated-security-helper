@@ -23,13 +23,13 @@ from __future__ import annotations
 import os
 import stat
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from automated_security_helper.utils import content_db_refresh
+from automated_security_helper.utils import content_db_refresh, offline_mode_validator
 from automated_security_helper.utils.offline_mode_validator import (
     OfflineModeValidator,
     validate_grype_offline_mode,
@@ -146,6 +146,45 @@ class TestTheDatabaseAge:
         assert is_valid is True
         assert any("newest is 0 days old" in m for m in messages), messages
         assert not any("-1 days" in m for m in messages), messages
+
+    @pytest.mark.skipif(
+        not hasattr(time, "tzset"), reason="the process zone is set with tzset"
+    )
+    def test_a_clock_change_in_the_window_does_not_shorten_the_age(
+        self, tmp_path, monkeypatch
+    ):
+        """Thirty days of elapsed time are thirty days whatever the zone did.
+
+        The two instants straddle Europe's 2026 autumn clock change: the file is
+        written at 12:00 UTC on October 20 and read thirty days later. As two
+        naive local times in Europe/Berlin they are 14:00 CEST and 13:00 CET, an
+        hour short of the elapsed time, which read as "29 days old".
+        """
+        database = tmp_path / "vulnerability.db"
+        database.write_bytes(b"\x00")
+        written = 1792497600.0
+        read_at = written + 30 * 24 * 3600
+        os.utime(database, (written, written))
+
+        class _Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.fromtimestamp(read_at, tz)
+
+        before = os.environ.get("TZ")
+        os.environ["TZ"] = "Europe/Berlin"
+        time.tzset()
+        try:
+            monkeypatch.setattr(offline_mode_validator, "datetime", _Clock)
+            age = offline_mode_validator._database_age(database)
+        finally:
+            if before is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = before
+            time.tzset()
+
+        assert age.days == 30, age
 
     def test_a_modification_time_the_platform_cannot_date_is_answered(
         self, tmp_path, monkeypatch
