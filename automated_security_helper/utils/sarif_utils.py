@@ -854,12 +854,15 @@ def _only_the_spelling_as_written_names_a_file(
 
         # A written relative URI carries no literal backslash (``%5C`` is its
         # form); one that does is not folded by posixpath and would be read as
-        # a separator by a Windows stat, so it is not probed either.
+        # a separator by a Windows stat, so it is not probed either. A drive
+        # letter in any form (``C:/x``, and the drive-relative ``C:x``, which
+        # a Windows join places at the drive's current directory, outside the
+        # root) and a ``//host/share`` are read the way Windows does.
         if (
             not text
             or "\\" in text
             or os.path.isabs(text)
-            or _DRIVE_PREFIX.match(text)
+            or PureWindowsPath(text).drive
             or text.startswith("/")
         ):
             return False

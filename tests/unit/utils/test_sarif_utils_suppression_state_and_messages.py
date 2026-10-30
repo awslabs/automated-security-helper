@@ -349,3 +349,7 @@ def test_the_written_spelling_is_probed_only_under_the_scan_root(tmp_path):
     assert (
         _matched_path_text("fixtures/a\\..%2Fb.json", root) == "fixtures/a\\../b.json"
     )
+    # A drive-relative spelling (``C:x``) is placed by a Windows join at the
+    # drive's current directory, outside the root, so it is not probed either.
+    (tmp_path / "C:x%2Fb.json").write_text("{}", encoding="utf-8")
+    assert _matched_path_text("C:x%2Fb.json", root) == "C:x/b.json"
