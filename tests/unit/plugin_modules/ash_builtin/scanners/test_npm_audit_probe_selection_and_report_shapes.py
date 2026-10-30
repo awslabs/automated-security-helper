@@ -49,11 +49,15 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     npm_audit_scanner,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
-    _VERSION_PROBE_TIMEOUT_SECONDS,
     _YARN_ADVISORIES_KEY,
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
+
+# Read by name, not imported: a tree without the probe timeout (the base this
+# file is also run against) then fails the one assertion that reads it, instead
+# of refusing to collect the whole module.
+PROBE_TIMEOUT = getattr(npm_audit_scanner, "_VERSION_PROBE_TIMEOUT_SECONDS", None)
 from automated_security_helper.utils.package_identity import identity_properties
 from automated_security_helper.utils.package_manager_child import NOT_A_REGULAR_FILE
 from tests.utils.aws_isolation import isolate_from_aws
@@ -208,7 +212,8 @@ class TestTheVersionProbe:
 
         ((command, kwargs),) = calls
         assert command == ["npm", "--version"]
-        assert kwargs.get("timeout") == _VERSION_PROBE_TIMEOUT_SECONDS
+        assert PROBE_TIMEOUT is not None, "the probe has no timeout constant"
+        assert kwargs.get("timeout") == PROBE_TIMEOUT
         cwd = kwargs.get("cwd")
         assert cwd is not None, "the probe ran in the scanned root"
         assert Path(cwd).is_relative_to(scanner.results_dir), cwd

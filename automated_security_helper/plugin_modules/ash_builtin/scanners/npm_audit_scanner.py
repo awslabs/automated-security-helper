@@ -448,9 +448,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             # scan() is not called after a False, so the lockfiles the audit
             # would have read are recorded here; ScanPhase copies them onto
             # the MISSING row. The converted tree does not exist yet at this
-            # point, so the source tree is what is recorded.
+            # point, so the source tree is what is recorded, through the same
+            # guarded selection the package-manager check below reads.
             self.inputs_not_scanned = self._offline_skips(
-                self._package_manifests("source"), "source"
+                self._source_manifests(), "source"
             )
             return False
         needed = self._package_managers_needed() or {self.command}
@@ -466,19 +467,24 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             self._probe_npm_version()
         return True
 
-    def _package_managers_needed(self) -> Set[str]:
-        """The package managers the source tree's lockfiles are audited with."""
-        needed: Set[str] = set()
+    def _source_manifests(self) -> List[str]:
+        """The source tree's package selection for the dependency check; empty
+        when the selection cannot be made (the selection is scan()'s to fail
+        loudly, the check only reads it)."""
         try:
-            manifests = self._package_manifests("source")
-        except Exception as exc:  # the selection is scan()'s to fail loudly
+            return self._package_manifests("source")
+        except Exception as exc:
             ASH_LOGGER.debug(
                 f"npm-audit: could not list the packages for the dependency check: "
                 f"{type(exc).__name__}",
                 extra=NO_MARKUP,
             )
-            return needed
-        for manifest in manifests:
+            return []
+
+    def _package_managers_needed(self) -> Set[str]:
+        """The package managers the source tree's lockfiles are audited with."""
+        needed: Set[str] = set()
+        for manifest in self._source_manifests():
             lock_file = self._lockfile_beside(manifest)
             if lock_file is not None:
                 needed.add(_LOCKFILE_BINARY.get(lock_file.name, self.command))

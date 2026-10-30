@@ -1000,20 +1000,31 @@ def test_severity_map_is_not_vacuous():
     assert SEVERITY_TO_LEVEL["not-a-severity"] == "warning"
 
 
-def test_a_vulnerability_with_no_nodes_produces_no_result(scanner):
-    """Results are emitted per install location, so no nodes means no result.
+def test_a_vulnerability_with_no_nodes_produces_one_result_by_name(scanner):
+    """A vulnerability npm lists with no node is still a finding.
 
-    Worth pinning because the rule is still created: a report can therefore
-    carry a rule with no matching finding.
+    npm counted the advisory in the report's metadata, so a rule with no
+    result silently dropped it. One result is made for the package by name,
+    at the hoisted location, with no installed version or path (the lockfile
+    gives none for a node npm did not name).
     """
     results = audit_json(nodes=())
 
     report = scanner._convert_npm_audit_to_sarif(results, scanner.context.source_dir)
 
-    assert report.runs[0].results == []
+    (result,) = report.runs[0].results
+    assert result.ruleId == "GHSA-aaaa-bbbb-cccc"
+    location = result.locations[0].physicalLocation.root.artifactLocation.uri
+    assert location == "node_modules/left-pad/package.json"
+    props = result.properties.model_extra
+    assert props["package_name"] == "left-pad"
+    assert "package_version" not in props and "package_path" not in props
+    assert "installed_version" not in props, (
+        "no node names an installed copy, so no version stands in for one"
+    )
     assert [rule.id for rule in report.runs[0].tool.driver.rules] == [
         "GHSA-aaaa-bbbb-cccc"
-    ], "the rule is registered even though no result references it"
+    ]
 
 
 def test_no_vulnerabilities_key_yields_an_empty_run(scanner):
