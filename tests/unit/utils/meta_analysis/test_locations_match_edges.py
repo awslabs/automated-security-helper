@@ -76,6 +76,7 @@ def test_a_missing_start_line_is_the_end_line_alone_not_a_wildcard():
 
 
 def test_a_posix_path_whose_third_character_is_a_colon_keeps_its_slash():
-    assert _normalize_file_path("file:///a:/file.py") == "/a:/file.py"
+    # Only a letter before the colon is a drive; "1:" is a POSIX name.
+    assert _normalize_file_path("file:///1:/file.py") == "/1:/file.py"
     assert _normalize_file_path("file:///C:/proj/a.py") == "C:/proj/a.py"
-    assert file_paths_match("file:///a:/file.py", "/a:/file.py")
+    assert file_paths_match("file:///1:/file.py", "/1:/file.py")
