@@ -143,7 +143,10 @@ def _is_junction(path: Path) -> bool:
         return bool(isjunction(path))
     try:
         found = os.lstat(path)
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError: a NUL in the path, which lstat raises as one rather than
+        # as an OSError. A path that cannot be named is no junction, as one that
+        # does not exist is none.
         return False
     attributes = getattr(found, "st_file_attributes", 0)
     tag = getattr(found, "st_reparse_tag", 0)
