@@ -13,6 +13,7 @@ the mode it has.
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 import sys
@@ -71,3 +72,81 @@ def test_marking_an_existing_workspace_again_changes_nothing(tmp_path) -> None:
 
     assert _mode(sandbox) == 0o750
     assert (sandbox / SESSION_MARKER).is_file()
+
+
+def test_each_directory_is_private_from_the_moment_it_exists(
+    tmp_path, monkeypatch
+) -> None:
+    """The mode is the creating call's own, not a chmod after the fact: between
+    a mkdir under the umask and a later chmod, another account could open the
+    new directory and keep a handle whose listing outlives the chmod."""
+    chmods: list = []
+    real_chmod = os.chmod
+
+    def recording_chmod(path, mode, *args, **kwargs):
+        chmods.append((Path(path), mode))
+        return real_chmod(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "chmod", recording_chmod)
+    root = tmp_path / "ws-root"
+    previous = os.umask(0o022)
+    try:
+        sandbox = mark_session_workspace(root / "session-d")
+    finally:
+        os.umask(previous)
+
+    assert chmods == [], f"a directory was made open and tightened after: {chmods}"
+    assert _mode(root) == 0o700, oct(_mode(root))
+    assert _mode(sandbox) == 0o700, oct(_mode(sandbox))
+
+
+def test_an_existing_root_other_accounts_can_list_is_warned_about_once(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    """A root ASH did not make keeps its mode, and the operator is told once,
+    not once per session, that other accounts can read the live session ids."""
+    from automated_security_helper.cli.mcp import session_paths
+
+    monkeypatch.setattr(session_paths, "_listable_parents_warned", set())
+    root = tmp_path / "ws-root"
+    root.mkdir()
+    os.chmod(root, 0o755)
+
+    with caplog.at_level(logging.WARNING):
+        mark_session_workspace(root / "session-e")
+        mark_session_workspace(root / "session-f")
+
+    about_the_root = [
+        record.getMessage()
+        for record in caplog.records
+        if str(root) in record.getMessage()
+        and "live session ids" in record.getMessage()
+    ]
+    assert len(about_the_root) == 1, caplog.text
+    assert "0o755" in about_the_root[0], about_the_root[0]
+    assert _mode(root) == 0o755, "an existing directory's mode was changed"
+
+
+def test_the_presence_registries_are_private_too(tmp_path, monkeypatch) -> None:
+    """The stdio and scan presence registries sit beside the session
+    directories under the root; made under the umask, they and the root they
+    created first were listable by every account on the host."""
+    from automated_security_helper.cli.mcp import sessions
+
+    root = tmp_path / "ws-root"
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+    monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
+    sessions.reset_default_registry_for_tests()
+    previous = os.umask(0o022)
+    try:
+        with sessions.StdioServerPresence():
+            pass
+        with sessions._scan_presence_guard(root):
+            pass
+    finally:
+        os.umask(previous)
+        sessions.reset_default_registry_for_tests()
+
+    assert _mode(root) == 0o700, oct(_mode(root))
+    assert _mode(root / sessions.STDIO_SERVERS_DIR) == 0o700
+    assert _mode(root / sessions.SCAN_PRESENCE_DIR) == 0o700

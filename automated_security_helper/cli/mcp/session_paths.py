@@ -55,9 +55,10 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import stat
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Set
 
 #: The characters a validated id may hold: ASCII letters, digits, and
 #: ``. _ ~ + = -``. Anchored with ``fullmatch`` at the call site rather than with
@@ -246,26 +247,80 @@ def joined_inside(parent: Path, component: str, what: str = "session_id") -> Pat
 SESSION_MARKER = ".ash-mcp-session"
 
 
+#: Existing directories already warned about as listable by other accounts, so
+#: an operator reads one line per directory, not one per session created in it.
+_listable_parents_warned: Set[Path] = set()
+
+
+def make_private_dir(directory: Path) -> List[Path]:
+    """Create ``directory`` and its missing ancestors, each private from the start.
+
+    Every level is made with ``os.mkdir(path, 0o700)``: the mode is the creating
+    call's own, so there is no moment between a ``mkdir`` and a later ``chmod``
+    in which another account can open the new directory and keep a handle whose
+    listing outlives the ``chmod``. A umask that drops owner bits leaves a
+    directory tighter than ``0o700``, which is then set once. A directory that
+    already exists keeps the mode it has, and the one a new directory is made
+    under is warned about, once per path, when other accounts can list it
+    (POSIX only): under the workspace root that listing is the live session
+    ids. Returns the directories made, deepest last.
+    """
+    missing: List[Path] = []
+    for ancestor in (directory, *directory.parents):
+        if ancestor.exists():
+            break
+        missing.append(ancestor)
+    if missing:
+        _warn_once_about_a_listable_parent(missing[-1].parent)
+    made: List[Path] = []
+    for path in reversed(missing):
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            # Made meanwhile by another server sharing the root; its mode is its
+            # maker's, as an existing directory's is.
+            continue
+        if stat.S_IMODE(os.stat(path).st_mode) != 0o700:
+            with contextlib.suppress(OSError):
+                os.chmod(path, 0o700)
+        made.append(path)
+    return made
+
+
+def _warn_once_about_a_listable_parent(parent: Path) -> None:
+    if os.name != "posix":
+        return
+    try:
+        mode = stat.S_IMODE(os.stat(parent).st_mode)
+    except OSError:
+        return
+    if not mode & 0o077 or parent in _listable_parents_warned:
+        return
+    _listable_parents_warned.add(parent)
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    ASH_LOGGER.warning(
+        "Other accounts on this host can list %s (mode %s): under the MCP "
+        "workspace root that listing is the live session ids. Only directories "
+        "ASH creates are made private; set this one to 0700 if other accounts "
+        "should not read it.",
+        parent,
+        oct(mode),
+    )
+
+
 def mark_session_workspace(directory: Path) -> Path:
     """Create ``directory`` as a session workspace, with its marker, and return it.
 
     The directory, and every ancestor this call creates (the workspace root among
-    them), is readable and searchable by its owner alone (``0o700``), whatever
-    the process umask: a session's directory holds a client's delivered source,
-    and the root's listing is the set of live session ids. A directory that
-    already exists keeps the mode it has; a mode that cannot be set is left as
-    the filesystem made it.
+    them), is readable and searchable by its owner alone (``0o700``) from the
+    moment it exists, whatever the process umask (:func:`make_private_dir`): a
+    session's directory holds a client's delivered source, and the root's
+    listing is the set of live session ids. A directory that already exists
+    keeps the mode it has, with one warning when other accounts can list it.
     """
 
-    created: List[Path] = []
-    for ancestor in (directory, *directory.parents):
-        if ancestor.exists():
-            break
-        created.append(ancestor)
-    directory.mkdir(parents=True, exist_ok=True)
-    for made in created:
-        with contextlib.suppress(OSError):
-            os.chmod(made, 0o700)
+    make_private_dir(directory)
     (directory / SESSION_MARKER).touch(exist_ok=True)
     return directory
 

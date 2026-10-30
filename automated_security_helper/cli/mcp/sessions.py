@@ -67,6 +67,7 @@ from automated_security_helper.cli.mcp.session_paths import (
     SESSION_MARKER,
     hidden_deleting_name,
     is_a_deleting_name,
+    make_private_dir,
     mark_session_workspace,
     session_directory,
     validated_path_component,
@@ -1397,7 +1398,9 @@ class StdioServerPresence:
 
         try:
             registry = self._registry()
-            registry.mkdir(parents=True, exist_ok=True)
+            # Private from the moment each level exists (the workspace root among
+            # them when it is made here), as a session workspace is.
+            make_private_dir(registry)
             with open(registry / _STDIO_SERVERS_LOCK, "a+b") as guard:
                 _lock_blocking(guard)
                 # Entries of servers that were killed are dropped here as well as
@@ -1509,7 +1512,11 @@ class StdioServerPresence:
 
         try:
             registry = StdioServerPresence._registry()
-            registry.mkdir(exist_ok=True)
+            if not registry.parent.is_dir():
+                # No workspace root: nothing of the default workspace exists to
+                # remove, and a deferred end does not make the root to say so.
+                raise FileNotFoundError(str(registry.parent))
+            make_private_dir(registry)
             guard = open(registry / _STDIO_SERVERS_LOCK, "a+b")
         except (OSError, RuntimeError) as exc:
             ASH_LOGGER.warning(
@@ -1616,7 +1623,7 @@ def _scan_presence_guard(root: Path, *, wait: Optional[float] = None) -> Iterato
     (the TTL sweep, ``_SWEEP_LOCK_WAIT_SECONDS``).
     """
     registry = root / SCAN_PRESENCE_DIR
-    registry.mkdir(exist_ok=True)
+    make_private_dir(registry)
     with open(registry / _SCAN_PRESENCE_LOCK, "a+b") as guard:
         if wait is None:
             _lock_blocking(guard)
