@@ -155,6 +155,32 @@ def test_a_value_holding_a_line_break_is_hidden_line_by_line():
     assert "second line of the value" not in shown
 
 
+def test_the_captured_output_hides_a_value_line_by_line_too(monkeypatch):
+    """What the console hides, the result kept for the caller hides as well."""
+    value = "first line of the value\nsecond line of the value"
+    completed = create_completed_process(
+        args=["runtime"],
+        returncode=0,
+        stdout="echo: second line of the value\n",
+        stderr="",
+    )
+    monkeypatch.setattr(
+        rac, "run_cmd_direct", lambda cmd, debug=False, env=None: completed
+    )
+
+    with subprocess_utils._spawn_values((value,)):
+        result = rac._execute_container(["runtime", "run", "img"], debug=False)
+
+    assert "second line of the value" not in result.stdout
+
+
+def test_short_and_blank_lines_of_a_value_are_not_hidden_on_their_own():
+    value = "{\n  \n  a-long-enough-line\n}"
+
+    assert rac._value_lines((value,)) == (value, "a-long-enough-line")
+    assert rac._value_lines(rac._value_lines((value,))) == rac._value_lines((value,))
+
+
 class _TextPipe:
     """A child's pipe as Popen opens it in text mode: universal newlines."""
 

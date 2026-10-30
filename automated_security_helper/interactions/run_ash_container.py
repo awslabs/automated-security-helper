@@ -661,12 +661,27 @@ def _streamed_line(
 
 
 def _value_lines(values: Tuple[str, ...]) -> Tuple[str, ...]:
-    """``values`` with each one that holds a line break followed by its lines."""
+    """``values`` with each one that holds a line break followed by its lines.
+
+    Each line is stripped, and only a line long enough to be matched as a value
+    of its own (``MIN_REDACTED_LENGTH``) is added: a brace or a blank line of a
+    multi-line value would otherwise hide every brace of the output. Nothing is
+    added twice, so the answer can be passed through again unchanged.
+    """
+    from automated_security_helper.utils.numeric_text import MIN_REDACTED_LENGTH
+
     out: List[str] = []
+    seen: set[str] = set()
     for value in values:
-        out.append(value)
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
         if "\n" in value or "\r" in value:
-            out.extend(part for part in value.splitlines() if part)
+            for part in value.splitlines():
+                part = part.strip()
+                if len(part) >= MIN_REDACTED_LENGTH and part not in seen:
+                    seen.add(part)
+                    out.append(part)
     return tuple(out)
 
 
@@ -4984,10 +4999,12 @@ def _execute_container(cmd: List[str], debug: bool, env: Dict[str, str] | None =
         echo(f"Running container command: {shown}")
     # The values the run carries (the spawn's recorded values) are hidden in the
     # streamed copy of the child's output line by line; the copy kept on the
-    # result is hidden the same way, so a caller that prints or logs it after
-    # the run, when the record is gone, cannot show them.
-    carried = tuple(subprocess_utils._SPAWN_VALUES.get()) + tuple(
-        subprocess_utils._SPAWN_STRICT_VALUES.get()
+    # result is hidden the same way, each line of a value that holds a line
+    # break included (_value_lines, as the stream has it), so a caller that
+    # prints or logs it after the run, when the record is gone, cannot show them.
+    carried = _value_lines(
+        tuple(subprocess_utils._SPAWN_VALUES.get())
+        + tuple(subprocess_utils._SPAWN_STRICT_VALUES.get())
     )
 
     def hidden(text):
