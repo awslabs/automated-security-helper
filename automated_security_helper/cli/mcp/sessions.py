@@ -2084,15 +2084,42 @@ def sweep_stale_workspaces(
             # raised past its own handling) is that workspace's: it is named
             # and left for the next pass, and the sweep goes on to the rest
             # instead of ending the pass with every later entry unread.
-            from automated_security_helper.utils.log import ASH_LOGGER
-
-            ASH_LOGGER.warning(
-                "The TTL sweep could not remove session %r (%s); its workspace "
-                "stays for the next pass.",
+            _warn_sweep_failure_once(
                 entry.name,
-                _describe_os_error(exc) if isinstance(exc, OSError) else exc,
+                _describe_os_error(exc) if isinstance(exc, OSError) else str(exc),
             )
     return removed
+
+
+#: Session ids whose removal the sweep has already reported as failing, so a
+#: workspace that keeps failing (a file another account owns) is named once for
+#: the life of the process, not on every pass, as a leftover is
+#: (``_warn_leftover_once``). A session the sweep later removes leaves the set,
+#: so a new failure of a reused id is reported again.
+_sweep_failures_warned: Set[str] = set()
+
+
+def _warn_sweep_failure_once(session_id: str, detail: str) -> None:
+    """Log once per session id that the sweep could not remove its workspace."""
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    with _leftovers_warned_lock:
+        if session_id in _sweep_failures_warned:
+            return
+        _sweep_failures_warned.add(session_id)
+    ASH_LOGGER.warning(
+        "The TTL sweep could not remove session %r (%s); its workspace stays "
+        "for the next pass. This is the only warning for it until a pass "
+        "removes it.",
+        session_id,
+        detail,
+    )
+
+
+def _forget_sweep_failure(session_id: str) -> None:
+    """A removal worked: a later failure of the same id is reported as new."""
+    with _leftovers_warned_lock:
+        _sweep_failures_warned.discard(session_id)
 
 
 def _remove_stale_leftover(root: Path, entry: Path, cutoff: float) -> None:
@@ -2339,6 +2366,7 @@ def _remove_stale_session_state(
                 if _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id):
                     return False
                 _remove_session_state(session_id)
+                _forget_sweep_failure(session_id)
                 with contextlib.suppress(OSError):
                     (root / SCAN_PRESENCE_DIR / session_id).rmdir()
         except OSError as exc:
@@ -2346,15 +2374,9 @@ def _remove_stale_session_state(
             # taken: the workspace stays for the next pass, and the failure is
             # named rather than swallowed, because a removal that keeps failing
             # is the one an operator has to see (a file another account owns,
-            # a filesystem error).
-            from automated_security_helper.utils.log import ASH_LOGGER
-
-            ASH_LOGGER.warning(
-                "The TTL sweep could not remove session %r (%s); its workspace "
-                "stays for the next pass.",
-                session_id,
-                _describe_os_error(exc),
-            )
+            # a filesystem error). Named once per session, not on every pass
+            # (at most every five minutes) for as long as it keeps failing.
+            _warn_sweep_failure_once(session_id, _describe_os_error(exc))
             return False
         finally:
             session.end_sweep()
