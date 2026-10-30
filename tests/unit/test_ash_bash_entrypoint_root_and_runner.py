@@ -237,6 +237,35 @@ def test_dash_o_after_a_subcommand_is_the_subcommands(runner, source, tmp_path):
     ], inner
 
 
+def test_attached_dash_o_after_a_subcommand_is_the_subcommands(
+    runner, source, tmp_path
+):
+    """The attached spelling is the subcommand's after its name too: `./ash
+    get-genai-guide -oguide.md` writes the guide to guide.md, as click reads it.
+    The spaced -o arm consulted the subcommand mark; the attached arm did not, so
+    the same command with the value attached still ran a runner named guide.md."""
+    result, calls = _run(
+        runner,
+        [
+            "--no-build",
+            "--source-dir",
+            str(source),
+            "get-genai-guide",
+            "-oguide.md",
+        ],
+        cwd=tmp_path,
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    run = _only(calls, "run", shown)
+    inner = _after_image(run)
+    assert inner[inner.index("get-genai-guide") :][:2] == [
+        "get-genai-guide",
+        "-oguide.md",
+    ], inner
+
+
 def test_dash_o_before_a_subcommand_names_the_runner(runner, source, tmp_path):
     """Ahead of a subcommand, -o is still this script's runner option."""
     program, _ = runner

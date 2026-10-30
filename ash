@@ -1024,8 +1024,18 @@ while (("$#")); do
     # the scan got a runner, UID or GID word it has no use for while this script built
     # and ran with its defaults. A blank attached value is refused as a missing one.
     -o?*)
-      require_value "-o" 2 "${1:2}"
-      OCI_RUNNER="${1:2}"
+      # The attached spelling follows the spaced -o above: this script's runner only
+      # ahead of a subcommand's name, the subcommand's own after it (`./ash
+      # get-genai-guide -oguide.md` writes the guide to guide.md), and the value of a
+      # pending inner option when one is open. -u?* and -g?* below take no such
+      # guard because their spaced forms take none: the script owns the container
+      # UID and GID in every position.
+      if [[ "${SUBCOMMAND_SEEN}" = "YES" || "${INNER_VALUE_PENDING}" = "YES" ]]; then
+        forward_word "$1"
+      else
+        require_value "-o" 2 "${1:2}"
+        OCI_RUNNER="${1:2}"
+      fi
       ;;
     -u?*)
       require_value "-u" 2 "${1:2}"
