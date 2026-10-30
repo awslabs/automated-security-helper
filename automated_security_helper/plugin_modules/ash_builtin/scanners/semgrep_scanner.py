@@ -246,8 +246,13 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             self.use_uv_tool = False
             self.dependencies_satisfied = True
             return True
+        # The scanner's own offline mode reaches the probe too: with options.offline
+        # set and ASH online, the resolver used to probe (and could install) from
+        # PyPI while the scan, the version probe and the install ran offline.
         command = get_uv_tool_command(
-            self.command, from_spec=self._uv_probe_from_spec()
+            self.command,
+            from_spec=self._uv_probe_from_spec(),
+            offline=self._is_offline_mode(),
         )
         if command is None:
             return False

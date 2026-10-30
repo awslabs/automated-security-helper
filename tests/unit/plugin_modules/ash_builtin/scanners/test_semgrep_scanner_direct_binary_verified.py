@@ -161,3 +161,46 @@ def test_the_last_resort_after_a_failed_install_is_verified_too(
 
     assert scanner._validate_tool_dependencies() is False
     assert "0.9.0" in (scanner.dependency_unavailable_reason or "")
+
+
+@pytest.mark.parametrize("own_offline", [True, False])
+def test_the_probe_runs_under_the_scanners_own_offline_mode(
+    test_plugin_context, monkeypatch, own_offline
+):
+    """The resolver is asked with the scanner's own reading of offline, not left
+    to ASH's mode alone: with ``options.offline: true`` and ASH online, the
+    version probe runs offline like the scan, the version probe and the install
+    already do. With the option off it is asked with False, which the resolver
+    reads as "follow ASH".
+
+    Fails at the base on both rows: the resolver was asked with no ``offline``
+    at all, so an offline scanner's probe went to the network.
+    """
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+    scanner = SemgrepScanner(
+        context=test_plugin_context,
+        config=SemgrepScannerConfig(
+            options=SemgrepScannerConfigOptions(offline=own_offline)
+        ),
+    )
+    monkeypatch.setattr(
+        SemgrepScanner, "unsupported_platform_reason", lambda self: None
+    )
+    monkeypatch.setattr(
+        SemgrepScanner, "_validate_uv_tool_availability", lambda self: False
+    )
+    asked: list[dict] = []
+
+    def resolver(name, **kwargs):
+        asked.append(dict(kwargs))
+        return [BINARY]
+
+    monkeypatch.setattr(semgrep_scanner, "get_uv_tool_command", resolver)
+    _answer(
+        monkeypatch, _verdict("satisfied", "semgrep 1.130.0", version="1.130.0"), []
+    )
+
+    assert scanner._validate_tool_dependencies() is True
+    assert len(asked) == 1
+    assert asked[0].get("offline") is own_offline
