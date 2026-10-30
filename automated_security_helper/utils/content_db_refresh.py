@@ -285,15 +285,19 @@ def default_cache_dir(
         raw = variable("TRIVY_CACHE_DIR")
         if raw:
             return absolute(raw)
-        # Go's os.UserHomeDir reads HOME itself and errors when it is empty;
-        # there is no passwd fallback, so trivy's user cache is undefined then.
-        home = variable("HOME")
+        # The home directory is the scan's ``HOME`` when its environment sets
+        # one, else this process's: every sandbox backend gives the scanner
+        # the operator's home, and an environment built for the scan without
+        # the variable (a caller that names only the variables it changes)
+        # still means that home, not Go's temporary-directory fallback for a
+        # HOME that is unset in the scanner's own process.
+        home = Path(variable("HOME")) if variable("HOME") else Path.home()
         if windows:
             user_cache = Path(local_app_data) if local_app_data else None
         elif platform == "darwin":
-            user_cache = Path(home) / "Library" / "Caches" if home else None
+            user_cache = home / "Library" / "Caches"
         elif not xdg:
-            user_cache = Path(home) / ".cache" if home else None
+            user_cache = home / ".cache"
         else:
             user_cache = Path(xdg) if isabs(xdg) else None
         if user_cache is None:
