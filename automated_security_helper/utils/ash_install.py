@@ -185,6 +185,13 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
             f"({exc}); trying the install-location strategy instead."
         )
         mapped = []
+    # A dist-info with a top_level.txt or RECORD but no METADATA maps the package
+    # to None (cdk_nag_scanner notes the same shape). A list holding only None is
+    # truthy, so it used to be returned as the located distributions: the
+    # requirement read and the install record then asked for a distribution
+    # named None and got nothing, and the install-location strategy below, which
+    # would have found the real one, never ran.
+    mapped = [name for name in mapped if isinstance(name, str) and name]
     if mapped:
         return list(mapped)
 
@@ -283,6 +290,114 @@ def _extra_marker(extra: str) -> "re.Pattern[str]":
     return re.compile(rf"""\bextra\s*==\s*['"]{re.escape(extra)}['"]""")
 
 
+def _without_extra_clause(requirement: str, extra: str) -> str:
+    """``requirement`` with the ``extra == "<extra>"`` clause taken out of its marker.
+
+    pip evaluates a marker with ``extra`` undefined, so a requirement still
+    carrying ``extra == "cdk"`` is skipped while pip exits 0; the clause has to
+    go. The REST of the marker stays: ``tomli; python_version < "3.11" and extra
+    == "cdk"`` is gated on the interpreter, and dropping the whole marker, which
+    this used to do, installed the requirement on every platform and interpreter
+    the extra never meant it for. Only a marker that is a conjunction of clauses
+    is edited; one holding ``or`` (no extra of ASH's is declared that way) is
+    dropped whole, as before, since removing one term of a disjunction changes
+    what the others mean.
+    """
+    bare, separator, marker_text = requirement.partition(";")
+    bare = bare.strip()
+    if not separator:
+        return bare
+    if re.search(r"\bor\b", marker_text):
+        return bare
+    pattern = _extra_marker(extra)
+    clauses = [clause.strip() for clause in re.split(r"\band\b", marker_text)]
+    kept = [clause for clause in clauses if clause and not pattern.search(clause)]
+    if not kept:
+        return bare
+    return f"{bare}; {' and '.join(kept)}"
+
+
+def _same_named(name: str) -> List[Any]:
+    """Every installed distribution named ``name``, in ``sys.path`` order.
+
+    More than one when a stale ``*.dist-info`` of an earlier install sits beside
+    the current one. ``importlib.metadata.distribution(name)`` returns the
+    first of them only, so a read by name could not reach the one that ships
+    this module when a stale one came first on ``sys.path``. Empty when the name
+    resolves to nothing this way (the callers then fall back to the by-name
+    read, which also serves the tests that replace it).
+    """
+    try:
+        return list(distributions(name=name))
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def _ships_this_module(dist: Any, here: Path, accepted: set) -> bool:
+    """Whether ``dist`` is the distribution this very module was installed from.
+
+    True for a non-editable install whose RECORD lists this file at this path,
+    and for an editable or local install whose PEP 610 record names one of the
+    project directories this module sits in (``_project_directories_of``).
+    Every read is defensive: the distribution is a sibling's until proven ours.
+    """
+    try:
+        raw = dist.read_text("direct_url.json")
+        if raw:
+            url = json.loads(raw).get("url", "")
+            project_dir = _local_path_from_file_url(url)
+            if project_dir is not None and project_dir.resolve() in accepted:
+                return True
+        for entry in dist.files or ():
+            if Path(str(entry)).name != here.name:
+                continue
+            if Path(str(dist.locate_file(entry))).resolve() == here:
+                return True
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return False
+    return False
+
+
+def _distributions_to_read(name: str) -> List[Any]:
+    """The distribution objects to read for a located ``name``: the one that
+    ships this module when it can be told apart, else every one of that name.
+
+    Two same-named dist-infos (a stale one left behind and the current one)
+    used to both resolve to whichever came first on ``sys.path``, so a stale one
+    masked the good one's record and requirements, and the stale bounds merged
+    into the current extra made the cdk install unsatisfiable. Empty when the
+    name resolves to no distribution object (the by-name read is then used).
+    """
+    candidates = _same_named(name)
+    if len(candidates) < 2:
+        return candidates
+    try:
+        here = Path(__file__).resolve()
+    except OSError:  # pragma: no cover - resolve() on an unreadable cwd
+        return candidates
+    accepted = _project_directories_of(here, _ROOT_PACKAGE)
+    ours = [dist for dist in candidates if _ships_this_module(dist, here, accepted)]
+    return ours or candidates
+
+
+def _requirements_declared(dist_name: str) -> List[Optional[List[str]]]:
+    """The ``Requires-Dist`` lists to search for ``dist_name``, one per
+    distribution read (``_distributions_to_read``), or the by-name read's."""
+    chosen = _distributions_to_read(dist_name)
+    if not chosen:
+        return [requires(dist_name)]
+    declared: List[Optional[List[str]]] = []
+    for dist in chosen:
+        try:
+            declared.append(dist.requires)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            ASH_LOGGER.debug(
+                f"Could not read requirements from a distribution named "
+                f"{dist_name!r} ({exc}); skipping that copy."
+            )
+    return declared
+
+
 def extra_requirements_from_metadata(extra: str) -> Optional[List[str]]:
     """The requirements of ASH's ``extra`` as the installed metadata declares it.
 
@@ -298,33 +413,39 @@ def extra_requirements_from_metadata(extra: str) -> Optional[List[str]]:
     module's top-level package, never by naming one; see
     ``_distributions_declaring_this_module``. Every located distribution is
     searched, so a stale ``*.dist-info`` that declares requirements but not the
-    extra cannot mask a good one. Each requirement is returned without its
-    marker: pip evaluates markers with ``extra`` undefined, so a requirement
-    still carrying ``extra == "cdk"`` is skipped while pip exits 0.
+    extra cannot mask a good one; where two carry one name, the one that ships
+    this module is read alone (``_distributions_to_read``), so a stale copy's
+    older bounds do not merge into the current extra. Each requirement is
+    returned without its ``extra`` clause and with the rest of its marker
+    (``_without_extra_clause``): pip evaluates markers with ``extra`` undefined,
+    so a requirement still carrying ``extra == "cdk"`` is skipped while pip
+    exits 0, and one stripped of its ``python_version`` clause is installed
+    where the extra never meant it.
     """
     marker = _extra_marker(extra)
     accumulated: List[str] = []
 
     for dist_name in _distributions_declaring_this_module(_ROOT_PACKAGE):
         try:
-            declared = requires(dist_name)
+            declared_lists = _requirements_declared(dist_name)
         except (PackageNotFoundError, OSError, ValueError) as exc:
             ASH_LOGGER.debug(
                 f"Could not read requirements from distribution {dist_name!r} "
                 f"providing {_ROOT_PACKAGE!r} ({exc}); skipping it."
             )
             continue
-        if declared is None:
-            continue
-        for requirement in declared:
-            if not marker.search(requirement):
+        for declared in declared_lists:
+            if declared is None:
                 continue
-            bare = requirement.split(";", 1)[0].strip()
-            # Deduplicated in place rather than through a set, so the order the
-            # metadata declares is the order pip receives and a logged command
-            # does not vary run to run.
-            if bare and bare not in accumulated:
-                accumulated.append(bare)
+            for requirement in declared:
+                if not marker.search(requirement):
+                    continue
+                kept = _without_extra_clause(requirement, extra)
+                # Deduplicated in place rather than through a set, so the order the
+                # metadata declares is the order pip receives and a logged command
+                # does not vary run to run.
+                if kept and kept not in accumulated:
+                    accumulated.append(kept)
 
     return accumulated or None
 
@@ -337,14 +458,18 @@ def _direct_url() -> Any:
     parse. Only the first distribution located for this module is read. A second
     one (a fork installed beside ASH, an old dist-info left behind) describes
     another install, so its record is never used in place of the first one's,
-    even when the first one has none.
+    even when the first one has none. Where two dist-infos carry the first
+    name, the one that ships this module is the one read
+    (``_distributions_to_read``), not whichever ``sys.path`` lists first.
     """
     located = _distributions_declaring_this_module(_ROOT_PACKAGE)
     if not located:
         return None
     try:
-        raw = distribution(located[0]).read_text("direct_url.json")
-    except (PackageNotFoundError, OSError, ValueError):
+        chosen = _distributions_to_read(located[0])
+        source = chosen[0] if chosen else distribution(located[0])
+        raw = source.read_text("direct_url.json")
+    except (PackageNotFoundError, OSError, ValueError, TypeError, AttributeError):
         return None
     if not raw:
         return None
@@ -359,9 +484,12 @@ def _without_credentials(url: str) -> Optional[str]:
 
     PEP 610 tells installers to strip credentials before recording a URL, and
     pip and uv do. A hint is printed into logs, so it does not rely on that.
-    ``git@`` with no password is the ssh convention, not a credential, and is
-    kept. None for a URL that does not parse, such as an unterminated IPv6 host
-    or a port outside 0-65535: uv refuses those too, and the hint is built while
+    A user name with no password on an ssh URL is the ssh convention for which
+    account to log in as (``git@``, or a deployment account a host requires), not
+    a credential, and is kept: a hint stripped of it could not authenticate.
+    Over http(s) a user name alone can be a token, so it is stripped there.
+    None for a URL that does not parse, such as an unterminated IPv6 host or a
+    port outside 0-65535: uv refuses those too, and the hint is built while
     something else is being reported, so it must not raise.
     """
     try:
@@ -371,7 +499,9 @@ def _without_credentials(url: str) -> Optional[str]:
         return None
     if parts.username is None and parts.password is None:
         return url
-    if parts.username == "git" and parts.password is None:
+    if parts.password is None and (
+        parts.username == "git" or parts.scheme.lower() in _SSH_SCHEMES
+    ):
         return url
     host = parts.hostname or ""
     if ":" in host:
@@ -387,6 +517,10 @@ def _remote_archive(url: str) -> Optional[str]:
     Only http and https with a host: uv reads any other scheme as a relative
     path or refuses it. A scheme is case-insensitive, but uv reads ``HTTPS://``
     as a relative path too, so the URL is rebuilt with the scheme in lower case.
+    The query is dropped: a presigned or tokened archive URL carries its
+    credential there (a signature, an access token), and the hint is printed
+    into logs. A query is no part of naming an archive, and one whose query
+    was its credential has expired by the time anyone reads the hint anyway.
     """
     try:
         parts = urlsplit(url)
@@ -394,7 +528,7 @@ def _remote_archive(url: str) -> Optional[str]:
         return None
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return None
-    return _without_credentials(urlunsplit(parts))
+    return _without_credentials(urlunsplit(parts._replace(query="")))
 
 
 def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
@@ -404,10 +538,14 @@ def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
     ``file:`` URL), ``"path"`` for a local directory, and ``"editable"`` for an
     editable directory. A record without the field its kind needs (a git record
     with no commit, a directory record whose URL is not a local path) is
-    unusable rather than guessed at, and so is a local directory or archive that
-    no longer exists: the container image installs ASH from a wheel and then
-    deletes it. A URL uv could not fetch is unusable too: a remote archive that is
-    not http or https with a host, or any URL that does not parse.
+    unusable rather than guessed at, and so is a local directory, archive or
+    clone that no longer exists: the container image installs ASH from a wheel
+    and then deletes it, and a ``git+file://`` install names a clone that can
+    be gone the same way. A URL uv could not fetch is unusable too: a remote
+    archive that is not http or https with a host, or any URL that does not
+    parse. A local path this process cannot stat (Python 3.10-3.12 re-raise
+    EACCES from ``is_dir`` and ``is_file``) is unusable rather than an error:
+    the hint is built while something else is being reported.
     """
     if not isinstance(record, dict):
         return None
@@ -421,6 +559,11 @@ def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
         commit = vcs_info.get("commit_id")
         if not (isinstance(vcs, str) and vcs and isinstance(commit, str) and commit):
             return None
+        clone = _local_path_from_file_url(url)
+        if clone is not None and not _is_dir(clone):
+            # A clone on this host that is gone, as a local directory or archive
+            # record is checked below; the remote spelling is checked by uv.
+            return None
         remote = _without_credentials(url)
         if remote is None:
             return None
@@ -433,16 +576,36 @@ def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
     local = _local_path_from_file_url(url)
     dir_info = record.get("dir_info")
     if isinstance(dir_info, dict):
-        if local is None or not local.is_dir():
+        if local is None or not _is_dir(local):
             return None
         return ("editable" if dir_info.get("editable") is True else "path"), str(local)
 
     if isinstance(record.get("archive_info"), dict):
         if local is not None:
-            return ("url", local.as_uri()) if local.is_file() else None
+            return ("url", local.as_uri()) if _is_file(local) else None
         remote = _remote_archive(url)
         return ("url", remote) if remote is not None else None
     return None
+
+
+#: URL schemes whose user name is the account to log in as, never a credential.
+_SSH_SCHEMES = frozenset({"ssh", "git+ssh", "ssh+git", "git"})
+
+
+def _is_dir(path: Path) -> bool:
+    """``path.is_dir()``, False for a path this process cannot stat."""
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _is_file(path: Path) -> bool:
+    """``path.is_file()``, False for a path this process cannot stat."""
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def ash_install_arguments(extra: Optional[str] = None) -> str:
