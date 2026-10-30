@@ -147,6 +147,39 @@ def test_a_failed_root_export_is_tried_again(layout, monkeypatch):
     assert backends._system_trust_roots() == "BEGIN CERTIFICATE\n"
 
 
+def test_a_root_export_that_ran_out_of_time_is_not_tried_again(layout, monkeypatch):
+    """A hang costs one spawn the probe timeout, not every spawn of the run."""
+    keychain = layout.tmp / "roots.keychain"
+    keychain.write_text("")
+    monkeypatch.setattr(backends, "_TRUST_ROOT_KEYCHAINS", (str(keychain),))
+    monkeypatch.setattr(backends, "_trust_roots_cache", [])
+    calls = []
+
+    def hanging(*args, **kwargs):
+        calls.append(args)
+        raise subprocess.TimeoutExpired(cmd="security", timeout=1)
+
+    monkeypatch.setattr(backends.subprocess, "run", hanging)
+
+    assert backends._system_trust_roots() is None
+    assert backends._system_trust_roots() is None
+    assert len(calls) == 1
+
+
+def test_a_private_cache_that_cannot_be_made_leaves_no_directory(layout):
+    """Two cache variables that differ only in case collide on one directory name.
+
+    The second ``mkdir`` raises after the cache root was made under the results
+    directory; nothing is returned, so no cleanup step would ever remove it.
+    """
+    policy = _policy(layout, cache_env=("UV_CACHE_DIR", "uv_cache_dir"))
+
+    with pytest.raises(FileExistsError):
+        backends._private_caches(policy, {})
+
+    assert list(layout.results.iterdir()) == []
+
+
 def test_a_failed_bwrap_probe_leaves_the_plan_guard_unsatisfied(layout, monkeypatch):
     programs = {"bwrap": "/fake/bwrap", "true": "/fake/true"}
     monkeypatch.setattr(backends, "_sandbox_program", lambda name: programs.get(name))
@@ -346,8 +379,36 @@ def test_a_passwd_home_of_root_names_no_home_for_firejail(layout, monkeypatch):
 
     argv = backend.plan(["/bin/true"], {}, _policy(layout)).argv
 
-    assert "--private" in argv
+    # Nothing is whitelisted against the root, --private is not asked of a home
+    # firejail cannot make private, and HOME's directory, which firejail does not
+    # treat as the home, is hidden the way a HOME beside the passwd home is.
+    assert "--private" not in argv
     assert not [a for a in argv if a.startswith("--whitelist=")], argv
+    assert f"--blacklist={_real(layout.home).as_posix()}" in argv, argv
+
+
+@pytest.mark.skipif(os.name == "nt", reason="firejail's plan reads os.getuid()")
+def test_firejail_hides_a_sibling_whose_name_it_would_read_as_a_pattern(layout):
+    """A name among the user's own files is hidden, with ``?`` for the odd character.
+
+    ~/.local links to a directory elsewhere; the policy grants a tool inside it, so
+    the siblings beside the way to the tool are blacklisted. One of them is named
+    ``notes~``: a blacklist that hides more than it is the safe direction, so the
+    spawn is not refused, and the value matches the name.
+    """
+    persist = layout.tmp / "persist" / "local"
+    (persist / "tool" / "bin").mkdir(parents=True)
+    (persist / "notes~").mkdir()
+    (layout.home / ".local").symlink_to(persist, target_is_directory=True)
+    backend = FirejailBackend()
+    backend._executable = "/fj"
+
+    argv = backend.plan(
+        ["/bin/true"], {}, _policy(layout, read_only=(layout.system, persist / "tool"))
+    ).argv
+
+    assert f"--blacklist={_real(persist).as_posix()}/notes?" in argv, argv
+    assert not [a for a in argv if "~" in a and a.startswith("--blacklist=")], argv
 
 
 @pytest.mark.skipif(os.name == "nt", reason="firejail's plan reads os.getuid()")

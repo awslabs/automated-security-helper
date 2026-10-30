@@ -93,14 +93,23 @@ def _private_caches(
     if not policy.cache_env:
         return [], []
     root = Path(tempfile.mkdtemp(prefix=".sandbox-cache-", dir=policy.results_dir))
-    for name in policy.cache_env:
-        # npm reads npm_config_* without regard to case, so a NPM_CONFIG_CACHE
-        # passed through from the parent would compete with the redirect.
-        for key in [k for k in child_env if k.lower() == name.lower() and k != name]:
-            del child_env[key]
-        private = root / name.lower()
-        private.mkdir()
-        child_env[name] = private.as_posix()
+    try:
+        for name in policy.cache_env:
+            # npm reads npm_config_* without regard to case, so a NPM_CONFIG_CACHE
+            # passed through from the parent would compete with the redirect.
+            for key in [
+                k for k in child_env if k.lower() == name.lower() and k != name
+            ]:
+                del child_env[key]
+            private = root / name.lower()
+            private.mkdir()
+            child_env[name] = private.as_posix()
+    except BaseException:
+        # Nothing is returned, so no cleanup step would remove the directory
+        # made above: it is removed here, and the results directory is left as it
+        # was (two names that differ only in case raise FileExistsError here).
+        shutil.rmtree(root, ignore_errors=True)
+        raise
     return [lambda: shutil.rmtree(root, ignore_errors=True)], [root]
 
 
@@ -380,10 +389,15 @@ def _around(paths: Sequence[Path], homes: Sequence[Path]) -> List[Path]:
     dropping /opt for a HOME of /opt/app/home would take away a tool's installation
     prefix), so such a path is replaced here by what sits beside the way to the
     home: its entries, and the entries of each directory on the way, all but the
-    home and any entry that resolves to or into a home (a link into it). A path that
-    is a home, or sits inside one, is the policy's own grant (the scanned tree under
-    ~, a cache it lists) and is kept as it is. A directory on the way that cannot be
-    listed is left out whole, nothing beneath it granted, rather than the home.
+    home, any entry that resolves to or into a home, and any symlink. A link is not
+    granted by what it names: granted so, a link beside the way (``/opt/x ->
+    /srv/secrets``, or to "/", which a scanned tree holding the home writes itself)
+    would grant its target; Landlock checks the resolved path, so the link stays
+    usable where its target is granted on its own, and _hidden_around passes links
+    over the same way. A path that is a home, or sits inside one, is the policy's
+    own grant (the scanned tree under ~, a cache it lists) and is kept as it is. A
+    directory on the way that cannot be listed is left out whole, nothing beneath
+    it granted, rather than the home.
     """
     kept: List[Path] = []
     seen: Set[Path] = set()
@@ -397,6 +411,8 @@ def _around(paths: Sequence[Path], homes: Sequence[Path]) -> List[Path]:
         except OSError:
             return
         for entry in entries:
+            if entry.is_symlink():
+                continue
             real = _real(entry)
             if any(real == home or _is_within(real, home) for home in homes):
                 continue
@@ -567,11 +583,20 @@ class BwrapBackend(SandboxBackend):
             )
             self._overlay_devices[device] = failure is None
             if failure:
+                # The path and bwrap's own words can name a value an option chose:
+                # redacted with the active scope's env-read values, as run_cleanup
+                # redacts what it logs.
+                from automated_security_helper.utils.sandbox.scope import (
+                    scope_shown_text,
+                )
+
                 ASH_LOGGER.warning(
-                    f"bwrap cannot mount a throwaway overlay over {real.as_posix()} "
-                    f"({failure}): the caches on that filesystem are mounted "
-                    "read-only, and a tool that has to write its cache gets an empty "
-                    "private one."
+                    scope_shown_text(
+                        f"bwrap cannot mount a throwaway overlay over "
+                        f"{real.as_posix()} ({failure}): the caches on that "
+                        "filesystem are mounted read-only, and a tool that has to "
+                        "write its cache gets an empty private one."
+                    )
                 )
         return self._overlay_devices[device]
 
@@ -810,6 +835,24 @@ def _firejail_path(path: Path) -> str:
     return text
 
 
+def _firejail_hidden_path(path: Path) -> str:
+    """``path`` as a --blacklist value, each pattern character replaced with ``?``.
+
+    A blacklist names what the scanner may not see, so a value that matches more
+    than the path is the safe direction: ``?`` matches the character it stands for
+    (and any other), so ``notes~`` stays hidden, and a sibling spelled like it is
+    hidden with it. The siblings _hidden_around lists are the user's own files,
+    whose names ASH does not choose, and one odd name among them must not refuse
+    the whole spawn the way a pattern in a whitelist or a read-write value does. A
+    control character still cannot be written and is refused as _firejail_path
+    refuses it.
+    """
+    text = path.as_posix()
+    if any(ord(ch) < 0x20 for ch in text):
+        return _firejail_path(path)
+    return "".join("?" if ch in _FIREJAIL_PATTERN_CHARACTERS else ch for ch in text)
+
+
 class FirejailBackend(SandboxBackend):
     name = "firejail"
     platforms = ("linux",)
@@ -907,15 +950,14 @@ class FirejailBackend(SandboxBackend):
         # home. HOME's own directory, when it is another one, is blacklisted below.
         # A passwd home of "/" (a service account's) names no home: decided
         # against it, every readable path was "inside the home", so /usr, /etc
-        # and the rest were whitelisted and --private dropped; HOME's directory
-        # is the home then, and the root, which no whitelist or blacklist can
-        # express, is treated as none.
-        passwd_home = _passwd_home()
-        if passwd_home is not None and _real(passwd_home) == Path(
-            _real(passwd_home).anchor
-        ):
-            passwd_home = None
-        home = _real(passwd_home or policy.home)
+        # and the rest were whitelisted and --private dropped. The root stays the
+        # home firejail reads, flagged so that nothing is whitelisted against it
+        # and --private is not asked for. HOME's directory is not put in its
+        # place: firejail would not treat it as the home either, so a path
+        # whitelisted under it would empty the rest of its top-level directory,
+        # and taken for the home it was no longer blacklisted below, which is
+        # what hides its ~/.ssh and ~/.aws.
+        home = _real(_passwd_home() or policy.home)
         home_is_a_root = home == Path(home.anchor)
         home_variable = _real(policy.home)
         tmp_root = _real(_TMP_ROOT)
@@ -937,7 +979,7 @@ class FirejailBackend(SandboxBackend):
         ]
         for path in ipc:
             if path and os.path.lexists(path):
-                cmd.append(f"--blacklist={_firejail_path(Path(path))}")
+                cmd.append(f"--blacklist={_firejail_hidden_path(Path(path))}")
 
         # firejail has no throwaway overlay, so a cache is read-only like the rest;
         # _private_caches gives the tools that write one a private directory.
@@ -968,7 +1010,7 @@ class FirejailBackend(SandboxBackend):
             and home_variable != Path(home_variable.anchor)
             and not _is_within(home_variable, tmp_root)
         ):
-            cmd.append(f"--blacklist={_firejail_path(home_variable)}")
+            cmd.append(f"--blacklist={_firejail_hidden_path(home_variable)}")
         # A directory a link at the top of either home names (~/.local kept on
         # another disk) is part of that home but outside it, where firejail shows
         # everything: it is blacklisted, all but the policy's own paths inside it.
@@ -981,7 +1023,7 @@ class FirejailBackend(SandboxBackend):
             if _is_within(target, tmp_root):
                 continue
             for hidden in _hidden_around(target, readable + writable, homes):
-                cmd.append(f"--blacklist={_firejail_path(hidden)}")
+                cmd.append(f"--blacklist={_firejail_hidden_path(hidden)}")
         # A whitelisted path is mounted read-write whatever --read-only=/ said, so
         # every readable path is made read-only again here, and only then are the
         # writable ones (the results directory, inside the read-only output and
@@ -1323,14 +1365,18 @@ def _system_trust_roots() -> Optional[str]:
 
     Runs outside the sandbox, as ASH, with the same command ca-certs runs. None when
     neither keychain gave a certificate, in which case the tool is left to find its
-    own and fails the way it would have without the export. Only an export that
-    gave certificates is remembered: a failure (a timed-out or refused
-    ``security`` run) is tried again at the next spawn rather than disabling the
+    own and fails the way it would have without the export. An export that gave
+    certificates is remembered, and so is one that ran out of time: ``security``
+    is run at every spawn, so an export that hangs would cost each spawn up to
+    PROBE_TIMEOUT_SECONDS per keychain, and a hang is not a condition the next
+    spawn finds cured. A run that failed in time (refused, exit non-zero, no
+    certificate) is tried again at the next spawn rather than disabling the
     export for the rest of the process.
     """
     if _trust_roots_cache:
         return _trust_roots_cache[0]
     exported = []
+    timed_out = False
     for keychain in _TRUST_ROOT_KEYCHAINS:
         if not Path(keychain).exists():
             continue
@@ -1343,6 +1389,10 @@ def _system_trust_roots() -> Optional[str]:
                 timeout=PROBE_TIMEOUT_SECONDS,
                 check=False,
             )
+        except subprocess.TimeoutExpired as e:
+            ASH_LOGGER.debug(f"Exporting root certificates from {keychain}: {e}")
+            timed_out = True
+            continue
         except (OSError, subprocess.SubprocessError) as e:
             ASH_LOGGER.debug(f"Exporting root certificates from {keychain}: {e}")
             continue
@@ -1353,7 +1403,14 @@ def _system_trust_roots() -> Optional[str]:
         ASH_LOGGER.warning(
             "Could not export the system root certificates; a sandboxed scanner "
             "that reads them itself (semgrep) may fail to verify TLS."
+            + (
+                " The export ran out of time and is not tried again in this run."
+                if timed_out
+                else ""
+            )
         )
+        if timed_out:
+            _trust_roots_cache.append(None)
         return None
     _trust_roots_cache.append(pem)
     return pem

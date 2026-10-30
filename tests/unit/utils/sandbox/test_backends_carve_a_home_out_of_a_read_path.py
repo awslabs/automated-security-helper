@@ -153,6 +153,32 @@ def test_landlock_grants_what_sits_beside_the_home_not_the_path_holding_it(
     sys.platform == "win32",
     reason="Landlock is a Linux backend; its plan document is read on POSIX hosts",
 )
+def test_landlock_grants_no_link_beside_the_way_by_what_it_names(
+    prefix, tmp_path, monkeypatch
+):
+    """A link beside the way to the home grants neither its target nor the root.
+
+    The entries beside the way are granted by their real paths, and a link's real
+    path is whatever it names: a scanned tree that holds the home could place
+    ``<prefix>/escape -> /srv/secrets`` or ``<prefix>/app/all -> /`` and be granted
+    them. Links are passed over; a tool beside the way is still granted.
+    """
+    secrets = tmp_path / "srv" / "secrets"
+    secrets.mkdir(parents=True)
+    (prefix.root / "escape").symlink_to(secrets, target_is_directory=True)
+    (prefix.root / "app" / "all").symlink_to(Path("/"), target_is_directory=True)
+    granted = _landlock_read_grants(_policy(tmp_path / "src"), tmp_path, monkeypatch)
+
+    assert _real(secrets) not in granted, sorted(map(str, granted))
+    assert Path("/") not in granted
+    assert _real(prefix.root / "tool") in granted
+    assert _real(prefix.root / "app" / "other") in granted
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Landlock is a Linux backend; its plan document is read on POSIX hosts",
+)
 def test_landlock_keeps_the_policys_own_path_inside_the_home(
     prefix, tmp_path, monkeypatch
 ):
