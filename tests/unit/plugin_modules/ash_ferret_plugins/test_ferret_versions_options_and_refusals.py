@@ -356,6 +356,38 @@ def test_control_the_same_link_on_the_substring_line_refuses_the_target(
     assert started == []
 
 
+@POSIX_ONLY
+def test_a_link_whose_ignored_directory_fell_past_the_budget_refuses_the_target(
+    mock_plugin_context, tmp_path, monkeypatch
+):
+    """The budget admits the mandatory value (nothing: no operator patterns, no
+    output directory inside the target) but not the ignored directory's pattern, so
+    the ignore step leaves it out; the link under it then needs its own pattern,
+    which is longer still, so the value is past the budget and the target is
+    refused with the count rather than run with the link readable."""
+    root = _tree(mock_plugin_context.source_dir, ["vendor/x.js"])
+    outside = tmp_path / "outside.js"
+    outside.write_text("x\n", encoding="utf-8")
+    (root / "vendor" / "leaving.js").symlink_to(outside)
+    directory_pattern = os.fspath(root / "vendor") + os.sep + "*"
+    monkeypatch.setattr(
+        ferret_scanner, "_EXCLUDE_VALUE_BUDGET", len(directory_pattern) - 1
+    )
+    scanner = _scanner(mock_plugin_context)
+    started: list[list[str]] = []
+
+    with pytest.raises(ScannerError, match="leaving the tree under ignored paths"):
+        _scan(
+            scanner,
+            _run_double({"returncode": 0}, EMPTY_SARIF, started),
+            root,
+            [IgnorePathWithReason(path="vendor/", reason="third party")],
+        )
+
+    assert started == []
+    assert scanner.exit_code is None
+
+
 # --- the mandatory exclude budget -----------------------------------------------------
 
 
