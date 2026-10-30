@@ -35,6 +35,9 @@ The contract these cases pin:
   budget cancels one project and the run goes on) records the FAILED outcome
   with ``output_written`` set when its output had been handed, so the masking
   pass rewrites the reports it left, and unset when the cancel came first;
+- a scan that saved its files and then raised, with nothing abandoning it,
+  claims the gate and keeps what it saved for the masking pass, as every other
+  raise that is not an abandon does;
 - the discard removes the two things a scan writes, the results file and the
   report directory, and leaves everything else an operator may have kept there;
 - a raise AFTER the scan returned (the reduction: the verdict's file reads, the
@@ -51,6 +54,8 @@ import logging
 import sys
 import threading
 from concurrent.futures import Future
+from pathlib import Path
+from typing import List, Optional
 
 import pytest
 
@@ -79,32 +84,59 @@ needs_symlinks = pytest.mark.skipif(
 def _reset_fake():
     FakeOrchestrator.built = []
     FakeOrchestrator.behaviour = {}
+    _SavesThenRaises.error = RuntimeError("boom")
     yield
     FakeOrchestrator.built = []
     FakeOrchestrator.behaviour = {}
+    # A class attribute the cases below reassign: back to the default, so a case
+    # that forgets to set it does not inherit the previous case's error.
+    _SavesThenRaises.error = RuntimeError("boom")
+
+
+class _DiscardWatch:
+    """The one discard of ``expected``, and whether a results file was there to remove."""
+
+    def __init__(self, expected: Path) -> None:
+        self.expected = expected
+        self.done = threading.Event()
+        self.had_results: Optional[bool] = None
+        self.other_outputs: List[Path] = []
 
 
 @pytest.fixture
-def discard_done(monkeypatch):
-    """An event set once the real discard has run, for the late-worker cases.
+def discard_watch(monkeypatch):
+    """A watch on the real discard of ONE project's output, for the late-worker cases.
 
     ``_run`` returns with the pool shut down ``wait=False``, so the worker is
     still blocked when it returns and the scan's files do not exist yet. An
-    assertion made then passes with or without the discard. The signal used to be
-    a log line any late worker in the same xdist worker could have written; the
-    discard itself is tied to this call.
+    assertion made then passes with or without the discard. The patched discard
+    is module-global, so a late worker of another test in the same process could
+    reach it too: the watch acts only on the path it was given and passes any
+    other through, and it records whether the results file existed right before
+    the real discard ran, so "the file is gone" cannot pass because the scan
+    never wrote it.
     """
-    done = threading.Event()
-    real = execution._discard_project_output
 
-    def wrapped(project_output):
-        try:
-            real(project_output)
-        finally:
-            done.set()
+    def watch(expected: Path) -> _DiscardWatch:
+        made = _DiscardWatch(expected)
+        real = execution._discard_project_output
 
-    monkeypatch.setattr(execution, "_discard_project_output", wrapped)
-    return done
+        def wrapped(project_output):
+            if Path(project_output) != made.expected:
+                made.other_outputs.append(Path(project_output))
+                return real(project_output)
+            made.had_results = (
+                Path(project_output) / "ash_aggregated_results.json"
+            ).exists()
+            try:
+                real(project_output)
+            finally:
+                made.done.set()
+
+        monkeypatch.setattr(execution, "_discard_project_output", wrapped)
+        return made
+
+    return watch
 
 
 class _SavesThenRaises(FakeOrchestrator):
@@ -125,7 +157,7 @@ class _SavesThenRaises(FakeOrchestrator):
         raise type(self).error
 
 
-def test_the_output_the_scan_saved_is_removed_after_an_abandon(tmp_path, discard_done):
+def test_the_output_the_scan_saved_is_removed_after_an_abandon(tmp_path, discard_watch):
     _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"))
     release = threading.Event()
     FakeOrchestrator.behaviour["wedged"] = {
@@ -135,16 +167,21 @@ def test_the_output_the_scan_saved_is_removed_after_an_abandon(tmp_path, discard
     }
     project_output = tmp_path / "out" / "projects" / "wedged"
     results = project_output / "ash_aggregated_results.json"
+    watch = discard_watch(project_output)
     try:
         outcome = _run(tmp_path, plan, project_timeout=PROJECT_TIMEOUT)
         # Let the abandoned worker finish: the scan saves its file and its
         # reports, then the workspace layer sees the abandon.
         release.set()
-        finished = discard_done.wait(5.0)
+        finished = watch.done.wait(5.0)
     finally:
         release.set()
 
     assert finished, "the abandoned worker never ran its discard"
+    assert watch.had_results is True, (
+        "the scan saved no results file, so there was nothing for the discard to "
+        "remove and the assertion below would pass on its own"
+    )
     entry = outcome.payload.projects[0]
     assert entry.status is ProjectRunStatus.FAILED
     assert entry.finding_count == 0
@@ -287,6 +324,34 @@ def test_a_worker_that_raises_claims_the_gate_so_a_later_abandon_cannot_land(
     )
 
 
+def test_a_worker_that_raises_after_saving_with_the_gate_untaken_keeps_its_output(
+    tmp_path,
+):
+    """The shape the case above leaves open: the scan saved its files and then
+    raised, and nothing abandoned it. The worker claims the gate and records
+    FAILED, and what the scan saved stays, as for every other raise that is not
+    an abandon: the masking pass rewrites it, and a poll abandon landing
+    afterwards finds the decision taken, so no discard follows either."""
+    _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"))
+    _SavesThenRaises.error = RuntimeError("boom")
+    project_output = tmp_path / "out" / "projects" / "broken"
+    gate = execution._AbandonGate()
+
+    run = execution._scan_one_project(
+        plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
+    )
+
+    assert FakeOrchestrator.built, "no orchestrator was built: the scan never ran"
+    assert run.outcome.status is ProjectRunStatus.FAILED
+    assert "boom" in (run.outcome.error or ""), run.outcome.error
+    assert run.output_written is True, (
+        "the output was handed before the raise; the masking pass has to cover it"
+    )
+    assert gate.set() is False, "the worker that raised must have claimed the gate"
+    assert (project_output / "ash_aggregated_results.json").exists()
+    assert (project_output / "reports" / "ash.sarif").exists()
+
+
 def test_a_worker_abandoned_before_it_raised_discards_what_the_scan_left(tmp_path):
     """Must-not-regress control: an abandon that came first still discards.
 
@@ -313,9 +378,10 @@ def test_a_worker_abandoned_before_it_raised_discards_what_the_scan_left(tmp_pat
 
 def test_a_worker_stopped_by_its_abandons_cancel_discards_what_the_scan_left(tmp_path):
     """``ScanCancelled`` is a BaseException: the ``except Exception`` arm never
-    sees it, and the worker records the project cancelled. The abandon's cancel
-    is the ordinary way an abandoned scan stops, so the output it saved before
-    the cancel reached it is discarded as a raise's is."""
+    sees it, and the worker records the project FAILED with the error
+    ``cancelled``. The abandon's cancel is the ordinary way an abandoned scan
+    stops, so the output it saved before the cancel reached it is discarded as a
+    raise's is."""
     _, plan = _make_workspace(tmp_path, ("stopped", "MEDIUM"))
     _SavesThenRaises.error = ScanCancelled("the scan was cancelled")
     project_output = tmp_path / "out" / "projects" / "stopped"
@@ -326,6 +392,9 @@ def test_a_worker_stopped_by_its_abandons_cancel_discards_what_the_scan_left(tmp
         plan.projects[0], _settings(tmp_path), _SavesThenRaises.create, gate
     )
 
+    # The scan ran and saved before its cancel: the discard measured here is the
+    # cancel arm's, not an early return on the already-abandoned gate.
+    assert FakeOrchestrator.built, "no orchestrator was built: the scan never ran"
     assert run.outcome.status is ProjectRunStatus.FAILED
     assert run.outcome.error == "cancelled"
     assert not (project_output / "ash_aggregated_results.json").exists(), (
@@ -352,7 +421,7 @@ def test_a_cancel_that_is_not_an_abandon_leaves_the_scans_output(tmp_path):
     assert run.outcome.status is ProjectRunStatus.FAILED
     assert run.outcome.error == "cancelled"
     assert (project_output / "ash_aggregated_results.json").exists()
-    assert gate.set() is False, "the cancelled worker claimed its gate"
+    assert gate.set() is False, "the cancelled worker did not claim its gate"
     assert run.output_written is True, (
         "a project cancelled after its output was handed must be masked like a "
         "project that raised after writing"
@@ -449,9 +518,10 @@ def test_a_project_that_finished_before_the_poll_read_the_clock_is_not_abandoned
         if widened["count"] == 0 and still_pending:
             # The first poll returns nothing done; before the loop reads the
             # clock, every pending future finishes. The old loop abandoned them.
+            # Waited for, not read: a worker's own exception stays on its future
+            # for the loop to collect instead of raising out of the patched wait.
             widened["count"] += 1
-            for future in still_pending:
-                future.result(timeout=5.0)
+            real_wait(list(still_pending), timeout=5.0)
         return done, still_pending
 
     monkeypatch.setattr(execution, "wait", wait_then_let_it_finish)

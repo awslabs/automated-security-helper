@@ -29,6 +29,8 @@ The contract these cases pin:
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from automated_security_helper.workspace.aggregation import (
@@ -87,33 +89,62 @@ def _placed(run: dict) -> tuple[str, str | None, str | None]:
     )
 
 
-def test_a_src_layout_finding_is_not_relocated_to_the_project_root(project):
+#: The rebase halves build their URIs from the project's own path with its
+#: leading separator stripped, so the old second reading lands INSIDE the
+#: project; a drive-qualified Windows path has no separator to strip.
+needs_a_rooted_posix_path = pytest.mark.skipif(
+    sys.platform == "win32", reason="a drive-qualified path has no separator to strip"
+)
+
+
+def test_a_src_layout_finding_is_not_relocated_to_the_project_root():
+    """The pure functions, read as text on every platform, with the literal
+    ``/src/api`` the container shape produces."""
     assert project_relative_uri("src/api/__init__.py", "/src/api") is NOT_ABSOLUTE
     assert (
         to_workspace_uri("src/api/__init__.py", "api", "/src/api")
         == "api/src/api/__init__.py"
     )
 
-    rebased, unconvertible = rebase_run_for_project(
-        _run("src/api/__init__.py"), project
-    )
+
+@needs_a_rooted_posix_path
+def test_a_src_layout_finding_is_not_relocated_through_the_rebase(project):
+    """Through ``rebase_run_for_project``, with a URI that spells the project's
+    own absolute path minus its leading separator.
+
+    A literal ``src/api/__init__.py`` against a project under ``tmp_path`` never
+    landed inside it once the separator was restored, so the old double reading
+    returned project-relative there too and the assertion passed on the old
+    code. Built from the project's path, the restored form IS the project's
+    ``__init__.py``, the shape the old code relocated to the root.
+    """
+    inside = project.path.lstrip("/")
+    uri = f"{inside}/__init__.py"
+
+    rebased, unconvertible = rebase_run_for_project(_run(uri), project)
 
     assert unconvertible == 0
-    assert _placed(rebased) == (
-        "src/api/__init__.py",
-        PROJECT_ROOT_URI_BASE_ID,
-        "api/src/api/__init__.py",
-    )
+    assert _placed(rebased) == (uri, PROJECT_ROOT_URI_BASE_ID, f"api/{uri}")
 
 
-def test_a_rooted_uri_is_reduced_once_and_both_coordinates_agree(project, tmp_path):
-    """Control: the absolute shape still reduces, and reduces only once."""
-    absolute = (tmp_path / "src" / "api" / "src" / "api" / "models.py").as_posix()
+@needs_a_rooted_posix_path
+def test_a_rooted_uri_is_reduced_once_and_both_coordinates_agree(project):
+    """Control: the absolute shape reduces, and reduces only once.
+
+    The reduced URI spells the project's path again, so a second reduction
+    would move the finding to ``models.py`` at the project root and the artifact
+    ``uri`` and the ``workspace_uri`` would name two files, the drift the module
+    docstring describes; a reduced ``src/api/models.py`` never re-landed inside
+    the project and could not show it.
+    """
+    inside = project.path.lstrip("/")
+    absolute = f"{project.path}/{inside}/models.py"
+
     rebased, unconvertible = rebase_run_for_project(_run(absolute), project)
 
     assert unconvertible == 0
     assert _placed(rebased) == (
-        "src/api/models.py",
+        f"{inside}/models.py",
         PROJECT_ROOT_URI_BASE_ID,
-        "api/src/api/models.py",
+        f"api/{inside}/models.py",
     )

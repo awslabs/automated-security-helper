@@ -277,7 +277,15 @@ def test_a_threshold_read_from_the_environment_grades_and_is_not_published(
     assert entry.actionable_finding_count == 1
     # Not published: no entry for bandit, so a reader grades it by the project's.
     assert entry.scanner_thresholds == {}
-    assert "CRITICAL" not in outcome.results_path.read_text("utf-8")
+    # The same, read from the unified file as written: the threshold fields the
+    # project row carries name no bandit entry and carry no value read from the
+    # environment. (A substring scan of the whole file read every spelling of
+    # the word, so any later field spelled CRITICAL would have failed it.)
+    written = json.loads(outcome.results_path.read_text("utf-8"))["projects"][0]
+    assert "bandit" not in written["scanner_thresholds"]
+    assert "CRITICAL" not in written["scanner_thresholds"].values()
+    assert written["severity_threshold"] == "MEDIUM"
+    assert written["withheld_scanner_thresholds"] == ["bandit"]
     # Red at the base: nothing said the fallback was not the verdict's gate, so
     # the merged reporters and the result filters regraded bandit's HIGH at
     # MEDIUM (actionable) while the verdict had not counted it. The name is

@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """An abandoned worker with a caller-given event holds its slot after the grace.
 
 ``_run_projects`` decides when a queued project is given up on from the
@@ -90,6 +93,12 @@ def test_a_stoppable_worker_that_never_stops_is_counted_held_after_the_grace(
     freed the slot. Now ``queued`` is failed as never started once the grace has
     passed; the pool still waits for ``wedged`` at shutdown, as the caller's
     event asks.
+
+    The wedged scan is let go the moment the pool gives up on ``queued``
+    (``_close_never_started`` is the one call that does so), not after a
+    wall-clock margin: a slow poll on a loaded runner cannot let ``queued`` run
+    first, and a pool that never gives up leaves the scan blocked until its own
+    bound, after which ``queued`` runs and the last assertion reads it.
     """
     monkeypatch.setattr(
         execution_module, "_ABANDONED_STOP_GRACE_SECONDS", GRACE_SECONDS
@@ -98,9 +107,17 @@ def test_a_stoppable_worker_that_never_stops_is_counted_held_after_the_grace(
     scan = _AScanThatIgnoresItsScope(release)
     monkeypatch.setattr(execution_module, "_scan_one_project", scan)
     events = {"wedged": CancelEvent(), "queued": CancelEvent()}
+    real_close = execution_module._close_never_started
 
-    end_the_wedged_scan = threading.Timer(1.5, release.set)
-    end_the_wedged_scan.start()
+    def release_once_queued_is_given_up(future, gate, key):
+        closed = real_close(future, gate, key)
+        if key == "queued":
+            release.set()
+        return closed
+
+    monkeypatch.setattr(
+        execution_module, "_close_never_started", release_once_queued_is_given_up
+    )
     try:
         collected = _run_projects(
             [_project(tmp_path, "wedged"), _project(tmp_path, "queued")],
@@ -110,7 +127,6 @@ def test_a_stoppable_worker_that_never_stops_is_counted_held_after_the_grace(
             cancel_events=events,
         )
     finally:
-        end_the_wedged_scan.cancel()
         release.set()
 
     assert collected["wedged"].outcome.error.startswith("timed out"), collected

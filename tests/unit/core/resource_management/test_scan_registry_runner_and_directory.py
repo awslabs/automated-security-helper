@@ -803,6 +803,31 @@ class TestProgressOfASupersededScanReadsNoFiles:
         assert registry.get_scan(old).later_scan_ids == [new]
         assert registry.check_scan_progress(old)["superseded_by"] == [new]
 
+    def test_the_claim_is_a_flag_on_the_entry_and_a_second_record_is_a_no_op(
+        self, tmp_path
+    ):
+        """What makes "once" hold: the entry's ``claimed_output_tree`` flag, False
+        until the scan claims its tree and True from then on, and a direct second
+        record of a claimed entry appends nothing."""
+        registry = ScanRegistry()
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = project / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        old = _register(registry, project, output)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        new = _register(registry, project, output)
+        assert registry.get_scan(new).claimed_output_tree is False
+        assert registry.get_scan(old).later_scan_ids == []
+
+        registry.update_scan_status(new, MCScanStatus.RUNNING)
+
+        assert registry.get_scan(new).claimed_output_tree is True
+        assert registry.get_scan(old).later_scan_ids == [new]
+        with registry._registry_lock:
+            registry._record_supersession(registry.get_scan(new))
+        assert registry.get_scan(old).later_scan_ids == [new]
+
     def test_supersession_survives_the_later_scans_removal(self, tmp_path):
         """Worked out from registry membership alone, cleaning the later scan
         up made the old scan read the later scan's files as its own again."""

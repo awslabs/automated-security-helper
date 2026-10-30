@@ -105,6 +105,12 @@ def _result(plan, settings) -> WorkspaceRunResult:
     )
 
 
+def _a_scan_that_must_not_run(*_args, **_kwargs):
+    """Fail fast: the paths that use this never reach ``execute_workspace``, and a
+    regression that did would otherwise start a real scan under the test."""
+    raise AssertionError("execute_workspace ran on a path that must not reach it")
+
+
 class _Claim:
     """The slice of ``_WorkspaceScanClaim`` that ``_execute`` touches, recording calls."""
 
@@ -138,21 +144,55 @@ class TestTheGitignoreIsWrittenOnceTheOutputDirectoryExists:
         assert set(outputs) == {"api"}
         writer.assert_not_called()
 
-    def test_the_writer_is_called_after_the_directories_exist(self, tmp_path):
-        """The call-site order: create, then write, so a first scan gets its file."""
-        plan = _plan(tmp_path)
-        settings = _settings(tmp_path)
-        outputs = workspace_module._project_outputs(plan, settings)
-        output_dir = Path(settings.output_dir)
-        assert not output_dir.exists()
+    def test_the_entry_point_writes_the_gitignore_after_it_creates_the_output_root(
+        self, tmp_path, monkeypatch
+    ):
+        """The call-site order, read from the real entry point: ``mcp_scan_workspace``
+        creates the output root, then writes the file into it, so a first scan
+        gets its file.
 
-        workspace_module._create_project_outputs(outputs, settings.output_dir)
-        wrote = workspace_module.ignore_output_dir_in_git(
-            plan.workspace_root, settings.output_dir
+        The earlier form of this test called the two steps itself, in the right
+        order, and accepted a writer that wrote nothing; a call site put back to
+        write-before-mkdir kept it green. Here the two steps are the production
+        ones, recorded in the order the entry point calls them, with the scan
+        itself stubbed.
+        """
+        for name in (
+            "ASH_MCP_ALLOWED_ROOTS",
+            "ASH_MCP_ALLOWED_CONFIG_ROOTS",
+            "ASH_MCP_WORKSPACE_ROOT",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        plan = _plan(tmp_path)
+        output_dir = Path(plan.workspace_root) / ".ash" / "ash_output"
+        assert not output_dir.exists()
+        order: List[str] = []
+        real_create = workspace_module._create_project_outputs
+        real_ignore = workspace_module.ignore_output_dir_in_git
+
+        def create(outputs, root):
+            order.append("create")
+            return real_create(outputs, root)
+
+        def ignore(source, output):
+            wrote = real_ignore(source, output)
+            order.append(f"gitignore wrote={wrote}")
+            return wrote
+
+        monkeypatch.setattr(workspace_module, "_create_project_outputs", create)
+        monkeypatch.setattr(workspace_module, "ignore_output_dir_in_git", ignore)
+        monkeypatch.setattr(
+            workspace_module, "execute_workspace", lambda p, s, **k: _result(p, s)
         )
 
+        answer = asyncio.run(
+            workspace_module.mcp_scan_workspace(workspace_file=plan.workspace_file)
+        )
+
+        assert answer.get("success") is True, answer
+        assert order == ["create", "gitignore wrote=True"], order
         assert output_dir.is_dir()
-        assert wrote is False or (output_dir / ".gitignore").exists()
+        assert (output_dir / ".gitignore").exists()
 
     def test_the_output_root_is_created_when_no_project_is_active(self, tmp_path):
         """Red at the base: the root existed only as a side effect of the project
@@ -557,7 +597,14 @@ class TestAThreadTheTaskAbandonedSettlesNothing:
         """
         order: List[str] = []
 
-        with patch.object(workspace_module, "ScanPresence") as presence:
+        with (
+            patch.object(
+                workspace_module,
+                "execute_workspace",
+                side_effect=_a_scan_that_must_not_run,
+            ),
+            patch.object(workspace_module, "ScanPresence") as presence,
+        ):
             presence.return_value.__enter__.return_value = None
             presence.return_value.__exit__.return_value = False
             result = asyncio.run(
@@ -614,6 +661,11 @@ class TestAWorkerThatMissedTheClaimReleasesNothing:
         claim.call_returns()
 
         with (
+            patch.object(
+                workspace_module,
+                "execute_workspace",
+                side_effect=_a_scan_that_must_not_run,
+            ),
             patch.object(workspace_module, "ScanPresence") as presence,
             pytest.raises(RuntimeError, match="cancelled before it started"),
         ):
