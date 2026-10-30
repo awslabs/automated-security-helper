@@ -20,6 +20,7 @@ The stat's error is raised from the path's ``__fspath__``, which ``os.stat`` and
 from __future__ import annotations
 
 import errno
+import os
 
 import pytest
 
@@ -49,8 +50,12 @@ class _RaisesOnStat:
         raise self._error
 
 
-def _einval(winerror: int | None) -> OSError:
-    error = OSError(errno.EINVAL, "Invalid argument")
+#: What Windows says for a logon failure; the errno's own text is "Invalid argument".
+WINDOWS_TEXT = "The user name or password is incorrect"
+
+
+def _einval(winerror: int | None, strerror: str = "Invalid argument") -> OSError:
+    error = OSError(errno.EINVAL, strerror)
     if winerror is not None:
         error.winerror = winerror  # type: ignore[attr-defined]
     return error
@@ -74,11 +79,27 @@ def test_an_invalid_name_is_missing_with_or_without_a_windows_error():
     ids=["logon-failure", "network-name-deleted", "cant-access-file"],
 )
 def test_any_other_windows_error_behind_an_einval_is_unreadable(winerror):
-    problem = _problem(_einval(winerror))
+    problem = _problem(_einval(winerror, WINDOWS_TEXT))
 
     assert problem.kind == UNREADABLE
-    assert problem.code == "EINVAL"
+    # The Windows error is kept, not folded into "EINVAL": a refusal prints the
+    # code, and its cause carries the Windows text.
+    assert problem.code == f"WinError {winerror}"
     assert problem.number == errno.EINVAL
+    assert problem.strerror == WINDOWS_TEXT
+    cause = problem.cause()
+    assert cause.errno == errno.EINVAL
+    assert cause.strerror == WINDOWS_TEXT
+    assert cause.filename is None
+
+
+def test_an_error_with_no_stored_text_still_reads_from_its_errno():
+    """The control: every other kind stores no strerror, so its cause is the
+    errno's own text as before."""
+    problem = _problem(OSError(errno.EACCES, "Permission denied"))
+
+    assert problem.strerror == ""
+    assert problem.cause().strerror == os.strerror(errno.EACCES)
 
 
 def test_an_enoent_with_a_windows_error_is_still_missing():

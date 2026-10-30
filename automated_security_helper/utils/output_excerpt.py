@@ -20,6 +20,7 @@ so a value is matched whole, never split by the cut's marker.
 from __future__ import annotations
 
 import re
+import string
 from typing import Iterable
 
 from automated_security_helper.utils.terminal_text import (
@@ -30,26 +31,74 @@ from automated_security_helper.utils.terminal_text import (
 #: Share of the limit given to the start of the text; the rest goes to the end.
 _HEAD_SHARE = 4
 
-#: The text of an escape as the sinks and :func:`controls_shown` write one, with
-#: the run of backslashes before it. A cut inside one would leave half an escape
-#: on each side of the marker, or a tail that starts inside a backslash run and
-#: so reads as an escape the text did not hold.
-_ESCAPE_TEXT = re.compile(r"\\+(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})?")
+#: The text after a backslash that makes an escape as the sinks and
+#: :func:`controls_shown` write one, by its letter: the hex digits it takes.
+_ESCAPE_DIGITS = {"x": 2, "u": 4, "U": 8}
+
+#: The most characters a cut is moved back to the start of the backslash run it
+#: fell in (or the run before the escape text it fell in). A longer run is cut
+#: near the cut instead, so a run the length of the text cannot make an excerpt
+#: the length of the text.
+_MOVE_LIMIT = 16
+
+
+def _is_hex(text: str) -> bool:
+    return all(character in string.hexdigits for character in text)
+
+
+def _escape_letter_at(text: str, index: int) -> int:
+    """The position of the letter of an escape's text that *index* falls inside
+    (after the escape's last backslash, before its end), or -1.
+
+    The escape's text is a backslash, ``x``, ``u`` or ``U``, and the two, four or
+    eight hex digits that letter takes.
+    """
+    for letter in range(max(1, index - 8), index + 1):
+        digits = _ESCAPE_DIGITS.get(text[letter])
+        if (
+            digits is not None
+            and text[letter - 1] == "\\"
+            and index < letter + 1 + digits
+            and len(text) >= letter + 1 + digits
+            and _is_hex(text[letter + 1 : letter + 1 + digits])
+        ):
+            return letter
+    return -1
+
+
+def _run_start(text: str, end: int) -> int:
+    """The start of the run of backslashes that ends just before *end*."""
+    start = end
+    while start > 0 and text[start - 1] == "\\":
+        start -= 1
+    return start
 
 
 def _cut_outside_escapes(text: str, index: int) -> int:
     """*index* moved back to the start of the escape text, or the backslash run,
     it would otherwise fall inside of; unchanged when it falls between two
-    characters that belong to no escape."""
-    start = max(0, index - 11)
-    # The window can open inside a long backslash run, and a match found from
-    # there starts mid-run: the cut moved back to it left the run's other half on
-    # the other side. The window opens at the start of the run it fell in.
-    while start > 0 and text[start - 1] == "\\":
-        start -= 1
-    for match in _ESCAPE_TEXT.finditer(text, start, min(len(text), index + 11)):
-        if match.start() < index < match.end():
-            return match.start()
+    characters that belong to no escape.
+
+    The move is bounded (:data:`_MOVE_LIMIT`). Past it the cut stays near where it
+    fell and keeps its parity in the run: a tail that begins with a run reads the
+    same, escape or pairs of backslashes, only if its length has the parity of the
+    run it was cut from, so the cut lands an even number of characters from the
+    run's start, one character earlier at most when it fell on an odd one. A cut
+    inside the text of an escape after a long run goes to the escape's last
+    backslash when the run is odd (the escape stays whole in the tail) and to the
+    escape's letter when it is even (the text after the pairs is plain)."""
+    if not 0 < index < len(text):
+        return index
+    letter = _escape_letter_at(text, index)
+    if letter != -1:
+        run_start = _run_start(text, letter)
+        if index - run_start <= _MOVE_LIMIT:
+            return run_start
+        return letter - 1 if (letter - run_start) % 2 else letter
+    if text[index] == "\\" and text[index - 1] == "\\":
+        run_start = _run_start(text, index)
+        inside = index - run_start
+        return run_start if inside <= _MOVE_LIMIT else index - inside % 2
     return index
 
 
@@ -61,7 +110,9 @@ def head_and_tail(text: str, limit: int) -> str:
     characters were left out. The marker itself is not counted against ``limit``.
     Neither cut lands inside an escape's text (``\\xNN``, ``\\uNNNN``, a backslash
     run): such a cut is moved back to the escape's start, so the head ends before it
-    and the tail begins with it whole.
+    and the tail begins with it whole. The move is bounded: for a run longer than
+    that the cut stays near where it fell and keeps the parity of the run, so the
+    excerpt stays near ``limit`` however long the run is (:func:`_cut_outside_escapes`).
     """
     if limit <= 0:
         return ""

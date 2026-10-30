@@ -92,11 +92,11 @@ def test_the_tail_does_not_start_inside_a_backslash_run():
 
 
 def test_the_head_does_not_end_inside_a_long_backslash_run():
-    # limit 80: the head would end at index 20, inside a run of 40 backslashes
-    # written over 1-40. The window the cut looks at opens 11 back, inside the run;
-    # the cut must move to the run's start, index 1, not to where the window opened.
-    text = "x" + "\\" * 40 + "y" * 100
-    excerpt = head_and_tail(text, 80)
+    # limit 52: the head would end at index 13, inside a run of 14 backslashes
+    # written over 1-14. The cut looks 11 back, which is inside the run; it must
+    # move to the run's start, index 1, not to where that window opened.
+    text = "x" + "\\" * 14 + "y" * 100
+    excerpt = head_and_tail(text, 52)
     head, _, _ = excerpt.partition(" ...[")
     assert head == "x", head
 
@@ -109,6 +109,63 @@ def test_the_tail_does_not_start_inside_a_long_backslash_run():
     excerpt = head_and_tail(text, 60)
     _, _, tail = excerpt.partition("]... ")
     assert tail == "\\" * 40 + "z" * 20, tail
+
+
+#: What the marker and its spaces add to an excerpt beyond the limit.
+MARKER_ALLOWANCE = 64
+
+
+def test_a_run_longer_than_the_limit_does_not_grow_the_excerpt():
+    """A cut inside a long run moves a bounded distance, so a tool that echoes a
+    file holding 50,000 backslashes cannot make an excerpt 25 times its limit."""
+    text = "a" * 3000 + "\\" * 50000 + "b" * 10
+
+    excerpt = head_and_tail(text, 2000)
+
+    assert len(excerpt) <= 2000 + MARKER_ALLOWANCE, len(excerpt)
+
+
+def test_a_text_that_starts_with_a_long_run_is_still_cut():
+    text = "\\" * 5000 + "reason"
+
+    excerpt = head_and_tail(text, 200)
+
+    assert len(excerpt) <= 200 + MARKER_ALLOWANCE, len(excerpt)
+    assert excerpt.endswith("reason"), excerpt[-20:]
+
+
+def test_a_cut_in_a_long_run_keeps_the_parity_of_what_the_tail_begins_with():
+    """The run is odd (1001), then ``x41``: the tail reads it as an escape. The
+    cut would fall an odd distance into the run, so it moves one back and the
+    tail's leading run is odd too (197), where one character later it would be
+    even and read as pairs of backslashes."""
+    text = "a" * 10 + "\\" * 1001 + "x41" + "b" * 101
+
+    excerpt = head_and_tail(text, 400)
+
+    _, _, tail = excerpt.partition("]... ")
+    leading = len(tail) - len(tail.lstrip("\\"))
+    assert leading == 197, leading
+    assert tail[leading:].startswith("x41"), tail[leading : leading + 10]
+
+
+def test_a_cut_inside_an_escape_after_an_odd_long_run_keeps_the_escape_whole():
+    text = "a" * 10 + "\\" * 1001 + "x41" + "b" * 298
+
+    excerpt = head_and_tail(text, 400)
+
+    _, _, tail = excerpt.partition("]... ")
+    assert tail.startswith("\\x41b"), tail[:10]
+
+
+def test_a_cut_inside_the_text_after_an_even_long_run_starts_at_the_letter():
+    """Pairs of backslashes, then the plain text ``x41``: nothing to keep whole."""
+    text = "a" * 10 + "\\" * 1000 + "x41" + "b" * 298
+
+    excerpt = head_and_tail(text, 400)
+
+    _, _, tail = excerpt.partition("]... ")
+    assert tail.startswith("x41b"), tail[:10]
 
 
 def test_a_cut_between_plain_characters_is_where_it_was():

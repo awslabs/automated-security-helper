@@ -63,10 +63,13 @@ class StatProblem:
 
     ``kind`` is MISSING, LOOP or UNREADABLE. ``code`` is the errno's name
     (``"EACCES"``; ``"EINVAL"`` for a LOOP Windows reported that way), the
-    errno as text when it has no name, NO_ERROR_CODE when the error carried
-    none, and empty for a path the OS cannot take.
+    errno as text when it has no name, ``"WinError <n>"`` for an EINVAL Windows
+    made from an error of its own (a logon failure, a deleted network name),
+    NO_ERROR_CODE when the error carried none, and empty for a path the OS
+    cannot take.
     ``strerror`` is the error's own strerror, kept for an error with no errno,
-    whose message cannot come from ``os.strerror``.
+    whose message cannot come from ``os.strerror``, and for a Windows error,
+    whose text says more than the errno's.
     """
 
     kind: str
@@ -80,10 +83,11 @@ class StatProblem:
         can be one the configuration read from the environment; and
         ``os.strerror`` takes only an int, so an error that carried no errno
         is described by its own strerror, or by its code when it has none,
-        instead of raising a TypeError in its place.
+        instead of raising a TypeError in its place. A stored strerror (a Windows
+        error's) is used over the errno's text.
         """
         if isinstance(self.number, int):
-            return OSError(self.number, os.strerror(self.number))
+            return OSError(self.number, self.strerror or os.strerror(self.number))
         return OSError(None, self.strerror or self.code)
 
 
@@ -119,7 +123,10 @@ def stat_named_path(
         # logon failure, a network name deleted, a file the system cannot
         # access): the path may be there and cannot be read, so it is not the
         # "not found" that sends a scan to the default configuration.
-        return StatProblem(UNREADABLE, errno.errorcode[number], number)
+        # The Windows error stays in the answer, its number as the code and its
+        # own text: a logon failure or a deleted network name read as
+        # "EINVAL ... Invalid argument" pointed away from the cause.
+        return StatProblem(UNREADABLE, f"WinError {winerror}", number, strerror)
     if number in (errno.ENOENT, errno.ENOTDIR) or number in _CANNOT_TAKE:
         return StatProblem(MISSING, errno.errorcode[number], number)
     if number == errno.ELOOP:
