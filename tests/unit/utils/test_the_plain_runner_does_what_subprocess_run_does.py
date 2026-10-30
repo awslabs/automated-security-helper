@@ -287,7 +287,11 @@ def test_an_interrupt_while_waiting_is_raised_without_an_unbounded_wait():
 def test_an_interrupt_waits_only_briefly_for_a_child_the_kill_did_not_stop():
     """On KeyboardInterrupt subprocess.run kills the child, and Popen's exit then
     waits at most a quarter second for it, never without a bound. With the kill a
-    no-op the child keeps running, so a wait without a bound shows as one."""
+    no-op the child keeps running, so a wait without a bound shows as one.
+
+    The plain runner stops the child's own process group (it leads one, as every
+    spawn inside a cancel scope does), so the kill it sends is the group signal
+    rather than Popen.kill; both are made no-ops here and both count as a try."""
     interrupt = KeyboardInterrupt()
     real_kill = subprocess.Popen.kill
     real_communicate = subprocess.Popen.communicate
@@ -302,11 +306,20 @@ def test_an_interrupt_waits_only_briefly_for_a_child_the_kill_did_not_stop():
     def kill(self):
         seen.kills += 1
 
+    def signal_group(pgid, signum):
+        # Signal 0 is the existence probe, which keeps answering that the group
+        # lives on; a real signal is the stop attempt the test counts, swallowed
+        # so the child keeps running as the case under test requires.
+        if signum != 0:
+            seen.kills += 1
+        return True
+
     started = time.monotonic()
     try:
         with (
             patch.object(subprocess.Popen, "communicate", communicate),
             patch.object(subprocess.Popen, "kill", kill),
+            patch.object(subprocess_utils, "_signal_group", signal_group),
             pytest.raises(KeyboardInterrupt) as info,
         ):
             _plain()(PARTIAL_THEN_SLEEPS, capture_output=True, text=True)
