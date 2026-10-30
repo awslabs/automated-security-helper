@@ -19,6 +19,7 @@ Everything here runs in-process against a stand-in /proc: no fork, no sandbox.
 
 import errno
 import io
+import json
 import os
 import signal
 import sys
@@ -722,6 +723,35 @@ def test_the_reap_after_a_stop_keeps_a_minimum_window_once_the_scanner_exited():
     # A stop long before the exit: the exit-based bounds alone.
     assert landlock_exec._reap_deadline(stop, stop - 60.0) == stop + minimum
     assert quarter + minimum < 0.5
+
+
+def test_a_policy_with_a_relative_path_is_refused(capsys):
+    """The wrapper changes into the policy's cwd before the rules are applied and
+    the command is run, so a relative path would resolve against that directory
+    and a grant on a path that is then not found would go in silence: a relative
+    path in any list, or as the cwd, is exit 126 with the key named."""
+    base = {"read_only": ["/usr"], "writable": ["/var/out"], "network": False}
+
+    for key, value in (
+        ("read_only", ["usr"]),
+        ("read_data", ["./data"]),
+        ("writable", ["/var/out", "out"]),
+        ("cwd", "work"),
+    ):
+        with pytest.raises(SystemExit) as refused:
+            landlock_exec._parse_policy(json.dumps({**base, key: value}))
+        assert refused.value.code == 126
+        noted = capsys.readouterr().err
+        assert (
+            "absolute" in noted and key in noted and noted.startswith("ash-landlock: ")
+        )
+
+    # Control: absolute paths, and an empty cwd (none), pass as before.
+    policy = landlock_exec._parse_policy(
+        json.dumps({**base, "read_data": ["/srv/data"], "cwd": "/var/work"})
+    )
+    assert policy["cwd"] == "/var/work"
+    assert landlock_exec._parse_policy(json.dumps({**base, "cwd": ""}))["cwd"] == ""
 
 
 def test_the_socket_filter_route_restores_the_dispositions_before_its_exec(
