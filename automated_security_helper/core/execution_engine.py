@@ -980,6 +980,16 @@ class ScanExecutionEngine:
 
             # Execute each phase in order using the new phase classes
             self._results = self._asharp_model
+            # Recorded on the results, not only in this run's context: under
+            # --ignore-suppressions no suppression is matched in any phase, and a
+            # results file re-rendered later by `ash report`, whose context
+            # carries no such flag, has to read the same way (the
+            # unused-suppressions reporter reads metadata.suppressions_ignored
+            # beside its context). Written before the phases so a run that stops
+            # at the scan phase records it too; never written False, so a saved
+            # record survives a later report-only run.
+            if self._context.ignore_suppressions:
+                self._results.metadata.suppressions_ignored = True
             for phase_name in ordered_phases:
                 # A scan cancelled during one phase does not start the next, so a
                 # cancel during the scan phase writes no reports. A no-op outside
