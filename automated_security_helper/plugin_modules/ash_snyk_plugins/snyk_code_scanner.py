@@ -402,12 +402,19 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # Start with base command and subcommands
         args = [self.command, *self.subcommands]
 
-        # Add extra args (like severity threshold)
+        # Add extra args. A value may be a number or a bool (ToolExtraArg), and
+        # a spawn takes text only; a bool is spelled as a config file spells it,
+        # the rule ScannerPluginBase._resolve_arguments applies, which this
+        # override does not call.
         for tool_extra_arg in self.args.extra_args:
-            if tool_extra_arg.value is not None:
-                args.extend([tool_extra_arg.key, str(tool_extra_arg.value)])
-            else:
-                args.append(tool_extra_arg.key)
+            args.append(tool_extra_arg.key)
+            value = tool_extra_arg.value
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            elif value is not None and not isinstance(value, str):
+                value = str(value)
+            if value is not None:
+                args.append(value)
 
         # Add target path
         args.append(Path(target).as_posix())
