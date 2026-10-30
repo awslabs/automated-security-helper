@@ -162,8 +162,12 @@ SKIPPED_PROJECT_UID_PREFIX = "ash-workspace-skipped-project:"
 #: The name was "Scan", which is not an activity of the class, beside the id 1.
 ACTIVITY_NAME = "Create"
 
-#: A CVE identifier, the only value OCSF's ``cve.uid`` is defined to hold.
-_CVE_ID = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
+#: A CVE identifier at the head of a rule id, the only value OCSF's ``cve.uid``
+#: is defined to hold. Grype names its rules ``<CVE id>-<package>``
+#: (``CVE-2022-40897-setuptools``), so the identifier is read off the front and
+#: the package suffix is left behind; a scanner's own rule id (``B602``), or an
+#: id that only contains a CVE id further in, carries no cve.
+_CVE_ID = re.compile(r"^(CVE-\d{4}-\d{4,})(?:-|$)", re.IGNORECASE)
 
 #: The namespace every finding's ``finding_info.uid`` is derived under. A uid was
 #: a fresh uuid4 on every run, so the same finding reached a SIEM under a new
@@ -377,9 +381,10 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # rule) published there told a SIEM that every finding was a known
             # CVE. The rule id is the vulnerability's ``title`` either way.
             try:
-                if rule_id and _CVE_ID.match(rule_id):
+                cve_match = _CVE_ID.match(rule_id) if rule_id else None
+                if cve_match:
                     vuln_dict["cve"] = {
-                        "uid": rule_id.upper(),
+                        "uid": cve_match.group(1).upper(),
                         "desc": desc,
                     }
             except Exception as e:

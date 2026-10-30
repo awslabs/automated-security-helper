@@ -101,6 +101,41 @@ class TestCveIsOnlyACve:
         assert vulnerability.cve.uid == "CVE-2024-12345"
         assert vulnerability.cve.desc == "m"
 
+    @pytest.mark.parametrize(
+        ("rule_id", "uid"),
+        [
+            ("CVE-2022-40897-setuptools", "CVE-2022-40897"),
+            ("CVE-2021-44228-log4j-core", "CVE-2021-44228"),
+            ("cve-2024-12345", "CVE-2024-12345"),
+        ],
+    )
+    def test_a_cve_at_the_head_of_a_rule_id_is_that_cve(self, reporter, rule_id, uid):
+        """Grype names its rules ``<CVE id>-<package>``, so the finding is a
+        known CVE and ``cve.uid`` is the identifier alone, upper-cased; the
+        title keeps the rule id as the scanner wrote it."""
+        result = Result(ruleId=rule_id, level=Level.error, message=Message(text="m"))
+
+        vulnerability = reporter._create_vulnerability_from_result(result)
+
+        assert vulnerability.title == rule_id
+        assert vulnerability.cve.uid == uid
+
+    @pytest.mark.parametrize(
+        "rule_id",
+        [
+            "GHSA-abcd-1234-efgh",
+            "setuptools-CVE-2022-40897",
+            "CVE-2024-1",
+            "CVE-24-12345",
+        ],
+    )
+    def test_a_rule_id_without_a_cve_at_its_head_has_no_cve(self, reporter, rule_id):
+        result = Result(ruleId=rule_id, level=Level.error, message=Message(text="m"))
+
+        vulnerability = reporter._create_vulnerability_from_result(result)
+
+        assert vulnerability.cve is None
+
 
 class TestActivityIsCreate:
     def test_a_finding_record_is_a_create_activity(self, reporter, metadata):
@@ -115,7 +150,14 @@ class TestActivityIsCreate:
 
 class TestTheErrorResponseCountsOnce:
     def test_processed_and_failed_are_not_both_the_total(self, reporter):
-        payload = json.loads(reporter._create_error_response("boom", 1, 0, 3))
+        payload = json.loads(
+            reporter._create_error_response(
+                error_message="boom",
+                current_time_ms=1,
+                processed_count=0,
+                failed_count=3,
+            )
+        )
 
         assert payload[0]["processing_statistics"] == {
             "processed_results_count": 0,
