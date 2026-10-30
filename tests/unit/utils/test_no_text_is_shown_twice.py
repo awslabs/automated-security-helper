@@ -43,7 +43,8 @@ import, starting from terminal_text's escapers:
   library's) that the handler's try body raises with shown text, or reaches by
   calling a function of the package that does, up to _REACH_DEPTH calls down. One
   ``raise ValueError(<shown>)`` therefore makes no ``except ValueError`` elsewhere
-  a handler of shown text.
+  a handler of shown text. A name read only as ``type(x)`` or ``x.__class__`` is a
+  class, not the value: it makes nothing shown.
 
 Refused: a doubling sink given shown text. Allowed: the one-pass form (a log
 call's whole message one shown_not_obeyed or shown_on_one_line call), the values
@@ -61,9 +62,9 @@ shown_not_obeyed(v)`` in one method, logged in another), a container, another
 function's argument or a return value of a function outside the package; an
 exception of a builtin or library kind that reaches its handler through a call the
 check cannot resolve (a method of an object) or through more than _REACH_DEPTH
-calls of the package; a logger or a log method handed in as an argument, kept in an attribute or a container, or
-returned by a function that is no maker; a log method wrapped (functools.partial)
-or looked up by getattr; repr() and ascii() of
+calls of the package; a logger or a log method handed in as an argument, kept in
+an attribute or a container, or returned by a function that is no maker; a log
+method wrapped (functools.partial) or looked up by getattr; repr() and ascii() of
 a value; and the TUI's widgets (cli/inspect), which have their own guard.
 terminal_text itself is not read: its public functions and classes, and each of
 its names that reaches an escaper or the maker (a private composer, an alias, a
@@ -173,6 +174,22 @@ _BY_DESIGN: Dict[Site, str] = {
         "cleanup_scan_resources",
         "Failed to cancel scan",
     ): "it logs the cancel result's message, which is raw; only its error is shown",
+    # get_scan_results returns the error-holding response of mcp_get_scan_results
+    # at its `"error" in results` check, before either call below, so what they
+    # are handed is the producer's success payload. The check takes the result of
+    # the producer for shown text whole, and the filters reach a log call.
+    (
+        "automated_security_helper/cli/mcp_server.py",
+        "get_scan_results",
+        "filter_actionable_only(results)",
+    ): "results is the producer's success payload: the error-holding response "
+    'returned at the `"error" in results` check above',
+    (
+        "automated_security_helper/cli/mcp_server.py",
+        "get_scan_results",
+        "apply_content_filters(results, scanners, severities)",
+    ): "results is the producer's success payload: the error-holding response "
+    'returned at the `"error" in results` check above',
 }
 
 
@@ -386,6 +403,34 @@ def _derived_from(function: ast.AST, seeds: Set[str]) -> Set[str]:
                             derived.add(name)
                             changed = True
     return derived
+
+
+def _is_a_class_read(node: ast.AST) -> bool:
+    """``type(x)`` with one argument, or ``x.__class__``: the class of a value."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "__class__"
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "type"
+        and len(node.args) == 1
+        and not node.keywords
+    )
+
+
+def _walk_values(node: ast.AST) -> Iterable[ast.AST]:
+    """``ast.walk`` that does not look inside the class of a value.
+
+    ``type(error).__name__`` and ``error.__class__.__name__`` name a class: none of
+    the text *error* holds is in them, so a shown *error* does not make the
+    expression shown text.
+    """
+    pending = [node]
+    while pending:
+        inner = pending.pop()
+        yield inner
+        if not _is_a_class_read(inner):
+            pending.extend(ast.iter_child_nodes(inner))
 
 
 #: The try statements of the syntax tree (``try/except*`` too, where it exists).
@@ -624,7 +669,7 @@ class _Analysis:
         return _is_escaper(module.resolve(func), DOUBLING)
 
     def shown_in(self, node: ast.AST, module: _Module, shown: Set[str]) -> bool:
-        for inner in ast.walk(node):
+        for inner in _walk_values(node):
             if isinstance(inner, ast.Call) and self.is_shown_call(inner, module):
                 return True
             if isinstance(inner, ast.Name) and inner.id in shown:
@@ -1106,6 +1151,47 @@ def test_a_helper_that_logs_its_message_when_a_send_fails_shows_shown_text_twice
     assert _sites({"automated_security_helper/x.py": source}) == [
         ("automated_security_helper/x.py", "site")
     ]
+
+
+#: What a handler of shown text (its try body raises a ValueError with shown text)
+#: logs about its variable, and whether that shows text twice.
+_CLASS_READ_CASES = {
+    "type-name": ("{type(exc).__name__}", False),
+    "dunder-class-name": ("{exc.__class__.__name__}", False),
+    "class-name-and-the-text": ("{type(exc).__name__}: {exc}", True),
+    "class-name-and-str-of-it": ("{type(exc).__name__}: {str(exc)}", True),
+    "the-text": ("{exc}", True),
+}
+
+
+@pytest.mark.parametrize(
+    "logged, offends", _CLASS_READ_CASES.values(), ids=list(_CLASS_READ_CASES)
+)
+def test_the_class_of_a_value_is_not_the_value(logged, offends):
+    """A name read only as ``type(x)`` or ``x.__class__`` makes nothing shown, and
+    does not hide a read of the value beside it."""
+    source = _HELPERS + (
+        "def site(name):\n"
+        "    try:\n        raise ValueError(f'no: {_shown(name)}')\n"
+        "    except ValueError as exc:\n"
+        f"        ASH_LOGGER.debug(f'cannot read ({logged})')\n"
+        "def through_a_local(name):\n"
+        "    try:\n        raise ValueError(f'no: {_shown(name)}')\n"
+        "    except ValueError as exc:\n"
+        f"        reason = f'failed: {logged}'\n"
+        "        ASH_LOGGER.error(f'x {reason}')\n"
+    )
+
+    sites = _sites({"automated_security_helper/x.py": source})
+
+    assert sites == (
+        [
+            ("automated_security_helper/x.py", "site"),
+            ("automated_security_helper/x.py", "through_a_local"),
+        ]
+        if offends
+        else []
+    ), sites
 
 
 def test_a_method_named_shown_that_escapes_nothing_makes_no_text_shown():
