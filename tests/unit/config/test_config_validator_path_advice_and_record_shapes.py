@@ -115,13 +115,16 @@ class TestPathPatternAdvice:
         assert advice == f"Path './tests/' {PREFIX}. Use 'tests/' to ignore it."
 
     def test_the_dot_prefix_advice_takes_the_trees_spelling(self, tmp_path):
-        advice = path_pattern_advice("./Tests", _tree(tmp_path), ignore_path=True)
+        """The respelling covers the leading names the tree holds in another
+        case; a file the pattern names has to exist for its path to be
+        respelled, so the second case writes it under the tree's spelling."""
+        root = _tree(tmp_path)
+        advice = path_pattern_advice("./Tests", root, ignore_path=True)
         assert advice == (
             f"Path './Tests' {PREFIX}. Use 'tests/' to ignore every file inside the directory."
         )
-        advice = path_pattern_advice(
-            "./Tests/app.py", _tree(tmp_path), ignore_path=False
-        )
+        (root / "tests" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        advice = path_pattern_advice("./Tests/app.py", root, ignore_path=False)
         assert (
             advice
             == f"Path './Tests/app.py' {PREFIX}. Use 'tests/app.py' to suppress its findings."
