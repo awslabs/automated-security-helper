@@ -194,8 +194,11 @@ def test_a_too_old_pinned_checkov_is_missing_with_the_version_named(
 
     assert scanner.validate_plugin_dependencies() is False
     reason = scanner.dependency_unavailable_reason or ""
-    assert f"checkov at {wrapper} cannot be used" in reason
-    assert "installed checkov does not satisfy '>=3.2.0,<4.0.0'" in reason
+    # The reason that reaches the results carries the check's summary, not the
+    # copy's path or the probe's excerpt (those go to the log alone).
+    assert "Offline mode: checkov cannot be used" in reason
+    assert "the installed package does not satisfy the version constraint" in reason
+    assert str(wrapper) not in reason
     assert "Nix flake" in reason and "flake.nix" in reason
     assert "numpy" not in reason
     assert recorder.network_capable == [], (
@@ -215,7 +218,8 @@ def test_an_unverifiable_nix_checkov_is_missing_rather_than_substituted(
 
     assert scanner.validate_plugin_dependencies() is False
     reason = scanner.dependency_unavailable_reason or ""
-    assert f"checkov at {wrapper} could not be verified" in reason
+    assert "Offline mode: checkov could not be verified" in reason
     assert "no distribution metadata" in reason
+    assert str(wrapper) not in reason
     assert recorder.network_capable == []
     assert recorder.scan_resolves == []
