@@ -359,7 +359,9 @@ def _uses_value_of(match: "re.Match[str]") -> str:
     if double_quoted is not None:
         try:
             decoded = yaml.safe_load(f'"{double_quoted}"')
-        except yaml.YAMLError:
+        except (yaml.YAMLError, ValueError):
+            # ValueError: an escape outside Unicode (``\UFFFFFFFF``), which
+            # PyYAML's scanner raises as is, not as a YAMLError.
             return double_quoted
         return decoded if isinstance(decoded, str) else double_quoted
     if single_quoted is not None:
@@ -390,7 +392,9 @@ def local_uses_references(text: str) -> Set[str]:
         for node in yaml.compose_all(text, Loader=yaml.SafeLoader):
             if node is not None:
                 stack.append(node)
-    except (yaml.YAMLError, RecursionError):
+    except (yaml.YAMLError, RecursionError, ValueError):
+        # ValueError: an escape outside Unicode in a quoted scalar; PyYAML's
+        # scanner lets chr() raise it instead of wrapping it as a YAMLError.
         pass
     visited: Set[int] = set()
     while stack:
@@ -997,12 +1001,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             text = decode_workflow(workflow.read_bytes())
         except OSError:
             return None
-        # A value holding a NUL (a YAML escape can write one) names no file: no
-        # operating system opens such a path, so actionlint reads nothing through
-        # it, and os.path.realpath would raise ValueError on it below.
-        specs = sorted(
-            spec for spec in local_uses_references(text) if "\x00" not in spec
-        )
+        specs = sorted(local_uses_references(text))
         if not specs:
             return None
         context_config = self.context.config if self.context is not None else None
@@ -1025,7 +1024,14 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                         candidate.is_symlink() or candidate.exists()
                     ):
                         continue
-                    real = Path(os.path.realpath(candidate))
+                    try:
+                        real = Path(os.path.realpath(candidate))
+                    except ValueError:
+                        # A NUL (a YAML escape can write one), a lone surrogate,
+                        # or anything else the operating system takes no path
+                        # from: no file is opened through it, by actionlint or
+                        # anyone, so it names nothing here.
+                        continue
                     if not (
                         real.is_relative_to(target_real) or in_scanned_tree(real, root)
                     ):

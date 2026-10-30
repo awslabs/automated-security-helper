@@ -2172,6 +2172,29 @@ def test_a_local_reference_holding_a_nul_does_not_fail_the_scan(
     assert ".github/workflows/refs.yml" in argv[argv.index("--") + 1 :]
 
 
+@pytest.mark.unit
+def test_a_local_reference_holding_a_lone_surrogate_does_not_fail_the_scan(
+    repo, monkeypatch, on_path
+):
+    """A "\\ud800" escape puts a lone surrogate into the value. The operating
+    system takes no path from it (the encoder refuses it), so os.path.realpath
+    raises a ValueError that is no OSError; the first candidate has no exists()
+    guard in front of it, so the error escaped the workflow selection and failed
+    the whole scan. The value names no file, so the workflow is linted."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "workflows" / "refs.yml").write_text(
+        "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+        '      - uses: "./.github/actions/\\ud800"\n'
+    )
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert ".github/workflows/refs.yml" in argv[argv.index("--") + 1 :]
+
+
 @pytest.mark.parametrize("encoding", ["utf-16", "utf-16-be", "utf-8-sig"])
 @pytest.mark.unit
 def test_a_workflow_with_a_byte_order_mark_is_read_as_actionlint_reads_it(
@@ -2255,6 +2278,11 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         # A later document that fails to compose must not lose the ones before
         # it; the folded value is found by the walk alone.
         ("steps:\n  - uses: >-\n      ./n\n---\nbad: [\n", {"./n"}),
+        # An escape outside Unicode: PyYAML's scanner raises ValueError, not a
+        # YAMLError, on both the composed walk and the line scan's decode. go-yaml
+        # rejects the escape too, so actionlint reads nothing through it.
+        ('steps:\n  - uses: "./\\UFFFFFFFF"\n', set()),
+        ('steps:\n  - uses: "./\\UFFFFFFFF"\n  bad: [\n', set()),
     ],
     ids=[
         "block",
@@ -2275,6 +2303,8 @@ def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
         "capitalized-key",
         "upper-key-alias",
         "later-document-fails",
+        "escape-outside-unicode",
+        "escape-outside-unicode-line-scan",
     ],
 )
 @pytest.mark.unit
