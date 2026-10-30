@@ -530,25 +530,22 @@ def _call_shown(hook: Callable[..., Any], exc: BaseException) -> None:
     ``sys.exit`` code) is never replaced by the cleanup's, and the other stream's
     held line is still ended.
     """
+    # Imported here, not at the top: this module is the floor, and this call is
+    # made only once ASH's own modules import (the shown streams need them).
+    from automated_security_helper.utils.process_env import environ_overrides
+
     stdout, stderr = sys.stdout, sys.stderr
     shown = [_ShownLines(s) if s is not None else None for s in (stdout, stderr)]
-    colors = {
-        name: os.environ.get(name)
-        for name in ("PYTHON_COLORS", "NO_COLOR", "FORCE_COLOR")
-    }
     sys.stdout, sys.stderr = shown
-    os.environ["PYTHON_COLORS"] = "0"
-    os.environ["NO_COLOR"] = "1"
-    os.environ.pop("FORCE_COLOR", None)
     try:
-        hook(type(exc), exc, exc.__traceback__)
+        # Set and put back through process_env, under its lock, so a scanner
+        # thread copying the environment for a spawn never reads it half-written.
+        with environ_overrides(
+            {"PYTHON_COLORS": "0", "NO_COLOR": "1", "FORCE_COLOR": None}
+        ):
+            hook(type(exc), exc, exc.__traceback__)
     finally:
         sys.stdout, sys.stderr = stdout, stderr
-        for name, value in colors.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
         for stream in shown:
             if stream is not None:
                 try:
