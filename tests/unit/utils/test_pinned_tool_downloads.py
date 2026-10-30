@@ -858,17 +858,20 @@ class TestTheVerifiedDigestIsTheOneRecorded:
     def _swap_during_the_window(substitute: bytes):
         """Replace the installed file from inside the post-verification window.
 
-        Driven from ``make_executable``, which is a real call that sits in that window
+        Driven from ``write_receipt``, which is a real call that sits in that window
         rather than a seam invented for the test: both install paths call it after the
-        bytes have been verified at the target and before the receipt is written.
+        bytes have been verified at the target and before the receipt exists, so the
+        file is swapped the instant before the receipt is written. (``make_executable``
+        no longer sits in the archive path's window: the mode is set on the staged
+        file's own descriptor before the rename.)
         """
-        real_make_executable = download_utils.make_executable
+        real_write_receipt = download_utils.write_receipt
 
-        def swap_then_chmod(file_path):
-            Path(file_path).write_bytes(substitute)
-            return real_make_executable(file_path)
+        def swap_then_record(destination, installed_as, receipt):
+            Path(destination, installed_as).write_bytes(substitute)
+            return real_write_receipt(destination, installed_as, receipt)
 
-        return patch.object(download_utils, "make_executable", swap_then_chmod)
+        return patch.object(download_utils, "write_receipt", swap_then_record)
 
     def test_the_archive_path_records_the_verified_digest(
         self, tmp_path, monkeypatch, fake_grype_release
@@ -1196,10 +1199,12 @@ class TestAssetResolution:
 
         Refusing is the point: falling back to the amd64 asset would install a
         binary that fails at exec time, and that shows up in a scan report as an
-        execution failure rather than as a tool that was never installable.
+        execution failure rather than as a tool that was never installable. The
+        refusal names ASH's own table (which can list fewer platforms than the
+        release publishes), not the vendor.
         """
         with pytest.raises(
-            ToolNotProvisionableError, match="publishes no release asset"
+            ToolNotProvisionableError, match="has no asset for windows/arm64"
         ):
             get_tool_asset(tool, "windows", "arm64")
 
