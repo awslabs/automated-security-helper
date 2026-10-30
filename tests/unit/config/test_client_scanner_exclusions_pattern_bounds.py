@@ -212,6 +212,10 @@ def test_a_slow_skip_path_is_stopped_at_the_bound():
 
 
 def test_a_fast_skip_path_answers_under_the_bound():
+    """The answer comes back through the bounded path. The bound is generous:
+    the test shows the result crosses the bound, not that the search is fast,
+    and a 20 ms bound failed at random on a loaded worker whose thread was not
+    scheduled in time."""
     assert (
         checkov_skips(
             "vend.r", "/scan/vendor/x.tf", "vendor/x.tf", timeout=FAST_TIMEOUT
@@ -668,8 +672,10 @@ def test_the_suppression_pass_shares_one_budget_across_its_findings(
 
 
 def _strip(config, tmp_path: Path):
+    # The operator document sits under the test's own path: a fixed
+    # ``/operator`` resolved to ``C:/operator`` on Windows and matched nothing.
     documents = {
-        Path("/operator/ash.yaml"): {},
+        tmp_path / "operator" / "ash.yaml": {},
         tmp_path / "c.yaml": {},
     }
     return strip_client_scanner_exclusions(

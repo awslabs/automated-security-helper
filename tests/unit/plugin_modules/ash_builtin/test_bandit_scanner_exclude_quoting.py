@@ -104,10 +104,7 @@ def test_process_config_options_exclude_argument_value_is_well_formed(
             f"  expected: {expected_entries!r}"
         )
 
-    # All --exclude= tokens (multiple if _process_config_options is invoked
-    # more than once) must carry the same value.
-    distinct_values = {token[len("--exclude=") :] for token in exclude_tokens}
-    assert len(distinct_values) == 1, (
-        f"Expected all --exclude= tokens to carry the same value; got "
-        f"{len(distinct_values)} distinct values: {distinct_values!r}"
-    )
+    # The options were processed twice (construction, then the call above), and
+    # a second call rebuilds the arguments from the base ones, so there is
+    # exactly one --exclude= token, not one per call.
+    assert len(exclude_tokens) == 1, exclude_tokens

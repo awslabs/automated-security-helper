@@ -33,6 +33,7 @@ from __future__ import annotations
 import fnmatch
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -141,8 +142,11 @@ def test_a_nul_entry_leaves_the_other_exclusions_in_place(tmp_path, caplog):
 
     entries = _entries(argv)
     assert not any("\0" in entry for entry in entries), entries
-    for entry in bandit_excluded_path_globs(source.as_posix(), "vendor"):
-        assert entry in entries
+    # The other entry's globs are all there; a builder that returned none for
+    # it would have made the loop below check nothing.
+    expected = bandit_excluded_path_globs(source.as_posix(), "vendor")
+    assert expected
+    assert set(expected) <= set(entries), (expected, entries)
     nul_lines = [
         message
         for message in _warnings(caplog)
@@ -268,18 +272,31 @@ def test_elsewhere_one_argument_is_bounded_on_its_own():
     assert _exclude_fits("--exclude=vendor", [], os.name)
 
 
-def test_the_required_entries_are_judged_on_the_resolved_command(tmp_path):
+def test_the_required_entries_are_judged_on_the_resolved_command(tmp_path, monkeypatch):
     """The bound is measured beside the other arguments of the resolved
-    command, and the token the scan passes is the one that was judged."""
+    command, and the token the scan passes is the one that was judged: the
+    bound is recorded as the scan consults it, since any small argv would
+    satisfy a second measurement taken afterwards."""
     source = _tree(tmp_path, ["app.py"])
     scanner = _scanner(source, tmp_path)
+    judged: list[tuple[str, list[str]]] = []
+    real = bandit_scanner._exclude_fits
+
+    def recorder(token, rest, platform=os.name):
+        judged.append((token, [str(argument) for argument in rest]))
+        return real(token, rest, platform)
+
+    monkeypatch.setattr(bandit_scanner, "_exclude_fits", recorder)
 
     argv, _, _ = scanner._execute_scan(source, "source", _ignore("vendor/**"))
 
     tokens = [arg for arg in argv if arg.startswith("--exclude=")]
     assert len(tokens) == 1
     rest = [arg for arg in argv if not arg.startswith("--exclude=")]
-    assert _exclude_fits(tokens[0], rest)
+    assert judged, "the bound was never consulted"
+    # The last candidate judged is the token the scan passes, beside the
+    # resolved command's other arguments.
+    assert judged[-1] == (tokens[0], rest)
     assert f"{source.as_posix()}/vendor/*" in _entries(argv)
 
 
@@ -319,6 +336,19 @@ def test_such_a_literal_is_not_passed_as_a_plain_substring():
     assert "/scan/-" not in entries
     assert "/scan/*/-" in entries
     assert "/scan/-/*" in entries
+
+    def skipped(path: str) -> bool:
+        """bandit 1.9.4's rule: an fnmatch glob, or a plain substring."""
+        return any(fnmatch.fnmatch(path, e) or e in path for e in entries)
+
+    # Applied as bandit applies them: the neighbor file stays, a nested "-" and
+    # the files under a top-level "-" directory are skipped, and a top-level
+    # FILE named "-" is left to bandit, since the only entry that would name it
+    # is the plain substring that also took the neighbor.
+    assert not skipped("/scan/-x.py")
+    assert skipped("/scan/d/-")
+    assert skipped("/scan/-/a.py")
+    assert not skipped("/scan/-")
 
 
 def test_a_link_named_only_with_special_characters_still_gets_an_entry(tmp_path):
@@ -449,7 +479,12 @@ def test_a_dropped_entry_from_an_environment_value_is_redacted(
     assert f"{source.as_posix()}/secretvendor/*.md" not in _entries(argv)
     dropped = [message for message in _warnings(caplog) if "Not passing" in message]
     assert dropped, _warnings(caplog)
+    # The bracketed top-level form puts "[" and "]" around one character of
+    # the value (secretvendo[r]), so the plain text is checked with any
+    # single-character bracket removed as well.
+    unbracketed = [re.sub(r"\[(.)\]", r"\1", message) for message in dropped]
     assert not any("secretvendor" in message for message in dropped), dropped
+    assert not any("secretvendor" in message for message in unbracketed), unbracketed
 
 
 # ---------------------------------------------------------------------------

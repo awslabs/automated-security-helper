@@ -1,5 +1,7 @@
 """Tests for Bandit scanner."""
 
+import logging
+
 import pytest
 from pathlib import Path
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
@@ -183,25 +185,36 @@ def test_bandit_scanner_scan_nonexistent_path(test_bandit_scanner):
     )
 
 
-def test_bandit_scanner_additional_formats(test_plugin_context):
-    """additional_formats adds no ``--format`` to the extra arguments.
+def test_bandit_scanner_additional_formats(test_plugin_context, caplog):
+    """additional_formats adds no ``--format`` to the extra arguments, and the
+    operator is told the formats are not produced.
 
     bandit takes one ``--format`` (argparse ``store``, last one wins). A second
     one after the base class's ``--format sarif`` made bandit write that format
     into bandit.sarif, and the scan failed reading it as SARIF. The one format in
-    argv stays the base class's SARIF.
+    argv stays the base class's SARIF; without the warning ``html`` would just
+    never appear.
     """
-    scanner = BanditScanner(
-        context=test_plugin_context,
-        config=BanditScannerConfig(
-            options=BanditScannerConfigOptions(
-                additional_formats=["sarif", "html"],
-            )
-        ),
-    )
-    scanner._process_config_options()
+    with caplog.at_level(logging.WARNING):
+        scanner = BanditScanner(
+            context=test_plugin_context,
+            config=BanditScannerConfig(
+                options=BanditScannerConfigOptions(
+                    additional_formats=["sarif", "html"],
+                )
+            ),
+        )
+        scanner._process_config_options()
 
     format_args = [arg.key for arg in scanner.args.extra_args]
     assert "--format" not in format_args
     assert scanner.args.format_arg == "--format"
     assert scanner.args.format_arg_value == "sarif"
+    told = [
+        record.getMessage()
+        for record in caplog.records
+        if "additional_formats" in record.getMessage()
+    ]
+    assert any("html" in message and "not produced" in message for message in told), [
+        record.getMessage() for record in caplog.records
+    ]

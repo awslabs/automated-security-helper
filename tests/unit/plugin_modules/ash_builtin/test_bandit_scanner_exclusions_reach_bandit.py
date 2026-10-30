@@ -157,8 +157,10 @@ def test_a_line_break_entry_leaves_the_other_exclusions_in_place(tmp_path, caplo
     told = [
         record.message for record in caplog.records if "line break" in record.message
     ]
-    assert any(repr("ven\ndor") in message for message in told), told
-    assert any(repr("gen\nerated/**") in message for message in told), told
+    # Once per input: a warning repeated on every reprocess or scan would
+    # still satisfy an any().
+    assert sum(repr("ven\ndor") in message for message in told) == 1, told
+    assert sum(repr("gen\nerated/**") in message for message in told) == 1, told
 
 
 def test_a_target_whose_path_holds_a_line_break_refuses_the_scan(tmp_path):
@@ -291,17 +293,30 @@ def test_a_link_name_with_a_non_utf8_byte_does_not_fail_the_scan(tmp_path):
 
 
 def test_bandits_own_default_excludes_are_passed(tmp_path):
-    """bandit replaces its defaults with any --exclude it is given."""
-    source = _tree(tmp_path, ["app.py"])
+    """bandit replaces its defaults with any --exclude it is given. Checked as
+    bandit applies the entries (an fnmatch glob or a plain substring) against
+    files under the defaults' names, not against the builder's own output,
+    which a builder returning nothing for ``*.egg`` would have satisfied."""
+    source = _tree(tmp_path, ["app.py", ".tox/x.py", "pkg.egg"])
     scanner = _scanner(source, tmp_path)
 
     argv, _, _ = scanner._execute_scan(source, "source", [])
 
     entries = _entries(argv)
     assert ".tox" in BANDIT_DEFAULT_EXCLUDES and "*.egg" in BANDIT_DEFAULT_EXCLUDES
+
+    def skipped(relative: str) -> bool:
+        path = f"{source.as_posix()}/{relative}"
+        return any(fnmatch.fnmatchcase(path, e) or e in path for e in entries)
+
     for item in BANDIT_DEFAULT_EXCLUDES:
-        for entry in bandit_excluded_path_globs(source.as_posix(), item):
+        globs = bandit_excluded_path_globs(source.as_posix(), item)
+        assert globs, item
+        for entry in globs:
             assert entry in entries, (item, entry)
+    assert skipped(".tox/x.py")
+    assert skipped("pkg.egg")
+    assert not skipped("app.py")
 
 
 def test_the_operators_bandit_ini_exclude_reaches_bandit(tmp_path):
@@ -682,10 +697,14 @@ def _verifier(status: str, executable: str, detail: str):
 
     def verify(*args, **kwargs):
         calls.append((args, kwargs))
+        # The requirement names the package the call asked about, as the real
+        # verifier builds it, so a message built from the answer names the
+        # right package too.
+        package = args[1] if len(args) > 1 else kwargs.get("package", "bandit")
         return PreInstalledToolVerdict(
             status=status,
             executable=executable,
-            requirement="bandit[sarif,toml]>=1.7.8,<2.0.0",
+            requirement=f"{package}[sarif,toml]>=1.7.8,<2.0.0",
             detail=detail,
         )
 
@@ -785,14 +804,20 @@ def test_after_a_failed_install_a_path_binary_runs_directly(tmp_path, monkeypatc
     assert scanner.dependencies_satisfied is True
 
 
-@pytest.mark.parametrize("name", ["uv", "uv.exe", "UV.EXE"])
-def test_a_uv_answer_by_path_keeps_the_uv_route(tmp_path, monkeypatch, name):
-    """The resolver may name uv by its path, on Windows as ``uv.exe``; compared
-    as the bare word, or by name without the suffix in mind, that answer was
-    taken for a bandit binary, verified as one, and run directly."""
+@pytest.mark.parametrize(
+    "answer",
+    ["uv", "tools/uv", "tools/uv.exe", "tools/UV.EXE"],
+    ids=["bare", "path", "exe", "upper-exe"],
+)
+def test_a_uv_answer_by_path_keeps_the_uv_route(tmp_path, monkeypatch, answer):
+    """The resolver may name uv as the bare word or by its path, on Windows as
+    ``uv.exe``; compared as the bare word, or by name without the suffix in
+    mind, a path answer was taken for a bandit binary, verified as one, and run
+    directly. Every shape runs with the verifier set to fail the test, so a uv
+    answer wrongly verified as bandit cannot pass unnoticed."""
     source = _tree(tmp_path, ["app.py"])
     scanner = _scanner(source, tmp_path)
-    uv = str(tmp_path / "tools" / name)
+    uv = answer if answer == "uv" else str(tmp_path / answer)
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: True
     )
@@ -816,25 +841,3 @@ def test_a_uv_answer_by_path_keeps_the_uv_route(tmp_path, monkeypatch, name):
     assert scanner.validate_plugin_dependencies() is True
     assert scanner.use_uv_tool is True
     assert scanner.dependencies_satisfied is True
-
-
-def test_a_uv_answer_keeps_the_uv_route(tmp_path, monkeypatch):
-    source = _tree(tmp_path, ["app.py"])
-    scanner = _scanner(source, tmp_path)
-    monkeypatch.setattr(
-        BanditScanner, "_validate_uv_tool_availability", lambda self: True
-    )
-    monkeypatch.setattr(
-        BanditScanner, "_get_tool_installation_info", lambda self: {"available": False}
-    )
-    monkeypatch.setattr(
-        BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
-    )
-    monkeypatch.setattr(
-        bandit_scanner,
-        "get_uv_tool_command",
-        lambda command, **kwargs: ["uv", "tool", "run", "bandit"],
-    )
-
-    assert scanner.validate_plugin_dependencies() is True
-    assert scanner.use_uv_tool is True

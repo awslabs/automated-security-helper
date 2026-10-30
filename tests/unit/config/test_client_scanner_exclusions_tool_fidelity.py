@@ -30,6 +30,7 @@ or the move out of the options read more or less than the scanner did:
 from __future__ import annotations
 
 import os
+import threading
 import time
 from datetime import date
 from pathlib import Path
@@ -57,9 +58,17 @@ def _spec(scanner: str):
     return next(spec for spec in SCANNER_EXCLUSION_OPTIONS if spec.scanner == scanner)
 
 
+def _operator_document(tmp_path: Path) -> Path:
+    """Where the operator's document sits for these tests: under the test's own
+    path, so a relative value in it anchors the same way on every platform (a
+    fixed ``/operator`` resolved to ``C:/operator`` on Windows and matched
+    nothing)."""
+    return tmp_path / "operator" / "ash.yaml"
+
+
 def _strip(config, delivered: dict, operator: dict | None, tmp_path: Path, base=None):
     documents = {
-        Path("/operator/ash.yaml"): operator or {},
+        _operator_document(tmp_path): operator or {},
         tmp_path / "c.yaml": delivered,
     }
     return strip_client_scanner_exclusions(
@@ -102,6 +111,26 @@ def test_a_trivy_ignore_entry_no_longer_applies_on_its_expiry_date():
     assert parse_trivy_ignore_file(document, yaml_format=True, today=today) == [
         ("CVE-2", ())
     ]
+
+
+def test_a_yaml_expiry_written_as_a_bare_date_is_read():
+    """A real ``.trivyignore.yaml`` writes ``expired_at: 2026-01-01`` with no
+    quotes, which ``yaml.safe_load`` gives the parser as a ``datetime.date``,
+    not a string; ``safe_dump`` quotes the value, so the dumped documents above
+    never exercised that type."""
+    document = (
+        "vulnerabilities:\n"
+        "  - id: CVE-1\n"
+        "    expired_at: 2026-01-01\n"
+        "  - id: CVE-2\n"
+        "    expired_at: 2026-01-02\n"
+    )
+    assert yaml.safe_load(document)["vulnerabilities"][0]["expired_at"] == date(
+        2026, 1, 1
+    )
+    assert parse_trivy_ignore_file(
+        document, yaml_format=True, today=date(2026, 1, 1)
+    ) == [("CVE-2", ())]
 
 
 @pytest.mark.parametrize(
@@ -305,11 +334,23 @@ def test_a_pattern_of_repeated_doublestars_answers_at_once():
     a linear match and far below what the recursive one needed."""
     pattern = "*/" + "**/" * 16 + "zz"
     path = "/".join(f"d{depth}" for depth in range(20))
+    answers: dict[str, bool] = {}
+
+    def match() -> None:
+        answers["miss"] = glob_excludes(pattern, path)
+        answers["hit"] = glob_excludes(pattern, path + "/zz")
+        answers["trivy"] = trivy_path_matches(pattern, path + "/zz")
+
+    # Run under a real deadline: checked only after the matcher returned, a
+    # matcher that went back to the recursive split would hold this test for
+    # hours, until the runner killed the job, instead of failing it at once.
     started = time.monotonic()
-    assert not glob_excludes(pattern, path)
-    assert glob_excludes(pattern, path + "/zz")
-    assert trivy_path_matches(pattern, path + "/zz")
+    matcher = threading.Thread(target=match, name="doublestar-match", daemon=True)
+    matcher.start()
+    matcher.join(5.0)
+    assert not matcher.is_alive(), "the doublestar match did not answer in 5 s"
     assert time.monotonic() - started < 5.0
+    assert answers == {"miss": False, "hit": True, "trivy": True}
 
 
 @pytest.mark.parametrize(
@@ -360,16 +401,23 @@ def test_a_path_typed_trusted_ignore_file_is_the_operators(tmp_path):
 
 
 def test_an_operator_chain_files_ignore_file_survives_a_delivered_override(tmp_path):
+    """The option takes the operator file's value anchored at THAT file's
+    directory: a value anchored at the source directory or at the working
+    directory would name a file the operator never wrote. The delivered
+    document carries the client's override, as a real delivery does."""
     config = AshConfig()
     options = config.scanners.trivy.options
     options.ignore_file = "/client/.trivyignore"
     operator = {"scanners": {"trivy": {"options": {"ignore_file": "op.trivyignore"}}}}
+    delivered = {
+        "scanners": {"trivy": {"options": {"ignore_file": "/client/.trivyignore"}}}
+    }
 
-    _strip(config, {}, operator, tmp_path)
+    _strip(config, delivered, operator, tmp_path)
 
-    assert options.ignore_file is not None
-    assert options.ignore_file.endswith("op.trivyignore")
-    assert options.ignore_file != "op.trivyignore"
+    assert options.ignore_file == str(
+        _operator_document(tmp_path).parent / "op.trivyignore"
+    )
     assert config._client_scanner_exclusions == []
 
 

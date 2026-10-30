@@ -294,20 +294,27 @@ def test_failed_installation_falls_back_to_the_resolver(scanner, monkeypatch, ca
 
 
 def test_resolver_is_asked_about_the_scanners_own_command(scanner, monkeypatch):
-    """The resolver must be queried for 'bandit', not some other tool name."""
+    """The resolver must be queried for 'bandit', not some other tool name, and
+    under the scan's own ``--from`` spec (the extras and the version range): a
+    bare ``bandit`` resolves a different environment, and a stub that threw
+    the keywords away could not tell."""
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
     asked = []
 
     def _resolver(command, **kwargs):
-        asked.append(command)
+        asked.append((command, kwargs))
 
     monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", _resolver)
 
     scanner.validate_plugin_dependencies()
 
-    assert asked == ["bandit"]
+    assert [command for command, _ in asked] == ["bandit"]
+    ((_, kwargs),) = asked
+    assert "from_spec" in kwargs, kwargs
+    assert kwargs["from_spec"].startswith("bandit[sarif,toml]"), kwargs
+    assert ">=1.7.8" in kwargs["from_spec"], kwargs
 
 
 @pytest.mark.parametrize("offline", [True, False], ids=["offline", "online"])
@@ -423,7 +430,9 @@ def test_processing_the_options_again_builds_each_flag_once(plugin_context, tmp_
     scanner = BanditScanner(
         context=plugin_context,
         config=BanditScannerConfig(
-            options=BanditScannerConfigOptions(config_file=config_file)
+            options=BanditScannerConfigOptions(
+                config_file=config_file, confidence_level="low"
+            )
         ),
     )
     once = [(arg.key, arg.value) for arg in scanner.args.extra_args]
@@ -438,6 +447,18 @@ def test_processing_the_options_again_builds_each_flag_once(plugin_context, tmp_
     assert sum(key.startswith("--exclude=") for key in keys) == 1
     argv = _scan_argv(scanner, plugin_context)
     assert _value_after(argv, "--ini") == [config_file.as_posix()]
+
+    # Rebuilt from the base, not deduplicated by key: a version that kept the
+    # first --confidence-level it saw would also build each flag once, and
+    # keep the stale value after configure() with another.
+    scanner.configure(
+        BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                config_file=config_file, confidence_level="high"
+            )
+        )
+    )
+    assert extra_arg_values(scanner, "--confidence-level") == ["high"]
 
 
 @pytest.mark.parametrize("filename", ["bandit.yaml", "bandit.toml", "custom.yaml"])
