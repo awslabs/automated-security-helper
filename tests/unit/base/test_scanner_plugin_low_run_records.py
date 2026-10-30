@@ -351,9 +351,10 @@ def test_an_unreadable_stderr_log_is_not_reported_as_no_stderr(tmp_path):
     scanner.exit_code = 2
     results = tmp_path / "scanners" / "stub" / "results.json"
     results.parent.mkdir(parents=True)
-    other = tmp_path / "elsewhere.log"
-    other.write_text("not the tool's log\n", encoding="utf-8")
-    (results.parent / "StubScanner.stderr.log").symlink_to(other)
+    # Something that is not a regular file at the log's name: it exists, and a
+    # read that refuses it is not the same as a log the tool never wrote. A
+    # directory does this on every platform, where a link needs privileges.
+    (results.parent / "StubScanner.stderr.log").mkdir()
 
     detail = scanner._describe_scan_failure(RuntimeError("planted"), results)
 

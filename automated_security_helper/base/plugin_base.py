@@ -932,12 +932,14 @@ class PluginBase(UVToolMixin, BaseModel):
         ``model_copy`` runs neither the validators nor ``__setattr__``, the two
         places a plugin's section is given its context's environment values,
         so a ``config`` passed in ``update`` was put in the copy bare and
-        printed them in clear. Only a ``config`` in ``update`` is carried to:
-        it is the section that was never in a plugin. Without one the copy
-        shares the original's section, which already carries the values, and a
-        carry from the copy's own context would overwrite the original's."""
+        printed them in clear. The copy's section is carried to when ``update``
+        names a ``config`` (a section that was never in a plugin) or a
+        ``context`` (whose values the shared section may not yet hold), the two
+        keys ``__setattr__`` acts on. The carry adds the context's values beside
+        the ones the section already holds and never removes any, so a section
+        still shared with the original keeps what the original gave it."""
         copied = super().model_copy(update=update, deep=deep)
-        if update and "config" in update:
+        if update and ("config" in update or "context" in update):
             carry_environment_values(
                 copied.__dict__.get("config"), copied._values_for_its_section()
             )
@@ -1827,20 +1829,15 @@ class PluginBase(UVToolMixin, BaseModel):
             from automated_security_helper.utils import python_child
             from automated_security_helper.utils.process_env import snapshot_environ
 
-            uv_overrides = python_child.uv_child_overrides(command)
+            # The choice of interpreter is read from the environment the child
+            # gets (``env``, this process's when None): an interpreter the
+            # caller named there is theirs, and replacing it with ASH's would
+            # run the tool on another Python than the one the caller asked for.
+            # uv_child_overrides applies its own reading of UV_SYSTEM_PYTHON
+            # (a "0" or "false" is no choice), so that is not redone here.
+            uv_overrides = python_child.uv_child_overrides(command, env)
             if uv_overrides:
                 child_env = snapshot_environ() if env is None else env
-                # uv_child_overrides decides from ASH's own environment whether
-                # the operator chose an interpreter, but the child gets
-                # ``env``: an interpreter the caller named there is theirs,
-                # and replacing it with ASH's would run the tool on another
-                # Python than the one the caller asked for.
-                if child_env.get("UV_PYTHON") or child_env.get("UV_SYSTEM_PYTHON"):
-                    uv_overrides = {
-                        key: value
-                        for key, value in uv_overrides.items()
-                        if key != "UV_PYTHON"
-                    }
                 env = {**child_env, **uv_overrides}
 
             # The ONE guarded read of the overridable values hook for this run

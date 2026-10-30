@@ -203,6 +203,41 @@ def test_the_interpreter_is_ash_s_when_nobody_named_one(plugin_context, monkeypa
     assert seen["env"]["UV_NO_PROJECT"] == "1"
 
 
+@pytest.mark.parametrize("false_word", ["0", "false", "no", "off", ""])
+def test_a_system_python_switch_read_as_false_names_no_interpreter(
+    plugin_context, monkeypatch, false_word
+):
+    # uv reads these values of UV_SYSTEM_PYTHON as false, so the caller chose
+    # nothing and ASH's interpreter still keeps uv out of the tree's .venv.
+    monkeypatch.delenv("UV_PYTHON", raising=False)
+    monkeypatch.delenv("UV_SYSTEM_PYTHON", raising=False)
+    seen = _capture_env(monkeypatch)
+    plugin = _Plugin(context=plugin_context)
+
+    plugin._run_subprocess(
+        ["uv", "run", "probe"],
+        env={"PATH": "/usr/bin", "UV_SYSTEM_PYTHON": false_word},
+    )
+
+    assert seen["env"]["UV_PYTHON"] == sys.executable
+
+
+def test_a_system_python_switch_read_as_true_is_the_callers_choice(
+    plugin_context, monkeypatch
+):
+    monkeypatch.delenv("UV_PYTHON", raising=False)
+    monkeypatch.delenv("UV_SYSTEM_PYTHON", raising=False)
+    seen = _capture_env(monkeypatch)
+    plugin = _Plugin(context=plugin_context)
+
+    plugin._run_subprocess(
+        ["uv", "run", "probe"],
+        env={"PATH": "/usr/bin", "UV_SYSTEM_PYTHON": "1"},
+    )
+
+    assert "UV_PYTHON" not in seen["env"]
+
+
 # -- the timeout limit token -----------------------------------------------------
 
 

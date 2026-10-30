@@ -86,6 +86,42 @@ def test_a_copy_given_a_section_carries_the_values_into_it(plugin_context):
     assert copied.config.redaction_values() == (ENV_VALUE,)
 
 
+class _ReadsItsContext(_Plugin):
+    """A plugin whose values hook names its context's output directory."""
+
+    def _values_to_redact(self):
+        return (self.context.output_dir.name,)
+
+
+def _context_with_output_dir_named(tmp_path, name):
+    source_dir = tmp_path / f"source-{name}"
+    source_dir.mkdir()
+    output_dir = tmp_path / name
+    output_dir.mkdir()
+    work_dir = output_dir / ASH_WORK_DIR_NAME
+    work_dir.mkdir()
+    return PluginContext(
+        source_dir=source_dir,
+        output_dir=output_dir,
+        work_dir=work_dir,
+        config=AshConfig(project_name="test"),
+    )
+
+
+def test_a_copy_given_a_context_carries_its_values_into_the_shared_section(tmp_path):
+    first = _context_with_output_dir_named(tmp_path, "FIRSTCANARY-u33a-1")
+    second = _context_with_output_dir_named(tmp_path, "SECONDCANARY-u33a-2")
+    plugin = _ReadsItsContext(context=first, config=PluginConfigBase(name="probe"))
+    assert plugin.config.redaction_values() == ("FIRSTCANARY-u33a-1",)
+
+    copied = plugin.model_copy(update={"context": second})
+
+    values = copied.config.redaction_values()
+    assert "SECONDCANARY-u33a-2" in values
+    # The values the section already held are kept beside the new ones.
+    assert "FIRSTCANARY-u33a-1" in values
+
+
 def test_a_copy_with_no_new_section_keeps_the_values_it_shares(plugin_context):
     plugin = _ReadsAValue(context=plugin_context, config=PluginConfigBase(name="probe"))
     assert plugin.config.redaction_values() == (ENV_VALUE,)
