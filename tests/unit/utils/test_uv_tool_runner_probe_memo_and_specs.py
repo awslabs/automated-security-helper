@@ -242,6 +242,13 @@ class TestATimeoutUnderCheckIsAFailedRun:
         result = runner.run_tool("bandit", check=False)
         assert getattr(result, "timed_out", False) is True
 
+
+class TestTheProbeSpecAndItsMemo:
+    """``get_uv_tool_command`` probes the ``--from`` spec the scan runs, holds it
+    to the package, and remembers each form's answer under its own key. These
+    sat under the timeout-under-check class above, where a run of the memo
+    class by name skipped them."""
+
     def test_a_probe_that_exited_non_zero_is_remembered(self, spawn):
         """The control: uv's own answer about the tool is still memoized."""
         assert get_uv_tool_command("bandit") is None
