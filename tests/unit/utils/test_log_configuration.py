@@ -98,8 +98,12 @@ class EncodinglessStream(FakeStream):
 
 @pytest.fixture
 def on_windows(monkeypatch):
-    """Make the module believe it is running on Windows, with a clean env."""
+    """Make the module believe it is running on Windows, with a clean env.
+
+    The locale is set once a process, so each test starts as if it had not been.
+    """
     monkeypatch.setattr(log_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(log_module, "_locale_step_done", False)
     for name in CI_INDICATORS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PYTHONIOENCODING", "utf-8")

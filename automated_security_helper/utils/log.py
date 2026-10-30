@@ -1065,6 +1065,13 @@ class JsonFormatter(logging.Formatter):
         return json_commands_broken(json.dumps(message_dict, default=str))
 
 
+# Whether configure_windows_safe_logging has made its one attempt at the process
+# locale, and the lock that makes the attempt once even when several threads
+# reach it together.
+_locale_step_done = False
+_LOCALE_STEP_LOCK = threading.Lock()
+
+
 def configure_windows_safe_logging():
     """Reconfigure stdout/stderr to UTF-8 on Windows consoles that cannot encode.
 
@@ -1083,7 +1090,12 @@ def configure_windows_safe_logging():
     Narrowly gated: returns immediately unless the platform is Windows and either
     CI is detected or the console encoding cannot represent the characters ASH
     emits, so it is a no-op on Linux and macOS.
+
+    The process locale is set on the first call that gets past that gate, and not
+    again; the streams are reconfigured on each call, for the streams of the moment.
     """
+    global _locale_step_done
+
     if platform.system().lower() != "windows":
         return
 
@@ -1125,14 +1137,20 @@ def configure_windows_safe_logging():
                 except (AttributeError, OSError, ValueError):
                     pass
 
-        # Set locale to UTF-8 if possible
-        try:
-            locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
-        except locale.Error:
-            try:
-                locale.setlocale(locale.LC_ALL, "C.UTF-8")
-            except locale.Error:
-                pass  # Keep default locale
+        # Set locale to UTF-8 if possible, once a process: the locale is the
+        # process's, setlocale is not safe to call from several threads at once,
+        # and get_logger runs this for every logger it sets up, MCP scan threads
+        # included. A second call would set what the first has set.
+        with _LOCALE_STEP_LOCK:
+            if not _locale_step_done:
+                try:
+                    locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
+                except locale.Error:
+                    try:
+                        locale.setlocale(locale.LC_ALL, "C.UTF-8")
+                    except locale.Error:
+                        pass  # Keep default locale
+                _locale_step_done = True
 
         # Set environment variable for subprocess encoding. Under the shared
         # environment lock: get_logger runs this from MCP scan threads too.
@@ -2027,6 +2045,17 @@ def configure_last_resort_level(level: "str | int | None" = None) -> None:
     """
     resolved = None if level is None else _coerce_log_level(level)
     _LAST_RESORT.setLevel(_last_resort_level() if resolved is None else resolved)
+    # The gate is meant to be the only filter a homeless record meets, but a
+    # logger whose level was never set takes its parent's (root's WARNING), and
+    # that refuses an INFO or DEBUG record before it can reach a gate set below
+    # WARNING. get_logger pins the logger low for the same reason; this does it
+    # for the records logged before get_logger runs. A level somebody set
+    # stays, and so does a gate at or above the level the logger already has.
+    if (
+        ASH_LOGGER.level == logging.NOTSET
+        and _LAST_RESORT.level < ASH_LOGGER.getEffectiveLevel()
+    ):
+        ASH_LOGGER.setLevel(_LAST_RESORT.level)
 
 
 class _RoutedLastResort(ShownHandlerErrors, logging.Handler):
