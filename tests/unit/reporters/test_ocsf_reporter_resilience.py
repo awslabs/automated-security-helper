@@ -674,9 +674,9 @@ class TestReportDegradation:
         converted = [f for f in findings if f["vulnerabilities"]]
         assert [f["vulnerabilities"][0]["title"] for f in converted] == ["GOOD"]
         shortfalls = [f for f in findings if not f["vulnerabilities"]]
-        # The uid is derived from the scanned project's name; this model names
-        # none, so it is the unnamed scan's.
-        assert [f["finding_info"]["uid"] for f in shortfalls] == [_shortfall_uid("")]
+        # The uid is derived from the scanned project's name; this model keeps
+        # the default report metadata, whose project is named "ASH".
+        assert [f["finding_info"]["uid"] for f in shortfalls] == [_shortfall_uid("ASH")]
 
     def test_when_every_finding_fails_to_serialize_an_error_response_is_returned(
         self, reporter, monkeypatch
