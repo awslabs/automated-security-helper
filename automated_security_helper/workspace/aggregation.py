@@ -267,7 +267,9 @@ def _slash_before_a_drive(text: str) -> bool:
     [2]: ``/x:legacy/src/x.py`` is a rooted POSIX path whose first component holds
     a colon, and dropping its separator made it ``x:legacy/src/x.py``, which
     nothing read as a drive, so it was rebased under the project as if relative.
-    ``utils/workspace_paths.py`` applies the same rule on its side.
+    ``utils/workspace_paths.py`` reads a drive letter at the start of text whose
+    separators are already stripped, so it never sees this shape; this predicate
+    is the one place the leading separator is judged.
     """
     if len(text) < 3 or text[0] != "/" or text[2] != ":":
         return False
