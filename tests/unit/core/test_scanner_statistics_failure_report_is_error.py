@@ -144,6 +144,51 @@ class TestAFailureReportIsAnError:
         assert error is True
         assert excluded is False
 
+    def test_an_exception_inside_raw_results_alone_is_an_error(self):
+        """The handlers' failure dict carries the exception beside its status; a
+        dict that kept the text and lost the status is still a failure's. Read
+        at the top of the report only, such a report was a FAILED grade."""
+        excluded, missing, error = ScannerStatisticsCalculator._status_info_from_report(
+            {
+                "scanner_name": SCANNER,
+                "status": "FAILED",
+                "raw_results": {"exception": "boom"},
+            }
+        )
+
+        assert error is True
+        assert excluded is False
+
+    def test_a_nested_exception_refuses_the_partial_loss_reading_too(self):
+        """The one rule reaches the other reader: an ERROR row beside a report
+        whose only failure mark is the nested exception is a crash, not a
+        partial loss."""
+        model = AshAggregatedResults()
+        model.ash_config = get_default_config()
+        model.additional_reports = {
+            SCANNER: {
+                "source": {
+                    "scanner_name": SCANNER,
+                    "target_type": "source",
+                    "status": "ERROR",
+                    "targets_attempted": 4,
+                    "targets_failed": 1,
+                    "raw_results": {"exception": "boom"},
+                }
+            }
+        }
+
+        assert (
+            ScannerStatisticsCalculator.recorded_error_is_partial_loss(model, SCANNER)
+            is False
+        )
+        # The control: the same counters with no failure mark are a partial loss.
+        del model.additional_reports[SCANNER]["source"]["raw_results"]
+        assert (
+            ScannerStatisticsCalculator.recorded_error_is_partial_loss(model, SCANNER)
+            is True
+        )
+
 
 class TestControls:
     def test_a_graded_failed_report_is_a_verdict(self):

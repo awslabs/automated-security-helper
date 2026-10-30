@@ -384,8 +384,8 @@ class ScannerStatisticsCalculator:
         (one written before the field existed, or built by hand) is kept and read
         for the key it is filed under, as ``core.unified_metrics.own_target_reports``
         keeps it: the durations, the counters, the ERROR and partial-loss reads of
-        the walks below are read for the key. Only a STATUS is never taken from a
-        name-less report, because a status filed under the wrong key would flip a
+        the walks below are read for the key. Only a recorded STATUS is never taken
+        from a name-less report, because a status filed under the wrong key would flip a
         row: ``_recorded_report`` and ``get_scanner_status_info``'s fallback over
         these reports refuse one, so the scanner reads as having no recorded
         status. The key and the recorded name are matched in any case
@@ -1227,21 +1227,27 @@ class ScannerStatisticsCalculator:
 
         Two marks, either one enough: ``raw_results`` is a dict whose ``status``
         is ``"failed"`` (the run modes' handlers write it on every failure row,
-        fresh or refiled), or ``exception`` is set (``set_exception`` writes it
-        on a row the handler refiles, ``for_failure`` on a fresh one, and a
-        merged or hand-written file can carry it alone). The one rule for the
-        three readers of a failure: ``_status_info_from_report`` grades such a
-        report ERROR whatever status it carries,
-        ``target_report_is_partial_loss`` refuses it (a crash's counters are
-        not a partial loss's), and ``recorded_error_is_partial_loss`` refuses an
-        ERROR row beside it. Spelled out in two of the three, a report with
-        partial counters, no ``raw_results`` and an ``exception`` read as a
+        fresh or refiled), or ``exception`` is set, at the top of the report
+        (``set_exception`` writes it on a row the handler refiles, ``for_failure``
+        on a fresh one, and a merged or hand-written file can carry it alone) or
+        inside ``raw_results`` (the handlers' failure dict carries the exception
+        text beside its ``status``, and a dict that kept the text and lost the
+        status, or was written by hand with the text alone, is a failure's all
+        the same). The one rule for the three readers of a failure:
+        ``_status_info_from_report`` grades such a report ERROR whatever status
+        it carries, ``target_report_is_partial_loss`` refuses it (a crash's
+        counters are not a partial loss's), and ``recorded_error_is_partial_loss``
+        refuses an ERROR row beside it. Spelled out in two of the three, a report
+        with partial counters, no ``raw_results`` and an ``exception`` read as a
         crash when the scanner had a recorded row and as a partial loss when it
         had none, so the same reports gave two statuses.
         """
         raw_results = report.get("raw_results")
-        if isinstance(raw_results, dict) and raw_results.get("status") == "failed":
-            return True
+        if isinstance(raw_results, dict):
+            if raw_results.get("status") == "failed":
+                return True
+            if raw_results.get("exception"):
+                return True
         return bool(report.get("exception"))
 
     @staticmethod
@@ -1482,9 +1488,9 @@ class ScannerStatisticsCalculator:
         the same structural reason. That function existed with that quantifier and this one did
         not, and the gap between them is exactly where the defect lived.
 
-        Only this scanner's own reports are read (``_own_reports``), as ``any_target_missing``
-        and ``_recorded_report`` read them: a report filed under this name that names another
-        scanner is not this scanner's ERROR.
+        Only this scanner's own reports are read (``_own_reports``): a report filed under
+        this name that names another scanner is not this scanner's ERROR, and a name-less
+        report's ERROR counts for the key it is filed under.
         """
         reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
 
