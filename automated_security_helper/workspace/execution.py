@@ -387,6 +387,7 @@ from automated_security_helper.utils.secret_masking import (
     mask_secrets_in_results,
     shapes_of_secret_values,
 )
+from automated_security_helper.utils.subprocess_utils import SANDBOX_STOP_GRACE_SECONDS
 from automated_security_helper.workspace.aggregation import (
     POLICY_ORIGIN,
     RESULTS_FILENAME,
@@ -420,28 +421,31 @@ from automated_security_helper.workspace.reporting import (
 #: that a timeout is reported promptly, large enough not to spin.
 _DEADLINE_POLL_SECONDS = 0.05
 
-#: How long, in seconds from the abandon's own clock read, an abandoned
-#: project's worker is given to come back after its stop was requested. A stop
-#: reaches a scanner's child through the subprocess layer's terminate-then-kill
-#: well inside that, so a worker still busy after this long is between scope
-#: checks and may not come back for the rest of its scan. Then its slot is counted
-#: lost for the projects still queued, and the secret values its findings exposed
-#: are declared missing from the workspace masking set rather than waited for
-#: without bound. Small against any ``project_timeout``, large against a stop.
-#: Measured on the clock and not in polls: a poll ends at every completion
-#: (``FIRST_COMPLETED``), so a grace counted in polls was spent in far less than
-#: the two seconds it named whenever other projects were finishing.
-_ABANDONED_STOP_GRACE_SECONDS = 2.0
+#: The margin, in seconds, the grace below allows past the subprocess layer's own
+#: stop grace: the SIGKILL that ends that grace, and the worker's return through
+#: the scan's own cleanup to the pool.
+_STOP_GRACE_MARGIN_SECONDS = 1.0
 
-#: The grace for an abandoned worker WITHOUT a caller-given event before its
-#: slot is counted lost to the projects still queued: none, beyond never in the
-#: poll that abandoned it (the test below is strictly later than the abandon).
-#: The pool does not wait for such a worker's stop at shutdown, so the slot is
-#: written off at the next poll. Its pool-built event stops a scan that checks
-#: its scope within that poll, and the slot it frees then starts a queued
-#: project instead of that project being failed as never started in the same
-#: breath as the abandon.
-_REAPER_GRACE_SECONDS = 0.0
+#: How long, in seconds from the abandon's own clock read, an abandoned
+#: project's worker is given to come back after its stop was requested, before
+#: its slot is counted lost for the projects still queued and the secret values
+#: its findings exposed are declared missing from the workspace masking set
+#: rather than waited for without bound. Derived from the stop itself, not
+#: asserted: a stop reaches a scanner's child through the subprocess layer's
+#: SIGTERM, ``SANDBOX_STOP_GRACE_SECONDS`` of waiting, then SIGKILL
+#: (``utils/subprocess_utils._stop_grace``), so a worker whose tool ignores
+#: SIGTERM comes back only after that grace, and a shorter one here wrote its
+#: slot off, and failed every queued project as never started at a bound of one,
+#: while the stop was still going to free it. A worker still busy after this
+#: long is between scope checks and may not come back for the rest of its scan.
+#: Large against a stop, still small against any ``project_timeout``. One grace
+#: for every abandoned worker, with or without a caller-given event: the stop
+#: reaches the child the same way on both paths, and whether the pool waits for
+#: the worker at shutdown says nothing about when its slot frees for a queued
+#: project. Measured on the clock and not in polls: a poll ends at every
+#: completion (``FIRST_COMPLETED``), so a grace counted in polls was spent in far
+#: less than it named whenever other projects were finishing.
+_ABANDONED_STOP_GRACE_SECONDS = SANDBOX_STOP_GRACE_SECONDS + _STOP_GRACE_MARGIN_SECONDS
 
 #: The phase name that selects report generation, as ``run_ash_scan`` spells it.
 _REPORT_PHASE = "report"
@@ -2992,8 +2996,13 @@ def _run_projects(
     before it counts among the workers lost to abandoned projects, which decide
     when a queued project is given up on (a scan that never checks its scope
     held its slot uncounted, and the queued projects waited on it without any
-    bound), and the pool is waited for before this returns, which is bounded
-    by how long a stop takes. That is what lets the MCP server hold the workspace's
+    bound), and the pool is waited for before this returns. That wait ends when
+    the stops have ended, not at ``project_timeout`` or the server's scan
+    timeout: a scan that never checks its scope holds the return until its
+    tool's SIGTERM-then-SIGKILL has run its course (``SANDBOX_STOP_GRACE_SECONDS``),
+    and a worker wedged outside any child stop holds it for as long as it runs.
+    What the grace bounds is when the projects still queued are given up on,
+    not the return. That is what lets the MCP server hold the workspace's
     max_concurrent_scans slot and its projects' directories until the scanners
     have stopped: ``project_timeout`` comes from the scanned workspace's own
     config, and without the wait a short one would leave scanners running
@@ -3046,9 +3055,6 @@ def _run_projects(
     # carries the secret values the project's findings exposed, which the
     # workspace masking set needs whatever the verdict.
     abandoned_futures: Dict[Future, ProjectPlan] = {}
-    # Those of them with a caller-given event: the pool waits for their stop at
-    # shutdown, so their values can still join the masking set.
-    stoppable_futures: Set[Future] = set()
 
     def worker(project: ProjectPlan) -> _ProjectRun:
         with start_lock:
@@ -3095,17 +3101,21 @@ def _run_projects(
         timeout = settings.project_timeout
         # The clock (time.monotonic) at which each abandoned project's worker was
         # told to stop. Each such worker is a pool slot that does not come back
-        # until the project's scan next checks its scope. A project with a
-        # caller-given event is given _ABANDONED_STOP_GRACE_SECONDS for its stop
-        # to free the slot before the slot is counted lost, because the pool
-        # waits for that stop at shutdown; a worker still busy after the grace is
-        # between scope checks and may never check again, and not counting it
-        # left the projects still queued waiting on it without any bound. Read
-        # from the futures each poll, not kept as a tally, so a worker whose
-        # project has since ended counts as free: a project still queued then
-        # starts on it instead of being failed as never started. The same clock
-        # read feeds the bounded wait after the loop and the note a worker that
-        # never came back is given, so the grace they name is the one spent.
+        # until the project's scan next checks its scope, or its tool's stop
+        # (SIGTERM, the subprocess layer's grace, SIGKILL) returns it. Every
+        # abandoned worker, with or without a caller-given event, is given
+        # _ABANDONED_STOP_GRACE_SECONDS for that to free the slot before the
+        # slot is counted lost: the stop reaches the child the same way on both
+        # paths, and counting a slot lost in the poll after the abandon, as the
+        # path without events once did, failed every queued project as never
+        # started while the stop was about to free it. A worker still busy after
+        # the grace is between scope checks and may never check again, and not
+        # counting it left the projects still queued waiting on it without any
+        # bound. Read from the futures each poll, not kept as a tally, so a
+        # worker whose project has since ended counts as free: a project still
+        # queued then starts on it instead of being failed as never started. The
+        # same clock read feeds the wait after the loop and the note a worker
+        # that never came back is given, so the grace they name is the one spent.
         abandoned_at: Dict[Future, float] = {}
 
         while pending:
@@ -3166,8 +3176,6 @@ def _run_projects(
                 )
                 abandoned_futures[future] = project
                 abandoned_at[future] = now
-                if stoppable:
-                    stoppable_futures.add(future)
                 _cancel(project)
                 collected[project.key] = _failed_outcome(
                     project,
@@ -3179,17 +3187,12 @@ def _run_projects(
                 pending.discard(future)
 
             # Strictly later than the abandon's own clock read, so a worker is
-            # never counted held in the poll that abandoned it, whatever grace.
+            # never counted held in the poll that abandoned it; one grace for
+            # every abandoned worker, whatever stops it (see the constant).
             held = [
                 future
                 for future, since in abandoned_at.items()
-                if not future.done()
-                and now - since
-                > (
-                    _ABANDONED_STOP_GRACE_SECONDS
-                    if future in stoppable_futures
-                    else _REAPER_GRACE_SECONDS
-                )
+                if not future.done() and now - since > _ABANDONED_STOP_GRACE_SECONDS
             ]
             if len(held) < bound:
                 continue

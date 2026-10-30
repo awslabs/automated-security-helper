@@ -14,6 +14,18 @@ worker now counts as held once ``_ABANDONED_STOP_GRACE_SECONDS`` have passed on
 the clock since its stop was requested (the grace was counted in polls, and a
 poll ends at every completion, so it was spent early whenever other projects
 finished); one that comes back inside the grace frees its slot as before.
+
+The grace is one for every abandoned worker, and derived from the stop. A worker
+WITHOUT a caller-given event (the CLI) was given none: its slot was written off
+in the poll after the abandon, on the reasoning that the pool does not wait for
+its stop at shutdown. Whether the pool waits at shutdown says nothing about when
+the slot frees for a queued project, and the stop reaches the scanner's child the
+same way on both paths, so the queued projects were failed as never started
+while the stop was about to free the slot. And the grace itself was asserted at
+2 s against a stop that gives the child ``SANDBOX_STOP_GRACE_SECONDS`` after
+SIGTERM before SIGKILL: a tool that ignores SIGTERM came back after the grace,
+with its slot already written off. The grace is now that stop grace plus a
+margin, and the same on both paths.
 """
 
 import threading
@@ -21,6 +33,7 @@ import threading
 import pytest
 
 from automated_security_helper.core.cancellation import CancelEvent
+from automated_security_helper.utils.subprocess_utils import SANDBOX_STOP_GRACE_SECONDS
 from automated_security_helper.workspace import execution as execution_module
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
@@ -163,3 +176,64 @@ def test_a_stoppable_worker_that_stops_inside_the_grace_frees_its_slot(
     assert _settle(scan, "wedged") == "cancelled"
     assert collected["wedged"].outcome.error.startswith("timed out"), collected
     assert "finished on its own" in (collected["queued"].outcome.error or ""), collected
+
+
+def test_the_grace_is_derived_from_the_subprocess_layers_stop_grace():
+    """Red at the base: 2.0 s, asserted, against a stop that waits
+    ``SANDBOX_STOP_GRACE_SECONDS`` after SIGTERM before it kills."""
+    assert execution_module._ABANDONED_STOP_GRACE_SECONDS > SANDBOX_STOP_GRACE_SECONDS
+
+
+def test_there_is_one_grace_for_every_abandoned_worker():
+    """Red at the base: a second constant, 0.0, for the worker without a
+    caller-given event."""
+    assert not hasattr(execution_module, "_REAPER_GRACE_SECONDS")
+
+
+def test_a_worker_without_a_caller_event_that_stops_inside_the_grace_frees_its_slot(
+    tmp_path, monkeypatch
+):
+    """The CLI path (no ``cancel_events``): one slot; ``wedged`` is abandoned and
+    its stop frees the slot a little later, inside the grace; ``queued`` runs on it.
+
+    Red at the base: the slot was written off in the poll after the abandon
+    (``_REAPER_GRACE_SECONDS = 0.0``), so ``queued`` was failed as never started
+    before the stop could free the slot. The release stands in for the stop
+    returning the worker; it is started from the abandon itself, so it lands
+    after the abandon whatever the poll timing, well inside a 1 s grace.
+    """
+    monkeypatch.setattr(execution_module, "_ABANDONED_STOP_GRACE_SECONDS", 1.0)
+    release = threading.Event()
+    scan = _AScanThatIgnoresItsScope(release)
+    monkeypatch.setattr(execution_module, "_scan_one_project", scan)
+    real_failed = execution_module._failed_outcome
+    timers = []
+
+    def release_shortly_after_the_abandon(project, settings, error, **kwargs):
+        if project.key == "wedged" and error.startswith("timed out"):
+            timer = threading.Timer(0.3, release.set)
+            timers.append(timer)
+            timer.start()
+        return real_failed(project, settings, error, **kwargs)
+
+    monkeypatch.setattr(
+        execution_module, "_failed_outcome", release_shortly_after_the_abandon
+    )
+    try:
+        collected = _run_projects(
+            [_project(tmp_path, "wedged"), _project(tmp_path, "queued")],
+            _settings(tmp_path, project_timeout=0.2),
+            None,
+            1,
+        )
+    finally:
+        release.set()
+        for timer in timers:
+            timer.cancel()
+
+    assert collected["wedged"].outcome.error.startswith("timed out"), collected
+    assert scan.exits.get("wedged") == "released", scan.exits
+    assert "finished on its own" in (collected["queued"].outcome.error or ""), (
+        "the queued project was failed as never started although the abandoned "
+        "worker's slot was freed inside the grace"
+    )
