@@ -57,7 +57,7 @@ A refused config keeps its own `error_type`. The scan does not start, and the re
 
 The target and source checks have their own `error_type` values too (`scan_target_not_permitted`, `output_dir_not_permitted`, `no_source_delivered`, `session_source_mismatch`, `delivered_source_missing`, `invalid_session_id`). A directory that already has a scan is refused with `error_type: MCPResourceError` and `error_category: resource_exhausted`; `error` says the directory `already has an active scan`, or, for a scan that was cancelled or stopped at its timeout and has not finished stopping, `has a scan that is still stopping`. That `error_type` is the exception's class name, and an unexpected error while the scan is being started arrives as `MCPResourceError` too, with `error_category: unexpected_error`, so `MCPResourceError` alone does not prove a deliberate refusal: branch on `error_category`. The server's `max_concurrent_scans` limit is refused the same way (`resource_exhausted`); its `context` holds `max_concurrent_scans`: wait for a running scan to finish, then retry. The busy-directory refusal's `context` names the running scan's `scan_id` only when the scan is this session's: poll `get_scan_progress` with it, or `cancel_scan` it if it is no longer needed (`list_active_scans` lists this session's scans). Without a `scan_id`, another session's scan holds the directory and the server does not name it: wait and retry, or scan another directory. After a `cancel_scan` of that directory the refusal repeats until the scan has stopped (see `cancel_scan`): retry after a few seconds. Four more refusals carry their own `error_type`: `committed_output_files` (a file git tracks in `.ash/ash_output` where the scan writes, or that check could not finish), `session_identity_required` (the caller has no session the server issued, so a scan it could neither follow nor stop is not started), `session_scan_limit` (this session is already running `max_concurrent_scans_per_session` scans: retry once one has finished, or `cancel_scan` one) and `source_delivery_busy` (the session's delivered source is being changed: retry after the change finishes). Any other reason the scan could not be started returns `error_type: scan_start_failure`, and an unexpected error returns the exception's class name. Branch on `error_type` and `error_category`, never on the text of `error`.
 
-On failure, `error_type` is one of `bound_profile_unavailable`, `committed_output_files`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `output_dir_not_usable`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch`, `source_delivery_busy` and `source_dir_not_usable`, or the class name of an exception.
+On failure, `error_type` is one of `bound_profile_unavailable`, `committed_output_files`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `delivered_source_missing`, `invalid_session_id`, `no_source_delivered`, `output_dir_not_permitted`, `output_dir_not_usable`, `scan_start_failure`, `scan_target_not_permitted`, `session_identity_required`, `session_scan_limit`, `session_source_mismatch`, `session_workspace_busy`, `source_delivery_busy` and `source_dir_not_usable`, or the class name of an exception.
 
 ## get_scan_progress
 
@@ -73,6 +73,7 @@ Returns:
 <!-- doctest: config kind=mcp-response of=mcp.get_scan_progress -->
 ```text
 {
+  "success": true,
   "scan_id": "...",
   "directory_path": "/path/to/scanned/project",
   "output_directory": "/path/to/.ash/ash_output",
@@ -80,12 +81,17 @@ Returns:
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
   "severity_threshold": "<the threshold the scan was judged by; null until it finishes when none was named>",
+  "requested_severity_threshold": "<the threshold the request named | null>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
+  "exit_code": "<int | null>",
+  "exit_code_meaning": "<str | null>",
   "is_complete": bool,
   "results_available": bool,
   "output_holds_previous_results": bool,
+  "output_superseded": bool,
+  "superseded_by": ["<scan_id>"],
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
@@ -94,6 +100,7 @@ Returns:
   "incomplete_converters": [{ "converter": "...", "reason": "...", "failed_input_kinds": ["..."] }],
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
+  "could_not_stop": [{ "scanner": "...", "reason": "..." }],
   "completed_scanners": int,
   "finished_scanners": int,
   "total_scanners": int,
@@ -101,26 +108,30 @@ Returns:
   "scanner_statuses": { "<scanner_name>": { "status": "PASSED | FAILED | ERROR | MISSING | SKIPPED", "excluded": bool, "dependencies_satisfied": bool } },
   "skipped_scanners": [{ "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies | excluded_by_configuration | skipped" }],
   "total_findings": int,
-  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
+  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int, "unknown": int },
   "scanners": {
     "<scanner_name>": {
       "<target_type>": { ... per-scanner-target progress ... }
     }
-  }
+  },
+  "timestamp": "<iso8601>",
+  "operation": "get_scan_progress"
 }
 ```
 
-There is no overall percentage field. To compute progress, use `completed_scanners / total_scanners`: `completed_scanners` counts only the scanners whose progress status is completed, so it can stay below `total_scanners` when the scan ends with a scanner that failed or was skipped. Guard against `total_scanners == 0` during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
+There is no overall percentage field. To compute progress, use `finished_scanners / total_scanners`: `finished_scanners` counts every scanner that has ended, whatever its status, and `completed_scanners` only the ones that PASSED. `scanner_status_counts` splits them into `passed`, `failed` (FAILED or ERROR), `skipped` (MISSING or SKIPPED), `running`, and `pending`. Guard against `total_scanners == 0` during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
 
 There is no top-level `duration` field; derive elapsed time from `start_time` and `end_time` (or from current time while running).
 
-`is_complete` is `true` once the scan has ended, whatever the ending: `completed`, `incomplete`, `failed` or `cancelled`. It is decided by the scan's state alone, never by a results file on disk, which can be a previous scan's. `results_available` is `true` for `completed` and `incomplete`, the scans whose results `get_scan_results` can read.
+`is_complete` is `true` once the scan has ended, whatever the ending: `completed`, `incomplete`, `failed` or `cancelled`. It is decided by the scan's state alone, never by a results file on disk, which can be a previous scan's. `results_available` is `true` for `completed` and `incomplete`, the scans whose results `get_scan_results` can read, and `false` for one of them whose results file cannot be read (the scan ended without writing its final results, or the file is not valid JSON): `error_message` then names the file and `coverage_complete` is `null`.
+
+A later scan can take the output tree over. `output_superseded` is `true` once a later scan of the same directory has written `output_directory`; `superseded_by` lists those scans' ids, oldest first, and is empty otherwise. Nothing below is read from the files then: this scan's results are gone, and `get_scan_results` on that directory reads the newest scan's. `exit_code` and `exit_code_meaning` are the ASH exit code of a run that ended with one and its documented meaning, `null` for every other ending and while the scan runs.
 
 A failed or cancelled scan leaves the previous scan's results in place. ASH puts them back in `output_directory`, and `output_holds_previous_results` is then `true` and the scanner fields are empty, because those files are not this scan's. `get_scan_results` on that directory reads the previous scan's results.
 
 `incomplete` is terminal, with partial coverage. The run finished and its results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost targets), no scanner reached a verdict, a converter did not run or could not convert some of its inputs, a rule could not be evaluated, or a content database was past its declared age bound. `incomplete_scanners` names each scanner and why, and `stale_content_databases` each stale database. The findings are real but partial, so read them, and do not report the target as clean. `failed` means the run crashed, left no readable results, or ran past the server's `scan_timeout_seconds`. `coverage_complete` is `null` while running and for `failed` or `cancelled`; with `fail_on_incomplete_scanners: false` a scan is `completed` with `coverage_complete: false` when scanners did not run.
 
-Status enum: the documented values are `pending | running | completed | incomplete | failed | cancelled`. The registry uses `pending` briefly while a scan is queued, transitions to `running` once execution begins, and may also expose the legacy `in_progress` string from older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` as equivalent "not done yet" states.
+Status enum: the documented values are `pending | running | completed | incomplete | failed | cancelled`, the registry entry's own state and nothing else. The registry uses `pending` briefly while a scan is queued and `running` once execution begins; treat both as "not done yet", and read `is_complete` rather than comparing the string.
 
 On failure, `error_type` is one of `invalid_session_id`, `scan_not_found` and `session_identity_required`, or the class name of an exception.
 
@@ -245,7 +256,7 @@ Get the resolved ASH config (defaults + user overrides merged).
 
 A config this session may not read, or one a client delivered that the server refuses, returns `success: false` with `error_type` `config_input_not_permitted`, `config_field_denied`, `config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` does for the same file.
 
-On failure, `error_type` is one of `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `invalid_session_id`, `plugin_module_refused`, `scan_target_not_permitted` and `source_dir_not_usable`, or the class name of an exception.
+On failure, `error_type` is one of `bound_profile_unavailable`, `config_env_not_resolved`, `config_field_denied`, `config_input_not_permitted`, `config_policy_unreadable`, `invalid_session_id`, `plugin_module_refused`, `scan_target_not_permitted`, `session_workspace_busy` and `source_dir_not_usable`, or the class name of an exception.
 
 ## list_profiles
 
