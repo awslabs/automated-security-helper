@@ -97,6 +97,45 @@ def _result_with(**rows: ScannerTargetStatusInfo):
     return SimpleNamespace(scanner_results=dict(rows))
 
 
+def _rollup_in_completion_order(
+    tmp_path: Path, plan_keys, *completed
+) -> Dict[str, dict]:
+    """The rollup when projects finish in *completed* order, not plan order."""
+    plan = _plan(tmp_path / "ws", *plan_keys)
+    by_key = {project.key: project for project in plan.projects}
+    aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+    for key, statuses in completed:
+        aggregator.add(_outcome(key, statuses), None, by_key[key])
+    path = aggregator.write(exit_code=0, wall_clock_seconds=0.1)
+    return json.loads(path.read_text("utf-8"))["scanner_results"]
+
+
+@pytest.mark.parametrize(
+    "completed",
+    [
+        pytest.param(
+            (("web", {"bandit": "PASSED"}), ("api", {"Bandit": "PASSED"})),
+            id="web-first",
+        ),
+        pytest.param(
+            (("api", {"Bandit": "PASSED"}), ("web", {"bandit": "PASSED"})),
+            id="api-first",
+        ),
+    ],
+)
+def test_the_published_row_is_named_by_the_plan_orders_spelling_whatever_finished_first(
+    tmp_path, completed
+):
+    """Red at the base for the web-first order: the row took the spelling of the
+    project that finished first, so a parallel run named it ``bandit`` one time
+    and ``Bandit`` the next."""
+    rolled = _rollup_in_completion_order(tmp_path, ("api", "web"), *completed)
+
+    assert "Bandit" in rolled, sorted(rolled)
+    assert "bandit" not in rolled
+    assert rolled["Bandit"]["status"] == "PASSED"
+
+
 @pytest.mark.parametrize(
     ("status", "recorded"),
     [

@@ -49,8 +49,10 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 )
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.workspace.aggregation import (
+    UNATTRIBUTED_SCANNER,
     actionable_results_by_scanner,
     count_actionable_results,
+    has_finding_at_min_severity,
 )
 from tests.unit.workspace.test_execution import (
     FakeOrchestrator,
@@ -126,6 +128,55 @@ def test_the_counter_grades_each_finding_by_its_scanners_threshold():
     )
     # Control: without a resolver, the project-wide threshold judges them all.
     assert count_actionable_results(findings, "MEDIUM") == 3
+
+
+class TestTheCounterAndTheGateReadOneFinding:
+    """The two paths that decide "is this finding actionable" grade alike.
+
+    Red at the base: the counter kept its own reading of a result (the declared
+    severity upper-cased but not stripped, a non-string scanner name
+    ``str()``-ed, the level graded through its own table) while the
+    ``--min-severity`` gate read it through the ladder's one predicate, so a
+    finding could qualify for the gate and not be counted, or the reverse.
+    """
+
+    def test_a_padded_declared_severity_is_counted_as_the_gate_reads_it(self):
+        finding = _finding("bandit")
+        finding["properties"]["issue_severity"] = " high "
+        finding["level"] = "note"
+
+        # The gate reads HIGH (the ladder strips); the counter read " HIGH " as
+        # no declared severity and graded the level, note, as LOW: not counted.
+        assert has_finding_at_min_severity([finding], "low", "MEDIUM") is True
+        assert actionable_results_by_scanner([finding], "MEDIUM") == {"bandit": 1}
+
+    def test_a_scanner_name_that_is_not_a_string_is_unattributed_on_both_sides(
+        self,
+    ):
+        finding = _finding("bandit")
+        finding["properties"]["scanner_name"] = 7
+
+        counts = actionable_results_by_scanner([finding], "MEDIUM")
+        # The gate's resolver sees None for a non-string name (the scan-wide
+        # threshold); the counter keyed the row "7" and resolved that name.
+        assert counts == {UNATTRIBUTED_SCANNER: 1}
+
+    def test_a_finding_the_gate_does_not_qualify_is_not_counted(self):
+        """Control: bandit's own CRITICAL makes its HIGH non-actionable on both sides."""
+        finding = _finding("bandit")
+
+        def threshold_for(scanner):
+            return "CRITICAL" if scanner == "bandit" else None
+
+        assert (
+            has_finding_at_min_severity(
+                [finding], "low", "MEDIUM", threshold_for=threshold_for
+            )
+            is False
+        )
+        assert actionable_results_by_scanner(
+            [finding], "MEDIUM", threshold_for=threshold_for
+        ) == {"bandit": 0}
 
 
 def test_a_scanner_with_its_own_looser_threshold_is_judged_by_it(tmp_path, monkeypatch):

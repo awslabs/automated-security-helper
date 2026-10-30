@@ -157,11 +157,9 @@ from automated_security_helper.utils.uri_separators import (
     sanitized_uri_text,
 )
 from automated_security_helper.utils.severity_ladder import (
-    SEVERITIES,
     result_fails_scanner_threshold,
+    result_scanner_name,
     result_severity,
-    sarif_level_fails_threshold,
-    severity_fails_threshold,
 )
 from automated_security_helper.utils.workspace_paths import to_workspace_pattern
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
@@ -789,6 +787,15 @@ def actionable_results_by_scanner(
     Returns:
         Scanner name to actionable count. A falsy effective threshold counts
         nothing for that scanner, which is how an operator turns the gate off.
+
+    One predicate with the ``--min-severity`` gate below:
+    ``severity_ladder.result_fails_scanner_threshold`` grades the result, and
+    ``result_scanner_name`` names its scanner, for both. This counter kept its
+    own reading (``issue_severity`` upper-cased but not stripped, ``str()`` of a
+    scanner name that is not a string, the level graded through its own table),
+    so a result with ``issue_severity: " high "`` was graded by its level here and
+    as HIGH by the gate: counted on one side and qualifying on the other, which is
+    the split sharing one resolver was meant to close.
     """
     effective = effective_threshold_resolver(threshold, threshold_for)
 
@@ -796,24 +803,14 @@ def actionable_results_by_scanner(
     for result in results:
         if not isinstance(result, Mapping):
             continue
-        properties = result.get("properties")
-        scanner: Optional[str] = None
-        issue_severity = ""
-        if isinstance(properties, Mapping):
-            raw_name = properties.get("scanner_name")
-            scanner = str(raw_name) if raw_name else None
-            issue_severity = str(properties.get("issue_severity") or "").upper()
+        scanner = result_scanner_name(result)
         name = scanner or UNATTRIBUTED_SCANNER
         counts.setdefault(name, 0)
         if result_is_suppressed(result):
             continue
-        gate = effective(scanner)
-        if not gate:
-            continue
-        if issue_severity in SEVERITIES:
-            if severity_fails_threshold(issue_severity, gate):
-                counts[name] += 1
-        elif sarif_level_fails_threshold(result.get("level"), gate):
+        # A falsy effective threshold fails nothing (severity_fails_threshold),
+        # which is the gate turned off for that scanner.
+        if result_fails_scanner_threshold(result, effective):
             counts[name] += 1
     return counts
 
@@ -1230,8 +1227,11 @@ class WorkspaceAggregator:
         # Every per-scanner map below is keyed by the folded name (_rollup_key):
         # cli/merge documents that one shard records "Bandit" where another
         # records "bandit", and a project's config is written by the same hands.
-        # Keyed by the raw name, one scanner split into two rows. The spelling
-        # the first project used is what the published row is named.
+        # Keyed by the raw name, one scanner split into two rows. The published
+        # row is named by the first spelling in WORKSPACE-FILE order
+        # (_display_names, read when the payload is built); this map remembers
+        # the first spelling add() saw, which is completion order and is the
+        # fallback for a scanner known only from its findings.
         self._scanner_display: Dict[str, str] = {}
         self._scanner_findings: Dict[str, int] = {}
         self._scanner_actionable: Dict[str, int] = {}
@@ -1468,6 +1468,7 @@ class WorkspaceAggregator:
         scanner has this one; it stays on that project's own entry.
         """
         outcomes = self._ordered_outcomes()
+        display = self._display_names(outcomes)
         payload: Dict[str, Dict[str, Any]] = {}
         for scanner in sorted(set(self._scanner_status) | set(self._scanner_findings)):
             status = self._scanner_status.get(scanner) or "PASSED"
@@ -1501,8 +1502,31 @@ class WorkspaceAggregator:
                         "skipped_reason" if status == "SKIPPED" else "missing_reason"
                     )
                     row[field] = "; ".join(named)
-            payload[self._scanner_display.get(scanner, scanner)] = row
+            payload[display.get(scanner, scanner)] = row
         return payload
+
+    def _display_names(
+        self, outcomes: Sequence[WorkspaceProjectResult]
+    ) -> Dict[str, str]:
+        """The published spelling of each folded scanner name, by plan order.
+
+        ``add()`` runs in completion order, which a parallel run does not
+        reproduce, so a row named by the first spelling it saw (``Bandit`` from
+        one project, ``bandit`` from another) could change its key between two
+        runs of the same workspace, and a reader looking the row up by a
+        project's own ``scanner_name`` found it one run and not the next. The
+        name is the first spelling in workspace-file order (*outcomes* is
+        ``_ordered_outcomes()``), read from each project's own rows; a scanner
+        no row recorded (known from its findings alone) keeps the first spelling
+        ``add()`` saw.
+        """
+        display: Dict[str, str] = {}
+        for outcome in outcomes:
+            for raw_name in outcome.scanners or {}:
+                display.setdefault(_fold_scanner_name(raw_name), raw_name)
+        for key, name in self._scanner_display.items():
+            display.setdefault(key, name)
+        return display
 
     def results_payload(
         self,
