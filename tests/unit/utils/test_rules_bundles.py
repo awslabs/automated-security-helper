@@ -513,7 +513,7 @@ class TestALocalFailureIsTheDocumentedRefusal:
     to let the raw OSError out, past the conversion the mkdir and mkdtemp had."""
 
     @contextmanager
-    def _refused_lock(self, path):
+    def _refused_lock(self, path, *, timeout=None):
         raise PermissionError(errno.EACCES, "Permission denied", str(path))
         yield  # pragma: no cover - the generator shape contextmanager needs
 
@@ -537,7 +537,7 @@ class TestALocalFailureIsTheDocumentedRefusal:
         archive, bundle = bundle_zip
 
         @contextmanager
-        def held_elsewhere(path):
+        def held_elsewhere(path, *, timeout=None):
             raise TimeoutError(f"the lock on {path} was held for 30 seconds")
             yield  # pragma: no cover
 
@@ -571,7 +571,7 @@ class TestALocalFailureIsTheDocumentedRefusal:
             with (
                 patch(
                     "automated_security_helper.utils.file_lock.exclusive_lock",
-                    lambda path: real(path, timeout=0.2),
+                    lambda path, *, timeout=None: real(path, timeout=0.2),
                 ),
                 pytest.raises(
                     RulesBundleUnavailable, match="another ASH process"
@@ -594,7 +594,7 @@ class TestALocalFailureIsTheDocumentedRefusal:
         archive, bundle = bundle_zip
 
         @contextmanager
-        def hung_mount(path):
+        def hung_mount(path, *, timeout=None):
             raise TimeoutError(errno.ETIMEDOUT, "Connection timed out", str(path))
             yield  # pragma: no cover
 

@@ -15,11 +15,15 @@ Each test pins one change in ``utils/rules_bundles.py``:
   says the install needs network access;
 * a failed move of the old bundle aside leaves no empty directory behind;
 * concurrent installs are serialized on a lock in the rules root, and an install
-  that finds the bundle in place once it holds the lock downloads nothing.
+  that finds the bundle in place once it holds the lock downloads nothing;
+* the wait for that lock is at least the lock's default and grows with the
+  download's own retry budget, and a lock that times out or cannot be taken is
+  the documented refusal, not a raw TimeoutError or OSError.
 """
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import sys
@@ -33,6 +37,8 @@ from unittest.mock import patch
 import pytest
 
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
+from automated_security_helper.utils.download_utils import download_wait_bound_seconds
+from automated_security_helper.utils.file_lock import LOCK_TIMEOUT_SECONDS
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
     extract_bundle,
@@ -277,16 +283,90 @@ class TestConcurrentInstalls:
         taken: list = []
 
         @contextmanager
-        def _lock(path):
-            taken.append(Path(path))
+        def _lock(path, *, timeout=None):
+            taken.append((Path(path), timeout))
             yield
 
         monkeypatch.setattr(
             "automated_security_helper.utils.file_lock.exclusive_lock", _lock
         )
+        monkeypatch.delenv("ASH_DOWNLOAD_MAX_ATTEMPTS", raising=False)
         rules = tmp_path / "rules"
         _install(rules, bundle, archive, [])
-        assert taken == [rules / ".ash-rules-install.lock"]
+        assert [path for path, _ in taken] == [rules / ".ash-rules-install.lock"]
+        # Under the default download policy the download's worst case is well
+        # under the lock's default wait, which is then the wait passed.
+        assert taken[0][1] == LOCK_TIMEOUT_SECONDS
+
+    def test_the_lock_wait_grows_with_the_download_budget(
+        self, tmp_path, bundle_zip, monkeypatch
+    ):
+        """An installer that may spend 200 attempts on its download holds the
+        lock for longer than the default wait; a waiter sized on the default
+        alone gave such a holder up for dead."""
+        archive, bundle = bundle_zip
+        taken: list = []
+
+        @contextmanager
+        def _lock(path, *, timeout=None):
+            taken.append(timeout)
+            yield
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.file_lock.exclusive_lock", _lock
+        )
+        monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", "200")
+        _install(tmp_path / "rules", bundle, archive, [])
+        assert taken[0] > LOCK_TIMEOUT_SECONDS
+        assert taken[0] == download_wait_bound_seconds() + 120.0
+
+    def test_a_lock_that_times_out_is_the_documented_refusal(
+        self, tmp_path, bundle_zip, monkeypatch
+    ):
+        archive, bundle = bundle_zip
+
+        @contextmanager
+        def _lock(path, *, timeout=None):
+            raise TimeoutError(f"Another process has held the lock {path}.")
+            yield  # pragma: no cover - the generator shape contextmanager needs
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.file_lock.exclusive_lock", _lock
+        )
+        monkeypatch.delenv("ASH_DOWNLOAD_MAX_ATTEMPTS", raising=False)
+        rules = tmp_path / "rules"
+        calls: list = []
+        with pytest.raises(RulesBundleUnavailable) as raised:
+            _install(rules, bundle, archive, calls)
+        text = str(raised.value)
+        assert str(rules / ".ash-rules-install.lock") in text
+        # The refusal names the wait that was spent, not a vague "too long".
+        assert "held the install lock" in text
+        assert f"for {LOCK_TIMEOUT_SECONDS:g} seconds" in text
+        assert isinstance(raised.value.__cause__, TimeoutError)
+        assert calls == [], "nothing is downloaded without the lock"
+
+    def test_a_lock_that_cannot_be_taken_is_the_documented_refusal(
+        self, tmp_path, bundle_zip, monkeypatch
+    ):
+        """The lock file is a directory, a FIFO or a link: file_lock refuses it
+        with OSError(EINVAL), and the installer says so in its own terms."""
+        archive, bundle = bundle_zip
+
+        @contextmanager
+        def _lock(path, *, timeout=None):
+            raise OSError(errno.EINVAL, f"The lock file {path} is not a regular file.")
+            yield  # pragma: no cover - the generator shape contextmanager needs
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.file_lock.exclusive_lock", _lock
+        )
+        rules = tmp_path / "rules"
+        with pytest.raises(RulesBundleUnavailable) as raised:
+            _install(rules, bundle, archive, [])
+        text = str(raised.value)
+        assert "could not be opened" in text and "not a regular file" in text
+        assert isinstance(raised.value.__cause__, OSError)
 
     def test_a_bundle_installed_while_waiting_for_the_lock_is_kept(
         self, tmp_path, bundle_zip, monkeypatch
@@ -298,7 +378,7 @@ class TestConcurrentInstalls:
         installed_meanwhile: list = []
 
         @contextmanager
-        def _lock(path):
+        def _lock(path, *, timeout=None):
             # Another process installed the bundle while this one waited. Once:
             # that install takes the same (patched) lock on its way through.
             if not installed_meanwhile:

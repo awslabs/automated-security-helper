@@ -127,6 +127,11 @@ _SAFE_MEMBER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _MAX_MEMBER_BYTES = 16 * 1024 * 1024
 _MAX_TOTAL_BYTES = 128 * 1024 * 1024
 
+# What an install does under its lock besides the download: extract an archive
+# bounded by _MAX_TOTAL_BYTES and rename two directories. The lock wait another
+# installer grants it adds this to the download's own worst case.
+_INSTALL_LOCK_MARGIN_SECONDS = 120.0
+
 
 class RulesBundleUnavailable(Exception):
     """The installed bundle is absent, incomplete, or not the pinned one, or ASH has
@@ -487,8 +492,14 @@ def install_rules_bundle(
     name; a swap with no such instant needs a different layout (a versioned
     directory behind a link) and is not attempted here.
     """
-    from automated_security_helper.utils.download_utils import download_file
-    from automated_security_helper.utils.file_lock import exclusive_lock
+    from automated_security_helper.utils.download_utils import (
+        download_file,
+        download_wait_bound_seconds,
+    )
+    from automated_security_helper.utils.file_lock import (
+        LOCK_TIMEOUT_SECONDS,
+        exclusive_lock,
+    )
     from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
     bundle = get_rules_bundle(name)
@@ -519,10 +530,24 @@ def install_rules_bundle(
             "ASH can write."
         ) from exc
 
+    # The wait for another installer's lock is sized from what that installer can
+    # be doing while healthy: a download that spends every attempt and every
+    # backoff of its retry policy, plus the extraction and the renames, and never
+    # less than the lock's default, the backstop for a holder that died. Under
+    # the default alone an operator who raised ASH_DOWNLOAD_MAX_ATTEMPTS could
+    # outlast it while still downloading, and the waiter gave a live installer up
+    # for dead. The two errors the lock raises (TimeoutError once the wait is
+    # spent; OSError when the lock file is not a regular file, or its directory
+    # cannot be made) are worded here as the documented refusal: raw, they left
+    # the scanner reporting a traceback instead of the reason it is MISSING.
     lock_path = root.joinpath(".ash-rules-install.lock")
+    lock_wait = max(
+        LOCK_TIMEOUT_SECONDS,
+        download_wait_bound_seconds() + _INSTALL_LOCK_MARGIN_SECONDS,
+    )
     with contextlib.ExitStack() as held:
         try:
-            held.enter_context(exclusive_lock(lock_path))
+            held.enter_context(exclusive_lock(lock_path, timeout=lock_wait))
         except TimeoutError as exc:
             if exc.errno is not None:
                 # The kernel's ETIMEDOUT (an open on a hung network mount),
@@ -536,8 +561,8 @@ def install_rules_bundle(
                 ) from exc
             raise RulesBundleUnavailable(
                 f"{problem}, and another ASH process held the install lock "
-                f"{lock_path} for too long ({exc}). Wait for that install to "
-                "finish, then run the install again."
+                f"{lock_path} for {lock_wait:g} seconds ({exc}). Wait for that "
+                "install to finish, then run the install again."
             ) from exc
         except OSError as exc:
             # The lock is a file in the rules root. A root that exists but is

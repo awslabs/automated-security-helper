@@ -201,6 +201,32 @@ def _retry_delay(attempt: int, base_delay: float) -> float:
     return min(base_delay * (2.0 ** min(attempt - 1, 32)), _DOWNLOAD_MAX_DELAY)
 
 
+def download_wait_bound_seconds() -> float:
+    """How long one download can stall before its own retry policy is spent, in
+    seconds: a socket timeout for every attempt, plus the backoff between them,
+    read from the same policy ``_download_verified`` reads.
+
+    A caller that holds a lock around a download sizes the lock's wait from this,
+    so a waiter does not give a holder up for dead while the holder is still
+    inside its own retries: the lock's default wait is a backstop for a holder
+    that died, and an operator who raises ``ASH_DOWNLOAD_MAX_ATTEMPTS`` can make a
+    healthy holder outlast it. It is a bound on the stalls, not on the transfer:
+    the socket timeout bounds each read, not the body, so a slow link that keeps
+    sending is not counted; a caller adds its own margin for what it does with
+    the bytes.
+    """
+    attempts, base_delay = _download_retry_policy()
+    # The backoff is constant once the exponent is capped (_retry_delay); the
+    # first 64 delays are summed as they are and the rest at that constant, so an
+    # attempt budget in the millions costs no loop of that length here.
+    counted = min(attempts - 1, 64)
+    backoff = sum(
+        _retry_delay(attempt, base_delay) for attempt in range(1, counted + 1)
+    )
+    backoff += max(0, attempts - 1 - counted) * _retry_delay(64, base_delay)
+    return attempts * _DOWNLOAD_SOCKET_TIMEOUT_SECONDS + backoff
+
+
 def _url_basename(url: str) -> str:
     """The name a download from ``url`` is installed under when none is given.
 
