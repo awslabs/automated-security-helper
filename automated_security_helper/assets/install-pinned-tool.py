@@ -537,27 +537,44 @@ def install(
             # executable digest (ToolAsset.executable_digest falls back to it).
             archive.rename(staged)
 
-        if staged_licenses is not None and third_party_dir is not None:
-            # After the executable is extracted and its digest checked, so a
-            # failure there leaves no license directory for a release that was not
-            # installed; before it is placed, so it never lands without them.
-            publish_third_party(staged_licenses, third_party_dir)
-        _place_executable(staged, final)
+        # The bytes are moved beside the destination first (the step that can run
+        # out of space or hit a permission error), then the licenses are
+        # published, then a single rename puts the executable at its name. Only
+        # that rename sits between the two writes: a copy that fails leaves the
+        # old binary and the old license directory exactly as they were.
+        partial = _prepare_executable(staged, final)
+        try:
+            if staged_licenses is not None and third_party_dir is not None:
+                # After the executable is extracted and its digest checked, so a
+                # failure there leaves no license directory for a release that
+                # was not installed; before the executable is placed, so it never
+                # lands without them.
+                publish_third_party(staged_licenses, third_party_dir)
+            _commit_executable(partial, final)
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
 
     print(f"Installed {asset.tool} {asset.version} to {final}", flush=True)
     return final
 
 
-def _place_executable(staged: Path, final: Path) -> None:
-    """Put the verified ``staged`` file at ``final`` with a single rename.
+def _prepare_executable(staged: Path, final: Path) -> Path:
+    """Put the verified ``staged`` file beside ``final``, ready to be renamed onto it.
 
     ``staged`` is in the system temp directory, which can be another filesystem
     than ``final``'s. ``shutil.move`` then copies across in place: it truncates
     and rewrites ``final``, through a symlink there onto the link's target, and an
     interrupt leaves a half-written executable where the next layer runs it. So
-    the bytes go to a file beside ``final`` first, and only that file is renamed
-    over it. The rename replaces a symlink with the new file instead of writing
-    through it.
+    the bytes go to a file beside ``final`` first, and ``_commit_executable``
+    renames only that file over it. The rename replaces a symlink with the new
+    file instead of writing through it.
+
+    The file is renamed into place when both directories share a filesystem (a
+    Docker overlay, where the staging directory and ``/usr/local/bin`` are one
+    mount) and copied only when the rename fails with EXDEV, so the usual case
+    neither reads nor writes the 80 MB twice. Returns the file beside ``final``,
+    or leaves nothing behind and raises.
     """
     descriptor, partial_name = tempfile.mkstemp(
         prefix=f".{final.name}.", suffix=".partial", dir=final.parent
@@ -565,12 +582,22 @@ def _place_executable(staged: Path, final: Path) -> None:
     os.close(descriptor)
     partial = Path(partial_name)
     try:
-        shutil.copyfile(staged, partial)
+        try:
+            os.replace(staged, partial)
+        except OSError as exc:
+            if exc.errno != errno.EXDEV:
+                raise
+            shutil.copyfile(staged, partial)
         partial.chmod(0o755)
-        os.replace(partial, final)
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
+    return partial
+
+
+def _commit_executable(partial: Path, final: Path) -> None:
+    """Rename ``partial``, made by ``_prepare_executable``, over ``final``."""
+    os.replace(partial, final)
 
 
 # Must match automated_security_helper/utils/rules_bundles.py: the image installs a

@@ -13,6 +13,10 @@ Each class pins one way the install could leave the destination wrong:
   raise instead of reinstalling.
 * License files were published before the executable was extracted and checked, so a
   failed extraction left the new release's license directory beside an old binary.
+* They were still published before the executable was copied beside its destination,
+  so a copy that ran out of space (ENOSPC, EIO, EACCES) left the same state. The copy
+  now comes first and only a rename follows the publish. The staged file is renamed
+  into place when both sit on one filesystem and copied only across filesystems.
 * ``publish_third_party`` deleted the old license directory before the move, and
   could not delete a symlink or a file at all.
 * A zip archive's directory entry that carried the member's name counted as a
@@ -28,6 +32,7 @@ import hashlib
 import importlib.util
 import io
 import os
+import shutil
 import tarfile
 import types
 import zipfile
@@ -259,6 +264,167 @@ class TestLicensesWaitForTheCheckedExecutable:
         setup.install(tmp_path / "bin", third_party)
         assert (third_party / "demo" / "LICENSE").read_bytes() == _LICENSE
         assert (tmp_path / "bin" / "demo").read_bytes() == _PAYLOAD
+
+
+_OLD_BINARY = b"#!/bin/sh\necho old\n"
+
+
+class TestAFailedPlacementLeavesTheLicensesAlone:
+    """Publishing the license directory comes after the copy beside the destination.
+
+    Everything here runs under ``tmp_path`` with the download stubbed.
+    """
+
+    @staticmethod
+    def _old_install(tmp_path: Path):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        existing = bin_dir / "demo"
+        existing.write_bytes(_OLD_BINARY)
+        existing.chmod(0o755)
+        third_party = tmp_path / "third-party"
+        (third_party / "demo").mkdir(parents=True)
+        (third_party / "demo" / "LICENSE").write_bytes(b"old license\n")
+        return bin_dir, existing, third_party
+
+    @staticmethod
+    def _staging_is_another_filesystem(monkeypatch, bin_dir: Path) -> None:
+        """Only a rename from outside ``bin_dir`` into it fails as across filesystems.
+
+        The license publish and the final rename inside ``bin_dir`` stay real, so
+        the failure is in the copy and nowhere else.
+        """
+        real = os.replace
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(dst).parent == bin_dir and Path(src).parent != bin_dir:
+                raise OSError(errno.EXDEV, "Invalid cross-device link")
+            return real(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", replace)
+
+    def test_a_copy_that_runs_out_of_space_keeps_the_old_licenses_and_binary(
+        self, tmp_path, monkeypatch
+    ):
+        setup = _Setup(monkeypatch)
+        bin_dir, existing, third_party = self._old_install(tmp_path)
+        self._staging_is_another_filesystem(monkeypatch, bin_dir)
+        real_copyfile = shutil.copyfile
+
+        def full_disk(src, dst, *args, **kwargs):
+            # Only the copy beside the destination fails; copytree's copies into
+            # the license work directory go through the real function.
+            if Path(dst).parent == bin_dir:
+                Path(dst).write_bytes(Path(src).read_bytes()[:4])
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return real_copyfile(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(shutil, "copyfile", full_disk)
+
+        with pytest.raises(OSError) as raised:
+            setup.install(bin_dir, third_party)
+
+        assert raised.value.errno == errno.ENOSPC
+        assert existing.read_bytes() == _OLD_BINARY
+        assert (third_party / "demo" / "LICENSE").read_bytes() == b"old license\n", (
+            "the new release's license directory was published beside the old binary"
+        )
+        assert sorted(p.name for p in bin_dir.iterdir()) == ["demo"], (
+            "a partial file was left beside the destination"
+        )
+        assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+    def test_a_failed_publish_removes_the_copied_executable(
+        self, tmp_path, monkeypatch
+    ):
+        """The copy is made first, so a publish that fails has a file to clean up."""
+        setup = _Setup(monkeypatch)
+        bin_dir, existing, third_party = self._old_install(tmp_path)
+
+        def refuse(staged, directory):
+            raise OSError(errno.EACCES, "Permission denied")
+
+        monkeypatch.setattr(installer, "publish_third_party", refuse)
+
+        with pytest.raises(PermissionError):
+            setup.install(bin_dir, third_party)
+
+        assert existing.read_bytes() == _OLD_BINARY
+        assert sorted(p.name for p in bin_dir.iterdir()) == ["demo"], (
+            "a partial file was left beside the destination"
+        )
+
+    def test_a_good_install_replaces_both_together(self, tmp_path, monkeypatch):
+        """Control: with nothing failing, the new binary and the new licenses land."""
+        setup = _Setup(monkeypatch)
+        bin_dir, _, third_party = self._old_install(tmp_path)
+
+        setup.install(bin_dir, third_party)
+
+        assert (bin_dir / "demo").read_bytes() == _PAYLOAD
+        assert (third_party / "demo" / "LICENSE").read_bytes() == _LICENSE
+        assert sorted(p.name for p in bin_dir.iterdir()) == ["demo"]
+
+
+class TestPreparingTheExecutable:
+    @staticmethod
+    def _staged(tmp_path: Path) -> Path:
+        staged = tmp_path / "staging" / "demo"
+        staged.parent.mkdir()
+        staged.write_bytes(_PAYLOAD)
+        (tmp_path / "bin").mkdir()
+        return staged
+
+    def test_a_staged_file_on_the_same_filesystem_is_renamed_not_copied(
+        self, tmp_path, monkeypatch
+    ):
+        staged = self._staged(tmp_path)
+        copies: list = []
+        monkeypatch.setattr(shutil, "copyfile", lambda *a, **k: copies.append(a))
+
+        partial = installer._prepare_executable(staged, tmp_path / "bin" / "demo")
+
+        assert copies == []
+        assert partial.parent == tmp_path / "bin"
+        assert partial.read_bytes() == _PAYLOAD
+        assert not staged.exists()
+        if os.name != "nt":
+            assert partial.stat().st_mode & 0o777 == 0o755
+
+    def test_a_cross_filesystem_rename_falls_back_to_a_copy(
+        self, tmp_path, monkeypatch
+    ):
+        staged = self._staged(tmp_path)
+
+        def replace(src, dst, *args, **kwargs):
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+        monkeypatch.setattr(os, "replace", replace)
+
+        partial = installer._prepare_executable(staged, tmp_path / "bin" / "demo")
+
+        assert partial.read_bytes() == _PAYLOAD
+        assert staged.read_bytes() == _PAYLOAD
+
+    def test_an_error_other_than_exdev_is_not_turned_into_a_copy(
+        self, tmp_path, monkeypatch
+    ):
+        """Control: only the cross-device case is the copy's to handle."""
+        staged = self._staged(tmp_path)
+        copies: list = []
+        monkeypatch.setattr(shutil, "copyfile", lambda *a, **k: copies.append(a))
+
+        def replace(src, dst, *args, **kwargs):
+            raise PermissionError(errno.EACCES, "Permission denied")
+
+        monkeypatch.setattr(os, "replace", replace)
+
+        with pytest.raises(PermissionError):
+            installer._prepare_executable(staged, tmp_path / "bin" / "demo")
+
+        assert copies == []
+        assert list((tmp_path / "bin").iterdir()) == []
+        assert staged.read_bytes() == _PAYLOAD
 
 
 def _staged_license_dir(tmp_path: Path, text: bytes) -> Path:
