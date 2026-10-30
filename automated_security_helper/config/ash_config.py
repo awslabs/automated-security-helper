@@ -3768,17 +3768,27 @@ def _write_checked(
             f"saving the suppression would write a config that {problem}",
             config_path,
         )
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+    )
+
     target = _resolved_for_save(config_path, config_path)
-    # The file the save writes stays in the directory the config path names:
-    # a symlinked config is written through to its target (so the link stays a
+    # The file the save writes stays inside the directory the config's own
+    # chain is confined to (default_confinement_root, as resolve_config_document
+    # confines a root's bases with no source directory given): the config's
+    # directory, or the directory holding ``.ash/`` for a config in it. A
+    # symlinked config is written through to its target (so the link stays a
     # link), but only to a target inside that directory, as resolved. A link
     # placed in a repository that pointed outside it (dangling or not) made the
-    # save create or edit a file wherever the link led, with no confinement.
-    inside = _resolved_for_save(config_path.parent, config_path)
-    if target.parent != inside and inside not in target.parents:
+    # save create or edit a file wherever the link led, with no confinement;
+    # the documented ``.ash/.ash.yaml`` linked to a config beside ``.ash/``
+    # stays inside the root and saves through.
+    inside = _resolved_for_save(default_confinement_root(config_path), config_path)
+    if inside not in target.parents:
         raise _left_unchanged(
-            "the config is a link to a file outside its own directory, which the "
-            "suppression save does not write through",
+            "the config is a link to a file outside its own directory (for a "
+            "config in .ash/, the directory holding .ash/), which the suppression "
+            "save does not write through",
             config_path,
         )
     try:
