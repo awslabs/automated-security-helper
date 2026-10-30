@@ -287,6 +287,37 @@ class TestOtherWaysToWriteAFile:
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
 
+class TestTheMarkerScanDirectly:
+    """Each redirect, pipe and separator shape, judged on the markers themselves.
+
+    The Dockerfile-level cases above use a shell on the line for the "keeps nothing"
+    shapes, which makes the body commands whatever the redirect says, so they cannot
+    show that the ``/dev/null`` and ``2>&1`` exclusions work. These can.
+    """
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("cat <<EOF >/dev/null", [("EOF", False)]),
+            ("cat <<EOF > /dev/null", [("EOF", False)]),
+            ("cat <<EOF >&2", [("EOF", False)]),
+            ("cat <<EOF 2>&1", [("EOF", False)]),
+            ("cat 2>&1 > /x <<EOF", [("EOF", True)]),
+            ("cat >/dev/nullx <<EOF", [("EOF", True)]),
+            ("cat <<EOF > /x || true", [("EOF", True)]),
+            ("cat <<EOF | cat > /x", [("EOF", True)]),
+            ("cat <<EOF && tee /x", [("EOF", False)]),
+            ("cat > /a <<A; bash <<B", [("A", True), ("B", False)]),
+            ("bash <<EOF > /x", [("EOF", False)]),
+            ("x=$((1 << n)); cat > /x <<EOF", [("EOF", True)]),
+        ],
+    )
+    def test_the_marker_is_judged_by_its_own_command(self, line, expected):
+        # Red if either lookahead of _FILE_REDIRECT is deleted: the first four rows
+        # would read as file writes.
+        assert checker._heredoc_markers(line) == expected
+
+
 class TestAMultiLineInstallInAHereDocument:
     def test_a_continued_install_with_two_pins_is_read(self, tmp_path):
         """Control: the usual form, a package per continued line, joins correctly."""
