@@ -4,18 +4,18 @@
 """Readings of a SARIF report in ``sarif_utils`` that were wrong at the edges.
 
 ``get_finding_id`` dropped every None from its seed, so two distinct findings
-shared an id. ``file:`` URIs lost a ``#`` in a name, the drive of ``file://C:/p``
-and the whole single-slash form. The resolve fallback renamed a file reached
-through a link inside the tree. ``sanitize_sarif_paths`` left code flows, stacks,
-fixes and run artifacts absolute. ``attach_scanner_details`` replaced the details a
-scanner attached. The severity normalizer read the driver's rules alone, never
-checked an indexed rule's id, and graded non-fail results; the metrics raised on a
-None report. A rejected scanner suppression blocked ASH's own; an inline comment at
-every location appended one suppression each; a symlinked work directory was read
-as another tree; a drive letter was compared case-sensitively; the output
-exclusion ignored the context's work directory and rewrote a POSIX backslash in the
-source prefix; ``--ignore-suppressions`` still dropped ignore-path matches; and a
-result was dropped when any one of its locations matched an ignore path.
+shared an id. ``file://`` URIs lost a ``#`` in a name and the drive of
+``file://C:/p``; only that literal spelling is a file URI, as the matchers read
+it. The resolve fallback renamed a file reached through a link inside the tree.
+``sanitize_sarif_paths`` left code flows, stacks, fixes and run artifacts absolute.
+``attach_scanner_details`` replaced the details a scanner attached. The severity
+normalizer read the driver's rules alone, never checked an indexed rule's id, and
+graded non-fail results; the metrics raised on a None report. A rejected scanner
+suppression blocked ASH's own; an inline comment at every location appended one
+suppression each; a symlinked work directory was read as another tree; a drive
+letter was compared case-sensitively; the output exclusion ignored the context's
+work directory and rewrote a POSIX backslash in the source prefix; and a result
+was dropped when any one of its locations matched an ignore path.
 """
 
 from __future__ import annotations
@@ -166,24 +166,18 @@ class TestFileUris:
         assert _file_uri_to_path_text("file://host/proj/a.py") == "/proj/a.py"
 
     def test_a_posix_path_whose_third_character_is_a_colon_keeps_its_slash(self):
-        assert _file_uri_to_path_text("file:///a:/file.py") == "/a:/file.py"
+        # Only a letter before the colon is a drive; "1:" is a POSIX name.
+        assert _file_uri_to_path_text("file:///1:/file.py") == "/1:/file.py"
         assert _file_uri_to_path_text("file:///C:/file.py") == "C:/file.py"
 
-    def test_the_single_slash_form_and_an_upper_case_scheme_are_file_uris(self):
-        assert _is_file_uri("file:/abs/path")
-        assert _is_file_uri("FILE:///abs/path")
+    def test_only_the_literal_two_slash_scheme_is_a_file_uri(self):
+        # The matchers read exactly "file://"; the other spellings stay as written
+        # so a location and its pattern are spelled alike on both sides.
+        assert _is_file_uri("file:///abs/path")
+        assert _is_file_uri("file://C:/abs/path")
+        assert not _is_file_uri("file:/abs/path")
+        assert not _is_file_uri("FILE:///abs/path")
         assert not _is_file_uri("files/a.py")
-        assert _file_uri_to_path_text("file:/abs/path") == "/abs/path"
-
-    def test_a_single_slash_uri_is_made_relative(self, tmp_path):
-        source = path_in_record_form(tmp_path.resolve())
-        uri = f"file:{source.as_posix()}/src/a.py"
-
-        # Kept with its scheme before: it matched no suppression or ignore path.
-        assert _sanitize_uri(uri, source, source.as_posix() + "/") == "src/a.py"
-        assert _sanitize_uri(
-            uri.upper()[:5] + uri[5:], source, source.as_posix() + "/"
-        ) == ("src/a.py")
 
 
 @posix_only
@@ -438,15 +432,6 @@ def test_a_backslash_in_a_posix_source_directory_name_is_kept_in_the_prefix(tmp_
     # The bare replace spelled it a/b/, which no URI under it starts with.
     assert exclusion.source_dir_prefix.endswith("/a\\b/")
     assert exclusion.normalize(f"{source.resolve().as_posix()}/src/x.py") == "src/x.py"
-
-
-def test_ignore_suppressions_lifts_the_ignore_paths_too(tmp_path):
-    context = _context(tmp_path, _ignore_config(), ignore_suppressions=True)
-
-    report = apply_suppressions_to_sarif(_report(_result("vendor/a.py")), context)
-
-    # Dropped before, under a warning that said every rule was ignored.
-    assert [r.ruleId for r in report.runs[0].results] == ["RULE-1"]
 
 
 def test_a_result_is_dropped_only_when_every_location_is_under_an_ignore_path(

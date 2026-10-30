@@ -92,10 +92,17 @@ _DRIVE_AUTHORITY = re.compile(r"^[A-Za-z]:$")
 
 
 def _is_file_uri(uri: str) -> bool:
-    """Whether *uri* carries the ``file`` scheme, in any case and any of its
-    forms: ``file:///abs``, ``file://host/abs``, ``file://C:/abs`` and the RFC 8089
-    single-slash ``file:/abs``, which Java's ``File.toURI()`` writes."""
-    return uri[:5].lower() == "file:"
+    """Whether *uri* is a ``file://`` URI: ``file:///abs``, ``file://host/abs``
+    or ``file://C:/abs``.
+
+    Only the literal ``file://`` is read as a path, because the suppression and
+    ignore-path matchers read exactly that spelling and nothing else
+    (``test_a_location_is_spelled_as_the_matchers_read_it``): an upper-case scheme
+    or the RFC 8089 single-slash form ``file:/abs`` is kept as written here so a
+    location and the pattern that should cover it are spelled alike on both sides.
+    Reading those forms is a change for the matchers and this function together.
+    """
+    return uri.startswith("file://")
 
 
 def _file_uri_to_path_text(uri: str) -> str:
@@ -1019,18 +1026,21 @@ def _apply_inline_suppression(
     file_key = str(file_path)
     if file_key not in inline_cache:
         scan_root = source_dir
-        # Compared resolved: a scanner reports a converted file under the work
-        # directory's resolved spelling, and a work directory given through a
-        # symlinked spelling then read as another tree, so the file was read
-        # against the source tree and refused.
+        # The file's own (unresolved) path is read against the work directory as
+        # given AND as it resolves: a scanner reports a converted file under the
+        # work directory's resolved spelling, and a work directory given through
+        # a symlinked spelling then read as another tree, so the file was read
+        # against the source tree and refused. The file itself is not resolved:
+        # a link inside the work directory stays the work directory's file, so
+        # the scanned-tree rule refuses it under that tree and names it there.
         if work_dir is not None:
+            own = Path(os.path.abspath(file_path))
+            roots = [os.path.abspath(work_dir)]
             try:
-                in_work_dir = (
-                    Path(file_path).resolve().is_relative_to(Path(work_dir).resolve())
-                )
+                roots.append(str(Path(work_dir).resolve()))
             except (OSError, ValueError):
-                in_work_dir = False
-            if in_work_dir:
+                pass
+            if any(own.is_relative_to(root) for root in roots):
                 scan_root = work_dir
         inline_cache[file_key] = find_inline_suppressions(
             file_path, scan_root=scan_root
@@ -1302,7 +1312,9 @@ class _OutputDirExclusion:
         # even when the context named another, so converted-file findings
         # there were excluded as ASH's own output.
         work_dir = getattr(plugin_context, "work_dir", None)
-        if not isinstance(work_dir, (str, Path)) or not str(work_dir):
+        # os.PathLike, not Path: a test that patches this module's Path with a
+        # stand-in must still get here.
+        if not isinstance(work_dir, (str, os.PathLike)) or not str(work_dir):
             work_dir = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME)
         self.work_dir = Path(work_dir).resolve()
         self.source_dir = plugin_context.source_dir.resolve()
@@ -1563,12 +1575,12 @@ def apply_suppressions_to_sarif(
     )
 
     if ignore_suppressions:
+        # The flag names the suppression rules: the ignore paths and the
+        # output-directory exclusion still apply under it
+        # (test_apply_suppressions_with_ignore_flag).
         ASH_LOGGER.warning(
             "Ignoring all suppression rules as requested by --ignore-suppressions flag"
         )
-        # The flag lifts the ignore paths as it lifts the suppressions; the
-        # output-directory exclusion below is neither and stays.
-        ignore_paths = []
 
     # Note: Suppression expiration check is now handled by the EXECUTION_START event callback
     # in automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker
