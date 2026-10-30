@@ -43,6 +43,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
 )
 from automated_security_helper.utils.content_db_staleness import ContentDbAgeRecord
+from automated_security_helper.utils.sarif_utils import get_finding_id
 
 pytestmark = pytest.mark.unit
 
@@ -574,3 +575,43 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         assert first["id"] == flat[0].id
         assert third["id"] == flat[2].id
         assert second["id"] not in {"drifted-row", flat[1].id}
+
+    def test_two_legacy_ids_of_one_rule_at_one_line_are_told_apart(
+        self, reporter, monkeypatch
+    ):
+        """When the flattening cannot be read every finding keeps the legacy
+        rule-file-line id, and two findings of one rule at one line then shared
+        both the id and the ASH finding-id identifier, so GitLab merged them.
+        The first keeps the legacy id as it was; the second gets an occurrence of
+        its own, as the shared ids and the OCSF fallback uids already do."""
+        model = _model(
+            _result("B105", "password = 'first'"),
+            _result("B105", "password = 'second'"),
+            _result("B106", "other"),
+        )
+
+        def _unreadable(self):
+            raise RuntimeError("no flattening")
+
+        monkeypatch.setattr(
+            AshAggregatedResults, "to_flat_vulnerabilities", _unreadable
+        )
+        legacy = get_finding_id(
+            rule_id="B105", file="app/main.py", start_line=7, end_line=7
+        )
+
+        first, second, third = json.loads(reporter.report(model))["vulnerabilities"]
+
+        assert first["id"] == legacy
+        assert second["id"] != legacy
+        assert third["id"] == get_finding_id(
+            rule_id="B106", file="app/main.py", start_line=7, end_line=7
+        )
+        ash_ids = [
+            [i["value"] for i in v["identifiers"] if i["type"] == "ash-finding-id"]
+            for v in (first, second)
+        ]
+        assert ash_ids == [[first["id"]], [second["id"]]]
+        # Deterministic: the same report twice gives the same second id.
+        again = json.loads(reporter.report(model))["vulnerabilities"]
+        assert [v["id"] for v in again] == [first["id"], second["id"], third["id"]]

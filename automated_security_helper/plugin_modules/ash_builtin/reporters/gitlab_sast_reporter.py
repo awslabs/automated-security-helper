@@ -150,6 +150,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         skipped_results = 0
         if all_results:
             shared_ids = self._shared_finding_ids(model, all_results)
+            legacy_ids_seen: Dict[str, int] = {}
             ASH_LOGGER.trace("Creating rule dict")
             for index, result in enumerate(all_results):
                 if self._is_not_a_finding(result):
@@ -170,6 +171,8 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                     )
                     continue
                 if vuln is not None:
+                    if shared_ids[index] is None:
+                        self._distinct_legacy_id(vuln, legacy_ids_seen)
                     vulnerabilities.append(vuln)
 
         try:
@@ -235,6 +238,31 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
             ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
             return [None] * len(all_results)
+
+    @staticmethod
+    def _distinct_legacy_id(vuln: Dict[str, Any], seen: Dict[str, int]) -> None:
+        """Give the second and later findings that fell back to one legacy id an
+        id of their own.
+
+        The legacy id hashes the rule, the file and the line, so two distinct
+        findings of one rule at one line (a flattening this could not pair them
+        with) shared the ``id`` and the ASH finding-id identifier, and GitLab,
+        which deduplicates on either, kept one. The shared ids carry an occurrence
+        counter for such pairs (``utils/finding_identity``), as the OCSF report's
+        fallback uids do; this is the same counter for this report's fallback.
+        The first finding keeps the legacy id as it was, so an id that never
+        collided does not change between two pipelines of the same tree.
+        """
+        identifier = vuln["id"]
+        count = seen.get(identifier, 0)
+        seen[identifier] = count + 1
+        if not count:
+            return
+        distinct = get_finding_id(rule_id=f"{identifier}::occurrence::{count}")
+        vuln["id"] = distinct
+        for entry in vuln.get("identifiers", []):
+            if entry.get("type") == "ash-finding-id":
+                entry["value"] = distinct
 
     def _vulnerability_for(
         self, result, model: "AshAggregatedResults", shared_id: str | None = None
