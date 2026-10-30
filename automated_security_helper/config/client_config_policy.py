@@ -936,7 +936,11 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
         reduced_plugin_name,
     )
     from automated_security_helper.config.config_sources import _resolve_dict_key
-    from automated_security_helper.config.runtime_patch import _path_segments, _walk
+    from automated_security_helper.config.runtime_patch import (
+        _path_segments,
+        _same_json_value,
+        _walk,
+    )
 
     if denial.from_patch:
         return False
@@ -960,7 +964,15 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
         if _resolve_dict_key(options, option) in options:
             return False
         present, value = _walk(document, segments)
-        return present and value == default
+        if not present:
+            return False
+        # As JSON values, not as Python ones: ``1 == True`` and ``0 == False``
+        # in Python, so ``enable_preprocessors: 1`` is not the default ``true``.
+        # A value that is not JSON data at all (a YAML date) is not a default.
+        try:
+            return _same_json_value(value, default)
+        except (TypeError, ValueError):
+            return False
     return False
 
 
