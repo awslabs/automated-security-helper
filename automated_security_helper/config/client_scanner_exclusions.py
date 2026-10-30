@@ -1231,7 +1231,9 @@ def strip_client_scanner_exclusions(
                 listed = ", ".join(repr(pattern) for pattern in expired)
                 warnings.append(
                     f"{spec.key}: {listed} came from a config an MCP client delivered "
-                    f"and {'has' if len(expired) == 1 else 'have'} expired, so "
+                    f"and {'has' if len(expired) == 1 else 'have'} expired (by "
+                    f"{'its' if len(expired) == 1 else 'their'} own expiration, or "
+                    "the operator entry of the same path has), so "
                     f"{'it is' if len(expired) == 1 else 'they are'} not applied: "
                     f"the {spec.scanner} scanner would not have applied "
                     f"{'it' if len(expired) == 1 else 'them'}, and the files are "
@@ -1324,11 +1326,15 @@ def _scan_timeout_of(options: Any) -> Optional[float]:
 
     The value the section sets; the scanners' default for a plain mapping that
     leaves it unset, or for a value that is not a finite positive number up to
-    ``_LARGEST_SCAN_TIMEOUT`` (the scanner's own validation refuses one); None
-    for an explicit null, the scanner left unbounded. A plain mapping gets no
-    model validation, so an infinite value (YAML ``.inf``), a NaN or one past
-    what the bound's wait can take arrived as written and reached that wait,
-    which raised in the suppression pass after the scan.
+    ``_LARGEST_SCAN_TIMEOUT``; None for an explicit null, the scanner left
+    unbounded. The scanners' own validation (``ScannerOptionsBase.scan_timeout``,
+    an integer of at least 1 with no upper bound) refuses a non-positive value
+    but admits any size, so a validated model with a timeout past the ceiling
+    runs its scanner that long while the bound here takes the default, the
+    conservative side. A plain mapping gets no model validation at all, so an
+    infinite value (YAML ``.inf``), a NaN or one past what the bound's wait can
+    take arrived as written and reached that wait, which raised in the
+    suppression pass after the scan.
     """
     from automated_security_helper.base.options import ScannerOptionsBase
 
@@ -1389,9 +1395,13 @@ def _patterns_in(value: Any) -> Set[str]:
 
 
 def _entry_fields(entry: Any) -> Tuple[Optional[str], Optional[str], Any]:
-    """An option entry's pattern, reason and expiration (a string, or a path-with-reason entry)."""
+    """An option entry's pattern, reason and expiration (a string, or a path-with-reason entry).
+
+    A mapping entry is read as any ``Mapping``, as ``_operator_fields`` reads an
+    operator's, so the two readings of one entry agree.
+    """
     pattern, reason = _pattern_of(entry)
-    if isinstance(entry, dict):
+    if isinstance(entry, Mapping):
         return pattern, reason, entry.get("expiration")
     if isinstance(entry, str):
         return pattern, reason, None
