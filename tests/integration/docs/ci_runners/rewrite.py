@@ -1128,9 +1128,14 @@ def _rewrite_ash_version(
         + re.escape(f"v{ctx.version}")
         + r"(?P=q)[ \t]*$"
     )
+    # The commit id is written with detect-secrets' allowlist pragma: the rewritten
+    # workflow sits in the scanned tree, and a 40-hex value is a high-entropy string
+    # to that scanner, so without the pragma the rewrite plants an actionable finding
+    # the page's fixture does not count (measured on the hosted act legs).
+    pragma = "# pragma: allowlist secret"
     text, count = line.subn(
         lambda m: (
-            f'{m["indent"]}ash-version: "{ctx.head_sha}"\n'
+            f'{m["indent"]}ash-version: "{ctx.head_sha}" {pragma}\n'
             f'{m["indent"]}ash-repo: "{ctx.repository}"'
         ),
         text,
@@ -1140,7 +1145,7 @@ def _rewrite_ash_version(
             Applied(
                 "ash-version",
                 f"ash-version: v{ctx.version}",
-                f'ash-version: "{ctx.head_sha}"\nash-repo: "{ctx.repository}"',
+                f'ash-version: "{ctx.head_sha}" {pragma}\nash-repo: "{ctx.repository}"',
                 count,
             )
         )
