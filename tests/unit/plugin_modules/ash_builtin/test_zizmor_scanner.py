@@ -607,6 +607,9 @@ def test_default_argv_is_offline_sarif_with_inputs_after_double_dash(repo):
         assert flag in final_args
     assert final_args[final_args.index("--format") + 1] == "sarif"
     assert final_args[final_args.index("--persona") + 1] == "regular"
+    # The SARIF on stdout is parsed as JSON: a colored run would put escape
+    # sequences into it, so the flag that turns color off is part of the argv.
+    assert final_args[final_args.index("--color") + 1] == "never"
     separator = final_args.index("--")
     # Inputs are relative to source_dir, the subprocess cwd.
     assert final_args[separator + 1 :] == EXPECTED_INPUTS
