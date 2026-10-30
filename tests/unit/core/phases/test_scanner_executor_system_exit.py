@@ -164,12 +164,15 @@ def test_the_rows_reason_names_the_exit_and_its_code(plugin_context, code):
 ENV_CANARY = "env-read-canary-u18x-value"
 
 
-def test_an_exit_message_quoting_an_environment_value_is_redacted(plugin_context):
+def test_an_exit_message_quoting_an_environment_value_is_redacted(
+    plugin_context, caplog
+):
     """The named exit is built from the plugin's exit code, which can be a message
     quoting a value the configuration read from the environment. Written from
-    the raw code it reached the row's errors, the failure dict and the ERROR
-    event in clear, beside a description error_text had redacted. Red at the
-    base: the value was in the row's reasons."""
+    the raw code it reached the row's errors, the failure dict, the ERROR log
+    record and the ERROR event in clear, beside a description error_text had
+    redacted. Red at the base: the value was in the row's reasons and in the
+    log."""
     plugin_context.config._environment_values = [ENV_CANARY]
     (row,) = _executor(plugin_context)._execute_scanner(
         "shape-tool",
@@ -182,6 +185,9 @@ def test_an_exit_message_quoting_an_environment_value_is_redacted(plugin_context
     assert "the scanner called sys.exit(" in reasons, row.errors
     assert ENV_CANARY not in reasons, row.errors
     assert ENV_CANARY not in str(row.raw_results), row.raw_results
+    # The same text is what the handler logs at ERROR (:1563).
+    assert "Failed to execute shape-tool scanner" in caplog.text
+    assert ENV_CANARY not in caplog.text
     # The control: the plain code reads as before beside the planted value.
     (plain,) = _executor(plugin_context)._execute_scanner(
         "shape-tool", _scanner(plugin_context, SystemExit(3)), _targets(plugin_context)
