@@ -712,10 +712,11 @@ class TestOcsfReporterHelperMethods:
         # Full message should be in description
         assert finding.finding_info.desc == very_long_message
 
-    def test_create_vulnerability_finding_unique_identifiers_stress_test(
+    def test_create_vulnerability_finding_repeats_one_uid_for_one_finding(
         self, reporter, sample_metadata
     ):
-        """Test that unique identifiers are generated consistently under stress."""
+        """The uid is derived from the finding, so building it twice gives the
+        same uid; two builds show that as well as a hundred would."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         result = Result(
             ruleId="STRESS_TEST",
@@ -723,9 +724,8 @@ class TestOcsfReporterHelperMethods:
             message=Message(root=Message1(text="Stress test message")),
         )
 
-        # Generate many findings to test uniqueness
         findings = []
-        for i in range(100):
+        for i in range(2):
             finding = reporter._create_vulnerability_finding(
                 result, sample_metadata, current_time_ms
             )
@@ -734,7 +734,7 @@ class TestOcsfReporterHelperMethods:
         # Extract all UIDs
         uids = [finding.finding_info.uid for finding in findings]
 
-        # One finding built many times is one UID
+        # One finding built twice is one UID
         assert len(set(uids)) == 1, "the same finding keeps one UID"
 
         # All UIDs should be valid UUIDs
@@ -807,10 +807,11 @@ class TestOcsfReporterHelperMethods:
         assert vulnerability.affected_code[0].start_line == 10
         assert vulnerability.affected_code[0].end_line == 20
 
-    def test_create_vulnerability_finding_error_recovery_maintains_uniqueness(
+    def test_create_vulnerability_finding_error_recovery_keeps_one_uid(
         self, reporter, sample_metadata, monkeypatch
     ):
-        """Test that error recovery still maintains unique identifiers."""
+        """Error recovery derives the uid the same way, so the same faulty result
+        keeps one uid across builds."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
         # Create a result that will cause errors in title creation
