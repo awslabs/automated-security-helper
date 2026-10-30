@@ -194,7 +194,15 @@ esac
 # and a second fetch of the same bytes either reproduces it or quietly turns a
 # supply-chain control into a coin flip. Space-separated; the same `case` idiom
 # as the knobs above.
-fatal=${WITH_RETRY_NO_RETRY_EXITS:-3}
+#
+# 2 is in the default as well. install-pinned-tool exits 2 for a request that
+# can never succeed: an unknown tool or bundle, a platform with no asset, a
+# non-https URL, a half-applied version bump. Another attempt repeats the same
+# refusal, so retrying it five times only delays the build by the whole backoff
+# window and then reports a generic failure. A caller that wraps a command which
+# uses 2 for a transient failure sets WITH_RETRY_NO_RETRY_EXITS to its own list,
+# and a list set explicitly replaces this default rather than extending it.
+fatal=${WITH_RETRY_NO_RETRY_EXITS:-2 3}
 for code in $fatal; do
   case $code in
     '' | *[!0-9]*)

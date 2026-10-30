@@ -6,7 +6,7 @@ network failure. with-retry wraps every pinned install in the Dockerfile and
 retried that exit like any other: five fetches of the same mismatching bytes,
 then exit 1, so the caller could not tell an integrity failure from a dead
 network either. The script now takes a space-separated set of exit statuses it
-never retries (3 by default) and exits with the command's own status on one.
+never retries (2 and 3 by default) and exits with the command's own status on one.
 
 Runs the real script with the backoff collapsed, the same way the sibling file
 does, so it is an integration test like that file's classes.
