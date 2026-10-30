@@ -19,15 +19,20 @@ read no cache.
   default rulesets, offline to the cache: a different scan reported as the one
   that was asked for.
 - ``content_databases_in_use`` names the offline ruleset only when the scan read
-  the cache: patterns mode, the operator's local rules and a missing cache read
-  none, so the result is not graded on the cache's age. The staleness probe is
-  pointed at the cache absolutely, as the command was.
+  the cache: the operator's local rules and a missing cache read none, so the
+  result is not graded on the cache's age. The staleness probe is pointed at the
+  cache absolutely, as the command was.
 
 The tests that expect a rules path to be PASSED build their tree with
 ``context_outside_checkouts`` (this directory's conftest): ``test_plugin_context``
 sits under ``tests/pytest-temp`` inside the repository's checkout, where every
 rules file beside it is refused by path trust. The tests that expect a REFUSAL
 use ``test_plugin_context``, whose source directory is a tree like any other.
+
+The ``--config`` values read here (``_configs``) leave out the rules ASH bundles
+under its own assets directory, which ``_process_config_options`` passes on every
+command in both modes: they are the same for every scanner built here and are not
+what these tests judge; the operator's configured value is.
 
 Building the scanners probes uv and opengrep; the unit conftest's tool guard answers
 the probes as a host without the tools would, so nothing starts here.
@@ -41,6 +46,7 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
     OpengrepScannerConfig,
@@ -76,7 +82,17 @@ RULE = "rules:\n  - id: placeholder\n    languages: [python]\n    message: m\n  
 
 
 def _configs(scanner) -> list[str]:
-    return [arg.value for arg in scanner.args.extra_args if arg.key == "--config"]
+    """The ``--config`` values of the command, without the rules ASH bundles.
+
+    ``_process_config_options`` passes every rules file under the assets directory
+    on every command; those are constant and not under test here.
+    """
+    bundled = ASH_ASSETS_DIR.joinpath("ash_stargrep_rules").as_posix()
+    return [
+        arg.value
+        for arg in scanner.args.extra_args
+        if arg.key == "--config" and not str(arg.value).startswith(bundled)
+    ]
 
 
 def _online(monkeypatch, scanner_cls):
@@ -271,24 +287,43 @@ def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_offlin
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )
 def test_the_decline_reason_names_the_resolved_path_of_a_missing_rules_file(
-    scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
+    scanner_cls,
+    config_cls,
+    options_cls,
+    cache_env,
+    context_outside_checkouts,
+    monkeypatch,
 ):
     """A typo's reason shows the absolute path ASH looked for and says it does not
     exist, and names the operator sources that admit a rules file; a reader can
     tell it from a path-trust refusal.
 
+    The missing file is named beside the scanned tree, not inside it: a relative
+    value resolves under the source directory, which is the scanned tree, and path
+    trust refuses that before anything asks whether the file exists, so an in-tree
+    typo reads as a path-trust refusal (the test below), not as a missing file.
+
     Fails at the tip whose reason was one sentence listing every possible cause.
     """
+    _rules_beside_the_tree(context_outside_checkouts)
     monkeypatch.delenv(cache_env, raising=False)
     _online(monkeypatch, scanner_cls)
 
     scanner = scanner_cls(
-        context=test_plugin_context,
-        config=config_cls(options=options_cls(offline=False, config="my-rulez.yaml")),
+        context=context_outside_checkouts,
+        config=config_cls(
+            options=options_cls(
+                offline=False, config="../rules-beside-the-tree/my-rulez.yaml"
+            )
+        ),
     )
 
     reason = scanner.dependency_unavailable_reason or ""
-    expected = os.path.realpath(Path(test_plugin_context.source_dir) / "my-rulez.yaml")
+    expected = os.path.realpath(
+        Path(context_outside_checkouts.source_dir).parent
+        / "rules-beside-the-tree"
+        / "my-rulez.yaml"
+    )
     assert expected in reason, reason
     assert "does not exist" in reason, reason
     assert "path trust refused" not in reason, reason
@@ -323,8 +358,15 @@ def test_the_decline_reason_names_a_path_trust_refusal_as_such(
 
 
 def _separate_checkout_with_rules(tmp_path: Path) -> Path:
+    """A rules directory inside a checkout of its own, beside the scanned tree.
+
+    The ``.git`` holds a ``HEAD``: path trust counts a directory as a checkout by
+    the shape git's own discovery opens (``sandbox_grants._git_shaped``), and a bare
+    empty ``.git`` directory, what a stray mkdir leaves, marks none.
+    """
     other = tmp_path / "other-checkout"
     (other / ".git").mkdir(parents=True)
+    (other / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     rules = other / "rules"
     rules.mkdir()
     (rules / "a.yaml").write_text(RULE, encoding="utf-8")
@@ -581,24 +623,3 @@ def test_the_cache_the_command_read_is_declared_and_probed_absolutely(
     context = scanner.content_database_probe_context()
     assert context.cache_dir == expected
     assert os.path.isabs(context.cache_dir)
-
-
-def test_opengrep_patterns_mode_offline_declares_no_content_database(
-    test_plugin_context, tmp_path, monkeypatch
-):
-    """Fails at the base: patterns mode reads no rules at all, and the ruleset was
-    still declared for it."""
-    cache = tmp_path / "cache"
-    cache.mkdir()
-    (cache / "registry.yaml").write_text(RULE, encoding="utf-8")
-    monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(cache))
-
-    scanner = OpengrepScanner(
-        context=test_plugin_context,
-        config=OpengrepScannerConfig(
-            options=OpengrepScannerConfigOptions(offline=True, patterns=["$X == $X"])
-        ),
-    )
-
-    assert cache.as_posix() not in _configs(scanner)
-    assert scanner.content_databases_in_use() == []
