@@ -1800,6 +1800,19 @@ def install_pinned_tool(
     return target
 
 
+def _executable_by_caller(info: os.stat_result) -> bool:
+    """Whether the file behind ``info`` is executable by this process, read from
+    the mode bits as ``os.access(path, X_OK)`` would read them for a non-root
+    caller, so the judgment is made on the descriptor's own stat rather than by
+    a second look-up by name."""
+    mode = info.st_mode
+    if info.st_uid == os.getuid():
+        return bool(mode & stat.S_IXUSR)
+    if info.st_gid == os.getgid() or info.st_gid in os.getgroups():
+        return bool(mode & stat.S_IXGRP)
+    return bool(mode & stat.S_IXOTH)
+
+
 @dataclass(frozen=True)
 class VerifiedPresentTool:
     """A pinned tool found on disk whose bytes hash to its pinned executable digest."""
@@ -1892,16 +1905,32 @@ def find_verified_pinned_executable(
             )
             return None
 
-    if candidate.is_symlink() or not candidate.is_file():
+    if candidate.is_symlink():
         return None
-    if platform.system() != "Windows" and not os.access(candidate, os.X_OK):
-        return None
-
+    # Judged on one open descriptor from here: is_file and os.access by name and
+    # then a plain open that follows a link left a window in which a link swapped
+    # in at the candidate's name, pointing at the pinned bytes, was accepted,
+    # against the rule above that a symlink here is never accepted. O_NOFOLLOW
+    # refuses such a link at the open, O_NONBLOCK keeps a FIFO there from blocking
+    # it, and the file type, the mode and the hash are all read from what was
+    # opened.
     try:
-        actual = sha256_file(candidate)
+        fd = os.open(candidate, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not open {candidate} ({e}); installing {tool}")
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        if platform.system() != "Windows" and not _executable_by_caller(info):
+            return None
+        actual = _sha256_of_open_file(fd)
     except OSError as e:
         ASH_LOGGER.debug(f"Could not hash {candidate} ({e}); installing {tool}")
         return None
+    finally:
+        os.close(fd)
     if actual != expected.lower():
         ASH_LOGGER.debug(
             f"{candidate} is named {asset.install_as} but is not the pinned "
