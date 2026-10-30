@@ -18,9 +18,10 @@ text, say; tests/unit/core/phases/test_a_probing_scanner_under_a_refused_sandbox
 pins that it survives) and never replaces a merged target's file. The scanner
 stays out of ``completed_scanners`` so the completeness check records it, and
 leaves the remaining list (a later SCAN_COMPLETE no longer names it as running)
-without a SCAN_COMPLETE of its own: a failure is not a completion, the rule the
-run-loop tests (tests/unit/core/phases/test_scanner_executor_rows_and_run_loops.py)
-pin for a scanner whose bookkeeping raised.
+with a SCAN_COMPLETE of its own whose ``succeeded`` is False: every finished turn
+is announced, the rule the run-loop tests
+(tests/unit/core/phases/test_scanner_executor_rows_and_run_loops.py) pin for a
+scanner whose bookkeeping raised.
 
 A refiled row that the processor raises on AGAIN (whatever on the row caused the
 first raise is still on it) is followed by a fresh failure row for the same target,
@@ -412,16 +413,19 @@ def test_every_target_merged_completes_the_scanner(plugin_context, tmp_path):
     assert len(executor.completed_scanners) == 1
 
 
-class TestAProcessingFailureLeavesTheRemainingListUnannounced:
+class TestAProcessingFailureIsAnnouncedAsAFailedTurn:
     """The scanner returned; one target's results could not be merged. The failure
     is filed on that target's row, and the scanner's turn is over: it leaves
-    ``remaining_scanners``, so a later SCAN_COMPLETE no longer lists it as running,
-    but no SCAN_COMPLETE names the failed scanner itself (a failure is not a
-    completion, as the run-loop tests pin for a scanner whose bookkeeping raised).
-    It stays out of ``completed_scanners``, so the completeness check records it."""
+    ``remaining_scanners`` and its SCAN_COMPLETE is sent with ``succeeded`` False,
+    as every finished turn's is (docs/content/plugins/event-subscribers.md: "after
+    each scanner, including one that failed"). Before, a merge failure sent none
+    while a scan() that raised was announced, so whether a failed scanner got
+    SCAN_COMPLETE depended on how it failed, and a merge failure in the last
+    scanner left the completion logger with no ``remaining_count == 0`` event. It
+    stays out of ``completed_scanners``, so the completeness check records it."""
 
     @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
-    def test_no_scan_complete_names_the_failed_scanner_and_it_leaves_remaining(
+    def test_the_failed_scanner_is_announced_as_failed_and_leaves_remaining(
         self, plugin_context, tmp_path, parallel
     ):
         _, executor = _run(
@@ -432,28 +436,43 @@ class TestAProcessingFailureLeavesTheRemainingListUnannounced:
             with_clean_scanner=True,
         )
 
-        (complete,) = _scan_complete_events(executor)
-        assert complete["scanner"] == "clean-tool"
-        assert complete["total_count"] == 2
-        assert len(executor.completed_scanners) == 1
+        completes = _scan_complete_events(executor)
+        by_name = {c["scanner"]: c for c in completes}
+        assert set(by_name) == {"shape-tool", "clean-tool"}, completes
+        assert by_name["shape-tool"]["succeeded"] is False
+        assert by_name["clean-tool"]["succeeded"] is True
+        assert all(c["total_count"] == 2 for c in completes)
+        assert executor.completed_scanners == ["clean-tool"]
         if not parallel:
-            # The failed scanner's turn ended before the clean one's began, so
-            # the clean scanner's SCAN_COMPLETE finds nothing left running and
-            # counts two turns over: a failed turn is a turn, not a completed
-            # scanner (completed_scanners holds the clean one alone).
-            assert complete["remaining_scanners"] == []
-            assert complete["remaining_count"] == 0
-            assert complete["completed_count"] == 2
+            # The failed scanner's turn ended before the clean one's began: its
+            # event still names the clean scanner as running, and the clean
+            # scanner's finds nothing left and counts two turns over (a failed
+            # turn is a turn, not a completed scanner).
+            assert [c["scanner"] for c in completes] == ["shape-tool", "clean-tool"]
+            assert by_name["shape-tool"]["remaining_scanners"] == ["clean-tool"]
+            assert by_name["shape-tool"]["completed_count"] == 1
+            assert by_name["clean-tool"]["remaining_scanners"] == []
+            assert by_name["clean-tool"]["remaining_count"] == 0
+            assert by_name["clean-tool"]["completed_count"] == 2
 
     @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
-    def test_a_failed_scanner_alone_sends_no_scan_complete(
+    def test_a_failed_scanner_alone_sends_one_failed_scan_complete(
         self, plugin_context, tmp_path, parallel
     ):
+        """The last turn to end is the failed one: the event that says nothing is
+        left running is still sent, so the completion logger says the scan is
+        over."""
         _, executor = _run(
             plugin_context, tmp_path, failing_target="converted", parallel=parallel
         )
 
-        assert _scan_complete_events(executor) == []
+        (complete,) = _scan_complete_events(executor)
+        assert complete["scanner"] == "shape-tool"
+        assert complete["succeeded"] is False
+        assert complete["remaining_scanners"] == []
+        assert complete["remaining_count"] == 0
+        assert complete["completed_count"] == 1
+        assert "failed" in complete["message"]
         assert executor.completed_scanners == []
 
     @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
@@ -467,4 +486,6 @@ class TestAProcessingFailureLeavesTheRemainingListUnannounced:
 
         (complete,) = _scan_complete_events(executor)
         assert complete["remaining_scanners"] == []
+        assert complete["succeeded"] is True
+        assert "completed" in complete["message"]
         assert len(executor.completed_scanners) == 1

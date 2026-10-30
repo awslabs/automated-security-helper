@@ -812,19 +812,25 @@ class ScannerExecutor:
         remaining_scanners: List[str],
         completed_count: int,
         total: int,
+        succeeded: bool = True,
     ) -> None:
         """Take *scanner_name* off *remaining_scanners* and announce SCAN_COMPLETE.
 
-        The path for a scanner whose results were recorded. A scanner whose turn
-        ended in a failure container is taken off the list too
-        (``_drop_from_remaining``) but not announced: SCAN_COMPLETE is the
-        completion event, and a subscriber reading it as "this scanner
-        completed" would read a failure as a completion. Left in the list, the
-        failed scanner was named as still running by every later SCAN_COMPLETE
-        and the completion logger never said the scan was complete. The
+        Every finished turn is announced, with ``succeeded`` saying whether the
+        scanner's results were recorded (False for a turn that ended in a
+        failure container, a scan() that raised or a merge that failed), the
+        contract docs/content/plugins/event-subscribers.md states: "after each
+        scanner, including one that failed". Announced only for recorded
+        results, a scanner whose scan() raised was still announced (its failure
+        container comes back down the normal path) while one whose results
+        failed to merge was not, so whether a failed scanner got SCAN_COMPLETE
+        depended on how it failed, and when the last scanner to finish was a
+        merge failure no SCAN_COMPLETE with ``remaining_count == 0`` was ever
+        sent, so the completion logger never said the scan was complete. The
         subscriber gets a copy of the list: the executor keeps changing its own,
         and a subscriber that kept the live list (as the sequential loop passed
-        it) saw it change under it.
+        it) saw it change under it. ``completed_scanners`` is a separate record
+        and still names only the scanners whose results were recorded.
         """
         self._drop_from_remaining(scanner_name, remaining_scanners)
         try:
@@ -834,6 +840,7 @@ class ScannerExecutor:
             remaining_list = (
                 ", ".join(remaining_scanners) if remaining_scanners else "None"
             )
+            outcome = "completed" if succeeded else "failed"
             self._notify(
                 AshEventType.SCAN_COMPLETE,
                 scanner=scanner_name,
@@ -841,7 +848,8 @@ class ScannerExecutor:
                 total_count=total,
                 remaining_count=remaining_count,
                 remaining_scanners=remaining_scanners.copy(),
-                message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
+                succeeded=succeeded,
+                message=f"Scanner {scanner_name} {outcome}. {remaining_count} remaining: {remaining_list}",
             )
         except Exception as notify_error:
             # See the ERROR guard in _execute_scanner: _notify already handles a
@@ -2539,7 +2547,11 @@ class ScannerExecutor:
                             description=f"[green]({escape_markup(scanner_name)}) Completed scan",
                         )
                     self._announce_scan_complete(
-                        scanner_name, remaining_scanners, completed + 1, total
+                        scanner_name,
+                        remaining_scanners,
+                        completed + 1,
+                        total,
+                        succeeded=scanner_succeeded,
                     )
 
             except Exception as e:
@@ -2619,10 +2631,16 @@ class ScannerExecutor:
                         f"Scanner {scanner_name} failed",
                         aggregated_results,
                     )
-                # The scanner's turn is over, its failure recorded: it is not
-                # still running, so it leaves the remaining list, but a failure
-                # is not a completion and SCAN_COMPLETE does not name it.
-                self._drop_from_remaining(scanner_name, remaining_scanners)
+                # The scanner's turn is over, its failure recorded: it leaves
+                # the remaining list and the turn is announced, succeeded False,
+                # so a subscriber sees every turn end (_announce_scan_complete).
+                self._announce_scan_complete(
+                    scanner_name,
+                    remaining_scanners,
+                    completed + 1,
+                    total,
+                    succeeded=False,
+                )
             finally:
                 completed += 1
 
@@ -2868,6 +2886,7 @@ class ScannerExecutor:
                                 remaining_scanners,
                                 completed_count + 1,
                                 total,
+                                succeeded=scanner_succeeded,
                             )
 
                     # A completion: the scanner returned, or returned None and
@@ -2957,12 +2976,17 @@ class ScannerExecutor:
                             f"Scanner {scanner_name} failed in thread pool",
                             aggregated_results,
                         )
-                    # The scanner's turn is over, its failure recorded: it is
-                    # not still running, so it leaves the remaining list, but a
-                    # failure is not a completion and SCAN_COMPLETE does not
-                    # name it.
+                    # The scanner's turn is over, its failure recorded: it leaves
+                    # the remaining list and the turn is announced, succeeded
+                    # False (_announce_scan_complete).
                     with remaining_scanners_lock:
-                        self._drop_from_remaining(scanner_name, remaining_scanners)
+                        self._announce_scan_complete(
+                            scanner_name,
+                            remaining_scanners,
+                            completed_count + 1,
+                            total,
+                            succeeded=False,
+                        )
                     # A recorded failure counts toward the run's progress.
                     completed_count += 1
 

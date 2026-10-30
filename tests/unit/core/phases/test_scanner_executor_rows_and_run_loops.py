@@ -27,8 +27,10 @@ The run loops:
 - SCAN_COMPLETE subscribers get a copy of the remaining list, in both modes;
 - the parallel loop emits SCAN_START, keys tasks by position, records the future's
   own plugin and sets the scan's cancel event on a cancel; a scanner whose
-  bookkeeping raised leaves the remaining list without a SCAN_COMPLETE of its
-  own (a failure is not a completion), with the processor error redacted.
+  bookkeeping raised leaves the remaining list and is announced with a
+  SCAN_COMPLETE whose ``succeeded`` is False (every finished turn is announced;
+  ``completed_scanners`` still names the recorded ones alone), with the
+  processor error redacted.
 """
 
 from __future__ import annotations
@@ -606,13 +608,14 @@ class TestTheRunLoops:
         assert waited.get("set") is True, waited
         assert waited["seconds"] < 4, waited
 
-    def test_a_scanner_whose_bookkeeping_raised_leaves_the_remaining_list_unannounced(
+    def test_a_scanner_whose_bookkeeping_raised_is_announced_as_a_failed_turn(
         self, tmp_path, monkeypatch
     ):
         """The progress update raising sends the first scanner down the except
         path: it is taken off the remaining list, so the next scanner's
-        SCAN_COMPLETE no longer names it as running, but no SCAN_COMPLETE names
-        the failed scanner itself (a failure is not a completion), and the
+        SCAN_COMPLETE no longer names it as running; its own SCAN_COMPLETE is
+        sent with succeeded False (every finished turn is announced, so a
+        failed last scanner still ends the completion logger's count), and the
         processor error of its failure container is logged redacted."""
         from automated_security_helper.plugins.events import AshEventType
 
@@ -622,7 +625,13 @@ class TestTheRunLoops:
 
         def _notify(event_type, **kwargs):
             if event_type == AshEventType.SCAN_COMPLETE:
-                completions.append((kwargs["scanner"], kwargs["remaining_scanners"]))
+                completions.append(
+                    (
+                        kwargs["scanner"],
+                        kwargs["remaining_scanners"],
+                        kwargs["succeeded"],
+                    )
+                )
 
         def _process(container, aggregated):
             if container.target_type is None:
@@ -653,6 +662,9 @@ class TestTheRunLoops:
 
         executor.run_sequential(AshAggregatedResults())
 
-        assert completions == [("second", [])], completions
+        assert completions == [
+            ("first", ["second"], False),
+            ("second", [], True),
+        ], completions
         assert any("Failed to process error results" in line for line in errors), errors
         assert not any(CANARY in line for line in errors), errors

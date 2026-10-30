@@ -77,7 +77,7 @@ Subscribers to one event run in the order they were subscribed. The order betwee
 | `CONVERT_START` | before each converter runs | `converter`, `converter_class`, `message` |
 | `CONVERT_COMPLETE` | after each converter that did not raise | the same, plus `converted_files` and `file_count` |
 | `SCAN_START` | before each scanner, when scanners run one at a time: with `--strategy sequential`, or when only one scanner runs | `scanner`, `scanner_class`, `scan_targets`, `message` |
-| `SCAN_COMPLETE` | after each scanner, including one that failed | `scanner`, `completed_count`, `total_count`, `remaining_count`, `remaining_scanners`, `message` |
+| `SCAN_COMPLETE` | after each scanner's turn, including one that failed: `succeeded` is `False` when the scanner's results were not recorded (its `scan()` raised, or its results could not be merged), and such a scanner is not in `completed_scanners` | `scanner`, `completed_count`, `total_count`, `remaining_count`, `remaining_scanners`, `succeeded`, `message` |
 | `REPORT_START` | before each reporter | `reporter`, `reporter_class`, `message` |
 | `REPORT_COMPLETE` | after each reporter that returned a string; when the string was empty, no file was written, and `output_file` and `output_filename` are `None` | the same, plus `output_file` and `output_filename` |
 | `CONVERT_PHASE_COMPLETE`, `SCAN_PHASE_COMPLETE`, `REPORT_PHASE_COMPLETE`, `INSPECT_PHASE_COMPLETE` | when each phase ends | the phase's start arguments, plus `results` |
