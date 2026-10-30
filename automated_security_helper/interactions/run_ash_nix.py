@@ -62,6 +62,39 @@ ASH_NIX_FLAKE_REF_ENV_VAR = "ASH_NIX_FLAKE_REF"
 # Set by this module and read only by the inner command (_INNER_ENTRY_POINT).
 OUTER_PYTHONPATH_ENV_VAR = "ASH_NIX_OUTER_PYTHONPATH"
 
+# The environment variables the scan CLI reads as the value of a scan option
+# (`envvar=` on cli/scan.py's options). An explicit argv states the whole option
+# set of the scan inside the shell, and an option left at its default is left
+# OFF the command line, which is where these would decide it instead: a library
+# call with ``scanners=[]`` in a process holding ASH_SCANNERS=grype scanned with
+# grype alone, ASH_CHANGED_FILES_ONLY=1 filtered findings the call never asked
+# to filter (and there is no --no-changed-files-only to undo it), and
+# ASH_WORKSPACE made the inner --source-dir scan refuse. So they are removed from
+# the shell's environment when ``run_ash_nix`` is given an argv; a caller
+# forwarding its own command line (argv None) keeps them, since that command line
+# was read against them already. ASH_CONFIG stays in every case: the host side
+# resolves its own config reads through the same variable (run_ash_scan's
+# ASH_CONFIG fallbacks), so inner and outer agree on it; removing it would make
+# the inner scan discover a different file. ASH_MODE is listed although
+# rewrite_mode_args appends --mode local, so the inner scan is never one
+# environment variable away from recursing.
+INNER_SCAN_OPTION_VARIABLES: tuple = (
+    "ASH_SOURCE_DIR",
+    "ASH_OUTPUT_DIR",
+    "ASH_SCANNERS",
+    "ASH_EXCLUDED_SCANNERS",
+    "ASH_PLUGIN_MODULES",
+    "ASH_MODE",
+    "ASH_VERBOSE",
+    "ASH_DEBUG",
+    "ASH_CHANGED_FILES_ONLY",
+    "ASH_BASE_REF",
+    "ASH_SHARD_INDEX",
+    "ASH_SHARD_COUNT",
+    "ASH_WORKSPACE",
+    "ASH_WORKSPACE_CONFIG",
+)
+
 # Both features are DISABLED by default on a stock multi-user Nix install: /etc/nix/nix.conf
 # carries only build-users-group, and every flake operation then fails with "experimental
 # Nix feature 'nix-command' is disabled". Passing them explicitly on each invocation means
@@ -336,6 +369,10 @@ def run_ash_nix(
     # inside the scanned tree unless the operator allowed in-tree tools. nix
     # develop prepends the shell's packages to this PATH.
     env = child_environ()
+    if argv is not None:
+        # The argv states the whole option set; see INNER_SCAN_OPTION_VARIABLES.
+        for name in INNER_SCAN_OPTION_VARIABLES:
+            env.pop(name, None)
     env[ASH_IN_NIX_ENV_VAR] = "1"
     # The flake already supplies every scanner, so stop the thirteen scanners that prefer
     # `uv tool install` from fetching their own copies and shadowing the pinned ones.
