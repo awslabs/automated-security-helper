@@ -329,6 +329,8 @@ def download_file(
     destination: Path,
     rename_to: Optional[str] = None,
     expected_sha256: Optional[str] = None,
+    *,
+    mode: int = 0o755,
 ) -> Path:
     """Download a file from a URL to the specified destination.
 
@@ -340,6 +342,11 @@ def download_file(
             while the bytes are still in the temporary file, so a mismatch leaves
             nothing at the destination. When omitted, the download is unverified
             and says so in the log rather than passing silently.
+        mode: The mode the landed file gets on POSIX. ``0o755`` by default, the
+            mode every download of this helper has always landed with, so a
+            plugin that downloads a binary through it keeps running it; a caller
+            that knows it fetches data (an archive, a rules bundle) passes
+            ``0o644``.
 
     Returns:
         Path to the downloaded file
@@ -347,7 +354,10 @@ def download_file(
     Raises:
         ToolDownloadIntegrityError: if expected_sha256 is given and does not match
     """
-    return _download_verified(url, destination, rename_to, expected_sha256)[0]
+    landed, _digest = _download_verified(
+        url, destination, rename_to, expected_sha256, mode=mode
+    )
+    return landed
 
 
 def _download_verified(
@@ -356,7 +366,7 @@ def _download_verified(
     rename_to: Optional[str] = None,
     expected_sha256: Optional[str] = None,
     *,
-    mode: int = 0o644,
+    mode: int = 0o755,
 ) -> "tuple[Path, str]":
     """``download_file``, and also the digest of the bytes that landed.
 
@@ -366,10 +376,11 @@ def _download_verified(
     reject. ``download_file`` keeps its plain ``Path`` return, because it is a public
     helper and a scanner plugin may be calling it.
 
-    ``mode`` is the mode the landed file gets: ``0o644`` by default, since what
-    this downloads is data (a release archive, a rules bundle); the installers
-    that land an executable make it one themselves (``make_executable``), and the
-    extraction of an archive member sets its own.
+    ``mode`` is the mode the landed file gets: ``0o755`` by default, the mode
+    every download landed with before the parameter existed, which a public
+    caller may rely on for a binary it fetches; the callers here that fetch data
+    (a release archive, a rules bundle) pass ``0o644``, and the extraction of an
+    archive member sets its own.
     """
     # The URL first, before anything is made for the download: a refused URL
     # used to leave a freshly created destination directory behind.
@@ -1774,6 +1785,9 @@ def install_pinned_tool(
                 staging_dir,
                 rename_to=asset_name,
                 expected_sha256=asset.sha256,
+                # An archive is data; the executable asset is placed below with
+                # the mode an executable gets.
+                mode=0o644 if asset.archive else 0o755,
             )
             _store_cached_asset(downloaded, asset_name)
         if not asset.archive:

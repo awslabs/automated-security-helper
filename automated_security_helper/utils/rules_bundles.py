@@ -551,6 +551,8 @@ def _install_locked(
                     Path(download_dir),
                     rename_to=bundle.url.rsplit("/", 1)[-1],
                     expected_sha256=bundle.sha256,
+                    # A rules bundle is data, not a program to run.
+                    mode=0o644,
                 )
             except (OSError, http.client.HTTPException) as exc:
                 # URLError, HTTPError, timeouts and dropped connections, once
