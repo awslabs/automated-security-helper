@@ -22,8 +22,17 @@ through ``_copy_tar_members``, the path taken when tarfile has no "data" filter.
 has a control at the limit, which extracts.
 
 No archive here holds more than a few kilobytes of content that a reader can
-extract, except the sparse tar in ``TestDeclaredSizes``, which writes about 1 MiB;
-the large sizes are declared, never present. See ``tests/utils/archive_builders.py``.
+extract, except the sparse tar with data in ``TestDeclaredSizes``, which stores
+2 MiB of zeros the admission check refuses before any copy; the large sizes are
+declared, never present. See ``tests/utils/archive_builders.py``.
+
+The copy-limit checks in ``TestDeclaredSizes`` require that the copy ran. Two
+tests of a sparse member whose map ran past its declared size used to pass with
+nothing written once the sparse-map admission check refused that member before
+extraction: the refusal is what
+``test_a_sparse_member_whose_map_passes_its_size_is_refused_before_any_copy``
+measures, and the copy loop's own bound is measured with a member stream that
+reads longer than the member declares.
 """
 
 from __future__ import annotations
@@ -56,7 +65,6 @@ from tests.utils.archive_builders import (
     compressible_text,
     incompressible,
     ordinary_source_files,
-    sparse_tar_bytes,
     sparse_tar_with_data_bytes,
     zip_bytes,
 )
@@ -557,29 +565,6 @@ class TestDeclaredSizes:
         assert sum(written.values()) <= 4000, summary(written)
 
     @pytest.mark.parametrize("gz", TAR_KINDS)
-    def test_a_sparse_member_writes_no_more_than_the_limits_allow(
-        self, gz, tree, test_plugin_context, monkeypatch
-    ):
-        """The member declares 1 byte; tarfile's extractall copies 1 MiB for it."""
-        archive = tree / ("sparse.tar.gz" if gz else "sparse.tar")
-        archive.write_bytes(
-            sparse_tar_bytes(
-                "big.py",
-                declared_size=1,
-                map_length=2 * MEBIBYTE,
-                trailing=MEBIBYTE,
-                gz=gz,
-            )
-        )
-        converter = converter_for(
-            test_plugin_context, monkeypatch, [archive], limits=self.LIMITS
-        )
-
-        converter.convert()
-
-        self.assert_within_limits(converter)
-
-    @pytest.mark.parametrize("gz", TAR_KINDS)
     def test_a_member_is_admitted_for_the_stored_extent_its_header_pass_skips(
         self, gz, tree, test_plugin_context, monkeypatch, ash_warnings
     ):
@@ -646,33 +631,6 @@ class TestDeclaredSizes:
         assert "sparse" in converter.refused_inputs[0].reason
         assert copied == [], f"tarfile copied {copied} bytes for a refused member"
         assert files_written(converter) == {}
-
-    @pytest.mark.parametrize("gz", TAR_KINDS)
-    def test_without_the_data_filter_a_sparse_member_writes_no_more_than_the_limits_allow(
-        self, gz, tree, test_plugin_context, monkeypatch
-    ):
-        """The control: extractfile reads the same member as the 1 byte it declares."""
-        archive = tree / ("sparse.tar.gz" if gz else "sparse.tar")
-        archive.write_bytes(
-            sparse_tar_bytes(
-                "big.py",
-                declared_size=1,
-                map_length=2 * MEBIBYTE,
-                trailing=MEBIBYTE,
-                gz=gz,
-            )
-        )
-        converter = converter_for(
-            test_plugin_context,
-            monkeypatch,
-            [archive],
-            without_data_filter=True,
-            limits=self.LIMITS,
-        )
-
-        converter.convert()
-
-        self.assert_within_limits(converter)
 
     @pytest.mark.parametrize("gz", TAR_KINDS)
     def test_without_the_data_filter_the_copy_stops_at_the_limits_when_a_member_reads_longer(
