@@ -54,7 +54,15 @@ def _zip_bytes(entries: dict) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, content in entries.items():
-            zf.writestr(name, content)
+            # The entry is stored under the name as written. ``ZipInfo``
+            # rewrites ``os.sep`` to ``/`` when it is built from a name, so on
+            # Windows a backslash entry would reach the archive as the nested
+            # path ``src/main.py`` and the refusal below would have nothing to
+            # refuse; setting the name after construction keeps it literal.
+            info = zipfile.ZipInfo(name)
+            info.filename = name
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, content)
     return buf.getvalue()
 
 
