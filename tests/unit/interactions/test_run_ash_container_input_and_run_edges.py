@@ -238,7 +238,9 @@ def test_a_reader_still_running_after_the_join_is_said(monkeypatch, logged):
 
     rac.run_cmd_direct(["runtime", "run", "scan"])
 
-    assert any("incomplete" in m for m in logged.messages(logging.WARNING))
+    # Once, although both readers (stdout and stderr) are still alive.
+    said = [m for m in logged.messages(logging.WARNING) if "incomplete" in m]
+    assert len(said) == 1, said
 
 
 # ---------------------------------------------------------------------------

@@ -929,12 +929,12 @@ def run_cmd_direct(
     # not taken for the whole output.
     for reader in readers:
         reader.join(timeout=5.0)
-        if reader.is_alive():
-            ASH_LOGGER.warning(
-                "The container runtime exited but its output was still being read "
-                "after 5 seconds (a process it started may hold the pipe open); "
-                "the captured copy of its output may be incomplete."
-            )
+    if any(reader.is_alive() for reader in readers):
+        ASH_LOGGER.warning(
+            "The container runtime exited but its output was still being read "
+            "after 5 seconds (a process it started may hold the pipe open); "
+            "the captured copy of its output may be incomplete."
+        )
 
     # Get the captured output (safe now that threads are joined)
     stdout = stdout_buffer.getvalue()
