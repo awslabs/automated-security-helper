@@ -466,21 +466,27 @@ def _link_exclude_patterns(
 def parse_version(version_str: str) -> Tuple[int, ...]:
     """Parse a version string into a tuple of integers for comparison.
 
-    A pre-release (``1.2.3-rc1``, ``1.2.3-beta``) sorts BELOW its release under
-    ``compare_versions``: the tuple carries a trailing ``-1`` for it, and the
-    comparison pads the shorter tuple with zeros, so ``2.4.5-rc1`` reads as
-    ``(2, 4, 5, -1)`` against ``(2, 4, 5, 0)`` and is older than the minimum
-    ``2.4.5``, where dropping the suffix read it as the release. Compare through
-    ``compare_versions``, not ``<`` on the tuples: Python ranks a longer tuple
-    above its own prefix, so ``(2, 4, 5, -1) < (2, 4, 5)`` is False. Build metadata
-    (``1.2.3+build7``) ranks with its release, as semantic versioning has it.
+    A release carries a trailing ``0`` and a pre-release (``1.2.3-rc1``,
+    ``1.2.3-beta``) a ``-1`` in that place, followed by the numbers in its label,
+    so ``2.4.5-rc1`` reads as ``(2, 4, 5, -1, 1)`` against the release's
+    ``(2, 4, 5, 0)`` and is older than the minimum ``2.4.5``, where dropping the
+    suffix read it as the release; and ``rc1`` is older than ``rc2``, where a bare
+    ``-1`` read every pre-release of one version as equal. The release's own ``0``
+    is what makes ``<`` on the tuples agree with ``compare_versions``: without it
+    Python ranked the longer pre-release tuple above its own prefix, so
+    ``(2, 4, 5, -1) < (2, 4, 5)`` was False. Labels are not ranked against each
+    other (``beta`` against ``rc``): ferret-scan's bounds are release numbers, and
+    ``is_version_compatible`` compares a pre-release's release part at the upper
+    bound. Build metadata (``1.2.3+build7``) ranks with its release, as semantic
+    versioning has it.
 
     Args:
         version_str: Version string like "1.2.3" or "1.2.3-beta"
 
     Returns:
-        Tuple of integers representing the version (e.g., (1, 2, 3)), with a
-        trailing -1 for a pre-release (e.g., (1, 2, 3, -1))
+        Tuple of integers representing the version with a trailing 0 (e.g.,
+        (1, 2, 3, 0)), or with -1 and the pre-release's numbers in its place
+        (e.g., (1, 2, 3, -1, 1) for "1.2.3-rc1")
     """
     release, _, _build = version_str.partition("+")
     release, _, pre_release = release.partition("-")
@@ -488,8 +494,14 @@ def parse_version(version_str: str) -> Tuple[int, ...]:
     parts = re.findall(r"\d+", release)
     numbers = tuple(int(p) for p in parts) if parts else (0,)
     if pre_release:
-        return (*numbers, -1)
-    return numbers
+        return (*numbers, -1, *(int(p) for p in re.findall(r"\d+", pre_release)))
+    return (*numbers, 0)
+
+
+def _release_of(version: str) -> str:
+    """``version`` without its pre-release label and build metadata: the release a
+    pre-release is a build of (``2.6.0`` for ``2.6.0-rc1+build7``)."""
+    return version.partition("+")[0].partition("-")[0]
 
 
 def compare_versions(v1: str, v2: str) -> int:
@@ -520,17 +532,24 @@ def compare_versions(v1: str, v2: str) -> int:
 def is_version_compatible(version: str, min_version: str, max_version: str) -> bool:
     """Check if a version is within the compatible range.
 
+    The maximum excludes the release and its pre-releases alike: ``2.6.0-rc1`` is
+    a build of 2.6.0, the release a maximum of ``2.6.0`` excludes, so its release
+    part (``_release_of``) is what is compared at the upper bound, as PEP 440 reads
+    ``<2.6.0``. Compared as a pre-release it sorted below ``2.6.0`` and was admitted.
+    At the lower bound the pre-release itself is compared, so ``2.4.5-rc1`` stays
+    older than a minimum of ``2.4.5``.
+
     Args:
         version: Version to check
         min_version: Minimum supported version (inclusive)
-        max_version: Maximum supported version (exclusive)
+        max_version: Maximum supported version (exclusive, its pre-releases too)
 
     Returns:
         True if version is compatible, False otherwise
     """
     return (
         compare_versions(version, min_version) >= 0
-        and compare_versions(version, max_version) < 0
+        and compare_versions(_release_of(version), max_version) < 0
     )
 
 

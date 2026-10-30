@@ -4,7 +4,9 @@
 """Readings of the ferret-scan plugin that went wrong before.
 
 - ``parse_version`` dropped a pre-release suffix, so ``2.4.5-rc1`` read as the
-  release ``2.4.5`` and passed a minimum it is older than.
+  release ``2.4.5`` and passed a minimum it is older than; then every pre-release
+  of one version read as equal, the bare tuples did not order under ``<``, and the
+  exclusive maximum admitted its own pre-releases (``2.6.0-rc1`` under ``2.6.0``).
 - ``enable_preprocessors: false`` passed no flag, and both the bundled config and
   ferret-scan's own default turn preprocessing on, so the option did nothing.
 - An option key that is not a string raised ``AttributeError`` out of the
@@ -59,6 +61,7 @@ from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner 
     _link_exclude_patterns,
     _resolve_sarif_uri_base_ids,
     compare_versions,
+    is_version_compatible,
     parse_version,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -119,19 +122,39 @@ def _scan(scanner, run, target: Path, ignore_paths: list | None = None):
 
 
 def test_a_pre_release_sorts_below_its_release():
-    """The order is compare_versions', which pads the shorter tuple with zeros:
-    (2, 4, 5, -1) against (2, 4, 5, 0). The bare tuples are not ordered by ``<``
-    (Python ranks a longer tuple above its own prefix), so every caller compares
-    through compare_versions."""
-    assert parse_version("2.4.5-rc1") == (2, 4, 5, -1)
+    """A release carries a trailing 0 and a pre-release a -1 in that place, so
+    the bare tuples order under ``<`` as compare_versions orders them (which pads
+    the shorter tuple with zeros); a bare (2, 4, 5, -1) ranked above (2, 4, 5)."""
+    assert parse_version("2.4.5-rc1") == (2, 4, 5, -1, 1)
+    assert parse_version("2.4.5") == (2, 4, 5, 0)
+    assert parse_version("2.4.5-rc1") < parse_version("2.4.5")
     assert compare_versions("2.4.5-rc1", "2.4.5") == -1
     assert compare_versions("2.4.5", "2.4.5-rc1") == 1
     assert compare_versions("2.4.5-rc1", "2.4.4") == 1
+    assert compare_versions("1.0.0-beta", "1.0.0") == -1
+
+
+def test_pre_releases_of_one_version_order_by_their_number():
+    """A bare -1 read rc1 and rc2 as the same version."""
+    assert compare_versions("2.4.5-rc1", "2.4.5-rc2") == -1
+    assert compare_versions("2.4.5-rc2", "2.4.5-rc1") == 1
+    assert compare_versions("2.4.5-rc2", "2.4.5-rc2") == 0
 
 
 def test_build_metadata_ranks_with_its_release():
-    assert parse_version("1.2.3+build7") == (1, 2, 3)
+    assert parse_version("1.2.3+build7") == (1, 2, 3, 0)
     assert compare_versions("1.2.3+build7", "1.2.3") == 0
+
+
+def test_a_pre_release_of_the_maximum_is_outside_the_range():
+    """``<2.6.0`` excludes 2.6.0's own pre-releases, as PEP 440 reads it: the
+    release part is compared at the upper bound. Compared as a pre-release,
+    2.6.0-rc1 sorted below 2.6.0 and was admitted."""
+    assert is_version_compatible("2.6.0-rc1", "2.4.5", "2.6.0") is False
+    assert is_version_compatible("2.5.9-rc1", "2.4.5", "2.6.0") is True
+    assert is_version_compatible("2.5.9", "2.4.5", "2.6.0") is True
+    assert is_version_compatible("2.4.5", "2.4.5", "2.6.0") is True
+    assert is_version_compatible("2.4.5-rc1", "2.4.5", "2.6.0") is False
 
 
 @patch(
