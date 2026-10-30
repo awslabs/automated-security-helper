@@ -4,6 +4,7 @@
 import logging
 import os
 import re
+import threading
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -30,10 +31,17 @@ def _installed_revision(path: Path) -> str:
     False), and ``read_text()`` raises it on every interpreter, so without
     the handler an uncheckable install location kills ``import ash``. The
     handler is live on every supported version, not a versioned shim.
+
+    An asset that does not decode (``UnicodeDecodeError`` is a ``ValueError``,
+    not an ``OSError``) reads as absent too: it was read with the locale's codec,
+    and an asset that is not text would otherwise kill the import the same way.
+    The build writes the revision as UTF-8.
     """
     try:
-        return path.read_text().strip() if path.exists() else "unknown-commit"
-    except OSError:
+        if not path.exists():
+            return "unknown-commit"
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, ValueError):
         return "unknown-commit"
 
 
@@ -63,6 +71,9 @@ def is_anchored(path: str, pathmod: Any = os.path) -> bool:
 #: The (variable, value) pairs from the environment already warned about in this
 #: process.
 _warned_relative_values: Set[Tuple[str, str]] = set()
+#: Orders the check and the add below: two threads that both read "not warned
+#: yet" each logged the once-only warning.
+_warned_relative_values_lock = threading.Lock()
 
 
 def warn_relative_value_once(variable: str, value: str, message: str) -> None:
@@ -73,9 +84,10 @@ def warn_relative_value_once(variable: str, value: str, message: str) -> None:
     two settings to fix, and each one's warning names it.
     """
     key = (variable, value)
-    if key in _warned_relative_values:
-        return
-    _warned_relative_values.add(key)
+    with _warned_relative_values_lock:
+        if key in _warned_relative_values:
+            return
+        _warned_relative_values.add(key)
     from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
     ASH_LOGGER.warning(message, extra=NO_MARKUP)
@@ -96,12 +108,18 @@ def usable_home() -> Optional[Path]:
     entry, so an empty HOME, which makes ``~`` the filesystem root, and a relative
     one, which names a directory under the working directory (usually the
     repository being scanned), give None, as does an unset HOME with no absolute
-    passwd home. On Windows it is the home directory ``os.path.expanduser`` finds
-    (USERPROFILE, or HOMEDRIVE and HOMEPATH), when that has a drive or share.
+    passwd home. A HOME that is the filesystem root itself (``/``, which Docker
+    sets for a ``--user`` with no passwd entry) names no home either: ``~/.ash/bin``
+    would be ``/.ash/bin`` and the caches would sit at the top of the filesystem,
+    the same place an empty HOME led to. On Windows it is the home directory
+    ``os.path.expanduser`` finds (USERPROFILE, or HOMEDRIVE and HOMEPATH), when
+    that has a drive or share and is not a drive's root.
     """
     if os.name == "nt":
         home = os.path.expanduser("~")
-        return Path(home) if home != "~" and is_anchored(home) else None
+        if home == "~" or not is_anchored(home) or _is_filesystem_root(home):
+            return None
+        return Path(home)
     value = os.environ.get("HOME")
     if value is None:
         try:
@@ -110,9 +128,15 @@ def usable_home() -> Optional[Path]:
             value = pwd.getpwuid(os.getuid()).pw_dir
         except (ImportError, KeyError, AttributeError, OSError):
             return None
-    if not value or not is_anchored(value):
+    if not value or not is_anchored(value) or _is_filesystem_root(value):
         return None
     return Path(value)
+
+
+def _is_filesystem_root(value: str) -> bool:
+    """Whether *value* is a root (``/``, ``//``, ``C:\\``): a path with no parent."""
+    path = Path(value)
+    return path.parent == path
 
 
 def expand_home(value: str) -> Optional[str]:
@@ -155,25 +179,36 @@ def warn_if_home_unusable() -> None:
     """Say, once per value, that nothing under ``~`` is used for an unusable HOME."""
     if usable_home() is not None:
         return
-    if os.name == "nt":
-        variable, described = "USERPROFILE", "not an absolute path"
-    else:
-        variable = "HOME"
-        value = os.environ.get(variable)
+    variable = "USERPROFILE" if os.name == "nt" else "HOME"
+    value = os.environ.get(variable)
+    if value is None:
         described = (
-            "not set, and the passwd entry names no absolute home directory"
-            if value is None
-            else "empty"
-            if not value
-            else f"the relative path {value!r}"
+            "not set, and HOMEDRIVE and HOMEPATH name no absolute home directory"
+            if os.name == "nt"
+            else "not set, and the passwd entry names no absolute home directory"
         )
+    elif not value:
+        described = "empty"
+    elif is_anchored(value):
+        # Anchored, yet no home: only a filesystem root is refused after that.
+        described = "the filesystem root"
+    elif os.name == "nt":
+        described = "not an absolute path"
+    else:
+        described = f"the relative path {value!r}"
+    advice = "an absolute path" + (
+        " other than the filesystem root" if described == "the filesystem root" else ""
+    )
+    # An unset variable and an empty one are two settings with two messages, so
+    # they are keyed apart: the empty string stood for both, and the second
+    # warning in a process was suppressed. A NUL cannot be in an environment value.
     warn_relative_value_once(
         variable,
-        os.environ.get(variable, ""),
+        "\x00unset" if value is None else value,
         f"{variable} is {described}, so ASH uses nothing under ~: no tools in "
         "~/.ash/bin, no install receipts, no caches, and no scanner sandbox. A "
         "relative home would name a directory under the working directory, usually "
-        f"the repository being scanned. Set {variable} to an absolute path.",
+        f"the repository being scanned. Set {variable} to {advice}.",
     )
 
 
@@ -204,10 +239,24 @@ def is_blank_bin_path(value: "str | None") -> bool:
 def ash_bin_path_from_environment() -> "str | None":
     """ASH_BIN_PATH as set, or None when it is unset or blank (is_blank_bin_path).
 
-    The one reading of the variable.
+    The one reading of the variable. A value a shell left unexpanded (``~`` or
+    ``~/bin``, from a quoted assignment or a Windows ``set``) is expanded from the
+    usable home (:func:`usable_home`), as ``ash dependencies install`` expands the
+    same value to choose where it installs. Read literally it was a relative path,
+    which tool lookup does not search, so what the install put in the expanded
+    directory was never found by a later scan. With no usable home the value
+    names nowhere, and reads as unset.
     """
     value = os.environ.get("ASH_BIN_PATH")
-    return None if is_blank_bin_path(value) else value
+    if value is None or is_blank_bin_path(value):
+        return None
+    if value == "~" or value.startswith(("~/", "~\\")):
+        home = usable_home()
+        if home is None:
+            warn_if_home_unusable()
+            return None
+        return str(home.joinpath(value[2:]))
+    return value
 
 
 def _bin_path_at_import() -> Optional[Path]:
@@ -267,7 +316,10 @@ def _resolve_default_severity_level(raw: Optional[str]) -> str:
     if normalized is not None:
         return normalized
 
-    if raw is not None:
+    # An empty or blank value is an unset one: a shell that exports the name with
+    # nothing after it (``ASH_DEFAULT_SEVERITY_LEVEL=``) chose no threshold, and
+    # warning that it "is not a severity threshold" repeated on every start.
+    if raw is not None and raw.strip():
         logging.getLogger(__name__).warning(
             "ASH_DEFAULT_SEVERITY_LEVEL=%r is not a severity threshold; falling "
             "back to %s. Valid values are: %s. Note that these name the least "
@@ -451,6 +503,8 @@ ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES = (
     "_PATS",
     "_AUTH",
     "_AUTHS",
+    "_AUTHORIZATION",
+    "_AUTHORIZATIONS",
     "_CREDENTIAL",
     "_CREDENTIALS",
     "_HEADER_VALUE",
@@ -531,6 +585,8 @@ SECRET_SHAPED_NAME_SUFFIXES = (
     "PATS",
     "AUTH",
     "AUTHS",
+    "AUTHORIZATION",
+    "AUTHORIZATIONS",
     "PASSPHRASE",
     "PASSPHRASES",
 )
@@ -568,9 +624,14 @@ _TRAILING_QUALIFIER_SEGMENT = re.compile(r"\d+|V\d+|PROD|STAGING|DEV|TEST")
 #: here and a bare digit run is already gone.
 _GLUED_QUALIFIER = re.compile(r"V|PROD|STAGING|DEV|TEST")
 
+#: The same qualifiers at the end of a segment, for a secret word the segment
+#: ends with and does not begin with (``GITHUBTOKENPROD``).
+_GLUED_QUALIFIER_AT_END = re.compile(r"(?:V|PROD|STAGING|DEV|TEST)$")
+
 #: A segment's trailing digit run: ``KEY2`` and ``PASSWORD1`` carry the same
 #: words as ``KEY`` and ``PASSWORD``.
 _TRAILING_DIGITS = re.compile(r"\d+$")
+_LEADING_DIGITS = re.compile(r"^[0-9]+")
 
 
 def _canonical_segment(segment: str) -> str:
@@ -580,9 +641,21 @@ def _canonical_segment(segment: str) -> str:
     segment comes back digit-stripped only (``ENABLED``, ``PASSPORT``)."""
     stripped = _TRAILING_DIGITS.sub("", segment)
     for entry in SECRET_SHAPED_NAME_SUFFIXES:
-        rest = stripped[len(entry) :]
+        # The qualifier may follow digits that sit between the word and it
+        # (``KEY2PROD``, ``TOKEN1DEV``): those digits are not a trailing run, so
+        # they are skipped before the qualifier is read.
+        rest = _LEADING_DIGITS.sub("", stripped[len(entry) :])
         if stripped.startswith(entry) and rest and _GLUED_QUALIFIER.fullmatch(rest):
             return entry
+    # A qualifier glued after a word the segment ENDS with, not begins with:
+    # ``GITHUBTOKENPROD`` reads ``GITHUBTOKEN`` and ``MYPASSWORDV2`` reads
+    # ``MYPASSWORD``, which the ends-with reading then matches as it matches the
+    # unqualified names.
+    glued = _GLUED_QUALIFIER_AT_END.search(stripped)
+    if glued is not None and glued.start() > 0:
+        head = _TRAILING_DIGITS.sub("", stripped[: glued.start()])
+        if head.endswith(SECRET_SHAPED_NAME_SUFFIXES):
+            return head
     return stripped
 
 
@@ -976,6 +1049,29 @@ ASH_EXIT_CODES: Dict[int, str] = {
 }
 
 
+#: The ASH_OFFLINE values that name online mode. Anything else that is not one of
+#: the offline values is unrecognized, and is said so once.
+_ONLINE_OFFLINE_VALUES = ("", "NO", "FALSE", "0", "OFF", "N")
+
+
 def is_offline_mode() -> bool:
-    """Check if ASH is running in offline mode via ASH_OFFLINE env var."""
-    return str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
+    """Check if ASH is running in offline mode via ASH_OFFLINE env var.
+
+    YES, TRUE or 1, whatever the case and with the blanks around the value
+    removed (``set ASH_OFFLINE=YES `` in a Windows ``cmd`` keeps the trailing
+    blank, and the container init script strips before it compares). A value that
+    is neither those nor a plain "no" leaves ASH online, and one warning says so:
+    ``on`` or ``y`` used to leave it online with nothing said.
+    """
+    raw = os.environ.get("ASH_OFFLINE")
+    value = str(raw if raw is not None else "NO").strip().upper()
+    if value in ("YES", "TRUE", "1"):
+        return True
+    if value not in _ONLINE_OFFLINE_VALUES:
+        warn_relative_value_once(
+            "ASH_OFFLINE",
+            str(raw),
+            f"ASH_OFFLINE={raw!r} is not recognized, so ASH runs online. Set it to "
+            "YES, TRUE or 1 for offline mode.",
+        )
+    return False
