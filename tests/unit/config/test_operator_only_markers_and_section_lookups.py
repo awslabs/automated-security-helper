@@ -21,8 +21,10 @@
 from __future__ import annotations
 
 import datetime
+from typing import Annotated
 
 import pytest
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.environment_record import EnvironmentReference
@@ -30,6 +32,7 @@ from automated_security_helper.config.operator_only_options import (
     RepositorySettings,
     _confine_scanner_options,
     _sections_in,
+    _set_scanner_option,
     ignored_operator_only_options,
     mark_operator_only_options,
 )
@@ -78,6 +81,34 @@ def test_an_outside_files_string_value_is_stored_as_the_models_type():
     limit = config.scanners.detect_secrets.options.max_worker_output_mib
     assert limit == 256
     assert isinstance(limit, int) and not isinstance(limit, bool)
+
+
+def test_the_write_back_types_one_field_without_revalidating_the_whole_model():
+    """An options model with a second required field, and a model validator
+    that reads both fields: validating the one option as a whole model raised
+    on the missing field before the value was ever typed. The write-back reads
+    the one field, with its own constraints (the limit is held above zero), and
+    leaves the rest of the model as it is."""
+
+    class _TwoFields(BaseModel):
+        limit: Annotated[int, Field(gt=0)] = 1
+        ceiling: int
+
+        @model_validator(mode="after")
+        def _limit_within_ceiling(self) -> "_TwoFields":
+            if self.limit > self.ceiling:
+                raise ValueError("limit above ceiling")
+            return self
+
+    options = _TwoFields(limit=1, ceiling=512)
+
+    _set_scanner_option(options, "limit", "256")
+
+    assert options.limit == 256
+    assert isinstance(options.limit, int)
+    assert options.ceiling == 512
+    with pytest.raises(ValidationError):
+        _set_scanner_option(options, "limit", "0")
 
 
 def test_an_option_a_file_outside_the_tree_set_holds_that_files_value():

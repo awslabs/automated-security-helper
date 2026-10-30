@@ -83,6 +83,7 @@ import re
 from pathlib import Path, PurePath
 from typing import (
     TYPE_CHECKING,
+    Annotated,
     Any,
     Collection,
     Dict,
@@ -94,6 +95,8 @@ from typing import (
     Set,
     Tuple,
 )
+
+from pydantic import TypeAdapter
 
 from automated_security_helper.config.config_sources import resolve_override_segment
 from automated_security_helper.config.confinement_remedy import (
@@ -877,11 +880,23 @@ def _set_scanner_option(options: Any, option: str, value: Any) -> None:
     A value a file outside the tree wrote is the document's: an environment
     reference (``!ENV``, ``${VAR}``) is a string there where the model holds a
     number, so compared raw it always differed and was stored as a string. The
-    value is read through the options model first (lax, as a plugin's options
-    are read at load), so what is stored is the model's type and the comparison
-    is like with like. The trusted base's value is the model's already.
+    value is read through the option's own field first (lax, as a plugin's
+    options are read at load; the field's annotation with its constraints), so
+    what is stored is the model's type and the comparison is like with like.
+    The one field, not the whole model: validating ``{option: value}`` as a
+    model raised for any options model with another required field, or a
+    model validator reading several fields, on a value the field accepts. The
+    trusted base's value is the model's already. A name the model declares no
+    field for is set as given.
     """
-    typed = getattr(type(options).model_validate({option: value}), option)
+    field = type(options).model_fields.get(option)
+    if field is None:
+        typed = value
+    else:
+        annotation: Any = field.annotation
+        if field.metadata:
+            annotation = Annotated[(annotation, *field.metadata)]
+        typed = TypeAdapter(annotation).validate_python(value)
     if getattr(options, option) != typed:
         setattr(options, option, typed)
 
