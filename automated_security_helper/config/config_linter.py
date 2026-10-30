@@ -2292,6 +2292,21 @@ class ConfigLinter:
         return cls.UNUSED_SUPPRESSIONS_REPORT
 
     @classmethod
+    def find_unused_report(
+        cls, config_path: Path, output_dir: Optional[Path] = None
+    ) -> Tuple[Optional[Path], Optional[datetime]]:
+        """The unused-suppressions report a lint of ``config_path`` reads, under
+        the name the config gives it (``reporters.unused-suppressions.extension``),
+        and the report's modification time; ``(None, None)`` when there is none.
+
+        With ``output_dir`` the report is looked for there only; without it, in
+        the usual places beside the config. Public for the CLI's --source-dir
+        check, which looked under the default name alone and so never found a
+        report written under a configured extension.
+        """
+        return cls._find_unused_report(config_path, output_dir)
+
+    @classmethod
     def _find_unused_report(
         cls,
         config_path: Path,

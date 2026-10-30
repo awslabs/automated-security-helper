@@ -34,6 +34,14 @@ def _option_default(segment: str, section: str, field_name: str):
     return options_class.model_fields[field_name].default
 
 
+# The two tool_version defaults these tests write as "the option's own default":
+# read from the options models, so the next default bump does not turn them into
+# pins the operator wrote by hand (which lint --fix keeps) and fail three tests
+# in confusing ways.
+BANDIT_TOOL_VERSION = _option_default("scanners", "bandit", "tool_version")
+JUPYTER_TOOL_VERSION = _option_default("converters", "jupyter", "tool_version")
+
+
 def _a_value_other_than(default):
     """A value of the default's kind that is not the default: a pin."""
     if isinstance(default, int):
@@ -87,7 +95,7 @@ def config_with_internal_fields(tmp_path):
                 "enabled": True,
                 "name": "bandit",
                 "extension": "json",
-                "tool_version": ">=1.7.8,<2.0.0",
+                "tool_version": BANDIT_TOOL_VERSION,
             },
         },
         "reporters": {
@@ -101,7 +109,7 @@ def config_with_internal_fields(tmp_path):
             "jupyter": {
                 "enabled": True,
                 "name": "jupyter",
-                "tool_version": ">=7.16.0,<8.0.0",
+                "tool_version": JUPYTER_TOOL_VERSION,
                 "install_timeout": 300,
             },
         },
@@ -407,11 +415,11 @@ scanners:
     # option's own default, and a value an operator wrote beside `enabled` by
     # hand.
     OPTION_NAMED_FIELDS = [
-        ("scanners", "bandit", "tool_version", ">=1.7.8,<2.0.0", "==1.7.5"),
+        ("scanners", "bandit", "tool_version", BANDIT_TOOL_VERSION, "==1.7.5"),
         ("scanners", "bandit", "install_timeout", 300, 900),
         ("scanners", "checkov", "tool_version", None, "==3.2.250"),
         ("scanners", "semgrep", "tool_version", None, "==1.50.0"),
-        ("converters", "jupyter", "tool_version", ">=7.16.0,<8.0.0", "==7.16.4"),
+        ("converters", "jupyter", "tool_version", JUPYTER_TOOL_VERSION, "==7.16.4"),
         # Loaded from ash_plugin_modules, so lint cannot read its options.
         ("scanners", "ferret-scan", "tool_version", None, "==1.2.3"),
     ]
@@ -701,7 +709,7 @@ scanners:
 
     @pytest.mark.parametrize(
         "base_field,base_value",
-        [("install_timeout", 901), ("tool_version", ">=1.7.8,<2.0.0")],
+        [("install_timeout", 901), ("tool_version", BANDIT_TOOL_VERSION)],
         ids=["another-field", "the-same-field"],
     )
     def test_a_base_field_beside_a_fixable_one_stays_an_issue(
@@ -721,7 +729,7 @@ scanners:
         config_path = tmp_path / ".ash.yaml"
         config_path.write_text(
             "extends: base.yaml\nproject_name: demo\n"
-            "scanners:\n  bandit:\n    tool_version: '>=1.7.8,<2.0.0'\n",
+            f"scanners:\n  bandit:\n    tool_version: '{BANDIT_TOOL_VERSION}'\n",
             encoding="utf-8",
         )
 
@@ -755,7 +763,7 @@ scanners:
             "scanners:\n"
             "  bandit:\n"
             # The options' defaults, which --fix may remove.
-            "    tool_version: '>=1.7.8,<2.0.0'\n"
+            f"    tool_version: '{BANDIT_TOOL_VERSION}'\n"
             "    severity_threshold: HIGH\n"
             "    install_timeout: 300\n"
             "  cdk_nag:\n"
@@ -1105,12 +1113,14 @@ scanners:
         assert "gitlab-cyclonedx" in legacy_issues[0].message
 
     def test_lint_detects_legacy_canonical_collision(self, tmp_path):
-        """When BOTH legacy and canonical forms are present, say which one counts.
+        """When BOTH legacy and canonical forms are present, say what a scan does.
 
-        A scan accepts the file and reads the canonical form, so this is a
-        warning (lint gives the scan's verdict), and it names the form a scan
-        reads. The fixer must still refuse to touch the file in this case (data
-        loss otherwise), so the issue is not fixable.
+        A scan accepts the file and merges the two sections key by key, the
+        canonical form winning where both set a key (here ``severity_threshold``
+        is set only under ``cdk_nag``, so it still applies), so this is a
+        warning (lint gives the scan's verdict), and the message says the two
+        are merged and which spelling wins. The fixer must still refuse to touch
+        the file in this case (data loss otherwise), so the issue is not fixable.
         """
         config_path = tmp_path / ".ash" / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1761,3 +1771,22 @@ def test_the_toml_refusal_says_what_each_flag_rewrites(tmp_path, flags):
     assert "--fix-unused rewrite YAML and JSON" not in flat, flat
     assert "--fix rewrites YAML and JSON config files" in flat, flat
     assert "--fix-unused YAML ones only" in flat, flat
+
+
+def test_lint_fix_passes_a_clean_toml_file_without_the_refusal(tmp_path):
+    """The documented pre-commit invocation, ``lint --fix -y`` on a TOML config
+    with nothing to fix, exits 0 and prints no rewrite refusal. The test above
+    swapped its clean file for one with a fix to make; without this one a
+    regression here would break TOML users' pre-commit hooks with no test red."""
+    config_path = tmp_path / ".ashrc.toml"
+    config_path.write_text('project_name = "t"\n', encoding="utf-8")
+
+    result = CliRunner().invoke(
+        config_app,
+        ["lint", "--config", str(config_path), "--fix", "-y"],
+        env={"COLUMNS": "400"},
+    )
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    assert "rewrites YAML and JSON config files" not in flat, flat

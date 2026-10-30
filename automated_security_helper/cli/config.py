@@ -1798,8 +1798,16 @@ def lint(
         # so the linter's own search beside the file stays the default there,
         # as it does when the scanned tree holds no report.
         scan_output_dir = scan_root / ConfigLinter.DEFAULT_OUTPUT_DIR
-        if is_regular_file(scan_output_dir / ConfigLinter.UNUSED_SUPPRESSIONS_REPORT):
-            output_dir_path = scan_output_dir
+        # Looked for under the name the config gives the report (its
+        # reporters.unused-suppressions.extension), as the linter's own lookup
+        # names it: checked under the default name alone, a configured
+        # extension with --config outside the scanned tree never set this.
+        if config_path is not None:
+            found, _written_at = ConfigLinter.find_unused_report(
+                Path(config_path), scan_output_dir
+            )
+            if found is not None and is_regular_file(found):
+                output_dir_path = scan_output_dir
 
     if config_path is None:
         _report_no_config_found(scan_root)
