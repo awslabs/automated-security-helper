@@ -1131,7 +1131,11 @@ def validate_scan_target_in_sandbox(
     unresolved = _refusal_before_resolving("Scan target", directory_path)
     if unresolved is not None:
         return unresolved
-    resolved = Path(directory_path).resolve()
+    # os.path.realpath rather than Path.resolve, as the config-input gate below:
+    # on Python 3.12 and older, resolve raises RuntimeError for a symbolic link
+    # that leads back to itself, which escaped this gate as an exception instead
+    # of a judgment. Resolved as far as it can be, the path is judged here.
+    resolved = Path(os.path.realpath(directory_path))
     refusal = _scan_target_refusal(directory_path, resolved, session_id)
     if refusal is None and resolved_out is not None:
         resolved_out.append(resolved)

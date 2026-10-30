@@ -45,6 +45,9 @@ from automated_security_helper.cli.mcp.session_paths import hidden_deleting_name
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
+from automated_security_helper.core.resource_management.exceptions import (
+    MCPResourceError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -103,6 +106,20 @@ class TestAClientConfigWithASymlinkLoopIsJudgedNotRaised:
         loop.symlink_to(loop.name)
 
         assert client_named_config_is_untrusted(loop, OWN) is False
+
+    def test_a_scan_target_that_is_a_self_referencing_link_is_judged(self, tmp_path):
+        """Red at the base on Python 3.12 and older: the scan-target gate resolved
+        with Path.resolve and raised RuntimeError on the loop, escaping the gate
+        as an exception. Judged now: a remote caller's loop outside its sandbox is
+        refused, not raised on."""
+        _delivered(OWN)
+        loop = tmp_path / "elsewhere" / "checkout"
+        loop.parent.mkdir()
+        loop.symlink_to(loop.name)
+
+        refusal = validate_scan_target_in_sandbox(loop, session_id=OWN)
+
+        assert isinstance(refusal, MCPResourceError)
 
 
 class TestSessionSandboxRefusesTheIdsEveryOtherBuilderRefuses:
