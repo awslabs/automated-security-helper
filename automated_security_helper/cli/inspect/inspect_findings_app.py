@@ -116,13 +116,16 @@ SOURCE_READ_LIMIT = 64 * 1024 * 1024
 #: Lines shown on each side of a finding's line when they are read from its file.
 _CONTEXT_LINES = 5
 
-#: The bytes of each line kept while reading: enough for SNIPPET_LINE_CHARS + 1
-#: characters of UTF-8. A line longer than this is not shown at all
-#: (SOURCE_LINE_NOT_SHOWN): its head alone would reach the masker without the
-#: rest, so a value that started inside the shown part and ended past the head
+#: The bytes of each line kept while reading. A line longer than this is not shown
+#: at all (SOURCE_LINE_NOT_SHOWN): its head alone would reach the masker without
+#: the rest, so a value that started inside the shown part and ended past the head
 #: was not matched, and its start was shown. Nothing the masker could not check
-#: whole is shown.
-_LINE_HEAD_BYTES = (SNIPPET_LINE_CHARS + 1) * 4
+#: whole is shown. 64 KiB holds any line of code or prose (a paragraph of CJK text,
+#: a long log line) and leaves out only minified bundles and data blobs; the lines
+#: around a finding then take at most (2 * _CONTEXT_LINES + 1) times this. A head
+#: of (SNIPPET_LINE_CHARS + 1) * 4 bytes, enough for the shown part alone, hid
+#: every line over about 2,000 bytes, a Markdown paragraph among them.
+_LINE_HEAD_BYTES = 64 * 1024
 
 #: What an excerpt shows in place of a line longer than _LINE_HEAD_BYTES, or one
 #: the read limit ended inside. Not the head of the line: see _LINE_HEAD_BYTES.

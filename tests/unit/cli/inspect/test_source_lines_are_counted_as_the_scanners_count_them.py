@@ -70,9 +70,8 @@ class TestReadLines:
 
         assert len(lines) == 2, lines
         assert lines[1] == "y"
-        # A line longer than its head is not shown at all: a cut head could show
-        # the start of a value the results mask whole.
-        assert lines[0] == SOURCE_LINE_NOT_SHOWN
+        # One byte short of a chunk fits the line head, so the line is whole.
+        assert lines[0] == "x" * (_READ_CHUNK - 1)
 
     def test_a_line_longer_than_a_chunk_is_not_shown(self):
         handle = io.BytesIO(b"x" * (3 * _READ_CHUNK) + b"\ny\n")
