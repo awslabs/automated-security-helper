@@ -379,18 +379,23 @@ def extract_member(archive: Path, member_name: str, destination: Path) -> None:
         _require_exactly_one(members, member_name, archive)
         source = bundle.extractfile(members[0])
         if source is None:
-            raise SystemExit(f"{member_name} in {archive.name} is not readable")
+            raise _refuse(
+                f"{member_name} in {archive.name} is not readable", _EXIT_USAGE
+            )
         with source, destination.open("wb") as handle:
             shutil.copyfileobj(source, handle)
 
 
 def _require_exactly_one(matches: list, member_name: str, archive: Path) -> None:
     if not matches:
-        raise SystemExit(f"{archive.name} contains no member named {member_name}")
+        raise _refuse(
+            f"{archive.name} contains no member named {member_name}", _EXIT_USAGE
+        )
     if len(matches) > 1:
-        raise SystemExit(
+        raise _refuse(
             f"{archive.name} contains {len(matches)} members named {member_name}; "
-            "refusing to guess which one is the executable"
+            "refusing to guess which one is the executable",
+            _EXIT_USAGE,
         )
 
 
@@ -829,7 +834,7 @@ def installed_bundle_problem(
     try:
         bundle = pins.get_rules_bundle(name)
     except pins.ToolNotProvisionableError as exc:
-        raise SystemExit(str(exc))
+        raise _refuse(str(exc), _EXIT_USAGE)
     directory = rules_dir / f"{bundle.name}-{bundle.version}"
     if not directory.is_dir():
         if directory.exists() or directory.is_symlink():
@@ -864,7 +869,7 @@ _VERSION_TIMEOUT_SECONDS = 120
 def _plain_name(name: str, what: str) -> str:
     """Refuse a table value that would leave the directory it names a file in."""
     if not name or name in (".", "..") or "/" in name or "\\" in name:
-        raise SystemExit(f"refusing {what} {name!r}: not a plain file name")
+        raise _refuse(f"refusing {what} {name!r}: not a plain file name", _EXIT_USAGE)
     return name
 
 
@@ -910,7 +915,7 @@ def uv_tool_dir() -> Path:
     """
     uv = _on_absolute_path("uv")
     if uv is None:
-        raise SystemExit("`uv tool dir` failed: uv was not found on PATH")
+        raise _refuse("`uv tool dir` failed: uv was not found on PATH", _EXIT_USAGE)
     try:
         result = subprocess.run(  # nosec B603 - uv is on PATH in every stage that runs this
             [uv, "--color", "never", "tool", "dir"],
@@ -957,20 +962,22 @@ def find_dist_info(entry, tool_dir: Path) -> Path:
     )
     matches = [m for m in matches if (m / "METADATA").is_file()]
     if len(matches) != 1:
-        raise SystemExit(
+        raise _refuse(
             f"expected one installed {distribution} dist-info under "
             f"{tool_dir / distribution}, found {len(matches)}: "
             f"{', '.join(str(m) for m in matches) or 'none'}. Is it installed with "
-            "`uv tool install`?"
+            "`uv tool install`?",
+            _EXIT_USAGE,
         )
     installed = _metadata_version(matches[0])
     wanted = entry.version.lstrip("v")
     if installed != wanted:
-        raise SystemExit(
+        raise _refuse(
             f"{entry.tool}: {matches[0]} is version {installed}, but its license "
             f"entry records {entry.version}. `ash dependencies install` was run "
             "without `install-pinned-tool --uv-tool-pins`, or a version bump is "
-            "half-applied."
+            "half-applied.",
+            _EXIT_USAGE,
         )
     return matches[0]
 
@@ -1062,16 +1069,18 @@ def stage_third_party(
                 )
                 raise SystemExit(_EXIT_INTEGRITY)
         elif license_file.from_archive and dist_info is not None:
-            raise SystemExit(
+            raise _refuse(
                 f"{entry.tool}'s {license_file.name} is not in {dist_info}. Give it "
-                "a URL pinned at the entry's commit instead."
+                "a URL pinned at the entry's commit instead.",
+                _EXIT_USAGE,
             )
         elif license_file.from_archive:
             if archive is None:
-                raise SystemExit(
+                raise _refuse(
                     f"{entry.tool}'s {license_file.name} is read from its release "
                     f"archive, which only `install-pinned-tool {entry.tool}` has. "
-                    "--licenses-only can install URL-pinned files only."
+                    "--licenses-only can install URL-pinned files only.",
+                    _EXIT_USAGE,
                 )
             extract_member(archive, license_file.name, destination)
         else:
@@ -1098,7 +1107,7 @@ def stage_third_party(
                 )
                 raise SystemExit(_EXIT_INTEGRITY)
         if destination.stat().st_size == 0:
-            raise SystemExit(f"{entry.tool}'s {license_file.name} is empty")
+            raise _refuse(f"{entry.tool}'s {license_file.name} is empty", _EXIT_USAGE)
     (target / _SOURCE_FILE).write_text(
         entry.source_notice(installed_from), encoding="utf-8"
     )
