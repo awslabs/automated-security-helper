@@ -92,8 +92,73 @@ def test_the_projects_run_carries_the_converter_invocation(model, test_plugin_co
     assert "the converter crashed" in notification["message"]["text"]
 
 
-def test_a_single_directory_model_adds_nothing(test_plugin_context):
+def test_a_single_directory_model_adds_nothing():
     assert workspace_converter_invocations(AshAggregatedResults()) == []
+
+
+def _workspace_model(*projects: WorkspaceProjectResult, runs: int = 2):
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(version="2.1.0", runs=[_run() for _ in range(runs)])
+    model.workspace = WorkspaceResults(
+        workspace_file="/w/.ash-workspace.yaml",
+        workspace_root="/w",
+        exit_code=0,
+        projects=list(projects),
+    )
+    return model
+
+
+def test_a_project_with_no_run_index_adds_nothing_to_run_zero(test_plugin_context):
+    """A project whose converters failed before it produced a run names no run,
+    and its shortfall is never written onto ``runs[0]`` by default."""
+    model = _workspace_model(
+        _project("api", sarif_run_index=0),
+        _project(
+            "web",
+            sarif_run_index=None,
+            incomplete_converters={"archive": "crashed before a run existed"},
+        ),
+    )
+
+    assert workspace_converter_invocations(model) == []
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+    assert all("invocations" not in run for run in doc["runs"])
+
+
+def test_a_run_index_past_the_runs_is_not_applied(test_plugin_context):
+    model = _workspace_model(
+        _project("api", sarif_run_index=0),
+        _project(
+            "web", sarif_run_index=7, incomplete_converters={"archive": "the reason"}
+        ),
+    )
+
+    assert [index for index, _ in workspace_converter_invocations(model)] == [7]
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+    assert all("invocations" not in run for run in doc["runs"])
+
+
+def test_two_converters_give_two_invocations_on_the_projects_run(
+    test_plugin_context,
+):
+    model = _workspace_model(
+        _project("api", sarif_run_index=0),
+        _project(
+            "web",
+            sarif_run_index=1,
+            incomplete_converters={"jupyter": "second", "archive": "first"},
+        ),
+    )
+
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+
+    api_run, web_run = doc["runs"]
+    assert "invocations" not in api_run
+    assert [i["properties"]["ash_converter"] for i in web_run["invocations"]] == [
+        "archive",
+        "jupyter",
+    ]
+    assert all(i["executionSuccessful"] is False for i in web_run["invocations"])
 
 
 def test_the_scans_own_sarif_is_left_alone(model, test_plugin_context):
