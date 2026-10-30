@@ -5,7 +5,6 @@
 
 Each test is red on the tree that carried the defect:
 
-* A disabled extras section was counted in the expected-scanner roster.
 * A plugin whose config access raised ended the phase in the name helper.
 * A phase built without a progress display failed at its first ``add_task``.
 * A second run kept the first run's shard provenance and validation record, and a
@@ -175,7 +174,7 @@ class TestTheExpectedRoster:
         def __init__(self, extra):
             self.model_extra = extra
 
-    def test_a_disabled_extras_section_is_not_expected(self):
+    def test_a_disabled_extras_section_is_still_listed(self):
         segment = self._Segment(
             {
                 "kept": {"enabled": True},
@@ -188,8 +187,9 @@ class TestTheExpectedRoster:
 
         roster = _declared_scanner_roster(SimpleNamespace(scanners=segment))
 
-        # Red at the base: every extras key was listed.
-        assert roster == ["kept", "on-model", "bare"]
+        # The roster is what the configuration declares, not what is switched
+        # on: a scanner that is left off is still listed.
+        assert roster == ["kept", "off-dict", "off-model", "on-model", "bare"]
 
 
 class TestTheDisplayName:
