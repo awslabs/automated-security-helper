@@ -159,8 +159,9 @@ _SPAN_LINE_START_TAG = re.compile(r"(\n[ \t>]*)<")
 _UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
 #: A GFM table's delimiter row: columns of one or more hyphens, each with an
 #: optional colon at either end, separated by pipes, with the pipe at either end
-#: optional and up to three leading spaces.
-_TABLE_DELIMITER_ROW = re.compile(r"^ {0,3}\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$")
+#: optional. Leading whitespace is admitted whatever its width: the row is read
+#: from a paragraph's content, whose lines a viewer has already stripped.
+_TABLE_DELIMITER_ROW = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$")
 
 #: A line put after an answer while closing its fences: report text follows every
 #: answer, so text here shows whether the answer left a fence open.
@@ -241,18 +242,20 @@ def _cell_count(line: str) -> int:
     return len(_UNESCAPED_PIPE.split(text))
 
 
-def _table_row_lines(source: str, spans: List[Tuple[int, int]]) -> List[bool]:
-    """Which lines of *source* a GitHub viewer reads as table rows, by the GFM
-    table rule: a table exists only where a delimiter row (``|---|``-shaped
-    columns of hyphens, an optional colon at either end of each) follows a
-    header row with the same column count, and it then runs to the end of the
-    block (*source* is one block, so there is no blank line to end it sooner).
-    The header, the delimiter and every later line of the block are its rows.
-    A lone line holding a pipe is prose: the viewer never splits it, so its
-    spans are whole and a pipe inside one of them is just code. *spans* is
-    unused by the rule and kept for the caller's shape: the viewer splits a row
-    at the pipes inside spans too, so they count toward a column count."""
-    lines = source.split("\n")
+def _table_row_lines(lines: List[str]) -> List[bool]:
+    """Which of *lines*, one block's text as a viewer reads it, a GitHub viewer
+    reads as table rows, by the GFM table rule: a table exists only where a
+    delimiter row (``|---|``-shaped columns of hyphens, an optional colon at
+    either end of each) follows a header row with the same column count, and
+    it then runs to the end of the block (the lines are one block, so there is
+    no blank line to end it sooner). The header, the delimiter and every later
+    line of the block are its rows. A lone line holding a pipe is prose: the
+    viewer never splits it, so its spans are whole and a pipe inside one of
+    them is just code. The viewer splits a row at the pipes inside spans too,
+    so they count toward a column count. *lines* are the block's content lines,
+    not its raw lines: a table inside a block quote or a list item is a table
+    to the viewer, which reads the rows with the "> " and "- " markers already
+    stripped, and a raw line still carrying them is read as prose here."""
     rows = [False] * len(lines)
     for index in range(len(lines) - 1):
         if rows[index]:
@@ -268,7 +271,7 @@ def _table_row_lines(source: str, spans: List[Tuple[int, int]]) -> List[bool]:
     return rows
 
 
-def _inline_as_written(source: str) -> str:
+def _inline_as_written(source: str, content: Optional[str] = None) -> str:
     """One block's inline text with HTML outside its code spans written as text
     and each span as the model wrote it, but for a "<" starting a line inside a
     span, which stays text (_SPAN_LINE_START_TAG), and for a span that holds a
@@ -280,9 +283,23 @@ def _inline_as_written(source: str) -> str:
     text, so the HTML stays inert in a viewer that does not read the escape. A
     span holding a pipe on any other line is code to every viewer and is left
     as written: entities are not decoded inside a code span, so a "&lt;" written
-    there would show as the entity. The cost is confined to table rows."""
+    there would show as the entity. The cost is confined to table rows.
+
+    *source* is the block's raw lines, container markers included, so the result
+    splits back into the answer's lines. *content* is the same block as the
+    parser reads it, one line per raw line with the block-quote and list-item
+    markers stripped; the table rule reads it, because a viewer finds a table
+    inside a block quote or a list item too, and a raw ``> |---|`` is no
+    delimiter row. Given no *content*, or one whose line count disagrees with
+    the raw lines, every line holding a pipe is treated as a table row: the
+    side that rewrites a span it could have left alone, never the other."""
     spans = _code_span_ranges(source)
-    table_rows = _table_row_lines(source, spans)
+    lines = source.split("\n")
+    classified = lines if content is None else content.split("\n")
+    if content is None or len(classified) != len(lines):
+        table_rows = ["|" in line for line in lines]
+    else:
+        table_rows = _table_row_lines(classified)
     pieces = []
     position = 0
     for start, end in spans:
@@ -370,9 +387,12 @@ def _markdown_as_written(shown: str) -> str:
         if token.type in ("fence", "code_block"):
             written[start:end] = lines[start:end]
         elif token.type == "inline":
-            written[start:end] = _inline_as_written("\n".join(lines[start:end])).split(
-                "\n"
-            )
+            # The raw lines are rewritten; the token's content, the same lines with
+            # their block-quote and list-item markers stripped, is what the table
+            # rule reads, as a viewer finds tables inside those containers too.
+            written[start:end] = _inline_as_written(
+                "\n".join(lines[start:end]), content=token.content
+            ).split("\n")
     result = "\n".join(written)
     if _renders_html(result):
         result = _html_as_text(shown)

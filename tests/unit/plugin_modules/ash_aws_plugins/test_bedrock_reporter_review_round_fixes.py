@@ -126,6 +126,35 @@ def test_a_table_whose_header_and_delimiter_disagree_is_not_a_table():
     assert _markdown_as_written(block) == block
 
 
+def test_a_table_inside_a_block_quote_is_a_table_and_its_pipe_span_is_rewritten():
+    """A viewer finds a table inside a block quote, reading its rows with the
+    "> " markers stripped; the rule reads the same lines, so a raw "> |---|" is
+    still the delimiter row it is to the viewer and the row's span is rewritten."""
+    table = "> | a |\n> |---|\n> | `x | <b>y</b>` |"
+
+    written = _markdown_as_written(table)
+
+    assert written == "> | a |\n> |---|\n> | `x \\| &lt;b>y&lt;/b>` |", written
+
+
+def test_a_table_inside_a_list_item_is_a_table_and_its_pipe_span_is_rewritten():
+    """The same inside a list item: the item's "- " marker and the indent of its
+    continuation lines are not part of the rows the viewer counts columns on."""
+    table = "- | a |\n  |---|\n  | `x | <b>y</b>` |"
+
+    written = _markdown_as_written(table)
+
+    assert written == "- | a |\n  |---|\n  | `x \\| &lt;b>y&lt;/b>` |", written
+
+
+def test_a_quoted_prose_line_with_pipes_is_prose_and_its_span_stays_as_written():
+    """The control: a quoted line that merely holds pipes is a paragraph to the
+    viewer, so nothing in its span is rewritten."""
+    quote = "> Use `a<b | c` or x | y on the same line."
+
+    assert _markdown_as_written(quote) == quote
+
+
 # ---------------------------------------------------------------------------
 # 2. A prompt lists at most MAX_LOCATIONS_LISTED locations per finding
 # ---------------------------------------------------------------------------
