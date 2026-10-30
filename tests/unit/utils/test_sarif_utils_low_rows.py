@@ -434,6 +434,18 @@ def test_a_backslash_in_a_posix_source_directory_name_is_kept_in_the_prefix(tmp_
     assert exclusion.normalize(f"{source.resolve().as_posix()}/src/x.py") == "src/x.py"
 
 
+def test_ignore_suppressions_lifts_the_ignore_paths_too(tmp_path):
+    context = _context(tmp_path, _ignore_config(), ignore_suppressions=True)
+
+    report = apply_suppressions_to_sarif(_report(_result("vendor/a.py")), context)
+
+    # An ignore path is a suppression, so the flag lifts it with the rest: the
+    # ignore-path arm of Step 1 reads the flag and matches nothing under it, and
+    # the result that the ignore path would have dropped is kept.
+    assert [r.ruleId for r in report.runs[0].results] == ["RULE-1"]
+    assert not report.runs[0].results[0].suppressions
+
+
 def test_a_result_is_dropped_only_when_every_location_is_under_an_ignore_path(
     tmp_path,
 ):
