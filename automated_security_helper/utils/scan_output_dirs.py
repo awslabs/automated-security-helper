@@ -758,9 +758,9 @@ def entries_at_results_paths(base: Path, names: Iterable[str]) -> List[Path]:
     found = []
     for name in names:
         path = Path(os.path.normpath(base.joinpath(*name.split("/"))))
-        if not _strictly_inside(path, base):
+        parts = _parts_below(path, base)
+        if not parts:
             continue
-        parts = path.relative_to(base).parts
         first = output_name_key(parts[0])
         if (len(parts) == 1 and first in root_keys) or first in directory_keys:
             found.append(path)
@@ -867,18 +867,40 @@ def _strictly_inside(candidate: Path, root: Path) -> bool:
     )
 
 
+def _parts_below(path: Path, root: Path) -> Optional[Tuple[str, ...]]:
+    """*path*'s components below *root* when *path* is *root* or below it, each
+    name compared as its filesystem compares it (:func:`output_name_key`); None
+    when it is not.
+
+    The companion of :func:`_strictly_inside`, and the only way a path placed
+    inside by that comparison is taken apart: ``relative_to`` compares by text,
+    so for a candidate spelled in another case than the root (``repo/out`` under
+    ``Repo`` on macOS) it raised ``ValueError`` right after ``_strictly_inside``
+    had said "inside". The components keep *path*'s own spelling; a caller that
+    joins them onto *root* spells the result under *root*.
+    """
+    keys, prefix = _name_keys(path), _name_keys(root)
+    if keys[: len(prefix)] != prefix:
+        return None
+    return path.parts[len(root.parts) :]
+
+
 def _reached_through_a_link(directory: Path, base: Path) -> bool:
     """Whether a component of *directory* below *base* is a symlink or a junction.
 
     Each component is ``lstat``-ed from *base* down. A component that does not
-    exist ends the check: nothing is behind it.
+    exist ends the check: nothing is behind it. A *directory* that is not at or
+    below *base* (:func:`_parts_below`) has no component below it: False.
     """
     # Imported here: scanned_tree is the one place that says what a link is,
     # Windows junctions included.
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
+    below = _parts_below(directory, base)
+    if below is None:
+        return False
     current = base
-    for part in directory.relative_to(base).parts:
+    for part in below:
         current = current / part
         try:
             if _is_link_stat(os.lstat(current)):
@@ -927,8 +949,7 @@ def _through_a_link_in_the_tree(
         except OSError:
             return False
         if _is_link_stat(info):
-            where = _resolved(parent)
-            if where == root_resolved or where.is_relative_to(root_resolved):
+            if _at_or_below(_resolved(parent), root_resolved):
                 return True
     return False
 
@@ -936,17 +957,21 @@ def _through_a_link_in_the_tree(
 def _spelled_under(candidate: Path, root: Path, root_resolved: Path) -> Optional[Path]:
     """*candidate* spelled under *root*, when it is strictly inside the tree.
 
-    As given when it is spelled under *root*. Otherwise, when it is inside with
-    both resolved, *root* joined with the rest of its resolved path: the source
-    or the output directory given through a link above the tree is still the
-    same tree, and on macOS ``/var`` is a link to ``/private/var``. None when it
-    is outside the tree either way.
+    *root*'s own spelling, then the candidate's components below it, when it is
+    spelled under *root* (names compared as the filesystem compares them, so on
+    macOS and Windows ``repo/out`` is under ``Repo`` and comes back as
+    ``Repo/out``, one path with everything else named under *root*). Otherwise,
+    when it is inside with both resolved, *root* joined with the rest of its
+    resolved path: the source or the output directory given through a link above
+    the tree is still the same tree, and on macOS ``/var`` is a link to
+    ``/private/var``. None when it is outside the tree either way.
     """
-    if _strictly_inside(candidate, root):
-        return candidate
-    resolved = _resolved(candidate)
-    if _strictly_inside(resolved, root_resolved):
-        return root.joinpath(*resolved.relative_to(root_resolved).parts)
+    below = _parts_below(candidate, root)
+    if below:
+        return root.joinpath(*below)
+    below = _parts_below(_resolved(candidate), root_resolved)
+    if below:
+        return root.joinpath(*below)
     return None
 
 
@@ -1049,9 +1074,8 @@ def _output_dir_candidates_with_owner(
     found: List[Tuple[Path, bool]] = []
     for candidate, base in [*this_run, *defaults]:
         checked_from = root if _strictly_inside(candidate, root) else base
-        if (
-            candidate.is_relative_to(checked_from)
-            and _reached_through_a_link(candidate, checked_from)
+        if _reached_through_a_link(
+            candidate, checked_from
         ) or _through_a_link_in_the_tree(candidate, root, root_resolved):
             ASH_LOGGER.debug(
                 f"Not treating {candidate} as ASH's output directory: it is reached "
@@ -1121,12 +1145,12 @@ def classified_output_dirs(
     outermost = sorted(
         path
         for path in named
-        if not any(other != path and path.is_relative_to(other) for other in named)
+        if not any(other != path and _at_or_below(path, other) for other in named)
     )
     return outermost, sorted(
         path
         for path in scanned
-        if not any(path == other or path.is_relative_to(other) for other in named)
+        if not any(_at_or_below(path, other) for other in named)
     )
 
 
@@ -1386,11 +1410,15 @@ def output_dirs_inside(dirs: Sequence[Path], target: str | Path) -> List[Path]:
     produced.
     """
     target_abs = _absolute(target)
-    return [
-        directory.relative_to(target_abs)
-        for directory in dirs
-        if _strictly_inside(directory, target_abs)
-    ]
+    inside: List[Path] = []
+    for directory in dirs:
+        # Names compared as the filesystem compares them (_parts_below), never
+        # relative_to: on macOS a directory spelled in another case than the
+        # target was placed inside and then raised ValueError here.
+        below = _parts_below(directory, target_abs)
+        if below:
+            inside.append(Path(*below))
+    return inside
 
 
 def output_dir_exclude_globs(relatives: Sequence[Path]) -> List[str]:
