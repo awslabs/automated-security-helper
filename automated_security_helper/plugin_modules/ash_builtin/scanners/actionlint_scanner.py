@@ -242,13 +242,15 @@ ACTIONLINT_FORMAT = '{"version":{{getVersion | json}},"errors":{{json .}}}'
 UNTRUSTED_INPUT_MARKER = "potentially untrusted"
 
 #: Those two messages by their shape, anchored at the start: the quoted input
-#: (``%q``, Go-escaped) followed by the first sentence, or the object-filter
-#: wording. Other ``expression`` messages quote workflow-authored text (a property
-#: name, a format string), which can hold the marker's words without being this
-#: finding, so the marker alone is not what raises a finding to HIGH.
+#: (``%q``, Go-escaped) followed by the first sentence, which ends in a period
+#: or, in a message cut short, with the text, or the object-filter wording. Other
+#: ``expression`` messages quote workflow-authored text (a property name, a
+#: format string), which can hold the marker's words without being this finding,
+#: so the marker alone is not what raises a finding to HIGH.
 _UNTRUSTED_INPUT_MESSAGE = re.compile(
     r'^(?:"(?:[^"\\]|\\.)*" '
-    + re.escape(f"is {UNTRUSTED_INPUT_MARKER}.")
+    + re.escape(f"is {UNTRUSTED_INPUT_MARKER}")
+    + r"(?:\.|$)"
     + r"|"
     + re.escape(f"object filter extracts {UNTRUSTED_INPUT_MARKER} properties ")
     + r")"

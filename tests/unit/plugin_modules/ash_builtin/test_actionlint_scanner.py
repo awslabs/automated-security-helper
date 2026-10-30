@@ -352,6 +352,9 @@ def test_every_kind_of_the_pinned_version_has_a_deliberate_severity():
             "HIGH",
         ),
         ("expression", 'property "foo" is not defined in object type {}', "LOW"),
+        # The same finding with its message cut after the first sentence, as a
+        # record that quotes only the head of actionlint's text does.
+        ("expression", '"github.event.issue.title" is potentially untrusted', "HIGH"),
         # A type error quoting workflow-authored text that holds the marker's
         # words is still a type error, not script injection.
         (
