@@ -30,6 +30,24 @@ pytestmark = pytest.mark.unit
 NULL_FD = 977
 
 
+def _recording_write(written: list[int]):
+    """An ``os.write`` stand-in that records the descriptor and answers as the
+    real call does: the count of bytes written, the whole payload.
+
+    The raw floor repeats ``os.write`` until its counts cover the text
+    (``payload = payload[os.write(fd, payload):]``). A stand-in that answered
+    None left the payload whole on every turn, so the floor never returned, and
+    the record grew one entry per turn until the test process was killed for its
+    memory.
+    """
+
+    def write(fd: int, payload: bytes) -> int:
+        written.append(fd)
+        return len(payload)
+
+    return write
+
+
 @pytest.fixture
 def no_reservations(monkeypatch):
     monkeypatch.setattr(entrypoint, "_RESERVED_DESCRIPTORS", set())
@@ -183,7 +201,7 @@ def test_a_descriptor_closed_at_startup_is_recorded_though_the_hold_fails(
     monkeypatch.setattr(entrypoint, "_descriptor_is_closed", lambda fd: fd == 2)
     monkeypatch.setattr(entrypoint, "_reserve_descriptor", lambda fd: False)
     written: list[int] = []
-    monkeypatch.setattr(os, "write", lambda fd, payload: written.append(fd))
+    monkeypatch.setattr(os, "write", _recording_write(written))
 
     entrypoint.ensure_std_streams()
 
@@ -194,7 +212,7 @@ def test_a_descriptor_closed_at_startup_is_recorded_though_the_hold_fails(
 
 def test_the_raw_floor_skips_a_held_descriptor(monkeypatch, no_reservations):
     written: list[int] = []
-    monkeypatch.setattr(os, "write", lambda fd, payload: written.append(fd))
+    monkeypatch.setattr(os, "write", _recording_write(written))
     no_reservations.add(2)
 
     assert entrypoint._write_raw("report") is True
@@ -205,7 +223,7 @@ def test_the_raw_floor_reports_nothing_reached_when_both_are_held(
     monkeypatch, no_reservations
 ):
     written: list[int] = []
-    monkeypatch.setattr(os, "write", lambda fd, payload: written.append(fd))
+    monkeypatch.setattr(os, "write", _recording_write(written))
     no_reservations.update({1, 2})
 
     assert entrypoint._write_raw("report") is False
