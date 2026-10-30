@@ -2420,14 +2420,17 @@ class UVToolMixin:
                 return True
             else:
                 # The runner's False is documented as "nothing was installed":
-                # offline, a dependency question, or the install itself
-                # exhausting its attempts. The install arm above has already
-                # returned for the first two, so here it is the attempts; the
-                # line says what False means rather than asserting a retry
-                # count the runner may not have reached.
+                # uv absent, offline, a dependency question, a sandboxed scan,
+                # or a refused spec; an install that ran and failed RAISES and
+                # is answered by the arms below, never here. The arms above
+                # have returned for uv absent and for offline, so a False here
+                # is a sandboxed scan or a spec the runner refused, and the
+                # runner has logged which; the line says that, not a retry
+                # count that never ran.
                 self._plugin_log(
                     f"[INSTALLATION_FAILED] UV tool '{self.command}' was not installed; "
-                    "the install did not succeed within its attempts",
+                    "the runner installed nothing (a sandboxed scan, or a spec it "
+                    "refused; its own log line names which)",
                     f"Total installation time: {installation_time:.3f}s",
                     "Fallback strategy: Scanner will attempt direct tool execution or validation",
                     level=logging.WARNING,
