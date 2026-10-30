@@ -19,8 +19,12 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_TERMINATED,
 )
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
-from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+from automated_security_helper.interactions.run_ash_scan import (
+    resolved_console_log_level,
+    run_ash_scan,
+)
 from automated_security_helper.utils.console import echo
+from automated_security_helper.utils.log import configure_last_resort_level
 
 
 def build_ash_image_cli_command(
@@ -169,6 +173,21 @@ def build_ash_image_cli_command(
     if config_overrides is None:
         config_overrides = []
 
+    # The process-wide last-resort gate, set once at this command's start as
+    # `ash scan` sets it (cli/scan.py): a record logged before run_ash_scan
+    # attaches its handlers is shown at the verbosity the flags ask for, so
+    # --quiet hides it and --debug and --verbose show it. Without this the gate
+    # stayed at its import-time default whatever the flags said.
+    configure_last_resort_level(
+        resolved_console_log_level(
+            log_level=log_level,
+            verbose=verbose,
+            debug=debug,
+            quiet=quiet,
+            simple=False,
+        ).value
+    )
+
     # Call run_ash_scan with all parameters, inside a scope the entry point's
     # SIGTERM handler cancels, as ash scan runs it (cli/scan.py;
     # core/cancellation.py, "SIGTERM on the CLI"). The container scan this
@@ -195,8 +214,13 @@ def build_ash_image_cli_command(
                 ash_revision_to_install=ash_revision_to_install,
                 custom_containerfile=custom_containerfile,
                 custom_build_arg=custom_build_arg,
-                # General params
-                show_summary=False,
+                # General params. The scan that follows the build is a container
+                # scan, and the container is run with --no-show-summary so that
+                # the host prints the one summary (run_ash_container): with False
+                # here nobody did, and a scan with actionable findings exited 2
+                # with no summary and no exit-code legend. With --no-run nothing
+                # is scanned, so there is no summary to show.
+                show_summary=not no_run,
                 config=config,
                 config_overrides=config_overrides,
                 offline=offline,
