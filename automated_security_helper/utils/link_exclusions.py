@@ -288,23 +288,25 @@ def ignored_entries(
     }
     # A link whose destination holds a walked file that is not ignored, or no
     # walked file at all (nothing proven ignored; a nested link to scanned files
-    # may sit there, unentered): no directory holding the link is whole. A link
-    # whose destination's walked files are all ignored is skipped under its own
-    # name.
-    links_to_ignored: List[str] = []
-    for link, leads_to in (directory_links or {}).items():
+    # may sit there, unentered): no directory holding the link is whole. Every
+    # link is applied before any is judged, so a destination that is itself
+    # unmade whole by a link below it (a further link on to scanned files, which
+    # a tool reaches through the first link too) is not skipped under the first
+    # link's name either.
+    links = dict(directory_links or {})
+    for link, leads_to in links.items():
         walked = total.get(leads_to, 0)
         if walked == 0 or walked > hit.get(leads_to, 0):
             parts = link.split("/")
             for depth in range(1, len(parts)):
                 whole.discard("/".join(parts[:depth]))
-        else:
-            links_to_ignored.append(link)
 
     def _under_whole(relative: str) -> bool:
         parts = relative.split("/")
         return any("/".join(parts[:depth]) in whole for depth in range(1, len(parts)))
 
+    # A link whose destination is still whole is skipped under its own name.
+    links_to_ignored = [link for link, leads_to in links.items() if leads_to in whole]
     entries = [f"{directory}/" for directory in whole if not _under_whole(directory)]
     entries += [f"{link}/" for link in links_to_ignored if not _under_whole(link)]
     entries += [relative for relative in ignored if not _under_whole(relative)]
