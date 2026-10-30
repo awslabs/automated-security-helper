@@ -362,7 +362,9 @@ def test_merge_metadata_reads_an_integer_as_the_map_s_total_when_a_dict_arrives(
     """The other direction of the npm/pnpm pair: pnpm's integer was merged
     first, and npm's dict arrives second. ``int.update`` raised here, and
     keeping the integer left a reader of ``["dependencies"]["total"]`` with a
-    TypeError whenever pnpm's lockfile was walked first."""
+    TypeError whenever pnpm's lockfile was walked first. The vulnerability
+    counters come back with a recounted ``total`` beside them: the merge
+    recounts it from the severity counters once any counter is present."""
     into = {"dependencies": 5, "vulnerabilities": {"high": 3}}
 
     NpmAuditScanner._merge_metadata(
@@ -373,5 +375,5 @@ def test_merge_metadata_reads_an_integer_as_the_map_s_total_when_a_dict_arrives(
 
     assert into == {
         "dependencies": {"total": 7, "prod": 2},
-        "vulnerabilities": {"high": 4},
+        "vulnerabilities": {"high": 4, "total": 4},
     }, into
