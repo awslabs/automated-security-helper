@@ -126,6 +126,8 @@ def test_zombie_orphans_are_read_from_proc_stat_after_the_command_name(tmp_path)
         "778": f"778 (sleeping) S {me} 4242 4242 0 -1 0 0 0\n",
         "779": f"779 (other parent) Z {me + 1} 4242 4242 0 -1 0 0 0\n",
         "780": f"780 (other group) Z {me} 4243 4243 0 -1 0 0 0\n",
+        # The leader: our own exited child, whose status belongs to its Popen.
+        "4242": f"4242 (the tool) Z {me} 4242 4242 0 -1 0 0 0\n",
     }.items():
         (proc / pid).mkdir(parents=True)
         (proc / pid / "stat").write_text(stat)

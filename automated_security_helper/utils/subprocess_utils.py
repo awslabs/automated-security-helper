@@ -3588,6 +3588,12 @@ def _zombie_orphans_of_group(pgid: int) -> List[int]:
     group come right after the command name, which can hold spaces and
     parentheses, so the fields are taken from after its closing parenthesis.
     Empty where there is no /proc to read.
+
+    The leader itself, the child whose pid is the group id, is never listed: it
+    is a Popen's child, and a waitpid here would take its exit status from under
+    that Popen, whose next poll would then read ECHILD as a clean exit (code 0)
+    for a tool that was killed. Only the orphans the group's members left to
+    this process are reaped here.
     """
     me = os.getpid()
     zombies: List[int] = []
@@ -3596,7 +3602,7 @@ def _zombie_orphans_of_group(pgid: int) -> List[int]:
     except OSError:
         return zombies
     for entry in entries:
-        if not entry.isdigit():
+        if not entry.isdigit() or int(entry) == pgid:
             continue
         try:
             with open(f"/proc/{entry}/stat", "rb") as stat:
@@ -3621,8 +3627,9 @@ def _group_survives(pgid: int) -> bool:
     own container's init) nothing reaps them, so the group of a tool that is
     gone kept existing and every stop of a tool that had children was recorded
     as one ASH could not stop. Only this process's own exited children in the
-    group are waited for, each by its pid, so no other spawn's exit status is
-    taken from under its Popen.
+    group are waited for, each by its pid, and never the leader (its pid is the
+    group id, and its status is its Popen's to read), so no spawn's exit status
+    is taken from under its Popen.
     """
     if _this_process_is_init():
         for pid in _zombie_orphans_of_group(pgid):
