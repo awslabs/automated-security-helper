@@ -695,10 +695,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         parent = Path(package_file).parent
         kept: Set[Path] | None = None
         ignored: Set[Path] = set()
-        for tree_root, (kept_here, ignored_here) in self._lockfile_selection.items():
-            if parent == tree_root or tree_root in parent.parents:
-                kept, ignored = kept_here, ignored_here
-                break
+        # The DEEPEST recorded root that holds the manifest: by default the
+        # converted tree (the work directory) sits under the scanned source
+        # tree, so a converted manifest is under both roots, and the source
+        # tree's selection, which leaves the output directory out, would call
+        # every converted lockfile "not kept" and skip the package.
+        holding = [
+            (tree_root, selection)
+            for tree_root, selection in self._lockfile_selection.items()
+            if parent == tree_root or tree_root in parent.parents
+        ]
+        if holding:
+            _, (kept, ignored) = max(holding, key=lambda item: len(item[0].parts))
         for name in self.LOCKFILE_NAMES:
             candidate = parent.joinpath(name)
             if candidate in ignored:

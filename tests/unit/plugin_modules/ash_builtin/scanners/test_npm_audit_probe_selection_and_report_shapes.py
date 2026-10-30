@@ -421,6 +421,39 @@ class TestTheSelection:
             converted / "package-lock.json"
         )
 
+    def test_a_converted_manifest_under_the_source_tree_reads_the_converted_set(
+        self, tmp_path, online
+    ):
+        """The default layout: the work directory sits under the scanned source
+        tree (<source>/.ash/ash_output/converted), so a converted manifest is
+        under both recorded roots. The source selection leaves the output
+        directory out, so read against it every converted lockfile is "not
+        kept" and the package is skipped; the deepest holding root, the
+        converted tree's, is the one read."""
+        source = tmp_path / "src"
+        output = source / ".ash" / "ash_output"
+        work = output / "converted"
+        work.mkdir(parents=True)
+        nested = PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=work,
+            config=get_default_config(),
+        )
+        _package(source / "app", "yarn.lock")
+        converted = _package(work / "gen", "package-lock.json")
+        scanner = _scanner(nested)
+
+        scanner._package_manifests("source")
+        scanner._package_manifests("converted")
+
+        assert scanner._lockfile_beside(converted / "package.json") == (
+            converted / "package-lock.json"
+        )
+        assert scanner._lockfile_beside(source / "app" / "package.json") == (
+            source / "app" / "yarn.lock"
+        )
+
     @pytest.mark.skipif(os.name == "nt", reason="symlinks")
     def test_a_lockfile_that_is_a_link_to_nothing_is_recorded(self, context, online):
         package = context.source_dir / "app"
