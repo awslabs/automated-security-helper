@@ -8,8 +8,13 @@ resolver that calls it catches only ``OSError`` and ``ValueError``. On CPython
 3.10-3.12 ``Path.resolve()`` raises ``RuntimeError`` when an intermediate
 component is a symlink loop, so a folder entry such as ``loop/sub``, or a root
 reached through such a loop, escaped as a traceback instead of an exit code 2.
-CPython 3.13 resolves such a path without raising, so the checks below assert the
-shape of the answer only where the interpreter raises.
+
+CPython 3.13 raises nothing there: it resolves as far as it can and appends the
+rest unchecked, so the loop stayed in the answer, its text read as below the
+root, and ``loop/sub`` was ACCEPTED, where the same entry was refused one
+version earlier. The checks below therefore assert the rejection on every
+version: the resolved path is asked about once more with ``os.lstat``, which the
+kernel answers with ``ELOOP`` for a loop whatever the interpreter did.
 """
 
 from __future__ import annotations
@@ -30,8 +35,6 @@ pytestmark = [
     ),
 ]
 
-RAISES_ON_A_LOOP = sys.version_info < (3, 13)
-
 
 def _loop(directory):
     link = directory / "loop"
@@ -46,12 +49,11 @@ def test_a_candidate_through_a_symlink_loop_is_rejected_not_raised(tmp_path):
 
     result = validate_contained_path("loop/sub", root)
 
-    if RAISES_ON_A_LOOP:
-        assert not result.ok
-        assert result.error is not None
-        assert result.error.violation is PathContainmentViolation.SYMLINK
-        assert result.error.entry == "loop/sub"
-        assert "cannot be resolved" in result.error.message
+    assert not result.ok
+    assert result.error is not None
+    assert result.error.violation is PathContainmentViolation.SYMLINK
+    assert result.error.entry == "loop/sub"
+    assert "cannot be resolved" in result.error.message
 
 
 def test_a_root_through_a_symlink_loop_is_rejected_not_raised(tmp_path):
@@ -59,11 +61,10 @@ def test_a_root_through_a_symlink_loop_is_rejected_not_raised(tmp_path):
 
     result = validate_contained_path("project", tmp_path / "loop" / "ws")
 
-    if RAISES_ON_A_LOOP:
-        assert not result.ok
-        assert result.error is not None
-        assert result.error.violation is PathContainmentViolation.SYMLINK
-        assert "root" in result.error.message
+    assert not result.ok
+    assert result.error is not None
+    assert result.error.violation is PathContainmentViolation.SYMLINK
+    assert "root" in result.error.message
 
 
 def test_control_a_plain_candidate_is_still_accepted(tmp_path):
@@ -74,3 +75,15 @@ def test_control_a_plain_candidate_is_still_accepted(tmp_path):
 
     assert result.ok
     assert result.resolved == (root / "project").resolve()
+
+
+def test_control_a_candidate_that_does_not_exist_yet_is_still_accepted(tmp_path):
+    """The loop probe answers ENOENT, not ELOOP, for a path that is not there, so
+    ``must_exist=False`` keeps accepting a directory the caller will create."""
+    root = tmp_path / "ws"
+    root.mkdir()
+
+    result = validate_contained_path("not/yet/made", root)
+
+    assert result.ok
+    assert result.resolved == root.resolve() / "not" / "yet" / "made"
