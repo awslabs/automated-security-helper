@@ -351,6 +351,90 @@ class TestWhereYarnsCopyGoes:
                 named
             ).st_uid not in (os.getuid(), 0)
 
+    def test_the_ancestor_check_walks_the_real_path_of_a_linked_cache(self, tmp_path):
+        """``~/.cache -> /scratch/me/cache`` with ``/scratch`` at 1777: yarn's
+        working directory is the resolved path, so it reads ``/scratch/.npmrc``,
+        which any account can write. A walk of the path as written judged the
+        home's ancestors and passed; the walk of the real path names the shared
+        directory."""
+        scratch = tmp_path / "scratch"
+        cache = scratch / "me" / "cache"
+        cache.mkdir(parents=True)
+        scratch.chmod(0o1777)
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".cache").symlink_to(cache, target_is_directory=True)
+
+        named = child_module._untrusted_ancestor(home / ".cache" / "ash" / "copies")
+
+        assert named == scratch, named
+
+    def test_the_settings_file_check_walks_the_real_path_of_a_linked_cache(
+        self, tmp_path, monkeypatch
+    ):
+        """The same layout with ``/scratch/.npmrc`` planted: the settings-file
+        check names the target's parent and the file, where a walk of the path
+        as written saw only the home's ancestors."""
+        scratch = tmp_path / "scratch"
+        cache = scratch / "me" / "cache"
+        cache.mkdir(parents=True)
+        (scratch / ".npmrc").write_text(
+            "registry=https://planted.example/\n", encoding="utf-8"
+        )
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".cache").symlink_to(cache, target_is_directory=True)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+        assert child_module._settings_file_ancestor(
+            home / ".cache" / "ash" / "copies"
+        ) == (scratch, ".npmrc")
+
+    def test_the_cache_directory_is_made_owner_only_whatever_the_umask(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """Under umask 002 ``Path.mkdir`` made ``~/.cache/ash`` group-writable:
+        the first run copied below a directory the check had never seen, and
+        the next run's check named it and fell to in-place yarn. Each missing
+        part is made with mode 0700."""
+        cache_home = tmp_path / "cache-home"
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+        repo = tmp_path / "repo"
+        _yarn_package(repo)
+        previous = os.umask(0o002)
+        try:
+            chosen, passed_over = child_module._yarn_copy_parent(repo / "out", repo)
+        finally:
+            os.umask(previous)
+
+        assert chosen == cache_home / "ash", (chosen, passed_over)
+        assert stat.S_IMODE(os.stat(cache_home / "ash").st_mode) == 0o700
+        assert stat.S_IMODE(os.stat(cache_home).st_mode) == 0o700
+
+    def test_a_directory_that_fails_the_check_once_made_is_passed_over(
+        self, tmp_path, monkeypatch, trusted_copy_dirs
+    ):
+        """The ancestor check runs on the nearest EXISTING directory before the
+        candidate is made, and again on the candidate as made: a part that
+        comes out shared (made meanwhile by another process, or found half-way
+        with a lax mode) is named, and the candidate is passed over."""
+        cache_home = tmp_path / "cache-home"
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+        repo = tmp_path / "repo"
+        _yarn_package(repo)
+        monkeypatch.setattr(
+            child_module,
+            "_untrusted_ancestor",
+            lambda path: path if path.exists() else None,
+        )
+
+        chosen, passed_over = child_module._yarn_copy_parent(repo / "out", repo)
+
+        assert chosen is None, (chosen, passed_over)
+        assert any(
+            str(cache_home / "ash") in p and "another account" in p for p in passed_over
+        ), passed_over
+
     def test_the_runtime_directory_holds_the_copy_when_the_home_cannot(
         self, tmp_path, monkeypatch, trusted_copy_dirs
     ):
@@ -533,6 +617,59 @@ class TestLinkedDirectories:
             "package.json",
             "packages/api/package.json",
             "packages/loop/package.json",
+            "yarn.lock",
+        ]
+
+    def test_members_below_a_directory_first_reached_through_a_link_are_listed_twice(
+        self, tmp_path
+    ):
+        """With ``ui -> packages/ui`` the link is walked first, and a set of
+        every walked real path then cut everything below the real
+        ``packages/ui`` when os.walk reached it: ``packages/ui/plugins/x`` was
+        listed under the link's name only, and a workspace glob
+        ``packages/ui/plugins/*`` found nothing in yarn's copy. A real directory
+        is walked in full; the guard cuts only a link back to a directory whose
+        walk is in progress."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "packages" / "ui", "ui")
+        _manifest(package / "packages" / "ui" / "plugins" / "x", "x")
+        os.symlink(
+            package / "packages" / "ui", package / "ui", target_is_directory=True
+        )
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/ui/package.json",
+            "packages/ui/plugins/x/package.json",
+            "ui/package.json",
+            "ui/plugins/x/package.json",
+            "yarn.lock",
+        ]
+
+    def test_a_link_back_to_a_directory_being_walked_lists_its_manifest_only(
+        self, tmp_path
+    ):
+        """``packages/ui/self -> packages/ui``: walking the link would walk the
+        directory again under another name, without end. Its manifest is a file
+        yarn reads at the link's path, so that is listed; nothing below it."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        _manifest(package / "packages" / "ui", "ui")
+        os.symlink(
+            package / "packages" / "ui",
+            package / "packages" / "ui" / "self",
+            target_is_directory=True,
+        )
+
+        listed = package_manager_inputs("yarn", package, roots=[repo])
+
+        assert _rel(listed, package) == [
+            "package.json",
+            "packages/ui/package.json",
+            "packages/ui/self/package.json",
             "yarn.lock",
         ]
 

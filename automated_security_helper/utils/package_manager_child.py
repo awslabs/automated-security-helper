@@ -63,9 +63,12 @@ outside the scanned tree was read by each). So every file the tool reads from th
 package (``package_manager_inputs``) has to resolve inside the scanned tree and be a
 regular file (``input_refusal``). The scanner refuses a package with any other one
 before starting anything for it, and the copy here never holds one either: each
-input is opened first and judged through the open descriptor (``_read_admitted``),
-so a file swapped for a link or a FIFO between the scanner's check and the copy is
-refused rather than read through its new shape.
+input is opened first and judged through the open descriptor (``_read_admitted``):
+its shape by ``fstat``, its place by the descriptor's own path where the platform
+names one (Linux), else by its name tied to the open file by identity. So a file
+swapped for a link or a FIFO between the scanner's check and the copy is refused
+rather than read through its new shape, and one that cannot be opened is a raised
+failure (``InputUnreadable``), never a copy silently missing a file.
 """
 
 from __future__ import annotations
@@ -142,6 +145,30 @@ LINK_LEAVES_TREE = "link leaves the scanned tree"
 NOT_A_REGULAR_FILE = "not a regular file"
 
 
+class InputUnreadable(OSError):
+    """An input the package manager would read could not be read for the copy.
+
+    Raised by ``_read_admitted`` for an open failure (EACCES, EIO, a file gone
+    between the listing and the copy). A REFUSED input, one that resolves outside
+    the tree or is not a regular file, answers None instead: the scanner has
+    already recorded it through ``refused_inputs``. An unreadable one had passed
+    that check, so before this the copy silently lacked a file yarn would have
+    read in place, and the audit ran on part of the workspace with nothing
+    recorded. The scanner's scan loop records the raise as that audit's failure.
+    """
+
+
+class SuppressionsNotLiftable(ValueError):
+    """Under ``--ignore-suppressions`` a manifest could not be parsed, so its
+    ``pnpm.auditConfig`` could not be removed.
+
+    The flag lifts every suppression. A manifest this interpreter cannot parse
+    but the package manager can (nested past the recursion limit, say) kept its
+    ignore lists in the copy, and pnpm applied them under the flag; the package
+    is refused instead, with this reason, which the scan loop records.
+    """
+
+
 @dataclass(frozen=True)
 class PackageManagerChild:
     """The arguments to put right after the binary, the directory and environment."""
@@ -208,6 +235,27 @@ def _runtime_dir() -> Optional[Path]:
     return None
 
 
+def _nearest_real_directory(path: Path) -> Path:
+    """The real path of ``path``'s nearest existing ancestor (``path`` itself
+    when it exists).
+
+    yarn takes its directory from ``process.cwd()``, which is the RESOLVED
+    path, so the parents it reads settings files from are the parents of a
+    link's TARGET. A check that walked the path as written judged the parents
+    of the link instead: a cache directory reached through
+    ``~/.cache -> /scratch/me/cache`` passed on the home's ancestors while yarn
+    read ``/scratch/.npmrc``, which any account there can write (``/scratch``
+    at 1777). Both ancestor checks start from the real path (sshd's
+    ``safe_path`` resolves the same way).
+    """
+    current = Path(os.path.abspath(path))
+    while not current.exists():
+        if current.parent == current:
+            break
+        current = current.parent
+    return Path(os.path.realpath(current))
+
+
 def _untrusted_ancestor(path: Path) -> Optional[Path]:
     """The nearest directory at or above ``path`` another account could write, or None.
 
@@ -215,18 +263,15 @@ def _untrusted_ancestor(path: Path) -> Optional[Path]:
     its directory, so a copy below a directory any other account can write to
     (``/tmp`` with its sticky bit, a group- or world-writable directory, one
     owned by another account) can be redirected by a settings file planted
-    beside it. The check is sshd's StrictModes one: from the nearest existing
-    directory up to the root, each has to be owned by this account or root and
-    writable by its owner only. Where ownership and the mode bits mean nothing
-    of the kind (Windows) every directory passes.
+    beside it. The check is sshd's StrictModes one: from the real path of the
+    nearest existing directory (``_nearest_real_directory``, the directory
+    yarn reads its parents from) up to the root, each has to be owned by this
+    account or root and writable by its owner only. Where ownership and the
+    mode bits mean nothing of the kind (Windows) every directory passes.
     """
     if os.name == "nt":
         return None
-    current = Path(os.path.abspath(path))
-    while not current.exists():
-        if current.parent == current:
-            return None
-        current = current.parent
+    current = _nearest_real_directory(path)
     uid = os.getuid() if hasattr(os, "getuid") else None
     for directory in (current, *current.parents):
         try:
@@ -256,16 +301,21 @@ def _settings_file_ancestor(path: Path) -> Optional[Tuple[Path, str]]:
     --output-dir ./ash-out``) has ancestors the operator owns, and the
     checkout's root holds the repository's own ``.npmrc``. The operator's home
     directory is left out: the files there are the operator's, and yarn reads
-    them wherever it runs. The home is matched by its real path, so a home
-    spelled through a link (``HOME=/home/me`` where ``/home`` links to
-    ``/local/home``, or the cache path spelled one way and ``HOME`` the other)
-    is still the home and its files do not disqualify the cache below it.
+    them wherever it runs. The walk starts at the real path of the nearest
+    existing directory (``_nearest_real_directory``): yarn resolves its working
+    directory, so the parents it reads from are the link target's, and a
+    settings file beside the target of a linked cache or output directory is
+    found where a walk of the path as written passed it by. The home is
+    matched by its real path, so a home spelled through a link
+    (``HOME=/home/me`` where ``/home`` links to ``/local/home``, or the cache
+    path spelled one way and ``HOME`` the other) is still the home and its
+    files do not disqualify the cache below it.
     """
     try:
         home: Optional[str] = os.path.realpath(Path.home())
     except (KeyError, RuntimeError, OSError):
         home = None
-    current = Path(os.path.abspath(path))
+    current = _nearest_real_directory(path)
     for directory in (current, *current.parents):
         if home is not None and os.path.realpath(directory) == home:
             continue
@@ -277,6 +327,32 @@ def _settings_file_ancestor(path: Path) -> Optional[Tuple[Path, str]]:
             if present:
                 return directory, name
     return None
+
+
+def _make_private_directory(path: Path) -> None:
+    """Make ``path`` and each missing parent with mode 0700.
+
+    ``Path.mkdir(parents=True)`` makes every part with the process umask, so
+    under umask 002 (the user-private-group setup several distributions ship)
+    a fresh ``~/.cache/ash`` came out group-writable: the first run copied
+    below a directory the ancestor check had never seen, and every run after it
+    named that directory and fell to in-place yarn with the operator's
+    ``~/.npmrc`` dropped. Each missing part is made with 0700 (a umask can only
+    narrow that); a part that exists already is left as found, and the caller
+    re-runs the ancestor check on the made path.
+    """
+    missing: List[Path] = []
+    current = Path(os.path.abspath(path))
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for part in reversed(missing):
+        try:
+            os.mkdir(part, 0o700)
+        except FileExistsError:
+            continue
 
 
 def _yarn_copy_parent(
@@ -341,9 +417,19 @@ def _yarn_copy_parent(
             )
             continue
         try:
-            candidate.mkdir(parents=True, exist_ok=True)
+            _make_private_directory(candidate)
         except OSError as error:
             passed_over.append(f"{what} {candidate} cannot be made ({error})")
+            continue
+        # Read again on the directory as made: the check above ran on the
+        # nearest EXISTING ancestor, so a part found half-way with a lax mode,
+        # or one another process made meanwhile, is on yarn's path unchecked.
+        shared = _untrusted_ancestor(candidate)
+        if shared is not None:
+            passed_over.append(
+                f"{what} {candidate} is below {shared}, which another account "
+                "owns or can write"
+            )
             continue
         return candidate, tuple(passed_over)
     return None, tuple(passed_over)
@@ -370,7 +456,11 @@ def _copy_manifest(
 ) -> None:
     """Copy ``package.json``, without ``pnpm.auditConfig`` when suppressions are off.
 
-    ``data`` is the manifest's bytes, read by ``_read_admitted``.
+    ``data`` is the manifest's bytes, read by ``_read_admitted``. Under
+    ``--ignore-suppressions`` a manifest this parser cannot read is REFUSED
+    (``SuppressionsNotLiftable``), never copied as it is: the package manager
+    may still parse it, ignore lists included, and the flag's promise is that
+    nothing is suppressed.
     """
     if not ignore_suppressions:
         _write_copy(target, data, private)
@@ -380,14 +470,25 @@ def _copy_manifest(
         # the package managers, and json.loads refuses the mark, so the
         # auditConfig stayed in the copy of such a manifest and pnpm applied
         # the repository's ignore lists under the flag that lifts them.
+        # errors="replace": Node decodes an invalid byte as U+FFFD and parses
+        # on, so a manifest with one stray byte is JSON to the tool; a strict
+        # decode refused it here and the copy kept its ignore lists.
         # RecursionError: a manifest nested past the interpreter's limit is
         # refused by json.loads with that, not ValueError, and it escaped the
         # copy step as a crash of the scan instead of reaching the tool.
-        manifest = json.loads(data.decode("utf-8-sig"))
-    except (ValueError, RecursionError):
-        # Not JSON (or not UTF-8): the tool reports it as it would.
-        _write_copy(target, data, private)
-        return
+        manifest = json.loads(data.decode("utf-8-sig", errors="replace"))
+    except (ValueError, RecursionError) as error:
+        # Not JSON to this parser. V8 nests far past CPython's recursion
+        # limit, so the tool may read what was refused here, auditConfig
+        # included: copying the bytes as they were kept the repository's
+        # ignore lists under the flag that lifts them. The package is refused
+        # with the reason instead; the scan loop records it as the audit's
+        # failure, and the scan fails closed.
+        raise SuppressionsNotLiftable(
+            f"{target.name} could not be parsed ({type(error).__name__}: {error}), "
+            "so its pnpm.auditConfig cannot be removed under "
+            "--ignore-suppressions; the package was not audited"
+        ) from error
     pnpm = manifest.get("pnpm") if isinstance(manifest, dict) else None
     if isinstance(pnpm, dict) and "auditConfig" in pnpm:
         pnpm.pop("auditConfig")
@@ -535,30 +636,21 @@ def package_manager_inputs(
         Path(os.path.realpath(p)) for p in skip if not _within(package_dir, Path(p))
     ]
     bounds = [Path(r) for r in roots]
-    # Directories already walked, by real path: a link back into the walked
-    # tree, or two links to one directory, would otherwise never end, or list
-    # what is below the directory once per name it has.
-    seen: set = set()
+    # The real paths of the directories whose walk is in progress: the package
+    # directory and each linked directory entered on the way to the current
+    # one. A link whose target is one of them (``a -> b`` with ``b/back -> a``,
+    # or a link into its own subtree) would otherwise never end. Nothing else
+    # is cut: a real directory reached after a link to it was walked is walked
+    # in full. A "seen" set of every walked real path cut everything below
+    # such a directory, so with ``ui -> packages/ui`` the member
+    # ``packages/ui/plugins/x`` was listed under the link's name only, and a
+    # workspace glob ``packages/ui/plugins/*`` found nothing in yarn's copy.
+    chain: List[str] = [os.path.realpath(package_dir)]
 
     def _walk(start: Path) -> None:
         for root, dirs, files in os.walk(start, followlinks=False):
             here = Path(root)
-            real = os.path.realpath(here)
             manifest = here / "package.json"
-            if real in seen:
-                # The directory was already walked under another name: a
-                # linked directory is walked when the link is met, before
-                # os.walk reaches the real directory, so a member reached
-                # first through a link (``ui -> packages/ui``) came here as
-                # the real ``packages/ui`` and was dropped, and yarn's copy
-                # then had no ``packages/ui/package.json``. Its manifest is a
-                # file yarn reads at THIS path too, so it is listed under this
-                # name; only the descent below it is cut.
-                if "package.json" in files and manifest.exists():
-                    inputs.append(manifest)
-                dirs[:] = []
-                continue
-            seen.add(real)
             dirs[:] = [
                 d
                 for d in dirs
@@ -579,15 +671,23 @@ def package_manager_inputs(
                         # every installed package's manifest listed, checked
                         # and copied, three times per package.
                         continue
-                    if _within(package_dir, linked):
-                        # ``packages/root -> ..``: walking the ancestor would
-                        # walk the whole scanned tree, the package included,
-                        # under this name. Its own manifest is a file yarn
-                        # reads at this path; nothing below it is walked.
+                    real = os.path.realpath(linked)
+                    if _within(here, linked) or real in chain:
+                        # ``packages/root -> ..`` (an ancestor of this
+                        # directory, the whole scanned tree included), or a
+                        # link back to a directory whose walk is in progress:
+                        # walking it would walk this directory again under
+                        # another name, without end. Its own manifest is a
+                        # file yarn reads at this path; nothing below it is
+                        # walked.
                         if (linked / "package.json").exists():
                             inputs.append(linked / "package.json")
                         continue
-                    _walk(linked)
+                    chain.append(real)
+                    try:
+                        _walk(linked)
+                    finally:
+                        chain.pop()
                 elif bounds or (linked / "package.json").exists():
                     # Outside every root the link's own manifest is listed
                     # whether or not it exists: input_refusal refuses it for
@@ -640,17 +740,49 @@ def refused_inputs(
     return refused
 
 
+def _descriptor_within(fd: int, roots: Iterable[Path]) -> Optional[bool]:
+    """Whether the file open on ``fd`` lies inside one of ``roots``, judged by
+    the descriptor's own path; None where the platform names no such path.
+
+    Linux names an open file at ``/proc/self/fd/<n>``, a link to the file as
+    it is NOW, whatever name it was opened by. Judging the location by the
+    NAME (``input_refusal`` on it, then ``os.stat`` of it, after the open)
+    resolved the name three times, and a name pointed at an in-tree regular
+    file for the middle read and at an outside file for the other two passed
+    with the identities matching. The descriptor's path is read once and
+    judged as ``input_refusal`` judges a name (``sandbox_grants.is_within``,
+    by file identity). A descriptor that names no path (a pipe, a socket) is
+    outside every root.
+    """
+    link = f"/proc/self/fd/{fd}"
+    if not os.path.islink(link):
+        return None
+    opened_path = os.path.realpath(link)
+    if not os.path.isabs(opened_path) or not os.path.exists(opened_path):
+        return False
+    # Imported here: sandbox_grants imports ash_config, which imports the scanners.
+    from automated_security_helper.config.sandbox_grants import is_within
+
+    return any(is_within(Path(opened_path), Path(root)) for root in roots)
+
+
 def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
     """The bytes of ``path`` when it may be handed to the tool, else None.
 
     The file is opened FIRST and judged through the open descriptor: a regular
-    file by ``fstat``, admitted by ``input_refusal`` on its name, and the same
-    file under that name as the one opened (device and inode). Checking the
-    name and then reading by name left a window in which the file could be
-    swapped for a link out of the tree or a FIFO, and the read followed the
-    new shape; here a swap before the open is caught by the check on the new
-    object, a swap after it by the identity compare, and whatever is read came
-    from the descriptor the checks judged. Where the platform has ``O_NONBLOCK``
+    file by ``fstat``; inside a root by the descriptor's own path where the
+    platform names one (``_descriptor_within``, Linux), else by
+    ``input_refusal`` on the name tied to the open file by identity (device
+    and inode). Checking the name and then reading by name left a window in
+    which the file could be swapped for a link out of the tree or a FIFO, and
+    the read followed the new shape; here the descriptor's path judges the
+    open file itself, and on a platform without one a swap before the open is
+    caught by the check on the new object and a swap after it by the identity
+    compare (a double swap between those name reads is not; the descriptor
+    path closes it where it exists). A file that cannot be OPENED raises
+    ``InputUnreadable``: it passed the scanner's check, so dropping it would
+    hand the tool a copy missing a file it reads in place, with nothing
+    recorded. Where the platform has ``O_NONBLOCK``
     it keeps the open of a FIFO from waiting for a writer, and it is cleared
     before the read. Windows has no ``O_NONBLOCK``, so the open there is plain
     and nothing is cleared: its ``os.set_blocking`` (3.12 and later) accepts
@@ -666,20 +798,28 @@ def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
     binary = getattr(os, "O_BINARY", 0)
     try:
         fd = os.open(path, os.O_RDONLY | nonblocking | binary)
-    except OSError:
-        return None
+    except OSError as error:
+        raise InputUnreadable(
+            error.errno,
+            f"{path}: cannot be read for the copy ({error.strerror or error})",
+            str(path),
+        ) from error
     try:
         opened = os.fstat(fd)
         if not stat.S_ISREG(opened.st_mode):
             return None
-        if input_refusal(path, roots) is not None:
+        inside = _descriptor_within(fd, roots)
+        if inside is False:
             return None
-        try:
-            named = os.stat(path)
-        except OSError:
-            return None
-        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
-            return None
+        if inside is None:
+            if input_refusal(path, roots) is not None:
+                return None
+            try:
+                named = os.stat(path)
+            except OSError:
+                return None
+            if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+                return None
         if nonblocking:
             os.set_blocking(fd, True)
         with os.fdopen(fd, "rb") as handle:
@@ -703,9 +843,10 @@ def _copy_inputs(
     """Each input that stays in the tree, at its place below ``project``.
 
     Read through ``_read_admitted`` (a refused input is skipped, as the scanner
-    has already recorded it) and written through fs_guard (``_write_copy``),
-    which makes the parents and refuses a link on the way, with ``private`` as
-    the guarded root.
+    has already recorded it; one that cannot be read raises ``InputUnreadable``
+    to the scan loop, which records it) and written through fs_guard
+    (``_write_copy``), which makes the parents and refuses a link on the way,
+    with ``private`` as the guarded root.
     """
     for source in package_manager_inputs(binary, package_dir, skip=skip, roots=roots):
         data = _read_admitted(source, roots)

@@ -70,15 +70,99 @@ def _copy(binary: str, package: Path, tmp_path: Path, **options) -> dict:
 
 
 class TestADeeplyNestedManifest:
-    def test_is_handed_to_the_tool_as_it_is_under_ignore_suppressions(self, tmp_path):
-        """json.loads refuses it with RecursionError; the copy keeps the bytes."""
+    """json.loads refuses it with RecursionError; V8's parser does not."""
+
+    def _nested(self, tmp_path: Path, **keys) -> Path:
         depth = 50_000
-        nested = b'{"name": "deep", "a": ' + b"[" * depth + b"]" * depth + b"}"
-        package = _package(tmp_path / "repo" / "deep", "package-lock.json", nested)
+        body = json.dumps({"name": "deep", **keys})[1:-1].encode()
+        nested = b"{" + body + b', "a": ' + b"[" * depth + b"]" * depth + b"}"
+        return _package(tmp_path / "repo" / "deep", "package-lock.json", nested)
 
-        copied = _copy("npm", package, tmp_path, ignore_suppressions=True)
+    def test_is_handed_to_the_tool_as_it_is_without_the_flag(self, tmp_path):
+        """Control: with suppressions in force the copy keeps the bytes."""
+        package = self._nested(tmp_path)
 
-        assert copied["package.json"] == nested
+        copied = _copy("npm", package, tmp_path, ignore_suppressions=False)
+
+        assert copied["package.json"] == (package / "package.json").read_bytes()
+
+    def test_is_refused_under_ignore_suppressions(self, tmp_path):
+        """The copy kept the bytes, ``pnpm.auditConfig`` included, so the tool
+        parsed what this interpreter could not and applied the repository's
+        ignore lists under the flag that lifts them. The package is refused
+        with the reason; the scan loop records it."""
+        package = self._nested(tmp_path, pnpm={"auditConfig": AUDIT_CONFIG})
+
+        with pytest.raises(
+            package_manager_child.SuppressionsNotLiftable, match="auditConfig"
+        ):
+            _copy("npm", package, tmp_path, ignore_suppressions=True)
+
+
+class TestAManifestWithAnInvalidByte:
+    def test_loses_its_audit_config_under_the_flag(self, tmp_path):
+        """Node decodes an invalid byte as U+FFFD and parses on, so the manifest
+        is JSON to the tool; a strict decode refused it here and the copy kept
+        the ignore lists. It is decoded as Node decodes it, and the key goes."""
+        manifest = (
+            b'{"name": "odd\xff", "pnpm": {"auditConfig": '
+            + json.dumps(AUDIT_CONFIG).encode()
+            + b"}}"
+        )
+        package = _package(tmp_path / "repo" / "odd", "pnpm-lock.yaml", manifest)
+
+        copied = _copy("pnpm", package, tmp_path, ignore_suppressions=True)
+
+        written = json.loads(copied["package.json"])
+        assert "auditConfig" not in written.get("pnpm", {})
+        assert written["name"] == "odd�"
+
+
+class TestAnUnreadableInput:
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads any mode"
+    )
+    def test_is_a_raised_failure_not_a_silent_drop(self, tmp_path):
+        """A mode-000 manifest passes the scanner's stat check, and the copy
+        then lacked a file the tool reads in place, with nothing recorded. The
+        open failure is raised with the file named, for the scan loop to record
+        as the audit's failure."""
+        package = _package(tmp_path / "repo" / "quiet", "package-lock.json")
+        (package / "package.json").chmod(0)
+        try:
+            with pytest.raises(
+                package_manager_child.InputUnreadable, match="quiet/package.json"
+            ):
+                _copy("npm", package, tmp_path)
+        finally:
+            (package / "package.json").chmod(0o644)
+
+
+class TestTheOpenedFileIsJudged:
+    @pytest.mark.skipif(
+        not os.path.islink("/proc/self/fd/0"), reason="no descriptor paths here"
+    )
+    def test_by_the_descriptors_own_path_where_the_platform_names_one(self, tmp_path):
+        """Linux names an open file at /proc/self/fd/N as it is NOW, so the
+        place is read from the open file, not from a name that can be moved
+        between the open and the check."""
+        repo = tmp_path / "repo"
+        inside = _package(repo / "app", "package-lock.json") / "package.json"
+        outside = tmp_path / "elsewhere" / "package.json"
+        outside.parent.mkdir()
+        outside.write_text("{}", encoding="utf-8")
+        for path, expected in ((inside, True), (outside, False)):
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                assert package_manager_child._descriptor_within(fd, [repo]) is expected
+            finally:
+                os.close(fd)
+
+    def test_answers_none_where_no_descriptor_path_exists(self, monkeypatch):
+        """Elsewhere the name, tied to the open file by identity, is judged."""
+        monkeypatch.setattr(os.path, "islink", lambda p: False)
+
+        assert package_manager_child._descriptor_within(0, []) is None
 
 
 class TestPnpmWorkspaceSettings:

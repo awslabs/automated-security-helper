@@ -38,6 +38,8 @@ def test_a_relative_glob_without_a_parent_step_stays_inside(glob):
         "",
         "!",
         "/srv/shared/*",
+        "/**",
+        "../**",
         "\\shared\\*",
         "!\\shared\\*",
         "C:\\shared\\*",
