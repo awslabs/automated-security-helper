@@ -26,6 +26,10 @@ A child that changes directory after it starts should not rely on this: under 3.
 its ``''`` entry follows it. ``utils/cdk_nag_worker.py`` removes that entry itself
 for that reason.
 
+Limits: a ``PYTHONPATH`` entry that is relative is read against the child's working
+directory, the empty one, so a module importable only through such an entry (ASH
+itself, say) is not importable in the child. Name absolute entries in ``PYTHONPATH``.
+
 :func:`empty_directory` is the start directory on its own, for a child that is not
 Python. ``ash dependencies install`` starts every install command in one, so a
 package manager that reads settings from its working directory (npm's project
@@ -48,7 +52,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Sequence
+from typing import Dict, Iterator, List, Mapping, Optional, Sequence
 
 #: What makes the interpreter skip the working directory, where it can.
 _SAFE_PATH_FLAGS: List[str] = ["-P"] if sys.version_info >= (3, 11) else []
@@ -99,9 +103,13 @@ def python_child(*args: str, parent: Optional[Path] = None) -> Iterator[PythonCh
 #: ``usercustomize`` are imported before that entry is added (measured on 3.10 and
 #: 3.14). Under ``-P`` or ``PYTHONSAFEPATH`` the entry is not there, and the first,
 #: real entry is kept. ``utils/cdk_nag_worker.py`` starts its child the same way.
+#: Ends in a line break rather than ``; ``, so the source that follows may open
+#: with a compound statement (``if``, ``for``, ``def``), which no ``;`` can precede.
 DROP_WORKING_DIRECTORY = (
-    "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; "
+    "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]\n"
 )
+
+_FUTURE_IMPORT = "from __future__ import"
 
 
 def python_code_argv(source: str) -> List[str]:
@@ -110,8 +118,30 @@ def python_code_argv(source: str) -> List[str]:
     For a child that cannot be given an empty start directory, such as the inner scan
     ``nix develop --command`` runs in the scan's own directory: ``-P`` where Python
     has it, and ``source`` behind :data:`DROP_WORKING_DIRECTORY` for Python 3.10.
+
+    A ``from __future__ import`` at the start of ``source`` (after blank lines and
+    comments only) is kept ahead of the dropping statement: Python admits it only as
+    the first statement, and placed behind another it is a SyntaxError.
     """
-    return [sys.executable, *_SAFE_PATH_FLAGS, "-c", DROP_WORKING_DIRECTORY + source]
+    lines = source.splitlines(keepends=True)
+    future: List[str] = []
+    rest: List[str] = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(_FUTURE_IMPORT):
+            future.append(line if line.endswith("\n") else line + "\n")
+            continue
+        if not stripped or stripped.startswith("#"):
+            rest.append(line)
+            continue
+        rest.extend(lines[index:])
+        break
+    code = "".join(future) + DROP_WORKING_DIRECTORY + "".join(rest)
+    return [sys.executable, *_SAFE_PATH_FLAGS, "-c", code]
+
+
+#: Interpreter options that take the next argument as their value.
+_PYTHON_OPTIONS_WITH_A_VALUE = frozenset({"-X", "-W", "--check-hash-based-pycs"})
 
 
 def runs_module_or_code(argv: Sequence[str]) -> bool:
@@ -119,18 +149,33 @@ def runs_module_or_code(argv: Sequence[str]) -> bool:
 
     Only interpreter options may come before it, so ``python script.py -c`` is not
     one: a script's own directory is what Python adds for it, and ``-P`` would drop
-    that too.
+    that too. The option is read as the interpreter reads it: on its own (``-m``),
+    attached to its module or code (``-mpip``, ``-cCODE``), or combined with other
+    short options (``-Bc``), and ``-X``, ``-W`` and ``--check-hash-based-pycs`` take a
+    value, attached or as the next argument, that is never the module.
     """
-    if not argv or argv[0] != sys.executable:
+    if not argv or os.fspath(argv[0]) != sys.executable:
         return False
     options = iter(argv[1:])
     for arg in options:
-        if arg in ("-m", "-c"):
-            return True
-        if arg in ("-X", "-W"):
-            next(options, None)
-        elif not arg.startswith("-") or arg == "-":
+        if not arg.startswith("-") or arg == "-" or arg.startswith("--"):
+            if arg in _PYTHON_OPTIONS_WITH_A_VALUE:
+                next(options, None)
+                continue
             return False
+        # A cluster of short options: each letter is one option, until a letter
+        # that takes the rest of the argument as its value.
+        letters = arg[1:]
+        position = 0
+        while position < len(letters):
+            letter = letters[position]
+            if letter in ("m", "c"):
+                return True
+            if letter in ("X", "W"):
+                if position + 1 == len(letters):
+                    next(options, None)
+                break
+            position += 1
     return False
 
 
@@ -178,16 +223,51 @@ _UV_RUN_OPTIONS_WITH_A_VALUE = _UV_OPTIONS_WITH_A_VALUE | frozenset(
 #: The spellings a uv launcher goes by: the binary, and Windows' shims for it.
 _UV_PROGRAM_NAMES = frozenset({"uv", "uv.exe", "uv.cmd", "uv.bat"})
 
+#: uv's subcommands (uv 0.12), so a value of a global option this module does not
+#: list (a new option, say) is not read as the subcommand: the first positional
+#: argument that is a subcommand is it, and any other positional before it is a
+#: value of the option before it.
+_UV_SUBCOMMANDS = frozenset(
+    {
+        "add",
+        "auth",
+        "build",
+        "cache",
+        "export",
+        "format",
+        "generate-shell-completion",
+        "help",
+        "init",
+        "lock",
+        "pip",
+        "publish",
+        "python",
+        "remove",
+        "run",
+        "self",
+        "sync",
+        "tool",
+        "tree",
+        "venv",
+        "version",
+    }
+)
+
+#: ``UV_SYSTEM_PYTHON`` values uv reads as false, so an operator who set it to one
+#: of these chose no interpreter.
+_UV_FALSE = frozenset({"", "0", "false", "no", "off"})
+
 
 def _uv_arguments(argv: Sequence[str]) -> Optional[List[str]]:
     """The arguments after the uv program in ``argv``, or None when it is not uv.
 
     uv is the binary by any of its names, or ASH's own interpreter running the
-    ``uv`` module (``<python> -m uv ...``), which reads the same settings.
+    ``uv`` module (``<python> -m uv ...``), which reads the same settings. The
+    program may be a path-like, as subprocess accepts it.
     """
     if not argv:
         return None
-    name = re.split(r"[\\/]", argv[0])[-1].lower()
+    name = re.split(r"[\\/]", os.fspath(argv[0]))[-1].lower()
     if name in _UV_PROGRAM_NAMES:
         return list(argv[1:])
     if runs_module_or_code(argv):
@@ -223,7 +303,9 @@ def _uv_own_options(subcommand: str, rest: Sequence[str], start: int) -> List[st
     return own
 
 
-def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
+def uv_child_overrides(
+    argv: Sequence[str], env: Optional[Mapping[str, str]] = None
+) -> Dict[str, str]:
     """The environment a uv command needs to find no project or ``.venv`` near it.
 
     Measured with uv 0.12.22: ``uv pip`` and ``uv run`` run the python of a ``.venv``
@@ -234,8 +316,11 @@ def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
 
     - ``UV_NO_PROJECT=1``, unless it names a ``uv --project`` itself;
     - ``UV_PYTHON`` set to ASH's interpreter, unless it names one (``uv --python``,
-      ``uv -p``, ``uv --system``) or the operator set ``UV_PYTHON`` or
-      ``UV_SYSTEM_PYTHON``.
+      ``uv -p``, ``uv --system``) or the environment the child gets, ``env`` (this
+      process's when None), already carries ``UV_PYTHON`` or a ``UV_SYSTEM_PYTHON``
+      uv reads as true. The caller merges the overrides over ``env``, so the
+      choice is read from the mapping the merge would overwrite, never from
+      somewhere else.
 
     ``uv tool`` commands and ``uvx`` get nothing: they read neither, and an
     interpreter there would change which Python the tool's environment is built on.
@@ -244,6 +329,7 @@ def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
     rest = _uv_arguments(argv)
     if rest is None:
         return {}
+    environment: Mapping[str, str] = os.environ if env is None else env
     subcommand = None
     index = 0
     while index < len(rest):
@@ -252,8 +338,13 @@ def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
             index += 2
             continue
         if not arg.startswith("-"):
-            subcommand = arg
-            break
+            if arg in _UV_SUBCOMMANDS:
+                subcommand = arg
+                break
+            # The value of a global option this module does not list: not the
+            # subcommand, which is the next positional that names one.
+            index += 1
+            continue
         index += 1
     if subcommand in (None, "tool"):
         return {}
@@ -266,7 +357,9 @@ def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
     names_interpreter = any(
         a in ("--python", "-p", "--system") or a.startswith("--python=") for a in own
     )
-    operator_chose = os.environ.get("UV_PYTHON") or os.environ.get("UV_SYSTEM_PYTHON")
+    operator_chose = bool(environment.get("UV_PYTHON")) or (
+        environment.get("UV_SYSTEM_PYTHON", "").strip().lower() not in _UV_FALSE
+    )
     if not names_interpreter and not operator_chose:
         overrides["UV_PYTHON"] = sys.executable
     return overrides
