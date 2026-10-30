@@ -134,6 +134,18 @@ def _flatten_mapping_within_bound(
         ConstructorError: the merge would expand this mapping, or the document's
             merges together, past ``MERGED_MAPPING_PAIRS_BOUND`` pairs.
     """
+    done = getattr(loader, "_flattened_node_ids", None)
+    if done is None:
+        done = set()
+        loader._flattened_node_ids = done
+    if id(node) in done:
+        # Flattened earlier in this document: its pairs are flat and its merge
+        # keys are gone, so there is nothing to check or copy. Anchored nodes are
+        # shared, and a mapping that merges one alias N times (``{<<: [*a, *a,
+        # ...]}``) reached this N times; each time the base class copied and
+        # scanned the merged mapping again, about 65,000 Python steps per alias
+        # for a 32,768-pair mapping, before the bound was ever compared.
+        return
     in_progress = getattr(loader, "_flattening_node_ids", None)
     if in_progress is None:
         in_progress = set()
@@ -142,6 +154,7 @@ def _flatten_mapping_within_bound(
     if entered:
         in_progress.add(id(node))
     try:
+        base_total = getattr(loader, "_merged_pairs_added", 0)
         incoming = 0
         for key_node, value_node in list(node.value):
             if getattr(key_node, "tag", None) != _MERGE_TAG:
@@ -165,23 +178,28 @@ def _flatten_mapping_within_bound(
                     continue
                 loader.flatten_mapping(merged_node)
                 incoming += len(merged_node.value)
+                # Compared as the sum grows, so the refusal comes at the first
+                # merged mapping that passes the bound, not after every merged
+                # mapping of a wide merge has been flattened and counted.
+                expanded = incoming + len(node.value)
+                document_total = base_total + incoming
+                if (
+                    expanded > MERGED_MAPPING_PAIRS_BOUND
+                    or document_total > MERGED_MAPPING_PAIRS_BOUND
+                ):
+                    raise ConstructorError(
+                        None,
+                        None,
+                        f"a merge key (<<) would expand this mapping to {expanded} "
+                        f"key/value pairs or more ({document_total} added by this "
+                        f"document's merges), more than the "
+                        f"{MERGED_MAPPING_PAIRS_BOUND} ASH reads",
+                        node.start_mark,
+                    )
         if incoming:
-            expanded = incoming + len(node.value)
-            document_total = getattr(loader, "_merged_pairs_added", 0) + incoming
-            if (
-                expanded > MERGED_MAPPING_PAIRS_BOUND
-                or document_total > MERGED_MAPPING_PAIRS_BOUND
-            ):
-                raise ConstructorError(
-                    None,
-                    None,
-                    f"a merge key (<<) would expand this mapping to {expanded} "
-                    f"key/value pairs ({document_total} added by this document's "
-                    f"merges), more than the {MERGED_MAPPING_PAIRS_BOUND} ASH reads",
-                    node.start_mark,
-                )
-            loader._merged_pairs_added = document_total
+            loader._merged_pairs_added = base_total + incoming
         flatten(node)
+        done.add(id(node))
     finally:
         if entered:
             in_progress.discard(id(node))

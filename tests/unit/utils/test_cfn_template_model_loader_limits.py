@@ -16,6 +16,8 @@ Three behaviors of ``utils/cfn_template_model.py`` pinned here:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 import yaml
 
@@ -86,6 +88,53 @@ def test_a_wide_merge_is_refused_before_its_list_is_built():
     assert "would expand this mapping" in str(raised.value), str(raised.value)
     with pytest.raises(TemplateConstructorError):
         get_model_from_template_text(text, "wide.yaml")
+
+
+def _base_flatten_calls(text: str) -> tuple[int, Exception | None]:
+    """How many times PyYAML's own ``flatten_mapping`` ran while loading ``text``.
+
+    The pre-check wraps it, so this counts the copies and scans the base class
+    made, not the pre-check's own calls. Patched on the SafeConstructor method the
+    template loader inherits (``super().flatten_mapping`` resolves to it).
+    """
+    calls = 0
+    original = yaml.constructor.SafeConstructor.flatten_mapping
+
+    def counting(self, node):
+        nonlocal calls
+        calls += 1
+        return original(self, node)
+
+    with patch.object(yaml.constructor.SafeConstructor, "flatten_mapping", counting):
+        try:
+            yaml.load(text, Loader=cfn_template_model._TemplateLoader)  # nosec B506
+        except yaml.constructor.ConstructorError as refused:
+            return calls, refused
+    return calls, None
+
+
+def test_a_mapping_merged_several_times_is_flattened_once():
+    """At the previous tip ``{<<: [*a, *a, *a]}`` ran the base flatten over ``a``
+    once per alias in the pre-check and once more per alias in the base class's
+    own loop: nine runs for three mappings (the document root, ``a`` and ``b``).
+    Flattened nodes are now remembered on the loader, so each runs once."""
+    calls, refused = _base_flatten_calls("a: &a {k: v}\nb: {<<: [*a, *a, *a]}\n")
+    assert refused is None
+    assert calls == 3, calls
+
+
+def test_a_wide_merge_past_the_bound_is_refused_at_the_first_alias_that_passes_it():
+    """``{<<: [*a15 x 400]}``: a15 holds 32,768 pairs, so the fourth alias passes
+    the 100,000 bound. At the previous tip every one of the 400 aliases flattened
+    a15 again (about 65,000 Python steps each) before the bound was compared; now
+    a15 is flattened once and the refusal comes at the fourth alias."""
+    aliases = ", ".join(["*a15"] * 400)
+    text = _chain_then(15, f"x: {{<<: [{aliases}]}}\nResources: {{}}\n")
+    calls, refused = _base_flatten_calls(text)
+    assert refused is not None and "would expand this mapping" in str(refused)
+    # The document root and the chain's 16 mappings, each flattened once by the
+    # base class; the wide merge adds no run of its own before it is refused.
+    assert calls == 17, calls
 
 
 def test_a_mapping_that_merges_itself_builds_empty_as_pyyaml_does():
