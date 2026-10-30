@@ -548,19 +548,45 @@ def _yaml_problem(exc: yaml.YAMLError) -> str:
     return str(problem)
 
 
-def _ignore_pattern_text(item: Any) -> str:
-    """One ``ignore`` entry as actionlint reads it into a string.
-
-    go-yaml decodes a null into the empty string and a bool into its lower-case
-    spelling, and actionlint compiles every entry as a regular expression, so an
-    empty entry matches every message and drops every finding: the one entry
-    the log line most needs to show, which ``if item`` left out.
-    """
-    if item is None:
+def _scalar_text(node: Any) -> Optional[str]:
+    """A YAML scalar node as go-yaml decodes it into a Go string: its source
+    text (``False`` stays ``False``, ``0x1F`` stays ``0x1F``, ``yes`` stays
+    ``yes``), with a null as the empty string. None for a node that is not a
+    scalar. Reading the constructed Python value instead (``str(31)``,
+    ``"true"``) listed patterns actionlint never compiles."""
+    if not isinstance(node, yaml.ScalarNode):
+        return None
+    if node.tag == "tag:yaml.org,2002:null":
         return ""
-    if isinstance(item, bool):
-        return "true" if item else "false"
-    return str(item)
+    return str(node.value)
+
+
+def _ignore_pattern_texts(text: str) -> set[str]:
+    """The ``paths.<glob>.ignore`` scalar entries of the config *text*, each as
+    actionlint reads it into a string (``_scalar_text``). An entry that is not
+    a scalar is left out: actionlint refuses such a config itself. Composed, not
+    constructed, so the entries keep their spelling; *text* has already been
+    loaded by ``config_ignore_patterns``, which refused what cannot be read."""
+    found: set[str] = set()
+    root = yaml.compose(text, Loader=yaml.SafeLoader)
+    if not isinstance(root, yaml.MappingNode):
+        return found
+    for key, paths in root.value:
+        if _scalar_text(key) != "paths" or not isinstance(paths, yaml.MappingNode):
+            continue
+        for _glob, section in paths.value:
+            if not isinstance(section, yaml.MappingNode):
+                continue
+            for name, ignore in section.value:
+                if _scalar_text(name) != "ignore" or not isinstance(
+                    ignore, yaml.SequenceNode
+                ):
+                    continue
+                for item in ignore.value:
+                    entry = _scalar_text(item)
+                    if entry is not None:
+                        found.add(entry)
+    return found
 
 
 def config_ignore_patterns(config_path: Path) -> List[str]:
@@ -576,12 +602,18 @@ def config_ignore_patterns(config_path: Path) -> List[str]:
     caller to warn with; nothing is reported as "no patterns" that was not read
     as such. actionlint owns the judgment of its own config, and reports a
     malformed one itself with exit 3.
+
+    Each pattern is listed with the spelling actionlint compiles: go-yaml decodes
+    an ignore entry into a string as its source text, and a null as the empty
+    string, which matches every message and drops every finding, the one entry
+    the log line most needs to show.
     """
     # Imported here: config/ash_config.py imports this module.
     from automated_security_helper.config.ash_config import load_config_yaml
 
     try:
-        document = load_config_yaml(decode_workflow(config_path.read_bytes()))
+        text = decode_workflow(config_path.read_bytes())
+        document = load_config_yaml(text)
     except yaml.YAMLError as exc:
         raise IgnorePatternsUnlisted(_yaml_problem(exc)) from exc
     except (OSError, ValueError, RecursionError) as exc:
@@ -589,12 +621,7 @@ def config_ignore_patterns(config_path: Path) -> List[str]:
     paths = document.get("paths") if isinstance(document, dict) else None
     if not isinstance(paths, dict):
         return []
-    found: set[str] = set()
-    for section in paths.values():
-        ignore = section.get("ignore") if isinstance(section, dict) else None
-        if isinstance(ignore, list):
-            found.update(_ignore_pattern_text(item) for item in ignore)
-    return sorted(found)
+    return sorted(_ignore_pattern_texts(text))
 
 
 def _credential_lines(errors: Any) -> Set[Tuple[Any, Any]]:

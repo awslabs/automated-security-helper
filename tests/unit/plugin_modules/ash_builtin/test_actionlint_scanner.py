@@ -1113,10 +1113,24 @@ def test_an_aliased_config_is_not_read_for_its_ignore_patterns(tmp_path):
         ("self-hosted-runner:\n  labels: [a]\n", []),
         ("paths: [1]\n", []),
         ("", []),
-        # go-yaml reads a null as "" and a bool as its lower-case spelling, and
-        # actionlint compiles each as a regular expression: "" drops every
+        # go-yaml reads a null as "" and every other scalar as its source text,
+        # and actionlint compiles each as a regular expression: "" drops every
         # finding, which is the entry the log most needs to show.
         ("paths:\n  '**':\n    ignore: ['', ~, 0, false]\n", ["", "0", "false"]),
+        # A null on its own: read as "", not dropped (the row above cannot tell
+        # the two apart, since '' is in it too).
+        ("paths:\n  '**':\n    ignore: [~]\n", [""]),
+        ("paths:\n  '**':\n    ignore: [null]\n", [""]),
+        # Spellings PyYAML's constructor would turn into True, True, False and
+        # 31; go-yaml hands actionlint the text as written.
+        (
+            "paths:\n  '**':\n    ignore: [yes, on, False, 0x1F, 1e3]\n",
+            ["0x1F", "1e3", "False", "on", "yes"],
+        ),
+        # A quoted scalar is its text without the quotes, as go-yaml reads it.
+        ("paths:\n  '**':\n    ignore: ['false', \"0x1F\"]\n", ["0x1F", "false"]),
+        # An entry that is not a scalar is left out; actionlint refuses it.
+        ("paths:\n  '**':\n    ignore: [[a], {b: c}, x]\n", ["x"]),
     ],
 )
 @pytest.mark.unit
