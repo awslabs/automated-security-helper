@@ -28,7 +28,9 @@ Where each report puts them:
 * the flat JSON report under ``converter_refusals``, always present, every record;
 * ``ash.sarif`` as one extra invocation per converter, with a
   ``toolExecutionNotifications`` entry per record (level ``error`` when it left the
-  scan incomplete, ``warning`` otherwise) located at the input's path. The SARIF
+  scan incomplete, ``warning`` otherwise) located at the input's path, written as
+  the URI reference SARIF's ``artifactLocation.uri`` is (percent-encoded, so a
+  ``#``, ``?``, ``%`` or space in the name stays part of it). The SARIF
   reporter adds it to the document it writes, not to the scan's in-memory SARIF,
   which the exit-code gates read: ``run_ash_scan.unevaluated_rules`` treats an
   error-level execution notification there as a rule that did not run, and these
@@ -38,8 +40,10 @@ Where each report puts them:
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -56,21 +60,32 @@ _BIDI_CONTROLS = frozenset(
     "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
 )
 
+#: Unicode categories of the characters that are escaped besides the controls and
+#: _BIDI_CONTROLS: the line and paragraph separators (U+2028 and U+2029, which a
+#: terminal or a text viewer breaks the line at, so a name holding one broke a
+#: summary line into two) and the other format characters (zero-width joiners
+#: and spaces, soft hyphens, tag characters), which show as nothing and can make
+#: two different names read as one.
+_ESCAPED_CATEGORIES = frozenset({"Zl", "Zp", "Cf"})
+
 
 def inert_text(text: str) -> str:
-    """``text`` with every control and bidirectional-formatting character escaped.
+    """``text`` with every control, separator and format character escaped.
 
     For names the scanned tree chose, shown in a terminal or a text report: an
     escape sequence in a member name would otherwise be interpreted by the reader's
-    terminal, and a right-to-left override would show the name reordered.
+    terminal, a right-to-left override would show the name reordered, and a line
+    or paragraph separator would break the line the name is shown on.
     """
     shown = []
     for char in text:
         code = ord(char)
         if code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F:
             shown.append(f"\\x{code:02x}")
-        elif char in _BIDI_CONTROLS:
-            shown.append(f"\\u{code:04x}")
+        elif (
+            char in _BIDI_CONTROLS or unicodedata.category(char) in _ESCAPED_CATEGORIES
+        ):
+            shown.append(f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}")
         else:
             shown.append(char)
     return "".join(shown)
@@ -234,6 +249,19 @@ def _more_line(count: int) -> str:
     )
 
 
+def _artifact_uri(path: str) -> str:
+    """``path``, a tree-relative path with ``/``, as a SARIF ``artifactLocation.uri``.
+
+    A URI reference, so the path is percent-encoded with ``/`` kept: written as
+    it was, a ``#`` started a fragment, a ``?`` a query, a ``%`` an escape and a
+    space made the reference invalid, and a reader resolved the notification to
+    another file or none. The record's own ``path`` (``properties.refused_input``)
+    stays the path as written. A lone surrogate, a name byte that is not UTF-8
+    read back from a results file, is encoded as that byte.
+    """
+    return quote(path.encode("utf-8", "surrogateescape"), safe="/")
+
+
 def refusal_invocations(model: "AshAggregatedResults") -> List["Invocation"]:
     """A SARIF invocation per converter that refused inputs, one notification each."""
     from automated_security_helper.schemas.sarif_schema_model import (
@@ -268,7 +296,9 @@ def refusal_invocations(model: "AshAggregatedResults") -> List["Invocation"]:
                     Location(
                         physicalLocation=PhysicalLocation(
                             root=PhysicalLocation2(
-                                artifactLocation=ArtifactLocation(uri=refusal.path)
+                                artifactLocation=ArtifactLocation(
+                                    uri=_artifact_uri(refusal.path)
+                                )
                             )
                         )
                     )
