@@ -59,6 +59,7 @@ from unittest.mock import patch
 
 import pytest
 
+from automated_security_helper.base import scanner_plugin
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ScannerError
@@ -772,9 +773,7 @@ def test_the_dependency_check_reads_the_operators_scanners_before_the_first_scan
     alone never opens the database; it was reported MISSING all the same because
     the config file was read only once a scan had chosen it."""
     _operator_config_in_env(tmp_path, monkeypatch, "scan:\n  scanners: [misconfig]\n")
-    monkeypatch.setattr(
-        trivy_repo_scanner, "find_executable", lambda name: f"/bin/{name}"
-    )
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: f"/bin/{name}")
 
     def no_db(ctx):
         raise ValueError("no trivy database was found")
@@ -791,9 +790,7 @@ def test_control_an_operator_config_that_keeps_vuln_still_needs_the_database(
     tmp_path, monkeypatch
 ):
     _operator_config_in_env(tmp_path, monkeypatch, "scan:\n  scanners: [vuln]\n")
-    monkeypatch.setattr(
-        trivy_repo_scanner, "find_executable", lambda name: f"/bin/{name}"
-    )
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: f"/bin/{name}")
 
     def no_db(ctx):
         raise ValueError("no trivy database was found")

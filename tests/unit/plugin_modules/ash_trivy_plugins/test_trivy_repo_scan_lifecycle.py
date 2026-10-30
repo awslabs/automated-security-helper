@@ -37,14 +37,12 @@ from unittest.mock import patch
 
 import pytest
 
+from automated_security_helper.base import scanner_plugin
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     _trivy_scanner_base as trivy_base,
-)
-from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-    trivy_repo_scanner,
 )
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
@@ -292,9 +290,9 @@ def test_a_results_file_left_by_an_earlier_run_is_not_read_as_this_runs(tmp_path
 def test_a_trivy_refused_inside_the_scanned_tree_is_recorded_as_refused(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(trivy_repo_scanner, "find_executable", lambda name: None)
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: None)
     monkeypatch.setattr(
-        trivy_repo_scanner,
+        scanner_plugin,
         "in_tree_refusal",
         lambda command: f"a {command} inside the scanned tree was refused",
     )
@@ -307,8 +305,8 @@ def test_a_trivy_refused_inside_the_scanned_tree_is_recorded_as_refused(
 
 
 def test_control_a_trivy_missing_from_path_records_no_refusal(tmp_path, monkeypatch):
-    monkeypatch.setattr(trivy_repo_scanner, "find_executable", lambda name: None)
-    monkeypatch.setattr(trivy_repo_scanner, "in_tree_refusal", lambda command: None)
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: None)
+    monkeypatch.setattr(scanner_plugin, "in_tree_refusal", lambda command: None)
     scanner = _scanner(tmp_path)
 
     assert scanner.validate_plugin_dependencies() is False
@@ -318,9 +316,7 @@ def test_control_a_trivy_missing_from_path_records_no_refusal(tmp_path, monkeypa
 def test_offline_without_a_database_trivy_repo_is_missing_with_the_reason(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(
-        trivy_repo_scanner, "find_executable", lambda name: f"/bin/{name}"
-    )
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: f"/bin/{name}")
 
     def no_db(ctx):
         raise ValueError("no trivy database was found")
@@ -334,9 +330,7 @@ def test_offline_without_a_database_trivy_repo_is_missing_with_the_reason(
 
 
 def test_control_offline_with_a_database_trivy_repo_is_satisfied(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        trivy_repo_scanner, "find_executable", lambda name: f"/bin/{name}"
-    )
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: f"/bin/{name}")
     monkeypatch.setattr(staleness, "_built_from_trivy", lambda ctx: (None, "x"))
 
     assert _scanner(tmp_path, offline=True).validate_plugin_dependencies() is True

@@ -27,6 +27,7 @@ from unittest.mock import patch
 
 import pytest
 
+from automated_security_helper.base import scanner_plugin
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_trivy_plugins import (
@@ -102,9 +103,15 @@ def context(tmp_path: Path) -> PluginContext:
 
 @pytest.fixture(autouse=True)
 def trivy_on_path(monkeypatch):
-    monkeypatch.setattr(
-        trivy_repo_scanner, "find_executable", lambda name: "/opt/trivy/bin/trivy"
-    )
+    # The lookup is the base module's (ScannerPluginBase reads it there); the
+    # trivy-repo module re-exported the name while it kept its own copy of the
+    # dependency check. Patched wherever the name is, so the fixture reads the same
+    # with or without that re-export.
+    for module in (scanner_plugin, trivy_repo_scanner):
+        if hasattr(module, "find_executable"):
+            monkeypatch.setattr(
+                module, "find_executable", lambda name: "/opt/trivy/bin/trivy"
+            )
     for name in ("TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"):
         monkeypatch.delenv(name, raising=False)
 

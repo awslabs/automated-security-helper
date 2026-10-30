@@ -37,10 +37,6 @@ from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
-from automated_security_helper.utils.subprocess_utils import (
-    find_executable,
-    in_tree_refusal,
-)
 from automated_security_helper.utils.process_env import snapshot_environ
 
 
@@ -197,30 +193,6 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             extra_args=[],
         )
         super().model_post_init(context)
-
-    def validate_plugin_dependencies(self) -> bool:
-        """The binary, and offline, a vulnerability database for it to read.
-
-        A copy found only inside the scanned tree is refused by ``find_executable``
-        and answers None; the refusal is recorded (``dependency_unavailable_reason``,
-        as ``ScannerPluginBase.validate_plugin_dependencies`` records it) so the
-        MISSING row says so rather than "not installed". Offline, a scan that reads
-        the vulnerability database needs one in trivy's cache
-        (``TrivyScannerBase._offline_database_available``), as for the builtin
-        trivy scanner.
-
-        Returns:
-            bool: True if validation passes
-        """
-        if self.dependency_unavailable_reason:
-            return False
-        trivy_binary = find_executable("trivy")
-        if not trivy_binary or trivy_binary is None:
-            refusal = in_tree_refusal("trivy")
-            if refusal is not None:
-                self.dependency_unavailable_reason = refusal
-            return False
-        return self._offline_database_available()
 
     def _process_config_options(self):
         self._append_trivy_options()

@@ -219,9 +219,7 @@ class TestTrivyRepoScannerConfigProcessing:
 class TestTrivyRepoScannerDependencies:
     """Test dependency validation for TrivyRepoScanner."""
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_validate_dependencies_success(
         self, mock_find_executable, mock_plugin_context
     ):
@@ -235,9 +233,7 @@ class TestTrivyRepoScannerDependencies:
         assert result is True
         mock_find_executable.assert_called_once_with("trivy")
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_validate_dependencies_failure_not_found(
         self, mock_find_executable, mock_plugin_context
     ):
@@ -251,25 +247,7 @@ class TestTrivyRepoScannerDependencies:
         assert result is False
         mock_find_executable.assert_called_once_with("trivy")
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
-    def test_validate_dependencies_failure_empty_string(
-        self, mock_find_executable, mock_plugin_context
-    ):
-        """Test dependency validation failure when find_executable returns empty string."""
-        # Mock Trivy CLI returns empty string
-        mock_find_executable.return_value = ""
-
-        scanner = TrivyRepoScanner(context=mock_plugin_context)
-        result = scanner.validate_plugin_dependencies()
-
-        assert result is False
-        mock_find_executable.assert_called_once_with("trivy")
-
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_dependencies_satisfied_flag(
         self, mock_find_executable, mock_plugin_context
     ):
@@ -299,9 +277,7 @@ class TestTrivyRepoScannerDependencies:
 class TestTrivyRepoScannerScanning:
     """Test scanning workflow for TrivyRepoScanner."""
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_scan_successful_execution(
         self,
         mock_find_executable,
@@ -351,9 +327,7 @@ class TestTrivyRepoScannerScanning:
             mock_resolve.assert_called_once()
             mock_subprocess.assert_called_once()
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_scan_pre_scan_failure(
         self, mock_find_executable, mock_plugin_context, mock_target_directory
     ):
@@ -371,9 +345,7 @@ class TestTrivyRepoScannerScanning:
             assert result is False
             mock_post_scan.assert_called_once()
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_scan_dependencies_not_satisfied(
         self, mock_find_executable, mock_plugin_context, mock_target_directory
     ):
@@ -451,9 +423,7 @@ class TestTrivyRepoScannerTargetValidation:
 class TestTrivyRepoScannerErrorHandling:
     """Test comprehensive error handling for TrivyRepoScanner."""
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_subprocess_execution_failure(
         self,
         mock_find_executable,
@@ -480,9 +450,7 @@ class TestTrivyRepoScannerErrorHandling:
             with pytest.raises(ScannerError, match="Subprocess failed"):
                 scanner.scan(target=mock_target_directory, target_type="source")
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_general_exception_handling(
         self,
         mock_find_executable,
@@ -511,9 +479,7 @@ class TestTrivyRepoScannerErrorHandling:
 
             assert "Trivy scan failed: Test error message" in str(exc_info.value)
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_directory_creation_error(
         self, mock_find_executable, mock_plugin_context, mock_target_directory
     ):
@@ -530,9 +496,7 @@ class TestTrivyRepoScannerErrorHandling:
             with pytest.raises(ScannerError):
                 scanner.scan(target=mock_target_directory, target_type="source")
 
-    @patch(
-        "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.find_executable"
-    )
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_argument_resolution_error(
         self,
         mock_find_executable,
