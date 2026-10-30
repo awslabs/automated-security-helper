@@ -126,10 +126,18 @@ def _scope(tmp_path, backend=None, **fields) -> scope.SandboxScope:
 
 
 def test_a_remembered_refusal_keeps_no_traceback(monkeypatch):
+    """The refusal is kept for the process's life, so its frames must not be: not
+    its own traceback, and not the chain behind it. A real probe raises from
+    inside an ``except`` (the OSError of a missing binary), so the refusal
+    carries a ``__context__`` whose traceback holds the probe's frames; both are
+    dropped."""
     scope.clear_backend_cache()
 
     def probe(name):
-        raise SandboxUnavailable("bwrap is not installed")
+        try:
+            raise OSError("bwrap: command not found")
+        except OSError:
+            raise SandboxUnavailable("bwrap is not installed")
 
     monkeypatch.setattr(scope, "_probe_backend", probe)
     try:
@@ -138,6 +146,8 @@ def test_a_remembered_refusal_keeps_no_traceback(monkeypatch):
         (kept,) = list(scope._resolved.values())
         assert isinstance(kept, SandboxUnavailable)
         assert kept.__traceback__ is None
+        assert kept.__context__ is None
+        assert kept.__cause__ is None
     finally:
         scope.clear_backend_cache()
 
@@ -272,13 +282,19 @@ def test_the_probe_directory_is_removed_when_the_scope_build_raises(
     scratch.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(scratch))
 
+    made: list = []
+
     def exploding(plugin, context, scan_target):
+        # The positive control: the probe directory exists when the build fails,
+        # so an empty scratch afterwards means it was removed, not never made.
+        made.extend(scratch.iterdir())
         raise RuntimeError("not a refusal")
 
     monkeypatch.setattr(scope, "scanner_sandbox_scope", exploding)
     with pytest.raises(RuntimeError, match="not a refusal"):
         with scope._sandboxed_probe_scope(_Plugin, _context(tmp_path)):
             pass
+    assert len(made) == 1 and made[0].name.startswith("ash-sandbox-probe-"), made
     assert list(scratch.iterdir()) == []
 
 
@@ -328,23 +344,29 @@ def test_the_sweep_runs_first_and_passes_over_the_plans_private_dirs(
     under the results directory, which uv fills with links, is not the scanner's
     to be counted: the plan names it and the sweep is told to pass it over."""
     recorder = _Recorder()
-    backend_cleanup = lambda: None  # noqa: E731 - identity is what is asserted
-    recorder.cleanups = [backend_cleanup]
+    order: list = []
+    recorder.cleanups = [lambda: order.append("backend")]
     recorder.private_dirs = [tmp_path / "out" / "scanner" / ".sandbox-cache-abc"]
     swept: list = []
     monkeypatch.setattr(scope, "register_writable_root", lambda path: Path(path))
-    monkeypatch.setattr(scope, "release_writable_root", lambda path: None)
     monkeypatch.setattr(
-        scope,
-        "sweep_writable",
-        lambda roots, values=(), **kwargs: swept.append((list(roots), kwargs)) or 0,
+        scope, "release_writable_root", lambda path: order.append("release")
     )
 
-    plan = scope._plan_spawn(_scope(tmp_path, backend=recorder), ["tool"], {}, None)
+    def recording_sweep(roots, values=(), **kwargs):
+        order.append("sweep")
+        swept.append((list(roots), kwargs))
+        return 0
 
-    assert len(plan.cleanup) == 3
-    assert plan.cleanup[2] is backend_cleanup, "the backend's step comes last"
-    plan.cleanup[0]()
+    monkeypatch.setattr(scope, "sweep_writable", recording_sweep)
+
+    plan = scope._plan_spawn(_scope(tmp_path, backend=recorder), ["tool"], {}, None)
+    for step in plan.cleanup:
+        step()
+
+    # Each step identified by what it did, in the order it ran: the sweep first,
+    # the release of this spawn's roots, the backend's own steps last.
+    assert order == ["sweep", "release", "backend"]
     assert swept == [
         ([Path("/w")], {"values_unread": False, "skip": recorder.private_dirs})
     ]

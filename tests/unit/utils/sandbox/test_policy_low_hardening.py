@@ -15,6 +15,7 @@ component only. Everything reads the built policy in-process; nothing runs.
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -101,6 +102,19 @@ def test_pythonpath_keeps_only_its_anchored_entries(layout):
     assert "PYTHONPATH" not in policy.filter_env({"PYTHONPATH": "rel:."})
 
 
+def test_a_pythonpath_named_by_the_scanner_is_anchored_too(layout):
+    """A PYTHONPATH the scanner declares (or is granted) by name is held to the
+    same rule as one the PYTHON prefix passes: a relative or empty entry would be
+    read against the scanned tree whichever list let the variable through."""
+    policy = _policy(layout, SandboxRequirements(env_names=("PYTHONPATH",)))
+    assert "PYTHONPATH" in policy.env_names
+    env = policy.filter_env(
+        {"PYTHONPATH": os.pathsep.join(["rel", "/abs/x", "", ".", "/abs/y"])}
+    )
+    assert env["PYTHONPATH"] == os.pathsep.join(["/abs/x", "/abs/y"])
+    assert "PYTHONPATH" not in policy.filter_env({"PYTHONPATH": "rel:."})
+
+
 def test_a_relative_xdg_value_is_ignored_as_uv_ignores_it(layout, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", "rel-data")
     monkeypatch.setenv("XDG_CACHE_HOME", "rel-cache")
@@ -110,11 +124,48 @@ def test_a_relative_xdg_value_is_ignored_as_uv_ignores_it(layout, monkeypatch):
     assert policy_module.uv_cache_directory() == layout.home / ".cache" / "uv"
 
 
-def test_an_unexaminable_tools_directory_gives_no_lock(layout, monkeypatch):
-    """A name past the system's limit raises from the predicates: nothing, not an error."""
+def test_a_tools_directory_that_cannot_exist_gives_no_lock(layout, monkeypatch):
+    """A name past the system's limit: the directory is not there, so nothing is
+    mounted and no lock is granted. The guards themselves are measured by the
+    test below; on Python 3.13 and later ``Path.exists`` swallows the error this
+    name raises, so this case alone would pass with the guards deleted."""
     monkeypatch.setenv("XDG_DATA_HOME", str(layout.home.parent / ("x" * 300)))
     assert policy_module._uv_tool_locks() == []
     assert policy_module._uv_directories() == []
+
+
+@pytest.mark.parametrize("code", [errno.ENAMETOOLONG, errno.EACCES])
+def test_an_unexaminable_tools_directory_is_no_error(layout, monkeypatch, code):
+    """A tools directory whose lock cannot be stat'ed and whose entries cannot be
+    listed (a name past the limit, a permission refusal) contributes no lock and
+    no tool, and raises nothing: the reads are made to fail with the errno, so the
+    guarded paths run whatever the interpreter's own path checks swallow."""
+    data = layout.home.parent / "data"
+    tools = data / "uv" / "tools"
+    tools.mkdir(parents=True)
+    (tools / ".lock").write_text("")
+    (tools / "tool" / "bin").mkdir(parents=True)
+    monkeypatch.setenv("XDG_DATA_HOME", str(data))
+    real_lstat = os.lstat
+    real_iterdir = Path.iterdir
+
+    def refusing_lstat(path, *args, **kwargs):
+        if Path(path).name == ".lock":
+            raise OSError(code, os.strerror(code), str(path))
+        return real_lstat(path, *args, **kwargs)
+
+    def refusing_iterdir(self):
+        if self == tools:
+            raise OSError(code, os.strerror(code), str(self))
+        return real_iterdir(self)
+
+    monkeypatch.setattr(os, "lstat", refusing_lstat)
+    monkeypatch.setattr(Path, "iterdir", refusing_iterdir)
+
+    assert policy_module._uv_tool_locks() == []
+    mounted = policy_module._uv_directories()
+    assert tools.absolute() in mounted
+    assert len(mounted) == 1, mounted
 
 
 @pytest.mark.skipif(
@@ -186,16 +237,33 @@ def test_a_venv_directly_in_the_home_is_mounted_with_its_tool(layout):
     assert Path(os.path.realpath(venv)) in prefixes
 
 
-def test_the_env_shebang_program_follows_envs_own_grammar():
-    program = policy_module._env_program
-    assert program(["python3"]) == "python3"
-    assert program(["FOO=bar", "python3", "-u"]) == "python3"
-    assert program(["-u", "FOO", "python3"]) == "python3"
-    assert program(["--unset=FOO", "-i", "python3"]) == "python3"
-    assert program(["-S", "python3", "-u"]) == "python3"
-    assert program(["-C", "/dir", "ruby"]) == "ruby"
-    assert program([]) is None
-    assert program(["FOO=bar"]) is None
+@pytest.mark.parametrize(
+    "words, program",
+    [
+        (["python3"], "python3"),
+        (["FOO=bar", "python3", "-u"], "python3"),
+        (["-u", "FOO", "python3"], "python3"),
+        (["--unset", "FOO", "python3"], "python3"),
+        (["-uFOO", "python3"], "python3"),
+        (["--unset=FOO", "-i", "python3"], "python3"),
+        (["-S", "python3", "-u"], "python3"),
+        (["-C", "/dir", "ruby"], "ruby"),
+        (["--chdir=/dir", "ruby"], "ruby"),
+        (["-a", "argv0", "python3"], "python3"),
+        (["--argv0", "argv0", "python3"], "python3"),
+        (["-", "python3"], "python3"),
+        (["--", "python3"], "python3"),
+        (["-i", "--", "FOO=bar", "python3"], "python3"),
+        # BSD and macOS env: -P takes the search path, -L the login class.
+        (["-P", "/opt/bin", "python3"], "python3"),
+        (["-L", "daemon", "python3"], "python3"),
+        ([], None),
+        (["FOO=bar"], None),
+        (["-u", "FOO"], None),
+    ],
+)
+def test_the_env_shebang_program_follows_envs_own_grammar(words, program):
+    assert policy_module._env_program(words) == program
 
 
 def test_an_empty_sys_executable_mounts_no_working_directory(layout, monkeypatch):
@@ -207,11 +275,23 @@ def test_an_empty_sys_executable_mounts_no_working_directory(layout, monkeypatch
     paths, _data = policy_module._ash_paths()
 
     mounted = _real(paths)
-    assert Path(os.path.realpath(nested)) not in mounted
-    assert Path(os.path.realpath(nested.parent.parent)) not in mounted
+    real_nested = Path(os.path.realpath(nested))
+    # Neither the working directory ("" resolved), nor what a prefix walk would
+    # read as its bin directory and its prefix, nor any directory above it.
+    for leaked in (real_nested, real_nested.parent, real_nested.parent.parent):
+        assert leaked not in mounted, mounted
+    assert not any(p == real_nested or p in real_nested.parents for p in mounted), (
+        mounted
+    )
 
 
-def test_a_top_level_link_directory_is_refused(layout):
+def test_a_link_directory_at_the_top_level_is_refused(layout):
+    """The rule reads the directory's place, not the filesystem: a top-level
+    directory that is not a system read path is refused whether or not it exists
+    (a real top-level link cannot be made without root), and a system read path
+    or a directory below the top level is not. The /opt control holds where /opt
+    is a directory; a host that makes /opt a link (OSTree) would read it the
+    same, since nothing here follows links."""
     homes = [Path(os.path.realpath(layout.home))]
     with pytest.raises(SandboxUnavailable, match="top-level"):
         policy_module._refuse_a_home_among(
@@ -239,11 +319,15 @@ def test_the_xdg_data_home_is_broader_than_a_tool(layout):
 
 
 def test_a_declared_read_path_naming_the_home_is_refused(layout, monkeypatch):
+    """The home itself, and a directory above it, which would expose the home
+    with everything beside it: neither, nor anything above the home, is mounted.
+    A directory directly in the home (~/.gem) is admitted (the control)."""
     requirements = SandboxRequirements(read_paths=("$GEM_HOME",))
-    monkeypatch.setenv("GEM_HOME", str(layout.home))
-    assert Path(os.path.realpath(layout.home)) not in _real(
-        _policy(layout, requirements).read_only
-    )
+    home = Path(os.path.realpath(layout.home))
+    for named in (layout.home, layout.home.parent):
+        monkeypatch.setenv("GEM_HOME", str(named))
+        mounted = _real(_policy(layout, requirements).read_only)
+        assert not any(p == home or p in home.parents for p in mounted), mounted
     gems = layout.home / ".gem"
     gems.mkdir()
     monkeypatch.setenv("GEM_HOME", str(gems))
@@ -271,6 +355,41 @@ def test_a_declared_read_path_inside_the_tree_is_data(layout):
     policy = _policy(layout, SandboxRequirements(read_paths=(str(vendor),)))
     assert Path(os.path.realpath(vendor)) in _real(policy.read_only)
     assert Path(os.path.realpath(vendor)) not in _real(policy.executable)
+
+
+def test_an_operators_read_path_a_scanner_also_declares_stays_executable(layout):
+    """A declared read path that names the operator's ``extra_read_paths`` entry
+    exactly is the operator's grant, not the repository's: it stays executable,
+    as the entry does when no scanner names it (the control)."""
+    tools = layout.source / "tools"
+    tools.mkdir()
+    requirements = SandboxRequirements(read_paths=(str(tools),))
+
+    declared_too = _policy(layout, requirements, extra_read_paths=(str(tools),))
+    operator_only = _policy(layout, extra_read_paths=(str(tools),))
+    declared_only = _policy(layout, requirements)
+
+    assert Path(os.path.realpath(tools)) in _real(operator_only.executable)
+    assert Path(os.path.realpath(tools)) in _real(declared_too.executable)
+    assert Path(os.path.realpath(tools)) not in _real(declared_only.executable)
+
+
+def test_a_too_broad_uv_tool_dir_is_warned_about_once_per_policy(layout, monkeypatch):
+    """The three readers of uv's directories (the mounts, the environment hints,
+    the tools lock) take one screened reading, so the warning is logged once."""
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    monkeypatch.setenv("UV_TOOL_DIR", str(layout.home))
+    warned = []
+    monkeypatch.setattr(
+        ASH_LOGGER, "warning", lambda message, *args, **kwargs: warned.append(message)
+    )
+
+    policy = _policy(layout)
+
+    about_tools = [m for m in warned if "UV_TOOL_DIR" in m]
+    assert len(about_tools) == 1, warned
+    assert Path(os.path.realpath(layout.home)) not in _real(policy.read_only)
 
 
 def test_a_staged_tool_does_not_read_an_import_entry_inside_the_tree(
@@ -331,9 +450,12 @@ def test_a_uv_variable_the_environment_sets_is_left_alone(layout, monkeypatch):
     tools.mkdir()
     monkeypatch.setenv("UV_TOOL_DIR", str(tools))
 
-    env = _policy(layout).filter_env({"UV_TOOL_DIR": str(tools)})
+    # A spelling the policy would never derive itself (a trailing separator), so
+    # a value overwritten with the derived directory could not read as kept.
+    as_given = str(tools) + os.sep
+    env = _policy(layout).filter_env({"UV_TOOL_DIR": as_given})
 
-    assert env["UV_TOOL_DIR"] == str(tools)
+    assert env["UV_TOOL_DIR"] == as_given
     assert Path(env["UV_PYTHON_INSTALL_DIR"]) == data / "uv" / "python"
 
 

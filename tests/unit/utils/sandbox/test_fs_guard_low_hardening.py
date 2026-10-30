@@ -198,10 +198,17 @@ def test_an_atomic_write_replaces_a_multi_name_entry_and_spares_the_other_name(
 
 @POSIX
 def test_an_atomic_write_keeps_the_files_mode(root):
+    """A mode no creation path produces: the staging file is opened 0o666 less the
+    umask (0o644 under the one set here), so a writer that copied nothing would
+    end at 0o644 and not at the 0o640 the file had."""
     target = root / "secret.json"
     target.write_text("old")
-    target.chmod(0o600)
-    with open_for_atomic_write(target) as handle:
-        handle.write("new")
-    assert stat.S_IMODE(os.stat(target).st_mode) == 0o600
+    target.chmod(0o640)
+    previous = os.umask(0o022)
+    try:
+        with open_for_atomic_write(target) as handle:
+            handle.write("new")
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(os.stat(target).st_mode) == 0o640
     assert target.read_text() == "new"

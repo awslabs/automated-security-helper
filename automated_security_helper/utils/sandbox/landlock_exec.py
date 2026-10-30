@@ -101,11 +101,20 @@ REAP_DEADLINE_SECONDS = 5.0
 #: reaps leaves what its scanner started running, so a stop is finished well
 #: inside a grace of half a second.
 STOP_REAP_DEADLINE_SECONDS = 0.25
+#: How long after the first stop signal a scanner still running is SIGKILLed.
+#: Half the stop budget: a scanner that handles the signal gets that long to end
+#: the way it chooses, and the reap, whose deadline counts from the same signal,
+#: keeps the other half for passes over what the scanner left. Armed at the whole
+#: budget, the kill landed when the reap deadline had already passed, and a
+#: scanner that was slow to stop (a JVM's shutdown hooks, npm passing the signal
+#: to its children) left the reap no time but its one forced pass.
+STOP_KILL_DELAY_SECONDS = STOP_REAP_DEADLINE_SECONDS / 2
 #: How long the reap goes on after the scanner's exit on a stop, at least. A
-#: scanner that ignores the stop signal is SIGKILLed when STOP_REAP_DEADLINE_SECONDS
-#: ends, the moment the reap deadline would end too, which left what it started
-#: one reap pass and no second look; this keeps a short window of passes after
-#: it. Both together stay inside ASH's PROMPT_STOP_GRACE_SECONDS (0.5).
+#: scanner that ignores the stop signal is SIGKILLed STOP_KILL_DELAY_SECONDS after
+#: it; one that handles the signal can take that long and more to exit, up to the
+#: moment the reap deadline would end too, which left what it started one reap
+#: pass and no second look; this keeps a short window of passes after the exit.
+#: Both together stay inside ASH's PROMPT_STOP_GRACE_SECONDS (0.5).
 STOP_REAP_MINIMUM_SECONDS = 0.1
 # prctl(PR_SET_SECCOMP) rather than seccomp(2): the syscall number differs per arch.
 PR_SET_SECCOMP = 22
@@ -815,20 +824,25 @@ def _forward_stop(
     still_running: Callable[[], bool],
     stopped_at: List[float],
 ) -> None:
-    """Pass the stop signal ASH sent on to the scanner; SIGKILL it if it lingers.
+    """Pass the stop signal ASH sent on to the scanner's group; SIGKILL it if it lingers.
 
     The scanner gets the signal ASH sent the wrapper (SIGTERM on a timeout), as the
     same scanner run unwrapped would, so one that handles it ends the way it
     chooses and its exit is reported as that signal, not as a SIGKILL the wrapper
-    made up. A scanner still running STOP_REAP_DEADLINE_SECONDS later is
-    SIGKILLed by an interval timer's SIGALRM, so the stop still finishes inside the
-    grace ASH gives the wrapper. ``stopped_at`` records the first stop's clock
-    (the reap deadline counts from it), and the timer is armed by that first stop
-    alone: a second signal inside the quarter second (ASH's SIGTERM after a group
-    SIGINT, a repeated Ctrl-C, a supervisor that resends) is passed on, but a
-    timer re-armed by each would be pushed past the reap deadline, ASH would
-    SIGKILL the wrapper while it waited, and the scanner's tree would survive
-    its parent's death signal, which it already ignored.
+    made up. Unwrapped, ASH signals the scanner's whole process group, so the
+    signal goes to the group here too (``_signal_scanner``): the child leads a
+    session of its own, and what it started in that group (npm's children, a
+    JVM's helpers) gets the stop as the scanner does, rather than first learning
+    of it from the reap's SIGKILL. A scanner still running STOP_KILL_DELAY_SECONDS
+    later is SIGKILLed, group and all, by an interval timer's SIGALRM: half the
+    stop budget, so the reap, whose deadline counts from the same signal, keeps
+    the other half for passes over what the scanner left. ``stopped_at`` records
+    the first stop's clock, and the timer is armed by that first stop alone: a
+    second signal inside the budget (ASH's SIGTERM after a group SIGINT, a
+    repeated Ctrl-C, a supervisor that resends) is passed on, but a timer
+    re-armed by each would be pushed past the reap deadline, ASH would SIGKILL
+    the wrapper while it waited, and the scanner's tree would survive its
+    parent's death signal, which it already ignored.
     """
     first = not stopped_at
     if first:
@@ -837,7 +851,7 @@ def _forward_stop(
         # Reaped, or about to be: its pid may already be another process's.
         return
     try:
-        os.kill(pid, signum)
+        _signal_scanner(pid, signum)
     except OSError:
         return
     if not first:
@@ -846,12 +860,29 @@ def _forward_stop(
     def kill_if_lingering(_signum: int, _frame: object) -> None:
         if still_running():
             try:
-                os.kill(pid, signal.SIGKILL)
+                _signal_scanner(pid, signal.SIGKILL)
             except OSError:
                 pass
 
     signal.signal(signal.SIGALRM, kill_if_lingering)
-    signal.setitimer(signal.ITIMER_REAL, STOP_REAP_DEADLINE_SECONDS)
+    signal.setitimer(signal.ITIMER_REAL, STOP_KILL_DELAY_SECONDS)
+
+
+def _signal_scanner(pid: int, signum: int) -> None:
+    """Send ``signum`` to the scanner's process group, or to the scanner alone.
+
+    The child calls setsid in ``_child_setup``, so from then on its process group
+    has its own pid as id and ``killpg`` reaches it and everything it started in
+    that group, the way ASH's own stop reaches an unwrapped scanner's group. Until
+    that call (the instructions right after the fork) no group carries the pid, the
+    kernel answers ESRCH, and the signal goes to the pid alone; the child's own
+    group is still the wrapper's then, which is never signalled from here. Any
+    other error is the caller's to read, as before.
+    """
+    try:
+        os.killpg(pid, signum)
+    except ProcessLookupError:
+        os.kill(pid, signum)
 
 
 def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
@@ -944,8 +975,10 @@ def _reap_deadline(exited_at: float, stopped_at: Optional[float]) -> float:
     After a stop (``stopped_at``, the first stop signal's clock) it ends sooner:
     STOP_REAP_DEADLINE_SECONDS from that signal, as ASH SIGKILLs a wrapper that
     outlives its grace, but never before STOP_REAP_MINIMUM_SECONDS after the exit,
-    so a scanner the timer had to SIGKILL at that same deadline still leaves time
-    for more than one pass over what it started. The exit-based bound caps both.
+    so a scanner that took the whole budget to exit (the timer's SIGKILL lands
+    halfway through it; a scanner that handles the signal can take longer) still
+    leaves time for more than one pass over what it started. The exit-based bound
+    caps both.
     """
     if stopped_at is None:
         return exited_at + REAP_DEADLINE_SECONDS

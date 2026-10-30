@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess  # nosec B404 - CompletedProcess is built by hand, nothing runs
+import sys
 import tempfile
 from pathlib import Path
 
@@ -45,6 +47,13 @@ from automated_security_helper.utils.sandbox.policy import (
 )
 
 pytestmark = pytest.mark.unit
+
+#: The tests that make symlinks, or hand a POSIX program path to the Landlock plan:
+#: a Windows runner may not create links, resolves "/" to a drive, and on Python
+#: 3.13 reads "/bin/true" as relative, so the sibling carve file skips them too.
+POSIX = pytest.mark.skipif(
+    sys.platform == "win32", reason="symlinks and POSIX program paths"
+)
 
 
 def _real(path) -> Path:
@@ -231,7 +240,12 @@ def test_a_cache_whose_filesystem_refuses_an_overlay_is_mounted_read_only(
         plan.run_cleanup()
 
 
-def test_a_root_read_path_hides_no_link(layout):
+@POSIX
+def test_a_root_read_path_hides_no_link(layout, monkeypatch):
+    # No shared temp directory stands in for the missing bind: on a runner whose
+    # temporary directory is /tmp, a tmpfs over /tmp covered the link more closely
+    # than a bind of "/" and had it recreated with or without the fix.
+    monkeypatch.setattr(backends, "_SHARED_TMPFS", ())
     real = layout.tmp / "real"
     (real / "out").mkdir(parents=True)
     alias = layout.tmp / "alias"
@@ -245,6 +259,7 @@ def test_a_root_read_path_hides_no_link(layout):
     assert _real(layout.tmp) / "alias" in links
 
 
+@POSIX
 def test_a_link_whose_target_passes_through_another_link_is_recreated(layout):
     real = layout.tmp / "real"
     (real / "out").mkdir(parents=True)
@@ -258,6 +273,7 @@ def test_a_link_whose_target_passes_through_another_link_is_recreated(layout):
     assert _real(layout.tmp) / "b" in links, links
 
 
+@POSIX
 def test_a_link_covered_by_an_unread_tmpfs_is_recreated_in_it(layout):
     root = layout.tmp / "root"
     tree = root / "tree"
@@ -281,6 +297,7 @@ def test_a_link_covered_by_an_unread_tmpfs_is_recreated_in_it(layout):
     assert _real(root) / "otherlink" not in links
 
 
+@POSIX
 def test_no_link_is_recreated_over_a_shared_tmpfs(layout, monkeypatch):
     realtmp = layout.tmp / "realtmp"
     (realtmp / "out").mkdir(parents=True)
@@ -349,6 +366,7 @@ def test_bwrap_binds_the_uv_tool_lock_read_write(layout):
     assert _real(lock) not in _mounts(argv, "--ro-bind")
 
 
+@POSIX
 def test_the_resolver_file_is_bound_not_its_directory(layout, monkeypatch):
     (layout.tmp / "run" / "resolve").mkdir(parents=True)
     stub = layout.tmp / "run" / "resolve" / "stub-resolv.conf"
@@ -498,6 +516,7 @@ def _landlock_document(plan) -> dict:
     return json.loads(plan.argv[plan.argv.index("--policy") + 1])
 
 
+@POSIX
 def test_a_landlock_plan_that_raises_leaves_no_private_root(layout, monkeypatch):
     scratch = layout.tmp / "scratch"
     scratch.mkdir()
@@ -514,6 +533,7 @@ def test_a_landlock_plan_that_raises_leaves_no_private_root(layout, monkeypatch)
     assert list(scratch.iterdir()) == []
 
 
+@POSIX
 def test_landlock_grants_the_scans_data_read_without_exec(layout, monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
     source = layout.tmp / "src"
@@ -541,6 +561,7 @@ def test_landlock_grants_the_scans_data_read_without_exec(layout, monkeypatch):
         plan.run_cleanup()
 
 
+@POSIX
 def test_landlock_links_nothing_into_the_private_home_for_a_root_home(
     layout, monkeypatch
 ):
@@ -578,15 +599,50 @@ def test_the_profile_denies_the_third_shared_temp_directory_and_names_shm(layout
     assert "apple.shm.notification_center" in profile
 
 
+def _last_exec_rule(lines, path):
+    """The last process-exec rule whose subpaths or literals cover ``path``: in SBPL
+    the last matching rule decides."""
+    covering = [
+        line
+        for line in lines
+        if line.startswith(("(allow process-exec", "(deny process-exec"))
+        and (
+            any(
+                path == Path(subpath) or Path(subpath) in path.parents
+                for subpath in re.findall(r'\(subpath "([^"]*)"\)', line)
+            )
+            or any(
+                path == Path(literal)
+                for literal in re.findall(r'\(literal "([^"]*)"\)', line)
+            )
+        )
+    ]
+    return covering[-1]
+
+
 def test_the_uv_tool_lock_is_writable_but_not_executable(layout):
+    """The lock sits inside an executable tools directory, so an allow covers it;
+    the rule that decides, the last one covering the lock, is the deny."""
     lock = layout.tmp / "tools" / ".lock"
     lock.parent.mkdir()
     lock.write_text("")
-    lines = _profile(layout, _policy(layout, uv_tool_locks=(lock,))).splitlines()
-    literal = f'(literal "{_real(lock).as_posix()}")'
-    assert any(
-        line.startswith("(deny process-exec") and literal in line for line in lines
+    policy = _policy(
+        layout,
+        read_only=(layout.system, lock.parent),
+        executable=(lock.parent,),
+        uv_tool_locks=(lock,),
     )
+    lines = _profile(layout, policy).splitlines()
+    literal = f'(literal "{_real(lock).as_posix()}")'
+    allowed = [
+        line
+        for line in lines
+        if line.startswith("(allow process-exec")
+        and f'(subpath "{_real(lock.parent).as_posix()}")' in line
+    ]
+    assert allowed, lines
+    deciding = _last_exec_rule(lines, _real(lock))
+    assert deciding.startswith("(deny process-exec") and literal in deciding, lines
     assert any(
         line.startswith("(allow file-read* file-write*") and literal in line
         for line in lines

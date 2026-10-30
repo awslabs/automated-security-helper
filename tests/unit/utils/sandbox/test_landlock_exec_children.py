@@ -353,7 +353,9 @@ def pidfd_refused(monkeypatch):
 def test_a_refused_pidfd_pin_falls_back_to_the_kill_by_number(pidfd_refused):
     """pidfd_open refused by the kernel (ENOSYS or EPERM under a seccomp profile,
     EMFILE) is not "the process is gone": the descendant is still the scanner's
-    and is killed by number, as on a kernel without the call."""
+    and is killed by number, as on a kernel without the call. Each refusal here
+    is the stand-in raising the errno, the EMFILE row included: the wrapper is not
+    run out of descriptors, and the parent read that follows is the stand-in's."""
     for code in (errno.ENOSYS, errno.EPERM, errno.EMFILE):
         calls = pidfd_refused(code)
 
@@ -756,7 +758,9 @@ def stop_calls(monkeypatch):
 
     def run(signals: List[Tuple[int, bool]]) -> Tuple[List[Tuple[str, tuple]], List]:
         calls: List[Tuple[str, tuple]] = []
-        monkeypatch.setattr(landlock_exec, "os", _Recording(os, {"kill"}, calls))
+        monkeypatch.setattr(
+            landlock_exec, "os", _Recording(os, {"kill", "killpg"}, calls)
+        )
         monkeypatch.setattr(
             landlock_exec, "signal", _Recording(signal, {"signal", "setitimer"}, calls)
         )
@@ -772,17 +776,22 @@ def stop_calls(monkeypatch):
 
 
 def test_repeated_stop_signals_arm_the_kill_timer_once(stop_calls):
-    """Every stop signal is passed on to the scanner, but the SIGKILL timer counts
-    from the first one, as the reap deadline does: a second signal inside the
-    quarter second does not push the kill past that deadline."""
+    """Every stop signal is passed on to the scanner's group, but the SIGKILL timer
+    counts from the first one, as the reap deadline does: a second signal inside
+    the budget does not push the kill past that deadline. The timer is armed at
+    half the budget, so the reap keeps the other half."""
     calls, stopped_at = stop_calls(
         [(signal.SIGINT, True), (signal.SIGTERM, True), (signal.SIGTERM, True)]
     )
 
-    kills = [args for name, args in calls if name == "kill"]
+    kills = [args for name, args in calls if name == "killpg"]
     assert kills == [(42, signal.SIGINT), (42, signal.SIGTERM), (42, signal.SIGTERM)]
+    assert [args for name, args in calls if name == "kill"] == []
     timers = [args for name, args in calls if name == "setitimer"]
-    assert timers == [(signal.ITIMER_REAL, landlock_exec.STOP_REAP_DEADLINE_SECONDS)]
+    assert timers == [(signal.ITIMER_REAL, landlock_exec.STOP_KILL_DELAY_SECONDS)]
+    assert (
+        landlock_exec.STOP_KILL_DELAY_SECONDS < landlock_exec.STOP_REAP_DEADLINE_SECONDS
+    )
     assert stopped_at == [10.0]
 
 
@@ -796,16 +805,17 @@ def test_a_stop_after_the_scanner_exited_is_recorded_and_sends_nothing(stop_call
 
 
 def test_the_reap_after_a_stop_keeps_a_minimum_window_once_the_scanner_exited():
-    """A scanner that ignores the stop is SIGKILLed when the stop deadline ends,
-    which is when the reap used to end too, leaving its tree one pass: the reap
-    now runs at least STOP_REAP_MINIMUM_SECONDS past the exit, and the two
-    together stay inside the half second ASH gives a prompt stop."""
+    """A scanner that takes the whole stop budget to exit (one that handles the
+    signal slowly; one that ignores it is SIGKILLed halfway through) used to leave
+    its tree one reap pass, since the reap ended with the budget: the reap now runs
+    at least STOP_REAP_MINIMUM_SECONDS past the exit, and the two together stay
+    inside the half second ASH gives a prompt stop."""
     stop, quarter = 10.0, landlock_exec.STOP_REAP_DEADLINE_SECONDS
     minimum = landlock_exec.STOP_REAP_MINIMUM_SECONDS
 
     # Exited at once on the signal: the deadline is the stop's, unchanged.
     assert landlock_exec._reap_deadline(stop + 0.05, stop) == stop + quarter
-    # SIGKILLed at the stop deadline: a minimum window follows the exit.
+    # Exited only at the stop deadline: a minimum window follows the exit.
     assert landlock_exec._reap_deadline(stop + quarter, stop) == (
         stop + quarter + minimum
     )

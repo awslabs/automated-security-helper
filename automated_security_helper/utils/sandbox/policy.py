@@ -294,6 +294,16 @@ class SandboxPolicy:
         for key, value in env.items():
             if key in DROPPED_ENV_NAMES:
                 continue
+            if key == "PYTHONPATH":
+                # Passed through for the workers ASH starts with its own
+                # interpreter; a relative or empty entry would be read against the
+                # scanner's working directory, the scanned tree. Cleaned before
+                # the named allowlist is consulted, so a PYTHONPATH a scanner
+                # declares or is granted by name is held to the same rule as one
+                # the PYTHON prefix passes.
+                value = _anchored_entries(value)
+                if not value:
+                    continue
             if key in named:
                 kept[key] = value
                 continue
@@ -308,13 +318,6 @@ class SandboxPolicy:
                 continue
             if _URL_USERINFO.match(value or ""):
                 continue
-            if key == "PYTHONPATH":
-                # Passed through for the workers ASH starts with its own
-                # interpreter; a relative or empty entry would be read against the
-                # scanner's working directory, the scanned tree.
-                value = _anchored_entries(value)
-                if not value:
-                    continue
             kept[key] = value
         kept["HOME"] = self.home.as_posix()
         kept.update(self.extra_env)
@@ -421,7 +424,12 @@ def _holds_a_python_lib(prefix: Path) -> bool:
         return False
 
 
-def _uv_directories() -> List[Path]:
+#: uv's tools directory and its managed-interpreter directory, as
+#: ``_uv_data_directories`` returns them; a caller that has them passes them on.
+UvData = Tuple[Optional[Path], Optional[Path]]
+
+
+def _uv_directories(data: Optional[UvData] = None) -> List[Path]:
     """uv's tool and interpreter directories, without starting uv.
 
     ``uv tool run`` resolves the tool's environment from its cache and runs it with a
@@ -429,12 +437,14 @@ def _uv_directories() -> List[Path]:
     environment variables and XDG defaults rather than by running ``uv tool dir``:
     this runs for every scanner spawn, and a spawn here would itself need wrapping.
     A directory UV_TOOL_DIR or UV_PYTHON_INSTALL_DIR names is screened first
-    (_screened_uv_directory). Every filesystem predicate here runs under an OSError
-    guard: a tools directory whose entries cannot be examined (a name past the
-    system's length limit, an unreadable entry) contributes nothing rather than
-    failing the policy.
+    (_screened_uv_directory, which warns about one too broad to mount); ``data``
+    is that reading when the caller has made it already, so one policy screens,
+    and warns, once rather than at each of the three places that need it. Every
+    filesystem predicate here runs under an OSError guard: a tools directory whose
+    entries cannot be examined (a name past the system's length limit, an
+    unreadable entry) contributes nothing rather than failing the policy.
     """
-    tools, pythons = _uv_data_directories()
+    tools, pythons = _uv_data_directories() if data is None else data
     found = _existing([tools, pythons])
     # Each installed tool's environment runs on the interpreter it was created
     # with, which need not be in uv's default python directory: a tool installed
@@ -475,7 +485,7 @@ def _uv_directories() -> List[Path]:
     return _existing(found)
 
 
-def _uv_tool_locks() -> List[Path]:
+def _uv_tool_locks(data: Optional[UvData] = None) -> List[Path]:
     """The ``.lock`` file of uv's tools directory, where one exists.
 
     Granted writable by every backend, since ``uv tool run`` takes uv's advisory
@@ -484,8 +494,9 @@ def _uv_tool_locks() -> List[Path]:
     link, ``st_nlink`` above 1) is not granted either, since the grant would reach
     the other name's file and a scanner could hold uv's lock on it through this
     one. Read with lstat, so the link test and the name count come from one call.
+    ``data`` is ``_uv_data_directories``'s reading when the caller has it.
     """
-    tool_dir, _pythons = _uv_data_directories()
+    tool_dir, _pythons = _uv_data_directories() if data is None else data
     # Not the lock of a tools directory too broad to mount (_uv_directories warns).
     if tool_dir is None or _broader_than_a_tool(tool_dir):
         return []
@@ -507,7 +518,9 @@ def uv_cache_directory() -> Optional[Path]:
 
 
 def _uv_environment(
-    mounted: Sequence[Path], uv_cache: Optional[Path]
+    mounted: Sequence[Path],
+    uv_cache: Optional[Path],
+    data: Optional[UvData] = None,
 ) -> Dict[str, str]:
     """Variables that point a sandboxed uv at the directories the policy mounts.
 
@@ -521,9 +534,10 @@ def _uv_environment(
     used an empty one in the private home. Each variable the environment does not
     set is set to the mounted directory uv would otherwise have computed. A
     backend that mounts the cache read-only points UV_CACHE_DIR at a private
-    directory on top of this (``_private_caches``).
+    directory on top of this (``_private_caches``). ``data`` is
+    ``_uv_data_directories``'s reading when the caller has it.
     """
-    tools, pythons = _uv_data_directories()
+    tools, pythons = _uv_data_directories() if data is None else data
     mounted_real = {os.path.realpath(p) for p in mounted}
     hints: Dict[str, str] = {}
     for name, path in (
@@ -1007,16 +1021,23 @@ def _an_installation_directly_in_a_home(path: Path, homes: Sequence[Path]) -> bo
     return real.parent in homes and _is_an_installation_root(real)
 
 
-#: env's options that take the next word as their argument.
-_ENV_OPTIONS_WITH_AN_ARGUMENT = frozenset({"-u", "--unset", "-C", "--chdir"})
+#: env's options that take the next word as their argument: GNU's ``-u``/``--unset``,
+#: ``-C``/``--chdir`` and ``-a``/``--argv0``, and the BSD and macOS env's ``-P``
+#: (the search path for the program) and ``-L`` (the login class). Read as the
+#: program, the argument would name one that exists nowhere.
+_ENV_OPTIONS_WITH_AN_ARGUMENT = frozenset(
+    {"-u", "--unset", "-C", "--chdir", "-a", "--argv0", "-P", "-L"}
+)
 
 
 def _env_program(words: Sequence[str]) -> Optional[str]:
     """The program an ``env`` shebang line runs: the first word after env's own.
 
-    Skipped: env's options, the argument of one that takes one (``-u NAME``,
-    ``-C DIR``), a ``--option=value`` spelling, ``-S`` (what follows is the split
-    command line, whose first word is the program) and ``NAME=value`` assignments.
+    Skipped: env's options (``--`` and a bare ``-`` among them), the argument of
+    one that takes one (``-u NAME``, ``-C DIR``, BSD's ``-P PATH``), a
+    ``--option=value`` or attached ``-uNAME`` spelling, ``-S`` (what follows is the
+    split command line, whose first word is the program) and ``NAME=value``
+    assignments.
     Read as the program, an assignment or an option's argument named a program
     that exists nowhere, so the interpreter's prefix was not mounted and the
     script could not start inside the sandbox.
@@ -1566,10 +1587,15 @@ def build_scanner_policy(
     tool_prefixes = _executable_prefix(argv0) + [
         path for program in also_runs for path in _executable_prefix(program)
     ]
+    # uv's data directories, read and screened once for this policy: the mounts,
+    # the environment hints and the tools lock below all take this reading, so a
+    # UV_TOOL_DIR too broad to mount is warned about once per spawn, not three
+    # times, and the environment and the home are read once.
+    uv_data = _uv_data_directories()
     read_only = _existing(
         [p for p in (Path(p) for p in SYSTEM_READ_PATHS) if not _under_home(p, homes)]
         + _path_directories(list(trees))
-        + _uv_directories()
+        + _uv_directories(uv_data)
         + ash_paths
         + tool_prefixes
         + screened_declared_read
@@ -1653,13 +1679,24 @@ def build_scanner_policy(
     # inside the scan's data is data too, so sandbox-exec does not give exec back
     # beneath it after the tree's deny. A tool prefix inside the tree (a venv in
     # the scanned project that ASH itself runs from) and an operator's
-    # ``extra_read_paths`` entry there stay executable, as they were.
+    # ``extra_read_paths`` entry there stay executable, as they were: a declared
+    # path that names the operator's entry exactly is the operator's grant, not
+    # the repository's.
     scan_data_real = [Path(os.path.realpath(p)) for p in scan_data]
-    declared_in_data = {
+    operator_reads = {
         os.path.realpath(p)
-        for p in screened_declared_read
-        if _inside_any(Path(os.path.realpath(p)), scan_data_real)
-    } - {os.path.realpath(p) for p in tool_prefixes}
+        for p in (_expand(e) for e in extra_read_paths)
+        if p is not None
+    }
+    declared_in_data = (
+        {
+            os.path.realpath(p)
+            for p in screened_declared_read
+            if _inside_any(Path(os.path.realpath(p)), scan_data_real)
+        }
+        - {os.path.realpath(p) for p in tool_prefixes}
+        - operator_reads
+    )
     not_programs |= declared_in_data
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
 
@@ -1669,7 +1706,7 @@ def build_scanner_policy(
         # with a DNS error rather than running the tool.
         extra_env["UV_OFFLINE"] = "1"
     # Where uv looks for its tools, interpreters and cache inside the sandbox.
-    extra_env.update(_uv_environment([*read_only, *cache], uv_cache))
+    extra_env.update(_uv_environment([*read_only, *cache], uv_cache, uv_data))
     # uv opens its cache for writing on every run, to lock it, so it cannot use one
     # it may only read: where the host cache is read-only, uv gets a private one.
     cache_env = tuple(dict.fromkeys(("UV_CACHE_DIR", *requirements.cache_env)))
@@ -1691,6 +1728,6 @@ def build_scanner_policy(
         system_trust_roots=requirements.system_trust_roots,
         sandbox_exec_env=dict(requirements.sandbox_exec_env),
         unpack_dir_env=requirements.unpack_dir_env,
-        uv_tool_locks=tuple(_uv_tool_locks()),
+        uv_tool_locks=tuple(_uv_tool_locks(uv_data)),
         unread=tuple(unread),
     )

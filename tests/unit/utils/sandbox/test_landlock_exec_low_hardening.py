@@ -5,13 +5,14 @@
 
 A malformed policy or a failed fork exits 126 with an ``ash-landlock:`` line, not
 the interpreter's exit 1; a restriction step that raises in the child is reported
-as such, not as a failed exec; a stop is passed to the scanner as the signal ASH
-sent, with a SIGKILL only for a scanner that lingers; the reap loop kills a pid
-only while it is still a descendant and says which pids outlived the deadline;
-the wrapper turns core dumps off before it dies of the scanner's signal; the
-scan's data is granted read without exec; and the wrapper enters the policy's
-working directory. Nothing forks or restricts: every system call that would is
-replaced.
+as such, not as a failed exec; a stop is passed to the scanner's process group as
+the signal ASH sent, with a SIGKILL halfway through the stop budget only for a
+scanner that lingers; the reap loop kills a pid only while it is still a
+descendant and says which pids outlived the deadline; the wrapper turns core
+dumps off before it dies of the scanner's signal; the scan's data is granted read
+without exec; and the wrapper enters the policy's working directory. Nothing forks
+or restricts: every system call that would is replaced, and the ``no_process_control``
+fixture below makes sure of it for every test of this file.
 """
 
 from __future__ import annotations
@@ -37,6 +38,48 @@ from automated_security_helper.utils.sandbox import landlock_exec  # noqa: E402
 pytestmark = pytest.mark.unit
 
 VALID = json.dumps({"read_only": ["/usr"], "writable": [], "network": False})
+
+#: Every call that would replace, fork, signal or abort the test process. The
+#: wrapper's code runs here unforked, kept harmless only by the stubs each test
+#: puts in place for the one call it expects; a refactor that reached for a
+#: sibling (``execv`` for ``execve``, ``killpg`` or ``raise_signal`` for ``kill``)
+#: would otherwise replace the test runner with the scanner's program, which exits
+#: 0 and ends a run looking green with its tests unrun, or kill it with the
+#: scanner's signal and dump its core.
+_PROCESS_CONTROL = (
+    (os, "execv"),
+    (os, "execve"),
+    (os, "execvp"),
+    (os, "execvpe"),
+    (os, "execl"),
+    (os, "execle"),
+    (os, "execlp"),
+    (os, "execlpe"),
+    (os, "fork"),
+    (os, "kill"),
+    (os, "killpg"),
+    (os, "abort"),
+    (signal, "raise_signal"),
+)
+
+
+@pytest.fixture(autouse=True)
+def no_process_control(monkeypatch):
+    """Fail the test at any process-control call it did not stub itself.
+
+    The test's own ``monkeypatch.setattr`` on the one call it expects lands after
+    this fixture's and wins; every other call of the set fails the test with the
+    call's name instead of acting on the pytest process.
+    """
+
+    def refuse(name):
+        def refused(*args, **kwargs):
+            pytest.fail(f"os.{name} reached the test process; stub it in the test")
+
+        return refused
+
+    for module, name in _PROCESS_CONTROL:
+        monkeypatch.setattr(module, name, refuse(name), raising=False)
 
 
 class _Exit(BaseException):
@@ -181,11 +224,20 @@ def test_the_reap_loop_returns_what_outlived_the_deadline(monkeypatch):
     assert landlock_exec._reap_leftovers(lambda: 1.0) == []
 
 
-def test_a_stop_is_passed_on_as_sent_and_a_lingering_scanner_is_killed(monkeypatch):
-    kills = []
+def test_a_stop_is_passed_on_to_the_scanners_group_and_a_lingering_one_is_killed(
+    monkeypatch,
+):
+    """The stop goes to the scanner's process group, as ASH's own stop reaches an
+    unwrapped scanner's group, so what the scanner started in it gets the signal
+    too; the SIGKILL for a scanner that lingers goes the same way, armed halfway
+    through the stop budget so the reap keeps the other half."""
+    group_kills = []
     handlers = {}
     timers = []
-    monkeypatch.setattr(os, "kill", lambda pid, sig: kills.append((pid, sig)))
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: group_kills.append((pgid, sig)))
+    monkeypatch.setattr(
+        os, "kill", lambda pid, sig: pytest.fail("the scanner alone was signalled")
+    )
     monkeypatch.setattr(
         signal, "signal", lambda signum, handler: handlers.__setitem__(signum, handler)
     )
@@ -198,13 +250,40 @@ def test_a_stop_is_passed_on_as_sent_and_a_lingering_scanner_is_killed(monkeypat
     landlock_exec._forward_stop(4242, signal.SIGTERM, lambda: running[0], stopped_at)
 
     assert len(stopped_at) == 1
-    assert kills == [(4242, signal.SIGTERM)]
-    assert timers == [(signal.ITIMER_REAL, landlock_exec.STOP_REAP_DEADLINE_SECONDS)]
+    assert group_kills == [(4242, signal.SIGTERM)]
+    assert timers == [(signal.ITIMER_REAL, landlock_exec.STOP_KILL_DELAY_SECONDS)]
+    assert landlock_exec.STOP_KILL_DELAY_SECONDS == (
+        landlock_exec.STOP_REAP_DEADLINE_SECONDS / 2
+    )
     handlers[signal.SIGALRM](signal.SIGALRM, None)
-    assert kills == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
+    assert group_kills == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
     running[0] = False
     handlers[signal.SIGALRM](signal.SIGALRM, None)
-    assert len(kills) == 2
+    assert len(group_kills) == 2
+
+
+def test_a_stop_before_the_scanner_leads_a_group_goes_to_its_pid_alone(monkeypatch):
+    """Until the child's setsid, no process group carries its pid: the kernel
+    answers ESRCH to the group signal and the pid alone is signalled. Any other
+    refusal is the caller's to read, as before."""
+    kills = []
+
+    def no_such_group(pgid, sig):
+        raise ProcessLookupError(errno.ESRCH, "No such process")
+
+    monkeypatch.setattr(os, "killpg", no_such_group)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: kills.append((pid, sig)))
+
+    landlock_exec._signal_scanner(4242, signal.SIGTERM)
+    assert kills == [(4242, signal.SIGTERM)]
+
+    def refused(pgid, sig):
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(os, "killpg", refused)
+    with pytest.raises(PermissionError):
+        landlock_exec._signal_scanner(4242, signal.SIGTERM)
+    assert kills == [(4242, signal.SIGTERM)]
 
 
 def test_dying_of_the_scanners_signal_turns_core_dumps_off_first(monkeypatch):
