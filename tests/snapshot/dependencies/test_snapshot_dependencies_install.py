@@ -130,6 +130,14 @@ def _fake_machine(monkeypatch: pytest.MonkeyPatch, scenario: Scenario) -> None:
     for module in list(sys.modules.values()):
         if getattr(module, "find_executable", None) is real_find_executable:
             monkeypatch.setattr(module, "find_executable", scenario.find_executable)
+    # The install command looks a tool up as a scan of the tree would
+    # (find_executable_for_scan, anchored to the source directory), which does not
+    # route through find_executable; the scenario answers that lookup too.
+    monkeypatch.setattr(
+        dependencies,
+        "find_executable_for_scan",
+        lambda command, root: scenario.find_executable(command),
+    )
     monkeypatch.setattr(dependencies, "run_command", scenario.run_command)
     monkeypatch.setattr(dependencies, "clear_find_executable_cache", lambda: None)
     monkeypatch.setattr(sys, "executable", PINNED_PYTHON)

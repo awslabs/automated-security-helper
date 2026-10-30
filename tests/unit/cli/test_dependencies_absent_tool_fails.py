@@ -129,8 +129,8 @@ class TestThePostInstallSweep:
         monkeypatch.setattr(dependencies, "run_command", lambda cmd, shell=False: 0)
         monkeypatch.setattr(
             dependencies,
-            "find_executable",
-            lambda name: f"/usr/bin/{name}" if name in on_path else None,
+            "find_executable_for_scan",
+            lambda name, root: f"/usr/bin/{name}" if name in on_path else None,
         )
         fake_runner = SimpleNamespace(
             is_uv_available=lambda: True,

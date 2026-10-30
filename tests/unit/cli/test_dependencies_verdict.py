@@ -384,8 +384,8 @@ class TestToolSelectionScopesFailures:
             lambda cmd, shell=False: 0,
         )
         monkeypatch.setattr(
-            "automated_security_helper.cli.dependencies.find_executable",
-            lambda cmd: f"/usr/bin/{cmd}",
+            "automated_security_helper.cli.dependencies.find_executable_for_scan",
+            lambda cmd, root: f"/usr/bin/{cmd}",
         )
         return runner.invoke(
             dependencies_app,
@@ -829,8 +829,8 @@ def _install_fake_scanners(
         lambda cmd, shell=False: command_rc,
     )
     monkeypatch.setattr(
-        "automated_security_helper.cli.dependencies.find_executable",
-        lambda cmd: on_path,
+        "automated_security_helper.cli.dependencies.find_executable_for_scan",
+        lambda cmd, root: on_path,
     )
     args = ["--plugin-type", "scanner", "--bin-path", str(tmp_path / "bin")]
     args += list(extra_args)
