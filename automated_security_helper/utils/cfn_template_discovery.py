@@ -20,14 +20,21 @@ of scope for adding the new scanners. ``tests/unit/utils/test_cfn_template_disco
 holds the two to the same answer on a fixture tree instead, so a change to either side
 fails a test.
 
-The three outcomes per file
----------------------------
+The outcomes per file
+---------------------
 * a template: returned in ``templates``;
 * not CloudFormation (unparseable as YAML/JSON, or no ``Resources`` mapping): skipped,
   as cfn-nag skips it;
-* CloudFormation the model rejects (``CloudFormationTemplateModelError``): returned in
-  ``unmodelable`` with the reason, so the caller counts a failed target rather than
-  letting the file vanish. That is the distinction ``cfn_template_model`` documents.
+* CloudFormation the model rejects (``CloudFormationTemplateModelError``), or a file
+  whose structure is a template but whose values could not be built or that is
+  nested deeper than ASH reads: returned in ``unmodelable`` with the reason, so the
+  caller counts a failed target rather than letting the file vanish. That is the
+  distinction ``cfn_template_model`` documents;
+* a candidate ASH could not open or decode (``OSError``, ``UnicodeDecodeError``):
+  returned in ``unreadable`` with the reason. Not known to be CloudFormation and not
+  known not to be, so the callers count it as a target that was not evaluated, the
+  same answer the tool-absent check gives (only MISSING cannot hide a template);
+* a file the scanned-tree rule refuses: returned in ``refused`` (below).
 
 A file is read under the scanned-tree rule (``utils/scanned_tree.py``), against the
 tree cfn-nag reads it against: a symlink, a file under a symlinked directory, one
@@ -45,7 +52,8 @@ from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Tuple
 
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
-    get_model_from_template,
+    get_model_from_template_text,
+    read_template_text,
     unevaluable_template_reason,
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
@@ -142,8 +150,13 @@ def discover_templates(
     for path in candidate_files(context, target_type, global_ignore_paths):
         if not path.is_file():
             continue
+        # Read once, under the scanned-tree rule, and parsed from that text, so a
+        # file the parser rejects is classified from the text already read instead
+        # of being read and parsed again (unevaluable_template_reason takes it).
+        text: Optional[str] = None
         try:
-            model = get_model_from_template(template_path=path, scan_root=scan_root)
+            text = read_template_text(path, scan_root)
+            model = get_model_from_template_text(text, path)
         except TreeInputRefused as refused:
             result.refused.append((refused.path, refused.reason))
             continue
@@ -174,7 +187,7 @@ def discover_templates(
             # could not build, or that is nested deeper than ASH reads, is a
             # failed target, as cfn-nag counts the same file; a file that is not
             # YAML or JSON at all is not a template.
-            reason = unevaluable_template_reason(path, scan_root)
+            reason = unevaluable_template_reason(path, scan_root, text=text)
             if reason is not None:
                 result.unmodelable.append((path, reason))
                 continue
