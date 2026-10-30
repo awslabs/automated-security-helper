@@ -1,0 +1,146 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The refresh names the cache the tool names, locks where it can, and reports.
+
+Properties of ``utils/content_db_refresh.py`` that nothing else pins:
+
+- ``default_cache_dir`` expands a leading ``~`` in ``XDG_CACHE_HOME`` for grype
+  as adrg/xdg does, reads trivy's home from the environment's ``HOME`` as Go's
+  os.UserCacheDir does (falling to the temporary directory when it is unset),
+  and names that temporary directory as Go's os.TempDir does on each platform;
+- a dotted ``db.skip-update`` key beats the nested spelling, as viper reads it;
+- the refresh lock moves to a per-account temporary file when the cache's lock
+  file is not this account's to open, or the cache is not writable;
+- the prepared-scan memory is bounded;
+- a refresh's output is decoded with replacement, and a failed refresh whose
+  stderr is only whitespace reports its stdout.
+"""
+
+from __future__ import annotations
+
+import os
+import stat
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.utils import content_db_refresh as refresh
+
+pytestmark = pytest.mark.unit
+
+
+def test_grype_expands_a_leading_tilde_in_xdg_cache_home():
+    cache = refresh.default_cache_dir(
+        "grype", {"XDG_CACHE_HOME": "~/caches"}, platform="linux"
+    )
+    assert cache == Path.home() / "caches" / "grype" / "db"
+
+
+def test_trivy_reads_its_home_from_the_environment_it_runs_with():
+    cache = refresh.default_cache_dir("trivy", {"HOME": "/h"}, platform="linux")
+    assert cache == Path("/h") / ".cache" / "trivy"
+    cache = refresh.default_cache_dir("trivy", {"HOME": "/h"}, platform="darwin")
+    assert cache == Path("/h") / "Library" / "Caches" / "trivy"
+
+
+def test_trivy_with_no_home_falls_to_the_temporary_directory():
+    # Go's os.UserHomeDir errors on an unset HOME; trivy then uses os.TempDir.
+    cache = refresh.default_cache_dir("trivy", {"TMPDIR": "/t"}, platform="linux")
+    assert cache == Path("/t") / "trivy"
+
+
+def test_trivy_temporary_directory_follows_go_not_python(monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", "/elsewhere")
+    env = {"HOME": "/h", "XDG_CACHE_HOME": "relative"}
+    assert refresh.default_cache_dir("trivy", env, platform="linux") == Path(
+        "/tmp/trivy"  # nosec B108 - Go's own fallback, asserted
+    )
+    assert refresh.default_cache_dir("trivy", {"TEMP": "/temp"}, platform="win32") == (
+        Path("/temp") / "trivy"
+    )
+    assert refresh.default_cache_dir(
+        "trivy", {"TMP": "/tmp1", "TEMP": "/temp"}, platform="win32"
+    ) == (Path("/tmp1") / "trivy")
+
+
+def test_a_dotted_config_key_beats_the_nested_spelling(tmp_path):
+    config = tmp_path / "trivy.yaml"
+    config.write_text("db:\n  skip-update: false\ndb.skip-update: true\n", "utf-8")
+    found = refresh.trivy_update_opt_outs({}, config)
+    assert found == {"database": f"db.skip-update: true in {config}"}
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "getuid") or os.getuid() == 0,
+    reason="file modes do not bind root",
+)
+def test_a_lock_file_another_account_left_moves_the_lock_to_a_temp_file(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    foreign = cache / ".ash-grype-update.lock"
+    foreign.write_text("", "utf-8")
+    foreign.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    try:
+        lock = refresh.update_lock_path("grype", cache)
+    finally:
+        foreign.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    assert lock.parent == Path(tempfile.gettempdir())
+    assert lock.name.endswith(f"-{os.getuid()}.lock")
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "getuid") or os.getuid() == 0,
+    reason="file modes do not bind root",
+)
+def test_the_temporary_lock_is_named_for_the_account(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    cache.chmod(stat.S_IRUSR | stat.S_IXUSR)
+    try:
+        lock = refresh.update_lock_path("trivy", cache)
+    finally:
+        cache.chmod(stat.S_IRWXU)
+    assert lock.parent == Path(tempfile.gettempdir())
+    assert lock.name.startswith("ash-trivy-update-")
+    assert lock.name.endswith(f"-{os.getuid()}.lock")
+
+
+def test_the_prepared_scan_memory_is_bounded():
+    refresh.forget_prepared()
+    try:
+        for index in range(refresh._PREPARED_LIMIT + 100):
+            refresh._remember_prepared(
+                ("grype", "/cache", False, False, f"scan-{index}", "")
+            )
+        assert refresh.prepared_count() == refresh._PREPARED_LIMIT
+    finally:
+        refresh.forget_prepared()
+
+
+def test_the_refresh_decodes_the_tools_output_with_replacement(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_spawn_run(argv, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(refresh, "spawn_run", fake_spawn_run)
+    refresh._run(["grype", "db", "update"], {}, tmp_path, "grype database")
+    assert seen["text"] is True
+    assert seen["errors"] == "replace"
+
+
+def test_a_whitespace_only_stderr_does_not_hide_the_reason_on_stdout(
+    monkeypatch, tmp_path
+):
+    def fake_spawn_run(argv, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="the real reason\n", stderr=" \n")
+
+    monkeypatch.setattr(refresh, "spawn_run", fake_spawn_run)
+    with pytest.raises(ScannerError) as raised:
+        refresh._run(["trivy", "image"], {}, tmp_path, "trivy database")
+    assert "the real reason" in str(raised.value)

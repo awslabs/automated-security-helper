@@ -95,6 +95,7 @@ failed rather than run against a database that could not be brought up to date.
 
 from __future__ import annotations
 
+import getpass
 import hashlib
 import ntpath
 import os
@@ -106,7 +107,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import yaml
 
@@ -166,7 +167,24 @@ _GO_TRUE = frozenset({"1", "t", "T", "TRUE", "true", "True"})
 _GO_FALSE = frozenset({"0", "f", "F", "FALSE", "false", "False"})
 
 _prepared_lock = threading.Lock()
-_prepared: Set[Tuple[str, str, bool, bool, str, str]] = set()
+#: The scans prepared so far, oldest first (a dict keeps insertion order). Bounded
+#: at ``_PREPARED_LIMIT`` entries: a long-running process (the MCP server) hands
+#: every scan a new id, and an unbounded set grew with each one. A key dropped by
+#: the bound costs one more refresh call for that scan, which the tool answers at
+#: once when the database is current.
+_prepared: Dict[Tuple[str, str, bool, bool, str, str], None] = {}
+_PREPARED_LIMIT = 1024
+
+#: The Go ``os.TempDir`` fallback on Unix when ``TMPDIR`` is unset.
+_GO_UNIX_TEMP_DIR = "/tmp"  # nosec B108 - Go's own constant, read, never written
+
+
+def _remember_prepared(key: Tuple[str, str, bool, bool, str, str]) -> None:
+    """Record ``key`` as prepared, dropping the oldest keys past the bound."""
+    with _prepared_lock:
+        _prepared[key] = None
+        while len(_prepared) > _PREPARED_LIMIT:
+            del _prepared[next(iter(_prepared))]
 
 
 def default_cache_dir(
@@ -182,23 +200,29 @@ def default_cache_dir(
 
     - grype: ``GRYPE_DB_CACHE_DIR``, else ``xdg.CacheHome/grype/db``
       (grype/db/v6/installation/curator.go, grype 0.120.1). github.com/adrg/xdg
-      v0.5.3 sets ``CacheHome`` to ``XDG_CACHE_HOME`` when that is an absolute
+      v0.5.3 sets ``CacheHome`` to ``XDG_CACHE_HOME`` when that, with a leading
+      ``~`` expanded to the home directory (pathutil.ExpandHome), is an absolute
       path, else to ``~/Library/Caches`` on macOS (paths_darwin.go), ``~/.cache``
       on other Unix (paths_unix.go) and ``%LOCALAPPDATA%\\cache`` on Windows
       (paths_windows.go).
     - trivy: ``TRIVY_CACHE_DIR``, else ``os.UserCacheDir()/trivy``
       (pkg/cache/dir.go, trivy 0.75.0), and ``os.TempDir()/trivy`` when Go cannot
       name a user cache directory. Go's ``os.UserCacheDir`` is ``XDG_CACHE_HOME``
-      (an error when relative) or ``~/.cache`` on Unix other than macOS,
-      ``~/Library/Caches`` on macOS, whatever ``XDG_CACHE_HOME`` says, and
-      ``%LocalAppData%`` on Windows.
+      (an error when relative, and no ``~`` expansion) or ``$HOME/.cache`` on Unix
+      other than macOS, ``$HOME/Library/Caches`` on macOS, whatever
+      ``XDG_CACHE_HOME`` says, and ``%LocalAppData%`` on Windows; an unset or
+      empty ``HOME`` is an error there (Go reads the variable, not the passwd
+      entry), so trivy then falls to the temporary directory. Go's ``os.TempDir``
+      is ``TMPDIR`` else ``/tmp`` on Unix, and on Windows ``TMP``, then ``TEMP``,
+      then ``USERPROFILE``, then the Windows directory (GetTempPath).
 
     Args:
         tool: ``grype`` or ``trivy``.
         env: The environment the scan runs with; the process environment when
-            None. Only the variables above are read from it; the home directory
-            is this process's (``Path.home()``), which is also the ``HOME`` every
-            sandbox backend gives the scanner.
+            None. Only the variables above are read from it, ``HOME`` included
+            where the tool reads it (trivy); grype's home is this process's
+            (``Path.home()``), which is also the ``HOME`` every sandbox backend
+            gives the scanner.
         platform: A ``sys.platform`` value; this one when None.
 
     Returns:
@@ -230,8 +254,12 @@ def default_cache_dir(
         raw = variable("GRYPE_DB_CACHE_DIR")
         if raw:
             return absolute(raw)
-        if xdg and isabs(xdg):
-            cache_home = Path(xdg)
+        # adrg/xdg expands a leading ``~`` before it asks whether the path is
+        # absolute, so ``XDG_CACHE_HOME=~/caches`` names a directory under the
+        # home directory to grype, and here.
+        xdg_expanded = os.path.expanduser(xdg) if xdg.startswith("~") else xdg
+        if xdg_expanded and isabs(xdg_expanded):
+            cache_home = Path(xdg_expanded)
         elif windows:
             cache_home = Path(local_app_data or Path.home() / "AppData" / "Local")
             cache_home = cache_home / "cache"
@@ -244,20 +272,41 @@ def default_cache_dir(
         raw = variable("TRIVY_CACHE_DIR")
         if raw:
             return absolute(raw)
+        # Go's os.UserHomeDir reads HOME itself and errors when it is empty;
+        # there is no passwd fallback, so trivy's user cache is undefined then.
+        home = variable("HOME")
         if windows:
             user_cache = Path(local_app_data) if local_app_data else None
         elif platform == "darwin":
-            user_cache = Path.home() / "Library" / "Caches"
+            user_cache = Path(home) / "Library" / "Caches" if home else None
         elif not xdg:
-            user_cache = Path.home() / ".cache"
+            user_cache = Path(home) / ".cache" if home else None
         else:
             user_cache = Path(xdg) if isabs(xdg) else None
         if user_cache is None:
-            # Go's os.TempDir: $TMPDIR on Unix, GetTempPath on Windows.
-            temp = "" if windows else variable("TMPDIR")
-            user_cache = Path(temp or tempfile.gettempdir())
+            user_cache = Path(_go_temp_dir(variable, windows))
         return user_cache / "trivy"
     raise ValueError(f"no content database refresh for {tool!r}")
+
+
+def _go_temp_dir(variable: Any, windows: bool) -> str:
+    """Go's ``os.TempDir`` over ``variable``: the directory trivy falls back to.
+
+    Unix: ``TMPDIR``, else ``/tmp``. Windows: GetTempPath's order, ``TMP``, then
+    ``TEMP``, then ``USERPROFILE``, then the Windows directory, which is read from
+    Python's own search when none of the three is set. Python's
+    ``tempfile.gettempdir`` is not used for the Unix side: its order (``TMPDIR``,
+    ``TEMP``, ``TMP``, then a writability probe of ``/tmp``, ``/var/tmp`` and
+    ``/usr/tmp``) names another directory than Go's when ``TMPDIR`` is unset and
+    ``TEMP`` or ``TMP`` is, or ``/tmp`` is not writable.
+    """
+    if not windows:
+        return variable("TMPDIR") or _GO_UNIX_TEMP_DIR
+    for name in ("TMP", "TEMP", "USERPROFILE"):
+        value = variable(name)
+        if value:
+            return value
+    return tempfile.gettempdir()
 
 
 def trivy_update_opt_outs(
@@ -336,16 +385,19 @@ def _config_opt_out(
 ) -> Optional[str]:
     """``key`` (``db``, ``skip-update``) in the composed config, as the tool reads it.
 
-    Nested or dotted (``db.skip-update``), and case-insensitively, as both tools'
-    config library matches keys. The value is an opt-out when it reads as one of
-    ``opt_out``: true for trivy's skip settings, false for grype's auto-update. A
-    plain integer reads as true unless it is 0; a string reads as what
-    ``strconv.ParseBool`` makes of it, quoted or not, and a string it rejects is
-    neither, so it is no opt-out.
+    Dotted (``db.skip-update``) or nested, and case-insensitively, as both tools'
+    config library (viper) matches keys. The dotted spelling is read first: viper
+    searches a path's longest literal key prefix before it descends into nested
+    maps (searchIndexableWithPathPrefixes), so a top-level ``db.skip-update`` key
+    beats a nested ``db: skip-update:`` when a file holds both. The value is an
+    opt-out when it reads as one of ``opt_out``: true for trivy's skip settings,
+    false for grype's auto-update. A plain integer reads as true unless it is 0;
+    a string reads as what ``strconv.ParseBool`` makes of it, quoted or not, and
+    a string it rejects is neither, so it is no opt-out.
     """
-    value = _mapping_get(_mapping_get(root, key[0]), key[1])
+    value = _mapping_get(root, ".".join(key))
     if value is None:
-        value = _mapping_get(root, ".".join(key))
+        value = _mapping_get(_mapping_get(root, key[0]), key[1])
     if not isinstance(value, yaml.ScalarNode):
         return None
     text = value.value
@@ -370,8 +422,10 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     """Where the refresh lock for ``cache_dir`` lives.
 
     In the cache directory when it, or the nearest directory above it that exists
-    (the one it will be created under), is writable; otherwise in the temporary
-    directory, named for the cache, so the callers on this host still take turns.
+    (the one it will be created under), is writable and no lock file another
+    account left there stands in the way; otherwise in the temporary directory,
+    named for the cache and for this account, so the callers of this account on
+    this host still take turns.
 
     The nearest existing ancestor rather than the parent alone: a first refresh of
     a cache whose parent does not exist yet either (``~/.cache/grype/db`` on a host
@@ -379,15 +433,26 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     writable and take the temporary-directory lock, and a caller arriving once the
     refresh had created the cache would take the lock inside it, so the two ran at
     once.
+
+    The lock file itself is checked too: ``exclusive_lock`` opens it read-write,
+    and a shared cache's lock file created by another account (mode 0644) made
+    that open raise PermissionError out of the refresh. Such a caller takes the
+    temporary-directory lock instead. That lock's name carries the account
+    (``os.getuid`` where there is one), so two accounts sharing one cache do not
+    meet at a 0644 file in the shared temporary directory either; two accounts
+    then do not serialize against each other, which the cache lock could not do
+    for them either.
     """
     cache = Path(cache_dir)
     probe = cache
     while not probe.exists() and probe.parent != probe:
         probe = probe.parent
-    if os.access(probe, os.W_OK):
-        return cache / f".ash-{tool}-update.lock"
+    lock = cache / f".ash-{tool}-update.lock"
+    if os.access(probe, os.W_OK) and (not lock.exists() or os.access(lock, os.W_OK)):
+        return lock
     digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
-    return Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}.lock"
+    account = str(os.getuid()) if hasattr(os, "getuid") else getpass.getuser()
+    return Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}-{account}.lock"
 
 
 def prepare_content_db(
@@ -513,8 +578,7 @@ def prepare_content_db(
             finally:
                 shutil.rmtree(workdir, ignore_errors=True)
     if scan_id is not None:
-        with _prepared_lock:
-            _prepared.add(key)
+        _remember_prepared(key)
 
 
 def _commands(
@@ -594,6 +658,11 @@ def _run(
             argv,
             capture_output=True,
             text=True,
+            # Replacement, not the strict default: a byte the locale encoding
+            # does not read in the tool's output raised UnicodeDecodeError out
+            # of here, past the ScannerError every other failure becomes, even
+            # when the tool had succeeded.
+            errors="replace",
             env=env,
             cwd=cwd,
             timeout=UPDATE_TIMEOUT_SECONDS,
@@ -608,10 +677,13 @@ def _run(
     if proc.returncode != 0:
         from automated_security_helper.utils.error_text import shown_tool_stderr
 
-        # REDACTED BEFORE the excerpt is cut: a cut can split a quoted
+        # The stderr when it holds anything beyond whitespace, else the stdout:
+        # a stderr of a bare line break is no reason, and the reason is then on
+        # stdout. REDACTED BEFORE the excerpt is cut: a cut can split a quoted
         # env-read value, and the downstream whole-spelling redaction cannot
         # match the fragment.
-        detail = shown_tool_stderr((proc.stderr or proc.stdout or "").strip(), values)
+        printed = (proc.stderr or "").strip() or (proc.stdout or "").strip()
+        detail = shown_tool_stderr(printed, values)
         if len(detail) > 2000:
             detail = f"{detail[:1000]} ... {detail[-1000:]}"
         raise ScannerError(
@@ -649,3 +721,9 @@ def forget_prepared() -> None:
     """Forget which scans were prepared. For tests."""
     with _prepared_lock:
         _prepared.clear()
+
+
+def prepared_count() -> int:
+    """How many scans are remembered as prepared. For tests."""
+    with _prepared_lock:
+        return len(_prepared)
