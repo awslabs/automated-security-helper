@@ -1325,6 +1325,22 @@ def test_a_satisfying_binary_on_path_runs_directly(repo, monkeypatch):
     assert "GH_TOKEN" not in seen[0][1]
 
 
+def test_a_satisfying_binary_on_path_clears_a_stale_unavailable_reason(
+    repo, monkeypatch
+):
+    """An earlier check recorded why zizmor was unavailable; a satisfying binary
+    on PATH now answers the check, and the stale reason goes with it, so the
+    scanner never reads as satisfied and unavailable at once."""
+    _with_executable(monkeypatch, "zizmor 1.29.0\n")
+    scanner = _scanner(repo)
+    scanner.dependency_unavailable_reason = "zizmor is not available: none was found"
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.dependencies_satisfied is True
+    assert scanner.dependency_unavailable_reason is None
+
+
 def test_a_satisfying_binary_on_path_is_checked_before_the_uv_probe(repo, monkeypatch):
     """The docstring's order: a zizmor on PATH that satisfies the constraint runs
     directly, and the uv probe the construction deferred is not owed then. Sent

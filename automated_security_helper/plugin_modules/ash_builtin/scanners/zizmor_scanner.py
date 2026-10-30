@@ -826,6 +826,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 self.use_uv_tool = False
                 self.tool_version = version
                 self.dependencies_satisfied = True
+                # A reason an earlier check recorded (uv refused at construction,
+                # nothing found then) no longer holds: left in place, the scanner
+                # read as satisfied and unavailable at once.
+                self.dependency_unavailable_reason = None
                 # The binary on PATH is the one that runs, so the uv probe the
                 # construction deferred is not owed: run later by the SARIF step
                 # or the inventory, it would start uv for nothing and overwrite
