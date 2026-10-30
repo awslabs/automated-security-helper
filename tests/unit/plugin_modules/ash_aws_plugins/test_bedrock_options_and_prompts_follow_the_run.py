@@ -28,11 +28,13 @@ from automated_security_helper.plugin_modules.ash_aws_plugins import (
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
     BedrockSummaryReporter,
+    BedrockSummaryReporterConfig,
     BedrockSummaryReporterConfigOptions,
 )
 from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     MODULE,
     PRIMARY_MODEL,
+    REGION,
     make_reporter,
     plugin_context_in,
 )
@@ -315,7 +317,15 @@ def test_the_run_calls_the_spelling_the_listing_carries(monkeypatch, tmp_path):
         f"{MODULE}.boto3.Session",
         _session_double(runtime, ControlPlaneDouble(LISTED)),
     )
-    reporter = make_reporter(plugin_context_in(tmp_path), model_id=LISTED.upper())
+    # Not make_reporter: it sets model_id itself, and this test's model is the
+    # listed one spelled in another case.
+    options = BedrockSummaryReporterConfigOptions(
+        aws_region=REGION, model_id=LISTED.upper()
+    )
+    reporter = BedrockSummaryReporter(
+        context=plugin_context_in(tmp_path),
+        config=BedrockSummaryReporterConfig(options=options),
+    )
 
     assert reporter.validate_plugin_dependencies() is True
     client = reporter._make_model_client(runtime)
