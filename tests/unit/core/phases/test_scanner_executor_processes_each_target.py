@@ -8,15 +8,16 @@ per-target results file is written under ``source`` and so replaced the source
 target's file.
 
 Each container is now offered on its own, so the other targets' containers are
-merged, and the first failure is re-raised afterwards naming its target: the
-scanner-level handler logs it as it logs any failure ("Scanner failed: ...", the
-contract tests/unit/core/phases/test_scanner_executor_logs_tool_text_as_given.py
-pins) and files THAT TARGET'S OWN ROW again with the failure added (status ERROR,
-the reason in its errors), so the report keeps what the scan recorded (a refused
-sandbox's own error text, say; tests/unit/core/phases/
-test_a_probing_scanner_under_a_refused_sandbox.py pins that it survives) and never
-replaces a merged target's file. The scanner stays out of ``completed_scanners`` so
-the completeness check records it.
+merged, and the first failure is re-raised afterwards naming its target, with
+every later failure carried on it: the scanner-level handler logs each as it logs
+any failure ("Scanner failed: ...", the contract tests/unit/core/phases/
+test_scanner_executor_logs_tool_text_as_given.py pins) and files EACH FAILED
+TARGET'S OWN ROW again with the failure added (status ERROR, the reason in its
+errors), so the report keeps what the scan recorded (a refused sandbox's own error
+text, say; tests/unit/core/phases/test_a_probing_scanner_under_a_refused_sandbox.py
+pins that it survives) and never replaces a merged target's file. The scanner
+stays out of ``completed_scanners`` so the completeness check records it, and is
+closed out (SCAN_COMPLETE, off the remaining list) as a scanner that returned.
 """
 
 from __future__ import annotations
@@ -97,18 +98,23 @@ def _run(
 ):
     """Run one scanner over source and converted; the processor raises on one target.
 
-    The processor raises on EVERY container for ``failing_target``, the failure
-    record filed for it included, so ``seen`` shows the record's target.
-    ``before_raise`` is called with the container before each raise. The events
-    the executor sends are collected on ``executor.events`` as
+    The processor raises on EVERY container for ``failing_target`` (one name, or a
+    tuple of names), the failure record filed for it included, so ``seen`` shows
+    the record's target. ``before_raise`` is called with the container before each
+    raise. The events the executor sends are collected on ``executor.events`` as
     ``(event_type, kwargs)`` pairs.
     """
     seen: list = []
     events: list = []
+    failing = (
+        {failing_target}
+        if isinstance(failing_target, str)
+        else set(failing_target or ())
+    )
 
     def process(container, aggregated):
         seen.append(container)
-        if container.target_type == failing_target:
+        if container.target_type in failing:
             if before_raise is not None:
                 before_raise(container)
             raise RuntimeError("the report could not be read")
@@ -167,6 +173,35 @@ def test_the_failure_is_filed_on_the_row_of_the_target_that_failed(
     reasons = " ".join(str(e) for e in record.errors)
     assert "the report could not be read" in reasons
     assert "converted" in reasons
+
+
+@pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+def test_every_failed_target_is_filed_not_only_the_first(
+    plugin_context, tmp_path, parallel
+):
+    """Two targets fail to merge: both rows are filed again, ERROR, each naming
+    its own target. Only the first was kept before; the second target's report
+    stayed as the processor had dumped it before the raise, a normal-looking one."""
+    seen, executor = _run(
+        plugin_context,
+        tmp_path,
+        failing_target=("source", "converted"),
+        parallel=parallel,
+    )
+
+    assert [c.target_type for c in seen] == [
+        "source",
+        "converted",
+        "source",
+        "converted",
+    ], seen
+    assert seen[2] is seen[0] and seen[3] is seen[1]
+    for record in seen[2:]:
+        assert record.status == ScannerStatus.ERROR
+        reasons = " ".join(str(e) for e in record.errors)
+        assert "the report could not be read" in reasons
+        assert record.target_type in reasons
+    assert executor.completed_scanners == []
 
 
 def test_every_target_merged_completes_the_scanner(plugin_context, tmp_path):

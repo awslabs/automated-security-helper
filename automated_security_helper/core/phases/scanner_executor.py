@@ -628,7 +628,11 @@ class ResultsProcessingFailed(Exception):
     catch it as they catch any failure and file the failure on that container,
     so the target's report keeps what the scan recorded (its status, errors and
     counts), gains the reason it could not be merged, and never replaces a
-    merged target's file.
+    merged target's file. Every further target whose processing raised is on
+    ``later``, one instance each with its own container, and the handlers file
+    each of those the same way: before this only the first was kept, and a
+    second failed target's report stayed as the processor had dumped it before
+    the raise, which reads as a normal report.
     """
 
     def __init__(
@@ -639,6 +643,7 @@ class ResultsProcessingFailed(Exception):
     ) -> None:
         self.target_type = target_type
         self.container = container
+        self.later: List["ResultsProcessingFailed"] = []
         super().__init__(
             f"could not process its results on {target_type}: {error_text(error)}"
         )
@@ -850,15 +855,72 @@ class ScannerExecutor:
                     container, aggregated_results
                 )
             except Exception as process_error:
+                failure = ResultsProcessingFailed(
+                    getattr(container, "target_type", None),
+                    process_error,
+                    container,
+                )
+                failure.__cause__ = process_error
                 if failed is None:
-                    failed = ResultsProcessingFailed(
-                        getattr(container, "target_type", None),
-                        process_error,
-                        container,
-                    )
-                    failed.__cause__ = process_error
+                    failed = failure
+                else:
+                    # Kept, not dropped: the handler files and logs each one.
+                    failed.later.append(failure)
         if failed is not None:
             raise failed
+        return aggregated_results
+
+    def _file_later_failures(
+        self,
+        scanner_name: str,
+        failed: ResultsProcessingFailed,
+        environment_values: Any,
+        log_head: str,
+        row_head: str,
+        aggregated_results: AshAggregatedResults,
+    ) -> AshAggregatedResults:
+        """File every target failure after the first as the handler filed the first.
+
+        Each is logged under *log_head* as the first was, added to its own row
+        with *row_head*, graded ERROR, given the failure's raw_results record and
+        offered to the processor; a processor that raises on the record is
+        logged and the next one is still filed.
+        """
+        for later in failed.later:
+            described = error_text(later, environment_values)
+            stack_trace = traceback_text(
+                later.__cause__ or later, values=environment_values
+            )
+            ASH_LOGGER.debug(
+                f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}",
+                extra=NO_MARKUP,
+            )
+            ASH_LOGGER.error(
+                f"{log_head}: {scanner_name} - {described}", extra=NO_MARKUP
+            )
+            container = later.container
+            if container is None:
+                continue
+            container.add_error(f"{row_head}: {described}")
+            container.set_exception(later, environment_values)
+            container.status = ScannerStatus.ERROR
+            container.raw_results = {
+                "errors": [home_as_tilde(f"{row_head}: {described}")],
+                "status": "failed",
+                "exception": home_as_tilde(described),
+                "stack_trace": home_as_tilde(stack_trace),
+            }
+            try:
+                aggregated_results = self._process_results_fn(
+                    container, aggregated_results
+                )
+            except Exception as process_error:
+                # Redacted like every other handler's text here.
+                ASH_LOGGER.error(
+                    f"Failed to process error results for {scanner_name}: "
+                    f"{error_text(process_error, environment_values)}",
+                    extra=NO_MARKUP,
+                )
         return aggregated_results
 
     def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> list:
@@ -2348,6 +2410,17 @@ class ScannerExecutor:
                         f"{error_text(process_error, environment_values)}",
                         extra=NO_MARKUP,
                     )
+                if isinstance(e, ResultsProcessingFailed):
+                    # The merge of the scanner's targets' results failed: the
+                    # first failure is filed above, any later one here.
+                    aggregated_results = self._file_later_failures(
+                        scanner_name,
+                        e,
+                        environment_values,
+                        "Scanner failed",
+                        f"Scanner {scanner_name} failed",
+                        aggregated_results,
+                    )
                 # The scanner's turn is over, its failure recorded: it is not
                 # still running, and the subscribers are told so.
                 self._announce_scan_complete(
@@ -2661,6 +2734,17 @@ class ScannerExecutor:
                             f"Failed to process error results for {scanner_name}: "
                             f"{error_text(process_error, environment_values)}",
                             extra=NO_MARKUP,
+                        )
+                    if isinstance(e, ResultsProcessingFailed):
+                        # See run_sequential: the first merge failure is filed
+                        # above, any later one here.
+                        aggregated_results = self._file_later_failures(
+                            scanner_name,
+                            e,
+                            environment_values,
+                            "Scanner execution failed in thread pool",
+                            f"Scanner {scanner_name} failed in thread pool",
+                            aggregated_results,
                         )
                     # The scanner's turn is over, its failure recorded: it is
                     # not still running, and the subscribers are told so.
