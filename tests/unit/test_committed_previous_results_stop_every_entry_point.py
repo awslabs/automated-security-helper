@@ -72,6 +72,7 @@ def test_an_outer_mode_stops_before_the_host_removes_a_committed_held_set(
 
     monkeypatch.setattr(run_ash_scan_module, "run_ash_container", _run)
     monkeypatch.setattr(run_ash_scan_module, "run_ash_nix", _run)
+    monkeypatch.setattr(run_ash_scan_module, "nix_preflight", lambda: None)
 
     with pytest.raises(SystemExit) as exited:
         run_ash_scan(

@@ -1587,6 +1587,7 @@ class TestModesThatRunASHAgainCarryTheCodeOut:
         inner = subprocess.CompletedProcess(args=["nix"], returncode=inner_code)
         with (
             patch.object(mod, "run_ash_nix", return_value=inner),
+            patch.object(mod, "nix_preflight", lambda: None),
             pytest.raises(SystemExit) as exit_info,
         ):
             mod._run_nix_mode(opts, logger)
@@ -1604,6 +1605,7 @@ class TestModesThatRunASHAgainCarryTheCodeOut:
         inner = subprocess.CompletedProcess(args=["nix"], returncode=100)
         with (
             patch.object(mod, "run_ash_nix", return_value=inner),
+            patch.object(mod, "nix_preflight", lambda: None),
             pytest.raises(SystemExit) as exit_info,
         ):
             mod._run_nix_mode(opts, MagicMock())

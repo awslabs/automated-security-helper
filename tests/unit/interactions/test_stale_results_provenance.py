@@ -58,6 +58,10 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+# The refusals Nix mode asks before clearing the previous run's output; replaced by a
+# no-op beside each stand-in runner, since the preflight is asked whatever the runner is.
+_NIX_PREFLIGHT = "automated_security_helper.interactions.run_ash_scan.nix_preflight"
+
 pytestmark = pytest.mark.unit
 
 # A name that cannot have come from this invocation. Asserting on it, rather than on a
@@ -656,6 +660,7 @@ class TestNixModeStaleResults:
                 "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
                 return_value=create_completed_process(args=[], returncode=1),
             ),
+            patch(_NIX_PREFLIGHT, lambda: None),
             pytest.raises(SystemExit) as exit_info,
         ):
             _run_nix_mode(opts, MagicMock())
@@ -680,6 +685,7 @@ class TestNixModeStaleResults:
                 "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
                 return_value=create_completed_process(args=[], returncode=code),
             ),
+            patch(_NIX_PREFLIGHT, lambda: None),
             pytest.raises(SystemExit) as exit_info,
         ):
             _run_nix_mode(opts, logger)
@@ -697,6 +703,7 @@ class TestNixModeStaleResults:
                 "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
                 return_value=create_completed_process(args=[], returncode=42),
             ),
+            patch(_NIX_PREFLIGHT, lambda: None),
             pytest.raises(SystemExit) as exit_info,
         ):
             _run_nix_mode(opts, MagicMock())
@@ -723,6 +730,7 @@ class TestNixModeStaleResults:
                 "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
                 side_effect=dirty_scan,
             ),
+            patch(_NIX_PREFLIGHT, lambda: None),
         ):
             _run_nix_mode(opts, logger)
 
@@ -738,9 +746,12 @@ class TestNixModeStaleResults:
         existing = _seed_stale_results(opts.output_dir)
         opts.existing_results = existing.as_posix()
 
-        with patch(
-            "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
-            side_effect=_complete_the_existing_results(existing),
+        with (
+            patch(
+                "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
+                side_effect=_complete_the_existing_results(existing),
+            ),
+            patch(_NIX_PREFLIGHT, lambda: None),
         ):
             results = _run_nix_mode(opts, MagicMock())
 

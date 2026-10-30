@@ -147,7 +147,10 @@ def test_an_outer_scan_s_read_back_names_the_field(tmp_path, monkeypatch, mode):
     logger = MagicMock()
     runner = "run_ash_container" if mode == "container" else "run_ash_nix"
     wrapper = _run_container_mode if mode == "container" else _run_nix_mode
-    with patch.object(module, runner, side_effect=inner):
+    with (
+        patch.object(module, runner, side_effect=inner),
+        patch.object(module, "nix_preflight", lambda: None),
+    ):
         with pytest.raises(SystemExit) as exited:
             wrapper(opts, logger)
 

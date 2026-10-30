@@ -106,6 +106,7 @@ def no_nix_shell(monkeypatch):
         raise AssertionError("nix mode started its shell")
 
     monkeypatch.setattr(ras, "run_ash_nix", started)
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
 
 
 @pytest.mark.parametrize("mode", [RunMode.local, RunMode.precommit, RunMode.nix])

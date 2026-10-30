@@ -359,6 +359,7 @@ def test_nix_mode_says_it_was_interrupted_and_exits_130(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(mod, "run_ash_nix", _interrupted)
+    monkeypatch.setattr(mod, "nix_preflight", lambda: None)
 
     result = CliRunner().invoke(
         app,

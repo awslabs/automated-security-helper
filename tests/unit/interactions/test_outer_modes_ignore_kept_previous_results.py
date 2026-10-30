@@ -82,7 +82,10 @@ def _run_mode(mode: str, opts: ScanOptions, inner):
     if mode == "container":
         with patch.object(module, "run_ash_container", side_effect=inner):
             return _run_container_mode(opts, MagicMock())
-    with patch.object(module, "run_ash_nix", side_effect=inner):
+    with (
+        patch.object(module, "run_ash_nix", side_effect=inner),
+        patch.object(module, "nix_preflight", lambda: None),
+    ):
         return _run_nix_mode(opts, MagicMock())
 
 

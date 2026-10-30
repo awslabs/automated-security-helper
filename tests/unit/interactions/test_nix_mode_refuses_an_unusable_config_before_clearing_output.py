@@ -64,8 +64,14 @@ def _scan(tmp_path, monkeypatch, config, ash_config=None):
     out = tmp_path / "out"
     artifact = _plant_prior_run(out)
     launcher = MagicMock()
-    with patch(
-        "automated_security_helper.interactions.run_ash_scan.run_ash_nix", launcher
+    with (
+        patch(
+            "automated_security_helper.interactions.run_ash_scan.run_ash_nix", launcher
+        ),
+        patch(
+            "automated_security_helper.interactions.run_ash_scan.nix_preflight",
+            lambda: None,
+        ),
     ):
         with pytest.raises(ScanRefusedExit) as refused:
             run_ash_scan(

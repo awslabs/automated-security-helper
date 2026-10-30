@@ -409,6 +409,7 @@ def _nix_mode_run(tmp_path, runtime_path, monkeypatch):
 
     monkeypatch.setattr(run_ash_scan, "_discard_prior_run_artifacts", clear)
     monkeypatch.setattr(run_ash_scan, "run_ash_nix", nix_shell)
+    monkeypatch.setattr(run_ash_scan, "nix_preflight", lambda: None)
     monkeypatch.delenv("OCI_RUNNER_WRAPPER", raising=False)
     opts = run_ash_scan.ScanOptions(
         source_dir=source,

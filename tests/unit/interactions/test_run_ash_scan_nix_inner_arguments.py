@@ -38,7 +38,15 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def launched(monkeypatch) -> Dict[str, Any]:
-    """What _run_nix_mode hands the Nix launcher; nothing is started."""
+    """What _run_nix_mode hands the Nix launcher; nothing is started.
+
+    Two seams of ``run_ash_scan`` are replaced together: ``run_ash_nix``, the
+    runner, by a recorder, and ``nix_preflight``, the refusals asked before the
+    previous run's output is cleared, by a no-op. The preflight is asked whatever
+    the runner is, so a recorder alone would be refused on a host without `nix`
+    before it was reached; replacing it here says, in one place, that these runs
+    stand in for a host that has it.
+    """
     seen: Dict[str, Any] = {}
 
     def fake_run_ash_nix(**kwargs):
@@ -46,6 +54,7 @@ def launched(monkeypatch) -> Dict[str, Any]:
         return create_completed_process(args=[], returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(ras, "run_ash_nix", fake_run_ash_nix)
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
     monkeypatch.setattr(ras, "sweep_env_dirs", list)
     return seen
@@ -464,23 +473,47 @@ def test_the_missing_payload_message_names_what_ran():
     assert "container" not in ras._no_workspace_payload_message(RunMode.nix)
 
 
-def test_a_stand_in_runner_is_asked_nothing_about_nix(launched, tmp_path, monkeypatch):
-    """The refusals travel with the runner: a recorder in run_ash_nix's place
-    starts no shell, so a host without `nix` is no reason to refuse before it.
-    Asked beside the runner instead, the check refused every such run on a
-    host without nix before the recorder was reached."""
+def test_a_stand_in_runner_does_not_lift_the_refusal(tmp_path, monkeypatch):
+    """The preflight is ``run_ash_scan``'s own seam, asked whatever stands in for
+    the runner: a recorder in run_ash_nix's place that carries no check of its
+    own is still refused on a host without `nix`, and never reached. Read off
+    the runner instead (an attribute the real one carried), the check went with
+    the runner, and a stand-in lifted it without saying so."""
     from automated_security_helper.interactions import run_ash_nix
 
+    monkeypatch.delenv(run_ash_nix.ASH_IN_NIX_ENV_VAR, raising=False)
     monkeypatch.setattr(run_ash_nix, "find_executable", lambda _name: None)
+    monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
+    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    reached: list = []
 
-    _run(tmp_path)
+    def recorder(**kwargs):
+        reached.append(kwargs)
+        return create_completed_process(args=[], returncode=0, stdout="", stderr="")
 
-    assert launched.get("argv") is not None, "the stand-in runner was never reached"
+    monkeypatch.setattr(ras, "run_ash_nix", recorder)
+    assert not hasattr(recorder, "preflight")
+    src = tmp_path / "src"
+    src.mkdir()
+    opts = ras.ScanOptions(
+        source_dir=src,
+        output_dir=tmp_path / "out",
+        mode=RunMode.nix,
+        progress=False,
+        show_summary=False,
+    )
+
+    with pytest.raises(SystemExit) as refused:
+        ras._run_nix_mode(opts, MagicMock())
+
+    assert refused.value.code == 1
+    assert reached == [], "the stand-in runner was reached on a host without nix"
 
 
-def test_the_real_runner_carries_the_refusals():
-    """Control for the test above: the real runner's preflight is the check
-    the entry point asks before clearing the previous run's output."""
+def test_the_seam_is_the_real_preflight_by_default():
+    """Control for the test above: left alone, the seam is the runner module's
+    own check, the one the entry point asks before clearing the previous run's
+    output."""
     from automated_security_helper.interactions import run_ash_nix
 
-    assert run_ash_nix.run_ash_nix.preflight is run_ash_nix.nix_executable_for_this_run
+    assert ras.nix_preflight is run_ash_nix.nix_executable_for_this_run

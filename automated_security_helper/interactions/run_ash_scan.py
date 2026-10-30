@@ -126,6 +126,7 @@ from automated_security_helper.interactions.run_ash_container import (
 from automated_security_helper.interactions.run_ash_nix import (
     ASH_IN_NIX_ENV_VAR,
     NixModeRefused,
+    nix_executable_for_this_run,
     run_ash_nix,
 )
 from automated_security_helper.models.asharp_model import (
@@ -5658,6 +5659,16 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
     return argv
 
 
+# The two refusals of Nix mode (`nix` missing, the recursion guard), asked by
+# _run_nix_mode before it clears the previous run's output: a refused run starts no
+# shell, so it must not delete the reports of one that did. A module-level name of
+# its own, asked whatever stands in for run_ash_nix: a test or caller that replaces
+# the runner with something that starts no shell replaces this too, on purpose
+# (monkeypatch.setattr(run_ash_scan, "nix_preflight", lambda: None)), so the refusal
+# is never lifted by a stand-in that merely lacks a check of its own.
+nix_preflight = nix_executable_for_this_run
+
+
 def _run_nix_mode(
     opts: ScanOptions, logger, *, image_may_differ: Optional[bool] = None
 ) -> AshAggregatedResults:
@@ -5670,6 +5681,12 @@ def _run_nix_mode(
     the inner run is an ordinary local scan. Simpler than container mode in one respect,
     since a development shell changes PATH but not the filesystem, so there is no mount
     translation and none of that path-mapping logic belongs here.
+
+    Two module-level names are read at call time and are the seams a test replaces:
+    ``run_ash_nix``, the runner, and ``nix_preflight``, the refusals asked before the
+    clear. A stand-in runner that starts no shell sets ``nix_preflight`` to a no-op as
+    well; left alone, the preflight refuses on a host without `nix` whatever the runner
+    is, and the stand-in is never reached.
     """
     # The shell writes into the output directory this process was given, so a report left
     # by an earlier run sits exactly where a successful one would. run_ash_nix returns a
@@ -5680,20 +5697,14 @@ def _run_nix_mode(
     # this output directory, so it is removed before the clear, as container mode does.
     # A host with no container runtime has nothing to remove and its records stay.
     #
-    # The two refusals of Nix mode (`nix` missing, the recursion guard) are asked
-    # first: a refused run starts no shell, so it must not delete the reports of a
-    # run that did. run_ash_nix asks them again for a caller that reaches it directly.
-    # They are read off the runner this function will call (run_ash_nix.preflight),
-    # not imported beside it: a stand-in runner that starts no shell carries no
-    # preflight and is asked nothing about a `nix` it will not use.
-    preflight = getattr(run_ash_nix, "preflight", None)
-
     # Before the preflight and the clear: a refused run deletes nothing.
     _refuse_a_results_file_the_shell_cannot_be_handed(opts, logger)
 
     try:
-        if callable(preflight):
-            preflight()
+        # The two refusals of Nix mode (`nix` missing, the recursion guard), asked
+        # first: a refused run starts no shell, so it must not delete the reports of a
+        # run that did. run_ash_nix asks them again for a caller that reaches it directly.
+        nix_preflight()
         sweep_leftovers_before_run(opts.oci_runner)
         sweep_env_dirs()
         _discard_prior_run_artifacts(opts, logger)

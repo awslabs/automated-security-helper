@@ -122,6 +122,7 @@ def _nix_mode(tmp_path: Path, log: Path, monkeypatch, runtime: Path | None) -> N
 
     monkeypatch.setattr(run_ash_scan, "_discard_prior_run_artifacts", clear)
     monkeypatch.setattr(run_ash_scan, "run_ash_nix", nix_shell)
+    monkeypatch.setattr(run_ash_scan, "nix_preflight", lambda: None)
     opts = run_ash_scan.ScanOptions(
         source_dir=source,
         output_dir=output,
