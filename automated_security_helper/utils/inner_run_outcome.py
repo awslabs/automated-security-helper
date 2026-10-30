@@ -390,19 +390,23 @@ def read_refusal_outcome(
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        with open(fd, encoding="utf-8") as handle:
+        with open(fd, "rb") as handle:
             fd = -1
-            text = handle.read(_MAX_OUTCOME_BYTES + 1)
+            # Read as bytes, so the cap is the bytes it names: a text-mode read
+            # of the same count took characters, up to four bytes each.
+            data = handle.read(_MAX_OUTCOME_BYTES + 1)
     except (OSError, ValueError):
         return None
     finally:
         if fd != -1:
             os.close(fd)
-    if len(text) > _MAX_OUTCOME_BYTES:
+    if len(data) > _MAX_OUTCOME_BYTES:
         return None
     try:
-        record = json.loads(text)
-    except ValueError:
+        record = json.loads(data.decode("utf-8"))
+    except (ValueError, RecursionError):
+        # ValueError: not UTF-8, or not JSON. RecursionError: a record nested
+        # deeper than the parser can follow, which is no record this ASH wrote.
         return None
     if not (
         isinstance(record, dict)
@@ -502,7 +506,11 @@ def as_seen_from_the_host(message: str, inner_dir: Optional[str], host_dir: str)
     # Only where the inner directory starts a path: not inside another one, such as
     # /src/out for an inner /out, and not as the start of a longer name such as
     # /out-dir, /out.bak or /out:/y, so only a separator, whitespace, a quote or
-    # closing punctuation may follow it. The host directory is inserted as written,
-    # not read as a replacement template.
-    pattern = r"(?<![^\s'\"(])" + re.escape(inner_dir) + r"(?=[/\s'\"),;]|$)"
+    # closing punctuation may follow it, or a period or a colon that ends a
+    # sentence or a clause (followed by whitespace or the end), as a message
+    # writes "cannot write /out." or "/out: denied". The host directory is
+    # inserted as written, not read as a replacement template.
+    pattern = (
+        r"(?<![^\s'\"(])" + re.escape(inner_dir) + r"(?=[/\s'\"),;]|[.:](?:\s|$)|$)"
+    )
     return re.sub(pattern, lambda _match: host_dir, message)
