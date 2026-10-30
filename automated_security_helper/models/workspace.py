@@ -723,9 +723,13 @@ class WorkspaceProjectResult(RecordModel):
                 "Stored rather than derived from them for the same reason "
                 "exceeds_threshold is: fail_on_incomplete_scanners can be off, in "
                 "which case a project has scanners that did not run and still "
-                "passes. Always true for a stale content database under a fail "
-                "policy, an unevaluated rule or a tool ASH could not stop: no "
-                "setting silences those in `ash --source-dir P` either."
+                "passes. Always true for an unevaluated rule or a tool ASH could "
+                "not stop: no setting silences those in `ash --source-dir P` "
+                "either. A stale content database under a fail policy fails the "
+                "project too, except when its scanner is one only the workspace "
+                "policy added and policy_scanners_gate is off: then it is still "
+                "listed in stale_content_databases but does not decide this flag, "
+                "as that scanner's MISSING tool does not."
             ),
         ),
     ] = False
