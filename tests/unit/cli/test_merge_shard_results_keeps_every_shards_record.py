@@ -48,16 +48,17 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
-from tests.unit.cli import test_merge as _merge_tests
-from tests.unit.cli.merge_shard_support import SCANNERS, _sarif_for, _skipped_entries
-from tests.unit.cli.test_merge import as_loaded, build_shards
+from tests.unit.cli.merge_shard_support import (
+    SCANNERS,
+    _sarif_for,
+    _skipped_entries,
+    as_loaded,
+    build_shards,
+)
 
 pytestmark = pytest.mark.unit
 
-# pytest registers a fixture under the module attribute that holds it, so the
-# shared fixture is bound here under its own name (imported under an alias it was
-# registered as the alias, and ``capture`` was "not found").
-capture = _merge_tests.capture
+# The ``capture`` fixture comes from this directory's conftest.
 
 
 class TestAShardWithoutASelectionRecordIntendedWhatItOwned:

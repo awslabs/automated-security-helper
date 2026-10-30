@@ -30,7 +30,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 from pydantic import ValidationError
@@ -88,6 +88,7 @@ from tests.unit.cli.merge_shard_support import (  # noqa: F401
     _sarif_for,
     _sarif_result,
     _skipped_entries,
+    as_loaded,
     build_shard,
     build_shards,
     write_shards,
@@ -98,41 +99,8 @@ pytestmark = pytest.mark.unit
 #: The logger the merge's disclosures are written to.
 ASH_LOGGER_NAME = "ash"
 
-
-@pytest.fixture
-def capture(caplog):
-    """Route the module's logger at WARNING into caplog.
-
-    ASH's configured handler renders to a console and leaves nothing in
-    ``caplog.records``, so its handlers are swapped for pytest's capture handlers
-    for the duration.
-
-    At module scope rather than on one class because two disclosures are asserted
-    from it now: the scanners no shard intended to run, and the never-attempted
-    orphans ``_verify_scanner_union`` exempts from its refusal. A second copy of
-    this handler swap would be two fixtures that have to stay in step.
-    """
-    import logging
-
-    from automated_security_helper.utils.log import ASH_LOGGER
-
-    saved_handlers = ASH_LOGGER.handlers
-    saved_propagate = ASH_LOGGER.propagate
-    capture_handlers = [
-        handler
-        for handler in saved_handlers
-        if isinstance(handler, type(caplog.handler))
-    ]
-    if caplog.handler not in capture_handlers:
-        capture_handlers.append(caplog.handler)
-    ASH_LOGGER.handlers = capture_handlers
-    ASH_LOGGER.propagate = False
-    caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
-    try:
-        yield caplog
-    finally:
-        ASH_LOGGER.handlers = saved_handlers
-        ASH_LOGGER.propagate = saved_propagate
+# The ``capture`` fixture (ASH's logger routed into caplog) lives in this
+# directory's conftest, so every merge test module gets it by name.
 
 
 def build_unsharded(suppressions=None) -> AshAggregatedResults:
@@ -146,13 +114,6 @@ def build_unsharded(suppressions=None) -> AshAggregatedResults:
     model.metadata.summary_stats.end = "2026-08-28T10:24:00"
     model.metadata.summary_stats.duration = 64.0
     return populate_metrics_from_unified_source(aggregated_results=model)
-
-
-def as_loaded(
-    models: Sequence[AshAggregatedResults],
-) -> List[Tuple[Path, AshAggregatedResults]]:
-    """Pair models with placeholder paths, for tests that skip disk entirely."""
-    return [(Path(f"shard-{index}.json"), model) for index, model in enumerate(models)]
 
 
 def finding_key(result) -> Tuple:

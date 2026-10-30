@@ -24,7 +24,6 @@ adopt that shard's skip marker.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -95,22 +94,21 @@ def test_under_the_gate_an_owned_scanner_that_no_shard_recorded_is_refused():
 
 
 def test_under_the_override_the_merge_proceeds_and_the_warning_is_the_record(
-    caplog,
+    capture,
 ):
+    # ``capture`` (conftest) routes ASH's logger into caplog; plain ``caplog``
+    # sees nothing of it once an earlier merge in the process set its level.
     shards = _shards_with_bandit_recorded_nowhere()
 
-    with caplog.at_level(logging.WARNING):
-        merged = merge_shard_results(
-            _as_loaded(shards), require_scanner_completion=False
-        )
+    merged = merge_shard_results(_as_loaded(shards), require_scanner_completion=False)
 
     assert "bandit" not in merged.scanner_results
     warnings = [
         record.getMessage()
-        for record in caplog.records
+        for record in capture.records
         if "recorded by no shard" in record.getMessage()
     ]
-    assert len(warnings) == 1, caplog.text
+    assert len(warnings) == 1, capture.text
     assert "bandit" in warnings[0]
     assert "--no-fail-on-incomplete-scanners" in warnings[0]
 

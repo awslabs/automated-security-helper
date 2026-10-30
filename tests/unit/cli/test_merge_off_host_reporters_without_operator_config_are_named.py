@@ -56,41 +56,41 @@ _OffHost = FakeOffHost
 _S3 = S3
 
 
-def test_an_empty_list_stays_empty_and_says_nothing(caplog):
-    with caplog.at_level(logging.ERROR):
-        assert off_host_reporters_to_run([], None) == []
-    assert caplog.records == []
+# ``capture`` (conftest) routes ASH's logger into caplog: plain ``caplog`` sees
+# nothing of it, so ``records == []`` below would pass with no capture at all.
+
+
+def test_an_empty_list_stays_empty_and_says_nothing(capture):
+    assert off_host_reporters_to_run([], None) == []
+    assert capture.records == []
 
 
 def test_with_an_operator_config_the_list_is_returned_unchanged():
     assert off_host_reporters_to_run([_OffHost], AshConfig()) == [_OffHost]
 
 
-def test_without_an_operator_config_the_reporters_are_named_and_not_run(caplog):
-    with caplog.at_level(logging.ERROR):
-        assert off_host_reporters_to_run([_OffHost], None) == []
-    messages = [record.getMessage() for record in caplog.records]
+def test_without_an_operator_config_the_reporters_are_named_and_not_run(capture):
+    assert off_host_reporters_to_run([_OffHost], None) == []
+    messages = [record.getMessage() for record in capture.records]
     assert any(
         "fakeoffhost" in message and "did not run" in message for message in messages
     ), messages
 
 
-def test_a_requested_format_whose_reporter_runs_is_not_named(caplog):
-    with caplog.at_level(logging.ERROR):
-        assert log_off_host_formats_not_run(["s3"], [_S3]) == []
-    assert caplog.records == []
+def test_a_requested_format_whose_reporter_runs_is_not_named(capture):
+    assert log_off_host_formats_not_run(["s3"], [_S3]) == []
+    assert capture.records == []
 
 
-def test_a_requested_format_no_phase_runs_keeps_the_report_phases_line(caplog):
-    with caplog.at_level(logging.ERROR):
-        assert log_off_host_formats_not_run(["s3", "s3", "fakeoffhost"], [_S3]) == [
-            "fakeoffhost"
-        ]
-    messages = [record.getMessage() for record in caplog.records]
+def test_a_requested_format_no_phase_runs_keeps_the_report_phases_line(capture):
+    assert log_off_host_formats_not_run(["s3", "s3", "fakeoffhost"], [_S3]) == [
+        "fakeoffhost"
+    ]
+    messages = [record.getMessage() for record in capture.records]
     assert len(messages) == 1, messages
     assert messages[0].startswith(f"{NO_PRODUCER} 'fakeoffhost':"), messages
     assert "reporters.fakeoffhost.enabled=true" in messages[0], messages
-    assert all(record.levelno == logging.ERROR for record in caplog.records)
+    assert all(record.levelno == logging.ERROR for record in capture.records)
 
 
 def test_the_off_host_phase_is_given_only_the_formats_it_runs():
