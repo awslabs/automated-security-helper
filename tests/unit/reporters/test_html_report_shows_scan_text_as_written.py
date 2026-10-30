@@ -138,8 +138,12 @@ def test_a_hotspot_shows_a_windows_path_on_one_line_and_the_card_keeps_it(
         ],
     )
 
-    hotspot_locations = re.findall(r"<td>\d+</td>\s*<td>(.*?)</td>", document)
+    # Read the hotspot table alone: the scanner table above it also holds
+    # numeric cells in a row, which the row pattern would take for locations.
+    section = re.search(r'<div class="hotspots">.*?</table>', document, re.DOTALL)
     # The control: the hotspot table is there at all.
+    assert section, "no hotspot table was rendered"
+    hotspot_locations = re.findall(r"<td>\d+</td>\s*<td>(.*?)</td>", section.group())
     assert hotspot_locations, "no hotspot row was rendered"
     # The table doubles the backslash that starts an escape-like segment (the
     # "\x64" of "x64"); the copy attribute keeps the path as recorded.
