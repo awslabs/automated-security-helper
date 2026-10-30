@@ -41,12 +41,19 @@ def reporter(test_plugin_context):
 
 
 def _model_with_a_refusal() -> AshAggregatedResults:
+    # The refusal names the extraction limit it exceeded. The invocation is marked
+    # unsuccessful only for a refusal that leaves its input unscanned, which is a
+    # refusal with a limit (or an unaccepted failed input); a refusal without one
+    # is reported as a record and leaves executionSuccessful true.
     model = AshAggregatedResults()
     model.converter_results = {
         "archive": ConverterStatusInfo(
             refused_inputs=[
                 RefusedInputInfo(
-                    path="lib/bundle.zip", member="bundle.zip", reason="too large"
+                    path="lib/bundle.zip",
+                    member="bundle.zip",
+                    reason="too large",
+                    limit="max_total_bytes",
                 )
             ]
         )
