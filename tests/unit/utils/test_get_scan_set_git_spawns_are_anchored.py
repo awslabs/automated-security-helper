@@ -166,6 +166,31 @@ def test_the_root_lookup_and_the_diff_make_a_relative_location_absolute(
         assert env["GIT_WORK_TREE"] == os.path.join(here, "deployed")
 
 
+@pytest.mark.parametrize("ask", LAYOUT_HELPERS)
+def test_the_core_worktree_read_for_git_dir_alone_is_anchored_too(
+    tmp_path, monkeypatch, recorded, ask
+):
+    """GIT_DIR without GIT_WORK_TREE makes the root lookup and the diff ask the
+    repository whether ``core.worktree`` names its tree; that read runs the
+    resolved git with the anchored environment and no location variable of its
+    own. The recorder answers every call with an empty stdout, so the key reads as
+    unset and the lookup itself then drops the variables as before."""
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "repo.git"))
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    ask(tmp_path)
+
+    assert len(recorded) == 2, [argv for argv, _ in recorded]
+    probe_argv, probe_kwargs = recorded[0]
+    assert probe_argv[0] == RESOLVED
+    assert probe_argv[-3:] == ["config", "--get", "core.worktree"]
+    assert "--git-dir" in probe_argv
+    assert not set(probe_kwargs["env"]) & set(LOCATION_VARIABLES)
+    _lookup_argv, lookup_kwargs = recorded[1]
+    assert not set(lookup_kwargs["env"]) & set(LOCATION_VARIABLES)
+
+
 @pytest.mark.parametrize("ask", NESTING_HELPERS)
 def test_the_nesting_lookups_discover_even_when_the_caller_names_a_work_tree(
     tmp_path, monkeypatch, recorded, ask

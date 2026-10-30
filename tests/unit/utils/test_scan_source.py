@@ -1039,6 +1039,30 @@ def test_a_relative_git_work_tree_is_read_against_this_process_directory(
 
 
 @pytest.mark.integration
+def test_git_dir_alone_is_kept_when_the_repository_names_its_own_work_tree(
+    isolated_tmp, monkeypatch
+):
+    """With ``core.worktree`` set, GIT_DIR alone describes the layout: git takes
+    its working directory for the top only when neither GIT_WORK_TREE nor
+    ``core.worktree`` is given. The drop of GIT_DIR alone (the hook shape, where
+    the working directory would be taken for the top) also dropped this layout,
+    and discovery from a tree with no ``.git`` entry answered "not a repository"
+    where the base, passing GIT_DIR through, answered the configured tree."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    _git("config", "core.worktree", tree.as_posix(), cwd=source)
+    monkeypatch.setenv("GIT_DIR", (source / ".git").as_posix())
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
 def test_a_hooks_relative_git_dir_names_the_repository_it_was_exported_in(
     isolated_tmp, monkeypatch
 ):

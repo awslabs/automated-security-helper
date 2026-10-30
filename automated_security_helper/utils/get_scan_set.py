@@ -2179,6 +2179,35 @@ def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
     return {key: value for key, value in child_environ().items() if key not in dropped}
 
 
+def _core_worktree_names_a_tree(git_dir: str) -> bool:
+    """Whether the repository at *git_dir* sets ``core.worktree``.
+
+    With it, GIT_DIR alone describes the layout in full: git takes its working
+    directory for the top of the tree only when none of ``--work-tree``,
+    GIT_WORK_TREE and ``core.worktree`` is given. Read with ``git --git-dir <dir>
+    config --get core.worktree``, which exits 0 and prints the value when it is
+    set and 1 when it is not; a git that cannot be started, is missing or times
+    out reads as not set, which drops the variable and lets discovery answer.
+    """
+    git = _git_executable()
+    if git is None:
+        return False
+    try:
+        result = subprocess.run(
+            # git_argv: the repository's config names no program git runs here.
+            git_argv(  # nosec B603 B607
+                "--git-dir", git_dir, "config", "--get", "core.worktree", program=git
+            ),
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            env=_git_environ(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
 def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     """The environment of the repository-root lookup and the diff started in *cwd*.
 
@@ -2194,17 +2223,19 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     changed-file filter in the very shape this passthrough is for. Made absolute
     against this process's directory, the value keeps the exporter's meaning
     wherever git is started.
-    A bare repository driven as ``GIT_DIR=<bare> GIT_WORK_TREE=<tree>``
-    (a post-receive hook deploying a checkout, a ``core.worktree`` layout) has no
-    ``.git`` entry in the tree for git to discover, so dropping the pair there
-    turned the scan's root lookup into "not a repository", and dropping GIT_DIR
-    alone would let discovery bind GIT_WORK_TREE to whatever repository holds the
-    tree's ancestors. With GIT_WORK_TREE unset, GIT_DIR alone is the hook shape
-    where git takes its working directory for the top of the tree, and the
-    variables are dropped so that git discovers the repository (the docstring
-    above). A GIT_WORK_TREE that names no directory is not honored either: git
-    would answer with that name unchecked, and the lookup would join the diff's
-    paths onto a path that does not exist.
+    A bare repository driven as ``GIT_DIR=<bare> GIT_WORK_TREE=<tree>`` (a
+    post-receive hook deploying a checkout) has no ``.git`` entry in the tree for
+    git to discover, so dropping the pair there turned the scan's root lookup into
+    "not a repository", and dropping GIT_DIR alone would let discovery bind
+    GIT_WORK_TREE to whatever repository holds the tree's ancestors. With
+    GIT_WORK_TREE unset, GIT_DIR alone is the hook shape where git takes its
+    working directory for the top of the tree, and the variables are dropped so
+    that git discovers the repository (the docstring above); unless that
+    repository sets ``core.worktree`` (:func:`_core_worktree_names_a_tree`), in
+    which case GIT_DIR alone describes the layout in full and is kept, as it was
+    before the drop. A GIT_WORK_TREE that names no directory is not honored
+    either: git would answer with that name unchecked, and the lookup would join
+    the diff's paths onto a path that does not exist.
     """
     environ = child_environ()
     # os.path.abspath reads a relative value against this process's directory, the
@@ -2215,7 +2246,10 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
         if value and not os.path.isabs(value):
             environ[name] = os.path.abspath(value)
     work_tree = environ.get("GIT_WORK_TREE")
+    git_dir = environ.get("GIT_DIR")
     if work_tree and os.path.isdir(work_tree):
+        return environ
+    if git_dir and not work_tree and _core_worktree_names_a_tree(git_dir):
         return environ
     return _git_environ()
 
