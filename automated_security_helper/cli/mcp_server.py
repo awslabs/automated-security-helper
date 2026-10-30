@@ -184,11 +184,13 @@ async def _run_on(
     Context variables are kept as ``asyncio.to_thread`` keeps them. Awaiting this
     and then cancelling does not stop the thread: the delivery finishes or times
     out server-side, and the session reads busy until then.
+
+    The copy of the context is taken in the call, on the caller's thread, and
+    is the callable the pool runs: the shape the thread-context check reads.
     """
 
-    context = contextvars.copy_context()
     return await asyncio.get_running_loop().run_in_executor(
-        executor, functools.partial(context.run, function, **kwargs)
+        executor, contextvars.copy_context().run, functools.partial(function, **kwargs)
     )
 
 
