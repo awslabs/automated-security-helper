@@ -129,6 +129,42 @@ class TestARedirectLeavingHttpsIsRefused:
         ):
             assert secret not in printed
 
+    def test_the_port_of_both_urls_is_kept(self, capsys):
+        # Red before: ``hostname`` drops the port, so http://host:8080/x printed as
+        # http://host/x, naming a different server than the one that answered.
+        handler = installer._HttpsOnlyRedirects()
+        with pytest.raises(SystemExit):
+            handler.redirect_request(
+                urllib.request.Request("https://one.invalid:8443/a?sig=S1"),
+                io.BytesIO(b""),
+                302,
+                "Found",
+                {},
+                "http://two.invalid:8080/b?sig=S2",
+            )
+        printed = capsys.readouterr().err
+        assert "https://one.invalid:8443/a answered 302" in printed
+        assert "http://two.invalid:8080/b" in printed
+        assert "S1" not in printed and "S2" not in printed
+
+    def test_a_target_that_does_not_parse_is_refused_without_being_echoed(self, capsys):
+        # Red before: urlsplit raised ValueError ("Invalid IPv6 URL") out of the
+        # handler, a traceback with status 1 that with-retry repeats.
+        with pytest.raises(SystemExit) as raised:
+            self._redirect("http://[::1/secret-path?token=T")
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        printed = capsys.readouterr().err
+        assert "token=T" not in printed
+        assert "secret-path" not in printed
+
+    def test_a_plain_url_is_scheme_host_port_and_path_only(self):
+        plain = installer._plain_url
+        assert plain("https://h.invalid:8443/a/b?q=1#f") == "https://h.invalid:8443/a/b"
+        assert plain("https://u:p@h.invalid/a") == "https://h.invalid/a"
+        assert plain("file:///etc/passwd?x=1") == "file:///etc/passwd"
+        assert plain("http://[::1/x") == "<unparseable URL>"
+        assert len(plain("https://h.invalid/" + "a" * 5000)) <= 200
+
     def test_the_refusal_leaves_download_with_the_integrity_status(
         self, monkeypatch, tmp_path
     ):

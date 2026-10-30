@@ -283,13 +283,20 @@ def resolve_arch(machine: str) -> str:
 
 
 def _plain_url(url: str) -> str:
-    """``url`` as scheme://host/path, for a message.
+    """``url`` as scheme://host[:port]/path, for a message.
 
     The query string, the fragment and any user name or password are left out: on a
-    signed download URL they carry the credential.
+    signed download URL they carry the credential. The port stays, because
+    ``http://host:8080/x`` and ``http://host/x`` are different servers. A URL that
+    does not parse is replaced, not echoed and not raised on, and the result is cut
+    at 200 characters.
     """
-    parts = urllib.parse.urlsplit(url)
-    return f"{parts.scheme}://{parts.hostname or ''}{parts.path}"
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return "<unparseable URL>"
+    host = parts.netloc.rpartition("@")[2]
+    return f"{parts.scheme}://{host}{parts.path}"[:200]
 
 
 class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
@@ -307,13 +314,21 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
     of redirects the request that answered is itself a signed URL.
     """
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
+    @staticmethod
+    def _refuse_unless_https(req, code, msg, newurl):
+        try:
+            scheme = urllib.parse.urlsplit(newurl).scheme.lower()
+        except ValueError:
+            scheme = ""
+        if scheme != "https":
             raise _refuse(
                 f"{_plain_url(req.full_url)} answered {code} {msg}: refusing a "
                 f"redirect to the non-https URL {_plain_url(newurl)}",
                 _EXIT_INTEGRITY,
             )
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self._refuse_unless_https(req, code, msg, newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
