@@ -1832,20 +1832,41 @@ else
       if [[ "${COLOR_OUTPUT}" = "true" ]] && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
-      # The container's stdin is kept open (-i) for the two subcommands that read it:
-      # mcp, whose default stdio transport is driven by the client over stdin, and
-      # inspect, the Textual app, which reads keys. Without -i neither got any input.
-      # No other subcommand reads stdin, and -i on one of them makes the container
-      # consume the caller's input: `while read d; do ./ash --source-dir "$d"; done
+      # The container's stdin is kept open (-i) only for a run that reads it. The
+      # subcommands that read stdin are ASH_READS_STDIN: mcp, whose default stdio
+      # transport is driven by the client over stdin; inspect, the Textual app, which
+      # reads keys; and config, whose init and fix steps prompt for answers. Any
+      # subcommand reads stdin when given `--cli-json-input -`, which takes its
+      # parameters as a JSON document from stdin. Without -i none of them got any
+      # input. No other run reads stdin, and -i on one makes the container consume
+      # the caller's input: `while read d; do ./ash --source-dir "$d"; done
       # < dirs.txt` ended after one directory, a job script fed to bash on stdin lost
       # the commands after ./ash, and `./ash scan &` from an interactive shell had the
       # runner read the terminal and stopped on SIGTTIN. SUBCOMMAND is the first of
-      # ash's words that names a subcommand (detect_subcommand, above).
-      case "${SUBCOMMAND}" in
-        mcp | inspect)
-          DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -i"
-          ;;
-      esac
+      # ash's words that names a subcommand (detect_subcommand, above). The list
+      # must name the subcommands that read stdin;
+      # tests/unit/test_ash_bash_entrypoint_subcommand_args.py checks it against the
+      # CLI's own readers.
+      ASH_READS_STDIN="config inspect mcp"
+      KEEP_STDIN="NO"
+      if [[ -n "${SUBCOMMAND}" && " ${ASH_READS_STDIN} " == *" ${SUBCOMMAND} "* ]]; then
+        KEEP_STDIN="YES"
+      fi
+      for ((STDIN_WORD_AT = 0; STDIN_WORD_AT < ${#ASH_ARG_WORDS[@]}; STDIN_WORD_AT++)); do
+        case "${ASH_ARG_WORDS[STDIN_WORD_AT]}" in
+          --cli-json-input)
+            if [[ "${ASH_ARG_WORDS[STDIN_WORD_AT + 1]:-}" = "-" ]]; then
+              KEEP_STDIN="YES"
+            fi
+            ;;
+          --cli-json-input=-)
+            KEEP_STDIN="YES"
+            ;;
+        esac
+      done
+      if [[ "${KEEP_STDIN}" = "YES" ]]; then
+        DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -i"
+      fi
       # --quiet and --no-color are this script's options as well as ash's, and they
       # are handed on to ash in front of its arguments. ash passes an option given
       # before a subcommand on to it only when the subcommand takes it, and refuses

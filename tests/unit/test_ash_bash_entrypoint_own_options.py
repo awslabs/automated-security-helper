@@ -10,8 +10,8 @@ the CLI inside the container does. `-v` is the CLI's --verbose, not the wrapper'
 --version, so `./ash scan -v` scans. `--help` and `--version` run the CLI from the
 wrapper's own directory, not the caller's, so a package planted in a scanned checkout
 is not what runs. The script's own directory is read with CDPATH unset, and the
-container is run with its stdin open only for `mcp` and `inspect`, the two
-subcommands that read it.
+container is run with its stdin open only for the subcommands that read it (`mcp`,
+`inspect`, `config`) and for a run given `--cli-json-input -`.
 
 A fake OCI runner stands in for docker, as in
 test_ash_bash_entrypoint_container_inputs.py, and records each call's argv
@@ -463,15 +463,30 @@ def test_the_containers_stdin_is_kept_open_for_piped_input(runner, tmp_path):
         pytest.param(["report"], False, id="report"),
         pytest.param(["mcp"], True, id="mcp"),
         pytest.param(["inspect"], True, id="inspect"),
+        pytest.param(["config"], True, id="config"),
+        pytest.param(
+            ["scan", "--cli-json-input", "-"], True, id="scan-with-its-json-on-stdin"
+        ),
+        pytest.param(
+            ["report", "--cli-json-input=-"], True, id="report-with-its-json-attached"
+        ),
+        pytest.param(
+            ["scan", "--cli-json-input", "params.json"],
+            False,
+            id="scan-with-its-json-in-a-file",
+        ),
     ],
 )
-def test_only_mcp_and_inspect_keep_the_containers_stdin_open(
+def test_only_the_subcommands_that_read_stdin_keep_the_containers_stdin_open(
     runner, tmp_path, words, kept_open
 ):
     """Stdin here is a file (the shape of `./ash --source-dir "$d" < dirs.txt` inside
     a `while read` loop, or a job script fed to bash on stdin). A scan given -i
     consumed that input, so the loop ended after one directory and the script lost
-    the commands after ./ash; only mcp and inspect read stdin, so only they get -i."""
+    the commands after ./ash; only mcp, inspect and config read stdin, and any
+    subcommand given `--cli-json-input -` reads its parameters from it, so only those
+    get -i. The list is checked against the CLI's own readers in
+    test_ash_bash_entrypoint_subcommand_args.py."""
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,

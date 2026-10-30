@@ -13,7 +13,9 @@ A fake OCI runner stands in for docker, as in test_ash_bash_entrypoint_build_fai
 and prints the argv it was given.
 """
 
+import inspect
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -322,3 +324,85 @@ def test_every_re_emitted_flag_is_one_the_subcommand_takes():
     assert subcommands == set(declared)
     assert quiet == {name for name, params in declared.items() if "quiet" in params}
     assert color == {name for name, params in declared.items() if "color" in params}
+
+
+# What marks a module as reading stdin: the console helpers' confirm and prompt
+# (typer's, which read the terminal), the Textual app, or a read of the stdin stream.
+STDIN_READER = re.compile(
+    r"(?<![\w.])(?:confirm|prompt)\("
+    r"|^\s*(?:from|import) textual\b"
+    r"|\bsys\.stdin\b"
+    r"|get_text_stream\(\"stdin\"\)",
+    re.MULTILINE,
+)
+
+
+def _callback_modules(command) -> set[Path]:
+    """The source files of a click command's callback and of every command under it."""
+    found: set[Path] = set()
+    callback = getattr(command, "callback", None)
+    if callback is not None:
+        # typer wraps the function it was given; the wrapper carries the original.
+        module = inspect.getmodule(getattr(callback, "__wrapped__", callback))
+        if module is not None and module.__file__:
+            found.add(Path(module.__file__).resolve())
+    for sub in getattr(command, "commands", {}).values():
+        found |= _callback_modules(sub)
+    return found
+
+
+def _defaults_its_transport_to_stdio(command) -> bool:
+    for cmd in [command, *getattr(command, "commands", {}).values()]:
+        if any(p.name == "transport" and p.default == "stdio" for p in cmd.params):
+            return True
+    return False
+
+
+@pytest.mark.unit
+def test_stdin_is_kept_open_for_the_subcommands_that_read_it():
+    """The entrypoint's list of the subcommands whose container keeps stdin open
+    (ASH_READS_STDIN), checked against the CLI so it cannot drift from it: a
+    subcommand reads stdin when its command, or one under it, prompts, runs the
+    Textual app, or defaults its --transport to stdio. The one reader outside the
+    list is `--cli-json-input -`, which every command takes and the entrypoint reads
+    by its flag; every other stdin-reading module under the CLI package belongs to a
+    listed subcommand, so a new reader fails here until the list names it."""
+    import typer.main
+
+    from automated_security_helper import cli as cli_package
+    from automated_security_helper.cli.json_input import CLI_JSON_INPUT_FLAG
+    from automated_security_helper.cli.main import app
+
+    script = ASH_SCRIPT.read_text(encoding="utf-8")
+    reads_stdin = set(
+        re.search(r"ASH_READS_STDIN=\"([^\"]*)\"", script).group(1).split()
+    )
+    # The flag is read in both spellings, by the CLI's own name for it.
+    assert f"{CLI_JSON_INPUT_FLAG})" in script
+    assert f"{CLI_JSON_INPUT_FLAG}=-)" in script
+
+    root = typer.main.get_command(app)
+    owned = {
+        name: _callback_modules(command) for name, command in root.commands.items()
+    }
+    assert all(owned.values()), "every subcommand's callback resolves to a source file"
+    derived = {
+        name
+        for name, command in root.commands.items()
+        if _defaults_its_transport_to_stdio(command)
+        or any(
+            STDIN_READER.search(path.read_text(encoding="utf-8"))
+            for path in owned[name]
+        )
+    }
+    assert reads_stdin == derived
+
+    cli_dir = Path(cli_package.__file__).resolve().parent
+    reading = {
+        path
+        for path in cli_dir.rglob("*.py")
+        if STDIN_READER.search(path.read_text(encoding="utf-8"))
+    }
+    assert reading, "the CLI's stdin readers are found at all"
+    listed = set().union(*(owned[name] for name in reads_stdin))
+    assert reading - listed == {cli_dir / "json_input.py"}, sorted(reading - listed)
