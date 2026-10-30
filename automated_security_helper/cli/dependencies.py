@@ -2102,8 +2102,10 @@ def _report_and_exit(
        cdk-nag's node) is not, in a full run as with --tool. So a full run that
        installs grype and syft and leaves npm-audit without npm, or cfn-nag's gem
        without ``cfn_nag_scan``, fails, not reporting "Installation Complete"
-       before a scan reports those scanners MISSING. Restricted to plugins that
-       run an external program, since a reporter has none to find. Present means
+       before a scan reports those scanners MISSING. Judged by ``is_absent``: a
+       plugin with a command of its own, or one that names a program it needs
+       besides (``external_executables``) with or without a command; a reporter
+       that names neither has nothing to find. Present means
        found by ``find_executable``, or, for a tool run through ``uv tool run``,
        listed by uv, or, for a plugin that declares its check can start the
        tool off PATH, started by that check, the resolution a scan uses
