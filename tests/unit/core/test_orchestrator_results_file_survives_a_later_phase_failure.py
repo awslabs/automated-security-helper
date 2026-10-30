@@ -203,14 +203,17 @@ def test_a_report_over_loaded_results_leaves_the_saved_file_on_failure(
     assert saved.read_bytes() == saved_bytes
 
 
-def test_the_completion_record_is_the_phases_own_marker_not_the_managers_checkpoint():
-    """The fact the orchestrator reads is a marker of the phase's own.
+def test_the_completion_record_is_the_checkpoint_the_validation_manager_names():
+    """The fact the orchestrator reads is the one the scan phase's last step writes.
 
-    The completeness checkpoint the real manager returns is NOT it: that
-    checkpoint is appended inside the completeness pass's try, which swallows
-    the pass's errors, so its presence says the pass finished, not that the
-    phase did. A model that holds every validation checkpoint but the marker
-    reads as not completed; the marker alone reads as completed.
+    That record is a marker of the phase's own, written once its last step has
+    returned. The completeness checkpoint the real manager returns is NOT it,
+    whatever this test's name (kept from the checkpoint-shaped record it
+    replaced) says: that checkpoint is appended inside the completeness pass's
+    try, which swallows the pass's errors, so its presence says the pass
+    finished, not that the phase did. A model that holds every validation
+    checkpoint but the marker reads as not completed; the marker alone reads as
+    completed.
     """
     manager = ScannerValidationManager(plugin_context=MagicMock())
     checkpoint = manager.ensure_complete_results(AshAggregatedResults())
