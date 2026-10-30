@@ -57,9 +57,26 @@ from automated_security_helper.utils.sandbox import scope as sandbox_scope
 pytestmark = pytest.mark.unit
 
 POSIX_ONLY = pytest.mark.skipif(os.name == "nt", reason="POSIX signals and groups")
+#: The waitid probe exists on Linux and the BSDs but not on every POSIX build
+#: (macOS has no os.waitid), so a test that stands it in skips where it is absent.
+NEEDS_WAITID = pytest.mark.skipif(
+    not hasattr(os, "waitid"), reason="this Python has no os.waitid"
+)
 
 #: Above the kernel's pid space, so no live process shares it.
 _FAKE_PID = 2**30 + 47
+
+
+@pytest.fixture(autouse=True)
+def _no_state_carried_between_tests(monkeypatch):
+    """Each test starts with an empty tool-pid registry and empty stand-in
+    records: the fake pid rides four spawn paths here with ``_reap`` patched
+    out, so a registration one test left would be read by the next, and the
+    streaming stand-ins' class-level records would hold the earlier instances."""
+    monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
+    monkeypatch.setattr(_StreamingPopen, "instances", [])
+    monkeypatch.setattr(_StreamingPopen, "event", None)
+    monkeypatch.setattr(_SilentPopen, "instances", [])
 
 
 class _FakeChild:
@@ -188,9 +205,11 @@ def test_a_refused_stop_reaps_an_ended_leader_before_reading_its_group(monkeypat
     assert started.stop_refused is False
 
 
+@POSIX_ONLY
 def test_the_childs_own_path_is_searched_when_the_caller_gave_one(
     monkeypatch, tmp_path
 ):
+    # POSIX: an extensionless `#!/bin/sh` file made executable by its mode.
     tool_dir = tmp_path / "bin"
     tool_dir.mkdir()
     tool = tool_dir / "ash-u26-own-path-tool"
@@ -225,17 +244,38 @@ def test_the_terminal_probe_asks_every_standard_stream(monkeypatch):
     assert spu._child_got_the_terminals_interrupt() is True
 
 
+@POSIX_ONLY
+def test_the_terminal_probe_reads_a_foreign_foreground_group_as_no_interrupt(
+    monkeypatch,
+):
+    """The negative case: every standard stream is a terminal whose foreground
+    group is not ours, so the child did not get the terminal's Ctrl-C."""
+    monkeypatch.setattr(spu.sys, "stdin", SimpleNamespace(fileno=lambda: 0))
+    monkeypatch.setattr(spu.sys, "stdout", SimpleNamespace(fileno=lambda: 1))
+    monkeypatch.setattr(spu.sys, "stderr", SimpleNamespace(fileno=lambda: 2))
+    monkeypatch.setattr(spu.os, "tcgetpgrp", lambda fd: os.getpgrp() + 1)
+    assert spu._child_got_the_terminals_interrupt() is False
+
+
 # --- waits that are bounded ----------------------------------------------------------
 
 
 @POSIX_ONLY
+@NEEDS_WAITID
 def test_the_just_killed_wait_before_a_reap_is_bounded_with_waitid(monkeypatch):
     monkeypatch.setattr(spu, "_REAP_POLL_BOUND_SECONDS", 0.01)
     monkeypatch.setattr(spu, "INTERRUPT_WAIT_SLICE_SECONDS", 0.001)
     monkeypatch.setattr(spu.os, "waitid", lambda *a, **k: None)  # never exits
     discarded = []
     monkeypatch.setattr(spu, "discard_tool_pid", discarded.append)
-    spu.discard_tool_pid_before_reap(_FakeChild())
+    # On its own thread with a bounded join: a wait that lost its bound would
+    # otherwise hang the test run instead of failing it.
+    waiter = threading.Thread(
+        target=spu.discard_tool_pid_before_reap, args=(_FakeChild(),), daemon=True
+    )
+    waiter.start()
+    waiter.join(timeout=2.0)
+    assert not waiter.is_alive(), "the just-killed wait did not return"
     assert discarded == [_FAKE_PID]
 
 
@@ -243,7 +283,7 @@ def test_the_just_killed_wait_before_a_reap_is_bounded_with_waitid(monkeypatch):
 def test_stop_after_interrupt_observes_before_it_signals_and_reaps_with_a_bound(
     monkeypatch,
 ):
-    order: List[str] = []
+    order: List[Any] = []
     monkeypatch.setattr(
         spu, "discard_tool_pid_once_exited", lambda p: order.append("observe") or False
     )
@@ -253,20 +293,47 @@ def test_stop_after_interrupt_observes_before_it_signals_and_reaps_with_a_bound(
     )
     child = _FakeChild()
     real_kill = child.kill
+    real_send_signal = child.send_signal
 
     def kill():
         order.append("kill")
         real_kill()
 
+    def send_signal(signum):
+        # Into the same record as the observe and the kill, so the order of all
+        # three is what is asserted; the stand-in's own calls list keeps the
+        # signal number as before.
+        order.append("sigint" if signum == signal.SIGINT else ("send_signal", signum))
+        real_send_signal(signum)
+
     child.kill = kill
+    child.send_signal = send_signal
     with pytest.raises(KeyboardInterrupt):
         spu.stop_after_interrupt(child, grace=0.01, child_got_the_interrupt=False)
-    assert order[:2] == ["observe", ("send_signal", signal.SIGINT)] or order[0] == (
-        "observe"
-    )
-    assert order.index("observe") < order.index("kill")
+    assert order == ["observe", "sigint", "kill"]
     assert ("wait", spu._REAP_SECONDS) in child.calls
     assert ("wait", None) not in child.calls
+
+
+# --- the grace wait holds a first Ctrl-C --------------------------------------------
+
+
+def test_the_grace_wait_runs_inside_the_stop_grace_context(monkeypatch):
+    """While a stop waits out a tool's grace, a first Ctrl-C latches the scans'
+    cancel and does not interrupt the wait (cancellation.stop_grace_in_progress);
+    the wait had never entered that context."""
+    child = _FakeChild()
+    seen: List[int] = []
+
+    def sleep(step):
+        seen.append(cancellation._GRACE_WAITS)
+        child.returncode = 0
+
+    monkeypatch.setattr(spu.time, "sleep", sleep)
+    before = cancellation._GRACE_WAITS
+    spu._wait_out_grace(child, None, grace=1.0, prompt=None)
+    assert seen == [before + 1], "the grace wait ran outside the context"
+    assert cancellation._GRACE_WAITS == before
 
 
 # --- an interrupt during a grace still escalates ----------------------------------------
@@ -393,6 +460,7 @@ class _ReapedUnderTheLock(_FakeChild):
 
 
 @POSIX_ONLY
+@NEEDS_WAITID
 def test_a_child_another_thread_reaped_reads_as_exited(monkeypatch):
     """The kernel no longer knows the pid (``waitid`` raises ChildProcessError)
     and the reaper set the code, so the child has ended."""
@@ -483,29 +551,46 @@ def test_a_run_logged_below_info_logs_its_failure_below_info_too(monkeypatch, ca
     assert [r.levelno for r in loud] == [logging.WARNING]
 
 
-def test_a_string_command_is_the_programs_name_and_a_tuple_is_copied(monkeypatch):
+def test_a_string_command_is_the_programs_name_and_the_callers_list_is_copied(
+    monkeypatch,
+):
     seen: Dict[str, Any] = {}
     monkeypatch.setattr(spu, "_runner", _fake_runner(seen=seen))
-    monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
+
+    def resolve_into(args, *rest):
+        # The resolution writes the program's path into the list it is given,
+        # as the real one does; the caller's own list must not be that list.
+        args[0] = "/opt/bin/tool"
+        return None
+
+    monkeypatch.setattr(spu, "_resolved_or_refused", resolve_into)
     spu.run_command("ash-u26-no-such-tool")
-    assert seen["args"] == ["ash-u26-no-such-tool"]
-    given = ("ash-u26-no-such-tool", "--x")
+    assert seen["args"] == ["/opt/bin/tool"]
+    given = ["ash-u26-no-such-tool", "--x"]
     spu.run_command(given)
-    assert seen["args"] == ["ash-u26-no-such-tool", "--x"]
-    assert given == ("ash-u26-no-such-tool", "--x")
+    assert seen["args"] == ["/opt/bin/tool", "--x"]
+    assert given == ["ash-u26-no-such-tool", "--x"], "the caller's list was written"
+    spu.run_command(("ash-u26-no-such-tool", "--y"))
+    assert seen["args"] == ["/opt/bin/tool", "--y"]
 
 
 def test_a_failure_of_the_resolution_itself_is_a_spawn_failure(monkeypatch):
-    def resolution_fails(*args):
+    calls: List[Any] = []
+
+    def resolution_fails(*args, **kwargs):
+        calls.append(args[0])
         raise FileNotFoundError(2, "the working directory is gone")
 
     monkeypatch.setattr(spu, "_resolve_for_spawn", resolution_fails)
     monkeypatch.setattr(spu, "_runner", _fake_runner())
-    result = spu.run_command(["ash-u26-no-such-tool"])
+    # A name the lookup would resolve: the failure asserted below is the stand-in's,
+    # not an earlier refusal of an unknown program.
+    result = spu.run_command([sys.executable, "--version"])
     assert isinstance(result, spu.SpawnFailedProcess)
     assert result.returncode == spu.SPAWN_FAILURE_RETURNCODE
-    response = spu.run_command_with_output_handling(["ash-u26-no-such-tool"])
+    response = spu.run_command_with_output_handling([sys.executable, "--version"])
     assert response["spawn_failed"] is True
+    assert len(calls) == 2, "the resolution stand-in was not reached"
 
 
 def test_bytes_mode_passes_no_encoding_and_no_error_handler(monkeypatch):
@@ -539,6 +624,9 @@ def test_a_shell_command_refused_under_a_scope_is_counted():
 
 class _StreamingPopen(_FakeChild):
     instances: List["_StreamingPopen"] = []
+    #: The scan's cancel event the stand-in sets between its two lines; given by
+    #: the test that uses it (the autouse fixture clears it again).
+    event: Any = None
 
     def __init__(self, args, **kwargs):
         super().__init__()

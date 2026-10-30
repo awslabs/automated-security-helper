@@ -1775,7 +1775,13 @@ class TestTheProbeReadsNothingTheRepositoryWrote:
         )
         scanner._process_config_options()
         monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
-        monkeypatch.setattr(scanner, "_run_subprocess", lambda command, **kw: {})
+        # A run that ended: the scanner refuses a response with no exit code,
+        # so the stand-in answers as a finished tool does, with nothing to read.
+        monkeypatch.setattr(
+            scanner,
+            "_run_subprocess",
+            lambda command, **kw: {"returncode": 0, "stdout": "", "stderr": ""},
+        )
         scanner.scan(repo, "source")
         record = staleness.measure(
             cdb.get("trivy-db"),

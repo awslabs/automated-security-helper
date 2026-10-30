@@ -143,8 +143,14 @@ def test_copy_copy_of_the_wrap_does_not_recurse():
 @pytest.mark.parametrize("cls", [css.CommandSafeStream, css.CommandSafeBuffer])
 def test_an_attribute_read_on_an_uninitialized_instance_is_an_attribute_error(cls):
     """What copy.copy does before it fills the new instance's __dict__ in: a
-    lookup there must raise AttributeError, never recurse through ``target``."""
-    half_made = object.__new__(cls)
+    lookup there must raise AttributeError, never recurse through ``target``.
+
+    Made the way copy.copy makes it, ``cls.__new__(cls)``: ``object.__new__`` on
+    a subclass of an ``_io`` type raises TypeError on CPython 3.10 and 3.11
+    (those types have a ``__new__`` of their own), so the earlier shape errored
+    on those interpreters before the lookup under test ran.
+    """
+    half_made = cls.__new__(cls)
     with pytest.raises(AttributeError):
         half_made.anything
 
