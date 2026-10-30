@@ -1547,16 +1547,22 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     # shows the run itself fails.
                     self._plugin_log(
                         f"cfn-lint did not evaluate {len(batch)} template(s) in one "
-                        f"invocation ({failure}); linting each one on its own.",
+                        f"invocation ({failure}); re-running the first on its own "
+                        "to tell one template's fault from the run's.",
                         target_type=target_type,
                         level=logging.WARNING,
                     )
                     batch_failure = failure
 
-                    def lint_alone(position: int, argument: str):
+                    # The batch index is bound as a default at definition time,
+                    # not read from the loop variable when the closure runs
+                    # (flake8-bugbear B023), so the closure carries its own batch.
+                    def lint_alone(position: int, argument: str, batch_index=index):
                         return self._lint_once(
                             [argument],
-                            results_dir.joinpath(f"cfn-lint.{index}-{position}.sarif"),
+                            results_dir.joinpath(
+                                f"cfn-lint.{batch_index}-{position}.sarif"
+                            ),
                             option_args,
                             results_dir,
                             cwd,
