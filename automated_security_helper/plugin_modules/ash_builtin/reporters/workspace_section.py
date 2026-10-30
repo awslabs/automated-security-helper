@@ -176,21 +176,6 @@ def workspace_policy_gates(model: "AshAggregatedResults") -> Dict[str, Optional[
     return gates
 
 
-def workspace_project_threshold(
-    model: "AshAggregatedResults", project_key: Optional[str]
-) -> Optional[str]:
-    """The threshold *project_key*'s outcome was judged against, or None.
-
-    One lookup in ``workspace_project_thresholds``; a caller grading many
-    findings builds that dict once instead. None for a single-directory scan,
-    an unattributed finding, a project the workspace block does not list, and a
-    project whose recorded threshold is null or not a ladder name.
-    """
-    if not project_key:
-        return None
-    return workspace_project_thresholds(model).get(project_key)
-
-
 def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]]:
     """One row per project, in workspace-file order, or ``[]`` for a single scan.
 
