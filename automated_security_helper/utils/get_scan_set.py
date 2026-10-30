@@ -553,8 +553,9 @@ def _own_output_of(
     if not output:
         return None
     absolute = Path(os.path.abspath(output))
+    root = Path(os.path.abspath(source))
     through_the_tree = _through_a_link_in_the_tree(
-        absolute, Path(os.path.realpath(source))
+        absolute, root, Path(os.path.realpath(root))
     )
     return _OwnOutput(
         identity=_directory_identity(output, follow_symlinks=not through_the_tree),

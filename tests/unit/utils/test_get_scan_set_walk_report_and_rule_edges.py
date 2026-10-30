@@ -545,3 +545,27 @@ class TestTheCommandLineFilterPattern:
         assert gss.main() == 2
         assert called == []
         assert "not a regular expression" in capsys.readouterr().err
+
+
+class TestTheOwnOutputDirectoryOfAWalk:
+    def test_it_is_found_for_a_plain_output_directory(self, tmp_path):
+        """The helper that asks whether the way to the output directory runs through a
+        link the tree holds takes the root as spelled and the root resolved; called
+        with the old two arguments it raised TypeError on every walk."""
+        root = _build(tmp_path / "src", {"app.py": "x\n"})
+        output = tmp_path / "out"
+        output.mkdir()
+
+        own = gss._own_output_of(output, root)
+
+        assert own is not None
+        assert own.path == os.path.normcase(str(output))
+
+    def test_a_walk_with_an_output_directory_lists_the_tree(self, tmp_path):
+        root = _build(tmp_path / "src", {"app.py": "x\n", "lib/util.py": "y\n"})
+        output = tmp_path / "out"
+        output.mkdir()
+
+        found = _names(root, scan_set(source=str(root), output=str(output)))
+
+        assert found == {"app.py", "lib/util.py"}
