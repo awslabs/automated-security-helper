@@ -368,6 +368,12 @@ class TestOneScansRecords:
         assert joined.count("did not evaluate templates/compliant.yaml") == 1
         assert "Skipped broken.yaml: it could not be parsed" in joined
         assert scanner.targets_attempted == 2 and scanner.targets_failed == 2
+        # Both failed targets are recorded by name as targets the tool never
+        # evaluated, with the shown path, so the run's error record names them.
+        assert sorted(scanner.unevaluated_targets) == [
+            "bad.yaml",
+            "templates/compliant.yaml",
+        ]
 
     def test_stale_and_read_batch_files_do_not_outlive_the_scan(self, repo):
         scanner = _scanner(repo)

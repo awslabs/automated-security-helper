@@ -194,6 +194,36 @@ def test_a_timeout_stops_the_remaining_invocations(ash_temp_path):
     assert named == ["b.yaml", "c.yaml"], scanner.errors
 
 
+def test_a_failed_invocation_names_a_few_templates_and_records_each(ash_temp_path):
+    """One invocation lints a batch of templates, and when it fails as a whole one
+    line named every template in it. A batch holds up to 24,000 characters of
+    paths, hundreds of templates, so that line ran on for hundreds of names in the
+    error record. It now names the first eight and counts the rest; no name is
+    lost, since each template is recorded on its own as a target the tool never
+    evaluated, which the run's error record names one by one. At the previous tip
+    a template whose invocation failed was not recorded that way at all."""
+    names = [f"t{index:02d}.yaml" for index in range(12)]
+    repo = _repo(ash_temp_path, *names)
+    calls: list = []
+
+    def timing_out(command, **kwargs):
+        calls.append(list(command))
+        return {"stdout": "", "stderr": "", "returncode": None, "timed_out": True}
+
+    scanner = _scanner(repo)
+    _run(scanner, timing_out, repo)
+
+    assert len(calls) == 1, "the twelve templates did not run as one batch"
+    assert scanner.targets_attempted == 12
+    assert scanner.targets_failed == 12
+    assert sorted(scanner.unevaluated_targets) == names
+    lines = [e for e in scanner.errors if "did not evaluate" in e]
+    assert len(lines) == 1, scanner.errors
+    assert "t00.yaml, t01.yaml" in lines[0]
+    assert "t07.yaml and 4 more" in lines[0], lines[0]
+    assert "t08.yaml" not in lines[0]
+
+
 def test_honored_template_ignores_merge_with_the_operators_ignore_checks(
     ash_temp_path,
 ):

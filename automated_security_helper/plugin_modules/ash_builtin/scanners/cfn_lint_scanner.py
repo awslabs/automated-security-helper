@@ -308,6 +308,23 @@ _NOT_STARTED_AFTER_TIMEOUT = (
     "scan is discarded after a timeout"
 )
 
+#: How many templates one "did not evaluate" line names when a whole invocation
+#: failed; the rest are counted. A batch holds up to ``_ARGV_CHAR_BUDGET``
+#: characters of paths, hundreds of templates, and one line that named every one
+#: of them was unreadable in the error record. No name is lost: each template is
+#: recorded on its own as a target the tool never evaluated
+#: (``record_unevaluated_target``), which the run's error record names one by one.
+_NAMED_TEMPLATES_IN_A_LINE = 8
+
+
+def _named_templates(names: List[str]) -> str:
+    """``names`` for one log line: every name up to ``_NAMED_TEMPLATES_IN_A_LINE``,
+    else that many and a count of the rest (``a.yaml, b.yaml and 40 more``)."""
+    if len(names) <= _NAMED_TEMPLATES_IN_A_LINE:
+        return ", ".join(names)
+    shown = names[:_NAMED_TEMPLATES_IN_A_LINE]
+    return f"{', '.join(shown)} and {len(names) - len(shown)} more"
+
 
 def _invocation_failure(response: Dict[str, Any]) -> Optional[str]:
     """Why a run that did not complete failed, worded by the response's flags, or None.
@@ -1432,12 +1449,15 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
                 self.targets_failed += 1
-                # The ERROR log puts the line in self.errors (PluginBase._plugin_log);
-                # appended here as well, every failure was recorded twice, and with
-                # the host's absolute path where the other lines carry the shown one.
+                shown = display_path(path, source_dir)
+                # A target the tool never evaluated, recorded by name as the
+                # unreadable ones are and as cfn-nag records it. The ERROR log
+                # puts the line in self.errors (PluginBase._plugin_log); appended
+                # here as well, every failure was recorded twice, and with the
+                # host's absolute path where the other lines carry the shown one.
+                self.record_unevaluated_target(shown)
                 self._plugin_log(
-                    f"cfn-lint did not evaluate {display_path(path, source_dir)}: "
-                    f"{reason}",
+                    f"cfn-lint did not evaluate {shown}: {reason}",
                     target_type=target_type,
                     level=logging.ERROR,
                 )
@@ -1505,11 +1525,19 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 if failure is not None or found is None:
                     failure = failure or "cfn-lint output could not be read"
                     self.targets_failed += len(names)
-                    # One line, naming the templates: the ERROR log puts it in
-                    # self.errors, so the separate append recorded each failure
-                    # twice, once with the names and once with only their count.
+                    # Each template is a target the tool never evaluated, recorded
+                    # by name as the unreadable and unmodelable ones are, so the
+                    # run's error record names every one. Then ONE line for the
+                    # invocation: the ERROR log puts it in self.errors, so the
+                    # separate append recorded each failure twice, once with the
+                    # names and once with only their count; and a line naming
+                    # every template of a 24,000-character batch was unreadable,
+                    # so it names the first few and counts the rest.
+                    for name in names:
+                        self.record_unevaluated_target(name)
                     self._plugin_log(
-                        f"cfn-lint did not evaluate {', '.join(names)}: {failure}",
+                        f"cfn-lint did not evaluate {_named_templates(names)}: "
+                        f"{failure}",
                         target_type=target_type,
                         level=logging.ERROR,
                     )
