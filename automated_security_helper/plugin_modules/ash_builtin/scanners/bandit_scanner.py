@@ -6,7 +6,17 @@ import glob
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Optional, Sequence, Tuple
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from pydantic import Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -153,8 +163,15 @@ def _entries_no_path_holds_as_text(
     ignore_entries: List[str],
     output_entries: List[Tuple[str, Path]],
     holding: Optional[List[str]] = None,
+    values: Iterable[str] = (),
 ) -> List[str]:
     """The entries, less any that a file path under ``target`` holds as text.
+
+    ``values`` are the configured values to redact from the warning
+    (``text_without_values``): an ``excluded_paths`` entry can be read from the
+    environment, and the warning names the dropped globs built from it. A value's
+    bracketed form (``_not_a_plain_substring``, ``vendo[r]`` for ``vendor``) is
+    redacted with it, since that is how the top-level glob spells the value.
 
     bandit skips a file whose path contains an --exclude entry as a plain
     substring, as well as one the entry matches as a glob (bandit 1.9.4,
@@ -203,14 +220,24 @@ def _entries_no_path_holds_as_text(
     if dropped:
         # A warning, not a verbose line: an excluded_paths entry or a default
         # exclude left out here is applied nowhere after the scan, so bandit
-        # reads the files it names and their findings are reported.
+        # reads the files it names and their findings are reported. Redacted:
+        # the globs are built from configured entries, which can come from the
+        # environment, and ash.log keeps the line.
+        redacted = list(values)
+        for value in list(redacted):
+            bracketed = _not_a_plain_substring(value)
+            if bracketed and bracketed != value:
+                redacted.append(bracketed)
         ASH_LOGGER.warning(
-            f"Not passing {dropped} to bandit --exclude: a file path under "
-            f"'{target}' contains it as text, or it names an existing "
-            "directory, and bandit would skip files it does not cover. bandit "
-            "reads the files these entries name; the findings a global ignore "
-            "path covers are dropped after the scan, an excluded_paths entry's "
-            "or a default exclude's are reported.",
+            text_without_values(
+                f"Not passing {dropped} to bandit --exclude: a file path under "
+                f"'{target}' contains it as text, or it names an existing "
+                "directory, and bandit would skip files it does not cover. bandit "
+                "reads the files these entries name; the findings a global ignore "
+                "path covers are dropped after the scan, an excluded_paths entry's "
+                "or a default exclude's are reported.",
+                redacted,
+            ),
             extra=NO_MARKUP,
         )
     return kept
@@ -1208,11 +1235,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         if not excludes and not ignore_globs and not output_entries:
             return [], []
         holding = _paths_holding_glob_characters(target)
+        values = self._environment_values()
         required = _entries_no_path_holds_as_text(
-            target, excludes, output_entries, holding=holding
+            target, excludes, output_entries, holding=holding, values=values
         )
         best_effort = (
-            _entries_no_path_holds_as_text(target, ignore_globs, [], holding=holding)
+            _entries_no_path_holds_as_text(
+                target, ignore_globs, [], holding=holding, values=values
+            )
             if ignore_globs
             else []
         )

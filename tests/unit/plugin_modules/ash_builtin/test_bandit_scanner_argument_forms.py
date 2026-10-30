@@ -319,6 +319,30 @@ def test_an_entry_a_path_holds_as_text_is_left_out_with_a_warning(tmp_path, capl
     )
 
 
+def test_a_dropped_entry_from_an_environment_value_is_redacted(
+    tmp_path, monkeypatch, caplog
+):
+    """The drop warning names the globs built from configured excluded_paths,
+    which can be read from the environment; it is redacted like the scanner's
+    other lines, including the bracketed top-level form of the value."""
+    source = _tree(tmp_path, ["app.py", "secretvendor/*.md/evil.py"])
+    monkeypatch.setattr(
+        BanditScanner, "_environment_values", lambda self: ("secretvendor",)
+    )
+    scanner = _scanner(
+        source,
+        tmp_path,
+        BanditScannerConfigOptions(excluded_paths=_ignore("secretvendor/*.md")),
+    )
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert f"{source.as_posix()}/secretvendor/*.md" not in _entries(argv)
+    dropped = [message for message in _warnings(caplog) if "Not passing" in message]
+    assert dropped, _warnings(caplog)
+    assert not any("secretvendor" in message for message in dropped), dropped
+
+
 # ---------------------------------------------------------------------------
 # tool_version: null keeps the default constraint
 # ---------------------------------------------------------------------------
