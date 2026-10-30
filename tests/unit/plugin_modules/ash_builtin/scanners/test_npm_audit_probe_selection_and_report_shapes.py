@@ -421,8 +421,10 @@ class TestTheSelection:
     ):
         """The shape the scanner's older tests use: the scan set is stubbed with
         the manifest alone. The lockfile beside it is not kept and not ignored,
-        so it is the one audited."""
-        package = _package(context.source_dir / "app", "yarn.lock")
+        so it is the one audited. The fixture is an npm package because the
+        audit fake answers npm's report shape; a yarn.lock here made the yarn
+        parser refuse the answer and the scan raise before the assertion."""
+        package = _package(context.source_dir / "app", "package-lock.json")
         monkeypatch.setattr(
             npm_audit_scanner,
             "scan_set",
@@ -432,7 +434,7 @@ class TestTheSelection:
 
         _scanner(context).scan(target=context.source_dir, target_type="source")
 
-        assert started == ["yarn"], started
+        assert started == ["npm"], started
 
     def test_a_sole_lockfile_an_ignore_path_names_is_not_audited(self, context, online):
         """Control for the fallback: a lockfile an ignore path names stays
