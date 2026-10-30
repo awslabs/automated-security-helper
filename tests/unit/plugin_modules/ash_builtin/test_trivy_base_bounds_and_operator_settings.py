@@ -25,7 +25,11 @@ Each test here pins one reading that went wrong before:
 - ``TRIVY_SEVERITY`` and the other filtering variables narrowed the report with
   nothing in the run saying so.
 - the offline cache check judged only ``TRIVY_CACHE_DIR`` and warned about every
-  offline scan whose default cache held a database.
+  offline scan whose default cache held a database; then it warned about a
+  database a scan without ``vuln`` never opens.
+- before the first scan the operator's config file was not read, so the offline
+  dependency check judged trivy's default scanners for a scan whose
+  ``scan.scanners`` sends it elsewhere.
 - a missing secret-rules file failed a scan that never reads one.
 - the offline Terraform-check removal ignored the operator's own
   misconfiguration-scanner list.
@@ -81,6 +85,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfigOptions,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils import content_db_staleness as staleness
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 
@@ -667,6 +672,72 @@ def test_offline_with_trivy_cache_dir_set_the_validator_judges_that_directory(
 
     assert messages, "an empty cache named by TRIVY_CACHE_DIR has no database"
     assert all("environment variable not set" not in m for m in messages)
+
+
+def test_offline_the_cache_check_says_nothing_for_a_scan_that_never_opens_the_db(
+    tmp_path, monkeypatch
+):
+    """A missing database is no finding about a scan whose scanners never read it."""
+    scanner = _repo_scanner(tmp_path, scanners=["misconfig"], offline=True)
+    absent = tmp_path / "cache" / "absent"
+    monkeypatch.setattr(TrivyRepoScanner, "_trivy_cache_dir", lambda self: absent)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._check_offline_cache()
+
+    assert messages == []
+
+
+# --- the operator's config file before the first scan -------------------------------
+
+
+def _operator_config_in_env(tmp_path, monkeypatch, body: str) -> Path:
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(body, encoding="utf-8")
+    monkeypatch.setenv("TRIVY_CONFIG", str(operator))
+    return operator
+
+
+def test_the_dependency_check_reads_the_operators_scanners_before_the_first_scan(
+    tmp_path, monkeypatch
+):
+    """Offline, with no database, a scan the operator's config sends to misconfig
+    alone never opens the database; it was reported MISSING all the same because
+    the config file was read only once a scan had chosen it."""
+    _operator_config_in_env(tmp_path, monkeypatch, "scan:\n  scanners: [misconfig]\n")
+    monkeypatch.setattr(
+        trivy_repo_scanner, "find_executable", lambda name: f"/bin/{name}"
+    )
+
+    def no_db(ctx):
+        raise ValueError("no trivy database was found")
+
+    monkeypatch.setattr(staleness, "_built_from_trivy", no_db)
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+
+    assert scanner._effective_scanners() == ["misconfig"]
+    assert scanner.validate_plugin_dependencies() is True
+    assert not scanner.dependency_unavailable_reason
+
+
+def test_control_an_operator_config_that_keeps_vuln_still_needs_the_database(
+    tmp_path, monkeypatch
+):
+    _operator_config_in_env(tmp_path, monkeypatch, "scan:\n  scanners: [vuln]\n")
+    monkeypatch.setattr(
+        trivy_repo_scanner, "find_executable", lambda name: f"/bin/{name}"
+    )
+
+    def no_db(ctx):
+        raise ValueError("no trivy database was found")
+
+    monkeypatch.setattr(staleness, "_built_from_trivy", no_db)
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert "no vulnerability database" in scanner.dependency_unavailable_reason
 
 
 # --- a secret-rules file a scan never reads -----------------------------------------

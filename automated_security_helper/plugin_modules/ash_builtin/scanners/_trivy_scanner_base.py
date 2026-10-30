@@ -606,7 +606,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
     def _reads_vulnerability_db(self) -> bool:
         """Whether this scan opens trivy's vulnerability database: ``vuln`` is among
-        the scanners trivy will run (``_effective_scanners``)."""
+        the scanners trivy will run (``_effective_scanners``, which before the
+        first scan reads the operator's config file as the scan will)."""
         return "vuln" in self._effective_scanners()
 
     def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
@@ -830,17 +831,22 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         as a list of names; empty when unset or unreadable.
 
         The file is read from ``final_args`` when given, else the one this scanner
-        chose (``_scan_config_file``). trivy reads a list setting as a YAML list or
-        a comma-separated string. A file that cannot be read or parsed, including
-        one that is not UTF-8 (a ``UnicodeDecodeError`` is a ``ValueError``), counts
-        as setting nothing.
+        chose (``_scan_config_file``), else, before the first scan has chosen one,
+        the operator's config file when it is honored and exists
+        (``_operator_config_file``), as the staleness probe reads it
+        (``content_database_probe_context``). Without that last step the offline
+        dependency check, which runs before any scan, judged trivy's default
+        scanners for a scan whose ``scan.scanners`` sends it elsewhere. trivy
+        reads a list setting as a YAML list or a comma-separated string. A file
+        that cannot be read or parsed, including one that is not UTF-8 (a
+        ``UnicodeDecodeError`` is a ``ValueError``), counts as setting nothing.
         """
         config_file: Optional[str] = None
         for argument in final_args or []:
             if argument.startswith("--config="):
                 config_file = argument[len("--config=") :]
         if config_file is None:
-            config_file = self._scan_config_file
+            config_file = self._scan_config_file or self._operator_config_file()
         if not config_file:
             return []
         try:
@@ -1642,7 +1648,13 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         the resolved default cache is checked for existence here, with the directory
         named. The authoritative checks stay the dependency probe
         (``validate_plugin_dependencies``) and the post-scan staleness check.
+
+        Nothing is said for a scan whose scanners never open the vulnerability
+        database (``_reads_vulnerability_db``): a missing database is no finding
+        about a scan that does not read it.
         """
+        if not self._reads_vulnerability_db():
+            return
         if snapshot_environ().get("TRIVY_CACHE_DIR"):
             from automated_security_helper.utils.offline_mode_validator import (
                 validate_trivy_offline_mode,
