@@ -977,9 +977,12 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     # An earlier invocation timed out, and the executor discards
                     # the whole scan after a recorded timeout, so starting the
                     # remaining templates, each with a fresh full scan_timeout,
-                    # would only spend their time. Named, not started.
+                    # would only spend their time. Named, not started. The ERROR
+                    # log puts the line in self.errors (PluginBase._plugin_log
+                    # appends every ERROR log), so it is not appended here as
+                    # well: appended twice, each template appeared twice in
+                    # the invocation's exitCodeDescription.
                     self.targets_failed += 1
-                    self.errors.append(f"{shown}: {_NOT_STARTED_AFTER_TIMEOUT}")
                     self._plugin_log(
                         f"cfn-guard did not evaluate {shown}: "
                         f"{_NOT_STARTED_AFTER_TIMEOUT}",

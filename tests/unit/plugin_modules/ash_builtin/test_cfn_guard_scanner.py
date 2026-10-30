@@ -1042,7 +1042,11 @@ class TestScan:
         assert scanner.targets_attempted == 2
         assert scanner.targets_failed == 2
         assert any("timed out" in e for e in scanner.errors)
-        assert any("not started" in e for e in scanner.errors)
+        # One line per template that was not started: the ERROR log already puts
+        # the line in self.errors, so an append beside it recorded each twice in
+        # the invocation's exitCodeDescription.
+        not_started = [e for e in scanner.errors if "not started" in e]
+        assert len(not_started) == 1, scanner.errors
 
     def test_an_unreadable_candidate_is_a_target_that_was_not_evaluated(
         self, repo, rules_root
