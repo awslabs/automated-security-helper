@@ -560,9 +560,12 @@ class TestBareReference:
     def test_two_bare_references_in_one_value_are_left_as_written(
         self, tmp_path, monkeypatch
     ):
-        """The pattern's default group runs to the last ``}``, so ``${A}/${B}``
-        reads as ``A`` with trailing text inside the braces. Without the check for
-        that shape the value became A's value alone and B's half was dropped."""
+        """``${A}/${B}``: the first reference has no colon and another closing
+        brace follows it, so the resolver leaves the value as written. Without
+        the check for that shape the value became A's value alone and B's half
+        was dropped. (The pattern once read the default up to the last ``}``,
+        which made this shape a reference with text inside its braces; it now
+        ends at the first brace, and the text after the match is tested.)"""
         monkeypatch.setenv("ASH_TEST_FIRST", "first")
         monkeypatch.setenv("ASH_TEST_SECOND", "second")
         value = "${ASH_TEST_FIRST}/${ASH_TEST_SECOND}"
@@ -607,17 +610,20 @@ class TestBareReference:
 class TestOneReferencePerValueAtItsStart:
     """A value holds one reference, at its start; anything else is the value's text.
 
-    The documented contract (docs/content/docs/config-overrides.md, "Write one
-    reference per value, at its start"): a reference runs to the last ``}`` in
-    the value, a reference after other text is not resolved, and neither is a
-    second reference. These cells pin each shape the contract names, so the
-    behavior stays a documented choice.
+    The contract, pinned here (no page of docs/ states it; the file an earlier
+    docstring cited does not exist): a reference is ``${VAR}`` or
+    ``${VAR:default}`` and ends at the FIRST ``}`` (a default holding a brace
+    ends there too, see test_a_default_holding_a_brace_ends_at_the_first_brace),
+    a reference after other text is not resolved, a second reference is not
+    resolved, and a first reference followed by another closing brace with no
+    colon (``${A}/${B}``) is left as written. These tests pin each shape, so
+    the behavior stays a deliberate choice.
     """
 
     def test_two_adjacent_references_are_left_as_written(self, tmp_path, monkeypatch):
         """``${A}${B}``, like ``${A}/${B}``: a second reference is not resolved,
-        and the first, with no colon and text before the last ``}``, is not a
-        reference this resolver reads. Nothing is read from the environment."""
+        and the first, with no colon and another closing brace after it, is not
+        a reference this resolver reads. Nothing is read from the environment."""
         monkeypatch.setenv("ASH_TEST_FIRST", "first")
         monkeypatch.setenv("ASH_TEST_SECOND", "second")
         value = "${ASH_TEST_FIRST}${ASH_TEST_SECOND}"
