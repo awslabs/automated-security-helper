@@ -438,3 +438,80 @@ class TestDependencyFallbacks:
             assert scanner.validate_plugin_dependencies() is True
         assert scanner.use_uv_tool is False
         assert scanner.dependencies_satisfied is True
+
+
+class TestResolverOfflineMode:
+    """The consolidated resolver is asked under the scanner's own offline mode.
+
+    ``options.offline: true`` puts checkov offline while the rest of the run
+    stays online (``_scanner_offline``), and the mixin hands that mode to every
+    uv call it makes. The two ``get_uv_tool_command`` calls of the dependency
+    check passed no ``offline`` at all, so the resolver read ASH's global mode
+    alone and probed PyPI online for a scanner the operator had put offline.
+    """
+
+    @staticmethod
+    def _record(calls):
+        def resolver(tool_name, **kwargs):
+            calls.append((tool_name, dict(kwargs)))
+            return None
+
+        return resolver
+
+    def _uv_absent(self, tmp_path, **opts):
+        scanner = _scanner(tmp_path / "src", tmp_path / "out", **opts)
+        calls: list = []
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch.object(
+                CheckovScanner, "resolve_deferred_tool_version", return_value=None
+            ),
+            patch.object(
+                CheckovScanner, "_validate_uv_tool_availability", return_value=False
+            ),
+            patch.object(checkov_scanner, "get_uv_tool_command", self._record(calls)),
+        ):
+            os.environ.pop("ASH_OFFLINE", None)
+            assert scanner.validate_plugin_dependencies() is False
+        return calls
+
+    def _install_failed(self, tmp_path, **opts):
+        scanner = _scanner(tmp_path / "src", tmp_path / "out", **opts)
+        calls: list = []
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch.object(
+                CheckovScanner, "resolve_deferred_tool_version", return_value=None
+            ),
+            patch.object(
+                CheckovScanner, "_validate_uv_tool_availability", return_value=True
+            ),
+            patch.object(
+                CheckovScanner,
+                "_get_tool_installation_info",
+                return_value={"available": False},
+            ),
+            patch.object(CheckovScanner, "_install_uv_tool", return_value=False),
+            patch.object(checkov_scanner, "get_uv_tool_command", self._record(calls)),
+        ):
+            os.environ.pop("ASH_OFFLINE", None)
+            assert scanner.validate_plugin_dependencies() is False
+        return calls
+
+    def test_the_uv_absent_branch_passes_the_scanners_offline_mode(self, tmp_path):
+        ((asked, kwargs),) = self._uv_absent(tmp_path, offline=True)
+        assert asked == "checkov"
+        assert kwargs.get("offline") is True
+
+    def test_the_final_fallback_passes_the_scanners_offline_mode(self, tmp_path):
+        ((asked, kwargs),) = self._install_failed(tmp_path, offline=True)
+        assert asked == "checkov"
+        assert kwargs.get("offline") is True
+
+    def test_a_scanner_that_follows_ash_asks_online_when_ash_is(self, tmp_path):
+        for calls in (
+            self._uv_absent(tmp_path, offline=False),
+            self._install_failed(tmp_path, offline=False),
+        ):
+            ((_, kwargs),) = calls
+            assert kwargs.get("offline") is False
