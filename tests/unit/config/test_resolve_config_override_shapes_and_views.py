@@ -172,6 +172,19 @@ class TestOverrideRefusal:
             split_config_override(entry)
         assert f"Invalid config override: '{entry}'" in str(refused.value)
 
+    @pytest.mark.parametrize(("entry", "key"), [("=renamed", ""), ("  =renamed", "  ")])
+    def test_a_blank_key_before_an_equals_is_quoted_as_the_key(self, entry, key):
+        """An entry with an '=' is named by its key part, never by what follows
+        the '=', and never as "no '='"; the two CLI paths read the same."""
+        with pytest.raises(ASHConfigValidationError) as split:
+            split_config_override(entry)
+        with pytest.raises(ASHConfigValidationError) as applied:
+            apply_config_overrides(AshConfig(), [entry])
+        expected = f"Invalid config override: '{key}'. Expected format: key.path=value"
+        assert str(split.value) == expected, str(split.value)
+        assert str(applied.value) == expected, str(applied.value)
+        assert "renamed" not in str(split.value)
+
 
 class TestValidateConfigDocument:
     def test_the_file_load_context_is_passed(self, monkeypatch, tmp_path):

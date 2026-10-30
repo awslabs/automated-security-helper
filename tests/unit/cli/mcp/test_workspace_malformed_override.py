@@ -27,7 +27,9 @@ from automated_security_helper.core.exceptions import ASHConfigValidationError
 
 pytestmark = pytest.mark.unit
 
-MALFORMED = ["project_name", "=renamed", "  =renamed"]
+# The last entry has no '=' and the shape of a token, which the CLI names by
+# its length only; the workspace refusal has to read the same.
+MALFORMED = ["project_name", "=renamed", "  =renamed", "ab12" * 10]
 
 
 @pytest.fixture(autouse=True)

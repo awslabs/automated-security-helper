@@ -713,7 +713,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
         key_path, separator, value = override.partition("=")
         if not separator or not key_path.strip():
             raise ASHConfigValidationError(
-                f"Invalid config override: {_override_shown(key_path)}. "
+                f"Invalid config override: {_override_shown(override)}. "
                 "Expected format: key.path=value"
             )
         keys.append(key_path)
@@ -5440,11 +5440,21 @@ def _token_shaped(override: str) -> bool:
 
 
 def _override_shown(override: str) -> str:
-    """How a refusal names an override that has no ``=``: quoted when it is
-    key-shaped and not token-shaped, else by its length alone. Override
-    refusals name keys and never values (apply_config_overrides), and an entry
-    with no separator can be a value whose key the operator forgot, a hex
-    digest or an access-key id among them."""
+    """How a refusal names a malformed override entry, given whole.
+
+    An entry with an ``=`` and a blank key is named by its key part, quoted
+    (``''``): what stands before the ``=`` is never a value. An entry with no
+    ``=`` is quoted when it is key-shaped and not token-shaped, else named by
+    its length alone: override refusals name keys and never values
+    (apply_config_overrides), and an entry with no separator can be a value
+    whose key the operator forgot, a hex digest or an access-key id among
+    them. The CLI (apply_config_overrides, split_config_override) and the MCP
+    workspace tools name the entry through this one function, so the two
+    refusals read the same.
+    """
+    key_part, separator, _ = override.partition("=")
+    if separator:
+        return f"'{key_part}'"
     if _KEY_SHAPED_OVERRIDE.match(override) and not _token_shaped(override):
         return f"'{override}'"
     return f"an entry of {len(override)} characters with no '=' (not shown)"

@@ -876,6 +876,7 @@ def _gate_client_overrides(
         RuntimeOverridesConfig,
     )
     from automated_security_helper.config.resolve_config import (
+        _override_shown,
         _parse_config_value,
         apply_config_overrides,
         load_config_file_for_run,
@@ -930,11 +931,14 @@ def _gate_client_overrides(
     for override in config_overrides:
         key, separator, raw = str(override).partition("=")
         if not separator or not key.strip():
-            # The refusal --config-overrides gives, with the key part only: what
-            # follows an '=' is a value, which can be a credential, and the
-            # refusal goes to the client and the log.
+            # The refusal --config-overrides gives, named by the same function
+            # the CLI uses: the key part only where there is an '=', and an
+            # entry with none only when it is key-shaped, since what follows
+            # an '=' or stands alone can be a credential, and the refusal goes
+            # to the client and the log.
             raise ASHConfigValidationError(
-                f"Invalid config override: '{key}'. Expected format: key.path=value"
+                f"Invalid config override: {_override_shown(str(override))}. "
+                "Expected format: key.path=value"
             )
         append = key.endswith("+")
         resolved = _resolve_override_key(
