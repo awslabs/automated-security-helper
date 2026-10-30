@@ -139,6 +139,67 @@ class TestWhichRulesDescribeACredential:
         assert "RULE-1" in secret_rule_ids(report)
 
 
+class TestWhichRulesDescribeACredentialInAMixedReport:
+    """A report holds the runs of several scanners; a rule counts by its own
+    description, not by which other scanners share the report."""
+
+    def _report_of_three(self, third_scanner="custom-tool"):
+        return _report(
+            _run(
+                "checkov",
+                "CKV_AWS_41",
+                CVE_TEXT,
+                _result("CKV_AWS_41", "found", "checkov"),
+            ),
+            _run(
+                "grype",
+                "CVE-2024-0001",
+                CVE_TEXT,
+                _result("CVE-2024-0001", "vuln", "grype"),
+            ),
+            _run(
+                third_scanner,
+                "RULE-1",
+                CVE_TEXT,
+                _result("RULE-1", "found", third_scanner),
+            ),
+        )
+
+    def test_every_scanners_describing_rule_is_a_secret_rule(self):
+        ids = secret_rule_ids(self._report_of_three())
+
+        assert {"CKV_AWS_41", "CVE-2024-0001", "RULE-1"} <= ids
+
+    def test_a_scanner_of_unknown_type_is_not_dropped_beside_known_ones(self):
+        """Control: with a known non-infrastructure scanner in the report, a rule
+        of a scanner ASH does not know still counts."""
+        ids = secret_rule_ids(self._report_of_three(third_scanner="semgrep"))
+
+        assert "RULE-1" in ids
+
+    def test_a_rule_that_describes_nothing_of_the_kind_stays_out(self):
+        """Control."""
+        report = _report(
+            _run(
+                "checkov",
+                "CKV_AWS_41",
+                CVE_TEXT,
+                _result("CKV_AWS_41", "found", "checkov"),
+            ),
+            _run(
+                "semgrep",
+                "rule.b",
+                "Use of a deprecated function",
+                _result("rule.b", "found", "semgrep"),
+            ),
+        )
+
+        ids = secret_rule_ids(report)
+
+        assert "CKV_AWS_41" in ids
+        assert "rule.b" not in ids
+
+
 class TestWhichMessagesDescribeACredential:
     def test_a_code_scanners_message_that_describes_one_is_a_secret_finding(self):
         report = _report(

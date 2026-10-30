@@ -305,10 +305,14 @@ MIN_PROPAGATED_VALUE_ENTROPY = 2.5
 #: Letters alone, as one word or several joined by whitespace, dots, hyphens or
 #: underscores: words, identifiers and prose.
 _WORD_LIKE = re.compile(r"[A-Za-z]+(?:[\s._-]+[A-Za-z]+)*")
-#: The characters outside a word at either end of a value: the punctuation and
-#: spaces around a word (``password:``, ``--password``, ``'secret'``) make it no
-#: less a word.
-_EDGE_NON_WORD = re.compile(r"^\W+|\W+$")
+#: The label and quote punctuation at either end of a value: the colon, equals
+#: sign, quotes, brackets, hyphens, dots, commas and spaces around a word
+#: (``password:``, ``--password``, ``'secret'``) make it no less a word. The
+#: characters that end real passwords (``!``, ``@``, ``#``, ``$``, ``%``, ``^``,
+#: ``&``, ``*``, ``+``, ``~``) are not trimmed: ``Password!`` is a value, not the
+#: word.
+_LABEL_EDGE = r"""[\s'"`:=,;.()\[\]{}<>-]+"""
+_EDGE_NON_WORD = re.compile(f"^{_LABEL_EDGE}|{_LABEL_EDGE}$")
 #: Template placeholders: ``${NAME}``, ``{name}``, ``%(name)s``, ``<value>``, and
 #: a bare ``$NAME`` as shells and templates name a variable: upper case with
 #: digits and underscores, or letters and underscores alone. A value such as
@@ -1329,12 +1333,18 @@ def _region_last_line(region: Any, start: int) -> int:
     """The last line a region starting at ``start`` covers: its ``endLine`` when
     it has one at or after ``start``, else the last line of its snippet, else
     ``start``. A region with no ``endLine`` whose snippet has several lines
-    covers them all; counted as one line it missed the later ones."""
+    covers them all; counted as one line it missed the later ones.
+
+    The snippet's lines are counted both by the breaks scanners count and by every
+    break ``str.splitlines`` knows (form feed, vertical tab, NEL, U+2028), and the
+    larger count is taken: a snippet with a break only some scanners count covers
+    at least that many lines, and the smaller count left the lines after the first
+    unmasked."""
     end = getattr(region, "endLine", None)
     text = getattr(getattr(region, "snippet", None), "text", None)
     last = start
-    if isinstance(text, str) and not _UNCOUNTED_LINE_BREAK.search(text):
-        last = start + max(len(_split_lines(text)) - 1, 0)
+    if isinstance(text, str):
+        last = start + max(len(_split_lines(text)), len(text.splitlines()), 1) - 1
     if isinstance(end, int) and end > last:
         last = end
     return last
@@ -2002,15 +2012,41 @@ def _mask_url(node: AnyUrl, index: _SecretIndex) -> Any:
     A pydantic URL (``versionControlProvenance.repositoryUri``,
     ``hostedViewerUri``) is neither a str nor a model, and a credential written
     into it (``https://user:token@host/repo``) was kept.
+
+    ``str(node)`` is the URL as pydantic writes it, with the userinfo and the path
+    percent-encoded, so a value with ``@``, ``:``, ``/``, ``#``, ``?``, ``%`` or a
+    character outside ASCII is in it in its encoded spelling; the values are
+    masked in each spelling reports use (``mask_secret_values_in_text``) as well
+    as plain.
     """
     text = str(node)
-    masked = index.mask_values(text)
+    masked = mask_secret_values_in_text(index.mask_values(text), index.values)
     if masked == text:
         return node
     try:
         return type(node)(masked)
     except (ValueError, TypeError):
         return masked
+
+
+def _rename_masked_key(mapping: Dict[Any, Any], key: str, index: _SecretIndex) -> None:
+    """Replace ``key`` of ``mapping`` by its masked text, keeping its value.
+
+    The raw key is always removed. When the masked text is already a key of the
+    mapping (two keys masked to the same text, or a key that already reads like
+    the masked form), the value is stored under the masked text with a number
+    after it, so no value is lost and no raw key is kept.
+    """
+    masked_key = index.mask_values(key)
+    if masked_key == key:
+        return
+    value = mapping.pop(key)
+    target = masked_key
+    number = 2
+    while target in mapping:
+        target = f"{masked_key}#{number}"
+        number += 1
+    mapping[target] = value
 
 
 def _mask_tree(
@@ -2174,6 +2210,13 @@ def _mask_tree(
                     if pattern is not None:
                         masked = _keep_the_pattern(pattern, value, masked)
                 setattr(node, name, masked)
+        # The names of a model's extra fields are text a value can be in too
+        # (a map keyed by the values it holds), as a dict's keys are.
+        extra = getattr(node, "__pydantic_extra__", None)
+        if isinstance(extra, dict):
+            for key in list(extra):
+                if isinstance(key, str) and not _is_skipped_field(type(node), key):
+                    _rename_masked_key(extra, key, index)
         return node
     if isinstance(node, list):
         for position, item in enumerate(node):
@@ -2199,9 +2242,7 @@ def _mask_tree(
             # A value used as a key (a map keyed by the values it holds) is text
             # of the tree as much as any other string.
             if isinstance(key, str):
-                masked_key = index.mask_values(key)
-                if masked_key != key and masked_key not in node:
-                    node[masked_key] = node.pop(key)
+                _rename_masked_key(node, key, index)
         return node
     return node
 
