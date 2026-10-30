@@ -1154,13 +1154,17 @@ def _scan_target_refusal(
         f"scan, or deliver the tree with set_source_git or "
         f"set_source_zip_finalize so it lands in this session's sandbox."
     )
-    if _is_filesystem_root(resolved):
+    if _is_filesystem_root(resolved) and not sandbox.permits_scan(resolved):
         # Reached most often by omitting the directory entirely: the tool falls
         # back to the process working directory, and a server launched by an
         # editor or agent frequently has "/" for a cwd. Telling that caller to
         # configure an allowlist points at the wrong lever first. Judged before
         # the gates below, so the root keeps this remedy whatever they would say
-        # of a directory that contains everything.
+        # of a directory that contains everything. A root the operator granted
+        # (a second volume's drive root on Windows, "/" where no shared
+        # workspace root sits under it) is not that caller: it passes to the
+        # gates below as any granted directory does, and is permitted by them
+        # when nothing else refuses it.
         return _refusal(
             "Scan target",
             directory_path,
