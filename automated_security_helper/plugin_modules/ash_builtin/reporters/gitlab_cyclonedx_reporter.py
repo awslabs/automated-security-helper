@@ -402,17 +402,21 @@ def _resolve_package_manager_and_language(
 
     The manager an ecosystem table gives is refined by the component's lockfile
     (:func:`_refined_package_manager`): a component declared by a yarn.lock is
-    ``yarn``, not ``npm``.
+    ``yarn``, not ``npm``. The lockfile is the one the component reports as its
+    input file (:func:`_resolve_input_file_path`), the operator's override
+    included, so the manager and the input file written on one component always
+    agree.
     """
     # Config overrides win unconditionally
     if options.package_manager_override and options.language_override:
         return options.package_manager_override, options.language_override
 
-    location = _get_component_property(component_dict, "syft:location:0:path")
     pm, lang = _ecosystem_of(component_dict)
     if pm is not None:
+        input_file = _resolve_input_file_path(component_dict, options)
         return (
-            options.package_manager_override or _refined_package_manager(pm, location),
+            options.package_manager_override
+            or _refined_package_manager(pm, input_file),
             options.language_override or lang,
         )
 

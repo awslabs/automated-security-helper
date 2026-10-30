@@ -139,6 +139,32 @@ class TestLockfileNamesTheManager:
         assert props["gitlab:dependency_scanning:package_manager:name"] == "pip"
         assert props["gitlab:dependency_scanning:input_file:path"] == "docs/yarn.lock"
 
+    def test_a_component_is_refined_by_the_input_file_it_reports(self):
+        """With an input file override the component reports that file, so its
+        manager is the one that file names, not the one its own location names."""
+        options = GitLabCycloneDXReporterConfigOptions(
+            input_file_path_override="poetry.lock"
+        )
+        pm, lang = _resolve_package_manager_and_language(
+            _component(
+                "requests", "/requirements.txt", purl="pkg:pypi/requests@2.32.3"
+            ),
+            options,
+        )
+        assert (pm, lang) == ("poetry", "Python")
+
+    def test_a_component_and_the_report_agree_on_an_input_file_override(self, tmp_path):
+        doc = _report(
+            _reporter(tmp_path, input_file_path_override="poetry.lock"),
+            [_component("requests", "/requirements.txt", "pkg:pypi/requests@2.32.3")],
+        )
+
+        report_props = _metadata_props(doc)
+        component_props = _component_props(doc, "requests")
+        for props in (report_props, component_props):
+            assert props["gitlab:dependency_scanning:package_manager:name"] == "poetry"
+            assert props["gitlab:dependency_scanning:input_file:path"] == "poetry.lock"
+
     def test_the_report_level_manager_follows_the_report_level_lockfile(self, tmp_path):
         doc = _report(
             _reporter(tmp_path),
