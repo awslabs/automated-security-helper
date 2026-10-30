@@ -182,13 +182,17 @@ def _relative_to_resolved_root(uri: str, source_dir_path: Path) -> str:
     directory another way (macOS reports ``/tmp/x`` for ``/private/tmp/x``).
     Resolving the whole URI relocated a file reached through a link inside the
     tree to the link's target, so the finding was recorded under a path the
-    scan root does not show. The nearest ancestor that resolves to the source
-    directory is found instead, and the tail below it is kept as written; only
-    when no ancestor does is the whole URI resolved, as before. Raises
-    ValueError when the URI is outside the source directory either way.
+    scan root does not show. The shallowest ancestor that resolves to the source
+    directory is found instead, walking from the filesystem root down, and the
+    tail below it is kept as written; only when no ancestor does is the whole
+    URI resolved, as before. Shallowest, not deepest: a link inside the tree
+    that resolves to the scan root itself (``<root>/self -> <root>``) is an
+    ancestor too, and read deepest-first it was the boundary, so ``self/a.py``
+    was recorded as ``a.py``, the relocation this function exists to avoid.
+    Raises ValueError when the URI is outside the source directory either way.
     """
     candidate = Path(undecodable_of_text(uri))
-    for ancestor in (candidate, *candidate.parents):
+    for ancestor in reversed((candidate, *candidate.parents)):
         if path_in_record_form(ancestor.resolve()) == source_dir_path:
             return str(path_in_record_form(candidate.relative_to(ancestor)))
     return str(path_in_record_form(candidate.resolve()).relative_to(source_dir_path))
@@ -995,8 +999,12 @@ def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
 _URI_WITH_AUTHORITY = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+://")
 
 
-def _matched_path_text(uri: str, source_dir_prefix: str) -> str:
+def _matched_path_text(uri: str, source_dir_prefix: str, decode: bool = True) -> str:
     """*uri* in the one spelling every match reads.
+
+    With *decode* False a relative URI keeps its percent escapes: the spelling
+    the report records and a person copies from it into a suppression (see the
+    config pass, which matches that spelling too when the decoded one misses).
 
     The matchers compare a path as it is given and normalize only the pattern
     (``path_matching._path_pattern_matches``), so the path is put in one spelling
@@ -1026,7 +1034,7 @@ def _matched_path_text(uri: str, source_dir_prefix: str) -> str:
     """
     if _is_file_uri(uri):
         text = _file_uri_to_path_text(uri)
-    elif "%" in uri and not _URI_WITH_AUTHORITY.match(uri):
+    elif decode and "%" in uri and not _URI_WITH_AUTHORITY.match(uri):
         from urllib.parse import unquote
 
         decoded = unquote(uri, errors="surrogateescape")
@@ -1093,6 +1101,7 @@ def _normalize_sarif_uri(
     source_dir_prefix_with_slash: str,
     source_dir_prefix_no_drive: str | None,
     source_dir_basename: PurePosixPath | None,
+    decode: bool = True,
 ) -> str:
     """Strip source-directory prefix from a SARIF artifact URI.
 
@@ -1112,9 +1121,10 @@ def _normalize_sarif_uri(
     The URI is first put in the spelling every match reads
     (:func:`_matched_path_text`), before any prefix is stripped, so
     ``./vendor/v.py`` is ``vendor/v.py`` for the ignore paths, the suppressions,
-    the inline-suppression read and the finding id alike.
+    the inline-suppression read and the finding id alike. *decode* False keeps
+    a relative URI's percent escapes (:func:`_matched_path_text`).
     """
-    uri_normalized = _matched_path_text(uri, source_dir_prefix)
+    uri_normalized = _matched_path_text(uri, source_dir_prefix, decode)
     for prefix in (
         source_dir_prefix,
         source_dir_prefix_with_slash,
@@ -1522,8 +1532,14 @@ def _client_exclusion_for(
 ) -> Any:
     """The client-supplied scanner exclusion that would have kept ``result`` out, if any.
 
-    ``budget`` is the pass's ``EvaluationBudget``: every bounded search of a
-    client's checkov pattern in this pass shares its one ``scan_timeout``.
+    Every location that names a file has to be under one of the client's
+    exclusions, the rule the ignore paths follow (Step 1 of the pass): a result
+    located in an excluded ``vendor/x.py`` and in a kept ``src/a.py`` is a
+    finding about ``src/a.py``, and marking it excluded on the one matching
+    location hid it. The exclusion returned is the first location's. A result
+    with no located location is not excluded. ``budget`` is the pass's
+    ``EvaluationBudget``: every bounded search of a client's checkov pattern in
+    this pass shares its one ``scan_timeout``.
     """
     from automated_security_helper.config.client_scanner_exclusions import (
         matching_exclusion,
@@ -1532,6 +1548,7 @@ def _client_exclusion_for(
     scanner_name = _result_scanner_name(result, run)
     if not any(exclusion.applies_to(scanner_name) for exclusion in exclusions):
         return None
+    found = None
     for location in result.locations or []:
         if not (
             location.physicalLocation
@@ -1547,7 +1564,7 @@ def _client_exclusion_for(
             if Path(uri).is_absolute()
             else (source_dir / uri).as_posix()
         )
-        found = matching_exclusion(
+        exclusion = matching_exclusion(
             exclusions,
             scanner_name=scanner_name,
             relative=uri,
@@ -1555,9 +1572,11 @@ def _client_exclusion_for(
             rule_id=result.ruleId,
             budget=budget,
         )
-        if found is not None:
-            return found
-    return None
+        if exclusion is None:
+            return None
+        if found is None:
+            found = exclusion
+    return found
 
 
 class _OutputDirExclusion:
@@ -2070,6 +2089,7 @@ def _apply_suppressions_within_budget(
                     ),
                     None,
                 )
+                uri_as_written = None
                 if result.ruleId and location is not None:
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
                     uri = (
@@ -2083,6 +2103,22 @@ def _apply_suppressions_within_budget(
                         if raw_uri
                         else (raw_uri or "")
                     )
+                    # The spelling the report records, escapes kept: a person who
+                    # copies ``a%20b.py`` from the report (or saves the dialog's
+                    # entry, written from it) into a suppression named a file the
+                    # decoded match never met. Matched second, when the decoded
+                    # spelling differs and misses.
+                    if raw_uri and "%" in raw_uri:
+                        uri_as_written = _normalize_sarif_uri(
+                            raw_uri,
+                            _source_dir_prefix,
+                            _source_dir_prefix_with_slash,
+                            _source_dir_prefix_no_drive,
+                            _source_dir_basename,
+                            decode=False,
+                        )
+                        if uri_as_written == uri:
+                            uri_as_written = None
                     line_start = None
                     line_end = None
                     if (
@@ -2148,6 +2184,19 @@ def _apply_suppressions_within_budget(
                         recorded_fields,
                         written_ids,
                     )
+                    if not config_suppressed and uri_as_written is not None:
+                        config_suppressed = _apply_config_suppression(
+                            result,
+                            suppressions,
+                            flat_finding.model_copy(
+                                update={"file_path": uri_as_written}
+                            ),
+                            used_suppressions,
+                            _symbol_resolver,
+                            written_reasons,
+                            recorded_fields,
+                            written_ids,
+                        )
                     if config_suppressed and suppressions_in_effect(
                         result.suppressions
                     ):
