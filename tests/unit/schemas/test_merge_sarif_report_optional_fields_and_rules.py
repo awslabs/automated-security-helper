@@ -352,9 +352,39 @@ class TestResultsKeepTheirRuleById:
         # ride along in the kept reference; whether they are dropped is pinned
         # by the test of the kept reference's value filter, not here.
 
+    def test_an_index_only_component_reference_takes_the_components_name(self):
+        """A component reference with an index alone pointed into the incoming
+        run's extensions; dropping it whole made the rule read as the DRIVER's
+        (SARIF 3.52.7) when it came from an extension. The name is read from
+        the run's tool before the index goes."""
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [
+                        _finding(
+                            "T-0", rule={"id": "T-0", "toolComponent": {"index": 0}}
+                        )
+                    ],
+                    [],
+                    extensions=[{"name": "pack", "rules": [{"id": "T-0"}]}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        reference = (
+            aggregated.runs[0].results[0].rule.root.model_dump(exclude_unset=True)
+        )
+        assert reference["id"] == "T-0"
+        assert reference["toolComponent"] == {"name": "pack"}
+
     def test_a_component_reference_naming_only_an_index_is_dropped(self):
-        """The control: with no name and no guid the component reference says
-        nothing the aggregate can read, so it goes with its index."""
+        """The control: with no name and no guid, and an index past the run's
+        extensions (it carries none), the component reference names nothing the
+        aggregate can read, so it goes with its index."""
         aggregated = SarifReport(runs=[_run("aggregate", [], [])])
         incoming = SarifReport(
             runs=[
@@ -1297,6 +1327,59 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         assert taxon.index in (None, -1)
         assert taxon.toolComponent.name == "cwe"
         assert taxon.toolComponent.index in (None, -1)
+
+    def test_a_taxon_whose_component_is_named_by_index_alone_keeps_the_name(self):
+        """The component reference carried an index and nothing else, so the
+        detach dropped it whole and the taxon read as the driver's while its id
+        was read from the extension; the extension's name is taken first."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1", taxa=[{"index": 1, "toolComponent": {"index": 0}}]
+                        )
+                    ],
+                    extensions=[
+                        {"name": "cwe", "taxa": [{"id": "CWE-1"}, {"id": "CWE-79"}]}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        taxon = aggregated.runs[0].results[0].taxa[0].root
+        assert taxon.id == "CWE-79"
+        assert taxon.toolComponent.name == "cwe"
+        assert taxon.toolComponent.index in (None, -1)
+
+    def test_a_taxon_whose_component_index_names_nothing_loses_the_reference(self):
+        """The control: an index past the run's extensions names no component,
+        so the reference goes, as before."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            taxa=[{"id": "CWE-79", "toolComponent": {"index": 3}}],
+                        )
+                    ],
+                    extensions=[{"name": "cwe", "taxa": [{"id": "CWE-79"}]}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        taxon = aggregated.runs[0].results[0].taxa[0].root
+        assert taxon.id == "CWE-79"
+        assert taxon.toolComponent is None
 
     def test_a_web_request_named_by_index_takes_its_row_from_the_runs_table(self):
         aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])

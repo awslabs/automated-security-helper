@@ -3081,12 +3081,16 @@ def _detach_run_scoped_references(
         id is read from the incoming run when the reference carries none, then
         both indices are dropped; the component's name and guid stay, since they
         name the component by content, not by position (the same shape
-        ``_keep_the_rule_by_id`` gives a result's ``rule``)."""
+        ``_keep_the_rule_by_id`` gives a result's ``rule``). A component
+        reference that named its component by index alone takes that
+        component's name and guid from the incoming run's tool before the index
+        goes: a reference with no component reads as the DRIVER's (SARIF
+        3.52.7), and the taxon came from an extension."""
         if not isinstance(reference, dict):
             return
         component_reference = reference.get("toolComponent")
+        component = _referenced_tool_component(component_reference, incoming.tool)
         if reference.get("id") is None and reference.get("guid") is None:
-            component = _referenced_tool_component(component_reference, incoming.tool)
             taxa = (getattr(component, "taxa", None) or []) if component else []
             index = reference.get("index")
             if isinstance(index, int) and 0 <= index < len(taxa) and taxa[index].id:
@@ -3096,6 +3100,16 @@ def _detach_run_scoped_references(
         reference["index"] = -1
         if isinstance(component_reference, dict):
             component_reference.pop("index", None)
+            if (
+                component_reference.get("name") is None
+                and component_reference.get("guid") is None
+                and component is not None
+                and component is not incoming.tool.driver
+            ):
+                for key in ("name", "guid"):
+                    value = getattr(component, key, None)
+                    if value is not None:
+                        component_reference[key] = value
             if (
                 component_reference.get("name") is None
                 and component_reference.get("guid") is None
@@ -3215,8 +3229,12 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
     content, and the component itself is folded into the aggregate's
     extensions under that name, so they stay (a reference with no component
     reads as the driver's, SARIF 3.52.7, and after the merge the driver is the
-    aggregate's own). A component reference left with neither is dropped, and
-    a reference left with neither id nor guid is dropped whole.
+    aggregate's own). A component reference that named its component by index
+    alone takes that component's name and guid from the incoming run's tool
+    before the index goes, since without them the rule would read as the
+    driver's; one that names an extension the run does not carry, or the
+    driver, is dropped, and a reference left with neither id nor guid is
+    dropped whole.
     """
     reference = dumped.get("rule")
     if dumped.get("ruleId") is None:
@@ -3242,6 +3260,13 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
                 for key, value in component_reference.items()
                 if key != "index" and value is not None
             }
+            if component.get("name") is None and component.get("guid") is None:
+                named = _referenced_tool_component(component_reference, report_tool)
+                if named is not None and named is not report_tool.driver:
+                    for key in ("name", "guid"):
+                        value = getattr(named, key, None)
+                        if value is not None:
+                            component[key] = value
             if component.get("name") is not None or component.get("guid") is not None:
                 kept["toolComponent"] = component
         if kept.get("id") is None and kept.get("guid") is None:
