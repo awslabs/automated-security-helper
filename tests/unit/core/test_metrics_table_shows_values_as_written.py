@@ -9,11 +9,14 @@
   escaped twice, and a newline in it is written as an escape so the line stays one.
 - The help text names the SKIPPED row's second meaning and the (u)navailable
   threshold source the narrow table prints.
-- NO_COLOR is honored by the summary console.
+- NO_COLOR is honored by the summary console: no color is emitted (bold and the
+  other non-color styles stay, as Rich reads the convention).
 - One notice printer that raises does not stop the later notices.
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 from rich.console import Console
@@ -40,9 +43,15 @@ def _render(table, width=200) -> str:
 
 
 class TestTheCells:
-    @pytest.mark.parametrize("width", [200, 80], ids=["wide", "narrow"])
+    # The narrow table shows the threshold's first four characters, so its
+    # control character sits inside them; the wide table shows the whole text.
+    @pytest.mark.parametrize(
+        "width,threshold",
+        [(200, f"HIGH{ESC}[31m"), (80, f"{ESC}HIGH")],
+        ids=["wide", "narrow"],
+    )
     def test_the_threshold_cell_shows_a_control_character_as_an_escape(
-        self, monkeypatch, width
+        self, monkeypatch, width, threshold
     ):
         monkeypatch.setattr(
             metrics_table,
@@ -51,7 +60,7 @@ class TestTheCells:
                 ScannerMetrics(
                     scanner_name="tool",
                     status="PASSED",
-                    threshold=f"HIGH{ESC}[31m",
+                    threshold=threshold,
                     threshold_source=f"config{ESC}[0m",
                 )
             ],
@@ -97,15 +106,29 @@ class TestTheHelpText:
         assert "(u)navailable" in line, line
 
 
+#: An SGR sequence that sets a foreground or background color (16-color,
+#: bright, 256-color or truecolor). Rich keeps bold and the other non-color
+#: styles under NO_COLOR, so those sequences are not colors.
+COLOR_SEQUENCE = re.compile(
+    r"\x1b\[(?:[0-9;]*;)?(?:3[0-7]|9[0-7]|10[0-7]|38|48)(?:;[0-9;]*)?m"
+)
+
+
 class TestTheDisplay:
     def test_no_color_is_honored(self, monkeypatch, capsys):
-        monkeypatch.setenv("NO_COLOR", "1")
+        # The control: with color asked for and NO_COLOR unset, the table is
+        # printed in color, so the assertion below is reading a real difference.
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        display_metrics_table(AshAggregatedResults(), use_color=True)
+        colored = capsys.readouterr().out
+        assert COLOR_SEQUENCE.search(colored), repr(colored[:300])
 
+        monkeypatch.setenv("NO_COLOR", "1")
         display_metrics_table(AshAggregatedResults(), use_color=True)
 
         out = capsys.readouterr().out
         assert "ASH Scan Results Summary" in out
-        assert ESC not in out, repr(out[:200])
+        assert not COLOR_SEQUENCE.search(out), repr(out[:300])
 
     def test_a_notice_printer_that_raises_does_not_stop_the_later_notices(
         self, monkeypatch, capsys
@@ -114,6 +137,9 @@ class TestTheDisplay:
 
         def _raises(model, console):
             raise ValueError("a shape this printer cannot read")
+
+        # The warning names the printer by its __name__, as the live one is named.
+        _raises.__name__ = "print_coverage_shortfalls"
 
         def _prints(model, console):
             printed.append("later")
