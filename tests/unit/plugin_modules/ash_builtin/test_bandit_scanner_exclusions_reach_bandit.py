@@ -594,6 +594,37 @@ def test_after_a_failed_install_a_path_binary_runs_directly(tmp_path, monkeypatc
     assert scanner.dependencies_satisfied is True
 
 
+def test_a_uv_answer_by_path_keeps_the_uv_route(tmp_path, monkeypatch):
+    """The resolver may name uv by its path; compared as the bare word, that
+    answer was taken for a bandit binary, verified as one, and run directly."""
+    source = _tree(tmp_path, ["app.py"])
+    scanner = _scanner(source, tmp_path)
+    uv = str(tmp_path / "tools" / "uv")
+    monkeypatch.setattr(
+        BanditScanner, "_validate_uv_tool_availability", lambda self: True
+    )
+    monkeypatch.setattr(
+        BanditScanner, "_get_tool_installation_info", lambda self: {"available": False}
+    )
+    monkeypatch.setattr(
+        BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
+    )
+    monkeypatch.setattr(
+        bandit_scanner,
+        "get_uv_tool_command",
+        lambda command: [uv, "tool", "run", "bandit"],
+    )
+    monkeypatch.setattr(
+        pre_installed_tool,
+        "verify_pre_installed_tool",
+        lambda *args, **kwargs: pytest.fail("a uv answer is not verified as bandit"),
+    )
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.use_uv_tool is True
+    assert scanner.dependencies_satisfied is True
+
+
 def test_a_uv_answer_keeps_the_uv_route(tmp_path, monkeypatch):
     source = _tree(tmp_path, ["app.py"])
     scanner = _scanner(source, tmp_path)

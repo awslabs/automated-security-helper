@@ -799,17 +799,21 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _take_resolved_command(self, command: List[str]) -> bool:
         """Set the route from ``get_uv_tool_command``'s answer, and decide the dependency.
 
-        A ``uv`` answer keeps the uv route. A direct binary on PATH is verified as
-        ``_select_tool_execution`` verifies one (``utils/pre_installed_tool.py``:
-        the sarif and toml extras, ``tool_version``): one that falls short is
-        refused with what is missing named, since running it would fail at
-        ``--format sarif`` or report with the wrong version; one that cannot be
-        verified runs, with a warning, because on both routes that reach here uv
-        is not there to resolve the requirement instead. A verified binary runs
+        A ``uv`` answer (bare, or by its path) keeps the uv route. A direct binary
+        on PATH is verified as ``_select_tool_execution`` verifies one
+        (``utils/pre_installed_tool.py``: the sarif and toml extras,
+        ``tool_version``): one that falls short is refused with what is missing
+        named, since running it would fail at ``--format sarif`` or report with
+        the wrong version; one that cannot be verified runs, with a warning,
+        because on neither route that reaches here did uv resolve the requirement
+        (uv is absent, or its install of the tool failed). A verified binary runs
         directly: ``use_uv_tool`` is turned off, which the final fallback never
         did before.
         """
-        if command[0] == "uv":
+        if Path(command[0]).name == "uv":
+            # The resolver names uv bare or by its path; either is the uv route,
+            # which stays on. (Compared as the bare word, an absolute uv path
+            # read as a bandit binary and was "verified" as one.)
             self.dependencies_satisfied = True
             return True
         from automated_security_helper.utils.pre_installed_tool import (
@@ -859,7 +863,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 text_without_values(
                     f"Using pre-installed {self.command} at {executable} directly "
                     f"though it could not be verified against {requirement!r}: "
-                    f"{checked.detail}. uv is not available to resolve it instead.",
+                    f"{checked.detail}. No uv-managed {self.command} resolved "
+                    "instead (uv absent, or its install of the tool failed).",
                     values,
                 ),
                 level=logging.WARNING,
