@@ -90,10 +90,58 @@ def test_a_located_result_keeps_both_fields(reporter):
     assert vuln["location"] == {"file": "app/main.py", "start_line": 7}
 
 
-def test_no_location_field_is_ever_null(reporter):
-    """The schema-level statement: no ``null`` under any vulnerability's location."""
-    result = Result(ruleId="B105", message=Message(text="no position"))
+def test_a_region_without_a_start_line_omits_start_line(reporter):
+    """A region that carries a column or an offset but no line is the input most
+    likely to bring ``"start_line": null`` back."""
+    result = Result(
+        ruleId="B105",
+        message=Message(text="column only"),
+        locations=[
+            Location(
+                physicalLocation=PhysicalLocation(
+                    artifactLocation=ArtifactLocation(uri="app/main.py"),
+                    region=Region(startColumn=5, charOffset=10),
+                )
+            )
+        ],
+    )
 
+    (vuln,) = _report(reporter, result)["vulnerabilities"]
+
+    assert vuln["location"] == {"file": "app/main.py"}
+
+
+def _located(region=None, uri="app/main.py") -> Location:
+    return Location(
+        physicalLocation=PhysicalLocation(
+            artifactLocation=ArtifactLocation(uri=uri), region=region
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        Result(ruleId="B105", message=Message(text="no position")),
+        Result(
+            ruleId="B105", message=Message(text="file only"), locations=[_located()]
+        ),
+        Result(
+            ruleId="B105",
+            message=Message(text="region without a line"),
+            locations=[_located(Region(startColumn=5))],
+        ),
+        Result(
+            ruleId="B105",
+            message=Message(text="located"),
+            locations=[_located(Region(startLine=7))],
+        ),
+    ],
+    ids=["no-location", "file-only", "region-without-start-line", "full"],
+)
+def test_no_location_field_is_ever_null(reporter, result):
+    """The schema-level statement: no ``null`` under any vulnerability's
+    location, for every location shape a result can carry."""
     report = _report(reporter, result)
 
     for vuln in report["vulnerabilities"]:

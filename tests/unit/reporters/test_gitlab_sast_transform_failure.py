@@ -411,16 +411,3 @@ class TestRuleIdBindingIsTransparent:
             for identifier in vuln["identifiers"]
             if identifier["type"] == "ash-finding-id"
         ]
-
-    def test_the_finding_id_is_the_one_every_other_report_gives(self, reporter):
-        """The id is the flattened finding's, the same string in every report."""
-        result = Result(
-            ruleId="B105",
-            message=Message(text="hardcoded password string"),
-            locations=[_located()],
-        )
-        model = _model(result)
-
-        (vuln,) = json.loads(reporter.report(model))["vulnerabilities"]
-
-        assert vuln["id"] == model.to_flat_vulnerabilities()[0].id

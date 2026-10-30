@@ -17,6 +17,7 @@ Three things the report used to get wrong:
 """
 
 import json
+import re
 
 import pytest
 
@@ -70,12 +71,14 @@ def _model(*results: Result) -> AshAggregatedResults:
 
 
 class TestScanStatusReportsScannersThatDidNotComplete:
-    def _with_scanner(self, status: ScannerStatus) -> AshAggregatedResults:
-        model = _model()
+    def _with_scanner(
+        self, status: ScannerStatus, *results: Result, excluded: bool = False
+    ) -> AshAggregatedResults:
+        model = _model(*results)
         model.ash_config = AshConfig(project_name="scan-status-test")
         model.scanner_results["bandit"] = ScannerStatusInfo(
             status=status,
-            excluded=False,
+            excluded=excluded,
             dependencies_satisfied=status is not ScannerStatus.MISSING,
         )
         model.additional_reports["bandit"] = {
@@ -100,6 +103,50 @@ class TestScanStatusReportsScannersThatDidNotComplete:
         assert report["scan"]["status"] == "success"
         assert "messages" not in report["scan"]
 
+    def test_a_failed_scanner_is_one_that_ran_and_found_something(self, reporter):
+        """FAILED is an outcome (the scanner ran and its findings failed the
+        gate), not a coverage gap: no message says it did not complete."""
+        model = self._with_scanner(ScannerStatus.FAILED, _result("B105", "x = 's'"))
+
+        report = json.loads(reporter.report(model))
+
+        assert len(report["vulnerabilities"]) == 1
+        assert not any(
+            "did not complete" in m["value"] for m in report["scan"].get("messages", [])
+        )
+
+    def test_an_excluded_scanner_is_not_a_coverage_gap(self, reporter):
+        """Beside a scanner that ran: a run whose every scanner is SKIPPED has
+        scanned nothing at all, which is a message of its own."""
+        model = self._with_scanner(ScannerStatus.PASSED)
+        model.scanner_results["semgrep"] = ScannerStatusInfo(
+            status=ScannerStatus.SKIPPED, excluded=True, dependencies_satisfied=True
+        )
+        model.additional_reports["semgrep"] = {
+            "source": {"scanner_name": "semgrep", "status": ScannerStatus.SKIPPED.value}
+        }
+
+        report = json.loads(reporter.report(model))
+
+        assert report["scan"]["status"] == "success"
+        assert "messages" not in report["scan"]
+
+    def test_an_error_scanner_with_findings_is_still_reported_as_a_failure(
+        self, reporter
+    ):
+        """The masking case: a scanner at ERROR whose partial output still holds a
+        finding reports the finding AND the gap, never one hiding the other."""
+        model = self._with_scanner(ScannerStatus.ERROR, _result("B105", "x = 's'"))
+
+        report = json.loads(reporter.report(model))
+
+        assert len(report["vulnerabilities"]) == 1
+        assert report["scan"]["status"] == "failure"
+        assert any(
+            "bandit" in m["value"] and "ERROR" in m["value"]
+            for m in report["scan"]["messages"]
+        )
+
 
 class TestScanTimestampsAreUtc:
     @pytest.mark.parametrize(
@@ -110,6 +157,11 @@ class TestScanTimestampsAreUtc:
             ("2026-10-29T10:00:00+00:00", "2026-10-29T10:00:00"),
             ("2026-10-29T10:00:00Z", "2026-10-29T10:00:00"),
             ("2026-10-29T10:00:00", "2026-10-29T10:00:00"),
+            # datetime.isoformat()'s default form; the schema pattern has no
+            # fraction, so it is cut
+            ("2026-10-29T10:00:00.123456+00:00", "2026-10-29T10:00:00"),
+            # the UTC instant falls on the next calendar day
+            ("2026-10-29T20:00:00-07:00", "2026-10-30T03:00:00"),
         ],
     )
     def test_the_scan_times_are_the_utc_instant(self, reporter, generated_at, expected):
@@ -120,6 +172,26 @@ class TestScanTimestampsAreUtc:
 
         assert scan["start_time"] == expected
         assert scan["end_time"] == expected
+
+    @pytest.mark.parametrize("generated_at", ["", "not-a-date", "2026-13-45T99:00:00"])
+    def test_a_malformed_generated_at_still_yields_a_schema_shaped_document(
+        self, reporter, generated_at
+    ):
+        """A timestamp that will not parse falls back to the current UTC instant
+        in the schema's form, on the report path and on the failure path, so a
+        bad ``generated_at`` never costs the artefact."""
+        model = _model()
+        model.metadata.generated_at = generated_at
+        pattern = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+
+        report = json.loads(reporter.report(model))
+        failure = json.loads(reporter._failure_report(model, "detail"))
+
+        assert report["scan"]["status"] == "success"
+        assert re.fullmatch(pattern, report["scan"]["start_time"])
+        assert re.fullmatch(pattern, report["scan"]["end_time"])
+        assert failure["scan"]["status"] == "failure"
+        assert re.fullmatch(pattern, failure["scan"]["start_time"])
 
     def test_the_failure_report_uses_the_same_conversion(self, reporter):
         model = _model()
