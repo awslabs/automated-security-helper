@@ -14,7 +14,12 @@ import, keyed by the registrations alone, so the module's classes stayed missing
 after it became importable. The first cut of that fix skipped the memo on any
 failure, so a module that kept failing was re-imported (its top-level code and
 decorators re-run) and re-warned on every read; the memo now carries the failed
-paths and is reused until one of them is in ``sys.modules``.
+paths and is reused until one of them is in ``sys.modules``. The second cut
+relied on that signal alone, and a failed import leaves nothing in
+``sys.modules``, so in a long-lived server a module whose dependency an operator
+installed stayed out of the list; the memo now also expires after
+``FAILED_IMPORT_RETRY_SECONDS`` and the retry drops the import system's directory
+caches first.
 
 The two races are modelled deterministically: a dict whose membership and index
 disagree, and a registry lock that records what the attribution table held the
@@ -152,6 +157,46 @@ def test_a_module_that_keeps_failing_is_imported_once_until_something_imports_it
     monkeypatch.setitem(sys.modules, name, module)
 
     assert manager.plugin_modules("scanner") == [module.NeverScanner]
+
+
+def test_a_failed_import_is_retried_after_the_window_without_touching_sys_modules(
+    monkeypatch, tmp_path
+):
+    """Red before the fix: a module file written after the failure was never loaded.
+
+    The module becomes importable the way an operator makes it so: a file
+    appears on ``sys.path``. Nothing here touches ``sys.modules``, the memo's
+    other signal, and the clock is the module's own ``_monotonic`` stand-in.
+    """
+    from automated_security_helper.plugins import plugin_manager as pm
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(pm, "_monotonic", lambda: clock["now"])
+    monkeypatch.syspath_prepend(str(tmp_path))
+    name = "zz_fixed_later_ash_plugins"
+    monkeypatch.delitem(sys.modules, name, raising=False)
+    manager = _manager()
+    manager.register_plugin_module("scanner", "LateFileScanner", name)
+    try:
+        assert manager.plugin_modules("scanner") == []
+
+        (tmp_path / f"{name}.py").write_text(
+            "class LateFileScanner:\n    ash_plugin_type = 'scanner'\n",
+            encoding="utf-8",
+        )
+        assert name not in sys.modules
+        assert manager.plugin_modules("scanner") == [], (
+            "control: the memo was dropped inside the retry window"
+        )
+
+        clock["now"] += pm.FAILED_IMPORT_RETRY_SECONDS
+        assert name not in sys.modules
+        resolved = manager.plugin_modules("scanner")
+
+        assert [cls.__name__ for cls in resolved] == ["LateFileScanner"]
+        assert resolved[0].__module__ == name
+    finally:
+        sys.modules.pop(name, None)
 
 
 def test_a_clean_resolution_is_still_memoised(monkeypatch):

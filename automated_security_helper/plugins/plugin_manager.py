@@ -5,6 +5,7 @@ import functools
 import importlib
 import re
 import sys
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from threading import Lock, local
@@ -268,6 +269,28 @@ class AshPluginLibrary(BaseModel):
     ] = {}
 
 
+#: How long a resolution that failed to import a registered module is reused
+#: before the import is tried again, in seconds of ``time.monotonic``.
+#:
+#: A failed ``importlib.import_module`` leaves nothing in ``sys.modules``, so
+#: "the path is in sys.modules" alone never fires for a module whose missing
+#: dependency an operator installs, or whose file an operator fixes, in a
+#: long-lived process (the MCP server): the partial list would stand until
+#: something else imported the module. A bounded window retries on its own.
+#: Keying the memo on the module file's mtime and size would miss the missing
+#: dependency case (the file does not change); clearing the memo at the start
+#: of each MCP request would need every request path to know about it and would
+#: not cover a long CLI process. Within the window a module that keeps failing
+#: is neither re-imported (its top-level code and decorators re-run, a decorator
+#: subscribing a fresh function object each time) nor re-warned on every
+#: resolve: a scan's many reads of one kind cost one import attempt per window.
+FAILED_IMPORT_RETRY_SECONDS = 60.0
+
+#: The clock the retry window is measured on; a module attribute so a test can
+#: stand in a clock of its own.
+_monotonic = time.monotonic
+
+
 class _Resolution(NamedTuple):
     """What ``plugin_modules`` resolved one plugin kind to, and from what."""
 
@@ -280,15 +303,16 @@ class _Resolution(NamedTuple):
     registrations: Tuple[Tuple[str, str, bool, int], ...]
     classes: List[type]
     #: Module paths whose import failed in this resolution. The memo is reused
-    #: until one of them is in ``sys.modules``: something imported it since
-    #: (a later scan naming it, a dependency installed), the explicit signal to
-    #: resolve again. Re-importing on every read would re-run a failing
-    #: module's top-level code (its decorators subscribing a fresh function
-    #: object each time) and re-log the warning on every resolve.
+    #: until one of them is in ``sys.modules`` (something imported it since: a
+    #: later scan naming it) or until ``FAILED_IMPORT_RETRY_SECONDS`` have passed
+    #: since ``failed_at``, whichever comes first; a resolution with no failure
+    #: is reused until the registrations change.
     failed: Tuple[str, ...] = ()
     #: The registration objects the key's ids belong to, kept so no id is
     #: reused while the memo lives.
     held: Tuple[Any, ...] = ()
+    #: ``_monotonic()`` when the failed imports were tried.
+    failed_at: float = 0.0
 
 
 class AshPluginManager(BaseModel):
@@ -1017,21 +1041,32 @@ class AshPluginManager(BaseModel):
             registered = list(registrations.items())
         resolved_from = self._resolution_key(registered)
         cached = self._resolved_plugins.get(cache_key)
+        now = _monotonic()
+        retry_failed = bool(cached is not None and cached.failed) and (
+            any(path in sys.modules for path in cached.failed)
+            or now - cached.failed_at >= FAILED_IMPORT_RETRY_SECONDS
+        )
         if (
             cached is not None
             and cached.registrations == resolved_from
-            and not any(path in sys.modules for path in cached.failed)
+            and not retry_failed
         ):
-            # A failed path now present in sys.modules is the one signal to
-            # resolve again: something imported it since (a scan naming it, a
-            # dependency installed). Until then the memo stands, failures
-            # included, so a module that keeps failing is neither re-imported
-            # (its top-level code and decorators re-run, a decorator
-            # subscribing a fresh function object each time) nor re-warned on
-            # every resolve.
+            # The memo stands, failures included, until a failed path shows up
+            # in sys.modules (something imported it since) or the retry window
+            # has passed (FAILED_IMPORT_RETRY_SECONDS says why there is one), so
+            # a module that keeps failing is neither re-imported nor re-warned
+            # on every resolve, and one an operator has since fixed is loaded
+            # by the next resolve after the window without a restart.
             return self.filter_plugin_modules(
                 cached.classes, filter_callback, *args, **kwargs
             )
+        if retry_failed:
+            # The module file or its dependency may have appeared in a
+            # directory the import system listed before it existed (a package
+            # installed into a new site directory, a plugin file written
+            # beside the config); the finders' directory caches are dropped so
+            # the retry sees it.
+            importlib.invalidate_caches()
 
         plugins: List[type] = []
         failed: List[str] = []
@@ -1063,8 +1098,9 @@ class AshPluginManager(BaseModel):
                 )
 
         # Memoise the unfiltered result, keyed by the registrations it came from
-        # and carrying the paths that failed, so repeat calls skip the import
-        # work until something new registers or a failed module is imported.
+        # and carrying the paths that failed and when, so repeat calls skip the
+        # import work until something new registers, a failed module is
+        # imported, or the retry window passes.
         # Not when the registry changed while the imports ran: the loader can
         # evict a refused module and undo its registrations between the copy
         # above and the import of it here, and a memo of that resolution would
@@ -1078,6 +1114,7 @@ class AshPluginManager(BaseModel):
                 plugins,
                 tuple(failed),
                 tuple(registration for _name, registration in registered),
+                failed_at=now if failed else 0.0,
             )
 
         # Apply filter callback
