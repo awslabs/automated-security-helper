@@ -18,6 +18,7 @@ layer can use it.
 import collections.abc
 import contextlib
 import contextvars
+import copy
 import dataclasses
 import enum
 import os
@@ -2446,20 +2447,29 @@ def _downcast_what_validation_kept(value: Any) -> Any:
 
     A validated value is pydantic's output, not the plain view a config file
     gives, so unlike :func:`without_env_scalars` this walk keeps each
-    container's own class: a mutable container (a list, a set, a dict, a
-    deque, a subclass of one: a defaultdict keeps its factory, an OrderedDict
-    its class) has its entries replaced in place, an immutable one (a tuple, a
-    NamedTuple through ``_make``, a frozenset) is rebuilt as its own class, and
-    a model's or a dataclass instance's attributes are rewritten past their own
-    validation, which is the point: the marker is a str subclass the slot kept
-    because it accepts anything. Rebuilt as base types, a validated
-    ``OrderedDict`` came back a dict and a NamedTuple a tuple whose fields no
-    longer answered by name; a deque and a dataclass instance were not walked
-    and kept the marker. The text is unchanged, so equality, hashing and the
-    model's dump are not. A section is left alone: its own validator downcast
-    what it holds. A container that holds no marker comes back as it is.
-    Iterative, in post-order, and cycle-safe like the walks above: a container
-    that holds itself (no validated value does) is left as it is."""
+    container's own class: a container that changes is rebuilt as a shallow
+    copy of its own class (``copy.copy``: a defaultdict keeps its factory, an
+    OrderedDict or a Counter its class, a deque its maxlen; a tuple is rebuilt
+    as its class, a NamedTuple through ``_make``), a plain model as
+    ``model_copy()`` and a dataclass instance as a copy, with the attributes
+    rewritten on the copy past their own validation, which is the point: the
+    marker is a str subclass the slot kept because it accepts anything.
+    Rebuilt as base types, a validated ``OrderedDict`` came back a dict and a
+    NamedTuple a tuple whose fields no longer answered by name; a deque and a
+    dataclass instance were not walked and kept the marker. The text is
+    unchanged, so equality, hashing and the model's dump are not.
+
+    Nothing is written into the objects given: pydantic's Any and object
+    slots return their input by identity, and a union of several arms is
+    handed to pydantic as written (:func:`_downcast_outside_sections`), so a
+    container in the validated value can be the caller's own payload object,
+    and a rewrite in place would strip the markers out of the loader's payload
+    (a second read of the same object, or of a sub-object it shares with
+    another field, would then see plain text where a typed slot has to be
+    refused by name). A section is left alone: its own validator downcast what
+    it holds. A container that holds no marker comes back as it is, the same
+    object. Iterative, in post-order, and cycle-safe like the walks above: a
+    container that holds itself (no validated value does) is left as it is."""
     done: Dict[int, Any] = {}
     in_progress: Set[int] = set()
     stack: List[Tuple[Any, bool]] = [(value, False)]
@@ -2518,17 +2528,27 @@ def _kept_entries(node: Any) -> List[Any]:
 
 def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
     """*node* with each entry replaced by its downcast form in *done* (keyed
-    by the entry's id; an entry not there is kept): in place for a mutable
-    container, a model or a dataclass instance, as a new instance of its own
-    class for a tuple, a NamedTuple or a frozenset; *node* itself when nothing
-    in it changed."""
+    by the entry's id; an entry not there is kept), as a NEW object of
+    *node*'s own class: a shallow copy with the entries rewritten for a
+    mutable container, a model (``model_copy``) or a dataclass instance, a new
+    instance for a tuple, a NamedTuple or a frozenset; *node* itself, not
+    copied, when nothing in it changed. *node* is never written into: it may
+    be the caller's own object (:func:`_downcast_what_validation_kept`)."""
     if isinstance(node, BaseModel):
+        changed = False
         for entries in (node.__dict__, node.__pydantic_extra__):
+            for entry in (entries or {}).values():
+                if done.get(id(entry), entry) is not entry:
+                    changed = True
+        if not changed:
+            return node
+        fresh = node.model_copy()
+        for entries in (fresh.__dict__, fresh.__pydantic_extra__):
             for name, entry in list((entries or {}).items()):
                 replacement = done.get(id(entry), entry)
                 if replacement is not entry:
                     entries[name] = replacement  # type: ignore[index]
-        return node
+        return fresh
     if isinstance(node, dict):
         items = [
             (done.get(id(key), key), done.get(id(entry), entry))
@@ -2539,24 +2559,33 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
             for (new_key, new_entry), (key, entry) in zip(items, node.items())
         ):
             return node
-        node.clear()
-        node.update(items)
-        return node
+        fresh = _shallow_copy_of(node, dict)
+        fresh.clear()
+        # One item at a time: a Counter's update() counts an iterable's
+        # elements, a defaultdict's and an OrderedDict's take pairs; setting
+        # each key is the one spelling every dict reads as a mapping write.
+        for key, entry in items:
+            fresh[key] = entry
+        return fresh
     if isinstance(node, (list, tuple, set, frozenset, collections.deque)):
         given = list(node)
         entries = [done.get(id(entry), entry) for entry in given]
         if all(entry is new for entry, new in zip(given, entries)):
             return node
         if isinstance(node, list):
-            node[:] = entries
-            return node
-        if isinstance(node, (set, collections.deque)):
-            node.clear()
-            if isinstance(node, set):
-                node.update(entries)
-            else:
-                node.extend(entries)
-            return node
+            fresh = _shallow_copy_of(node, list)
+            fresh[:] = entries
+            return fresh
+        if isinstance(node, set):
+            fresh = _shallow_copy_of(node, set)
+            fresh.clear()
+            fresh.update(entries)
+            return fresh
+        if isinstance(node, collections.deque):
+            fresh = _shallow_copy_of(node, collections.deque)
+            fresh.clear()
+            fresh.extend(entries)
+            return fresh
         kind = type(node)
         if isinstance(node, tuple):
             if _is_named_tuple(kind):
@@ -2573,16 +2602,33 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
             return kind(entries)
         except Exception:  # a frozenset subclass with a constructor of its own
             return frozenset(entries)
+    replacements = {}
     for field in dataclasses.fields(node):
         entry = getattr(node, field.name, _ABSENT)
         if entry is _ABSENT:
             continue
         replacement = done.get(id(entry), entry)
         if replacement is not entry:
-            # Past the dataclass's own validation, a frozen one included: the
-            # text is unchanged, only its class.
-            object.__setattr__(node, field.name, replacement)
-    return node
+            replacements[field.name] = replacement
+    if not replacements:
+        return node
+    fresh = copy.copy(node)
+    for name, replacement in replacements.items():
+        # Past the dataclass's own validation, a frozen one included: the
+        # text is unchanged, only its class.
+        object.__setattr__(fresh, name, replacement)
+    return fresh
+
+
+def _shallow_copy_of(node: Any, base: type) -> Any:
+    """A shallow copy of the container *node* as its own class (``copy.copy``
+    keeps a defaultdict's factory, a Counter's or an OrderedDict's class, a
+    deque's maxlen); a container of the plain *base* class when the class
+    cannot be copied."""
+    try:
+        return copy.copy(node)
+    except Exception:  # a subclass whose copy protocol fails
+        return base(node)
 
 
 #: The value annotation a model's declared ``__pydantic_extra__`` gives its

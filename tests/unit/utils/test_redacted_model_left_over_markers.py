@@ -19,6 +19,12 @@ The downcast keeps each container as the instance pydantic built. Rebuilt as
 base types, a validated ``OrderedDict`` came back a plain dict and a NamedTuple
 a plain tuple whose fields no longer answered by name; a deque and a dataclass
 instance were not walked at all and kept the marker class.
+
+It writes into nothing it was given: an Any slot returns its input by
+identity, so a container in the validated value can be the caller's own payload
+object, and a rewrite in place stripped the markers out of the payload; a
+sub-object shared with a second field then reached that field's typed slot as
+plain text and was typed silently.
 """
 
 import collections
@@ -26,10 +32,11 @@ import dataclasses
 from typing import Any, Deque, Dict, List, NamedTuple, Optional, Union
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from automated_security_helper.utils.redacted_model import (
     RedactedSection,
+    _downcast_what_validation_kept,
     env_resolved_scalar,
 )
 
@@ -170,3 +177,56 @@ def test_a_dataclass_instance_beside_a_section_arm_holds_plain_text():
     assert isinstance(section.value, _Bag)
     assert section.value.payload == "loose-text"
     assert type(section.value.payload) is str
+
+
+def test_the_payload_given_is_left_as_given():
+    """The list under the dict arm's Any slot is the caller's own object
+    (pydantic hands an Any slot's input back by identity); the downcast
+    rebuilds a copy and leaves the payload's marker where the caller put it."""
+
+    class Section(RedactedSection):
+        value: Optional[Union[_Closed, Dict[str, Any]]] = None
+
+    marker = env_resolved_scalar("loose-text", VARIABLE)
+    inner = {"deep": marker}
+    payload = {"value": {"free": [inner]}}
+    section = Section.model_validate(payload)
+    assert type(section.value["free"][0]["deep"]) is str
+    assert inner["deep"] is marker
+    assert payload["value"]["free"][0] is inner
+
+
+def test_a_sub_object_shared_with_a_typed_field_is_still_refused_there():
+    """The same dict sits under an Any slot of the first field and at the typed
+    dict of the second. With the first field's downcast written into the
+    shared object, the second field saw plain text and typed the env-read
+    value silently; the markers now survive to the second field, whose int
+    slot refuses the reference by name."""
+
+    class Section(RedactedSection):
+        first: Optional[Union[_Closed, Dict[str, Any]]] = None
+        second: Optional[Union[_Closed, Dict[str, int]]] = None
+
+    shared = {"count": env_resolved_scalar("424242", VARIABLE)}
+    with pytest.raises(ValidationError) as refused:
+        Section.model_validate({"first": {"free": [shared]}, "second": shared})
+    text = " ".join(
+        f"{error['loc']}: {error['msg']}" for error in refused.value.errors()
+    )
+    assert VARIABLE in text, text
+    assert "second" in text, text
+    assert "424242" not in text, text
+
+
+def test_a_counter_keeps_its_counts_and_its_class():
+    """A Counter's ``update`` counts an iterable's elements, so rebuilding it
+    from pairs produced counts of 1 for each pair; each key is set one at a
+    time, and the input Counter is left as given."""
+    marker = env_resolved_scalar("loose-text", VARIABLE)
+    given = collections.Counter({marker: 2, "other": 1})
+    out = _downcast_what_validation_kept(given)
+    assert isinstance(out, collections.Counter)
+    assert out["loose-text"] == 2 and out["other"] == 1
+    assert all(type(key) is str for key in out)
+    assert out is not given
+    assert any(key is marker for key in given)
