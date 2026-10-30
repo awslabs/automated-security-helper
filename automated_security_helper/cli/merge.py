@@ -2184,18 +2184,28 @@ def apply_aggregated_suppressions(
 
 
 #: The justification prefixes ``apply_suppressions_to_sarif`` writes for the
-#: suppressions ASH itself applies from the operator's configuration and from
-#: inline comments. A client-supplied entry is written "(ASH, client-supplied
-#: config)" and marked ``clientSupplied``, and a scanner's own suppression carries
-#: whatever the scanner wrote; neither starts with one of these.
-_ASH_APPLIED_JUSTIFICATION_PREFIXES = ("(ASH) ", "(ASH inline) ")
+#: suppressions ASH itself attaches: from the operator's configuration, from
+#: inline comments, and from a client-supplied configuration (an ignore path or a
+#: scanner exclusion a delivered config carried, written "(ASH, client-supplied
+#: config)" and marked ``clientSupplied``). A scanner's own suppression carries
+#: whatever the scanner wrote and starts with none of these.
+_ASH_APPLIED_JUSTIFICATION_PREFIXES = (
+    "(ASH) ",
+    "(ASH inline) ",
+    "(ASH, client-supplied config) ",
+)
 
 
 def _is_ash_applied_suppression(suppression: Any) -> bool:
-    """Whether ``apply_suppressions_to_sarif`` attached *suppression* from ASH's own rules."""
+    """Whether ``apply_suppressions_to_sarif`` attached *suppression*.
+
+    A client-supplied one counts: it is ASH's too, attached by the same function
+    and by nothing else, so a scan run with ``--ignore-suppressions``, which never
+    calls that function (``ScanResultProcessor``), never carries it.
+    """
     properties = getattr(suppression, "properties", None)
     if getattr(properties, "clientSupplied", None) is True:
-        return False
+        return True
     justification = getattr(suppression, "justification", None) or ""
     return justification.startswith(_ASH_APPLIED_JUSTIFICATION_PREFIXES)
 
@@ -2204,13 +2214,15 @@ def lift_ash_suppressions(sarif_report: Any) -> int:
     """Remove the suppressions ASH applied from every result of *sarif_report*.
 
     What ``--ignore-suppressions`` means on a merge. ``ash scan`` run with the
-    flag attaches no config or inline suppression, so every such finding counts as
-    actionable; the shards of a sharded scan ran without it and attached theirs,
-    so the merge removes them again to answer the same question. Only ASH's own
-    are removed: a suppression a scanner wrote into its SARIF stays, as it stays
-    on a scan run with the flag, and so does one a client-supplied configuration
-    applied, which a scan run with the flag applies too. A result left with no
-    suppression carries ``None``, the shape of a result never suppressed.
+    flag never calls ``apply_suppressions_to_sarif`` (``ScanResultProcessor``
+    skips it and runs the output-directory exclusion alone), so no config, inline
+    or client-supplied suppression reaches its results and every such finding
+    counts as actionable; the shards of a sharded scan ran without the flag and
+    attached theirs, so the merge removes them again to answer the same question.
+    Only what that function attaches is removed: a suppression a scanner wrote
+    into its own SARIF stays, as it stays on a scan run with the flag. A result
+    left with no suppression carries ``None``, the shape of a result never
+    suppressed.
 
     Returns the number of suppressions removed.
     """
