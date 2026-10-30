@@ -26,6 +26,7 @@ import signal
 import pytest
 
 from automated_security_helper.core import cancellation
+from automated_security_helper.core.cancellation import CancelEvent
 
 pytestmark = [
     pytest.mark.unit,
@@ -89,10 +90,12 @@ class TestTheDieNowFallbackKillsOnlyALiveChild:
 class TestAFirstCtrlCDuringAGraceWaitLatchesWithoutInterrupting:
     def test_the_previous_handler_is_not_chained_inside_a_grace_wait(self, monkeypatch):
         chained = []
+        scan = CancelEvent()
         monkeypatch.setattr(cancellation, "_SIGINT_SEEN", False)
         monkeypatch.setattr(cancellation, "_SIGTERM_SEEN", False)
         monkeypatch.setattr(cancellation, "_SHUTDOWN_REQUESTED", False)
-        monkeypatch.setattr(cancellation, "_SHUTDOWN_SCOPES", ())
+        # A scan is registered to unwind on the latch (shutdown_cancels).
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_SCOPES", (scan,))
         monkeypatch.setattr(
             cancellation, "_PREVIOUS_SIGINT", lambda s, f: chained.append(s)
         )
@@ -106,7 +109,31 @@ class TestAFirstCtrlCDuringAGraceWaitLatchesWithoutInterrupting:
         # chained the default handler, which raises KeyboardInterrupt.
         assert chained == []
         assert cancellation._SIGINT_SEEN is True
+        assert scan._signalled is True
         assert cancellation._GRACE_WAITS == 0
+
+    def test_with_no_scan_registered_the_first_ctrl_c_still_interrupts(
+        self, monkeypatch
+    ):
+        """Nothing reads the latch when no scan is registered, so holding the
+        interrupt back inside a grace wait would leave the Ctrl-C without any
+        effect: the interrupt is chained as it is outside a grace wait."""
+        chained = []
+        monkeypatch.setattr(cancellation, "_SIGINT_SEEN", False)
+        monkeypatch.setattr(cancellation, "_SIGTERM_SEEN", False)
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_REQUESTED", False)
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_SCOPES", ())
+        monkeypatch.setattr(
+            cancellation, "_PREVIOUS_SIGINT", lambda s, f: chained.append(s)
+        )
+        monkeypatch.setattr(cancellation, "_GRACE_WAITS", 0)
+
+        with cancellation.stop_grace_in_progress():
+            cancellation._handle_sigint(signal.SIGINT, None)
+
+        # Red at the previous tip: the grace wait alone held the interrupt back.
+        assert chained == [signal.SIGINT]
+        assert cancellation._SIGINT_SEEN is True
 
     def test_a_second_ctrl_c_inside_a_grace_wait_dies_now(self, monkeypatch):
         """The second interrupt is the operator's "gone now": the recorded tool

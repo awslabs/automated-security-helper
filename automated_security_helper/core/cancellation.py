@@ -675,7 +675,11 @@ def stop_grace_in_progress() -> Iterator[None]:
     escalation the second-signal branch protects: a SIGTERM-ignoring tool then
     outlived the exit. Inside this context the first Ctrl-C still latches every
     registered scan's cancel (the scan unwinds through the same checks a cancel
-    uses once the stop returns), and the stop completes its escalation.
+    uses once the stop returns), and the stop completes its escalation. The
+    interrupt is held back only while a scan is registered
+    (``shutdown_cancels``): with none, nothing would unwind on the latch, so the
+    first Ctrl-C stays an interrupt. The count is process-wide, as the handler
+    is.
     """
     global _GRACE_WAITS
     with _GRACE_WAITS_WRITE_LOCK:
@@ -821,11 +825,15 @@ def _handle_sigint(signum: int, frame: object) -> None:
         # The same plain store as the SIGTERM handler's, for the same
         # deadlock reason; it covers cancel and prompt both.
         event._signalled = True
-    if _GRACE_WAITS > 0:
-        # A stop is waiting out a tool's grace (stop_grace_in_progress): the
-        # latch above is what this Ctrl-C asks for, and chaining the default
-        # handler would raise KeyboardInterrupt inside that wait and abort the
-        # SIGKILL escalation. The stop completes; the scan unwinds after it.
+    if _GRACE_WAITS > 0 and scopes:
+        # A stop is waiting out a tool's grace (stop_grace_in_progress) and a
+        # scan is registered to unwind on the latch above: the latch is what
+        # this Ctrl-C asks for, and chaining the default handler would raise
+        # KeyboardInterrupt inside that wait and abort the SIGKILL escalation.
+        # The stop completes; the scan unwinds after it. With no scan
+        # registered nothing reads the latch, so swallowing the interrupt
+        # here would leave the Ctrl-C without any effect: it stays an
+        # interrupt, as below.
         return
     # The first interrupt stays an interrupt. A previous disposition that is
     # not a Python callable (SIG_DFL, or a handler set in C) has nothing to
