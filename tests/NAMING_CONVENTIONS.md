@@ -98,7 +98,8 @@ word. A shard alone does not turn
 the floor on, so `ASH_TEST_SHARD=3of4 uv run pytest -m integration` on a developer
 machine is not failed for tests that a missing `pytest --run-integration` skipped. A
 leg whose every skip comes from a `skipif` marker whose condition held is admitted, with
-a line that names the reasons and their counts. A skip from the `pytest --run-integration`
+a line that names the reasons and their counts and a `::notice` annotation with the same
+text, so that an admitted leg shows on the run page. A skip from the `pytest --run-integration`
 or `pytest --run-slow` gate, from a `pytest.skip` in a test or a fixture, or from an
 unconditional `skip` mark still fails the leg, so a missing tool should be a `skipif`
 only when the test is meant not to apply there. The failure line counts leg assertions

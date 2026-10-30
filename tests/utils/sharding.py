@@ -99,20 +99,24 @@ first and then falls through to the ``skip`` marks, and both report the item's o
 an item that carries a ``skipif`` whose condition did not hold and also a ``skip`` mark
 would otherwise read as a held ``skipif``. A ``skipif`` with no condition is an
 unconditional skip as well, but it carries no ``skip`` keyword, so it is still admitted
-(a limit of reading reports and not items). The alternative not taken
-is to tag each skip where the item exists, with a ``pytest_runtest_makereport``
-hookwrapper that re-evaluates the item's ``skipif`` marks
-(``_pytest.skipping.evaluate_skip_marks``, a private function) or adds a user property
-to the report. The property would be published in the JUnit XML, for the reason given at
-``LEG_ASSERTION_MARKER``, and the private call can change between pytest releases. Known
-limits: a test that carries a ``skipif`` whose condition did not hold and is skipped by a
-gate shows the gate's text and is not admitted, which is the safe direction; a test that
-carries a held ``skipif`` and is also gated (a developer's run without
-``--run-integration``) is not admitted either, because the gate's ``skip`` mark is among
-its keywords; and a
-``skipif`` whose condition is a missing tool (``skipif(shutil.which("x") is None)``) is
-admitted like any other, because it is declared, where a ``pytest.skip`` found at run
-time is not.
+(a limit of reading reports and not items). The alternative not taken is to tag each
+skip where the item exists, with a ``pytest_runtest_makereport`` hookwrapper that
+re-evaluates the item's ``skipif`` marks (``_pytest.skipping.evaluate_skip_marks``, a
+private function) or adds a user property to the report. The property would be
+published in the JUnit XML, for the reason given at ``LEG_ASSERTION_MARKER``, and the
+private call can change between pytest releases. Known limits: a test that carries a
+``skipif`` whose condition did not hold and is skipped by a gate shows the gate's text
+and is not admitted, which is the safe direction; a test that carries a held ``skipif``
+and is also gated (a developer's run without ``--run-integration``) is not admitted
+either, because the gate's ``skip`` mark is among its keywords; and a ``skipif`` whose
+condition is a missing tool (``skipif(shutil.which("x") is None)``) is admitted like
+any other, because it is declared, where a ``pytest.skip`` found at run time is not.
+That last case is the floor's main one on an integration leg, which has no leg
+assertion for its tools. Two things answer it: the admitted line is also written as a
+``::notice`` annotation titled "tier run admitted on skipif skips", so an admitted leg
+shows on the run page and is not silently green; and the fuller shape, not taken here,
+is an allowlist of admitted reasons or a dedicated marker for "does not apply on this
+runner", which would change every test module that declares such a ``skipif``.
 
 ``ASH_TEST_TIER_FLOOR=warn`` opts in like ``1`` and reports instead of failing: the
 same line is printed with a warning prefix, followed by a GitHub warning annotation
@@ -225,6 +229,9 @@ FLOOR_ENV_VAR = "ASH_TEST_TIER_FLOOR"
 FLOOR_WARN_VALUE = "warn"
 #: The title of the GitHub error annotation a failing floor prints after its line.
 FAILURE_TITLE = "tier run executed no test"
+#: The title of the GitHub notice annotation a leg admitted on its ``skipif`` skips prints,
+#: so that an admitted leg is visible on the run page and not only in the step log.
+ADMITTED_TITLE = "tier run admitted on skipif skips"
 #: What the floor line starts with in warn mode, so a reader knows it did not fail the run.
 WARN_PREFIX = "warning (ASH_TEST_TIER_FLOOR=warn, exit status unchanged): "
 #: Whether this run opted in to the floor, in either mode.
@@ -432,9 +439,18 @@ def fail_a_tier_run_that_executed_no_test(
 
     ``skipif_reasons`` maps each reason of a ``skipif`` skip (:func:`skipif_reason`) to
     how many tests were skipped for it. When they account for every skip, the leg is
-    admitted: it stays ``OK``, one line names the reasons and their counts, and this
-    returns False. A gate skip, a ``pytest.skip`` or a ``skip`` mark among the skips
-    keeps the failure.
+    admitted: it stays ``OK``, one line names the reasons and their counts and is
+    followed by a GitHub notice annotation (``::notice title=...::<the line>``) so that
+    an admitted leg is visible on the run page, and this returns False. A gate skip, a
+    ``pytest.skip`` or a ``skip`` mark among the skips keeps the failure.
+
+    Any reason is admitted, a missing tool included. The fuller shape, not taken here,
+    admits only the reasons of an explicit allowlist, or only a skip from a dedicated
+    marker that means "does not apply on this runner"; it needs every test module that
+    declares such a ``skipif`` to be changed together with this module. The notice is
+    the cheaper cure: an integration leg (which has no leg assertion for its tools,
+    unlike e2e) admitted on ``skipif(shutil.which("x") is None)`` shows on the run
+    page, and a reader can open it.
 
     The status becomes ``TESTS_FAILED`` and one line says what the run did, counting the
     ``leg_assertions`` (tests marked ``leg_assertion``, which are in neither count)
@@ -475,11 +491,12 @@ def fail_a_tier_run_that_executed_no_test(
             f"{count} x {reason!r}"
             for reason, count in sorted(reasons.items(), key=lambda r: (-r[1], r[0]))
         )
-        _write_line(
-            config,
+        admitted = (
             "tier run executed no test; admitted, because every skip is a skipif "
-            f"condition that held: {skipped} skipped ({listed})",
+            f"condition that held: {skipped} skipped ({listed})"
         )
+        _write_line(config, admitted)
+        _write_line(config, f"::notice title={ADMITTED_TITLE}::{admitted}")
         return False
     counted = ""
     if leg_assertions > 0:

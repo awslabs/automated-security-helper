@@ -1037,13 +1037,18 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         "tier run executed no test; admitted, because every skip is a skipif "
         "condition that held: 2 skipped (2 x 'not supported on this runner')"
     )
+    NOTICE = f"::notice title=tier run admitted on skipif skips::{ADMITTED}"
 
     def test_a_leg_whose_every_test_is_a_skipif_that_held_is_admitted(self, tmp_path):
         self._plant(tmp_path, skipif=2)
         done = self._run(tmp_path, gate_open=True)
         assert done.returncode == 0, done.stdout + done.stderr
         assert self.ADMITTED in done.stdout, done.stdout
+        assert self.NOTICE in done.stdout.splitlines(), (
+            "the notice starts its own line, which is where GitHub reads it"
+        )
         assert "executed no test: " not in done.stdout, done.stdout
+        assert "::error" not in done.stdout and "::warning" not in done.stdout
 
     def test_the_same_leg_is_admitted_under_xdist(self, tmp_path):
         """The keywords and the skip's place cross the worker boundary in the reports."""
@@ -1053,6 +1058,7 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         done = self._run(tmp_path, gate_open=True, extra=("-n", "2"))
         assert done.returncode == 0, done.stdout + done.stderr
         assert self.ADMITTED in done.stdout, done.stdout
+        assert self.NOTICE in done.stdout.splitlines(), done.stdout
 
     def test_a_skipif_beside_the_gate_skip_mark_is_not_admitted(self, tmp_path):
         """With the gate closed, the tests carry a held ``skipif`` and the gate's ``skip``.
@@ -1092,6 +1098,7 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         assert done.returncode == 1, done.stdout + done.stderr
         assert "3 collected, 3 skipped, 0 executed" in done.stdout, done.stdout
         assert "admitted, because" not in done.stdout, done.stdout
+        assert "::notice" not in done.stdout, "a failed leg is not an admitted one"
 
     def test_a_mixed_leg_of_skipif_and_gate_skips_fails_under_xdist(self, tmp_path):
         import xdist  # noqa: F401 - the run below needs the plugin
@@ -1365,16 +1372,29 @@ class TestATierRunThatExecutedNoTestFails:
         assert sharding.FAILURE_TITLE == "tier run executed no test"
         assert written[1] == prefix + written[0]
 
-    def test_a_run_that_is_not_failed_prints_no_annotation(self):
-        """An admitted skipif leg and a run that executed a test."""
-        for kwargs, args in (
-            ({}, (0, 3, {"not supported on this runner": 3})),
-            ({}, (1, 2)),
-        ):
-            written: list[str] = []
-            session = self._session(written, **kwargs)
-            assert not sharding.fail_a_tier_run_that_executed_no_test(session, *args)
-            assert not any(line.startswith("::") for line in written), written
+    def test_a_run_that_executed_a_test_prints_no_annotation(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 1, 2)
+        assert not any(line.startswith("::") for line in written), written
+
+    def test_an_admitted_leg_prints_a_notice_with_the_admitted_line(self):
+        """An admitted leg is visible on the run page, as a notice and never an error."""
+        written: list[str] = []
+        session = self._session(written)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(
+            session, 0, 3, {"not supported on this runner": 3}
+        )
+        admitted = (
+            "tier run executed no test; admitted, because every skip is a skipif "
+            "condition that held: 3 skipped (3 x 'not supported on this runner')"
+        )
+        assert written == [
+            admitted,
+            f"::notice title={sharding.ADMITTED_TITLE}::{admitted}",
+        ]
+        assert sharding.ADMITTED_TITLE == "tier run admitted on skipif skips"
+        assert session.exitstatus == pytest.ExitCode.OK
 
     def test_warn_mode_prints_a_warning_annotation_and_never_an_error_one(self):
         """The run page shows a warning for each warn-mode leg that executed no test."""
@@ -1761,12 +1781,14 @@ class TestATierRunThatExecutedNoTestFails:
         }
         plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
         assert session.exitstatus == pytest.ExitCode.OK
+        admitted = (
+            "tier run executed no test; admitted, because every skip is a skipif "
+            "condition that held: 3 skipped "
+            "(2 x 'not supported on Windows', 1 x 'needs a newer tool')"
+        )
         assert written == [
-            (
-                "tier run executed no test; admitted, because every skip is a skipif "
-                "condition that held: 3 skipped "
-                "(2 x 'not supported on Windows', 1 x 'needs a newer tool')"
-            )
+            admitted,
+            f"::notice title={sharding.ADMITTED_TITLE}::{admitted}",
         ]
 
     def test_a_gate_skip_among_skipif_skips_keeps_the_failure(self):
@@ -1848,13 +1870,17 @@ class TestATierRunThatExecutedNoTestFails:
         assert session.exitstatus == pytest.ExitCode.OK and not written
 
     def test_warn_mode_still_admits_a_skipif_leg_without_a_warning(self):
+        """The admitted leg prints its line and a notice, and no warning annotation."""
         written: list[str] = []
         session = self._session(written, warn=True)
         assert not sharding.fail_a_tier_run_that_executed_no_test(
             session, 0, 3, {"not supported on this runner": 3}
         )
         assert session.exitstatus == pytest.ExitCode.OK
-        assert len(written) == 1 and written[0].startswith("tier run executed no test;")
+        assert len(written) == 2, written
+        assert written[0].startswith("tier run executed no test;")
+        assert written[1].startswith(f"::notice title={sharding.ADMITTED_TITLE}::")
+        assert not any(line.startswith("::warning") for line in written), written
 
     def test_a_worker_leaves_the_exit_status_to_the_controller(self):
         written: list[str] = []
