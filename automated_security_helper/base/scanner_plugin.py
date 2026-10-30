@@ -2082,7 +2082,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # Provide helpful offline mode message if applicable
             if self._is_offline_mode() and self.use_uv_tool:
                 self._plugin_log(
-                    f"Offline mode is enabled (ASH_OFFLINE=true) but tool '{self.command}' is not available. "
+                    f"Offline mode is enabled (ASH_OFFLINE, or this scanner's own options.offline) but tool '{self.command}' is not available. "
                     f"In offline mode, tools must be pre-installed. Please install '{self.command}' manually or disable offline mode.",
                     level=logging.ERROR,
                 )
