@@ -1012,6 +1012,46 @@ class TestTheGuardReadsThroughWrappers:
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
     @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "options",
+        [
+            pytest.param(["-euo", "pipefail", "-c"], id="o-inside-a-cluster-before-c"),
+            pytest.param(["-co", "pipefail"], id="c-and-o-in-one-cluster"),
+        ],
+    )
+    def test_an_option_letter_that_takes_a_value_inside_a_cluster(
+        self, home_guard_violations, into_home, options
+    ):
+        """The o inside ``-euo`` takes pipefail as its value, as the whole word ``-o``
+        does, so the command string is still the operand after it. Read without that,
+        pipefail was the command string, and the destination inside the real one was
+        never seen: the installer started."""
+        command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
+        outcome = self._start(["bash", *options, shlex.join(command)])
+        self._refused(home_guard_violations, outcome, "--bin-path", into_home)
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "argv, reads_stdin",
+        [
+            pytest.param(
+                ["sh", "-euo", "pipefail"], True, id="the-value-leaves-no-script"
+            ),
+            pytest.param(
+                ["sh", "-euo", "pipefail", "run.sh"], False, id="a-script-after-it"
+            ),
+            pytest.param(["sh", "-eu", "pipefail"], False, id="no-valued-letter"),
+        ],
+    )
+    def test_a_shell_whose_cluster_takes_a_value_reads_stdin_or_a_script(
+        self, request, argv, reads_stdin
+    ):
+        """``sh -euo pipefail`` reads its commands from standard input: pipefail is
+        the value of o, not a script file. Without the o, pipefail is the script."""
+        conftest = _root_conftest(request.config)
+        assert conftest._shell_reads_stdin(argv) is reads_stdin
+
+    @pytest.mark.unit
     def test_env_with_an_empty_environment(self, home_guard_violations):
         """``env -i`` drops HOME with the rest: the child falls back to the passwd home."""
         installer = TestToolInstallingChildrenGetTheirOwnHome.installer()

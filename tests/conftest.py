@@ -2863,6 +2863,10 @@ _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh", "mksh"})
 _SHELL_OPTIONS_WITH_A_VALUE = frozenset(
     {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 )
+#: Short option letters whose value is the next argument wherever they sit in a
+#: cluster: ``bash -euo pipefail -c STRING`` runs STRING, with pipefail the value of
+#: the o inside ``-euo``, and ``bash -co pipefail STRING`` does too.
+_SHELL_CLUSTER_LETTERS_WITH_A_VALUE = frozenset("oO")
 #: Long shell options that take no value. Any other might take one, and then where
 #: the options end is unknown.
 _SHELL_LONG_FLAGS = frozenset(
@@ -2995,7 +2999,11 @@ def _shell_command_string(argv: List[str]) -> Tuple[Optional[int], bool]:
 
     The index is None without -c. The options do not read when one is a long option the
     guard does not know: it might take a value, and then STRING could be anywhere. A
-    lone ``-`` ends the options as ``--`` does, so ``sh -c - STRING`` runs STRING.
+    lone ``-`` ends the options as ``--`` does, so ``sh -c - STRING`` runs STRING. An
+    o or O inside a short cluster takes the next argument as its value, as the whole
+    word ``-o`` does, so ``bash -euo pipefail -c STRING`` and ``bash -co pipefail
+    STRING`` both run STRING; read without that, pipefail was where the options
+    ended, and STRING was never read.
     """
     given_c = False
     index = 1
@@ -3011,8 +3019,11 @@ def _shell_command_string(argv: List[str]) -> Tuple[Optional[int], bool]:
                 return None, False
             index += 1
         elif len(arg) > 1 and arg[0] in "-+":
-            given_c = given_c or "c" in arg[1:]
-            index += 1
+            flags = arg[1:]
+            given_c = given_c or "c" in flags
+            index += 1 + sum(
+                flags.count(letter) for letter in _SHELL_CLUSTER_LETTERS_WITH_A_VALUE
+            )
         else:
             break
     return (index if given_c and index < len(argv) else None), True
@@ -3547,7 +3558,9 @@ def _shell_reads_stdin(argv: List[str]) -> bool:
     """Whether ``sh [OPTION]...`` reads its commands from standard input: it is given
     no -c and no script file, or -s. The guard cannot read those commands. A lone
     ``-`` ends the options as ``--`` does (bash, dash and POSIX sh), so ``sh -``
-    reads standard input too."""
+    reads standard input too, and so does ``sh -euo pipefail``: the o inside the
+    cluster takes pipefail as its value (_SHELL_CLUSTER_LETTERS_WITH_A_VALUE), which
+    leaves no script file."""
     index = 1
     while index < len(argv):
         arg = argv[index]
@@ -3564,7 +3577,9 @@ def _shell_reads_stdin(argv: List[str]) -> bool:
                 return False
             if arg[0] == "-" and "s" in flags:
                 return True
-            index += 1
+            index += 1 + sum(
+                flags.count(letter) for letter in _SHELL_CLUSTER_LETTERS_WITH_A_VALUE
+            )
         else:
             break
     return index >= len(argv)

@@ -446,6 +446,21 @@ def test_an_entry_a_uv_left_in_its_directories_is_recorded(tmp_path):
         ),
         pytest.param(["sh", "-s", "-c", "uv sync"], "uv sync", id="s-then-c"),
         pytest.param(["sh", "-sc", "uv sync"], "uv sync", id="s-and-c-in-one-cluster"),
+        pytest.param(
+            ["bash", "-euo", "pipefail", "-c", "uv sync"],
+            "uv sync",
+            id="a-valued-letter-inside-a-cluster-before-c",
+        ),
+        pytest.param(
+            ["bash", "-co", "pipefail", "uv sync"],
+            "uv sync",
+            id="c-and-a-valued-letter-in-one-cluster",
+        ),
+        pytest.param(
+            ["bash", "-oo", "pipefail", "errexit", "-c", "uv sync"],
+            "uv sync",
+            id="two-valued-letters-take-two-values",
+        ),
     ],
 )
 def test_the_shell_command_string_is_the_first_operand_after_every_option(
@@ -454,8 +469,34 @@ def test_the_shell_command_string_is_the_first_operand_after_every_option(
     """A shell reads all of its options before it takes the command string, so the
     string is the first operand after them, wherever -c sat among the options; the
     old walk took the word right after the cluster holding c, and so read ``-e`` or
-    ``-o`` as the command."""
+    ``-o`` as the command, and the one before this read ``pipefail`` as the command
+    of ``bash -euo pipefail -c STRING``, so a tool named by path in STRING started
+    with no stand-in seeing it."""
     assert readers()["_shell_command_line"](argv) == command
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param(["sh", "-c", "uv sync"], id="c-then-the-string"),
+        pytest.param(["bash", "-euo", "pipefail", "-c", "uv sync"], id="a-cluster"),
+        pytest.param(["bash", "-co", "pipefail", "uv sync"], id="c-with-a-value"),
+        pytest.param(["bash", "--mystery", "-c", "uv sync"], id="options-unread"),
+        pytest.param(["sh", "script.sh", "-c", "uv sync"], id="a-script"),
+        pytest.param(["sh", "-c", "--", "uv sync"], id="double-dash"),
+        pytest.param(["sh", "-c"], id="c-with-no-string"),
+    ],
+)
+def test_the_exec_d_shell_walk_answers_as_the_conftests_own_does(argv):
+    """The two shell walks are one function in two processes: the text the child
+    runs answers each command line as the root conftest's function does here,
+    index and options-read flag alike."""
+    from tests import conftest as root_conftest
+
+    assert readers()["_shell_command_string"](argv) == (
+        root_conftest._shell_command_string(argv)
+    )
 
 
 @pytest.mark.unit
@@ -572,16 +613,25 @@ def test_a_shell_line_with_no_interpreter_adds_no_module_word():
 
 @pytest.mark.unit
 def test_the_prelude_carries_the_conftests_tables_and_the_guards_walk(tmp_path):
-    """The child reads a command line with the sets the root conftest reads and the
-    -m walk the tool guard runs, taken from those homes when the prelude is built,
-    so neither can drift from its copy: there is no copy."""
+    """The child reads a command line with the sets and the shell walk the root
+    conftest reads with and the -m walk the tool guard runs, taken from those homes
+    when the prelude is built, so none can drift from its copy: there is no copy.
+    The future import comes first, so the walks' annotations are never evaluated
+    in the child."""
     from tests import conftest as root_conftest
 
     text = ChildToolStarts(tmp_path).prelude()
 
-    for name in ("_SHELLS", "_SHELL_OPTIONS_WITH_A_VALUE", "_SHELL_LONG_FLAGS"):
+    assert text.startswith("from __future__ import annotations\n")
+    for name in (
+        "_SHELLS",
+        "_SHELL_OPTIONS_WITH_A_VALUE",
+        "_SHELL_CLUSTER_LETTERS_WITH_A_VALUE",
+        "_SHELL_LONG_FLAGS",
+    ):
         expected = f"{name} = {tuple(sorted(getattr(root_conftest, name)))!r}\n"
         assert text.count(expected) == 1, name
+    assert text.count(inspect.getsource(root_conftest._shell_command_string)) == 1
     assert text.count(inspect.getsource(tool_guard._module_run_by)) == 1
 
 

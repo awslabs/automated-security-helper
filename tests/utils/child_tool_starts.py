@@ -40,10 +40,11 @@ unchanged, which is what lets a launch scan follow the caller's import path.
 The prelude's reading of a command line (which words of an argv can name a tool) is
 plain functions with no state, kept apart from the hook in ``_READERS`` so that
 ``readers`` can run them in the test's own process: the tests that pin the walk call
-them on an argv and start nothing. The shell tables and the -m walk are not copied
-into this file: the prelude takes the tables from tests/conftest.py's objects and the
-walk from tests/utils/tool_guard.py's ``_module_run_by`` source when it is built, so
-the child reads a command line exactly as the in-process guard does.
+them on an argv and start nothing. The shell tables, the shell walk and the -m walk
+are not copied into this file: the prelude takes the tables from tests/conftest.py's
+objects, the shell walk from its ``_shell_command_string`` source and the -m walk
+from tests/utils/tool_guard.py's ``_module_run_by`` source when it is built, so the
+child reads a command line exactly as the in-process guard does.
 
 The stand-ins are ``#!/bin/sh`` scripts, which Windows does not find on PATH, so the
 cells that use this class are skipped off POSIX (``POSIX_ONLY``).
@@ -82,6 +83,8 @@ SHADOWED_EXIT = 97
 #: starts with an underscore so it cannot collide with the code that follows in the
 #: same namespace.
 _PRELUDE_HEAD = """\
+from __future__ import annotations
+
 import os as _os
 import shutil as _shutil
 import sys as _sys
@@ -96,13 +99,22 @@ _EVENTS = ("subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn", "os.syst
 #: when the prelude is built (``_tables_source``), so the child reads the set the
 #: in-process guard reads: ``_SHELLS``, the shells whose -c runs its first operand;
 #: ``_SHELL_OPTIONS_WITH_A_VALUE``, the options whose value is the next argument;
-#: ``_SHELL_LONG_FLAGS``, the long options that take no value.
-_TABLE_NAMES = ("_SHELLS", "_SHELL_OPTIONS_WITH_A_VALUE", "_SHELL_LONG_FLAGS")
+#: ``_SHELL_CLUSTER_LETTERS_WITH_A_VALUE``, the letters that take the next argument
+#: from inside a short cluster; ``_SHELL_LONG_FLAGS``, the long options that take no
+#: value.
+_TABLE_NAMES = (
+    "_SHELLS",
+    "_SHELL_OPTIONS_WITH_A_VALUE",
+    "_SHELL_CLUSTER_LETTERS_WITH_A_VALUE",
+    "_SHELL_LONG_FLAGS",
+)
 
 #: The readers of a command line: which words of an argv a probed name can hide in.
-#: Plain functions of ``_os``, ``_NAMES``, the tables and ``_module_run_by`` (the tool
-#: guard's own, whose source joins this text in ``_readers_source``), so ``readers``
-#: can run them in the test's own process on an argv that is never started.
+#: Plain functions of ``_os``, ``_NAMES``, the tables, ``_shell_command_string`` (the
+#: root conftest's own shell walk) and ``_module_run_by`` (the tool guard's own -m
+#: walk), the last two taken as source from their homes in ``_readers_source``, so
+#: ``readers`` can run them in the test's own process on an argv that is never
+#: started.
 _READERS = '''\
 def _named(command):
     """The probed name *command* is, or None; a path counts by its last part."""
@@ -123,36 +135,16 @@ def _as_text(value):
 def _shell_command_line(arguments):
     """The command string of ``sh [OPTION]... -c STRING``, or None.
 
-    Read as the shell reads it (the test conftest's _shell_command_string): every
-    option is read first, c is noted wherever a short cluster holds it (``-c``,
-    ``-lc``, ``-sc``), a value-taking option skips its value, ``--`` and a lone
-    ``-`` end the options, and STRING is the first operand after them, so
-    ``bash -c -e STRING`` and ``sh -c -o pipefail STRING`` both run STRING. A long
-    option this reader does not know might take a value, and then where STRING is
-    would be a guess: None. An operand before any -c is a script, not a command
-    string: None.
+    Read by the test conftest's own _shell_command_string, whose source joins this
+    text: every option is read first, c is noted wherever a short cluster holds
+    it, a value-taking option or letter skips its value, ``--`` and a lone ``-``
+    end the options, and STRING is the first operand after them. None when there
+    is no -c, when an operand comes before it (a script), or when a long option
+    the walk does not know leaves the options unread (it might take a value, and
+    then where STRING is would be a guess).
     """
-    given_c = False
-    index = 1
-    while index < len(arguments):
-        argument = arguments[index]
-        if argument in ("--", "-"):
-            index += 1
-            break
-        if argument in _SHELL_OPTIONS_WITH_A_VALUE:
-            index += 2
-        elif argument.startswith("--"):
-            if argument not in _SHELL_LONG_FLAGS:
-                return None
-            index += 1
-        elif len(argument) > 1 and argument[0] in "-+":
-            given_c = given_c or "c" in argument[1:]
-            index += 1
-        else:
-            break
-    if given_c and index < len(arguments):
-        return arguments[index]
-    return None
+    index, _options_read = _shell_command_string(arguments)
+    return None if index is None else arguments[index]
 
 
 def _module_word(argv):
@@ -294,6 +286,18 @@ def _tables_source() -> str:
     )
 
 
+def _shell_command_string_source() -> str:
+    """The root conftest's ``_shell_command_string`` as source: the one shell walk,
+    read from its home so the child reads ``sh [OPTION]... -c STRING`` as the
+    in-process guard does. It needs only the tables, which ``_tables_source``
+    defines under the same names; its annotations are never evaluated, because
+    the prelude and ``readers`` both run it under ``from __future__ import
+    annotations``."""
+    from tests import conftest as root_conftest
+
+    return inspect.getsource(root_conftest._shell_command_string)
+
+
 def _module_run_by_source() -> str:
     """The tool guard's ``_module_run_by`` as source: the one -m walk, read from
     its home so the child runs what the in-process guard runs. It needs only
@@ -302,8 +306,17 @@ def _module_run_by_source() -> str:
 
 
 def _readers_source() -> str:
-    """The tables and the readers, as the prelude carries them."""
-    return _tables_source() + "\n\n" + _READERS + "\n\n" + _module_run_by_source()
+    """The tables, the two walks taken from their homes and the readers, as the
+    prelude carries them."""
+    return (
+        _tables_source()
+        + "\n\n"
+        + _shell_command_string_source()
+        + "\n\n"
+        + _READERS
+        + "\n\n"
+        + _module_run_by_source()
+    )
 
 
 def readers() -> dict:
@@ -314,8 +327,10 @@ def readers() -> dict:
     an argv the way the child's hook would, without starting anything.
     """
     namespace: dict = {"_os": os, "_NAMES": PROBED_TOOLS}
-    # This module's own text, never a caller's: the tests read what the child runs.
-    exec(_readers_source(), namespace)  # nosec B102 - the prelude's own source
+    # This module's own text, never a caller's: the tests read what the child runs,
+    # under the future import the prelude's head puts first.
+    source = "from __future__ import annotations\n" + _readers_source()
+    exec(source, namespace)  # nosec B102 - the prelude's own source
     return namespace
 
 
