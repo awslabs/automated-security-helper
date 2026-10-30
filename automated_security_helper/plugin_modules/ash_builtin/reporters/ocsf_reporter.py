@@ -19,6 +19,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
     skipped_project_detail,
     skipped_projects,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.shared_finding_ids import (
+    shared_ids_by_position,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     AffectedCode,
@@ -224,19 +227,16 @@ def _shared_finding_ids(
     line, column, fingerprints, message, an occurrence counter for findings that
     still collide), so the uid derived from it is the same string the GitLab
     SAST report and the flat JSON report carry, and distinct for two identical
-    results in one run.
+    results in one run. None where the flattening cannot vouch for a position
+    (:func:`shared_ids_by_position`), so that result's uid comes from
+    ``_identity_key`` instead of another finding's id.
     """
     try:
-        flat = model.to_flat_vulnerabilities()
+        flat = list(model.to_flat_vulnerabilities())
     except Exception as e:  # noqa: BLE001 -- a fallback, see _identity_key
         ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
         return [None] * len(all_results)
-    ids = [getattr(item, "id", None) for item in flat[: len(all_results)]]
-    if len(ids) != len(all_results) or not all(
-        isinstance(item, str) and item for item in ids
-    ):
-        return [None] * len(all_results)
-    return ids
+    return shared_ids_by_position(flat, all_results)
 
 
 def _rule_id(result: Any) -> Optional[str]:

@@ -237,6 +237,64 @@ class TestFindingUidIsStableAcrossRuns:
         # occurrence counter), so their uids differ.
         assert records[0]["finding_info"]["uid"] != records[1]["finding_info"]["uid"]
 
+    def test_a_flattening_with_more_rows_than_results_vouches_for_none(
+        self, reporter, monkeypatch
+    ):
+        """An extra flattened row used to pass the length check (taken after the
+        list was cut to size) and shift every later uid onto another finding."""
+        model = AshAggregatedResults()
+        model.sarif.runs[0].results = [
+            Result(ruleId="R1", level=Level.error, message=Message(text="a")),
+            Result(ruleId="R2", level=Level.error, message=Message(text="b")),
+        ]
+        flat = list(model.to_flat_vulnerabilities())
+        extra = flat[0].model_copy(update={"id": "an-extra-row"})
+        monkeypatch.setattr(
+            AshAggregatedResults, "to_flat_vulnerabilities", lambda self: flat + [extra]
+        )
+
+        uids = {r["finding_info"]["uid"] for r in json.loads(reporter.report(model))}
+
+        shared = {
+            str(uuid.uuid5(_FINDING_UID_NAMESPACE, key))
+            for key in [item.id for item in flat] + ["an-extra-row"]
+        }
+        assert len(uids) == 2
+        assert uids.isdisjoint(shared)
+
+    @pytest.mark.parametrize(
+        "drift",
+        [{"rule_id": "R9"}, {"file_path": "elsewhere/other.py"}],
+        ids=["another-rule", "another-file"],
+    )
+    def test_a_row_describing_another_finding_falls_back_alone(
+        self, reporter, monkeypatch, drift
+    ):
+        model = AshAggregatedResults()
+        model.sarif.runs[0].results = [
+            Result(ruleId="R1", level=Level.error, message=Message(text="a")),
+            Result(ruleId="R2", level=Level.error, message=Message(text="b")),
+            Result(ruleId="R3", level=Level.error, message=Message(text="c")),
+        ]
+        flat = list(model.to_flat_vulnerabilities())
+        drifted = flat[1].model_copy(update={"id": "drifted-row", **drift})
+        monkeypatch.setattr(
+            AshAggregatedResults,
+            "to_flat_vulnerabilities",
+            lambda self: [flat[0], drifted, flat[2]],
+        )
+
+        first, second, third = [
+            r["finding_info"]["uid"] for r in json.loads(reporter.report(model))
+        ]
+
+        assert first == str(uuid.uuid5(_FINDING_UID_NAMESPACE, flat[0].id))
+        assert third == str(uuid.uuid5(_FINDING_UID_NAMESPACE, flat[2].id))
+        assert second not in {
+            str(uuid.uuid5(_FINDING_UID_NAMESPACE, key))
+            for key in ("drifted-row", flat[1].id)
+        }
+
 
 class TestTheFallbackRecordKeepsWhatItCanRead:
     def test_severity_and_project_survive_a_failed_primary_build(

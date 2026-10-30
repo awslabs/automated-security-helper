@@ -18,6 +18,9 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.shared_finding_ids import (
+    shared_ids_by_position,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 from automated_security_helper.utils.error_text import error_text
@@ -217,20 +220,18 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         at one line shared an "unique" id and an ASH finding-id identifier, and
         the id differed from the one in every other report of the same scan.
 
-        A list of None when the flattening fails or does not line up, so a
-        model this cannot read keeps the legacy id rather than losing the report.
+        None at every position when the flattening fails or has a different
+        length, and at a position whose flattened row does not describe its
+        result (another rule or another file), so a model this cannot read, and
+        a result the flattening drifted from, keep the legacy id rather than
+        taking another finding's; see :func:`shared_ids_by_position`.
         """
         try:
-            flat = model.to_flat_vulnerabilities()
+            flat = list(model.to_flat_vulnerabilities())
         except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
             ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
             return [None] * len(all_results)
-        ids = [getattr(item, "id", None) for item in flat[: len(all_results)]]
-        if len(ids) != len(all_results) or not all(
-            isinstance(item, str) and item for item in ids
-        ):
-            return [None] * len(all_results)
-        return ids
+        return shared_ids_by_position(flat, all_results)
 
     def _vulnerability_for(
         self, result, model: "AshAggregatedResults", shared_id: str | None = None

@@ -230,3 +230,50 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         assert {
             i["value"] for i in vuln["identifiers"] if i["type"] == "ash-finding-id"
         } == {flat.id}
+
+    def test_a_flattening_with_more_rows_than_results_vouches_for_none(
+        self, reporter, monkeypatch
+    ):
+        """The length check used to run after the list was cut to size, so a
+        flattening with an extra row passed it and every id after the extra row
+        named another finding. A length that differs means no position is known
+        to line up, and every finding keeps its legacy id."""
+        model = _model(_result("B105", "one"), _result("B106", "two"))
+        flat = list(model.to_flat_vulnerabilities())
+        extra = flat[0].model_copy(update={"id": "an-extra-row"})
+        monkeypatch.setattr(
+            AshAggregatedResults, "to_flat_vulnerabilities", lambda self: flat + [extra]
+        )
+
+        ids = [v["id"] for v in json.loads(reporter.report(model))["vulnerabilities"]]
+
+        assert len(ids) == 2
+        assert set(ids).isdisjoint({item.id for item in flat} | {"an-extra-row"})
+
+    @pytest.mark.parametrize(
+        "drift",
+        [{"rule_id": "B999"}, {"file_path": "elsewhere/other.py"}],
+        ids=["another-rule", "another-file"],
+    )
+    def test_a_row_describing_another_finding_falls_back_alone(
+        self, reporter, monkeypatch, drift
+    ):
+        """One drifted pair costs that finding its shared id and no other: the
+        fallback used to be all-or-nothing, which changed every id of the report
+        between two pipelines of the same tree."""
+        model = _model(
+            _result("B105", "one"), _result("B106", "two"), _result("B107", "three")
+        )
+        flat = list(model.to_flat_vulnerabilities())
+        drifted = flat[1].model_copy(update={"id": "drifted-row", **drift})
+        monkeypatch.setattr(
+            AshAggregatedResults,
+            "to_flat_vulnerabilities",
+            lambda self: [flat[0], drifted, flat[2]],
+        )
+
+        first, second, third = json.loads(reporter.report(model))["vulnerabilities"]
+
+        assert first["id"] == flat[0].id
+        assert third["id"] == flat[2].id
+        assert second["id"] not in {"drifted-row", flat[1].id}
