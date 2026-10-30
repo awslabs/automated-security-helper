@@ -18,6 +18,11 @@
   take; ``_demo_main`` builds the context the executor would.
 - The tool lines were not reset per target, and an empty target kept the previous
   target's start time.
+
+The blank-config and warned-once tests read the argv and the warnings of real
+``scan()`` runs, not the arguments at construction or direct option re-reads: a
+fix that dropped ``--config`` altogether, or a warning that repeated per scan,
+would otherwise have passed them.
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScanner,
@@ -118,21 +124,37 @@ def _flag_value(command: list[str], flag: str) -> str:
 
 
 def test_a_blank_config_file_names_no_file(tmp_path, caplog):
+    """Read from the argv syft gets: a fix that dropped ``--config`` altogether
+    would pass a check of what is absent, and syft would then read a .syft.yaml
+    from the scanned source. One ``--config``, naming a file outside the source."""
     with caplog.at_level(logging.WARNING):
         scanner = _scanner(_context(tmp_path), config_file="  ")
 
     assert "Configured syft config file" not in caplog.text
-    configured = [a.value for a in scanner.args.extra_args if a.key == "--config"]
-    assert Path(scanner.context.source_dir).as_posix() not in configured
+    commands: list[list[str]] = []
+    _scan_with(scanner, {"returncode": 0}, MINIMAL_SBOM, commands=commands)
+    (command,) = commands
+    assert command.count("--config") == 1, command
+    named = Path(_flag_value(command, "--config")).resolve()
+    assert not named.is_relative_to(Path(scanner.context.source_dir).resolve())
 
 
 def test_a_missing_config_file_is_warned_about_once(tmp_path, caplog):
+    """``scan()`` runs ``_process_config_options`` again for every target, so the
+    real path is two scans, source then converted, and one line between them."""
     missing = tmp_path / "operator" / "syft.yaml"
+    context = _context(tmp_path)
 
     with caplog.at_level(logging.WARNING):
-        scanner = _scanner(_context(tmp_path), config_file=str(missing))
-        scanner._process_config_options()
-        scanner._process_config_options()
+        scanner = _scanner(context, config_file=str(missing))
+        _scan_with(scanner, {"returncode": 0}, MINIMAL_SBOM)
+        _scan_with(
+            scanner,
+            {"returncode": 0},
+            MINIMAL_SBOM,
+            target=Path(context.work_dir),
+            target_type="converted",
+        )
 
     given = [m for m in caplog.messages if "does not exist" in m]
     assert len(given) == 1, caplog.messages
@@ -150,12 +172,15 @@ def test_the_base_path_is_the_source_directory_for_a_target_inside_it(tmp_path):
     assert scanner._base_path(Path(context.source_dir) / "sub") == source
 
 
-def test_the_base_path_is_the_target_for_a_target_outside_the_source(tmp_path):
+@pytest.mark.parametrize("name", ["elsewhere", "src-other"])
+def test_the_base_path_is_the_target_for_a_target_outside_the_source(tmp_path, name):
+    """``src-other`` is outside the tree but string-prefixed by ``src``, the case a
+    ``startswith`` containment check gets wrong."""
     context = _context(tmp_path)
     scanner = _scanner(context)
-    elsewhere = tmp_path / "elsewhere"
+    outside = tmp_path / name
 
-    assert scanner._base_path(elsewhere) == Path(os.path.abspath(elsewhere))
+    assert scanner._base_path(outside) == Path(os.path.abspath(outside))
 
 
 def test_a_converted_target_outside_the_source_tree_is_its_own_base_path(tmp_path):
@@ -261,16 +286,34 @@ def test_an_empty_target_does_not_keep_the_previous_targets_start_time(tmp_path)
 # --- python -m ------------------------------------------------------------------------
 
 
-def test_the_module_entry_point_writes_the_sbom_under_the_output_directory(
+def test_the_module_entry_point_builds_the_executors_context_and_writes_the_result(
     tmp_path, monkeypatch
 ):
+    """The context the stubbed ``scan`` saw is the one the executor would build:
+    the source and output directories as given, and the work directory derived
+    from the output directory. A result that is not a report is written as JSON,
+    the function's documented shape."""
     source = tmp_path / "src"
     source.mkdir()
     (source / "requirements.txt").write_text("requests==2.19.0\n")
     output = tmp_path / "out"
-    monkeypatch.setattr(SyftScanner, "scan", lambda self, **kwargs: True)
+    seen: dict = {}
+
+    def scan(self, **kwargs):
+        seen["context"] = self.context
+        seen["kwargs"] = kwargs
+        return True
+
+    monkeypatch.setattr(SyftScanner, "scan", scan)
 
     written = _demo_main(source, output)
 
+    context = seen["context"]
+    assert os.path.realpath(context.source_dir) == os.path.realpath(source)
+    assert os.path.realpath(context.output_dir) == os.path.realpath(output)
+    assert os.path.realpath(context.work_dir) == os.path.realpath(
+        output / ASH_WORK_DIR_NAME
+    )
+    assert seen["kwargs"] == {"target": source, "target_type": "source"}
     assert written == output / "syft.cdx.json"
     assert json.loads(written.read_text()) is True

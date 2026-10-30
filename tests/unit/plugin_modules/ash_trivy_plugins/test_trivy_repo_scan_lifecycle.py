@@ -38,6 +38,9 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    _trivy_scanner_base as trivy_base,
+)
 from automated_security_helper.plugin_modules.ash_trivy_plugins import (
     trivy_repo_scanner,
 )
@@ -147,21 +150,49 @@ def _scan(scanner, run, *args, **kwargs):
 # --- the signature -----------------------------------------------------------------
 
 
-def test_the_parameters_are_in_the_base_scans_order(tmp_path):
+def test_the_parameters_are_in_the_base_scans_order(tmp_path, monkeypatch):
     """target, target type, the global ignore paths, then the config: a caller
-    passing them by position as the base declares them is read right."""
-    scanner = _scanner(tmp_path)
+    passing them by position as the base declares them is read right.
 
-    report = _scan(
-        scanner,
-        _run_double({"returncode": 0}, EMPTY_SARIF),
-        Path(scanner.context.source_dir),
-        "source",
-        [],
-        None,
-    )
+    Falsy values in both slots would pass with the parameters in either order, so
+    the ignore list is non-empty and the config a sentinel, and each is traced to
+    where it lands: the config in ``_pre_scan``'s keyword, the ignore list in the
+    call that turns it into ``--skip-dirs`` tokens, and that token in the argv.
+    """
+    scanner = _scanner(tmp_path)
+    sentinel = object()
+    ignore = [object()]
+    given: dict = {}
+
+    def skip_dirs(target, source_dir=None, ignore_paths=None):
+        given["ignore_paths"] = ignore_paths
+        return ["ignored-dir"]
+
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", skip_dirs)
+    monkeypatch.setattr(trivy_base, "trivy_skip_files", lambda *a, **k: [])
+    commands: list = []
+
+    def run(command, results_dir=None, env=None, timeout=None, **kwargs):
+        commands.append(list(command))
+        out = Path(command[command.index("--output") + 1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(EMPTY_SARIF), encoding="utf-8")
+        return {"returncode": 0}
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True) as pre,
+        patch.object(scanner, "_post_scan", side_effect=_post_scan(scanner)),
+        patch.object(scanner, "_run_subprocess", side_effect=run),
+    ):
+        report = scanner.scan(
+            Path(scanner.context.source_dir), "source", ignore, sentinel
+        )
 
     assert hasattr(report, "runs"), type(report)
+    assert pre.call_args.kwargs["config"] is sentinel
+    assert given["ignore_paths"] == ignore
+    (command,) = commands
+    assert "--skip-dirs=ignored-dir" in command, command
 
 
 # --- flagged responses --------------------------------------------------------------
@@ -328,11 +359,19 @@ def test_a_module_dir_that_is_not_a_directory_is_refused_by_key_alone(tmp_path):
 
 
 def test_the_default_ignore_unfixed_says_once_what_it_withholds(tmp_path, caplog):
-    with caplog.at_level("WARNING"):
-        _scanner(tmp_path, ignore_unfixed=True)
+    """The default is true, unlike the builtin trivy scanner's, and the warning is
+    given once per scanner, not once per target: ``_process_config_options`` runs
+    from the scanner's construction, and trivy-repo's ``scan()`` does not run it
+    again, so two scans add no line."""
+    assert TrivyRepoScannerConfigOptions().ignore_unfixed is True
 
-    assert "ignore_unfixed" in caplog.text
-    assert "withheld" in caplog.text
+    with caplog.at_level("WARNING"):
+        scanner = _scanner(tmp_path, ignore_unfixed=True)
+        _scan(scanner, _run_double({"returncode": 0}, EMPTY_SARIF))
+        _scan(scanner, _run_double({"returncode": 0}, EMPTY_SARIF))
+
+    withheld = [m for m in caplog.messages if "ignore_unfixed" in m and "withheld" in m]
+    assert len(withheld) == 1, caplog.messages
 
 
 def test_control_ignore_unfixed_off_is_not_warned_about(tmp_path, caplog):

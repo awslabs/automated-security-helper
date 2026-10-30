@@ -25,6 +25,11 @@
 - ``validate_plugin_dependencies`` probed PATH itself instead of chaining to the
   base check, so a recorded ``dependency_unavailable_reason`` was ignored and a
   refused in-tree copy read as "not installed".
+
+The blank-config test reads the argv grype gets, the swap-window test records
+where its raise landed, and the garbled-name tests write their names through
+``tests.utils.undecodable_names.make_tree``, which skips where the filesystem
+cannot hold them.
 """
 
 from __future__ import annotations
@@ -50,6 +55,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner
     GrypeScannerConfigOptions,
     _name_grype_garbled,
 )
+from tests.utils.undecodable_names import make_tree
 
 pytestmark = pytest.mark.unit
 
@@ -141,14 +147,50 @@ def test_the_cache_dir_warning_is_redacted_and_reads_the_key_case_insensitively(
 # --- the configured path ------------------------------------------------------------
 
 
+def _values(command: list[str], flag: str) -> list[str]:
+    found = []
+    for index, arg in enumerate(command):
+        if arg.startswith(f"{flag}="):
+            found.append(arg.split("=", 1)[1])
+        elif arg == flag and index + 1 < len(command):
+            found.append(command[index + 1])
+    return found
+
+
+def _scan_command(scanner) -> list[str]:
+    """The argv of one source scan, with the tool replaced by a double that writes
+    no results file; what the scan makes of the missing file is not read here."""
+    commands: list[list[str]] = []
+
+    def run(command, *args, **kwargs):
+        commands.append([str(part) for part in command])
+        return {"returncode": 0}
+
+    scanner.dependencies_satisfied = True
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_run_subprocess", side_effect=run),
+    ):
+        try:
+            scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
+        except Exception:
+            pass  # the double wrote no results file
+    (command,) = commands
+    return command
+
+
 def test_a_blank_config_file_names_no_file(root, caplog):
+    """Read from the argv grype gets, not the arguments at construction: a fix
+    that dropped ``--config`` altogether would pass a check of what is absent, and
+    grype would then load a .grype.yaml from the scanned source, where it runs."""
     ctx = _context(root)
 
     with caplog.at_level(logging.WARNING):
         scanner = _grype(ctx, config_file="  ")
 
-    configured = [a.value for a in scanner.args.extra_args if a.key == "--config"]
-    assert Path(ctx.source_dir).as_posix() not in configured
+    (named,) = _values(_scan_command(scanner), "--config")
+    assert not Path(named).resolve().is_relative_to(Path(ctx.source_dir).resolve())
     # The config-file message, named in full: this module runs offline (the
     # autouse fixture), and in a HOME without a grype database the offline cache
     # check warns that the database directory "does not exist", which is not
@@ -234,14 +276,19 @@ def test_a_raise_while_resolving_leaves_the_next_target_no_exclude_values(
     (ctx.source_dir / "leaving.txt").symlink_to(outside)
     scanner = _grype(ctx)
     before = list(scanner.args.extra_args)
+    keys_at_the_raise: list[str] = []
 
     def refuse(*args, **kwargs):
+        # Inside the swap window: the --exclude values are in place when the
+        # empty config is written, so the raise lands where the restore matters.
+        keys_at_the_raise.extend(arg.key for arg in scanner.args.extra_args)
         raise RuntimeError("the empty config could not be written")
 
     monkeypatch.setattr(grype_scanner, "empty_tool_config", refuse)
     with pytest.raises(RuntimeError):
         scanner._execute_scan(Path(ctx.source_dir), "source", [])
 
+    assert "--exclude" in keys_at_the_raise, keys_at_the_raise
     assert scanner.args.extra_args == before
     assert not any(arg.key == "--exclude" for arg in scanner.args.extra_args)
 
@@ -249,19 +296,19 @@ def test_a_raise_while_resolving_leaves_the_next_target_no_exclude_values(
 # --- garbled names ------------------------------------------------------------------
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
 def test_a_backslash_is_a_name_character_where_the_separator_is_a_slash(root):
+    """The name is written through ``make_tree``, which skips where the filesystem
+    cannot hold it (Windows cannot decode it; APFS refuses it with EILSEQ), rather
+    than on the platform's name alone."""
+    make_tree(root, {b"a\\b\xff": b"x\n"})
     garbled = os.fsdecode(b"a\\b\xff")
-    (root / garbled).write_text("x\n", encoding="utf-8")
 
     assert _name_grype_garbled(root, "a\\b�") == garbled
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
 def test_a_backslash_separator_is_kept_in_place_when_asked_for(root):
+    make_tree(root, {b"a/b\xff": b"x\n"})
     garbled = os.fsdecode(b"b\xff")
-    (root / "a").mkdir()
-    (root / "a" / garbled).write_text("x\n", encoding="utf-8")
 
     assert _name_grype_garbled(root, "a\\b�", separators="/\\") == f"a\\{garbled}"
     assert _name_grype_garbled(root, "a/b�", separators="/\\") == f"a/{garbled}"
