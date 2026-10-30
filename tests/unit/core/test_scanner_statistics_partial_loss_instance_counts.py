@@ -45,8 +45,14 @@ def test_an_instance_with_gate_failing_findings_is_not_a_partial_loss_error():
 
 
 def test_an_instance_mutated_into_a_refused_shape_is_refused():
-    counts = ScannerSeverityCount(high=1)
-    counts.high = "many"
+    """Started from counts whose valid grade is a partial loss (no findings at
+    all), so a False here can only come from the refusal: started from
+    ``high=1``, False was also what the unchanged instance gave, and code that
+    skipped the re-validation and read any non-zero ``high`` as a finding would
+    have passed too."""
+    counts = ScannerSeverityCount()
+    assert _is_partial_loss(counts) is True
+    counts.low = "many"
 
     assert _is_partial_loss(counts) is False
 

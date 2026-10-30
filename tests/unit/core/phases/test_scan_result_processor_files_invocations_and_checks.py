@@ -243,8 +243,9 @@ class TestThePostScanChecks:
     def test_validate_completion_reads_completed_scanners_off_the_results(
         self, tmp_path
     ):
-        """Given no list, the scanners with a row that is not ERROR are the ones
-        that completed; defaulting to none marked every queued scanner failed."""
+        """Given no list, the scanners with a PASSED or FAILED row are the ones
+        that completed (a SKIPPED or MISSING row never ran, an ERROR row did not
+        complete); defaulting to none marked every queued scanner failed."""
         processor = _processor(_context(tmp_path))
         processor.validation_manager.validate_execution_completion.return_value = (
             MagicMock(has_issues=MagicMock(return_value=False))

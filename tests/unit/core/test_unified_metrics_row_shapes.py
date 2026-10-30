@@ -161,12 +161,12 @@ class TestARecordedFailedWithNothingActionableReadsPassed:
 
 
 class TestAnErrorFiledUnderAnotherTargetIsTheScannersError:
-    """A results-processing failure is filed on the failed target's own row with
-    status ERROR, whatever target that is. The per-target walk reads every key,
-    so an ERROR under "converted" beside a PASSED source report and a PASSED
-    recorded row grades the scanner ERROR; before the refiled row was graded,
-    the failure record kept the row's FAILED-or-PASSED status and only the
-    "None" and "source" reports were read for it, so the source's PASSED won."""
+    """The calculator's per-target walk reads every key, so an ERROR report under
+    "converted" beside a PASSED source report and a PASSED recorded row grades
+    the scanner ERROR. This tests the walk (``any_target_errored``) over a report
+    built by hand under "converted", not the refiling that puts a
+    results-processing failure there; that refiling is the executor's and is
+    tested with it (``test_scanner_executor_processes_each_target``)."""
 
     def test_the_row_is_error(self):
         model = _model(

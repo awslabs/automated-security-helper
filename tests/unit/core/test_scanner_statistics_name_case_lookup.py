@@ -105,3 +105,40 @@ class TestTheExactKeyWins:
         model = _model("Bandit", "bandit")
 
         assert ScannerStatisticsCalculator.reports_for(model, "semgrep") is None
+
+
+class TestEveryReadFollowsTheFoldedKey:
+    """The module docstring says the dict counts were lost under a folded key too,
+    and ``reports_for`` lists MISSING among what it serves; neither was pinned
+    under a folded key, nor was the graded level the FAILED-to-PASSED flip reads."""
+
+    def test_dict_counts_under_a_folded_key_feed_the_row(self):
+        model = _model(
+            "Bandit",
+            "bandit",
+            raw_results={"findings": []},
+            severity_counts={"high": 1},
+        )
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+        (metrics,) = get_unified_scanner_metrics(model)
+
+        assert stats["Bandit"]["high"] == 1
+        assert metrics.high == 1
+        assert metrics.status == "FAILED"
+
+    def test_a_missing_report_under_a_folded_key_marks_the_dependencies(self):
+        model = _model("Bandit", "bandit", status="MISSING")
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats["Bandit"]["dependencies_missing"] is True
+
+    def test_a_graded_level_under_a_folded_key_is_the_scanners(self):
+        model = _model("Bandit", "bandit", scanner_severity_threshold="HIGH")
+
+        assert ScannerStatisticsCalculator.graded_level_recorded(model, "Bandit")
+        threshold, _source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            model, "Bandit"
+        )
+        assert threshold == "HIGH"

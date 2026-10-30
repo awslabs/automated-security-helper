@@ -18,8 +18,6 @@ whatever its status, so the two reads agree.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -82,12 +80,16 @@ def _processed(tmp_path) -> AshAggregatedResults:
 
 
 def _reloaded(model: AshAggregatedResults) -> AshAggregatedResults:
-    """The model as ``ash report`` reads it back from the saved results."""
-    reloaded = AshAggregatedResults()
+    """The model as ``ash report`` reads it back from the saved results.
+
+    The model's own JSON round trip, as ``save_model`` and ``load_model`` make
+    it: a ``json.dumps(..., default=str)`` of ``additional_reports`` alone wrote
+    a Python ``None`` key as ``"null"`` where pydantic writes ``"None"``, so a
+    processor that filed under ``None`` again would have passed this test
+    through a different branch than a real reload takes.
+    """
+    reloaded = AshAggregatedResults.model_validate_json(model.model_dump_json())
     reloaded.ash_config = get_default_config()
-    reloaded.additional_reports = json.loads(
-        json.dumps(model.additional_reports, default=str)
-    )
     return reloaded
 
 
