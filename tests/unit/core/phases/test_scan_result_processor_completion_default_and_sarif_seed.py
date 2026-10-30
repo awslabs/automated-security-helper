@@ -5,11 +5,14 @@
 
 - ``validate_completion`` with no names counts the rows recorded PASSED or FAILED
   as completed; SKIPPED, MISSING and ERROR rows did not run to completion.
+- A model with no SARIF yet seeds its report from the model's default (an empty
+  run under ASH's driver) and merges the first scanner's report into it; the
+  scanner's own report object is never the aggregate.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -22,8 +25,19 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerTargetStatusInfo,
 )
+from automated_security_helper.models.scan_results_container import ScanResultsContainer
+from automated_security_helper.schemas.sarif_schema_model import (
+    Message,
+    Result,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
+)
 
 pytestmark = pytest.mark.unit
+
+ASH_DRIVER_NAME = "AWS Labs - Automated Security Helper"
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -101,3 +115,81 @@ class TestTheCompletionDefaultCountsTheRowsThatRan:
         processor.validate_completion(AshAggregatedResults())
 
         validation_manager.validate_execution_completion.assert_called_once_with([])
+
+
+def _scanner_sarif(scanner_name: str) -> SarifReport:
+    return SarifReport(
+        runs=[
+            Run(
+                tool=Tool(driver=ToolComponent(name=scanner_name)),
+                results=[
+                    Result(
+                        ruleId="B101",
+                        level="warning",
+                        message=Message(text="assert used"),
+                    )
+                ],
+            )
+        ]
+    )
+
+
+def _process_sarif(tmp_path, model: AshAggregatedResults) -> SarifReport:
+    """Run one SARIF container through the processor; return the scanner's report."""
+    processor, _ = _processor(tmp_path)
+    report = _scanner_sarif("bandit")
+    container = ScanResultsContainer(
+        scanner_name="bandit",
+        target=str(processor.plugin_context.source_dir),
+        target_type="source",
+    )
+    container.raw_results = report
+    # Suppressions read a real configuration; the seed is what is measured here.
+    with patch(
+        "automated_security_helper.core.phases.scan_result_processor.apply_suppressions_to_sarif",
+        side_effect=lambda sarif_report, **kwargs: sarif_report,
+    ):
+        processor.process_container(container, model)
+    return report
+
+
+class TestAModelWithNoSarifSeedsItFromTheDefault:
+    """With ``sarif`` None on the model, the first scanner's report became the
+    aggregate: the combined SARIF carried that scanner's driver, and the two were one
+    object, so every later merge changed the scanner's own report in place."""
+
+    def test_the_first_report_is_merged_into_an_ash_report_not_adopted(self, tmp_path):
+        model = AshAggregatedResults()
+        model.sarif = None
+
+        report = _process_sarif(tmp_path, model)
+
+        assert model.sarif is not report
+        assert model.sarif.runs[0].tool.driver.name == ASH_DRIVER_NAME
+        assert [result.ruleId for result in model.sarif.runs[0].results] == ["B101"]
+        assert "bandit" in [
+            extension.name for extension in model.sarif.runs[0].tool.extensions
+        ]
+
+    def test_a_model_with_its_default_report_merges_as_before(self, tmp_path):
+        """Control: the default-built model takes the same shape."""
+        model = AshAggregatedResults()
+
+        report = _process_sarif(tmp_path, model)
+
+        assert model.sarif is not report
+        assert model.sarif.runs[0].tool.driver.name == ASH_DRIVER_NAME
+        assert [result.ruleId for result in model.sarif.runs[0].results] == ["B101"]
+
+    def test_the_seed_is_a_copy_of_the_default_not_the_shared_one(self, tmp_path):
+        """Two models seeded from None do not share the report object."""
+        first, second = AshAggregatedResults(), AshAggregatedResults()
+        first.sarif = None
+        second.sarif = None
+
+        _process_sarif(tmp_path / "a", first)
+        _process_sarif(tmp_path / "b", second)
+
+        assert first.sarif is not second.sarif
+        assert len(first.sarif.runs[0].results) == 1
+        assert len(second.sarif.runs[0].results) == 1

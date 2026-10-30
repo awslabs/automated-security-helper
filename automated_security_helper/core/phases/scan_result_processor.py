@@ -273,13 +273,19 @@ class ScanResultProcessor:
                 invocation_details=invocation_details or {},
             )
 
-            if aggregated_results.sarif is not None:
-                aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
-            else:
-                # No report to merge into: the scanner's findings become the
-                # report. Dropped here, they were in no output while the
-                # per-target entry below still said the scanner ran.
-                aggregated_results.sarif = sanitized_sarif
+            if aggregated_results.sarif is None:
+                # No report to merge into: the seed is the model's own default,
+                # an empty run under ASH's driver (a deep copy of the field's
+                # default; the class-level object is shared). Dropped, the
+                # findings were in no output while the per-target entry below
+                # still said the scanner ran. Taken as the aggregate itself, the
+                # scanner's report put its driver on the combined SARIF and the
+                # two were one object, so every later merge changed the scanner's
+                # own report in place.
+                aggregated_results.sarif = AshAggregatedResults.model_fields[
+                    "sarif"
+                ].get_default()
+            aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
             target_report = aggregated_results.additional_reports[scanner_name][
                 target_key
             ]
