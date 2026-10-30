@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, List, Literal, Optional, Union
 
 from pydantic import (
     AfterValidator,
@@ -72,10 +72,10 @@ LicenseId = Annotated[Union[spdx.Schema, str], AfterValidator(_spdx_id_text)]
 #   known to the SPDX list in this snapshot or not, is kept as the text the BOM
 #   carries (the schema still lists the known ids), because the SPDX list grows
 #   faster than this snapshot and a scanner's BOM may carry a newer id. An entry
-#   that fits neither form is kept as the object it was written as, with a
-#   warning, because a results file written by another ASH version can hold what
-#   the bare list accepted, and one entry must not refuse the component that
-#   carries it; a list entry that is not an object at all is refused. The spec's
+#   that fits neither form is kept as it was written, with a warning, whatever
+#   its type (an object with other keys, a bare string, a number), because a
+#   results file written by another ASH version can hold anything the bare list
+#   accepted, and one entry must not refuse the component that carries it. The spec's
 #   rule that a BOM holds either license entries or exactly one expression is
 #   not enforced: a scanner may write several expression entries, and that BOM
 #   still loads.
@@ -346,13 +346,14 @@ class LicenseExpression(BaseModel):
 class LicenseChoice(RootModel):
     # The typed forms come first and are tried in order (left_to_right), because
     # in the default smart mode a dict would match the last member exactly and
-    # win. An entry that fits neither form is kept as the object it was written
-    # as, with a warning (below): a results file written by another ASH version
-    # can hold what the old bare list accepted, and one entry must not refuse
-    # the component that carries it.
+    # win. An entry that fits neither form is kept as it was written, with a
+    # warning (below), whatever its type: a results file written by another ASH
+    # version can hold anything the old bare list accepted (an object with other
+    # keys, a bare "MIT", a number), and one entry must not refuse the component
+    # that carries it.
     root: List[
         Annotated[
-            Union[LicenseEntry, LicenseExpression, Dict[str, Any]],
+            Union[LicenseEntry, LicenseExpression, Any],
             Field(union_mode="left_to_right"),
         ]
     ] = Field(
@@ -366,7 +367,7 @@ class LicenseChoice(RootModel):
         from automated_security_helper.utils.log import ASH_LOGGER
 
         for index, entry in enumerate(self.root):
-            if isinstance(entry, dict):
+            if not isinstance(entry, (LicenseEntry, LicenseExpression)):
                 ASH_LOGGER.warning(
                     f"License entry {index} of a CycloneDX license list fits neither "
                     "license form (a license, or an SPDX expression); it is kept as "

@@ -17,8 +17,8 @@ so the model has to hand back what the scanner wrote:
 * ``Signer.algorithm`` is text, not ``AnyUrl``, which added a trailing slash to a
   path-less URI.
 * ``LicenseChoice`` entries are typed. An entry that fits neither license form
-  is kept as written with a warning, and a list entry that is not an object is
-  refused, so a stored BOM written by another ASH version still loads. A license
+  is kept as written with a warning, whatever its type, so a stored BOM written
+  by another ASH version, whose bare list accepted anything, still loads. A license
   id the bundled SPDX list lacks is kept as text, and an enum member given as an
   id is stored as its text.
 """
@@ -313,9 +313,23 @@ def test_control_a_well_formed_list_warns_nothing():
     [["MIT"], [1], [[{"license": {"id": "MIT"}}]]],
     ids=["string", "number", "list"],
 )
-def test_a_list_entry_that_is_not_an_object_is_still_refused(entries):
-    with pytest.raises(pydantic.ValidationError):
-        LicenseChoice.model_validate(entries)
+def test_a_list_entry_that_is_not_an_object_is_kept_as_written_too(entries):
+    """The old bare ``List`` accepted a bare id, a number or a nested list, so a
+    stored BOM can hold one; it is kept and warned about like a stray object."""
+    with patch(LOGGER) as logger:
+        choice = LicenseChoice.model_validate(entries)
+    assert choice.root == entries
+    assert choice.model_dump(by_alias=True) == entries
+    assert logger.warning.call_count == 1
+
+
+def test_a_bare_license_id_does_not_refuse_the_component_that_carries_it():
+    with patch(LOGGER):
+        component = Component.model_validate(
+            {"type": "library", "name": "lib", "licenses": ["MIT"]}
+        )
+    assert component.name == "lib"
+    assert component.model_dump(by_alias=True, exclude_none=True)["licenses"] == ["MIT"]
 
 
 def test_a_stray_license_entry_does_not_refuse_the_component_that_carries_it():
