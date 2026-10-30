@@ -98,7 +98,7 @@ Options, under `scanners.bandit.options`. An option not listed here refuses the 
 | <a id="scanners.bandit.options.confidence_level"></a>`confidence_level` | string, matches `^(all|low|medium|high)$` | `all` | Confidence level for bandit scan (all, low, medium, high) |
 | <a id="scanners.bandit.options.ignore_nosec"></a>`ignore_nosec` | boolean | `false` | Whether to ignore #nosec comments in the code |
 | <a id="scanners.bandit.options.excluded_paths"></a>`excluded_paths` | list of mapping | `[]` | List of paths to exclude from the bandit scan |
-| <a id="scanners.bandit.options.additional_formats"></a>`additional_formats` | list of string | `[]` | Additional output formats to generate (e.g., html, csv, xml) |
+| <a id="scanners.bandit.options.additional_formats"></a>`additional_formats` | list of string | `[]` | Additional output formats (e.g., html, csv, xml). bandit writes one format per run through a single --format option, and ASH needs that run's output to be SARIF, so these formats are not produced: a value here is accepted and logged as a warning. Convert the SARIF results with ASH's reporters instead. |
 | <a id="scanners.bandit.options.tool_version"></a>`tool_version` | string or null | `">=1.7.0,<2.0.0"` | Version constraint for bandit tool installation (e.g., '&gt;=1.7.0'). If not specified, uses '&gt;=1.7.0,&lt;2.0.0' for stability. |
 | <a id="scanners.bandit.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation (default: 300) |
 
@@ -331,7 +331,7 @@ Options, under `scanners.npm-audit.options`. An option not listed here refuses t
 |--------|------|---------|-------------|
 | <a id="scanners.npm-audit.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.npm-audit.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
-| <a id="scanners.npm-audit.options.offline"></a>`offline` | boolean | `false` | Treat this scanner as offline even if ASH is not. npm, yarn and pnpm audit by asking the registry, so offline npm-audit does not run: it is MISSING for a project with a lockfile and SKIPPED for one without. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
+| <a id="scanners.npm-audit.options.offline"></a>`offline` | boolean | `false` | Treat this scanner as offline. npm, pnpm and yarn audit only against the package registry's advisory service, so offline npm-audit audits nothing: each lockfile is listed as not scanned, with a lockfile the scanner is reported MISSING, and with none it is SKIPPED. When true, this scanner is offline even if ASH is not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 
 ## `opengrep`
 
