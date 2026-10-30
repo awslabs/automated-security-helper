@@ -440,8 +440,10 @@ def test_the_budget_on_windows_fits_the_command_line_limit(monkeypatch):
 def test_the_budget_elsewhere_reads_the_hosts_arg_max_less_the_environment(
     monkeypatch,
 ):
+    # ``raising=False``: Windows has no ``os.sysconf`` to replace, and this test
+    # plays a Linux host there too (the platform is patched above the call).
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(trivy_base.os, "sysconf", lambda name: 2_000_000)
+    monkeypatch.setattr(trivy_base.os, "sysconf", lambda name: 2_000_000, raising=False)
 
     assert skip_args_budget({}) == _SKIP_ARGS_BUDGET
     assert skip_args_budget({"A": "x" * 100_000}) == 1_000_000 - (1 + 100_000 + 2)
@@ -453,8 +455,19 @@ def test_control_a_host_that_does_not_answer_gets_the_ceiling(monkeypatch):
         raise ValueError(name)
 
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(trivy_base.os, "sysconf", unknown)
+    monkeypatch.setattr(trivy_base.os, "sysconf", unknown, raising=False)
 
+    assert skip_args_budget({"A": "x" * 100_000}) == _SKIP_ARGS_BUDGET
+
+
+def test_a_host_without_sysconf_gets_the_ceiling(monkeypatch):
+    """The ``AttributeError`` arm of the budget: a non-Windows platform whose ``os``
+    has no ``sysconf`` (what a Windows interpreter is once the platform check is
+    taken out of the way) gets the ceiling, not a crash."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delattr(trivy_base.os, "sysconf", raising=False)
+
+    assert not hasattr(trivy_base.os, "sysconf")
     assert skip_args_budget({"A": "x" * 100_000}) == _SKIP_ARGS_BUDGET
 
 
