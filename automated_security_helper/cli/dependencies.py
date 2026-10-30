@@ -22,11 +22,12 @@ import typer
 # reasons about this exact import form. It is utils/console.py's print, not rich's:
 # its console checks each line it writes off a terminal, so none reads as a CI command.
 from automated_security_helper.utils.console import ash_console, print  # noqa: A004
+from automated_security_helper.utils.console import global_console
 from automated_security_helper.utils.ui_theme import rich_theme
 from rich.panel import Panel
 from rich.table import Table
 
-from automated_security_helper.base.plugin_base import PluginBase
+from automated_security_helper.base.plugin_base import CustomCommand, PluginBase
 from automated_security_helper.base.plugin_config import (
     declared_plugin_name,
     plugin_config_key,
@@ -47,6 +48,7 @@ from automated_security_helper.core.constants import (
     ASH_BIN_PATH,
     ASH_CONFIG_SOURCES_DESCRIPTION,
     ASH_EXIT_BAD_SELECTION,
+    ASH_EXIT_USAGE_ERROR,
     ASH_WORK_DIR_NAME,
     ash_bin_path_from_environment,
     home_bin_path,
@@ -90,10 +92,16 @@ from automated_security_helper.utils.python_installer import environment_rebuild
 from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
-    find_executable,
+    find_executable_for_scan,
     shown_arguments,
 )
 from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
+
+#: How long one install command may run. A package manager or a download that
+#: stalls held the whole installer for ever: with no timeout, run_command waited on
+#: it indefinitely. A command that reaches this limit fails like any other failed
+#: command, naming the limit in its error line.
+INSTALL_COMMAND_TIMEOUT_SECONDS = 3600.0
 
 dependencies_app = typer.Typer(
     name="dependencies",
@@ -227,7 +235,7 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
             continue
         replacement = _DEPRECATED_ALIASES_BY_KEY.get(_selection_key(tool))
         if replacement is None:
-            resolved[tool] = tool
+            resolved[tool] = tool.strip()
             continue
         err_console.print(
             f"[bold yellow]Deprecated:[/bold yellow] --tool {escape(tool)} is "
@@ -258,6 +266,21 @@ def _bin_path_under_home(bin_path: str, home: Path, pure: type = PurePath) -> Pa
     path flavor the components are read with (the platform's by default).
     """
     return home.joinpath(*pure(bin_path).parts[1:])
+
+
+def _canonical_tool_names(
+    tool_resolution: dict[str, str], known: Iterable[str]
+) -> dict[str, str]:
+    """Each requested name mapped to the plugin name it selects among ``known``
+    (:func:`_canonical_tool_name`: as typed first, then by the scan's selection
+    key). A name no plugin has stays as resolved, so the caller still refuses it.
+    Compared as typed, `--tool Grype` was refused as unknown, and with
+    ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip it skipped a tool the scan then ran."""
+    names = list(known)
+    return {
+        typed: _canonical_tool_name(resolved_name, names)
+        for typed, resolved_name in tool_resolution.items()
+    }
 
 
 def _refuse_a_named_config_that_does_not_exist(config: Optional[str]) -> None:
@@ -334,6 +357,9 @@ class PluginInstallOutcome:
     # but it does not decide the exit code.
     unsupported_platform: Optional[str] = None
     disabled_by_config: bool = False
+    # Named with --tool: an explicit request, judged whether or not a scan here
+    # would run the plugin, and reported so (see status).
+    requested: bool = False
     # The plugin that produced this outcome, for the post-install sweep. On the
     # outcome itself, not in a side table keyed by name: two plugin modules can
     # ship plugins of the same name, and each outcome is judged by the plugin
@@ -373,26 +399,40 @@ class PluginInstallOutcome:
 
     @property
     def is_absent(self) -> bool:
-        """A program this plugin needs is not there after the install."""
+        """A program this plugin needs is not there after the install.
+
+        A program the plugin needs besides its command (``external_executables``)
+        counts whether or not the plugin has a command of its own: a plugin with
+        no command whose program was missing never failed the install.
+        """
+        if self.missing_executables:
+            return True
         return self.needs_external_tool and (
-            (not self.executable and not self.runnable_by_scan)
-            or bool(self.missing_executables)
+            not self.executable and not self.runnable_by_scan
         )
 
     @property
     def status(self) -> str:
         if self.errors or self.commands_failed:
             return "FAILED"
-        if self.is_absent and self.unsupported_platform is not None:
-            return "NOT AVAILABLE ON THIS PLATFORM"
-        if self.is_absent and self.disabled_by_config:
-            return "DISABLED IN CONFIG"
+        # A tool named with --tool is counted (see _report_and_exit), so its row
+        # says what is wrong with it, not that a scan would skip it: "DISABLED IN
+        # CONFIG" beside a verdict that failed for its absence read as two stories.
+        if self.is_absent and not self.requested:
+            if self.unsupported_platform is not None:
+                return "NOT AVAILABLE ON THIS PLATFORM"
+            if self.disabled_by_config:
+                return "DISABLED IN CONFIG"
         if self.missing_executables:
             return f"{self._status()} ({', '.join(self.missing_executables)} not found)"
         return self._status()
 
     def _status(self) -> str:
         if self.commands_succeeded:
+            if not self.needs_external_tool:
+                # Nothing to look for on PATH: the install put a Python package
+                # in place, and "not on PATH" said something was missing.
+                return "INSTALLED"
             if self.executable:
                 return "INSTALLED"
             if self.runnable_by_scan:
@@ -543,6 +583,10 @@ _UV_GLOBAL_OPTIONS_WITH_VALUES = frozenset(
         "--config-file",
         "--directory",
         "--project",
+        # Both take a value; missing, `uv --python-preference managed tool ...`
+        # read "managed" as the subcommand and lost the user's uv.toml.
+        "--python-fetch",
+        "--python-preference",
     }
 )
 
@@ -692,6 +736,16 @@ def run_command(args: List[str], shell: bool = False):
         # user's and the system uv.toml.
         env = snapshot_environ()
         env["UV_NO_CONFIG"] = "1"
+    # The uv child's own overrides (UV_PYTHON, UV_NO_PROJECT) for every spelling
+    # of a uv command, `<ASH python> -m uv ...` included: applied to the plain
+    # `uv ...` spelling only, a `-m uv` install resolved against another
+    # interpreter and the working directory's project.
+    uv_args = None if shell or not args else _uv_arguments(args)
+    overrides = {} if uv_args is None else uv_child_overrides(["uv", *uv_args])
+    if overrides:
+        # The declared command's UV_NO_CONFIG environment, when one was built
+        # above, extended with the uv child's own overrides.
+        env = {**(env if env is not None else snapshot_environ()), **overrides}
     try:
         if not shell and runs_module_or_code(args):
             with python_child(*args[1:]) as child:
@@ -702,13 +756,9 @@ def run_command(args: List[str], shell: bool = False):
                     check=False,
                     log_level=logging.INFO,
                     values=values,
+                    timeout=INSTALL_COMMAND_TIMEOUT_SECONDS,
                 )
         else:
-            overrides = {} if shell else uv_child_overrides(args)
-            if overrides:
-                # The declared command's UV_NO_CONFIG environment, when one was
-                # built above, extended with the uv child's own overrides.
-                env = {**(env if env is not None else snapshot_environ()), **overrides}
             with empty_directory() as start:
                 result = run_cmd(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
                     args=args,
@@ -718,6 +768,7 @@ def run_command(args: List[str], shell: bool = False):
                     check=False,
                     log_level=logging.INFO,
                     values=values,
+                    timeout=INSTALL_COMMAND_TIMEOUT_SECONDS,
                 )
         # The child's output is not markup. pip alone prints `[notice]` lines and
         # echoes extras such as `ash[sarif,toml]`, which rich would otherwise
@@ -816,6 +867,11 @@ def install_dependencies(
         show_progress=False,
         use_color=color,
     )
+    if not color:
+        # --no-color reached the logger only; the panels, the table and the
+        # print() lines, written through these consoles, stayed colored.
+        for sink in (console, err_console, global_console()):
+            sink.no_color = True
 
     # An unknown --plugin-type is refused first, before anything is resolved,
     # probed or installed, with an unknown --tool's code, naming the value and the
@@ -835,6 +891,9 @@ def install_dependencies(
             )
         )
         raise typer.Exit(EXIT_BAD_SELECTION)
+    # A repeated value selects its kind once: `--plugin-type scanner --plugin-type
+    # scanner` built and installed every scanner twice.
+    plugin_types = list(dict.fromkeys(plugin_types))
 
     # A named config file that is not there is refused before the bin directory is
     # made, the environment is changed or any plugin is resolved: resolve_config
@@ -847,6 +906,7 @@ def install_dependencies(
     bin_path_from_environment = ash_bin_path_from_environment()
     # The default when no bin path was given, or a blank one, from the option or
     # from a whitespace-only ASH_BIN_PATH that click passes through as given.
+    target_bin_path: Optional[Path]
     if is_blank_bin_path(bin_path):
         target_bin_path = ASH_BIN_PATH
     elif _is_under_tilde(bin_path):
@@ -858,7 +918,16 @@ def install_dependencies(
         home = usable_home()
         target_bin_path = None if home is None else _bin_path_under_home(bin_path, home)
     else:
-        target_bin_path = Path(bin_path).expanduser()
+        # expanduser's own RuntimeError for a "~user" with no such user is a
+        # refusal too, not a traceback.
+        try:
+            target_bin_path = Path(bin_path).expanduser()
+        except (RuntimeError, OSError, ValueError) as e:
+            print(
+                f"[red]--bin-path {escape(str(bin_path))} cannot be expanded: "
+                f"{escape(error_text(e))}[/red]"
+            )
+            raise typer.Exit(EXIT_INVALID_CONFIG)
     if target_bin_path is None:
         # No --bin-path, no ASH_BIN_PATH and no usable home for ~/.ash/bin, or a
         # bin path under "~" with no usable home: nowhere to install. Refused
@@ -866,12 +935,25 @@ def install_dependencies(
         # invalid-configuration code, as an unusable --config is.
         print(f"[red]{escape(NO_BIN_DIRECTORY)}[/red]")
         raise typer.Exit(EXIT_INVALID_CONFIG)
-    # Created and exported absolute, for the install's own commands and the sweep
-    # below: tool lookup does not search a relative ASH_BIN_PATH
-    # (subprocess_utils.find_executable). The panel shows the value as given.
+    # Exported absolute, for the install's own commands and the sweep below: tool
+    # lookup does not search a relative ASH_BIN_PATH
+    # (subprocess_utils.find_executable). The panel shows the value as given. The
+    # directory itself is made just before the installs run (below), after every
+    # refusal of this command's own.
     absolute_bin_path = Path(os.path.abspath(target_bin_path))
-    absolute_bin_path.mkdir(parents=True, exist_ok=True)
     set_environ("ASH_BIN_PATH", str(absolute_bin_path))
+
+    # The working directory is the source tree this command installs for. Deleted
+    # or unmounted under the shell, Path.cwd() raised FileNotFoundError after the
+    # panel was printed; it is the usage error a scan gives such a directory.
+    try:
+        source_dir = Path.cwd()
+    except OSError:
+        print(
+            "[red]Source directory does not exist: the current directory was "
+            "deleted or unmounted. Change to a directory that exists.[/red]"
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
 
     console.print(
         Panel(
@@ -891,7 +973,6 @@ def install_dependencies(
         f"Installing dependencies for platform: {platform_name}, architecture: {arch}"
     )
 
-    source_dir = Path.cwd()
     output_dir = source_dir.joinpath(".ash", "ash_output")
     work_dir = output_dir.joinpath(ASH_WORK_DIR_NAME)
     # config_path is what makes --config/ASH_CONFIG mean anything here. Omitting it
@@ -973,9 +1054,11 @@ def install_dependencies(
     outcomes: List[PluginInstallOutcome] = []
     construction_failures: List[PluginInstallOutcome] = []
     discovered: List[tuple] = []
-    # A failed plugin's outcome by the name it is selected with, where that name is
-    # known without building it; see _declared_install_name.
-    failures_by_name: dict[str, PluginInstallOutcome] = {}
+    # Each failed plugin's outcome by the name it is selected with, where that name
+    # is known without building it; see _declared_install_name. A list per name:
+    # two plugin classes can declare one name, and a dict that kept one outcome per
+    # name reported only the last failure.
+    failures_by_name: dict[str, List[PluginInstallOutcome]] = {}
 
     def discover(plugin_type: str, warn: bool = True, classes=None):
         """The plugins of one type, each built from its own section of the config.
@@ -1059,8 +1142,13 @@ def install_dependencies(
             )
 
     # Deprecated aliases are resolved first, so `--tool ArchiveConverter` selects,
-    # installs and is judged exactly as `--tool archive` is (see below).
-    tool_resolution = _resolve_tool_aliases(tools)
+    # installs and is judged exactly as `--tool archive` is (see below); then each
+    # name takes the spelling of the plugin it matches without regard to case, as
+    # the scan matches names (_canonical_tool_names).
+    tool_resolution = _canonical_tool_names(
+        _resolve_tool_aliases(tools),
+        [candidate[3] for candidate in candidates if candidate[3]],
+    )
     requested_names = list(dict.fromkeys(tool_resolution.values()))
 
     # Before any plugin is built, as the scan engine and ash report check: an
@@ -1140,14 +1228,21 @@ def install_dependencies(
             # `ash dependencies install --tool trivy-repo` exit 1 because some
             # other community plugin would not import, and name that other plugin
             # in the failure panel.
+            # A plugin its configuration disables is one a scan never runs, so
+            # its error does not decide a full run's verdict (the documented
+            # rule, PluginInstallOutcome.needed); read from its section, since
+            # the built plugin that would have said so does not exist.
             failure = PluginInstallOutcome(
                 name=plugin_class.__name__,
                 plugin_type=plugin_type,
                 errors=[error_text(e, environment_values)],
+                disabled_by_config=_section_disables(
+                    resolved_config, plugin_module_input, plugin_class
+                ),
             )
             construction_failures.append(failure)
             if declared_name:
-                failures_by_name[declared_name] = failure
+                failures_by_name.setdefault(declared_name, []).append(failure)
 
     # --tool selection. Validated against the names the plugins answer to rather than
     # a hardcoded list, so it cannot drift from the plugin registry. An unknown name
@@ -1338,12 +1433,10 @@ def install_dependencies(
             if candidate[3] is not None and candidate[3] in requested_names:
                 build(*candidate)
         # A requested plugin that exists but would not build is this run's failure,
-        # named, rather than an unknown name.
-        outcomes.extend(
-            failures_by_name[name]
-            for name in requested_names
-            if name in failures_by_name
-        )
+        # named, rather than an unknown name: every failure of that name, since
+        # two plugin classes can declare one.
+        for name in requested_names:
+            outcomes.extend(failures_by_name.get(name, []))
         # Only reachable if a plugin's built name differs from the one read from its
         # config, which no bundled plugin does; refused rather than reported as
         # installed.
@@ -1366,6 +1459,23 @@ def install_dependencies(
         outcomes.extend(construction_failures)
         selected = discovered
 
+    # The bin directory is made here, after every refusal above (a --config that is
+    # not there, a configuration a scan refuses, a plugin module that does not
+    # load, an unknown --tool or --plugin-type): made first, a refused run that
+    # printed "Nothing installed" had still created it. A regular file at the
+    # path, a file as a parent or a parent this user cannot write is a refusal
+    # with the invalid-configuration code, as an unusable --config is, where it
+    # was a traceback with the failed-install code.
+    try:
+        absolute_bin_path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(
+            f"[red]The bin directory {escape(str(target_bin_path))} cannot be "
+            f"created: {escape(error_text(e))}. Name a directory with --bin-path "
+            "(or ASH_BIN_PATH) that can be made.[/red]"
+        )
+        raise typer.Exit(EXIT_INVALID_CONFIG)
+
     ash_environment_requirements: List[str] = []
     # For run_command's lines about each child; reset once the installs are done.
     # Through the one normalizer every redaction reads values with, so a lone
@@ -1385,6 +1495,7 @@ def install_dependencies(
                     plugin_instance, "runs_in_ash_interpreter", False
                 )
                 is True,
+                requested=plugin_name in requested_names,
                 plugin=plugin_instance,
             )
             outcomes.append(outcome)
@@ -1407,8 +1518,12 @@ def install_dependencies(
                 )
                 outcome.errors.append(error_text(e, environment_values))
             try:
-                commands = plugin_instance.get_installation_commands(
-                    platform_name, arch
+                # Read whole, and checked, inside the try: a list that is None, an
+                # iterable that raises while iterated, or an argv with an element
+                # that is not text aborted the whole run with a traceback before
+                # the results table, outside the per-plugin error isolation.
+                commands = _well_formed_commands(
+                    plugin_instance.get_installation_commands(platform_name, arch)
                 )
             except Exception as e:
                 print(
@@ -1419,7 +1534,7 @@ def install_dependencies(
                 outcome.errors.append(error_text(e, environment_values))
                 continue
 
-            for cmd in commands:
+            for cmd, shell in commands:
                 # An empty argv is not a command. These reached run_command before
                 # this change, failed, and pushed the run's exit code to 1 -- which
                 # then went nowhere, because the returned code was discarded.
@@ -1433,19 +1548,8 @@ def install_dependencies(
                     outcome.commands_skipped_empty += 1
                     continue
 
-                # Fix for opengrep download command
-                if (
-                    len(cmd) > 2
-                    and cmd[0] == sys.executable
-                    and cmd[1] == "-c"
-                    and "opengrep" in cmd[2]
-                ):
-                    # Fix the Python command by properly importing Path
-                    cmd = [
-                        sys.executable,
-                        "-c",
-                        "from pathlib import Path; " + cmd[2],
-                    ]
+                if not shell:
+                    cmd = _with_path_imported(cmd)
 
                 # A pinned binary that is already on disk, byte for byte, is not
                 # installed a second time. The image installs syft, grype and trivy
@@ -1478,7 +1582,11 @@ def install_dependencies(
                     soft_wrap=True,
                 )
                 outcome.commands_attempted += 1
-                cmd_exit_code = run_command(cmd)
+                # A CustomCommand declared with shell=True runs through the shell,
+                # as declared; the flag was dropped before the installer saw it.
+                cmd_exit_code = (
+                    run_command(cmd, shell=shell) if shell else run_command(cmd)
+                )
                 if cmd_exit_code != 0:
                     print(f"Command failed with exit code: {cmd_exit_code}")
                     outcome.commands_failed += 1
@@ -1507,8 +1615,19 @@ def install_dependencies(
     # is looked up again now that it is installed.
     clear_find_executable_cache()
     for outcome in outcomes:
+        # Looked up as a scan of this tree looks a tool up (find_executable_for_scan
+        # with the source tree as its root): a copy found only inside the working
+        # directory, the tree this command treats as the source, is refused there,
+        # and the plain lookup reported it installed while the scan refused it.
+        # Programs the plugin needs besides its command are looked up for every
+        # plugin that names any, a plugin with no command included.
+        outcome.missing_executables = [
+            name
+            for name in outcome.external_executables
+            if not find_executable_for_scan(name, source_dir)
+        ]
         if outcome.needs_external_tool:
-            outcome.executable = _resolved_executable(outcome)
+            outcome.executable = _resolved_executable(outcome, source_dir)
             if outcome.executable is None and outcome.uv_managed:
                 outcome.executable = _uv_tool_executable(outcome.command)
             # Last, and only for a plugin the verdict counts (see
@@ -1550,11 +1669,6 @@ def install_dependencies(
                 # keeps its plain wording and quotes no refusal reason.
                 outcome.check_answer = answer
                 outcome.shown_refusal_reason = reason
-            outcome.missing_executables = [
-                name
-                for name in outcome.external_executables
-                if not find_executable(name)
-            ]
 
     try:
         return _report_and_exit(outcomes, requested_tools=requested_names)
@@ -1611,18 +1725,93 @@ def _bin_path_hint(target: Path, from_environment: Optional[str]) -> Optional[st
     )
 
 
-def _resolved_executable(outcome: PluginInstallOutcome) -> Optional[str]:
+def _resolved_executable(
+    outcome: PluginInstallOutcome, source_dir: Path
+) -> Optional[str]:
     """What runs ``outcome.command`` here, or None when the sweep finds nothing.
 
     A plugin that runs inside ASH's interpreter is run by ``sys.executable``, which
     is present by definition; looking its "python" up on PATH would report cdk-nag
     absent wherever the interpreter is called only ``python3``. Only an absolute
     ``sys.executable`` counts (an embedded interpreter may have an empty or
-    relative one); otherwise the name is looked up on PATH.
+    relative one); otherwise the name is looked up as a scan of ``source_dir``
+    looks it up, so a copy found only inside that tree is not reported installed.
     """
     if outcome.runs_in_ash_interpreter and os.path.isabs(sys.executable or ""):
         return sys.executable
-    return find_executable(outcome.command)
+    return find_executable_for_scan(outcome.command, source_dir)
+
+
+def _section_disables(resolved_config, plugin_type: str, plugin_class: type) -> bool:
+    """Whether the plugin's own section of the resolved config says ``enabled:
+    false``, read without building the plugin; False when it cannot be read."""
+    try:
+        section = resolved_config.get_plugin_config(
+            plugin_type=plugin_type, plugin_name=plugin_config_key(plugin_class)
+        )
+    except Exception:
+        return False
+    enabled = (
+        section.get("enabled", True)
+        if isinstance(section, dict)
+        else getattr(section, "enabled", True)
+    )
+    return enabled is False
+
+
+def _with_path_imported(cmd: List[str]) -> List[str]:
+    """The opengrep download command with ``Path`` imported, else ``cmd`` as is.
+
+    The fix for that command's ``-c`` script: ``from pathlib import Path`` is
+    prepended as a line of its own, so a script that starts with a compound
+    statement still parses, and the script's own arguments (``sys.argv``) are
+    kept, where the rewrite rebuilt the command from its first three elements and
+    joined the import with ``;``. A script that imports Path itself, or that
+    starts with a ``__future__`` import (which must come first), is left as
+    declared.
+    """
+    if not (
+        len(cmd) > 2
+        and cmd[0] == sys.executable
+        and cmd[1] == "-c"
+        and "opengrep" in cmd[2]
+        and "from pathlib import Path" not in cmd[2]
+        and "__future__" not in cmd[2]
+    ):
+        return cmd
+    return [sys.executable, "-c", "from pathlib import Path\n" + cmd[2], *cmd[3:]]
+
+
+def _well_formed_commands(declared: Any) -> List[Tuple[List[str], bool]]:
+    """The install commands a plugin declared, each as (argv, shell), checked.
+
+    ``get_installation_commands`` returns a list of argv lists; a
+    :class:`CustomCommand` carries its own ``shell`` flag and is run as declared.
+    None, a value that is not iterable, an entry that is neither an argv nor a
+    CustomCommand, and an argv element that is not text are each a ValueError or
+    TypeError naming the entry, which the caller records against that plugin
+    alone: iterated bare, each aborted the whole run with a traceback.
+    """
+    if declared is None:
+        raise ValueError("get_installation_commands returned None, not a list")
+    commands: List[Tuple[List[str], bool]] = []
+    for position, entry in enumerate(declared):
+        if isinstance(entry, CustomCommand):
+            argv, shell = list(entry.args), bool(entry.shell)
+        elif isinstance(entry, (list, tuple)):
+            argv, shell = list(entry), False
+        else:
+            raise TypeError(
+                f"install command {position} is {type(entry).__name__}, not a list "
+                "of arguments"
+            )
+        for item in argv:
+            if not isinstance(item, str):
+                raise TypeError(
+                    f"install command {position} holds {type(item).__name__}, not text"
+                )
+        commands.append((argv, shell))
+    return commands
 
 
 def _uv_tool_executable(command: str) -> Optional[str]:
@@ -1806,6 +1995,12 @@ def _refusal_reason(instance: Any, values: Iterable[str]) -> Optional[str]:
     return home_as_tilde(text_without_values(reason, values))
 
 
+def _found_in_uv_listing(outcome: PluginInstallOutcome) -> bool:
+    """Whether the sweep found the tool only in uv's listing (_uv_tool_executable),
+    which says uv can start it, not that it is on PATH."""
+    return outcome.uv_managed and (outcome.executable or "").startswith("uv tool ")
+
+
 def _report_and_exit(
     outcomes: List[PluginInstallOutcome], requested_tools: List[str]
 ) -> int:
@@ -1877,10 +2072,23 @@ def _report_and_exit(
     needed = [o for o in outcomes if o.needed or o.name in requested_tools]
     needed_failed = sum(o.commands_failed for o in needed)
     plugins_with_errors = [o.name for o in needed if o.errors]
+    # "Verified on PATH" counts a tool the lookup found (ASH's own interpreter
+    # for a plugin that runs inside it); a tool known only from uv's listing is
+    # not on PATH and is counted on its own line below.
     verified = sorted(
         o.name
         for o in outcomes
-        if o.needs_external_tool and o.executable and not o.missing_executables
+        if o.needs_external_tool
+        and o.executable
+        and not o.missing_executables
+        and not _found_in_uv_listing(o)
+    )
+    uv_listed = sorted(
+        o.name
+        for o in outcomes
+        if o.needs_external_tool
+        and _found_in_uv_listing(o)
+        and not o.missing_executables
     )
     # Named whether or not the tool happens to be present. "npm is on PATH" and
     # "ASH cannot install npm" are different facts, and a reader planning a CI image
@@ -1944,12 +2152,13 @@ def _report_and_exit(
         reasons.append(f"{needed_failed} install command(s) failed")
     if plugins_with_errors:
         reasons.append(f"plugin error(s): {', '.join(sorted(plugins_with_errors))}")
-    if commands_attempted == 0 and path_absent:
+    if commands_attempted == 0 and other_absent:
         # The state grype, syft and cfn-nag were in on every CI runner: nothing
-        # installed and something needed missing.
+        # installed and something needed missing. A requested tool is named by
+        # the requested clause below alone, not in both.
         reasons.append(
             "no install commands were run and these are still absent: "
-            + ", ".join(label(o) for o in path_absent)
+            + ", ".join(other_absent)
         )
     elif other_absent:
         reasons.append(
@@ -1976,6 +2185,11 @@ def _report_and_exit(
         f"[cyan]Commands run:[/cyan] {commands_attempted} ({commands_failed} failed)",
         f"[cyan]Tools verified on PATH:[/cyan] {len(verified)}{verified_names}",
     ]
+    if uv_listed:
+        summary.append(
+            f"[cyan]Tools uv manages, in its listing (not on PATH):[/cyan] "
+            f"{len(uv_listed)} -- {escape(', '.join(uv_listed))}"
+        )
     # Only printed when it happened, so a run with nothing pre-installed reads
     # exactly as it did before verified-present tools were recognized.
     if already_verified:
