@@ -185,14 +185,20 @@ class TestCleanupWaitsForTheRunner:
         assert output.exists()
 
     def test_a_scan_with_no_runner_is_not_waited_for(self, registry, tmp_path):
+        """Measured at the wait itself, as the settles-during-the-wait test
+        does: a patch of the module's ``asyncio.to_thread`` passed with no wait
+        made (through run_in_executor, a from-import or a polling loop) and
+        broke on any other use of to_thread in the call."""
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         registry.get_scan.return_value = entry
+        waits = []
+        entry.runner_done.wait = lambda timeout=None: waits.append(timeout) or True
 
-        with _use(registry), patch(f"{_MODULE}.asyncio.to_thread") as to_thread:
+        with _use(registry):
             result = asyncio.run(cleanup_scan_resources("scan-1"))
 
         assert result["success"] is True
-        to_thread.assert_not_called()
+        assert waits == []
 
 
 class TestOutputSharedWithAnotherScanIsKept:

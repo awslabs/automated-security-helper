@@ -424,6 +424,34 @@ class TestCleanupScanResources:
             "Failed to remove output directory: device busy"
         )
         assert "Permission denied" not in result["output_dir_error"]
+        # A failed removal of any kind keeps the entry for a retry, not only a
+        # permission failure.
+        assert result["success"] is False
+        assert result["removed_from_registry"] is False
+        registry.cleanup_scan.assert_not_called()
+
+    def test_an_output_path_that_is_not_a_directory_is_a_failed_removal(
+        self, registry, tmp_path
+    ):
+        """The remover returns False without raising when the output path is
+        there but is not a directory (or the tree was re-created while it came
+        down). That counted as a clean success with removed_output False and no
+        warning, and the entry was unregistered; the docstring promises the
+        entry stays for a retry whenever the directory could not be removed."""
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED)
+        (tmp_path / "out").write_text("not a directory", encoding="utf-8")
+        registry.get_scan.return_value = entry
+        registry.cleanup_scan.return_value = True
+
+        with _use(registry), patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is False
+        assert result["removed_output"] is False
+        assert result["removed_from_registry"] is False
+        assert "still present" in result["output_dir_error"]
+        registry.cleanup_scan.assert_not_called()
+        assert (tmp_path / "out").is_file()
 
     def test_a_nonexistent_output_directory_is_left_alone(self, registry, tmp_path):
         """rmtree must not be called for a path that is not there."""

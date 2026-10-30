@@ -228,10 +228,30 @@ async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[st
             }
 
         # The registry declined. The pre-check above ran without the registry
-        # lock, so the usual reason is that the scan ended between the two:
-        # that is the already-ended answer, not an unexpected error.
+        # lock, and the registry declines only a scan it cannot see or one no
+        # longer active, so the scan ended or was removed between the two.
+        # Ended is the already-ended answer; removed is the not-found answer
+        # the lookup above gives, which cleanup_old_scans branches on. Neither
+        # is an unexpected error, and the status shown is read now, not the
+        # pre-check's (which read "running" for a scan that was gone).
         ended = registry.get_scan(scan_id, **_scoped(session_id))
-        if ended is not None and not ended.is_active():
+        if ended is None:
+            return create_error_response(
+                error=MCPResourceError(
+                    f"Scan {scan_id} not found",
+                    context={
+                        "scan_id": scan_id,
+                        "error_category": ErrorCategory.SCAN_NOT_FOUND.value,
+                    },
+                ),
+                operation="cancel_scan",
+                suggestions=[
+                    "The scan was removed during the cancellation attempt",
+                    "Check that the scan ID is correct",
+                    "Start a new scan if needed",
+                ],
+            )
+        if not ended.is_active():
             return {
                 "success": False,
                 "scan_id": scan_id,
@@ -250,10 +270,9 @@ async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[st
             "success": False,
             "scan_id": scan_id,
             "message": "Failed to cancel scan",
-            "status": entry.status.value,
+            "status": ended.status.value,
             "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
             "suggestions": [
-                "The scan may have been removed during the cancellation attempt",
                 "Check scan status using get_scan_progress",
                 "Try again if the scan is still active",
             ],
@@ -483,11 +502,15 @@ async def cleanup_scan_resources(
                 def remove() -> bool:
                     # The path was recorded at registration; a link placed on
                     # or above it since would redirect the delete outside the
-                    # output tree the scan registered. Checked here, inside
-                    # the registry's lock and right before the delete, against
-                    # the registered OUTPUT directory: a workspace project's
-                    # output sits under the workspace's output_dir, not under
-                    # the project's own directory.
+                    # output tree the scan registered. Checked here, on the
+                    # worker thread the registry runs this remover on, OFF the
+                    # registry's lock (remove_output_of_scan marks the entry
+                    # under its lock and runs the remover outside it) and right
+                    # before the delete, against the registered OUTPUT
+                    # directory: a workspace project's output sits under the
+                    # workspace's output_dir, not under the project's own
+                    # directory. Nothing serializes this check with the delete
+                    # but their order on this thread.
                     if not _output_dir_within(
                         output_dir, entry.canonical_output_directory
                     ):
@@ -516,6 +539,23 @@ async def cleanup_scan_resources(
                 )
                 if reason is not None:
                     raise _OutputDirectoryInUse(reason)
+                if not removed_output:
+                    # The remover ran and raised nothing, yet the path is still
+                    # there: it is not a directory (a file or a device at the
+                    # output name is not removed), or the tree was re-created
+                    # while it came down. Not a success, and nothing a second
+                    # try could not change, so the entry is kept for the retry
+                    # as for any other failed removal.
+                    output_removal_failed = True
+                    output_dir_error = (
+                        "Failed to remove output directory: the path is still "
+                        "present (not a directory, or re-created while it was "
+                        "being removed)"
+                    )
+                    _logger.error(
+                        f"Failed to remove output directory for scan {scan_id}: "
+                        "the path is still present"
+                    )
             except _OutputDirectoryInUse as e:
                 output_dir_error = f"Output directory not removed: {e}"
                 _logger.warning(f"Output directory of scan {scan_id} not removed: {e}")

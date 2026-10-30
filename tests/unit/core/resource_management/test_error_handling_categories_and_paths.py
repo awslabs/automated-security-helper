@@ -88,10 +88,10 @@ class TestSafeReadJsonFileNamesEachFailure:
         path = tmp_path / "results.json"
         path.write_text("{}", encoding="utf-8")
 
-        def gone(path_obj, encoding="utf-8"):
+        def gone(path_obj):
             raise FileNotFoundError(errno.ENOENT, "No such file", str(path_obj))
 
-        monkeypatch.setattr(error_handling, "read_text_of_replaced_file", gone)
+        monkeypatch.setattr(error_handling, "_read_regular_file_text", gone)
 
         data, error = safe_read_json_file(path, required=True)
         assert data is None
@@ -110,6 +110,76 @@ class TestSafeReadJsonFileNamesEachFailure:
         assert data is None
         assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
         assert "symbolic link" in str(error)
+
+    @pytest.mark.skipif(
+        not hasattr(os, "O_NOFOLLOW"), reason="the platform has no O_NOFOLLOW"
+    )
+    def test_a_link_swapped_in_after_the_look_is_not_followed_either(
+        self, tmp_path, monkeypatch
+    ):
+        """The look (lstat) and the open are two calls; a scanner can replace a
+        regular file with a link between them. The open is by descriptor with
+        O_NOFOLLOW and the descriptor is fstat-ed, so what is read is what was
+        checked. Here the look is made to report the regular file the name held,
+        while the name already holds a link: the reopen by name followed it and
+        returned the file outside the tree as the scan's own."""
+        outside = tmp_path / "outside.json"
+        outside.write_text('{"secret": "elsewhere"}', encoding="utf-8")
+        link = tmp_path / "ASH.ScanResults.json"
+        _symlink_or_skip(outside, link)
+        regular = os.lstat(outside)
+        real_lstat = os.lstat
+
+        def looks_regular(path, *args, **kwargs):
+            if str(path) == str(link):
+                return regular
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(error_handling.os, "lstat", looks_regular)
+
+        data, error = safe_read_json_file(link)
+
+        assert data is None
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+        assert "symbolic link" in str(error)
+
+    def test_a_directory_swapped_in_after_the_look_is_not_a_file(
+        self, tmp_path, monkeypatch
+    ):
+        """The same window with a directory at the name: the descriptor opens
+        (a directory can be opened read-only) and its fstat refuses it as not a
+        file, where the reopen by name raised IsADirectoryError out of the
+        read and the caller was told "unexpected"."""
+        sample = tmp_path / "sample.json"
+        sample.write_text("{}", encoding="utf-8")
+        regular = os.lstat(sample)
+        real_lstat = os.lstat
+        directory = tmp_path / "ASH.ScanResults.json"
+        directory.mkdir()
+
+        def looks_regular(path, *args, **kwargs):
+            if str(path) == str(directory):
+                return regular
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(error_handling.os, "lstat", looks_regular)
+
+        data, error = safe_read_json_file(directory)
+
+        assert data is None
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+        assert "not a file" in str(error)
+
+    def test_the_control_a_regular_file_is_read_through_the_descriptor(self, tmp_path):
+        path = tmp_path / "ASH.ScanResults.json"
+        path.write_text('{"status": "PASSED"}', encoding="utf-8")
+
+        data, error = safe_read_json_file(path)
+
+        assert error is None
+        assert data == {"status": "PASSED"}
 
     def test_a_missing_file_error_names_the_file_and_not_the_process(self, tmp_path):
         data, error = safe_read_json_file(tmp_path / "absent.json")
@@ -183,23 +253,61 @@ class TestValidateDirectoryPathCategories:
 
 
 class TestSourceDirectoryErrorOnPathsTheSystemRefuses:
-    def test_an_embedded_nul_is_an_invalid_path(self):
+    """The category is this surface's; the text is the one every surface shares.
+
+    utils/directory_refusals.py (the CLI, ./ash and Invoke-ASH) words a NUL as
+    "does not exist" and a name too long as "cannot be entered", and three places
+    promise that source_directory_error gives the same text for the same input;
+    "is not a valid path" was a fourth wording no other surface used.
+    """
+
+    def test_an_embedded_nul_is_an_invalid_path_worded_as_the_cli_words_it(self):
+        from automated_security_helper.utils.directory_refusals import (
+            source_dir_refusal,
+        )
+
         error = source_directory_error("proj\x00ect")
 
         assert error is not None
         assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
-        assert "is not a valid path" in str(error)
+        assert str(error) == source_dir_refusal("proj\x00ect")
+        assert "does not exist" in str(error)
 
-    def test_a_name_too_long_is_an_invalid_path(self, monkeypatch):
+    def test_a_name_too_long_is_an_invalid_path_worded_as_the_cli_words_it(
+        self, monkeypatch
+    ):
+        from automated_security_helper.utils import directory_refusals
+        from automated_security_helper.utils.directory_refusals import (
+            source_dir_refusal,
+        )
+
         def too_long(path, *args, **kwargs):
             raise OSError(errno.ENAMETOOLONG, "File name too long", str(path))
 
         monkeypatch.setattr(error_handling.os, "stat", too_long)
+        monkeypatch.setattr(directory_refusals.os, "stat", too_long)
 
         error = source_directory_error("x" * 5000)
 
         assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
-        assert "is not a valid path" in str(error)
+        assert str(error) == source_dir_refusal("x" * 5000)
+        assert "cannot be entered" in str(error)
+
+    def test_no_text_of_this_helper_is_outside_the_shared_list(self):
+        """Every problem phrase source_directory_error can produce is one the
+        shared wording module lists; the fourth phrase was not."""
+        import inspect
+
+        source = inspect.getsource(source_directory_error)
+        shared = inspect.getsource(
+            __import__(
+                "automated_security_helper.utils.directory_refusals",
+                fromlist=["source_dir_refusal"],
+            ).source_dir_refusal
+        )
+        for phrase in ("does not exist", "is not a directory", "cannot be entered"):
+            assert phrase in source and phrase in shared
+        assert "is not a valid path" not in source
 
 
 class TestValidateOutputDirectoryPathCategories:

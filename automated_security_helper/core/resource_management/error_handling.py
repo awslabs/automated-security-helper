@@ -14,6 +14,8 @@ import errno
 import json
 import os
 import stat
+import sys
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Union
@@ -21,13 +23,65 @@ from typing import Dict, List, Optional, Any, Tuple, Union
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
-from automated_security_helper.utils.atomic_write import read_text_of_replaced_file
 from automated_security_helper.utils.directory_refusals import output_dir_refusal
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
 # Configure module logger
 _logger = ASH_LOGGER
+
+#: How a result file is opened for reading: by descriptor, never following a
+#: link at its name (O_NOFOLLOW, where the platform has it; Windows has not),
+#: never blocking on a FIFO left at the name (O_NONBLOCK), closed on exec.
+_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+#: On Windows an open that lands inside ``os.replace`` of the file gets a sharing
+#: violation (``PermissionError``) for a moment; retried for the bounded time
+#: the writer allows itself (utils/atomic_write.py's _REPLACE_ATTEMPTS and
+#: _REPLACE_BACKOFF_SECONDS, 40 x 0.05 s). POSIX never retries.
+_REPLACED_FILE_ATTEMPTS = 40
+_REPLACED_FILE_BACKOFF_SECONDS = 0.05
+
+
+class _NotARegularFile(Exception):
+    """The descriptor opened at the path is not a regular file's."""
+
+
+def _read_regular_file_text(path_obj: Path) -> str:
+    """Read ``path_obj`` through a descriptor that is checked before it is read.
+
+    The name is opened with :data:`_READ_FLAGS` and the descriptor is
+    ``fstat``-ed: what is read is what was checked, so a link or a FIFO swapped
+    in at the name between a caller's look and this open is refused (the open
+    fails with ELOOP for a link under O_NOFOLLOW; a FIFO or a directory opens
+    and is refused as :class:`_NotARegularFile`) instead of followed or waited
+    on. Raises what ``os.open`` raises otherwise, with the Windows replace
+    retry of ``atomic_write.read_text_of_replaced_file``.
+    """
+    for attempt in range(_REPLACED_FILE_ATTEMPTS):
+        try:
+            fd = os.open(path_obj, _READ_FLAGS)
+        except PermissionError:
+            if sys.platform != "win32" or attempt == _REPLACED_FILE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACED_FILE_BACKOFF_SECONDS)
+            continue
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise _NotARegularFile(str(path_obj))
+        except BaseException:
+            os.close(fd)
+            raise
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            return handle.read()
+    raise AssertionError("unreachable: the last attempt returns or raises")
 
 
 class ErrorCategory(Enum):
@@ -68,10 +122,15 @@ def safe_read_json_file(
     is refused as an invalid path: every caller reads a result file under a scan's
     output directory, where a sandboxed scanner may have left a link to a file
     outside the tree (utils/sandbox/fs_guard.py), and through a plain open that
-    file would have been read as the scan's own. Each way the read can fail has
-    its own category, so a caller branching on ``error_category`` is not told
-    "unexpected" for a file that vanished (``file_not_found``), could not be
-    read (``permission_denied``), or is not UTF-8 or is nested past what the
+    file would have been read as the scan's own. The look is not the check: the
+    file is then opened by descriptor without following a link and without
+    blocking (``_read_regular_file_text``), and the descriptor is checked to be
+    a regular file's before it is read, so a link or a FIFO that the scanner
+    swaps in between the look and the open is refused too, where a reopen by
+    name followed the link or waited on the FIFO. Each way the read can fail
+    has its own category, so a caller branching on ``error_category`` is not
+    told "unexpected" for a file that vanished (``file_not_found``), could not
+    be read (``permission_denied``), or is not UTF-8 or is nested past what the
     decoder can follow (``invalid_format``).
 
     The error contexts name the file and nothing about the process: the server's
@@ -132,13 +191,25 @@ def safe_read_json_file(
             )
             return None, error
 
-        # Read and parse the file. Result files are replaced atomically while scans
-        # run, and on Windows an open that lands inside the replace fails with a
-        # transient PermissionError; the helper retries that instead of reporting it.
-        # One that outlasts the retry is a read error, reported as such and not as
-        # a file that failed to parse.
+        # Read and parse the file, by a descriptor checked before it is read (see
+        # the docstring). Result files are replaced atomically while scans run,
+        # and on Windows an open that lands inside the replace fails with a
+        # transient PermissionError; the reader retries that instead of
+        # reporting it. One that outlasts the retry is a read error, reported as
+        # such and not as a file that failed to parse.
         try:
-            text = read_text_of_replaced_file(path_obj, encoding="utf-8")
+            text = _read_regular_file_text(path_obj)
+        except _NotARegularFile:
+            # A FIFO, a directory or a device swapped in at the name since the
+            # look above.
+            error = MCPResourceError(
+                f"Path is not a file: {path_obj}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                },
+            )
+            return None, error
         except (FileNotFoundError, NotADirectoryError):
             # Removed between the look above and the open.
             if not required:
@@ -153,6 +224,19 @@ def safe_read_json_file(
             return None, error
         except PermissionError as e:
             return None, _read_permission_error(path_obj, e)
+        except OSError as e:
+            if e.errno != errno.ELOOP:
+                raise
+            # A link swapped in at the name since the look above: O_NOFOLLOW
+            # refuses to open through it.
+            error = MCPResourceError(
+                f"Path is a symbolic link: {path_obj}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                },
+            )
+            return None, error
         except UnicodeDecodeError as e:
             error = MCPResourceError(
                 f"Invalid JSON format in file {path_obj}: the file is not valid "
@@ -268,13 +352,28 @@ def safe_write_json_file(
         )
         from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
+        # Serialized in full before the file is opened: ``json.dump`` streams
+        # into an already truncated file, so a value that cannot be serialized
+        # partway through left the previous content gone and a partial document
+        # in its place. A serialization error leaves the file as it was. Its
+        # own try: the open raises ValueError too, for a path the system
+        # refuses (an embedded NUL), and caught together that path error was
+        # reported as "Invalid data format for JSON serialization".
         try:
-            # Serialized in full before the file is opened: ``json.dump`` streams
-            # into an already truncated file, so a value that cannot be
-            # serialized partway through left the previous content gone and a
-            # partial document in its place. A serialization error now leaves
-            # the file as it was.
             text = json.dumps(data, indent=2)
+        except (TypeError, ValueError) as e:
+            # TypeError for a value json cannot encode; ValueError for a
+            # structure that refers to itself.
+            return MCPResourceError(
+                f"Invalid data format for JSON serialization: {str(e)}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_FORMAT.value,
+                    "error_message": str(e),
+                },
+            )
+
+        try:
             with open_for_write(path_obj, make_parents=True) as f:
                 f.write(text)
             return None
@@ -298,14 +397,15 @@ def safe_write_json_file(
                     "error_message": str(e),
                 },
             )
-        except (TypeError, ValueError) as e:
-            # TypeError for a value json cannot encode; ValueError for a
-            # structure that refers to itself.
+        except ValueError as e:
+            # The path itself, not the data: a string the system refuses as a
+            # path (an embedded NUL) is raised by the open as ValueError.
             return MCPResourceError(
-                f"Invalid data format for JSON serialization: {str(e)}",
+                f"Cannot write file {path_obj}: the path is not valid ({str(e)})",
                 context={
                     "file_path": str(path_obj),
-                    "error_category": ErrorCategory.INVALID_FORMAT.value,
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                    "error_type": type(e).__name__,
                     "error_message": str(e),
                 },
             )
@@ -434,22 +534,25 @@ def source_directory_error(
     that cannot be. For source directories only: validate_directory_path, which
     output-directory lookups also use, keeps its own words.
 
-    A string the operating system refuses as a path at all, one with an
-    embedded NUL (``ValueError`` from stat) or one longer than it allows
-    (``ENAMETOOLONG``), "is not a valid path": neither names a directory that
-    cannot be entered, which is what every other stat error means here.
+    A string the operating system refuses as a path at all is worded as the
+    CLI words it (utils/directory_refusals.py, ./ash and Invoke-ASH say the
+    same): one with an embedded NUL (``ValueError`` from stat) "does not
+    exist", and one longer than the system allows (``ENAMETOOLONG``) "cannot be
+    entered". Both carry the ``invalid_path`` category, since neither names a
+    directory that is absent or closed to this process; the text is the
+    surfaces' shared one, the category is this surface's.
     """
     try:
         status = os.stat(directory_path)
     except (FileNotFoundError, NotADirectoryError):
         problem, category = "does not exist", ErrorCategory.FILE_NOT_FOUND
     except ValueError:
-        problem, category = "is not a valid path", ErrorCategory.INVALID_PATH
+        problem, category = "does not exist", ErrorCategory.INVALID_PATH
     except OSError as error:
         if error.errno == errno.ELOOP:
             problem, category = "does not exist", ErrorCategory.FILE_NOT_FOUND
         elif error.errno == errno.ENAMETOOLONG:
-            problem, category = "is not a valid path", ErrorCategory.INVALID_PATH
+            problem, category = "cannot be entered", ErrorCategory.INVALID_PATH
         else:
             problem, category = "cannot be entered", ErrorCategory.PERMISSION_DENIED
     else:

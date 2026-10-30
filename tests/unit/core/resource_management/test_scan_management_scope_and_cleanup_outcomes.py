@@ -161,6 +161,41 @@ class TestCancelScanRace:
         assert "already in completed state" in result["message"]
         assert "error_category" not in result
 
+    def test_a_scan_removed_during_the_cancel_is_the_not_found_answer(
+        self, registry, tmp_path
+    ):
+        """The registry declines only a scan it cannot see or one no longer
+        active; with the ended case answered above, a declined cancel whose
+        re-lookup finds nothing means the scan was removed meanwhile. That read
+        as an unexpected error carrying the pre-check's stale "running"."""
+        entry = _entry(tmp_path, status=MCScanStatus.RUNNING)
+        registry.get_scan.side_effect = [entry, None]
+        registry.cancel_scan.return_value = False
+
+        with _use(registry):
+            result = asyncio.run(cancel_scan("scan-1"))
+
+        assert result["success"] is False
+        assert result["error_category"] == "scan_not_found"
+        assert result["operation"] == "cancel_scan"
+        assert "status" not in result
+
+    def test_a_decline_for_a_scan_still_active_stays_unexpected(
+        self, registry, tmp_path
+    ):
+        """The control: a decline the two readings cannot explain is still the
+        unexpected answer, with the status read now."""
+        entry = _entry(tmp_path, status=MCScanStatus.RUNNING)
+        registry.get_scan.return_value = entry
+        registry.cancel_scan.return_value = False
+
+        with _use(registry):
+            result = asyncio.run(cancel_scan("scan-1"))
+
+        assert result["success"] is False
+        assert result["error_category"] == "unexpected_error"
+        assert result["status"] == "running"
+
 
 class TestFileWorkLeavesTheEventLoop:
     def test_the_output_tree_is_removed_on_a_worker_thread(self, registry, tmp_path):

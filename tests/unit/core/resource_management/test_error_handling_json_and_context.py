@@ -85,6 +85,8 @@ class TestSafeWriteJsonFileKeepsThePreviousContent:
         assert error is not None
         assert error.context["error_category"] == ErrorCategory.INVALID_FORMAT.value
         assert json.loads(path.read_text(encoding="utf-8")) == {"kept": True}
+        # No staging file or other leftover beside the kept file.
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["state.json"]
 
     def test_a_self_referencing_value_is_refused_without_a_write(self, tmp_path):
         path = tmp_path / "state.json"
@@ -95,13 +97,38 @@ class TestSafeWriteJsonFileKeepsThePreviousContent:
         error = safe_write_json_file(path, loop)
 
         assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_FORMAT.value
         assert json.loads(path.read_text(encoding="utf-8")) == {"kept": True}
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["state.json"]
 
     def test_a_serializable_value_is_written(self, tmp_path):
         path = tmp_path / "state.json"
 
         assert safe_write_json_file(path, {"a": [1, 2]}) is None
         assert json.loads(path.read_text(encoding="utf-8")) == {"a": [1, 2]}
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["state.json"]
+
+
+class TestSafeWriteJsonFileBlamesThePathForAPathError:
+    def test_a_path_the_system_refuses_is_an_invalid_path_not_bad_data(self, tmp_path):
+        """The open raises ValueError for an embedded NUL, as json.dumps does for
+        a self-referencing value; caught together, the path error read as
+        "Invalid data format for JSON serialization" with invalid_format."""
+        path = tmp_path / "sta\x00te.json"
+
+        error = safe_write_json_file(path, {"a": 1})
+
+        assert error is not None
+        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+        assert "Invalid data format" not in str(error)
+        assert "not valid" in str(error)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_the_control_a_serializable_value_still_writes(self, tmp_path):
+        path = tmp_path / "state.json"
+
+        assert safe_write_json_file(path, {"a": 1}) is None
+        assert json.loads(path.read_text(encoding="utf-8")) == {"a": 1}
 
 
 class Pair(NamedTuple):
