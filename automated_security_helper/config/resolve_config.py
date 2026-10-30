@@ -178,6 +178,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
+    ASHConfigUnparsedError,
     ASHConfigValidationError,
     ASHRespelledOverrideError,
 )
@@ -4594,6 +4595,15 @@ def _load_operator_config(
     dropped: a silent None here would fall back to the defaults or ASH_CONFIG
     and lose the operator's sandbox-mode floor and the settings for options
     only the operator may set.
+
+    A named file whose text does not parse is refused as an unparsed config
+    naming itself (``ASHConfigUnparsedError``, in ``unparsed_config_reason``'s
+    words). The chain walk reads the root file raw, so the parser's error
+    carried no file name a caller could use: the MCP tools framed it with the
+    only path they hold, the client's delivered file, and blamed that file
+    for the operator's copy of a profile that would not parse. A base of the
+    chain is already reworded by the walk, and a file the process cannot
+    read is raised as it is, for the caller to name in its own words.
     """
     if trusted_config_path is None:
         return None
@@ -4604,13 +4614,25 @@ def _load_operator_config(
     # With its references, which the settings it confines a config's to take
     # (_take_confined_references).
     reads: Dict[Path, Any] = {}
-    document, config = load_config_file_for_run(
-        trusted_config_path,
-        reads=reads,
-        source_dir=source_dir,
-        permit_base=permit_base,
-        anchor_relative_paths=anchor_paths,
-    )
+    unparsed: Optional[str] = None
+    try:
+        document, config = load_config_file_for_run(
+            trusted_config_path,
+            reads=reads,
+            source_dir=source_dir,
+            permit_base=permit_base,
+            anchor_relative_paths=anchor_paths,
+        )
+    except (yaml.YAMLError, ValueError) as exc:
+        # ASH's own refusals and pydantic's ValidationError are ValueErrors
+        # the classifier excludes; they are re-raised as they are.
+        if not is_config_parse_error(exc):
+            raise
+        # The parser's own words can quote the file (unparsed_config_reason).
+        unparsed = unparsed_config_reason(Path(trusted_config_path), exc)
+    if unparsed is not None:
+        # Outside the handler (unparsed_config_reason).
+        raise ASHConfigUnparsedError(unparsed)
     return OperatorConfig(
         config=config,
         chain=list(document.chain),
