@@ -437,11 +437,17 @@ def test_an_interrupt_during_the_stoppable_runners_grace_still_kills(monkeypatch
     _TimingOutPopen.instances.clear()
     monkeypatch.setattr(spu.subprocess, "Popen", _TimingOutPopen)
     monkeypatch.setattr(spu, "_reap", lambda args, process: None)
+    # A registry of this test's own: the reap that would forget a record is
+    # replaced above, so a record made here would otherwise outlive the test.
+    monkeypatch.setattr(spu, "_RUNNING_GROUPS", {})
     with pytest.raises(KeyboardInterrupt):
         spu._run_stoppable(["tool"], timeout=0.01)
     (child,) = _TimingOutPopen.instances
     assert "terminate" in child.calls and "kill" in child.calls
     assert child.calls.index("terminate") < child.calls.index("kill")
+    # The sandboxed runner records no group of its own: the wrapper's setsid
+    # makes the group, and the stop paths ask the child about it at stop time.
+    assert spu._RUNNING_GROUPS == {}
 
 
 # --- the server's last stop ------------------------------------------------------------------
