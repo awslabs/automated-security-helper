@@ -12,6 +12,10 @@
 * The marker never shows a value the chain read from the environment: a list
   or mapping holding such a value shows the reference at that leaf, and a
   date or other non-JSON value a YAML file writes is shown as text, not raised.
+* An option a file outside the tree set is written back by the confinement
+  only, read through the options model: the settle list ``ash config validate``
+  reads (``ignored_operator_only_options``) changes nothing, and a string the
+  document holds for a numeric option is stored as the model's type.
 """
 
 from __future__ import annotations
@@ -26,12 +30,54 @@ from automated_security_helper.config.operator_only_options import (
     RepositorySettings,
     _confine_scanner_options,
     _sections_in,
+    ignored_operator_only_options,
     mark_operator_only_options,
 )
 
 pytestmark = pytest.mark.unit
 
 SH = "aws-security-hub"
+
+
+def _outside_tree_limit(value: object) -> RepositorySettings:
+    """A chain whose file outside the tree wrote detect-secrets' limit as *value*."""
+    repository = RepositorySettings(trees=[])
+    repository.document = {
+        "scanners": {"detect-secrets": {"options": {"max_worker_output_mib": value}}}
+    }
+    return repository
+
+
+def test_the_settle_list_a_validation_reads_changes_nothing():
+    """``ignored_operator_only_options`` serves ``ash config validate``, which
+    judges a file without changing the configuration; the option a file
+    outside the tree set is listed for the confinement to write back, not
+    written back by the listing."""
+    config = AshConfig.model_validate(
+        {"scanners": {"detect-secrets": {"options": {"max_worker_output_mib": 2048}}}}
+    )
+
+    ignored = ignored_operator_only_options(
+        config, AshConfig(), [], _outside_tree_limit(256)
+    )
+
+    assert ignored == []
+    assert config.scanners.detect_secrets.options.max_worker_output_mib == 2048
+
+
+def test_an_outside_files_string_value_is_stored_as_the_models_type():
+    """The document holds a string where the model holds a number (an
+    environment reference resolves to text); the write-back reads it through
+    the options model, so the scanner gets the number, not the string."""
+    config = AshConfig.model_validate(
+        {"scanners": {"detect-secrets": {"options": {"max_worker_output_mib": 2048}}}}
+    )
+
+    _confine_scanner_options(config, AshConfig(), [], _outside_tree_limit("256"))
+
+    limit = config.scanners.detect_secrets.options.max_worker_output_mib
+    assert limit == 256
+    assert isinstance(limit, int) and not isinstance(limit, bool)
 
 
 def test_an_option_a_file_outside_the_tree_set_holds_that_files_value():

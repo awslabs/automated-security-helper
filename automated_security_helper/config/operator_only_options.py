@@ -552,10 +552,15 @@ class _Settling(NamedTuple):
     option: str
     #: What the repository's files merged it to.
     value: Any
-    #: The trusted base's value, or _MISSING where it has none.
+    #: The trusted base's value, or _MISSING where it has none; the value a
+    #: file outside the tree wrote where ``from_elsewhere`` is set.
     operator: Any
     #: What the option is where nothing sets it, or _MISSING where not known.
     default: Any = _MISSING
+    #: Set when a file outside the tree wrote the option: ``operator`` is that
+    #: file's value, which the configuration takes as the operator's own, and
+    #: the option is neither settled to the trusted base nor reported.
+    from_elsewhere: bool = False
 
     @property
     def place(self) -> str:
@@ -564,6 +569,8 @@ class _Settling(NamedTuple):
     @property
     def ignored(self) -> bool:
         """Whether the value the scan uses is not the one the files wrote."""
+        if self.from_elsewhere:
+            return False
         return _differs(self.value, self.operator, self.default)
 
 
@@ -683,7 +690,10 @@ def _scanner_options_to_settle(
 ) -> List[_Settling]:
     """The options in OPERATOR_ONLY_SCANNER_OPTIONS a file of the repository
     wrote that take the trusted base's value: neither an override, which is
-    the operator's, nor a file outside the tree sets them. Changes nothing."""
+    the operator's, nor a file outside the tree sets them. One a file outside
+    the tree set is listed too, ``from_elsewhere``, with that file's value, for
+    ``_confine_scanner_options`` to write back. Changes nothing: ``ash config
+    validate`` reads the list through ``ignored_operator_only_options``."""
     found: List[_Settling] = []
     sections = config.scanners.model_dump(by_alias=True)
     environment_values = _environment_values_of(config, trusted)
@@ -706,8 +716,17 @@ def _scanner_options_to_settle(
             # A file outside the tree set it: that file's value holds, not
             # whatever the configuration holds by now (an override applied to
             # the model before the confinement).
-            if getattr(options, option) != elsewhere:
-                setattr(options, option, elsewhere)
+            found.append(
+                _Settling(
+                    "scanners",
+                    scanner,
+                    scanner,
+                    option,
+                    value,
+                    elsewhere,
+                    from_elsewhere=True,
+                )
+            )
             continue
         found.append(
             _Settling(
@@ -808,8 +827,11 @@ def _confine_scanner_options(
         config, trusted, config_overrides, repository
     ):
         options = _scanner_options(config, settling.plugin)
-        if getattr(options, settling.option) != settling.operator:
-            setattr(options, settling.option, settling.operator)
+        _set_scanner_option(options, settling.option, settling.operator)
+        if settling.from_elsewhere:
+            # A file outside the tree set it: its value is written back, and
+            # the option is neither the trusted base's nor reported.
+            continue
         settled.add(("scanners", settling.plugin, settling.option))
         if settling.ignored:
             replaced.append(settling)
@@ -841,14 +863,27 @@ def _confine_scanner_options(
             if elsewhere is not _MISSING:
                 # A file outside the tree set it: that file's value holds, not
                 # whatever the configuration holds by now.
-                if getattr(options, option) != elsewhere:
-                    setattr(options, option, elsewhere)
+                _set_scanner_option(options, option, elsewhere)
                 continue
-            operator_value = getattr(operator_options, option)
-            if getattr(options, option) != operator_value:
-                setattr(options, option, operator_value)
+            _set_scanner_option(options, option, getattr(operator_options, option))
             settled.add(("scanners", scanner, option))
     return replaced
+
+
+def _set_scanner_option(options: Any, option: str, value: Any) -> None:
+    """Set ``options.option`` to ``value`` as the options model reads it, when
+    it differs from what the model holds.
+
+    A value a file outside the tree wrote is the document's: an environment
+    reference (``!ENV``, ``${VAR}``) is a string there where the model holds a
+    number, so compared raw it always differed and was stored as a string. The
+    value is read through the options model first (lax, as a plugin's options
+    are read at load), so what is stored is the model's type and the comparison
+    is like with like. The trusted base's value is the model's already.
+    """
+    typed = getattr(type(options).model_validate({option: value}), option)
+    if getattr(options, option) != typed:
+        setattr(options, option, typed)
 
 
 def _trusted_value(trusted: "AshConfig", section_key: str, option: str) -> Any:
