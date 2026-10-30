@@ -3143,6 +3143,35 @@ async def _run_scan(
             keep_previous_results=True,
         )
 
+    def _record_the_tools_the_stop_could_not_end() -> None:
+        """Put the tools the stop could not end on the entry before the directory is let go.
+
+        A stop (cancel_scan, the scan timeout, a cancelled runner task) ends the
+        scan on its thread with a ScanCancelled, and the subprocess layer records
+        on the entry's cancel event, the root of the scan's cancel chain, every
+        tool it could not end (CancelEvent.note_could_not_stop). They are read
+        here, on the thread, after run_ash_scan ended and before runner_done is
+        set: the arm that catches the ScanCancelled runs on the runner's task,
+        which a cancelled task no longer has, and once runner_done is set the
+        registry may let the directory go (occupies_its_directory). The
+        registry attaches them only to an entry the server stopped; a scan that
+        ended on its own has no records. On a network transport the client's
+        warning names the tools only, and the process ids go to this log.
+        """
+        from automated_security_helper.cli.mcp.sandbox import transport_is_networked
+
+        records = entry.cancel_event.could_not_stop_records()
+        if not records:
+            return
+        if registry.record_cancel_outcome(
+            scan_id, records, name_process_ids=not transport_is_networked()
+        ):
+            named = ", ".join(f"{tool} (pid {pid})" for tool, pid in records)
+            _logger.warning(
+                f"Scan {scan_id} was stopped, but {len(records)} scanner tool(s) "
+                f"could not be stopped and may still be running: {named}"
+            )
+
     def _scan_under_session_lock() -> Any:
         """Acquire the session lock (if any) and run the scan synchronously.
 
@@ -3189,6 +3218,9 @@ async def _run_scan(
             _settle_previous_results(None, results)
             return results
         finally:
+            # Before runner_done: from then on the registry may let the
+            # directory go, and a tool still running would write into it.
+            _record_the_tools_the_stop_could_not_end()
             entry.runner_done.set()
             # After run_ash_scan ended on this thread, so the scan can no
             # longer load it.
@@ -3365,9 +3397,13 @@ async def _run_scan(
         registry.finish_scan(scan_id, MCScanStatus.CANCELLED)
         # A tool the stop could not end is still running, and may write into the
         # output directory after the cancel. The exception carries which ones
-        # (core/cancellation.py); only the registry can tell the client, through
-        # the entry's warnings, because the closed entry takes no other change.
-        if registry.record_cancel_outcome(scan_id, cancelled.could_not_stop):
+        # (core/cancellation.py), and the thread that ran the scan put them on
+        # the entry before it let the directory go
+        # (_record_the_tools_the_stop_could_not_end); a cancelled task never
+        # reaches this arm, so the thread is where the record is made. Only the
+        # registry can tell the client, through the entry's warnings, because
+        # the closed entry takes no other change.
+        if cancelled.could_not_stop:
             _logger.warning(
                 f"Scan {scan_id} was cancelled, but {len(cancelled.could_not_stop)} "
                 "scanner tool(s) could not be stopped and may still be running"

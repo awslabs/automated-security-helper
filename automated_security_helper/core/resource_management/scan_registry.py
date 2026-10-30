@@ -265,6 +265,12 @@ class ScanRegistryEntry:
         # that restore. See occupies_its_directory.
         self.has_runner = False
         self.runner_done = Event()
+        # The scanner tools a stop could not end, as (tool, pid) pairs, put here
+        # by record_cancel_outcome from the records the scan's cancel event
+        # collected. A tool still running can write into the output directory
+        # after the stop, so the entry keeps its directory while one of them
+        # runs (occupies_its_directory). Empty for a scan nothing stopped.
+        self.could_not_stop: Tuple[Tuple[str, int], ...] = ()
         # Set while remove_output_of_scan deletes this scan's output tree off
         # the registry lock, and set-and-cleared when the delete has ended,
         # whatever its outcome. register_scan waits on it for a scan of the
@@ -375,6 +381,19 @@ class ScanRegistryEntry:
         holds.
         """
         return self.is_active() or (self.has_runner and not self.runner_done.is_set())
+
+    def stopped_by_the_server(self) -> bool:
+        """Whether a cancel, the scan timeout, or a cancelled runner task ended this scan.
+
+        CANCELLED is a client's cancel. FAILED with the cancel event set is the
+        timeout or a cancelled runner task: each closes the entry FAILED first,
+        with its own reason, and sets the event under the same lock. A FAILED
+        scan whose event is clear ended on its own error, and nothing stopped
+        it, so a stop's outcome does not belong to it.
+        """
+        if self.status == MCScanStatus.CANCELLED:
+            return True
+        return self.status == MCScanStatus.FAILED and self.cancel_event.is_set()
 
 
 def _slot_of(entry: "ScanRegistryEntry") -> Tuple[str, str]:
@@ -1042,40 +1061,66 @@ class ScanRegistry:
             return True
 
     def record_cancel_outcome(
-        self, scan_id: str, could_not_stop: Iterable[Tuple[str, int]]
+        self,
+        scan_id: str,
+        could_not_stop: Iterable[Tuple[str, int]],
+        *,
+        name_process_ids: bool = True,
     ) -> bool:
-        """Attach to a cancelled scan the scanner tools its stop could not end.
+        """Attach to a scan the server stopped the scanner tools its stop could not end.
 
-        ``cancel_scan`` closes the entry as CANCELLED at once, and the runner
-        learns only afterwards, from ``ScanCancelled.could_not_stop``, which
-        tools kept running past the stop. ``finish_scan`` leaves a closed entry
-        alone by design, so that outcome had nowhere to go and a cancel whose
-        tool was still running read back as a clean one. This is the one way to
-        add it: a warning on the CANCELLED entry, naming each tool and its
-        process id as the CLI's exit line does, so a client polling the entry is
+        A stop closes the entry at once: ``cancel_scan`` as CANCELLED, the scan
+        timeout and a cancelled runner task as FAILED with the cancel event set.
+        The thread that runs the scan learns only afterwards, from the records
+        its cancel event collected (``CancelEvent.could_not_stop_records``),
+        which tools kept running past the stop, and ``finish_scan`` leaves a
+        closed entry alone by design, so that outcome had nowhere to go and a
+        stop whose tool was still running read back as a clean one. This is the
+        one way to add it: the ``(tool, pid)`` pairs are kept on the entry
+        (``could_not_stop``, which keeps the directory held while one of them
+        runs), and a warning names each tool, so a client polling the entry is
         told the output directory may still be written to.
 
-        Nothing is attached to an entry that is not CANCELLED: a scan the
-        timeout closed as FAILED carries its reason already, and a scan that
-        finished has no stop to report on.
+        Admitted for an entry the server stopped (``stopped_by_the_server``):
+        CANCELLED, or FAILED with its cancel event set. A RUNNING entry, a scan
+        that finished, and a FAILED scan nothing stopped take no outcome: the
+        records would describe a stop that did not happen. A pair already on
+        the entry is not recorded twice, so the thread that ran the scan and a
+        runner's arm may both call this with the same records.
+
+        ``name_process_ids`` False keeps the process ids out of the warning: on
+        a network transport the client is remote, and a server-side pid is
+        nothing it can act on and nothing it should learn. The caller logs the
+        ids on the server side instead; the entry keeps them either way.
 
         Returns:
-            True if a warning was attached, False if there was nothing to
-            attach, the entry is missing, or it is not a cancelled scan.
+            True if a warning was attached, False if there was nothing new to
+            attach, the entry is missing, or the server did not stop it.
         """
-        records = tuple(could_not_stop)
+        records = tuple(dict.fromkeys(could_not_stop))
         if not records:
             return False
         with self._registry_lock:
             entry = self._registry.get(scan_id)
-            if entry is None or entry.status != MCScanStatus.CANCELLED:
+            if entry is None or not entry.stopped_by_the_server():
                 return False
-            named = ", ".join(f"{tool} (pid {pid})" for tool, pid in records)
+            new = tuple(r for r in records if r not in entry.could_not_stop)
+            if not new:
+                return False
+            entry.could_not_stop = entry.could_not_stop + new
+            if name_process_ids:
+                named = ", ".join(f"{tool} (pid {pid})" for tool, pid in new)
+                how = "end the listed process(es) before reading or reusing it."
+            else:
+                named = ", ".join(tool for tool, _pid in new)
+                how = (
+                    "the server's log names the process(es); end them before "
+                    "reading or reusing it."
+                )
             entry.add_warning(
-                f"{len(records)} scanner tool(s) could not be stopped and may still "
+                f"{len(new)} scanner tool(s) could not be stopped and may still "
                 f"be running: {named}. A tool still running can write into the "
-                "output directory after the cancel; end the listed process(es) "
-                "before reading or reusing it."
+                f"output directory after the stop; {how}"
             )
             return True
 
