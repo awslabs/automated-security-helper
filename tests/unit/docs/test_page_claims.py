@@ -7145,15 +7145,40 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
     read its row's database offline, and online too unless the row says offline only;
     and the scanners the column names must be all the scanners ASH declares for that
     database. The online reading is the control for "offline only".
+
+    A scanner that reads a rule cache from a directory the environment names (the
+    grep family's ``cache_dir_env_var``) declares the database only when the offline
+    scan read that cache: with none it declines and reads nothing, and a scan of
+    the operator's own rules or of bare patterns reads no cache either. So the
+    offline build of such a scanner is given a cache the way the offline image
+    ships one, a directory outside the scanned tree holding one rules file, and
+    the question is asked of that build.
     """
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.utils.content_databases import get
+    from automated_security_helper.utils.content_databases import (
+        RULESET_FETCHED_AT_FILE,
+        get,
+    )
 
     rows = _offline_table(_OFFLINE_CDB_PAGE, "| Database | Read by | Age bound |")
     shipped = _offline_shipped_scanner_classes()
     config = AshConfig(project_name="readers")
     (tmp_path / "source").mkdir()
+
+    def _rule_cache(reader: str) -> Path:
+        cache = tmp_path / "rule-cache" / reader
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "rules.yaml").write_text(
+            "rules:\n  - id: placeholder\n    languages: [python]\n"
+            "    message: m\n    severity: INFO\n    pattern: $X == $X\n",
+            encoding="utf-8",
+        )
+        (cache / RULESET_FETCHED_AT_FILE).write_text(
+            "2026-01-01T00:00:00Z\n", encoding="utf-8"
+        )
+        return cache
+
     for row in rows:
         name, cell = _offline_database(row[0]), row[1]
         offline_only = cell.endswith(", offline only")
@@ -7170,18 +7195,26 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
                     monkeypatch.setenv("ASH_OFFLINE", "YES")
                 else:
                     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-                context = PluginContext(
-                    source_dir=tmp_path / "source",
-                    output_dir=tmp_path / "output",
-                    work_dir=tmp_path / "output" / "converted",
-                    config=config,
-                )
-                scanner = shipped[reader](
-                    config=config.get_plugin_config(
-                        plugin_type="scanner", plugin_name=reader
-                    ),
-                    context=context,
-                )
+
+                def _build():
+                    context = PluginContext(
+                        source_dir=tmp_path / "source",
+                        output_dir=tmp_path / "output",
+                        work_dir=tmp_path / "output" / "converted",
+                        config=config,
+                    )
+                    return shipped[reader](
+                        config=config.get_plugin_config(
+                            plugin_type="scanner", plugin_name=reader
+                        ),
+                        context=context,
+                    )
+
+                scanner = _build()
+                cache_env = getattr(scanner, "cache_dir_env_var", None)
+                if offline and callable(cache_env):
+                    monkeypatch.setenv(cache_env(), str(_rule_cache(reader)))
+                    scanner = _build()
                 reads = [e.name for e in scanner.content_databases_in_use()]
                 expected = offline or not offline_only
                 assert (name in reads) is expected, (
