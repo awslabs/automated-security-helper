@@ -217,6 +217,21 @@ class TestConverterRowsAcrossThreeShards:
         assert row.dependencies_satisfied is True
         assert row.dependency_unavailable_reason is None
 
+    def test_an_excluded_rows_reason_does_not_leak_when_the_running_row_has_none(
+        self,
+    ):
+        excluded = ConverterStatusInfo(
+            excluded=True,
+            dependencies_satisfied=False,
+            dependency_unavailable_reason="never checked: excluded",
+        )
+        ran_without = ConverterStatusInfo(dependencies_satisfied=False)
+
+        row = _merge_converter_rows(excluded, ran_without)
+
+        assert row.dependencies_satisfied is False
+        assert row.dependency_unavailable_reason is None
+
     def test_an_accepted_record_does_not_hide_another_shards_tool_failure(self):
         accepted = ConverterStatusInfo(
             failed_inputs=[

@@ -1880,8 +1880,12 @@ def _merge_converter_rows(
                 if row.dependency_unavailable_reason
             )
         )
-        if reasons:
-            update["dependency_unavailable_reason"] = _FAILURE_JOIN.join(reasons)
+        # From the rows that ran it alone: with none recorded, the merged row has
+        # none, where leaving the field alone kept the base row's, an excluded
+        # row's "never checked" text included.
+        update["dependency_unavailable_reason"] = (
+            _FAILURE_JOIN.join(reasons) if reasons else None
+        )
     elif base.dependencies_satisfied != other.dependencies_satisfied:
         # One row ran it with its dependencies and the other was excluded with
         # dependencies_satisfied False: the merged row ran it.
