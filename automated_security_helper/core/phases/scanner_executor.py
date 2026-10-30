@@ -1945,12 +1945,17 @@ class ScannerExecutor:
                     # A report returned with the dependencies unsatisfied is a target
                     # the scanner did not evaluate, and the statistics read it as
                     # missing (target_report_is_missing). It gets the reason and the
-                    # WARNING a falsy return gets, so its row says why. The branch
-                    # above has already given a falsy return or a sandbox refusal its
-                    # reason.
+                    # WARNING a False return gets, so its row says why. The branch
+                    # above has already given a False return or a sandbox refusal its
+                    # reason. Not a row already ERROR: a result ASH could not grade
+                    # (an empty dict, a list) is the row's one cause, and a reason
+                    # written here, with the "marking as MISSING" line beside it,
+                    # said the row was MISSING and ERROR at once, the contradiction
+                    # the False-only MISSING branch above exists to end.
                     if (
                         not container.dependencies_satisfied
                         and container.missing_reason is None
+                        and container.status != ScannerStatus.ERROR
                     ):
                         # Redacted with the config's environment values first,
                         # and the plugin's own, as for a falsy return above.

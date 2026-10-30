@@ -2075,7 +2075,9 @@ class ScanPhase(EnginePhase):
             ASH_LOGGER.info(f"   Nothing to scan: {len(nothing_to_scan_names)}")
             ASH_LOGGER.info(f"   Missing dependencies: {missing_deps_count}")
             # Scoped to preparation on purpose. A scanner can still be marked
-            # MISSING later, in ScannerExecutor, when its scan() returns falsy --
+            # MISSING later, in ScannerExecutor, when its scan() returns False
+            # (the template's answer for unavailable dependencies; an empty dict
+            # or list is a result the executor refuses to grade, ERROR) --
             # that discovery happens after this line and cannot be counted here,
             # so the label says what the number covers rather than implying it is
             # the final tally.
