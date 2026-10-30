@@ -5206,16 +5206,11 @@ def _run_container_mode(
     # the repository wrote replaced the operator's policy in the container.
 
     if opts.run:
-        # The inputs before the previous run's output: a scan refused for its config
-        # or for a path the runner cannot mount never starts, so it must not delete
-        # the reports of one that did. Exit 3, as run_ash_container would. The
-        # same check as the one above, with the same record of the operator's
-        # config reads and the same one-line showing of a message that can name
-        # a path inside the scanned tree.
-        _refuse_container_inputs(opts, workspace_config, reads)
-        # The build inputs too: IDs that are not numbers, a revision the build cannot
-        # take, and a non-root build as UID or GID 0, which is the default outcome on
-        # a root host that does not pass --build-target ci. With the host IDs
+        # The scan inputs were checked once, above, before anything else of this
+        # function ran; nothing between there and here changes them. The build
+        # inputs too: IDs that are not numbers, a revision the build cannot take,
+        # and a non-root build as UID or GID 0, which is the default outcome on a
+        # root host that does not pass --build-target ci. With the host IDs
         # unreadable, run_ash_container reports that itself.
         from automated_security_helper.utils import subprocess_utils
 

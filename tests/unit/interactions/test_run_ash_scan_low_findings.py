@@ -387,35 +387,75 @@ def test_a_config_under_an_unsearchable_directory_is_left_to_the_run(
 # ---------------------------------------------------------------------------
 
 
-def test_the_second_container_input_check_carries_the_reads_record(
-    tmp_path, monkeypatch, capsys
+def _fake_completed_container_run(**kwargs):
+    """A runtime stand-in: the inner run wrote its results and completed, exit 0."""
+    output_dir = Path(kwargs["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results_file = output_dir / "ash_aggregated_results.json"
+    results_file.write_text(AshAggregatedResults().model_dump_json(), encoding="utf-8")
+    mark_inner_run_completed(results_file, kwargs["outer_run_id"])
+    return create_completed_process(
+        args=["docker", "run"], returncode=0, stdout="", stderr=""
+    )
+
+
+def test_the_container_input_check_runs_once_before_the_discard_with_the_reads(
+    tmp_path, monkeypatch
 ):
-    """The check before the previous output is cleared takes the scan's record
-    of the operator's config reads, as the first does, and shows its message
-    once, on one line."""
+    """One check of the scan's inputs per container run, carrying the scan's
+    record of the operator's config reads, and before the previous run's output
+    is cleared, so a refused scan deletes nothing."""
     opts = _opts(tmp_path, mode=RunMode.container, build=False)
-    calls: List[tuple] = []
+    order: List[tuple] = []
 
     def recording_refusal(*args):
-        calls.append(args)
-        return None if len(calls) == 1 else "refused\nsecond line"
+        order.append(("inputs", args))
+        return None
+
+    real_discard = ras._discard_prior_run_artifacts
+
+    def recording_discard(opts, logger):
+        order.append(("discard", ()))
+        return real_discard(opts, logger)
 
     monkeypatch.setattr(ras, "container_input_refusal", recording_refusal)
+    monkeypatch.setattr(ras, "_discard_prior_run_artifacts", recording_discard)
+    monkeypatch.setattr(ras, "run_ash_container", _fake_completed_container_run)
     _quiet_container_side_effects(monkeypatch)
+
+    results = _run_container_mode(opts, _Logger())
+
+    assert isinstance(results, AshAggregatedResults)
+    assert [step for step, _ in order] == ["inputs", "discard"], order
+    (inputs,) = [args for step, args in order if step == "inputs"]
+    assert len(inputs) == 6, inputs
+    assert isinstance(inputs[5], ras.OperatorConfigReads)
+
+
+def test_a_refused_container_input_shows_one_line_and_clears_nothing(
+    tmp_path, monkeypatch, capsys
+):
+    opts = _opts(tmp_path, mode=RunMode.container, build=False)
+    opts.output_dir.mkdir()
+    prior = opts.output_dir / "reports" / "ash.sarif"
+    prior.parent.mkdir()
+    prior.write_text('{"runs": []}\n', encoding="utf-8")
+    monkeypatch.setattr(
+        ras, "container_input_refusal", lambda *args: "refused\nsecond line"
+    )
     monkeypatch.setattr(
         ras,
         "run_ash_container",
         lambda **kwargs: pytest.fail("the runtime was reached"),
     )
+    _quiet_container_side_effects(monkeypatch)
 
     with pytest.raises(SystemExit) as exited:
         _run_container_mode(opts, _Logger())
 
     assert exited.value.code == 3
-    assert len(calls) == 2
-    assert len(calls[1]) == 6, calls[1]
-    assert isinstance(calls[1][5], ras.OperatorConfigReads)
     assert "refused\\x0asecond line" in capsys.readouterr().err
+    assert prior.exists(), "the previous run's output was cleared before the refusal"
 
 
 def test_a_findings_exit_from_the_container_is_not_logged_as_a_failure(
