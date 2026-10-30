@@ -1281,12 +1281,13 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # across runs, and a target with nothing to audit never reaches
         # _execute_scan's own reset, so without this the converted target read
         # the source target's exit code as its own. None, "the tool did not
-        # run", until a run returns one: a template that declines this target
-        # (its dependency check, its pre-scan) then leaves None, as the
-        # multi-batch decline below does, where a 0 set here read as a clean
-        # run for a single-batch target and None for the same target in two.
-        # The "nothing to audit" return sets 0 itself: zizmor was skipped
-        # there by design, and the invocation record reads 0 as accepted.
+        # run", until a path below sets its own: the "nothing to audit" return
+        # sets 0 (zizmor was skipped there by design, and the invocation
+        # record reads 0 as accepted), each batch's template run sets the
+        # code it returned, and a declined target reads None whether it had
+        # one batch or several (the template's own scan() starts at 0, its
+        # clean-skip reading, so the single-batch path restores None after a
+        # decline and the batch loop folds only the runs that happened).
         self.exit_code = None
         # The same for the rest of the per-target state the template resets at
         # the top of its own scan(): the "nothing to audit" return below never
@@ -1317,9 +1318,19 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         batches = self._input_batches(inputs)
         if len(batches) == 1:
             self._inputs = inputs
-            return super().scan(
+            result = super().scan(
                 target, target_type, global_ignore_paths, config, *args, **kwargs
             )
+            if result is False:
+                # The template declined (its dependency check, its pre-scan)
+                # before the tool started: the only shape its scan() answers
+                # False (a run that fails raises). It had set the 0 it starts
+                # every scan() with, its clean-skip reading for an early
+                # return, so the declined target read as a clean run here and
+                # as "the tool did not run" (None) when the same target was
+                # split into batches. One reading, None, for both.
+                self.exit_code = None
+            return result
         reports: List[SarifReport] = []
         attempted = failed = 0
         # Folded as the base class folds its own runs, through this scanner's

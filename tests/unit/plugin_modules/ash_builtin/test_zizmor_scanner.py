@@ -2333,8 +2333,11 @@ def test_batch_exit_codes_are_folded_by_the_scanners_own_ranking(repo, monkeypat
     reports it, and None leaves the fold alone. The module-level fold, a plain
     max, read 3 above 1. Only accepted codes reach the fold today (the template
     refuses a batch outside the set before its report is read), so the scan
-    below proves the mechanism: every batch's code is folded through the
-    scanner's own hook, with the codes the batches returned."""
+    below proves the mechanism: every batch's code reaches the scanner's own
+    hook twice, once from the template's _process_command_response, which
+    folds each run's code into the fresh per-run None (plugin_base's
+    _folded_exit_code reads the hook), and once from the batch loop, whose
+    current is the worst code so far."""
     scanner = _scanner(repo)
     assert scanner._worse_exit_code(None, 3) == 3
     assert scanner._worse_exit_code(0, 3) == 3
@@ -2357,8 +2360,15 @@ def test_batch_exit_codes_are_folded_by_the_scanners_own_ranking(repo, monkeypat
 
     assert isinstance(report, SarifReport)
     assert len(calls) == len(EXPECTED_INPUTS) >= 3
-    assert [new for _, new in folded] == [3, 0] + [3] * (len(calls) - 2)
-    assert folded[0][0] is None
+    batch_codes = [3, 0] + [3] * (len(calls) - 2)
+    # Two folds per batch: the template's per-run fold, then the loop's.
+    assert [new for _, new in folded] == [code for code in batch_codes for _ in (0, 1)]
+    per_run = folded[0::2]
+    across_batches = folded[1::2]
+    assert all(current is None for current, _ in per_run)
+    assert [current for current, _ in across_batches] == [None, 3, 3] + [3] * (
+        len(calls) - 3
+    )
     assert scanner.exit_code == 3
 
 
@@ -2388,8 +2398,10 @@ def test_a_multi_batch_scan_keeps_every_batchs_record(repo, monkeypatch):
 def test_a_declined_single_batch_target_leaves_no_exit_code(repo):
     """The template declined the one batch (its dependency check said no), so
     zizmor never ran: the exit code is None, as it is when a multi-batch target
-    is declined, not the 0 a per-target reset left for a single batch, which
-    read as a clean run."""
+    is declined. The template's own scan() starts every call at 0, its
+    clean-skip reading for an early return, and a declined single-batch target
+    kept that 0, which read as a clean run; the scanner restores None after a
+    declined single batch."""
     scanner = _scanner(repo)
     _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
     object.__setattr__(scanner, "validate_plugin_dependencies", lambda: False)
