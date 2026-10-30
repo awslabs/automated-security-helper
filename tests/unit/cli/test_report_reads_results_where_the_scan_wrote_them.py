@@ -1,0 +1,257 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""`ash report` writes where the scan wrote, names the file it refuses, and keeps going.
+
+The reporters' companion files and the link checks follow the results that
+were found, not --output-dir as given; a deleted working directory and a
+path the user cannot search are refusals, not tracebacks; the config file is
+read once; the OSError and parse refusals name a file, never "None"; the
+ASH_CONFIG file is held with the --config file; a reporter is found by the
+name it declares and one that cannot be built is a failed run, not a
+mistyped --format; a closed stdout pipe is not a render error; the writer
+keeps a CRLF line end, writes a JSON-format reporter's non-JSON text as
+text, and knows unused-suppressions as a JSON format.
+"""
+
+from __future__ import annotations
+
+import io
+import os
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from automated_security_helper.cli import report as report_module
+from automated_security_helper.cli.main import app
+from automated_security_helper.cli.report import (
+    JSON_STDOUT_FORMATS,
+    _exists,
+    _is_json_document,
+    _named_config_files,
+    _refused_config_name,
+    _write_report,
+    _write_report_data,
+)
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
+
+
+class _Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def _write_results(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    results = directory / "ash_aggregated_results.json"
+    results.write_text(
+        AshAggregatedResults().model_dump_json(by_alias=True), encoding="utf-8"
+    )
+    return results
+
+
+def _report(*args):
+    return CliRunner().invoke(app, ["report", "--log-level", "ERROR", *args])
+
+
+@pytest.fixture(autouse=True)
+def _own_environment(monkeypatch, tmp_path):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_OUTPUT_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+
+# --- the writer ---
+
+
+def test_a_crlf_line_end_stays_one_line_end(monkeypatch):
+    """Replacing the line feed alone made CR CR LF of a CSV row's CRLF on Windows."""
+    monkeypatch.setattr(report_module.os, "linesep", "\r\n")
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+
+    _write_report_data("a,b\r\nc,d\n", stream)
+
+    assert stream.buffer.getvalue() == b"a,b\r\nc,d\r\n"
+
+
+def test_non_json_text_from_a_json_format_reporter_is_written_on_a_terminal():
+    """json.loads ran only on a terminal, so the same reporter output passed
+    to a pipe and failed a terminal with 'Expecting value'."""
+    stream = _Terminal()
+
+    _write_report("not a document\n", "sarif", pretty=True, stream=stream)
+
+    assert "not a document" in stream.getvalue()
+
+
+def test_unused_suppressions_is_a_json_format_whose_markdown_is_written_as_text():
+    assert "unused-suppressions" in JSON_STDOUT_FORMATS
+    stream = io.StringIO()
+
+    _write_report(
+        "# Unused\n\n##name[x]\n", "unused-suppressions", pretty=False, stream=stream
+    )
+
+    written = stream.getvalue()
+    assert "\\u0023" not in written, written  # not JSON's escape
+    assert "Unused" in written
+
+
+def test_a_json_document_under_the_format_keeps_jsons_escape():
+    stream = io.StringIO()
+
+    _write_report(
+        '{"a": "##name[x]"}\n', "unused-suppressions", pretty=False, stream=stream
+    )
+
+    assert "\\u0023" in stream.getvalue()
+
+
+@pytest.mark.parametrize(
+    "content, expected",
+    [("{}", True), ("  [1]\n", True), ("# md", False), ("", False), ("text", False)],
+)
+def test_a_json_document_is_known_by_its_first_character(content, expected):
+    assert _is_json_document(content) is expected
+
+
+# --- paths and names ---
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory modes are POSIX")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root searches any directory"
+)
+def test_a_path_the_user_cannot_search_reads_as_absent(tmp_path):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    probe = locked / "ash.yaml"
+    locked.chmod(0o000)
+    try:
+        assert _exists(probe) is False
+    finally:
+        locked.chmod(0o700)
+
+
+def test_the_refused_name_is_never_none(monkeypatch):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    assert _refused_config_name("a.yaml") == "a.yaml"
+    assert _refused_config_name(None) == "the configuration file"
+    monkeypatch.setenv("ASH_CONFIG", "env.yaml")
+    assert _refused_config_name(None) == "env.yaml"
+
+
+def test_both_named_files_are_held(monkeypatch):
+    monkeypatch.setenv("ASH_CONFIG", "base.yaml")
+    assert _named_config_files("a.yaml") == ["a.yaml", "base.yaml"]
+    assert _named_config_files("base.yaml") == ["base.yaml"]
+    assert _named_config_files(None) == ["base.yaml"]
+    monkeypatch.delenv("ASH_CONFIG")
+    assert _named_config_files(None) == []
+
+
+def test_the_ash_config_file_is_confined_with_the_config_file(tmp_path, monkeypatch):
+    """With both given, only the --config file was held to the off-host rules."""
+    results = _write_results(tmp_path / "out")
+    base = tmp_path / "base.yaml"
+    base.write_text("project_name: base\n", encoding="utf-8")
+    named = tmp_path / "named.yaml"
+    named.write_text("project_name: named\n", encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(base))
+    held: list = []
+    real = report_module.confine_off_host_reporters_to_overrides
+
+    def recording(config, files, overrides, source):
+        held.append(list(files))
+        return real(config, files, overrides, source)
+
+    monkeypatch.setattr(
+        report_module, "confine_off_host_reporters_to_overrides", recording
+    )
+
+    result = _report(
+        "--format", "text", "--output-dir", str(results.parent), "--config", str(named)
+    )
+
+    assert result.exit_code == 0, result.output
+    assert held == [[named, base]], held
+
+
+# --- the command ---
+
+
+def test_a_deleted_working_directory_is_the_usage_refusal(tmp_path):
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    before = os.getcwd()
+    os.chdir(gone)
+    try:
+        gone.rmdir()
+        result = _report("--format", "text")
+    finally:
+        os.chdir(before)
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "deleted or unmounted" in result.output, result.output
+
+
+def test_companion_files_follow_the_results_that_were_found(tmp_path, monkeypatch):
+    """--output-dir named the project; the results were found under its
+    .ash/ash_output, and the reporters wrote into <project>/reports."""
+    project = tmp_path / "project"
+    results = _write_results(project / ".ash" / "ash_output")
+    seen: list = []
+    real = report_module.PluginContext
+
+    def recording(**kwargs):
+        seen.append(kwargs["output_dir"])
+        return real(**kwargs)
+
+    monkeypatch.setattr(report_module, "PluginContext", recording)
+
+    result = _report("--format", "text", "--output-dir", str(project))
+
+    assert result.exit_code == 0, result.output
+    assert seen == [results.parent], seen
+    assert not (project / "reports").exists()
+
+
+def test_a_reporter_that_cannot_be_built_is_a_failed_run_not_a_mistyped_format(
+    tmp_path, monkeypatch
+):
+    from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+        text_reporter,
+    )
+
+    results = _write_results(tmp_path / "out")
+
+    def refusing(self, *args, **kwargs):
+        raise RuntimeError("the client library is missing")
+
+    monkeypatch.setattr(text_reporter.TextReporter, "__init__", refusing)
+
+    result = _report("--format", "text", "--output-dir", str(results.parent))
+
+    assert result.exit_code == 1, result.output
+    assert "not found" not in result.output, result.output
+    assert "could not be built" in result.output, result.output
+    assert "the client library is missing" in result.output, result.output
+
+
+def test_a_closed_stdout_pipe_is_not_a_render_error(tmp_path, monkeypatch):
+    results = _write_results(tmp_path / "out")
+
+    def closed(*args, **kwargs):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(report_module, "_write_report", closed)
+
+    result = _report("--format", "text", "--output-dir", str(results.parent))
+
+    assert result.exit_code == 1, result.output
+    assert "Error generating report" not in result.output, result.output
