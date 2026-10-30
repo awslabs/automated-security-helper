@@ -93,6 +93,10 @@ def test_process_config_options_exclude_argument_value_is_well_formed(
     for token in exclude_tokens:
         value = token[len("--exclude=") :]
         actual_entries = value.split(",")
+        # The argument has a size bound, so no glob is passed twice; today the
+        # known ignore paths and bandit's defaults share no entry, and this
+        # says so for any later change to either list.
+        assert len(actual_entries) == len(set(actual_entries)), actual_entries
         assert actual_entries == expected_entries, (
             f"--exclude= value did not match expected entries.\n"
             f"  token:    {token!r}\n"
