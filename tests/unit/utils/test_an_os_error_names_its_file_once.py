@@ -63,7 +63,12 @@ def _shown_twice(text: str) -> str:
 def test_the_file_is_named_as_given(name):
     error = FileNotFoundError(2, "No such file or directory", name)
 
-    assert error_text(error) == f"[Errno 2] No such file or directory: '{name}'"
+    # The name's bytes as given, between the quote characters repr puts around
+    # it: double quotes around a name holding an apostrophe, single otherwise.
+    quote = repr(name)[0]
+    assert error_text(error) == (
+        f"[Errno 2] No such file or directory: {quote}{name}{quote}"
+    )
 
 
 def test_both_files_of_a_rename_are_named_as_given():
