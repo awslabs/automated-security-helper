@@ -80,7 +80,20 @@ Failure modes and known limitations
   code 2 and should not assume a raised exception on rejection. That includes a
   path ``resolve()`` cannot follow: a symlink loop in an intermediate component
   raises ``RuntimeError`` on CPython 3.10-3.12, which is returned as a
-  ``SYMLINK`` rejection rather than propagated.
+  ``SYMLINK`` rejection rather than propagated. It also includes a candidate or
+  root holding a NUL character, which no file system path can: ``os.lstat`` and
+  ``resolve()`` raise ``ValueError`` for one, and it is returned as an
+  ``EMBEDDED_NUL`` rejection before either is asked.
+* On a file system that compares names without regard to case (macOS's default)
+  a candidate spelled in another case than the root is the same directory, but
+  ``is_relative_to`` compares the text. When the text says "outside", the
+  candidate's ancestors are compared with the root by identity
+  (``os.path.samefile``), so such a spelling is accepted where it names the same
+  directory and still rejected on a case-sensitive volume, where it does not.
+  The ``resolved`` field keeps the caller's spelling either way.
+* A rejection message names the candidate and the root as given, never the real
+  path the candidate resolves to: the workspace resolver echoes these messages to
+  an MCP client, which would otherwise learn where a server-side link leads.
 """
 
 from __future__ import annotations
@@ -88,7 +101,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Optional, Union
 
 PathLike = Union[str, Path]
@@ -106,6 +119,7 @@ class PathContainmentViolation(str, Enum):
     OUTSIDE_ROOT = "outside-root"
     SYMLINK = "symlink"
     MISSING = "missing"
+    EMBEDDED_NUL = "embedded-nul"
 
 
 @dataclass(frozen=True)
@@ -146,10 +160,39 @@ def _has_parent_component(value: PathLike) -> bool:
     """True when any whole path component of *value* is ``..``.
 
     Tokenises through PurePosixPath after normalising backslashes, so a
-    Windows-style separator is understood on POSIX as well. Whole components
-    only: ``a..b`` is a legal filename, not traversal.
+    Windows-style separator is understood on POSIX as well, and through
+    PureWindowsPath, which reads a drive-relative ``C:..\\b`` as the drive and
+    then ``..``: read as POSIX text that is one component, ``C:..``, and the
+    traversal passed. Whole components only: ``a..b`` is a legal filename, not
+    traversal.
     """
-    return _PARENT in PurePosixPath(str(value).replace("\\", "/")).parts
+    text = str(value)
+    return (
+        _PARENT in PurePosixPath(text.replace("\\", "/")).parts
+        or _PARENT in PureWindowsPath(text).parts
+    )
+
+
+def _is_within(resolved: Path, resolved_root: Path) -> bool:
+    """Whether *resolved* is at or below *resolved_root*.
+
+    By text first (``is_relative_to``), then, when the text says no, by identity:
+    *resolved* or one of its parents is the root's own directory
+    (``os.path.samefile``). On a case-insensitive file system a candidate spelled
+    in another case than the root names the same directory and the text alone
+    rejected it; on a case-sensitive one the two are different directories and
+    the identity check says so. A path that does not exist has no identity and
+    is skipped, so a nonexistent candidate is decided by the text, as before.
+    """
+    if resolved.is_relative_to(resolved_root):
+        return True
+    for ancestor in (resolved, *resolved.parents):
+        try:
+            if os.path.samefile(ancestor, resolved_root):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _reject(
@@ -190,8 +233,18 @@ def validate_contained_path(
         canonical absolute path; on failure ``error`` names the offending entry
         and the rule it broke. Callers turn a failure into exit code 2.
     """
-    # Text-level check first: it does not touch the filesystem, and it is the
-    # one rule that must hold regardless of where the path would resolve to.
+    # Text-level checks first: they do not touch the filesystem. A NUL names no
+    # file, and os.lstat and resolve() raise ValueError for one, which the
+    # callers' except clauses (OSError, ValueError) do not all cover.
+    for text, what in ((candidate, "candidate"), (root, "root")):
+        if "\x00" in str(text):
+            return _reject(
+                PathContainmentViolation.EMBEDDED_NUL,
+                text,
+                root,
+                f"the {what} '{_display(text)}' holds a NUL character; no path does",
+            )
+    # The one rule that must hold regardless of where the path would resolve to.
     if _has_parent_component(candidate):
         return _reject(
             PathContainmentViolation.PARENT_TRAVERSAL,
@@ -242,6 +295,13 @@ def validate_contained_path(
         names_another_path = _is_link_stat(os.lstat(joined))
     except OSError:
         names_another_path = False
+    # The root itself is accepted, and so is naming it by the spelling the caller
+    # gave for it, link or not: an absolute candidate equal to a root reached
+    # through a link was refused as a symlink while "." was accepted.
+    if names_another_path and os.path.normcase(
+        os.path.normpath(joined)
+    ) == os.path.normcase(os.path.normpath(os.path.abspath(root))):
+        names_another_path = False
     if names_another_path:
         return _reject(
             PathContainmentViolation.SYMLINK,
@@ -262,13 +322,12 @@ def validate_contained_path(
             "to it is a symlink loop or cannot be read",
         )
 
-    if not resolved.is_relative_to(resolved_root):
+    if not _is_within(resolved, resolved_root):
         return _reject(
             PathContainmentViolation.OUTSIDE_ROOT,
             candidate,
             root,
-            f"'{_display(candidate)}' resolves to '{_display(resolved)}', "
-            f"which is outside '{_display(resolved_root)}'",
+            f"'{_display(candidate)}' resolves outside '{_display(root)}'",
         )
 
     if must_exist and not resolved.is_dir():
