@@ -249,3 +249,49 @@ class TestADirectoryNamedTildeIsNotAHome:
         assert "outside.py" in found, found
         assert f"{name}/inside.py" not in found, found
         assert f"{name}/.gitignore" in found, found
+
+
+class TestTheStandaloneWalk:
+    def test_get_files_not_matching_spec_does_not_descend_a_junction(
+        self, tmp_path, monkeypatch
+    ):
+        """Called without a pre-collected file list, the function walked the tree
+        with a raw ``os.walk``, which follows a junction on 3.10 and 3.11."""
+        root = tmp_path / "tree"
+        _write(root, "app.py")
+        _write(root, "junction/inside.py")
+        _junction_stand_in(monkeypatch, root / "junction")
+
+        found = _names(root, gss.get_files_not_matching_spec(root, IgnoreParser()))
+
+        assert "app.py" in found, found
+        assert "junction/inside.py" not in found, found
+
+
+class TestTheLinkWalkCostsNoExtraStat:
+    def test_a_tree_of_regular_files_is_walked_without_islink(
+        self, tmp_path, monkeypatch
+    ):
+        """``file_links_leaving_tree`` asked ``os.path.islink`` about every regular
+        file, one ``lstat`` each, repeating what the listing's cached entry already
+        answered; bandit, checkov, snyk-code and the link exclusions each walk the
+        whole tree through it."""
+        root = tmp_path / "tree"
+        for i in range(5):
+            _write(root, f"pkg/mod{i}.py")
+            _write(root, f"top{i}.py")
+        calls: list[str] = []
+        real_islink = os.path.islink
+
+        def counting_islink(path):
+            calls.append(os.fspath(path))
+            return real_islink(path)
+
+        monkeypatch.setattr(os.path, "islink", counting_islink)
+
+        all_files: list[str] = []
+        links = file_links_leaving_tree(root, all_files=all_files)
+
+        assert links == []
+        assert len(all_files) == 10
+        assert calls == [], calls

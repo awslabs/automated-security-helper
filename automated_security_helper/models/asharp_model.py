@@ -1158,6 +1158,13 @@ class AshAggregatedResults(RecordModel):
     # every project exposed.
     _secret_values: set = PrivateAttr(default_factory=set)
 
+    # How many findings in converted files the --changed-files-only filter has
+    # already said it kept for this model (utils/changed_files.py). The scan
+    # execution engine narrows the one model at the end of the scan phase and
+    # again at the report phase, and the kept findings survive both passes, so
+    # without this the count was said twice. Never serialized.
+    _changed_files_kept_said: int = PrivateAttr(default=0)
+
     # Each of the three entry points below resolves the AshConfig forward reference
     # before doing anything else. This module does not resolve it when it is
     # imported, so unless config.ash_config's last line already has, the first of

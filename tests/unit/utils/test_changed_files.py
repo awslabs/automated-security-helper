@@ -583,3 +583,65 @@ class TestLocationReadings:
         filtered = filter_results_to_changed_files(results, changed, source_dir)
 
         assert len(filtered.sarif.runs[0].results) == 1
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="a Windows file name is UTF-16; the byte-wise percent form is POSIX's",
+    )
+    def test_a_percent_encoded_non_utf8_name_matches_the_file_it_names(self, tmp_path):
+        """``Path.as_uri()`` spells a latin-1 ``secr\\xe9t.py`` as ``secr%E9t.py``;
+        decoded with ``replace`` that became ``secr\\ufffdt.py``, a name no file has,
+        so the finding was dropped though the file had changed."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        name = os.fsdecode(b"secr\xe9t.py")
+        changed = {(source_dir / name).resolve()}
+        results = _make_results_with_sarif(
+            [_make_result("secr%E9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["secr%E9t.py"]
+
+
+@pytest.mark.unit
+class TestTheKeptCountIsSaidOnce:
+    """The scan execution engine narrows the one result model after the scan phase
+    and again at the report phase; a kept converted finding survives both passes,
+    so the "Kept N finding(s) located in converted files" count was said twice."""
+
+    def test_the_kept_count_is_said_once_for_one_result_model(
+        self, tmp_path, ash_warnings
+    ):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        results = _make_results_with_sarif(
+            [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+        )
+
+        filter_results_to_changed_files(results, changed, source_dir)
+        filter_results_to_changed_files(results, changed, source_dir)
+
+        said = [m for m in ash_warnings() if "located in converted files" in m]
+        assert len(said) == 1, ash_warnings()
+
+    def test_a_different_model_is_told_on_its_own(self, tmp_path, ash_warnings):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        for _ in range(2):
+            results = _make_results_with_sarif(
+                [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+            )
+            filter_results_to_changed_files(results, changed, source_dir)
+
+        said = [m for m in ash_warnings() if "located in converted files" in m]
+        assert len(said) == 2, ash_warnings()

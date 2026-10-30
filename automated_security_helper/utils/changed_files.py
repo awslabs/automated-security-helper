@@ -37,13 +37,20 @@ def _location_readings(uri: str) -> List[str]:
     directory was dropped from a ``--changed-files-only`` report whether or not
     its file had changed. Both readings are tried; the decoded one is left out
     when it is the same text.
+
+    Decoded with ``surrogateescape``: a name that is not UTF-8 is percent-encoded
+    byte by byte (``secr%E9t.py`` for latin-1), and the default ``replace``
+    handler turned that byte into U+FFFD, a name no file has, so the finding was
+    dropped though its file had changed. With ``surrogateescape`` the byte becomes
+    the lone surrogate ``\\udce9``, which is the name git and ``os.fsdecode`` give
+    the file, so the reading resolves to it.
     """
     if uri.startswith("file://"):
         uri = uri[7:]
         if uri.startswith("///"):
             uri = uri[2:]
     readings = [uri]
-    decoded = unquote(uri)
+    decoded = unquote(uri, errors="surrogateescape")
     if decoded != uri:
         readings.append(decoded)
     return readings
@@ -139,7 +146,7 @@ def filter_results_to_changed_files(
         discarded += len(run.results) - len(filtered)
         run.results = filtered
 
-    if unplaced_converted:
+    if unplaced_converted and _not_yet_said(results, unplaced_converted):
         ASH_LOGGER.warning(
             "Kept %d finding(s) located in converted files (notebooks, archive "
             "members): the changed-file filter has no record of the source file "
@@ -177,10 +184,30 @@ def filter_results_to_changed_files(
     if not changed_files and discarded:
         ASH_LOGGER.warning(
             "Discarded %d finding(s): the changed-file set is empty, so it matched "
-            "no location and every located finding was removed. This report is "
-            "therefore not evidence that the tree is clean. Either the diff against "
-            "--base-ref is empty, or none of the paths it names are inside "
-            "--source-dir.",
+            "no location and every finding it could place was removed (one in a "
+            "converted file with no recorded source, or at a location no path "
+            "resolves, is kept and said above). This report is therefore not "
+            "evidence that the tree is clean. Either the diff against --base-ref "
+            "is empty, or none of the paths it names are inside --source-dir.",
             discarded,
         )
     return results
+
+
+def _not_yet_said(results: "AshAggregatedResults", kept: int) -> bool:
+    """Whether the kept-converted count is new for *results*; records it if so.
+
+    The scan execution engine narrows the one result model at the end of the scan
+    phase and again at the report phase (the filter is idempotent on the
+    findings), and a kept converted finding survives both passes, so the same
+    count was said twice. The count said is kept on the model as a private
+    attribute (``AshAggregatedResults._changed_files_kept_said``, never
+    serialized); a model without it is told every time.
+    """
+    try:
+        if getattr(results, "_changed_files_kept_said", None) == kept:
+            return False
+        results._changed_files_kept_said = kept
+    except (AttributeError, ValueError):
+        return True
+    return True

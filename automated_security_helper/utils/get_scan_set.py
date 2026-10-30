@@ -265,6 +265,23 @@ def _is_link_to_directory(path: str | Path) -> bool:
     return bool(isjunction is not None and isjunction(path))
 
 
+def _entry_is_link_to_directory(entry: "os.DirEntry[str]") -> bool:
+    """:func:`_is_link_to_directory` for a ``scandir`` entry, from what it holds.
+
+    ``entry.is_symlink()`` answers from the listing's cached ``lstat``, where
+    ``os.path.islink`` runs one ``lstat`` per entry: for a tree of regular files
+    that was one system call per file, repeated by every scanner that walks the
+    tree through :func:`file_links_leaving_tree`. The junction test is
+    ``os.path.isjunction``, read off ``os.path`` when called as
+    :func:`_is_link_to_directory` reads it (a test stands one in); on POSIX it
+    answers without a system call.
+    """
+    if entry.is_symlink():
+        return True
+    isjunction = getattr(os.path, "isjunction", None)
+    return bool(isjunction is not None and isjunction(entry.path))
+
+
 def _walk_without_link_directories(top: str | Path):
     """``os.walk(top)`` that never descends a link or junction to a directory.
 
@@ -363,19 +380,19 @@ def file_links_leaving_tree(
         for entry in listed:
             relative = f"{prefix}{entry.name}"
             try:
-                if entry.is_dir(follow_symlinks=False) and not _is_link_to_directory(
-                    entry.path
-                ):
+                if entry.is_dir(
+                    follow_symlinks=False
+                ) and not _entry_is_link_to_directory(entry):
                     pending.append((entry.path, f"{relative}/"))
                     continue
                 # A symlink to a directory, or a Windows junction: on Python 3.12
                 # and later a junction is neither a symlink nor, with
                 # follow_symlinks=False, a directory to DirEntry, so tested by
                 # itself; otherwise it was listed among the files and never
-                # recorded as a directory link.
-                if (
-                    entry.is_symlink() or _is_link_to_directory(entry.path)
-                ) and os.path.isdir(entry.path):
+                # recorded as a directory link. From the entry's own cached
+                # lstat, not os.path.islink: that was one extra system call per
+                # regular file.
+                if _entry_is_link_to_directory(entry) and os.path.isdir(entry.path):
                     if directory_links is not None and not resolves_inside(
                         entry.path, root
                     ):
@@ -1679,9 +1696,11 @@ def get_files_not_matching_spec(
     files its own walk already filtered, so it sees each link once.
     """
     if _all_files is None:
-        # Fallback: walk again if called standalone without pre-collected files
+        # Fallback: walk again if called standalone without pre-collected files.
+        # The same walk as scan_set's, so a link or junction to a directory is
+        # never descended here either (os.walk of 3.10 and 3.11 follows a junction).
         _all_files = []
-        for root, _dirs, files in os.walk(path):
+        for root, _dirs, files in _walk_without_link_directories(path):
             for f in files:
                 _all_files.append(os.path.join(root, f))
 
