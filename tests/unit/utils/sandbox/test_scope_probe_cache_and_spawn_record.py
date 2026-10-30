@@ -269,11 +269,20 @@ def test_quoted_spellings_cover_only_texts_quoting_rewrites(tmp_path):
     assert "'" in spellings[0] and '"' in spellings[0]
 
 
-def test_a_plugin_input_holding_a_quote_is_hidden_in_both_spellings(
+def test_a_hidden_plugin_input_holding_a_quote_stays_hidden_when_quoted(
     tmp_path, debug_record
 ):
-    spec = "tool @ git+https://example.invalid/it's-a-spec.git"
-    sandbox_scope = _scope(tmp_path, plugin_inputs=(spec,), command="tool")
+    """A plugin input is hidden by origin: when it holds an env-read value, the
+    uv layer hides the whole input. Quoting respells a quote character inside
+    it, so without the cover the rest of the input would print once the value
+    inside is hidden; with the cover the input's quoted spelling is hidden too.
+    An input holding no value is shown by design (a constraint stays
+    diagnosable), so that shape is not what this test measures."""
+    value = "example.invalid"
+    spec = f"tool @ git+https://{value}/it's-a-spec.git"
+    sandbox_scope = _scope(
+        tmp_path, environment_values=(value,), plugin_inputs=(spec,), command="tool"
+    )
 
     with scope.sandbox_scope(sandbox_scope):
         scope._plan_spawn(
@@ -281,6 +290,7 @@ def test_a_plugin_input_holding_a_quote_is_hidden_in_both_spellings(
         )
 
     record = _record(debug_record)
+    assert value not in record
     assert spec not in record
     assert shlex.quote(spec)[1:-1] not in record
     assert "it's-a-spec" not in record and "it'\"'\"'s-a-spec" not in record
