@@ -265,7 +265,12 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         (elsewhere / "ash_output").mkdir(parents=True)
         (elsewhere / "ash_output" / "keep.txt").write_text("keep", encoding="utf-8")
         # After the scan, <source>/.ash is replaced by a link to another tree.
-        (source / ".ash").symlink_to(elsewhere)
+        try:
+            (source / ".ash").symlink_to(elsewhere)
+        except OSError:
+            # hasattr(os, "symlink") is true on Windows too, where creating one
+            # needs a privilege or Developer Mode (WinError 1314).
+            pytest.skip("this platform refuses to create a symlink here")
         registry.get_scan.return_value = entry
 
         with _use(registry):
@@ -286,7 +291,10 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
         (elsewhere / "keep.txt").write_text("keep", encoding="utf-8")
-        (source / ".ash" / "ash_output").symlink_to(elsewhere)
+        try:
+            (source / ".ash" / "ash_output").symlink_to(elsewhere)
+        except OSError:
+            pytest.skip("this platform refuses to create a symlink here")
         registry.get_scan.return_value = entry
 
         with _use(registry):
