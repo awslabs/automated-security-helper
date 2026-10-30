@@ -529,15 +529,15 @@ def test_a_registry_rules_name_passes_with_no_working_directory(
     "override, key",
     [
         (
-            'scanners.semgrep.options={"config": "rules/zz-own.yml"}',
+            'scanners.semgrep.options={"config": "rules/zz-own"}',
             "scanners.semgrep.options",
         ),
         (
-            'scanners.opengrep={"options": {"config": "rules/zz-own.yml"}}',
+            'scanners.opengrep={"options": {"config": "rules/zz-own"}}',
             "scanners.opengrep",
         ),
         (
-            'scanners={"semgrep": {"options": {"config": "rules/zz-own.yml"}}}',
+            'scanners={"semgrep": {"options": {"config": "rules/zz-own"}}}',
             "scanners",
         ),
     ],
@@ -550,7 +550,10 @@ def test_a_relative_rules_file_inside_a_mapping_is_refused_with_no_working_direc
     mapping value down to the option and reads the disk for it, so with the
     directory gone it is the same relative value with nothing to read, refused
     the same way, naming the key as written and not the value. Read at the
-    option's own key only, these passed as written."""
+    option's own key only, these passed as written. The value is a rules
+    DIRECTORY (``rules/zz-own``, the shape ``--config rules/`` takes): it has no
+    rules-file suffix the anchoring could read as a path on its own, so with
+    nothing on disk only this check tells it from a registry entry."""
     from automated_security_helper.config.resolve_config import (
         _anchored_operator_overrides,
     )
