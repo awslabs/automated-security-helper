@@ -121,24 +121,17 @@ def python_code_argv(source: str) -> List[str]:
     ``nix develop --command`` runs in the scan's own directory: ``-P`` where Python
     has it, and ``source`` behind :data:`DROP_WORKING_DIRECTORY` for Python 3.10.
 
-    A ``from __future__ import`` at the start of ``source`` (after blank lines and
-    comments only) is kept ahead of the dropping statement: Python admits it only as
-    the first statement, and placed behind another it is a SyntaxError.
+    The dropping statement is the first statement executed, always. ``source`` runs
+    behind it as its own compiled unit (``exec(compile(...))``), so a ``from
+    __future__ import`` at the start of ``source`` is legal there as the first
+    statement of that unit, and nothing of ``source`` is hoisted ahead of the drop:
+    moving a leading future-import LINE ahead used to move the rest of that line
+    with it, and a ``;``-joined source (the one caller writes one) then imported
+    the package from the working directory before the drop, which is the import
+    this function exists to prevent; the future import itself imports
+    ``__future__`` with the working directory first on ``sys.path``.
     """
-    lines = source.splitlines(keepends=True)
-    future: List[str] = []
-    rest: List[str] = []
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith(_FUTURE_IMPORT):
-            future.append(line if line.endswith("\n") else line + "\n")
-            continue
-        if not stripped or stripped.startswith("#"):
-            rest.append(line)
-            continue
-        rest.extend(lines[index:])
-        break
-    code = "".join(future) + DROP_WORKING_DIRECTORY + "".join(rest)
+    code = DROP_WORKING_DIRECTORY + f"exec(compile({source!r}, '<ash>', 'exec'))\n"
     return [sys.executable, *_SAFE_PATH_FLAGS, "-c", code]
 
 
