@@ -29,6 +29,7 @@ from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.utils.inner_run_outcome import record_reports_written
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from automated_security_helper.workspace.resolver import resolve_workspace
 
@@ -308,6 +309,11 @@ def _results_with_the_file_apart_from_the_model(tmp_path, in_model, in_file):
     )
     results.scanner_results["bandit"] = ScannerStatusInfo()
     results.scanner_results["semgrep"] = ScannerStatusInfo()
+    # The exit code reads reports/ash.sarif only when the results record it as a
+    # file this run's SARIF reporter wrote (report_file_written_as); a file in
+    # reports/ that nothing recorded is an earlier run's. The report phase makes
+    # this record; the fixture makes it the same way.
+    record_reports_written(results, [("ash.sarif", "sarif")])
     sarif_file = tmp_path / "out" / "reports" / "ash.sarif"
     sarif_file.parent.mkdir(parents=True, exist_ok=True)
     sarif_file.write_text(
@@ -420,7 +426,11 @@ def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypa
     metric.actionable = 2
     metric.targets_attempted = 1
     metric.targets_failed = 0
-    monkeypatch.setattr(ras, "get_unified_scanner_metrics", lambda _results: [metric])
+    # The product passes the model by keyword (asharp_model=...), so the stand-in
+    # takes the call in either shape.
+    monkeypatch.setattr(
+        ras, "get_unified_scanner_metrics", lambda *_args, **_kwargs: [metric]
+    )
 
     exit_code = ras._compute_exit_code(
         results, _opts(tmp_path, "medium"), report_sarif_written_this_run=False
