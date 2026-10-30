@@ -39,6 +39,7 @@ from automated_security_helper.utils.redacted_model import (
     carry_environment_values,
     environment_strings,
     first_env_scalar,
+    without_env_scalars,
 )
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
@@ -503,12 +504,21 @@ class BuildConfig(RedactedSection):
     build_mode: Annotated[
         Literal["ONLINE", "OFFLINE"],
         Field(
-            description="Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning."
+            description=(
+                "Not used: nothing reads this setting, so it changes neither the "
+                "container image build nor the scan. To scan offline, pass "
+                "--offline or set ASH_OFFLINE."
+            )
         ),
     ] = "ONLINE"
     tool_install_scripts: Annotated[
         Dict[str, List[str]],
-        Field(description="Map of tool names to their installation scripts"),
+        Field(
+            description=(
+                "Not used: nothing reads this setting, so no script listed here "
+                "runs. Map of tool names to their installation scripts."
+            )
+        ),
     ] = {}
     custom_scanners: Annotated[
         List[ScannerPluginBase],
@@ -575,13 +585,15 @@ def _merge_config_values(base: Any, overlay: Any) -> Any:
     """Merge two raw config values, ``overlay`` winning key by key.
 
     Model instances are dumped first so that a value built in Python merges the
-    same way as one read from YAML. Anything that is not a mapping on both sides
-    is replaced by ``overlay`` whole.
+    same way as one read from YAML. An ``overlay`` instance is dumped with only
+    the fields it was built with: dumped whole, each default it was never given
+    replaced the value ``base`` set for that key. Anything that is not a mapping
+    on both sides is replaced by ``overlay`` whole.
     """
     if isinstance(base, BaseModel):
         base = base.model_dump()
     if isinstance(overlay, BaseModel):
-        overlay = overlay.model_dump()
+        overlay = overlay.model_dump(exclude_unset=True)
     if not (isinstance(base, dict) and isinstance(overlay, dict)):
         return overlay
     merged = dict(base)
@@ -635,9 +647,13 @@ class _PluginConfigSegment(RedactedSection):
     def _read_field_name_spellings_as_aliases(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
+        # The spelling other than the declared one already read for each
+        # declared key: the field-name spelling here, a variant below.
+        seen_variant: Dict[str, str] = {}
         for field_name, alias in field_name_spellings(cls).items():
             if field_name not in data:
                 continue
+            seen_variant[alias] = field_name
             data = dict(data)
             field_name_value = data.pop(field_name)
             if alias in data:
@@ -652,12 +668,14 @@ class _PluginConfigSegment(RedactedSection):
         # the defaults. The declared spelling wins where both set a key, as
         # for the field-name spelling above. Two non-declared spellings of one
         # plugin name no winner and are refused as ambiguous, the same rule the
-        # document loader applies per file (plugin_section_names). A document
-        # load folds there and never reaches this branch; it runs for a
-        # configuration built from a dict directly.
+        # document loader applies per file (plugin_section_names). The
+        # field-name spelling is one of them: the loader does not take it for
+        # the declared spelling, so a variant beside it is refused here too,
+        # where it was merged in silently. A document load folds there and
+        # never reaches this branch; it runs for a configuration built from a
+        # dict directly.
         declared = {info.alias or name for name, info in cls.model_fields.items()}
         folded = {_folded_section_name(key): key for key in declared}
-        seen_variant: Dict[str, str] = {}
         for key in list(data):
             if not isinstance(key, str) or key in declared:
                 continue
@@ -1151,7 +1169,7 @@ class RuntimeOverridesConfig(RedactedSection):
                 "sections of the plugins that send data off the host: the s3, "
                 "aws-security-hub, cloudwatch-logs and bedrock-summary-reporter "
                 "reporters and the detect-secrets, npm-audit, opengrep, semgrep, "
-                "snyk-code and trivy-repo scanners) are added to it."
+                "snyk-code, trivy, trivy-repo and zizmor scanners) are added to it."
             )
         ),
     ] = [
@@ -2576,11 +2594,22 @@ class AshConfig(RedactedSection):
         (``environment_record.fill_environment_references``). The MCP server
         saves a session's config with these (``profile_registry
         .materialize_session_config``). In that dump a reference is written as
-        the reference only where the whole string is the value: one the load
+        the reference only where the whole string is the value: a value the load
         changed after reading it (a relative path taken from the file's
-        directory) is written as it is now, and any other string that reads as
-        an ``!ENV`` reference is written quoted.
+        directory) is refused, naming the variable
+        (``environment_record.EnvironmentValueInPath``), and any other string
+        that reads as an ``!ENV`` reference is written quoted. A value read from
+        the environment that the dump still holds as text where no reference
+        was written is refused too, naming only the variable. Without
+        ``as_written`` such a value is written as text, as render_config_file
+        writes it.
+
+        The direct dump is a JSON document for a ``.json`` path, as
+        render_config_file writes one; a JSON path whose dump has to write
+        references is refused. The whole text is built before the file is
+        opened, so a dump that fails leaves an existing file as it was.
         """
+        from automated_security_helper.config.config_sources import is_json_file
         from automated_security_helper.config.config_writer import (
             SCHEMA_COMMENT,
             render_config_file,
@@ -2589,21 +2618,55 @@ class AshConfig(RedactedSection):
 
         config_path = Path(config_path)
         if exclude_unset or (as_written and not env_tags):
-            data = self.model_dump(by_alias=True, exclude_unset=exclude_unset)
-            if as_written and self._environment_references:
-                from automated_security_helper.config.environment_record import (
-                    record_environment_references,
-                    written_without_tag,
+            writes_references = as_written and bool(self._environment_references)
+            if is_json_file(config_path):
+                if writes_references:
+                    raise ValueError(
+                        "the configuration was not written: with exclude_unset or "
+                        "env_tags=False, the references its files read from the "
+                        "environment are written to YAML only; save it to a YAML "
+                        "path"
+                    )
+                text = (
+                    json.dumps(
+                        self.model_dump(
+                            mode="json", by_alias=True, exclude_unset=exclude_unset
+                        ),
+                        indent=2,
+                    )
+                    + "\n"
                 )
+            else:
+                data = self.model_dump(by_alias=True, exclude_unset=exclude_unset)
+                if writes_references:
+                    from automated_security_helper.config.environment_record import (
+                        record_environment_references,
+                        written_without_tag,
+                    )
 
-                data = record_environment_references(
-                    data,
-                    self._environment_references,
-                    mark=TaggedReference if env_tags else written_without_tag,
-                    whole_only=True,
-                )
+                    data = record_environment_references(
+                        data,
+                        self._environment_references,
+                        mark=TaggedReference if env_tags else written_without_tag,
+                        whole_only=True,
+                    )
+                    left = first_env_scalar(data)
+                    if left is not None:
+                        # By the variable's name alone: the text is the value.
+                        raise RuntimeError(
+                            "the configuration was not written: it would hold a "
+                            f"value read from environment variable {left.variable} "
+                            "as text, where its file wrote a reference to the "
+                            "variable"
+                        )
+                else:
+                    # A section kept without validation (an external plugin's)
+                    # holds such values as a str subclass, which the dumper
+                    # cannot write.
+                    data = without_env_scalars(data)
+                text = yaml.dump(data, Dumper=_ConfigDumper, indent=2)
             with open(config_path, mode="w", encoding="utf-8") as f:
-                yaml.dump(data, f, Dumper=_ConfigDumper, indent=2)
+                f.write(text)
             return
         render = render_config_file_as_written if as_written else render_config_file
         config_path.write_text(
@@ -3050,8 +3113,19 @@ _OTHER_YAML_BREAKS = (chr(0x85), chr(0x2028), chr(0x2029))
 #: Both shapes are unreachable through the save, whose one caller passes
 #: elements of str.splitlines, but the pattern says what the caller means.
 _ALL_LINE_BREAKS = "\r\n" + "".join(_OTHER_YAML_BREAKS)
+
+
+def _key_pattern(key: str) -> str:
+    """A pattern for ``key:`` as a YAML block mapping can write it: plain,
+    single-quoted or double-quoted, with spaces or tabs before the colon
+    (_key_on_line reads the same spellings)."""
+    return rf"(?:{key}|\"{key}\"|'{key}')[ \t]*:"
+
+
 _EMPTY_SUPPRESSIONS_LINE = re.compile(
-    r"^(?P<indent>[ \t]+)suppressions:[ \t]*(?:\[[ \t]*\]|~|null|Null|NULL)[ \t]*"
+    r"^(?P<indent>[ \t]+)(?P<key>"
+    + _key_pattern("suppressions")
+    + r")[ \t]*(?:\[[ \t]*\]|~|null|Null|NULL)[ \t]*"
     r"(?P<comment>#[^" + _ALL_LINE_BREAKS + r"]*)?"
     r"(?P<end>\r?\n?|[" + "".join(_OTHER_YAML_BREAKS) + r"])\Z"
 )
@@ -3062,7 +3136,9 @@ _EMPTY_SUPPRESSIONS_LINE = re.compile(
 #: suppressions key is inserted under it once the value is dropped
 #: (_blocked_empty_global_settings).
 _EMPTY_GLOBAL_SETTINGS_LINE = re.compile(
-    r"^global_settings:[ \t]*(?:\{[ \t]*\}|~|null|Null|NULL)[ \t]*"
+    r"^(?P<key>"
+    + _key_pattern("global_settings")
+    + r")[ \t]*(?:\{[ \t]*\}|~|null|Null|NULL)[ \t]*"
     r"(?P<comment>#[^" + _ALL_LINE_BREAKS + r"]*)?"
     r"(?P<end>\r?\n?|[" + "".join(_OTHER_YAML_BREAKS) + r"])\Z"
 )
@@ -3084,8 +3160,36 @@ def _blocked_empty_global_settings(lines: list) -> None:
         if found is not None:
             comment = found.group("comment")
             kept = f" {comment}" if comment else ""
-            lines[idx] = f"global_settings:{kept}{found.group('end')}"
+            lines[idx] = f"{found.group('key')}{kept}{found.group('end')}"
             return
+
+
+#: What may follow a mapping key's colon in block style: nothing, whitespace,
+#: or a line break, YAML's other breaks (_OTHER_YAML_BREAKS) included.
+_AFTER_A_KEY_COLON = ("", " ", "\t", "\r", "\n", *_OTHER_YAML_BREAKS)
+
+
+def _key_on_line(stripped: str, key: str) -> Optional[int]:
+    """The length of the ``key:`` that *stripped*, a line with its indent
+    stripped, starts with, or None when it starts with no such key.
+
+    The key as a YAML block mapping can write it (_key_pattern): plain,
+    single-quoted or double-quoted, with spaces or tabs before the colon, and
+    the colon followed by whitespace, a line break or nothing. Reading only
+    the plain ``key:`` spelling took a quoted key, or one with a space before
+    its colon, for no key at all: the save then added a second key of that
+    name, and refused the file it had made.
+    """
+    for spelled in (key, f'"{key}"', f"'{key}'"):
+        if not stripped.startswith(spelled):
+            continue
+        after = stripped[len(spelled) :]
+        colon = len(after) - len(after.lstrip(" \t"))
+        if after[colon : colon + 1] == ":" and (
+            after[colon + 1 : colon + 2] in _AFTER_A_KEY_COLON
+        ):
+            return len(spelled) + colon + 1
+    return None
 
 
 def _suppressions_key_line(lines: list) -> tuple:
@@ -3106,13 +3210,16 @@ def _suppressions_key_line(lines: list) -> tuple:
         if indent == 0:
             if in_global:
                 return (None, None)
-            in_global = stripped.startswith("global_settings:")
+            in_global = _key_on_line(stripped, "global_settings") is not None
             continue
         if not in_global:
             continue
         if child_indent is None:
             child_indent = indent
-        if indent == child_indent and stripped.startswith("suppressions:"):
+        if (
+            indent == child_indent
+            and _key_on_line(stripped, "suppressions") is not None
+        ):
             return (idx, indent)
     return (None, None)
 
@@ -3123,7 +3230,8 @@ def _holds_a_value_on_its_line(key_line: str) -> bool:
     tag alone (``&shared``, ``!!seq``) names or types the node below the key,
     which can be the block list, so it is read past; one followed by a value
     counts as that value."""
-    rest = key_line.lstrip(" \t")[len("suppressions:") :].strip()
+    stripped = key_line.lstrip(" \t")
+    rest = stripped[_key_on_line(stripped, "suppressions") or 0 :].strip()
     while rest.startswith(("&", "!")):
         parts = rest.split(None, 1)
         rest = parts[1].strip() if len(parts) > 1 else ""
@@ -3197,7 +3305,7 @@ def _blocked_empty_suppressions(lines: list) -> None:
         comment = found.group("comment")
         kept = f" {comment}" if comment else ""
         lines[key_idx] = (
-            f"{found.group('indent')}suppressions:{kept}{found.group('end')}"
+            f"{found.group('indent')}{found.group('key')}{kept}{found.group('end')}"
         )
 
 
@@ -3318,7 +3426,7 @@ def _repeated_key(text: str, is_json: bool, any_depth: bool = False) -> Optional
     does when the file is loaded."""
     try:
         root = (
-            json.loads(text, object_pairs_hook=_KeyPairs)
+            json.loads(text.removeprefix(chr(0xFEFF)), object_pairs_hook=_KeyPairs)
             if is_json
             else yaml.compose(text, Loader=_KeepsEnvReferences)  # nosec B506 - a SafeLoader, composed only
         )
@@ -3375,9 +3483,10 @@ def _apart_from_the_entry(document: Any, suppression: Optional[AshSuppression]) 
 
 def _parsed_config(text: str, is_json: bool) -> Any:
     """*text* parsed as the file is read: YAML with ``!ENV`` kept as text, or
-    JSON as JSON."""
+    JSON as JSON, past a leading byte order mark as the loader reads it
+    (utf-8-sig)."""
     if is_json:
-        return json.loads(text)
+        return json.loads(text.removeprefix(chr(0xFEFF)))
     return yaml.load(text, Loader=_KeepsEnvReferences)  # nosec B506 - a SafeLoader
 
 
@@ -3605,7 +3714,10 @@ def _write_checked(
     cache: it checks the staged file holds exactly the bytes handed to
     write(), not what the platters would answer after a crash), and replace
     the resolved target
-    in one os.replace, after which the directory is synced too. So a failure
+    in one os.replace, after which the directory is synced too. Right before
+    the replace the config is read again, and one whose bytes are no longer
+    *earlier* (written meanwhile, or created or removed) is refused, so a
+    change made since the save read the file is not lost. So a failure
     at any step leaves the config as it was: a write cut short on the live
     file (a full disk, a kill) would have truncated it and lost the
     suppressions it held, and without the syncs a power loss could leave the
@@ -3694,6 +3806,21 @@ def _write_checked(
             )
         if kept_mode is not None and not hasattr(os, "fchmod"):
             os.chmod(staged, kept_mode)
+        # The config as it is now, against the bytes the save was built from:
+        # a change written to it since that read (an editor's save, a second
+        # suppression save) would otherwise be replaced by bytes that never
+        # held it. The window left is the one between this read and the
+        # replace below.
+        try:
+            current: Optional[bytes] = target.read_bytes()
+        except FileNotFoundError:
+            current = None
+        if current != earlier:
+            raise _left_unchanged(
+                "the config changed while the suppression was being saved, so "
+                "it is not saved; save it again",
+                config_path,
+            )
         replace_refusal: Optional[str] = None
         try:
             os.replace(staged, target)
@@ -3833,6 +3960,11 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         if undecoded is not None:
             # Outside the handler, so the decoder's error is not its context.
             raise _left_unchanged(undecoded, config_path)
+        # A leading byte order mark, which the loader reads past (utf-8-sig)
+        # and json.loads refuses: held apart and put back, as for YAML below.
+        json_mark = ""
+        if json_text is not None and json_text.startswith(chr(0xFEFF)):
+            json_mark, json_text = json_text[0], json_text[1:]
         new_json, held_json = _json_config_with_entry(
             config_path, json_text, suppression
         )
@@ -3840,9 +3972,10 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
             return False
         _write_checked(
             config_path,
-            "".join(_ending_with(new_json.splitlines(keepends=True), eol)).encode(
-                "utf-8"
-            ),
+            (
+                json_mark
+                + "".join(_ending_with(new_json.splitlines(keepends=True), eol))
+            ).encode("utf-8"),
             suppression,
             held_json,
             is_json=True,
@@ -3932,6 +4065,8 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
             "/global_settings/suppressions/-, value: {...}}]",
             config_path,
         )
+    if _patch_op_over_the_list(data):
+        raise _left_unchanged(_PATCH_OVER_THE_LIST.format(config_path), config_path)
 
     # An identical entry is not written twice. Matching on rule_id and path
     # alone dropped a second line range of the same file while the caller
@@ -3980,9 +4115,14 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
             config_path,
         )
 
+    # A top-level mapping in flow style takes none of the text edits below:
+    # each inserts block lines, which a flow mapping cannot hold, so it goes
+    # to the full rewrite (Case D).
+    flow_root = _flow_style_root(lines)
+
     # Case A: a suppressions list already exists -> insert the item at its end.
     insert_idx, list_indent = _find_suppressions_append_point(lines)
-    if insert_idx is not None:
+    if insert_idx is not None and not flow_root:
         _insert_lines(
             lines, insert_idx, _serialize_entry_lines(entry, list_indent), eol
         )
@@ -4003,7 +4143,7 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     # under it as a block child instead of through the whole rewrite.
     _blocked_empty_global_settings(lines)
     gs_insert_idx, gs_child_indent = _find_global_settings_insert_point(lines)
-    if gs_insert_idx is not None:
+    if gs_insert_idx is not None and not flow_root:
         block = [f"{gs_child_indent}suppressions:\n"]
         block += _serialize_entry_lines(entry, gs_child_indent + "  ")
         _insert_lines(lines, gs_insert_idx, block, eol)
@@ -4018,7 +4158,7 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
 
     # Case C: content, but no global_settings key at all -> append a fresh block
     # at EOF, leaving every existing line (and comment) untouched.
-    if not _has_top_level_key(lines, "global_settings"):
+    if not flow_root and not _has_top_level_key(lines, "global_settings"):
         block = ["global_settings:\n", "  suppressions:\n"]
         block += _serialize_entry_lines(entry, "    ")
         _insert_lines(lines, len(lines), block, eol)
@@ -4032,11 +4172,17 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         return True
 
     # Case D (last resort): a shape we cannot safely edit as text, e.g. an inline
-    # `global_settings: {...}` mapping. Fall back to a full rewrite. This loses
-    # comments, but only for a structure that essentially never occurs.
-    from automated_security_helper.config.config_sources import uses_env_references
+    # `global_settings: {...}` mapping or a flow-style top-level mapping. Fall
+    # back to a full rewrite. This loses comments, but only for a structure that
+    # essentially never occurs.
+    from automated_security_helper.config.config_sources import (
+        text_reads_the_environment,
+    )
 
-    if uses_env_references(config_path):
+    # Read from the text this save edits, not from the file again: a second
+    # read that failed (or found other bytes) answered that nothing was read
+    # from the environment, and the rewrite then dropped the !ENV tags.
+    if text_reads_the_environment(config_path, text):
         # A rewrite here dumps what _KeepsEnvReferences read: each reference's
         # own text with its !ENV tag dropped, so a tagged reference the
         # implicit ${VAR} form does not cover would stop being resolved. (The
@@ -4094,8 +4240,8 @@ def _reference_shaped_strings_quoted(
     reference-shaped key is quoted as a value is. The blind spot is
     _KeepsEnvReferences' own: an explicitly ``!ENV``-tagged reference is read
     as its bare text, which this quoting would freeze into a literal - such
-    files never reach a full rewrite, because the save refuses any file
-    ``uses_env_references`` answers True for.
+    files never reach a full rewrite, because the save refuses any file whose
+    text ``text_reads_the_environment`` answers True for.
     """
     style = "'" if ENV_REFERENCE_PATTERN.match(value) else None
     return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
@@ -4125,6 +4271,56 @@ def _serialize_entry_lines(entry: dict, item_indent: str) -> list[str]:
         sort_keys=False,
     )
     return [f"{item_indent}{line}\n" for line in dumped.splitlines()]
+
+
+#: global_settings' suppressions list as JSON-Pointer segments.
+_SUPPRESSIONS_POINTER = ("global_settings", "suppressions")
+
+#: The save's refusal for a file whose own patch decides the list
+#: (_patch_op_over_the_list); formatted with the config path.
+_PATCH_OVER_THE_LIST = (
+    "{} has a patch operation of its own that replaces, moves, removes or "
+    "tests global_settings.suppressions (or a node above it), and the file's "
+    "patch applies after its list is read, so an entry written to the list "
+    "would not be in the list a scan reads, or the file would stop loading. "
+    "Add it as a patch instead: patch: [{{op: add, path: "
+    "/global_settings/suppressions/-, value: {{...}}}}]"
+)
+
+
+def _patch_op_over_the_list(document: Any) -> bool:
+    """Whether *document*, a parsed config file, has a ``patch`` operation that
+    writes, removes or tests global_settings' suppressions list, or a node
+    that holds it, or that moves one of them away.
+
+    A file's own patch applies after the file's keys are read
+    (config_sources), so such an operation decides the list a scan reads: a
+    ``replace`` drops the entry the save adds, and a ``test`` of the list no
+    longer holds once the list has one more entry, so the file stops loading.
+    An ``add`` at ``/global_settings/suppressions/-`` or at an index, and every
+    operation inside the list or elsewhere, leaves the entry in place. A
+    segment is read with "-" and "_" as one, as the patch's pointer walk reads
+    it, after the pointer's own escapes.
+    """
+    ops = document.get("patch") if isinstance(document, dict) else None
+    if not isinstance(ops, list):
+        return False
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+        pointers = [op.get("path")]
+        if op.get("op") == "move":
+            pointers.append(op.get("from"))
+        for pointer in pointers:
+            if not isinstance(pointer, str):
+                continue
+            segments = tuple(
+                segment.replace("~1", "/").replace("~0", "~").replace("-", "_")
+                for segment in pointer.split("/")[1:]
+            )
+            if _SUPPRESSIONS_POINTER[: len(segments)] == segments:
+                return True
+    return False
 
 
 def _json_config_with_entry(
@@ -4175,6 +4371,8 @@ def _json_config_with_entry(
             "Add it as a patch instead",
             config_path,
         )
+    if _patch_op_over_the_list(data):
+        raise _left_unchanged(_PATCH_OVER_THE_LIST.format(config_path), config_path)
     if global_settings.get("suppressions") is None:
         global_settings["suppressions"] = []
     suppressions = global_settings.setdefault("suppressions", [])
@@ -4212,11 +4410,29 @@ def _config_dump_with_entry(data: dict, entry: dict) -> str:
 
 
 def _has_top_level_key(lines: list, key: str) -> bool:
-    prefix = f"{key}:"
     return any(
-        (len(line) - len(line.lstrip())) == 0 and line.lstrip().startswith(prefix)
+        (len(line) - len(line.lstrip())) == 0 and _key_on_line(line, key) is not None
         for line in lines
     )
+
+
+def _flow_style_root(lines: list) -> bool:
+    """Whether the document's top-level mapping is written in flow style
+    (``{project_name: demo}``): the first line holding anything but a
+    comment, a directive or a ``---`` marker starts with ``{``.
+
+    No text edit applies to such a file: each one inserts block lines, which
+    cannot follow or sit inside a flow mapping, so the result never parsed
+    and the save was refused instead of reaching the full rewrite.
+    """
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("---"):
+            stripped = stripped[len("---") :].strip()
+        if not stripped or stripped.startswith(("#", "%")):
+            continue
+        return stripped.startswith("{")
+    return False
 
 
 def _find_global_settings_insert_point(lines: list) -> tuple:
@@ -4236,14 +4452,17 @@ def _find_global_settings_insert_point(lines: list) -> tuple:
         stripped = line.lstrip()
         indent_len = len(line) - len(stripped)
         if not in_global:
-            if indent_len == 0 and stripped.startswith("global_settings:"):
+            key_length = (
+                _key_on_line(stripped, "global_settings") if indent_len == 0 else None
+            )
+            if key_length is not None:
                 # An inline mapping value after the colon is not
                 # text-insertable. A trailing comment is not a value, and an
                 # anchor or tag alone names or types the block below (as
                 # _holds_a_value_on_its_line reads them): taking either for a
                 # value sent the save to the whole rewrite, which drops every
                 # comment the file holds.
-                rest = stripped[len("global_settings:") :].strip()
+                rest = stripped[key_length:].strip()
                 while rest.startswith(("&", "!")):
                     parts = rest.split(None, 1)
                     rest = parts[1].strip() if len(parts) > 1 else ""
@@ -4252,8 +4471,16 @@ def _find_global_settings_insert_point(lines: list) -> tuple:
                 in_global = True
                 block_end = idx + 1
             continue
-        if stripped == "" or stripped.startswith("#"):
+        if stripped == "":
             continue  # inside the block, but not a child to anchor on
+        if stripped.startswith("#"):
+            # Indented, it can be a block scalar's content line, which the
+            # block runs through: inserting before it put the new key inside
+            # that scalar. A real comment there is kept in the block either
+            # way. At column 0 it is a comment, never content.
+            if indent_len > 0:
+                block_end = idx + 1
+            continue
         if indent_len == 0:
             break  # a following top-level key: the block has ended
         if child_indent is None:
@@ -4287,7 +4514,16 @@ def _find_suppressions_append_point(lines: list) -> tuple:
         line = lines[idx]
         stripped = line.lstrip(" \t")
         indent = len(line) - len(stripped)
-        if not stripped.strip() or stripped.startswith("#"):
+        if not stripped.strip():
+            continue
+        if stripped.startswith("#"):
+            # Deeper than the key, it can be a line of an entry's block
+            # scalar, which the list runs through: inserting before it put the
+            # new item inside that scalar. A real comment there is kept in the
+            # list either way. At or left of the key's indent no scalar's
+            # content can sit, so it is a comment and ends nothing.
+            if indent > key_indent:
+                insert_idx = idx + 1
             continue
         is_item = _a_block_item(stripped)
         if indent < key_indent or (indent == key_indent and not is_item):
