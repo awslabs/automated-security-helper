@@ -223,8 +223,10 @@ def test_the_recorders_see_a_process_start_by_any_route(recorders, tmp_path):
             attempt()
     assert [event for event, _ in spawned] == list(attempts)
     # On Windows, Popen joins the argument list into one command line before it
-    # raises the audit event, so the recorded arguments are the string "true".
-    assert spawned[0][1] in (["true"], "true")
+    # raises the audit event, so the recorded arguments are the string "true";
+    # elsewhere they are the list. Each platform expects exactly its own form.
+    expected_args = "true" if os.name == "nt" else ["true"]
+    assert spawned[0][1] == expected_args
     started = threading.Timer(30, lambda: None)
     started.start()
     try:
