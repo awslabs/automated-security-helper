@@ -133,6 +133,17 @@ OPERATOR_ONLY_SCANNER_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "detect-secrets": ("max_worker_output_mib",),
 }
 
+#: (reporter section name, option) -> the value the option has where no section
+#: sets it, for the options in OPERATOR_ONLY_OPTIONS. Listed here because the
+#: reporters' models are in a plugin package this module does not import; a unit
+#: test holds each value equal to the reporter's options model. A repository
+#: file that writes the value an unset option already has changes nothing, so
+#: the settle step does not report it as ignored.
+OPERATOR_ONLY_DEFAULTS: Dict[Tuple[str, str], Any] = {
+    ("aws-security-hub", "findings_scope"): None,
+    ("aws-security-hub", "archive_resolved_findings"): False,
+}
+
 _MISSING = object()
 
 
@@ -271,6 +282,27 @@ def _scanner_options(config: "AshConfig", scanner: str) -> Any:
     return None
 
 
+def _as_the_model_reads(options: Any, option: str, value: Any) -> Any:
+    """*value*, the raw text or number a file wrote for *option*, as the
+    scanner's options model reads it (``"256"`` is 256), so it is compared with
+    the typed value the trusted base holds. A value the model refuses is
+    returned as written: it is not the trusted base's."""
+    try:
+        return getattr(type(options).model_validate({option: value}), option)
+    except (AttributeError, TypeError, ValueError):
+        return value
+
+
+def _differs(value: Any, operator: Any, default: Any = _MISSING) -> bool:
+    """Whether the scan uses a value other than *value*, which the repository's
+    files wrote. *operator* is the trusted base's value; where the base has
+    none (``_MISSING``) the option is unset, and unset is *default* when the
+    option has a known one."""
+    if operator is _MISSING:
+        return default is _MISSING or value != default
+    return value != operator
+
+
 def _scanner_sections_in(
     scanners: Dict[str, Any], scanner: str
 ) -> List[Tuple[str, Dict[str, Any]]]:
@@ -364,8 +396,11 @@ class RepositorySettings:
         self.repository_files: List[Path] = []
         #: The places (``found_place``) an option was left out of whose file is
         #: the repository's only because resolving its name stopped before the
-        #: walk finished, so a sentence naming them cannot claim a location.
+        #: walk finished, so a sentence naming them cannot claim a location. A
+        #: place a file with an established location also left out is not one.
         self.undecided_places: Set[str] = set()
+        #: The places a file with an established location left an option out of.
+        self._located_places: Set[str] = set()
         self.document: Any = None
 
     def _membership(self, real: Path, named: Path) -> Tuple[bool, bool]:
@@ -375,7 +410,10 @@ class RepositorySettings:
             return True, False
         confined = confined_files([real], self.trees, [named])
         if confined.members:
-            return True, bool(confined.undecided)
+            # A walk that stopped makes the file undecided only when the resolved
+            # path is not itself a member by where it is.
+            real_decided = real in confined.members and real not in confined.undecided
+            return True, bool(confined.undecided) and not real_decided
         # A file an MCP client delivered is the client's wherever it sits, in a
         # checkout or not: the same delivery judgment the rest of the chain's
         # membership uses (resolve_config._delivered_by_a_client).
@@ -398,10 +436,12 @@ class RepositorySettings:
             self.repository_files.append(real)
             first = len(self.found)
             data = self._without_operator_only(data)
+            places = {found_place(entry) for entry in self.found[first:]}
             if undecided:
-                self.undecided_places.update(
-                    found_place(entry) for entry in self.found[first:]
-                )
+                self.undecided_places.update(places - self._located_places)
+            else:
+                self._located_places.update(places)
+                self.undecided_places.difference_update(places)
         self.document = data
         return data
 
@@ -461,11 +501,15 @@ class RepositorySettings:
         places: List[str] = []
         for (scanner, _key, option), value in self.written("scanners").items():
             options = _scanner_options(trusted, scanner)
-            if options is not None and value != getattr(options, option):
+            if options is not None and _differs(
+                _as_the_model_reads(options, option, value),
+                getattr(options, option),
+            ):
                 places.append(f"scanners.{scanner}.options.{option}")
-        for (_reporter, key, option), value in self.written("reporters").items():
+        for (reporter, key, option), value in self.written("reporters").items():
             operator = _trusted_value(trusted, key, option)
-            if operator is _MISSING or value != operator:
+            default = OPERATOR_ONLY_DEFAULTS.get((reporter, option), _MISSING)
+            if _differs(value, operator, default):
                 places.append(f"reporters.{key}.options.{option}")
         return places
 
@@ -510,6 +554,8 @@ class _Settling(NamedTuple):
     value: Any
     #: The trusted base's value, or _MISSING where it has none.
     operator: Any
+    #: What the option is where nothing sets it, or _MISSING where not known.
+    default: Any = _MISSING
 
     @property
     def place(self) -> str:
@@ -518,7 +564,7 @@ class _Settling(NamedTuple):
     @property
     def ignored(self) -> bool:
         """Whether the value the scan uses is not the one the files wrote."""
-        return self.operator is _MISSING or self.value != self.operator
+        return _differs(self.value, self.operator, self.default)
 
 
 def scan_repository_settings(
@@ -571,6 +617,17 @@ def _environment_values_of(
     return (*config_environment_values(config), *config_environment_values(trusted))
 
 
+#: One place of a joined list of place strings: its kind and ``.``, its key, and
+#: the ``.options.<option>`` that follows the key of an option's place.
+_PLACE_SHAPE = re.compile(
+    r"(?:^|(?<=, ))(?P<kind>(?:reporters|scanners)\.)"
+    r"(?P<key>.*?)"
+    r"(?P<option>\.options\.[^.,\s]+)?"
+    r"(?=, (?:reporters|scanners)\.|\Z)",
+    re.DOTALL,
+)
+
+
 def redacted_places(text: str, key_values: Collection[str]) -> str:
     """*text*, a joined list of place strings, with every env-read KEY in
     *key_values* hidden in both its separator spellings.
@@ -581,7 +638,13 @@ def redacted_places(text: str, key_values: Collection[str]) -> str:
     one-character minimum: a place string is built from mapping keys alone,
     so a read VALUE cannot appear in one, and redacting against values hid
     parts of fixed option names. Both spellings, since the found record folds
-    "-" and "_" and a place can print either."""
+    "-" and "_" and a place can print either.
+
+    Only the key of each place is searched (``reporters.<key>.options.<option>``
+    or ``reporters.<key>``): the kind, ``options`` and the option's name are
+    fixed words, so a short key read from the environment elsewhere in the
+    configuration does not hide them. Text that is not in that shape is
+    searched whole."""
     from automated_security_helper.config.config_validator import redact_values
 
     values = tuple(
@@ -596,7 +659,20 @@ def redacted_places(text: str, key_values: Collection[str]) -> str:
             )
         )
     )
-    return redact_values(text, values, min_length=1)
+
+    def hidden(piece: str) -> str:
+        return redact_values(piece, values, min_length=1) if piece else piece
+
+    parts: List[str] = []
+    position = 0
+    for place in _PLACE_SHAPE.finditer(text):
+        parts.append(hidden(text[position : place.start()]))
+        parts.append(place["kind"])
+        parts.append(hidden(place["key"]))
+        parts.append(place["option"] or "")
+        position = place.end()
+    parts.append(hidden(text[position:]))
+    return "".join(parts)
 
 
 def _scanner_options_to_settle(
@@ -639,7 +715,7 @@ def _scanner_options_to_settle(
                 scanner,
                 scanner,
                 option,
-                value,
+                _as_the_model_reads(operator_options, option, value),
                 getattr(operator_options, option),
             )
         )
@@ -679,6 +755,7 @@ def _reporter_options_to_settle(
                     option,
                     value,
                     _trusted_value(trusted, key, option),
+                    OPERATOR_ONLY_DEFAULTS.get((reporter, option), _MISSING),
                 )
             )
     return found
@@ -877,7 +954,9 @@ def confine_operator_only_options(
             unchanged.
     """
     if repository is None:
-        repository = RepositorySettings(())
+        # Nothing was recorded, so no option is known to be the repository's
+        # and none is settled.
+        return set()
     membership = confinement_membership(
         checkout_membership=checkout_membership,
         client_supplied=client_supplied,
@@ -1161,6 +1240,15 @@ def mark_operator_only_options(
         if not isinstance(sections, dict):
             continue
         wrote = None if written is None else written.written(kind)
+        if wrote is not None and kind == "reporters":
+            # The record keys a reporter section by the spelling the file that
+            # wrote it used, and the dump by the spelling the merged chain kept,
+            # which another file may have written differently. Both are looked
+            # up by the folded spelling.
+            wrote = {
+                (plugin, folded_section_name(key), option): value
+                for (plugin, key, option), value in wrote.items()
+            }
         # A scanners section is read as the model reads it: the declared
         # section, or a spelling that folds to it (_scanner_sections_in); the
         # reporter lookup would also mark an extra scanner section the plugin
@@ -1172,7 +1260,11 @@ def mark_operator_only_options(
                 if not isinstance(options, dict):
                     continue
                 for option in names:
-                    place = (plugin, plugin if kind == "scanners" else key, option)
+                    place = (
+                        plugin,
+                        plugin if kind == "scanners" else folded_section_name(key),
+                        option,
+                    )
                     if wrote is None:
                         if option not in options:
                             continue
@@ -1433,13 +1525,31 @@ def _section_within(section: Any, operator_section: Any) -> bool:
     The run uses the operator's section whole, so the warning fires only when
     the resolved section holds something that will not run: a key or value of
     the repository's. An operator section that holds MORE (the trusted base's
-    settings, which the config file never mentioned) ignores nothing."""
+    settings, which the config file never mentioned) ignores nothing.
+
+    A mapping that holds no value (the ``options`` table left empty after the
+    operator-only options were taken out of it) holds nothing that will not
+    run, so the operator's section need not have it."""
     if isinstance(section, dict) and isinstance(operator_section, dict):
         return all(
-            key in operator_section and _section_within(value, operator_section[key])
+            (
+                _section_within(value, operator_section[key])
+                if key in operator_section
+                else _holds_no_value(value)
+            )
             for key, value in section.items()
         )
+    if isinstance(section, dict) and operator_section is None:
+        return _holds_no_value(section)
     return section is None or section == operator_section
+
+
+def _holds_no_value(section: Any) -> bool:
+    """Whether *section* is a mapping with nothing in it, or only mappings that
+    have nothing in them."""
+    return isinstance(section, dict) and all(
+        _holds_no_value(value) for value in section.values()
+    )
 
 
 def reporter_section(config: Optional["AshConfig"], reporter_class: type) -> Any:
