@@ -856,9 +856,11 @@ def materialize_session_binding(
     old one removed, before the operator copy is replaced, so the operator copy is
     never replaced under an older client copy. The binding is recorded by the
     caller only after both. A failure between the moves (a rename refused) leaves
-    the previous binding recorded: its files are written again from it on the
-    next read when one is missing (``_bound_config_paths``), and a client copy
-    that was already replaced is the new profile's until the session binds again.
+    the previous binding recorded, and the client copy the first move already
+    replaced is removed, so the session holds the previous binding's operator copy
+    alone rather than one profile's client copy over another's trusted base; a
+    previous binding that was patched then finds its client copy missing and
+    writes both files again from itself on the next read (``_bound_config_paths``).
 
     Raises:
         RuntimeError: as ``materialize_session_config`` does,
@@ -885,7 +887,19 @@ def materialize_session_binding(
             raise
         try:
             _replace_staged(client_partial, client_target)
-            _replace_staged(trusted_partial, trusted_target)
+            try:
+                _replace_staged(trusted_partial, trusted_target)
+            except BaseException:
+                # The client's copy is already the new profile's and the
+                # operator's is still the old one's: a scan that read the pair
+                # would resolve one profile's client values against another
+                # profile's trusted base. Removing the client copy leaves the
+                # session with the previous binding's operator copy alone, and a
+                # previous binding that was patched finds its client copy gone
+                # and writes both files again from itself on the next read.
+                with contextlib.suppress(OSError):
+                    client_target.unlink(missing_ok=True)
+                raise
         finally:
             # A rename that failed leaves the other staged file behind.
             trusted_partial.unlink(missing_ok=True)

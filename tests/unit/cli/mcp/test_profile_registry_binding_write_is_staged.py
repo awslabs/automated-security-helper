@@ -92,6 +92,39 @@ def test_a_failed_operator_copy_leaves_the_client_copy_as_it_was(monkeypatch) ->
     _no_partial_left(Path(config_path).parent, Path(trusted_path).parent)
 
 
+def test_a_failed_operator_move_leaves_no_client_copy_of_the_new_profile(
+    monkeypatch,
+) -> None:
+    """Red at the base: the client's copy had already been moved into place when
+    the operator's move failed, so the session held the new profile's client copy
+    over the old profile's operator copy, both present, and nothing repaired them."""
+    registered = AshConfig(project_name="registered")
+    config_path, trusted_path = materialize_session_binding(
+        SESSION, registered, AshConfig(project_name="first-patch")
+    )
+    trusted_before = Path(trusted_path).read_bytes()
+    real_replace_staged = profile_registry._replace_staged
+    moves: list = []
+
+    def refuse_the_second_move(partial, target):
+        moves.append(Path(target).name)
+        if len(moves) == 2:
+            raise PermissionError(errno.EACCES, "refused", str(target))
+        return real_replace_staged(partial, target)
+
+    monkeypatch.setattr(profile_registry, "_replace_staged", refuse_the_second_move)
+
+    with pytest.raises(PermissionError):
+        materialize_session_binding(
+            SESSION, registered, AshConfig(project_name="second-patch")
+        )
+
+    assert len(moves) == 2, moves
+    assert not Path(config_path).exists(), "the new profile's client copy was kept"
+    assert Path(trusted_path).read_bytes() == trusted_before
+    _no_partial_left(Path(config_path).parent, Path(trusted_path).parent)
+
+
 def test_a_failed_unpatched_rebind_keeps_the_client_copy(monkeypatch) -> None:
     registered = AshConfig(project_name="registered")
     config_path, _trusted_path = materialize_session_binding(
