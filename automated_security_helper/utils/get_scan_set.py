@@ -794,9 +794,12 @@ def _negations_that_unprune(
 
     Only negations: a positive rule in these files is left to the full spec, so
     whatever the pre-pass prunes is still the root ``.gitignore``'s doing and is
-    counted to it. A file that cannot be read contributes nothing here; the full
-    spec reports it. A caller-named file outside the scan root compiles against
-    the root, as the full spec compiles it (:func:`_confine_base_path`).
+    counted to it. A file that cannot be opened contributes nothing here, and the
+    pre-pass goes on; the full spec then meets the same file and raises, since an
+    unreadable ignore file in the tree is an error by design (only a refused one
+    is skipped; ``test_tree_readers_scanned_tree`` pins it), so the tolerance here
+    never widens a scan set. A caller-named file outside the scan root compiles
+    against the root, as the full spec compiles it (:func:`_confine_base_path`).
     """
     sources: List[Tuple[List[str], Path]] = []
     if honor_ignore_files:
@@ -984,10 +987,14 @@ def _collect_ignorefiles_and_all_files(
         except (OSError, *_IGNORE_RULE_ERRORS):
             # If the root .gitignore can't be read or parsed (malformed patterns,
             # encoding issues, etc.), proceed without directory pruning. The full
-            # ignore spec reads the same file later and tolerates the same errors
-            # one rule at a time (get_ash_ignorespec_with_attribution), warning
-            # about each, so the files are still filtered by every rule that does
-            # compile.
+            # ignore spec reads the same file later: a rule it cannot compile is
+            # skipped with a warning, one rule at a time
+            # (get_ash_ignorespec_with_attribution), so the files are still
+            # filtered by every rule that does compile; a file it cannot OPEN is
+            # an error there, by design (an unreadable ignore file in the tree
+            # ends the scan set; only a refused one is skipped), so skipping it
+            # here only decides whether directories are pruned, never what the
+            # scan set holds.
             debug_echo(
                 f"Could not parse root .gitignore for directory pruning: {root_gitignore}",
                 debug=debug,
