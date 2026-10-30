@@ -214,16 +214,33 @@ def test_the_scan_phase_document_reads_as_still_running(tmp_path):
     assert progress["error_message"] is None
 
 
-def test_the_scan_phase_document_after_the_scan_ended_is_a_failure(tmp_path):
-    """The scan returned, and the final rewrite that adds scanner_results never came."""
+def test_the_scan_phase_document_after_the_scan_ended_reports_no_results(tmp_path):
+    """The scan returned, and the final rewrite that adds scanner_results never came.
+
+    The runner's word stands: the entry was closed COMPLETED, so the poll's status
+    is "completed" and is_complete is True, and a read-only poll does not re-close
+    the entry as FAILED (it used to, while an unreadable file kept the entry, so the
+    two unusable-file shapes answered differently). What the file read found is
+    reported beside the status: results_available is False, and error_message
+    names the file and the missing scanner_results, so a client that would read
+    the results is told there are none to read.
+    """
     registry = ScanRegistry()
     scan_id, output_dir = _register(registry, tmp_path, SCAN_PHASE_DOCUMENT)
     registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
 
     progress = registry.check_scan_progress(scan_id)
 
-    _assert_reported_as_failed(progress, output_dir)
-    assert "scanner_results" in progress["error_message"]
+    assert progress["status"] == "completed"
+    assert progress["is_complete"] is True
+    assert progress["results_available"] is False
+    message = progress["error_message"]
+    assert message, "The poll carries no error_message, so a client cannot say why."
+    assert str(output_dir / RESULTS_FILE) in message, message
+    assert "scanner_results" in message, message
+    assert progress["scanners"] == {}
+    # Read-only: the entry keeps the status its runner gave it.
+    assert registry.get_scan(scan_id).status is MCScanStatus.COMPLETED
 
 
 def test_an_entry_closed_as_completed_without_a_results_file_stays_completed(tmp_path):
