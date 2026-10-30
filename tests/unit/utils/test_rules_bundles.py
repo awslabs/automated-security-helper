@@ -119,6 +119,24 @@ def _offline(calls: list):
     return download_file
 
 
+def test_the_bundle_is_fetched_as_data(tmp_path, bundle_zip):
+    """The rules bundle is data, not a program: the installer asks the download
+    helper for the data mode, whatever the helper's default is."""
+    archive, bundle = bundle_zip
+    calls: list = []
+    modes: list = []
+    landing = _fake_download(archive, calls)
+
+    def download_file(
+        url, destination, rename_to=None, expected_sha256=None, *, mode=None
+    ):
+        modes.append(mode)
+        return landing(url, destination, rename_to, expected_sha256)
+
+    _install(tmp_path, bundle, archive, calls, download=download_file)
+    assert modes == [0o644]
+
+
 def _install(tmp_path, bundle, archive, calls, download=None, **kwargs):
     with (
         patch(

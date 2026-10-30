@@ -68,6 +68,70 @@ def test_an_interrupt_during_the_tree_stops_grace_survives_a_refused_kill():
     assert sent == [signal.SIGTERM, signal.SIGKILL]
 
 
+def test_a_refused_kill_after_an_interrupt_in_the_plain_stop_marks_the_record(
+    monkeypatch, caplog
+):
+    """The interrupt still propagates, and the spawn's record says the stop was
+    refused, as it does for the ordinary stop's refusal; the refusal is a
+    WARNING, not a debug line."""
+    process = _child_the_kernel_will_not_kill()
+    process.poll.return_value = None
+    process.args = ["tool"]
+    monkeypatch.setattr(subprocess_utils, "_has_exited", lambda child: False)
+    started = subprocess_utils._StartedChild()
+    with (
+        patch.object(
+            subprocess_utils, "_wait_out_grace", side_effect=KeyboardInterrupt
+        ),
+        caplog.at_level("WARNING"),
+        started.recording(),
+    ):
+        started.process = process
+        with pytest.raises(KeyboardInterrupt):
+            subprocess_utils._stop(process, grace=0.01)
+    assert started.stop_refused is True
+    assert any(
+        "Could not stop" in r.getMessage() and r.levelname == "WARNING"
+        for r in caplog.records
+    )
+
+
+@POSIX_ONLY
+def test_a_refused_kill_after_an_interrupt_in_the_tree_stop_marks_the_record(
+    monkeypatch, caplog
+):
+    process = MagicMock(spec=subprocess.Popen)
+    process.pid = _NO_SUCH_PGID
+    process.returncode = None
+    process.poll.return_value = None
+    process.args = ["tool"]
+
+    def signal_group(pgid, signum):
+        if signum == signal.SIGKILL:
+            raise PermissionError(1, "Operation not permitted")
+        return True
+
+    monkeypatch.setattr(subprocess_utils, "_has_exited", lambda child: False)
+    started = subprocess_utils._StartedChild()
+    with (
+        patch.object(subprocess_utils, "_group_survives", return_value=True),
+        patch.object(subprocess_utils, "_signal_group", side_effect=signal_group),
+        patch.object(
+            subprocess_utils, "_wait_out_grace", side_effect=KeyboardInterrupt
+        ),
+        caplog.at_level("WARNING"),
+        started.recording(),
+    ):
+        started.process = process
+        with pytest.raises(KeyboardInterrupt):
+            subprocess_utils._stop_tree(process, grace=0.01)
+    assert started.stop_refused is True
+    assert any(
+        "Could not stop" in r.getMessage() and r.levelname == "WARNING"
+        for r in caplog.records
+    )
+
+
 def _child_the_kernel_will_not_kill() -> MagicMock:
     process = MagicMock(spec=subprocess.Popen)
     process.pid = 4242

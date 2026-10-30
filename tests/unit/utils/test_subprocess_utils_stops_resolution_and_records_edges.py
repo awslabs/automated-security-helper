@@ -206,6 +206,46 @@ def test_a_refused_stop_reaps_an_ended_leader_before_reading_its_group(monkeypat
 
 
 @POSIX_ONLY
+@POSIX_ONLY
+def test_the_childs_own_path_is_searched_before_ashs(monkeypatch, tmp_path):
+    """A tool's bin directory put first on the child's PATH names the copy the
+    child runs; ASH's own PATH may hold another copy, which must not shadow it."""
+    tool_dir = tmp_path / "bin"
+    tool_dir.mkdir()
+    tool = tool_dir / "ash-u26-two-copies-tool"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setattr(spu, "find_executable", lambda name: "/opt/elsewhere/tool")
+    env = {"PATH": str(tool_dir)}
+    args = ["ash-u26-two-copies-tool"]
+    assert spu._resolve_for_spawn(args, None, env) is None
+    assert args[0] == str(tool), "ASH's PATH shadowed the child's own copy"
+
+
+@POSIX_ONLY
+def test_an_in_tree_copy_on_the_childs_path_is_a_refusal_not_a_miss(
+    monkeypatch, tmp_path
+):
+    """The only copy the child's PATH names sits inside the scanned tree: the
+    resolution reports the refusal, naming that copy, instead of falling through
+    to the not-found branches as if nothing had been named."""
+    repo = tmp_path / "repo"
+    tool_dir = repo / "bin"
+    tool_dir.mkdir(parents=True)
+    tool = tool_dir / "ash-u26-in-tree-tool"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setattr(spu, "find_executable", lambda name: None)
+    env = {"PATH": str(tool_dir)}
+    args = ["ash-u26-in-tree-tool"]
+    with spu.scanning_tree(str(repo)):
+        refusal = spu._resolve_for_spawn(args, None, env)
+    assert isinstance(refusal, FileNotFoundError)
+    assert "resolves on the child's PATH to" in str(refusal)
+    assert str(tool) in str(refusal)
+    assert args[0] == "ash-u26-in-tree-tool"
+
+
 def test_the_childs_own_path_is_searched_when_the_caller_gave_one(
     monkeypatch, tmp_path
 ):
@@ -730,6 +770,71 @@ def test_a_streamed_run_stops_a_child_silent_since_the_cancel(monkeypatch):
     (child,) = _SilentPopen.instances
     assert "terminate" in child.calls
     assert took < _SILENT_BOUND / 2, f"the cancel took {took:.2f}s to stop the tool"
+
+
+class _LingeringPopen(_FakeChild):
+    """A child that ignores SIGTERM and prints one more line after it: the stop
+    the watcher began must wait out its grace before anything kills the child."""
+
+    instances: List["_LingeringPopen"] = []
+
+    def __init__(self, args, **kwargs):
+        super().__init__()
+        self.args = list(args)
+        self.event = _LingeringPopen.event
+        self.terminated = threading.Event()
+        self.ended = threading.Event()
+        self.times: Dict[str, float] = {}
+        _LingeringPopen.instances.append(self)
+        self.stdout = self._lines()
+
+    def _lines(self):
+        yield "line one\n"
+        self.event.set()
+        # The read blocks until the SIGTERM, then one more line comes out.
+        self.terminated.wait(_SILENT_BOUND)
+        yield "line two\n"
+        self.ended.wait(_SILENT_BOUND)
+
+    def terminate(self):
+        super().terminate()
+        self.times["terminate"] = time.monotonic()
+        self.terminated.set()  # the signal is ignored: no exit
+
+    def kill(self):
+        super().kill()
+        self.times["kill"] = time.monotonic()
+        self.ended.set()
+
+    def wait(self, timeout=None):
+        self.calls.append(("wait", timeout))
+        if not self.ended.wait(_SILENT_BOUND):
+            raise subprocess.TimeoutExpired(self.args, _SILENT_BOUND)
+        return self.returncode if self.returncode is not None else 0
+
+
+def test_a_line_printed_after_the_watchers_sigterm_does_not_cut_its_grace(
+    monkeypatch,
+):
+    """The watcher sent SIGTERM and waits out the grace; the tool prints once
+    more; the loop reads the cancel, and the cancel it raises must not put the
+    finally's kill in front of the grace the watcher is still waiting out."""
+    grace = 0.4
+    event = CancelEvent()
+    _LingeringPopen.event = event
+    _LingeringPopen.instances.clear()
+    monkeypatch.setattr(spu.subprocess, "Popen", _LingeringPopen)
+    monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
+    monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda process: False)
+    monkeypatch.setattr(spu, "_stop_grace", lambda cancel_event: grace)
+    with cancellation.cancel_scope(event):
+        with pytest.raises(ScanCancelled):
+            spu.run_command_stream_output(["ash-u26-no-such-tool"])
+    (child,) = _LingeringPopen.instances
+    assert "terminate" in child.calls and "kill" in child.calls
+    waited = child.times["kill"] - child.times["terminate"]
+    assert waited >= grace * 0.8, f"the kill came {waited:.2f}s after the SIGTERM"
 
 
 def test_a_streamed_run_starts_nothing_in_a_cancelled_scan(monkeypatch):
