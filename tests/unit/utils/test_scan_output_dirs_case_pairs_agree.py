@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -76,6 +77,35 @@ def test_a_resolved_candidate_in_another_case_is_spelled_under_the_root(
     spelled = _spelled_under(tree / "repo" / "out", root, root)
 
     assert spelled == root / "out"
+
+
+def test_two_spellings_of_one_named_directory_leave_one_named(
+    folding, tmp_path, monkeypatch
+):
+    """On a filesystem that compares names without case, this run's output
+    directory spelled ``.ASH/ash_output`` and the earlier run's ``.ash/ash_output``
+    on disk are one directory. Each read as "below" the other by name key, so the
+    reduction to the outermost directories dropped both and no output directory
+    was named: nothing was excluded and ASH's own output was scanned."""
+    from automated_security_helper.utils import subprocess_utils
+
+    root = Path(os.path.realpath(tmp_path)) / "repo"
+    (root / ".git").mkdir(parents=True)
+    (root / ".ash" / "ash_output").mkdir(parents=True)
+    monkeypatch.setattr(
+        subprocess_utils,
+        "spawn_run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=b"", stderr=b""),
+    )
+    monkeypatch.chdir(root)
+
+    named, scanned = classified_output_dirs(
+        root, output_dir=root / ".ASH" / "ash_output"
+    )
+
+    assert len(named) == 1
+    assert named[0].parts[-2:] in ((".ASH", "ash_output"), (".ash", "ash_output"))
+    assert scanned == []
 
 
 def test_reached_through_a_link_walks_from_a_base_in_another_case(folding, tmp_path):

@@ -184,6 +184,39 @@ def test_a_checked_out_submodule_is_the_entry_its_superproject_tracks(
     assert found == [sub]
 
 
+def test_a_superproject_that_gives_no_listing_is_not_read_as_not_tracking(
+    tmp_path, monkeypatch
+):
+    """The directory is a repository of its own, so its superproject is asked once
+    whether it tracks the directory's path. git giving no list there is not "no",
+    and the refusal must not read it as one: the committed-output check then counts
+    what is on disk instead (``GitIndexUnavailable``), as it does when the
+    directory's own repository gives no list."""
+    tree = Path(os.path.realpath(tmp_path))
+    outer = tree / "outer"
+    sub = outer / "sub"
+    sub.mkdir(parents=True)
+    roots = {sub: sub, outer: outer}
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "_repository_root_of",
+        lambda directory: roots.get(Path(directory)),
+    )
+
+    def listing(root, relative, **_):
+        if (root, relative) == (sub, "."):
+            return ["x.txt"], None, False
+        return None, "git exited with status 128: fatal: index file corrupt", False
+
+    monkeypatch.setattr(scan_output_dirs, "_index_listing", listing)
+
+    with pytest.raises(scan_output_dirs.GitIndexUnavailable) as raised:
+        committed_files_at_results_paths(sub)
+
+    assert raised.value.answer.repository == outer
+    assert "index file corrupt" in str(raised.value)
+
+
 def test_control_a_plain_output_directory_in_a_repository_is_not_an_entry(
     tmp_path, monkeypatch
 ):
