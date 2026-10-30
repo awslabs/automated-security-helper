@@ -10,7 +10,7 @@ import platform
 import shlex
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import Annotated, Any, Iterable, List, Optional, Tuple
 
 import typer
@@ -206,6 +206,28 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
         )
         resolved[tool] = replacement
     return resolved
+
+
+def _is_under_tilde(bin_path: str, pure: type = PurePath) -> bool:
+    """Whether ``bin_path`` is ``~`` or starts with the component ``~``.
+
+    The rule pathlib's own ``expanduser`` applies: the first path component, read
+    with the platform's separators (``pure``), is exactly ``~``.
+    """
+    return pure(bin_path).parts[:1] == ("~",)
+
+
+def _bin_path_under_home(bin_path: str, home: Path, pure: type = PurePath) -> Path:
+    """``bin_path``, whose first component is ``~`` (:func:`_is_under_tilde`),
+    under ``home``.
+
+    Joined component by component, never as the text after ``~/``: ``~//.ash/bin``
+    has the components of ``~/.ash/bin``, while its text after ``~/`` is the
+    absolute ``/.ash/bin``, which ``Path.joinpath`` would take whole, dropping
+    ``home`` and putting the install at the filesystem's root. ``pure`` is the
+    path flavor the components are read with (the platform's by default).
+    """
+    return home.joinpath(*pure(bin_path).parts[1:])
 
 
 def _refuse_a_named_config_that_does_not_exist(config: Optional[str]) -> None:
@@ -791,14 +813,14 @@ def install_dependencies(
     # from a whitespace-only ASH_BIN_PATH that click passes through as given.
     if is_blank_bin_path(bin_path):
         target_bin_path = ASH_BIN_PATH
-    elif bin_path == "~" or bin_path[:2] in ("~/", "~\\"):
+    elif _is_under_tilde(bin_path):
         # A "~" a shell left unexpanded (a quoted --bin-path, or ASH_BIN_PATH set
         # to it) is expanded from the home directory only when there is a usable
         # one (usable_home), as ~/.ash/bin is. Path.expanduser takes HOME as given:
         # an empty HOME made ~/.ash/bin the filesystem's /.ash/bin, and a relative
         # HOME put it under the working directory, the scanned repository.
         home = usable_home()
-        target_bin_path = None if home is None else home.joinpath(bin_path[2:])
+        target_bin_path = None if home is None else _bin_path_under_home(bin_path, home)
     else:
         target_bin_path = Path(bin_path).expanduser()
     if target_bin_path is None:

@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 from typer.testing import CliRunner
 
+from automated_security_helper.cli import dependencies as dependencies_module
 from automated_security_helper.cli.dependencies import (
     EXIT_INVALID_CONFIG,
     EXIT_OK,
@@ -116,3 +117,53 @@ def test_a_usable_home_expands_a_bin_path_under_tilde(project, tmp_path, monkeyp
     assert result.exit_code == EXIT_OK, result.output
     assert (home / "tools").is_dir()
     assert f"Target bin path: {home / 'tools'}" in _flat(result.output), result.output
+
+
+def test_a_doubled_separator_after_tilde_stays_under_the_home(
+    project, tmp_path, monkeypatch
+):
+    """`~//.ash/bin` used to leave `/.ash/bin` after the `~/`, which joinpath took
+    whole, dropping the home and installing at the filesystem's root."""
+    home = tmp_path / "home"
+    home.mkdir()
+    _home(monkeypatch, str(home))
+    made: list[str] = []
+    real_mkdir = Path.mkdir
+
+    def no_directory_outside_the_test(self, *args, **kwargs):
+        if tmp_path not in self.parents and self != tmp_path:
+            made.append(str(self))
+            raise PermissionError(str(self))
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", no_directory_outside_the_test)
+
+    result = _install("~//.ash/bin")
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert made == [], made
+    assert (home / ".ash" / "bin").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("bin_path", "pure", "expected"),
+    [
+        ("~//.ash/bin", PurePosixPath, ("home", ".ash", "bin")),
+        ("~", PurePosixPath, ("home",)),
+        ("~\\\\x", PureWindowsPath, ("home", "x")),
+        ("~/\\x", PureWindowsPath, ("home", "x")),
+    ],
+)
+def test_the_components_after_tilde_are_joined_under_the_home(bin_path, pure, expected):
+    home = Path("home")
+    assert dependencies_module._is_under_tilde(bin_path, pure)
+    assert dependencies_module._bin_path_under_home(bin_path, home, pure) == Path(
+        *expected
+    )
+
+
+def test_a_tilde_inside_a_component_is_not_a_home_path():
+    """Only a first component of exactly `~` is expanded, as pathlib does."""
+    assert not dependencies_module._is_under_tilde("~user/x", PurePosixPath)
+    assert not dependencies_module._is_under_tilde(" ~/x", PurePosixPath)
+    assert not dependencies_module._is_under_tilde("x/~/y", PurePosixPath)
