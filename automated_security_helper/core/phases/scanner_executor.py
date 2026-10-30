@@ -2292,14 +2292,16 @@ class ScannerExecutor:
                 ASH_LOGGER.error(
                     f"Scanner failed: {scanner_name} - {described}", extra=NO_MARKUP
                 )
-                failed_container = getattr(e, "container", None)
-                if isinstance(failed_container, ScanResultsContainer):
+                if isinstance(e, ResultsProcessingFailed) and e.container is not None:
                     # A results-processing failure carries the target's own row:
                     # it is filed again with the failure added, so the report
-                    # keeps what the scan recorded (its status, its errors, its
-                    # counts), reads ERROR, names why it could not be merged,
-                    # and never replaces a merged target's file.
-                    failure_container = failed_container
+                    # keeps what the scan recorded (its errors, its counts, its
+                    # could-not-stop and dependency facts), its status becomes
+                    # ERROR, it names why it could not be merged, and it never
+                    # replaces a merged target's file. By type, not by a
+                    # ``container`` attribute: a plugin's own exception class may
+                    # carry one.
+                    failure_container = e.container
                     failure_container.add_error(
                         f"Scanner {scanner_name} failed: {described}"
                     )
@@ -2602,12 +2604,14 @@ class ScannerExecutor:
                         f"Scanner execution failed in thread pool: {scanner_name} - {described}",
                         extra=NO_MARKUP,
                     )
-                    failed_container = getattr(e, "container", None)
-                    if isinstance(failed_container, ScanResultsContainer):
+                    if (
+                        isinstance(e, ResultsProcessingFailed)
+                        and e.container is not None
+                    ):
                         # See run_sequential: a results-processing failure
                         # carries the target's own row, filed again with the
-                        # failure added.
-                        failure_container = failed_container
+                        # failure added; matched by type, not by attribute.
+                        failure_container = e.container
                         failure_container.add_error(
                             f"Scanner {scanner_name} failed in thread pool: {described}"
                         )
