@@ -2354,6 +2354,14 @@ def _remove_stale_session_state(
                     return False
                 if _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id):
                     return False
+                # The age read before the guard is not the age now: a scan in
+                # another server that ended meanwhile touched the workspace and
+                # then took this guard to drop its entry (ScanPresence.__exit__,
+                # in that order), so this sweep, let in right after it, sees no
+                # entry and a fresh mtime. Re-read under the guard, where that
+                # order guarantees the touch is visible before the entry is gone.
+                if not _is_stale_workspace(sandbox, cutoff):
+                    return False
                 _remove_session_state(session_id)
                 _forget_sweep_failure(session_id)
                 with contextlib.suppress(OSError):
