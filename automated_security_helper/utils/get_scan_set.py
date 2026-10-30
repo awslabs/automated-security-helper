@@ -28,6 +28,7 @@ from typing import (
     Tuple,
 )
 from igittigitt import IgnoreParser
+from igittigitt import igittigitt as _igittigitt_module
 from pathlib import Path, PurePosixPath
 import argparse
 import os
@@ -1679,13 +1680,22 @@ def _check_rule_compiles(rule: str, base_path: str | Path) -> None:
     time a path is matched against it, so a pattern wcmatch refuses passed
     ``add_rule`` and then raised out of the first match that reached it, out of the
     scan set, though the pruning pass tolerates the same pattern. A parser holding
-    only this rule is asked about a path that is not a file, which makes it compile
-    every rule it holds, directory-only rules included, so the real parser never
-    holds a rule it cannot match.
+    only this rule builds its rules, and each built rule's glob goes through the
+    function igittigitt matches with, so every rule it holds is compiled, directory
+    only rules and negations included, and the real parser never holds a rule it
+    cannot match. No path is asked about, so the answer does not depend on what the
+    tree holds: asking a parser to match ``<base>/probe`` skipped the directory-only
+    rules when a file of that name existed.
     """
     probe = IgnoreParser()
     probe.add_rule(rule, base_path=base_path)
-    probe.match(Path(os.path.abspath(base_path)) / "probe")
+    glob_match = getattr(_igittigitt_module, "_globmatch", None)
+    if glob_match is None:
+        # A release without that function: ask about a path that is not a file.
+        probe.match(Path(os.path.abspath(base_path)) / "probe")
+        return
+    for built in probe.rules:
+        glob_match("", built.pattern_glob)
 
 
 def get_ash_ignorespec_with_attribution(

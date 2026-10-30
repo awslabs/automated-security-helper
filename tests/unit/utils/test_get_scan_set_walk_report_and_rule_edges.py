@@ -385,6 +385,41 @@ class TestARuleIgittigittCannotCompile:
             warning
         )
 
+    def test_a_file_named_probe_in_the_tree_changes_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """The check asked a parser about ``<base>/probe``, which only compiles a
+        directory-only rule while that is not a file. A tree with a file of that name
+        beside its ignore file let such a rule through, and it raised at the first
+        match."""
+        real = igittigitt_module._globmatch
+
+        def refusing(path, glob):
+            if "BADRULE" in glob:
+                raise re.error("bad character range")
+            return real(path, glob)
+
+        monkeypatch.setattr(igittigitt_module, "_globmatch", refusing)
+        root = _build(tmp_path / "src", {"probe": "p\n", "BADRULE/x.txt": "x\n"})
+        lines = [
+            f"{gss.START_MARKER_PREFIX}${{SOURCE_DIR}}/.gitignore{gss.MARKER_SUFFIX}",
+            "BADRULE/",
+            f"{gss.END_MARKER_PREFIX}${{SOURCE_DIR}}/.gitignore{gss.MARKER_SUFFIX}",
+        ]
+
+        with patch.object(gss.ASH_LOGGER, "warning") as warning:
+            spec, _ids = gss.get_ash_ignorespec_with_attribution(lines, root)
+            included = gss.get_files_not_matching_spec(
+                str(root),
+                spec,
+                _all_files=[str(root / name) for name in ("probe", "BADRULE/x.txt")],
+            )
+
+        assert sorted(_names(root, included)) == ["BADRULE/x.txt", "probe"]
+        assert any("Skipped ignore rule" in text for text in _said(warning)), _said(
+            warning
+        )
+
     def test_a_negation_it_cannot_compile_is_skipped_too(self, tmp_path, monkeypatch):
         """The check holds the rule alone, so it has to compile a negation without a
         positive rule before it matching first. A parser that kept negations apart
