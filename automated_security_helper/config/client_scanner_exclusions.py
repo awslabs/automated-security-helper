@@ -128,11 +128,12 @@ Known limitations
   scanned tree is in, while the matching here anchors at the scan root. The
   two are one directory when the scanned tree is the repository's root.
 * A regular expression is bounded by running it in a child process that is
-  killed at the deadline (``evaluated_within``): one process start per
-  bounded search, which on Linux is a fork of ASH's own process. A suppression
-  pass spends one ``scan_timeout`` over all of its searches, not one per
-  finding, and does not search again an entry that ran out
-  (``EvaluationBudget``). The scan it was part of fails at the deadline.
+  killed at the deadline (``evaluated_within``): one worker process per
+  suppression pass, started at its first bounded search and reused (a fork of
+  ASH's own process on Linux, a fresh interpreter elsewhere), and one more
+  after each kill. A pass spends one ``scan_timeout`` over all of its
+  searches, not one per finding, and does not search again an entry that ran
+  out (``EvaluationBudget``). The scan it was part of fails at the deadline.
 
 Rejected alternatives
 ---------------------
@@ -153,6 +154,7 @@ import os
 import re
 import sys
 import time
+import weakref
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -172,6 +174,7 @@ from typing import (
 )
 
 from pydantic import BaseModel, ConfigDict
+from typing_extensions import Self
 
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -406,7 +409,11 @@ def evaluated_within(
     paths): they cross to the child, which on platforms without ``fork`` is a
     fresh interpreter that imports this module by name (``_process_context``).
     """
-    return EvaluationBudget().evaluate(timeout, source, source, function, *args)
+    budget = EvaluationBudget()
+    try:
+        return budget.evaluate(timeout, source, source, function, *args)
+    finally:
+        budget.close()
 
 
 class EvaluationTimedOut(ScannerError):
@@ -425,16 +432,48 @@ class EvaluationBudget:
     is evaluated, and every later evaluation under that timeout gets what is
     left of it. An entry whose search ran to the deadline is remembered by its
     ``key``, and a later question about it fails at once with the same answer
-    instead of starting another child; so does any evaluation once the
-    deadline has passed. The pass creates one budget and hands it down
+    instead of starting another search; so does any evaluation once the
+    deadline has passed.
+
+    The searches run in ONE child process the budget starts at its first
+    bounded evaluation and reuses for the rest (``_EvaluationWorker``): a
+    process per search cost a fork per finding on Linux and a fresh interpreter
+    per finding where the start method is ``spawn`` (Windows, macOS), where a
+    pass of many findings spent its ``scan_timeout`` on interpreter starts
+    alone. A search killed at the deadline takes the worker with it, and the
+    next evaluation starts a new one. ``close()`` ends the worker; the pass
+    calls it when it is done, and a budget that is dropped unclosed closes its
+    worker when it is collected (``weakref.finalize``), so no child outlives
+    the pass by more than that. The pass creates one budget and hands it down
     (``utils/sarif_utils.apply_suppressions_to_sarif``); ``evaluated_within``
-    is one evaluation under a budget of its own, which is how a caller with no
-    pass (the detect-secrets scanner's one filter) uses the bound.
+    is one evaluation under a budget of its own, closed right after, which is
+    how a caller with no pass (the detect-secrets scanner's one filter) uses
+    the bound.
     """
 
     def __init__(self) -> None:
         self._deadlines: Dict[float, float] = {}
         self._timed_out: Dict[str, str] = {}
+        self._worker = _EvaluationWorker()
+        self._finalizer = weakref.finalize(self, self._worker.close)
+
+    def close(self, graceful: bool = True) -> None:
+        """End the worker process, if one is running. The budget stays usable.
+
+        ``graceful`` is handed to the worker (``_EvaluationWorker.close``).
+        """
+        self._worker.close(graceful)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    @property
+    def worker_pid(self) -> Optional[int]:
+        """The pid of the running worker, or None when none is running."""
+        return self._worker.pid
 
     def remaining(self, timeout: float) -> float:
         """Seconds left of the deadline ``timeout`` opened, opening it now if new."""
@@ -478,103 +517,160 @@ class EvaluationBudget:
                 "could be searched. The scan fails rather than run past it."
             )
         try:
-            return _evaluated_in_a_child(remaining, timeout, source, function, args)
+            return self._worker.evaluate(remaining, timeout, source, function, args)
         except EvaluationTimedOut:
             self._timed_out[key] = source
             raise
 
 
-def _evaluated_in_a_child(
-    wait: float,
-    timeout: float,
-    source: str,
-    function: Callable[..., T],
-    args: Tuple[Any, ...],
-) -> T:
-    """``function(*args)`` in a child process, killed when ``wait`` seconds pass.
+class _EvaluationWorker:
+    """One child process that runs a budget's bounded searches, one at a time.
 
-    ``wait`` is what is left of ``timeout``, the scanner's ``scan_timeout``,
-    which the error names. The child sends the result, or the exception, back
-    over a pipe; the parent waits for it up to ``wait`` and kills the child
-    when nothing has arrived by then (``EvaluationTimedOut``). A child that
-    ends without answering (killed from outside, or its answer could not be
-    sent) fails the evaluation too, named as such, so the scan never guesses
-    at a match it did not see.
+    Started at the first evaluation and reused for the next ones; each
+    evaluation sends ``(function, args)`` over the pipe and waits up to ``wait``
+    seconds for ``(True, result)`` or ``(False, error)`` back. A search still
+    running at the deadline cannot be interrupted inside the child (the matcher
+    returns to no one until it is done), so the whole child is killed
+    (``EvaluationTimedOut``) and the next evaluation starts a new one. A child
+    that ends without answering (killed from outside, or an answer that could
+    not be sent) fails the evaluation too, named as such, so the scan never
+    guesses at a match it did not see.
     """
-    context = _process_context()
-    receiving, sending = context.Pipe(duplex=False)
-    child = context.Process(
-        target=_answer_through,
-        args=(sending, function, args),
-        name="ash-pattern-evaluation",
-        daemon=True,
-    )
-    child.start()
-    sending.close()
-    try:
-        if not receiving.poll(wait):
-            raise EvaluationTimedOut(
-                f"A regular expression from {source} did not finish matching within "
-                f"{timeout} seconds, the scanner's scan_timeout. Its evaluation was "
-                "stopped, and the scan fails rather than wait on it."
-            )
+
+    def __init__(self) -> None:
+        self._process: Any = None
+        self._connection: Any = None
+
+    @property
+    def pid(self) -> Optional[int]:
+        if self._process is None or not self._process.is_alive():
+            return None
+        return self._process.pid
+
+    def evaluate(
+        self,
+        wait: float,
+        timeout: float,
+        source: str,
+        function: Callable[..., T],
+        args: Tuple[Any, ...],
+    ) -> T:
+        """``function(*args)`` in the worker, killed when ``wait`` seconds pass.
+
+        ``wait`` is what is left of ``timeout``, the scanner's ``scan_timeout``,
+        which the error names.
+        """
+        connection = self._started()
         try:
-            answered, payload = receiving.recv()
-        except EOFError:
+            connection.send((function, args))
+            if not connection.poll(wait):
+                raise EvaluationTimedOut(
+                    f"A regular expression from {source} did not finish matching "
+                    f"within {timeout} seconds, the scanner's scan_timeout. Its "
+                    "evaluation was stopped, and the scan fails rather than wait on "
+                    "it."
+                )
+            answered, payload = connection.recv()
+        except EvaluationTimedOut:
+            self.close(graceful=False)
+            raise
+        except (EOFError, OSError):
+            self.close(graceful=False)
             raise ScannerError(
                 f"The evaluation of a regular expression from {source} ended without "
                 "an answer, so the scan fails rather than guess at one."
             ) from None
-    finally:
-        receiving.close()
-        if child.is_alive():
-            child.kill()
-        child.join()
-    if answered:
-        return payload
-    raise payload
+        if answered:
+            return payload
+        raise payload
+
+    def close(self, graceful: bool = True) -> None:
+        """End the worker, if one is running.
+
+        ``graceful`` asks an idle worker to leave on its own and waits half a
+        second for it; a worker caught mid-search (the deadline case) is killed
+        outright, since nothing inside it will read the request.
+        """
+        process, connection = self._process, self._connection
+        self._process = self._connection = None
+        if connection is not None:
+            if graceful and process is not None and process.is_alive():
+                try:
+                    connection.send(None)
+                except (OSError, ValueError):
+                    pass
+            connection.close()
+        if process is not None:
+            if graceful:
+                process.join(0.5)
+            if process.is_alive():
+                process.kill()
+            process.join()
+
+    def _started(self) -> Any:
+        if self._process is not None and self._process.is_alive():
+            return self._connection
+        self.close()
+        context = _process_context()
+        parent_end, child_end = context.Pipe(duplex=True)
+        process = context.Process(
+            target=_serve_evaluations,
+            args=(child_end,),
+            name="ash-pattern-evaluation",
+            daemon=True,
+        )
+        process.start()
+        child_end.close()
+        self._process, self._connection = process, parent_end
+        return parent_end
 
 
-def _answer_through(
-    connection: Any, function: Callable[..., Any], args: Tuple[Any, ...]
-) -> None:
-    """In the child: run ``function(*args)`` and send ``(True, result)`` or ``(False, error)``.
+def _serve_evaluations(connection: Any) -> None:
+    """In the worker: answer each ``(function, args)`` job until None or the pipe ends.
 
     A result or an error that cannot be pickled is replaced by a ScannerError
-    that names its type, so the parent always reads one answer.
+    that names its type, so the parent always reads one answer per job.
     """
     try:
-        answer: Tuple[bool, Any] = (True, function(*args))
-    except BaseException as error:  # re-raised in the caller's process
-        answer = (False, error)
-    try:
-        try:
-            connection.send(answer)
-        except Exception:
-            what = "result" if answer[0] else type(answer[1]).__name__
-            connection.send(
-                (
-                    False,
-                    ScannerError(
-                        f"The evaluation's {what} could not be handed back from the "
-                        "process it ran in."
-                    ),
+        while True:
+            try:
+                job = connection.recv()
+            except EOFError:
+                return
+            if job is None:
+                return
+            function, args = job
+            try:
+                answer: Tuple[bool, Any] = (True, function(*args))
+            except BaseException as error:  # re-raised in the caller's process
+                answer = (False, error)
+            try:
+                connection.send(answer)
+            except Exception:
+                what = "result" if answer[0] else type(answer[1]).__name__
+                connection.send(
+                    (
+                        False,
+                        ScannerError(
+                            f"The evaluation's {what} could not be handed back from "
+                            "the process it ran in."
+                        ),
+                    )
                 )
-            )
     finally:
         connection.close()
 
 
 def _process_context() -> Any:
-    """The multiprocessing context the evaluation child is started with.
+    """The multiprocessing context the evaluation worker is started with.
 
     ``fork`` on Linux: the child starts with this module and the compiled
-    pattern already in memory, in milliseconds, which is what a search per
-    finding can afford (the detect-secrets scanner forces the same method for
-    its worker). Elsewhere the platform's default (``spawn`` on Windows and
-    macOS), which starts a fresh interpreter and imports the evaluated function
-    by its module and name, which is why every function handed to
-    ``evaluated_within`` is defined at module level.
+    pattern already in memory, in milliseconds (the detect-secrets scanner
+    forces the same method for its own worker). Elsewhere the platform's
+    default (``spawn`` on Windows and macOS), which starts a fresh interpreter
+    and imports the evaluated function by its module and name, which is why
+    every function handed to ``evaluated_within`` is defined at module level;
+    one worker per pass keeps that start to one per pass.
     """
     if sys.platform.startswith("linux"):
         return multiprocessing.get_context("fork")

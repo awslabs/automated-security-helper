@@ -1973,6 +1973,8 @@ def apply_suppressions_to_sarif(
         )
 
     output_exclusion.report()
+    # The pass is done: end the budget's worker process, if one was started.
+    evaluation_budget.close()
     return sarif_report
 
 

@@ -29,6 +29,13 @@ per ``scan_timeout`` the first time it is used, hands each later search what is
 left, and remembers an entry that ran out so it is not searched again. The SARIF
 pass creates one budget and hands it down through ``matching_exclusion`` and
 ``hides``; the tests here pin each hop with a budget that records what it saw.
+
+The budget's searches run in ONE worker child it starts at its first bounded
+evaluation and reuses (a process per search cost a fork per finding on Linux and
+a fresh interpreter per finding where the start method is ``spawn``); a worker
+killed at the deadline is replaced by the next evaluation, ``close()`` ends it,
+and the pass closes its budget when it is done. The tests pin that lifecycle by
+pid: one pid across evaluations, none after ``close()``, a new one after a kill.
 """
 
 from __future__ import annotations
@@ -343,11 +350,11 @@ def test_a_budget_spends_one_deadline_over_a_pass():
 def test_a_budget_remembers_an_entry_that_ran_out(monkeypatch):
     calls: list = []
 
-    def running_out(wait, timeout, source, function, args):
+    def running_out(self, wait, timeout, source, function, args):
         calls.append(source)
         raise EvaluationTimedOut("ran out")
 
-    monkeypatch.setattr(exclusions_module, "_evaluated_in_a_child", running_out)
+    monkeypatch.setattr(exclusions_module._EvaluationWorker, "evaluate", running_out)
     budget = EvaluationBudget()
 
     with pytest.raises(EvaluationTimedOut):
@@ -377,6 +384,89 @@ def test_a_budget_with_no_bound_runs_inline():
 
     assert budget.evaluate(None, "s", "k", os.getpid) == os.getpid()
     assert budget.timed_out == ()
+    assert budget.worker_pid is None
+
+
+# ---------------------------------------------------------------------------
+# One worker process per pass
+# ---------------------------------------------------------------------------
+
+
+def _evaluation_workers() -> list:
+    return [
+        child
+        for child in multiprocessing.active_children()
+        if child.name == "ash-pattern-evaluation"
+    ]
+
+
+def test_a_budget_reuses_one_worker_across_its_evaluations():
+    budget = EvaluationBudget()
+    assert budget.worker_pid is None
+
+    first = budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+    second = budget.evaluate(FAST_TIMEOUT, "s", "k2", os.getpid)
+    third = budget.evaluate(FAST_TIMEOUT, "s", "k3", operator.add, 2, 3)
+
+    assert first == second != os.getpid()
+    assert budget.worker_pid == first
+    assert third == 5
+    budget.close()
+    assert budget.worker_pid is None
+    assert _evaluation_workers() == []
+
+
+def test_a_closed_budget_starts_a_new_worker_when_asked_again():
+    budget = EvaluationBudget()
+    first = budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+    budget.close()
+
+    again = budget.evaluate(FAST_TIMEOUT, "s", "k2", os.getpid)
+
+    assert again != first
+    assert again != os.getpid()
+    budget.close()
+
+
+def test_a_worker_killed_at_the_deadline_is_replaced():
+    budget = EvaluationBudget()
+    first = budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+
+    with pytest.raises(EvaluationTimedOut):
+        budget.evaluate(TINY_TIMEOUT, "s", "slow", time.sleep, 10)
+    assert budget.worker_pid is None
+    replaced = budget.evaluate(FAST_TIMEOUT, "s", "k3", os.getpid)
+
+    assert replaced != first
+    assert replaced != os.getpid()
+    assert budget.timed_out == ("slow",)
+    budget.close()
+
+
+def test_a_worker_hands_an_error_back_and_stays_alive():
+    budget = EvaluationBudget()
+
+    with pytest.raises(KeyError):
+        budget.evaluate(FAST_TIMEOUT, "s", "k1", _missing_key)
+    pid = budget.worker_pid
+
+    assert pid is not None
+    assert budget.evaluate(FAST_TIMEOUT, "s", "k2", os.getpid) == pid
+    budget.close()
+
+
+def test_evaluated_within_leaves_no_worker_behind():
+    assert evaluated_within(FAST_TIMEOUT, "x", os.getpid) != os.getpid()
+
+    assert _evaluation_workers() == []
+
+
+def test_a_budget_used_as_a_context_manager_closes_on_exit():
+    with EvaluationBudget() as budget:
+        pid = budget.evaluate(FAST_TIMEOUT, "s", "k1", os.getpid)
+        assert budget.worker_pid == pid
+
+    assert budget.worker_pid is None
 
 
 def test_the_skip_path_search_is_charged_to_the_budget_by_its_pattern():
@@ -469,18 +559,25 @@ def _report_of(uris: list) -> Any:
 def test_the_suppression_pass_shares_one_budget_across_its_findings(
     tmp_path, monkeypatch
 ):
-    """``apply_suppressions_to_sarif`` creates one budget and hands it to every
-    client-exclusion question of the pass."""
+    """``apply_suppressions_to_sarif`` creates one budget, hands it to every
+    client-exclusion question of the pass, and closes it when the pass is done."""
     import automated_security_helper.utils.sarif_utils as sarif_utils
     from automated_security_helper.base.plugin_context import PluginContext
 
     seen: list = []
+    closed: list = []
+
+    class _ClosingBudget(EvaluationBudget):
+        def close(self, graceful: bool = True) -> None:
+            closed.append(self)
+            super().close(graceful)
 
     def recording(result, run, exclusions, normalize, source_dir, budget=None):
         seen.append(budget)
         return None
 
     monkeypatch.setattr(sarif_utils, "_client_exclusion_for", recording)
+    monkeypatch.setattr(exclusions_module, "EvaluationBudget", _ClosingBudget)
     config = AshConfig()
     config._client_scanner_exclusions = [
         ClientScannerExclusion(
@@ -505,6 +602,7 @@ def test_the_suppression_pass_shares_one_budget_across_its_findings(
     assert len(seen) == 2
     assert isinstance(seen[0], EvaluationBudget)
     assert seen[0] is seen[1]
+    assert closed == [seen[0]]
 
 
 # ---------------------------------------------------------------------------
