@@ -39,7 +39,7 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash mcp`](#mcp) | Start the ASH MCP server (Model Context Protocol) |
 | [`ash merge`](#merge) | Merges the results of a sharded scan into one unified report. |
 | [`ash plugin`](#plugin) | Manage ASH plugins |
-| [`ash plugin list`](#plugin-list) | The `plugin list` command lists the plugins a scan with this configuration runs. |
+| [`ash plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
 | [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
 
@@ -555,7 +555,7 @@ Subcommands: [`ash plugin list`](#plugin-list).
 
 ### <a id="plugin-list"></a>`ash plugin list`
 
-The `plugin list` command lists the plugins a scan with this configuration runs.
+The `plugin list` command lists what a scan with this configuration loads, on or off.
 
 ```text
 ash plugin list [OPTIONS]

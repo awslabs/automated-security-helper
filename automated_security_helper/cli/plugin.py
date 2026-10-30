@@ -70,7 +70,7 @@ plugin_app = typer.Typer(
 @plugin_app.command(
     name="list",
     help="""
-The `plugin list` command lists the plugins a scan with this configuration runs.
+The `plugin list` command lists what a scan with this configuration loads, on or off.
 """,
 )
 def list_plugins(

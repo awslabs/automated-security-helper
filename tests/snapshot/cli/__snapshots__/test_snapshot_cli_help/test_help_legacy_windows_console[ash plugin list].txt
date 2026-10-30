@@ -1,7 +1,7 @@
 
  Usage: ash plugin list [OPTIONS]
 
- The `plugin list` command lists the plugins a scan with this configuration runs.
+ The `plugin list` command lists what a scan with this configuration loads, on or off.
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --include-plugin-config      --no-include-plugin-config           Whether to include the plugin │

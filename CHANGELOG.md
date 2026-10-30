@@ -5479,8 +5479,8 @@
   unedited skeleton no longer overrides the variable with the default; its
   `--generate-cli-skeleton` help says so.
 
-- **`ash plugin list` lists the plugins a scan with the configuration runs, built
-  as the scan builds them.** It listed every class registered in the process, so
+- **`ash plugin list` lists what a scan with the configuration loads, on or off,
+  built as the scan builds it.** It listed every class registered in the process, so
   plugins no scan of the configuration would run (a module the configuration does
   not name, an off-host reporter a trusted module does not load) were listed and
   had their options checked; the listing now follows the scan's selection. Each

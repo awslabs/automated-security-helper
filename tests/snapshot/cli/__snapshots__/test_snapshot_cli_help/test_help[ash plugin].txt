@@ -7,5 +7,5 @@
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list  The `plugin list` command lists the plugins a scan with this configuration runs.           │
+│ list  The `plugin list` command lists what a scan with this configuration loads, on or off.      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
