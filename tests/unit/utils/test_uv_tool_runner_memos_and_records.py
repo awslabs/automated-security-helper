@@ -159,17 +159,25 @@ def test_a_chunk_count_one_too_high_hands_the_sleep_nothing_negative(monkeypatch
     No pair of floats was found that rounds the division and the multiplication
     apart for the real poll (two million delays and every schedule shape were
     tried), so the count is forced one too high here to read the clamp.
+
+    The delay must make the forced extra chunk NEGATIVE, not zero: with 1.0 and
+    a poll of 0.2 both are exact in doubles (1.0 / 0.2 == 5.0, 5 * 0.2 == 1.0),
+    so the extra chunk is 0.0 with or without the clamp and nothing is read.
+    With 1.1 the extra chunk is 1.1 - 6 * 0.2, about -0.1 in doubles, so an
+    unclamped wait hands the sleep a negative and the clamp hands it 0.0.
     """
     real_ceil = math.ceil
     monkeypatch.setattr(uv_tool_runner.math, "ceil", lambda value: real_ceil(value) + 1)
     handed: list = []
     monkeypatch.setattr(uv_tool_runner.time, "sleep", handed.append)
-    _sleep_between_attempts(1.0)
     poll = uv_tool_runner._UV_PROBE_CANCEL_POLL_SECONDS
-    assert len(handed) == real_ceil(1.0 / poll) + 1
+    delay = 1.1
+    assert delay - real_ceil(delay / poll) * poll < 0.0, "the delay must overshoot"
+    _sleep_between_attempts(delay)
+    assert len(handed) == real_ceil(delay / poll) + 1
     assert all(0.0 <= chunk <= poll for chunk in handed), handed
     assert handed[-1] == 0.0
-    assert sum(handed) == pytest.approx(1.0)
+    assert sum(handed) == pytest.approx(delay)
 
 
 class TestTheInstallArms:
