@@ -1861,6 +1861,11 @@ def _well_formed_commands(declared: Any) -> List[Tuple[List[str], bool]]:
     CustomCommand, and an argv element that is not text are each a ValueError or
     TypeError naming the entry, which the caller records against that plugin
     alone: iterated bare, each aborted the whole run with a traceback.
+
+    A path object (``os.PathLike``) is text to this check: subprocess accepts one
+    as an argv element, and a plugin that builds its command from a ``Path`` is
+    run as it would be by hand. It is taken as its ``os.fspath`` text, so the
+    runner and the "Running command" line see one shape.
     """
     if declared is None:
         raise ValueError("get_installation_commands returned None, not a list")
@@ -1875,12 +1880,16 @@ def _well_formed_commands(declared: Any) -> List[Tuple[List[str], bool]]:
                 f"install command {position} is {type(entry).__name__}, not a list "
                 "of arguments"
             )
+        text_argv: List[str] = []
         for item in argv:
+            if isinstance(item, os.PathLike):
+                item = os.fspath(item)
             if not isinstance(item, str):
                 raise TypeError(
                     f"install command {position} holds {type(item).__name__}, not text"
                 )
-        commands.append((argv, shell))
+            text_argv.append(item)
+        commands.append((text_argv, shell))
     return commands
 
 

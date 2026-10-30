@@ -39,6 +39,19 @@ pytestmark = pytest.mark.unit
 CANARY = "ash-canary-value-xq9"
 
 
+def test_a_path_element_is_text_to_the_command_check():
+    """The shape check refused a Path element as "not text" before the argv was
+    shown or run; subprocess accepts a path object, so the check reads it as its
+    text. A number is still refused."""
+    checked = dependencies_module._well_formed_commands(
+        [["copy", Path("plain-path"), "dest"]]
+    )
+
+    assert checked == [(["copy", "plain-path", "dest"], False)], checked
+    with pytest.raises(TypeError):
+        dependencies_module._well_formed_commands([["copy", 3]])
+
+
 def test_a_command_line_is_shown_as_text_without_the_values():
     shown = dependencies_module._shown_command(
         ["pip", "install", Path("plain-path"), 3, CANARY], (CANARY,)
