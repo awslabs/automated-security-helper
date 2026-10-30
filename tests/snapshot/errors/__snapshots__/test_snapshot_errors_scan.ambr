@@ -455,7 +455,7 @@
   dict({
     'exit_code': 4,
     'stderr': '''
-      --allow-missing-projects and --workspace-config (or ASH_WORKSPACE_CONFIG in the environment) only applies in workspace mode; pass '--workspace <file>' or '--workspace auto' as well.
+      --allow-missing-projects and --workspace-config only applies in workspace mode; pass '--workspace <file>' or '--workspace auto' as well.
   
     ''',
     'stdout': '',
