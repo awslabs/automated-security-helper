@@ -362,12 +362,24 @@ TOOL_NOTES: dict[str, dict] = {
                 "results."
             ),
             {
-                # Printed while the response carries the keys the paragraph names.
+                # Printed while the response carries the keys the paragraph names;
+                # without one of them the status explanation is kept, with the
+                # key-naming sentences left out, so the warning never disappears.
                 "needs": [
                     "incomplete_scanners",
                     "stale_content_databases",
                     "coverage_complete",
                 ],
+                "otherwise": (
+                    "**`incomplete` is terminal, with partial coverage.** The run finished and its "
+                    "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
+                    "targets), no scanner reached a verdict, a converter did not run or could "
+                    "not convert some of its inputs, a rule "
+                    "could not be evaluated, or a content database was past its declared age "
+                    "bound. The findings are real but partial, so read them, and do not report "
+                    "the target as clean. `failed` means the run crashed, left no readable "
+                    "results, or ran past the server's `scan_timeout_seconds`."
+                ),
                 "text": (
                     "**`incomplete` is terminal, with partial coverage.** The run finished and its "
                     "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
