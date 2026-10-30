@@ -1361,13 +1361,20 @@ def run_ash_scan_cli_command(
         # None of these flags mean anything outside workspace mode. Silently
         # ignoring --dry-run would run a full scan for someone who asked for
         # none; silently ignoring --workspace-config would scan with no policy
-        # for someone who believes a severity ceiling is in force.
+        # for someone who believes a severity ceiling is in force. The policy
+        # file is the one option here with an environment variable, so the
+        # refusal names it: with ASH_WORKSPACE_CONFIG exported, every scan
+        # outside workspace mode was refused for a flag the command line did
+        # not carry.
         offending = [
             flag
             for flag, given in (
                 ("--dry-run", dry_run),
                 ("--allow-missing-projects", allow_missing_projects),
-                ("--workspace-config", workspace_config is not None),
+                (
+                    "--workspace-config (or ASH_WORKSPACE_CONFIG in the environment)",
+                    workspace_config is not None,
+                ),
             )
             if given
         ]
