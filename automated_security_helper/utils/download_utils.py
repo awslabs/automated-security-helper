@@ -1037,12 +1037,6 @@ def _already_installed(
         return False
     if expected_sha256 is None:
         return False
-    if platform.system() != "Windows" and not os.access(target, os.X_OK):
-        # The bytes may match and the mode still be wrong: a binary that lost
-        # its execute bit was skipped as installed while no scan could run it.
-        # Not installed, so the install puts a runnable copy in its place.
-        ASH_LOGGER.warning(f"{target} is not executable; reinstalling")
-        return False
     receipt = read_receipt(destination, installed_as)
     if receipt is None:
         return False
@@ -1065,6 +1059,22 @@ def _already_installed(
     except OSError as e:
         ASH_LOGGER.debug(f"Could not hash {target} ({e}); treating as not installed")
         return False
+    if platform.system() != "Windows" and not os.access(target, os.X_OK):
+        # The bytes match and the mode is wrong: a binary that lost its execute
+        # bit was skipped as installed while no scan could run it. The bytes
+        # were just verified against the receipt, so the mode is put back on
+        # the file in place rather than the file downloaded again; a mode that
+        # cannot be set leaves it not installed, and the install replaces it.
+        ASH_LOGGER.warning(f"{target} was not executable; making it executable")
+        try:
+            make_executable(target)
+        except OSError as e:
+            ASH_LOGGER.warning(
+                f"Could not make {target} executable ({e}); reinstalling it"
+            )
+            return False
+        if not os.access(target, os.X_OK):
+            return False
     return True
 
 
