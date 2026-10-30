@@ -198,6 +198,11 @@ def deferred_tool_version_probes() -> Iterator[None]:
         _DEFER_VERSION_PROBES.reset(token)
 
 
+#: The runner's own words for a uv that is simply not there
+#: (``UVToolRunner.unavailable_reason``), the answer that carries no reason.
+_UV_ABSENT = "UV is not available"
+
+
 def _uv_unavailable(runner: Any, failure: Optional[str] = None) -> str:
     """Why ``runner``'s last availability check failed: absent uv, a probe that
     failed, or a refusal.
@@ -207,12 +212,23 @@ def _uv_unavailable(runner: Any, failure: Optional[str] = None) -> str:
     sandbox scope that refuses the check, or a probe that timed out or was
     killed, says nothing about uv; logging either as "UV is not available"
     sends the operator to install a uv they already have.
+
+    A refusal the runner recorded for this thread's last check comes first,
+    in the runner's own sentence (``unavailable_reason``: "The scanner
+    sandbox refused to run uv (...)"), which names the sandbox as the actor;
+    the probe's failure text for the same event ("the probe's spawn failed
+    with SandboxUnavailable: ...") names the exception, and the operator
+    reads the sentence. ``unavailable_reason`` answers the plain
+    ``_UV_ABSENT`` sentence when no refusal was recorded, so that answer is
+    the one that defers to ``failure``.
     """
-    if failure:
-        return f"uv is not available ({failure})"
     reason = getattr(runner, "unavailable_reason", None)
     text = reason() if callable(reason) else None
-    return text if isinstance(text, str) else "UV is not available"
+    if isinstance(text, str) and text != _UV_ABSENT:
+        return text
+    if failure:
+        return f"uv is not available ({failure})"
+    return _UV_ABSENT
 
 
 def _uv_available(runner: Any) -> Tuple[bool, Optional[str]]:
