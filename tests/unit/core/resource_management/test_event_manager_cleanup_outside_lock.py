@@ -78,6 +78,54 @@ class TestAnAwaitableReturnedByACleanupIsAwaited:
         assert ran == ["ran"]
 
 
+class TestTheScanScopedCleanupRunsEachCleanupTheSameWay:
+    """cleanup_subscriptions_by_scan runs every cleanup through
+    unregister_subscription; both fixes are pinned through that path too."""
+
+    @pytest.mark.asyncio
+    async def test_a_re_entrant_cleanup_does_not_deadlock_the_scan_cleanup(self):
+        manager = EventSubscriptionManager()
+        await _register(manager, "other", None, scan_id="scan-1")
+
+        async def cleanup():
+            # Would wait on the manager's lock forever if that were still held.
+            await manager.unregister_subscription("other")
+
+        await _register(manager, "sub", cleanup, scan_id="scan-1")
+
+        results = await asyncio.wait_for(
+            manager.cleanup_subscriptions_by_scan("scan-1"), 5
+        )
+
+        assert results["total_subscriptions"] == 2
+        assert results["successful_cleanups"] + results["failed_cleanups"] == 2
+        assert results["errors"] == []
+        assert manager.get_subscriptions_by_scan("scan-1") == []
+        assert manager.get_subscription_info("sub") is None
+        assert manager.get_subscription_info("other") is None
+
+    @pytest.mark.asyncio
+    async def test_a_cleanup_returning_a_coroutine_runs_to_completion(self):
+        manager = EventSubscriptionManager()
+        ran = []
+
+        async def really_clean_up():
+            ran.append("ran")
+
+        await _register(manager, "sub", lambda: really_clean_up(), scan_id="scan-1")
+
+        results = await manager.cleanup_subscriptions_by_scan("scan-1")
+
+        assert results == {
+            "scan_id": "scan-1",
+            "total_subscriptions": 1,
+            "successful_cleanups": 1,
+            "failed_cleanups": 0,
+            "errors": [],
+        }
+        assert ran == ["ran"]
+
+
 class TestTheCleanupRunsOutsideTheLock:
     @pytest.mark.asyncio
     async def test_a_cleanup_that_calls_back_into_the_manager_does_not_deadlock(
