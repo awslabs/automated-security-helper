@@ -92,6 +92,12 @@ class TestExitCode:
     def test_exit_two_with_an_exceeding_project_is_clean(self, gate):
         assert gate.check_exit_code(2, [_project(gate, "project-a")]) == []
 
+    def test_exit_zero_with_no_exceeding_project_is_clean(self, gate):
+        """The passing case for exit 0. Without it an implementation that
+        refuses every exit 0 once projects exist passes the whole class."""
+        projects = [_project(gate, "project-a", actionable=0, exceeds=False)]
+        assert gate.check_exit_code(0, projects) == []
+
     def test_without_projects_both_codes_are_tolerated(self, gate):
         assert gate.check_exit_code(0) == []
         assert gate.check_exit_code(2) == []
@@ -353,6 +359,12 @@ class TestChildEnvironment:
         assert "PYTHONSAFEPATH" not in env
 
 
+#: Above any pid_max, so a signal that escapes the killpg patch (a refactor to
+#: ``from os import killpg``, or a bare os.kill) meets ESRCH instead of a live
+#: process on the runner.
+FAKE_PID = 2**30
+
+
 class _FakeProcess:
     """A child that has exited, or one that ignores SIGTERM and never exits.
 
@@ -361,7 +373,7 @@ class _FakeProcess:
     """
 
     def __init__(self, alive: bool):
-        self.pid = 4242
+        self.pid = FAKE_PID
         self.alive = alive
         self.waits: list = []
         self.killed = False
@@ -384,7 +396,7 @@ class _FakePipes:
     """A stopped child whose output pipes follow a script of results or timeouts."""
 
     def __init__(self, *outcomes):
-        self.pid = 4242
+        self.pid = FAKE_PID
         self.outcomes = list(outcomes)
         self.timeouts: list = []
 
@@ -405,7 +417,7 @@ def _timeout(output=None, stderr=None):
 class _FakeScanChild:
     """A scan child that exited while a tool it started still holds the pipes."""
 
-    pid = 4242
+    pid = FAKE_PID
 
     def __init__(self, *args, **kwargs):
         self.returncode = 0
