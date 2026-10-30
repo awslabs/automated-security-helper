@@ -1184,6 +1184,14 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # workspace root holds it, and without naming it the walk would lint
             # other projects' output as this project's source.
             workspace_output = getattr(self.context, "workspace_output_dir", None)
+            # The scan set leaves out a file link whose target is outside the
+            # tree before any scanner sees it. A workflow among those is still
+            # an input this scanner did not lint, so it is recorded as the loop
+            # below records the links it refuses itself (the converted walk meets
+            # them there), and the nothing-to-scan reason names it instead of
+            # saying the tree holds no workflow file. Empty when the scan set was
+            # read back from the output directory, whose list left them out.
+            links_left_out: List[Dict[str, str]] = []
             candidates = scan_set(
                 source=str(self._source_dir()),
                 output=str(self._output_dir()),
@@ -1194,7 +1202,24 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 workspace_output_dir=(
                     str(workspace_output) if workspace_output is not None else None
                 ),
+                links_not_scanned=links_left_out,
             )
+            source_abs = Path(self._source_dir()).absolute()
+            for entry in links_left_out:
+                link = (source_abs / entry["path"]).absolute()
+                if not link.is_relative_to(target_abs):
+                    continue
+                link_rel = link.relative_to(target_abs).as_posix()
+                if not is_workflow_file(link_rel, scan_root=target_abs):
+                    continue
+                if _KNOWN_IGNORED_DIRS.intersection(PurePosixPath(link_rel).parts[:-1]):
+                    continue
+                if any(
+                    ignore_path_matches(link_rel, ignore.path)
+                    for ignore in global_ignore_paths
+                ):
+                    continue
+                refuse(link_rel, "it resolves outside the scan root")
 
         relative: List[str] = []
         for item in candidates:
