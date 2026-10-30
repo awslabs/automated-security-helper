@@ -560,6 +560,29 @@ class TestAScannerRowNoShardOwnsIsKept:
         with pytest.raises(ShardCoverageError, match="half-left-out"):
             merge_shard_results(as_loaded(shards))
 
+    def test_a_scanner_every_shard_left_to_another_shard_is_a_hole(self):
+        """The shard split writes the deselection's row shape too: SKIPPED with
+        ``excluded`` and a reason beginning "assigned to another shard". A name
+        every shard left to another shard that no shard's assignment names is a
+        hole in the partition, the disagreement the union check exists for, so
+        it is refused and named as one; the ``excluded`` flag alone does not
+        read as a deselection. Red at the base: the two rows read as a
+        deselection and the merge went through."""
+        shards = build_shards(2)
+        for index, shard in enumerate(shards):
+            shard.scanner_results["fell-between-shards"] = ScannerTargetStatusInfo(
+                status=ScannerStatus.SKIPPED,
+                excluded=True,
+                dependencies_satisfied=True,
+                skipped_reason=(
+                    f"assigned to another shard (this run is shard {index} of 2)"
+                ),
+            )
+
+        with pytest.raises(ShardCoverageError, match="hole in the partition") as held:
+            merge_shard_results(as_loaded(shards))
+        assert "fell-between-shards" in str(held.value)
+
     def test_an_unowned_error_row_survives_adoption(self):
         shards = build_shards(2)
         shards[1].scanner_results["broken.plugin.module"] = ScannerTargetStatusInfo(

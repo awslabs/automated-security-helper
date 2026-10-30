@@ -385,6 +385,15 @@ _NEVER_ATTEMPTED_STATUSES = frozenset(
     {ScannerStatus.ERROR.value, ScannerStatus.MISSING.value}
 )
 
+#: How ScanPhase begins the ``skipped_reason`` of a scanner it left to another shard
+#: (``"assigned to another shard (this run is shard i of n)"``, the row the shard
+#: split writes beside the ``excluded=True`` flag). The same flag marks an operator
+#: deselection, so :func:`_verify_scanner_union` reads this text to tell the two
+#: apart: an orphan every shard left to "another shard" is a partition hole, not a
+#: deselection. A literal coupling to the scan's text; hoisting it to one shared
+#: constant is the scan phase's follow-up.
+_SHARD_SPLIT_REASON_PREFIX = "assigned to another shard"
+
 
 def _each_value_once(*groups: Optional[Iterable[str]]) -> list[str]:
     """The groups' values joined, each once, in their first order. A group
@@ -904,6 +913,9 @@ def _verify_scanner_union(
     # Whether every row a name carries says the operator deselected the scanner
     # (``excluded``), read beside the status; False as soon as one row does not.
     deselected: Dict[str, bool] = {}
+    # Whether some row a name carries was written by the shard split ("assigned to
+    # another shard"), which sets the same ``excluded`` flag as a deselection.
+    left_to_another_shard: Dict[str, bool] = {}
     for results_file, results, _ in shards:
         for scanner, entry in results.scanner_results.items():
             key = _normalized(scanner)
@@ -912,6 +924,11 @@ def _verify_scanner_union(
             statuses.setdefault(key, set()).add(str(getattr(status, "value", status)))
             deselected[key] = deselected.get(key, True) and bool(
                 getattr(entry, "excluded", False)
+            )
+            reason = getattr(entry, "skipped_reason", None)
+            left_to_another_shard[key] = left_to_another_shard.get(key, False) or (
+                isinstance(reason, str)
+                and reason.startswith(_SHARD_SPLIT_REASON_PREFIX)
             )
 
     # An unclaimed row is only an offence when it claims its scanner's outcome is
@@ -967,6 +984,15 @@ def _verify_scanner_union(
     # when EVERY row the name carries is SKIPPED and excluded. A SKIPPED row with
     # ``excluded`` False (one shard's selection or config left the scanner out while
     # no shard owns it) stays refused: that is the shape the harm above describes.
+    #
+    # THE SHARD SPLIT WRITES THE SAME FLAG. A shard records every scanner outside
+    # its assignment SKIPPED with ``excluded=True`` too, its reason beginning
+    # "assigned to another shard". A name every shard left to "another shard" that
+    # no shard's assignment names is a PARTITION HOLE -- the very disagreement this
+    # check exists to refuse -- and on shards written before ``candidate_scanners``
+    # existed this function is the only detector of it. So the deselection
+    # exemption asks the reason as well: a row the split wrote is never a
+    # deselection, and such an orphan is refused, naming the hole.
     orphans = set(seen) - set(owner_by_scanner)
     exempted = sorted(
         name
@@ -977,10 +1003,12 @@ def _verify_scanner_union(
             or (
                 statuses[name] == {ScannerStatus.SKIPPED.value}
                 and deselected.get(name, False)
+                and not left_to_another_shard.get(name, False)
             )
         )
     )
     unclaimed = sorted(orphans - set(exempted))
+    holes = [name for name in unclaimed if left_to_another_shard.get(name, False)]
 
     # Ahead of the refusal below so the disclosure is emitted whether or not this
     # call goes on to raise. Both sets are drawn from `orphans`, so a merge can
@@ -1030,6 +1058,15 @@ def _verify_scanner_union(
             f"--fail-on-incomplete-scanners rather than refused here; one the "
             f"operator deselected is recorded SKIPPED as excluded and is not "
             f"refused either."
+            + (
+                f" Of these, {_shown(', '.join(holes))} "
+                f"{'was' if len(holes) == 1 else 'were'} recorded by every shard "
+                f"as assigned to another shard while no shard's assignment names "
+                f"{'it' if len(holes) == 1 else 'them'}: a hole in the partition, "
+                f"so no shard ran {'it' if len(holes) == 1 else 'them'}."
+                if holes
+                else ""
+            )
         )
 
     unrecorded_by_owner = sorted(
