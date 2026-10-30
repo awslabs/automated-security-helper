@@ -2844,6 +2844,12 @@ class SarifReport(RecordModel):
             if "level" not in res.model_fields_set:
                 clean_result.pop("level", None)
             _keep_the_rule_by_id(clean_result, res, report_tool)
+            if self.runs:
+                # Folded into a run that does not carry the incoming run's
+                # artifacts, logicalLocations or originalUriBaseIds, so an index
+                # or a base id into those tables must not travel with the copy.
+                # An adopted first run keeps its own tables, so its indices stay.
+                _detach_run_scoped_references(clean_result, report_run, self.runs[0])
             report_results.append(Result(**clean_result))
 
         if self.runs:
@@ -2880,6 +2886,121 @@ class SarifReport(RecordModel):
             # told explicitly not to (default is to include)
             if include_invocation:
                 self_run.invocations.extend(report_invocations)
+
+
+def _detach_run_scoped_references(
+    dumped: Dict, incoming: "Run", aggregate: "Run"
+) -> None:
+    """Make a result copied out of *incoming* stand without that run's tables.
+
+    SARIF scopes three kinds of reference to the run that holds the result:
+    ``artifactLocation.index`` (into ``run.artifacts``), ``logicalLocation.index``
+    and ``threadFlowLocation.index`` (into ``run.logicalLocations`` and
+    ``run.threadFlowLocations``), and ``artifactLocation.uriBaseId`` (into
+    ``run.originalUriBaseIds``). The merge folds results into the aggregate's
+    first run, which has its own tables, so every such reference in the copy
+    pointed into the wrong run: a result naming its file by index alone named
+    whatever the aggregate held at that position, and ``SRCROOT`` meant the
+    aggregate's root, not the scanned target's. ``ruleIndex`` was already dropped
+    for the same reason; the rest is handled here, on the dumped copy, before it
+    is rebuilt as a ``Result``.
+
+    An artifact index is resolved first: a location with no ``uri`` takes the
+    ``uri`` (and ``uriBaseId``) of ``incoming.artifacts[index].location``, then
+    the index is dropped; a location that already names its file loses the index
+    only. Logical-location and thread-flow indices are dropped; the names stay.
+    A ``uriBaseId`` is kept when the aggregate defines the same base the same
+    way, folded into the aggregate's ``originalUriBaseIds`` when the aggregate
+    does not define it, and otherwise expanded into the ``uri`` from the
+    incoming run's definition (following a base's own ``uriBaseId`` chain) so the
+    two runs' roots cannot be confused. A base id the incoming run never
+    defined is left as written: there is nothing to read it against.
+    """
+    incoming_bases = incoming.originalUriBaseIds or {}
+    artifacts = incoming.artifacts or []
+
+    def base_definition(base_id: str) -> Optional[Dict]:
+        base = incoming_bases.get(base_id)
+        if base is None:
+            return None
+        return base.model_dump(exclude_none=True, exclude={"index"})
+
+    def expand(uri: Optional[str], base_id: str) -> tuple:
+        """*uri* prefixed by the incoming run's definition of *base_id*."""
+        text = uri or ""
+        seen: set = set()
+        while base_id is not None and base_id not in seen:
+            seen.add(base_id)
+            base = incoming_bases.get(base_id)
+            if base is None or not base.uri:
+                return text, base_id
+            prefix = base.uri if base.uri.endswith("/") else base.uri + "/"
+            text = prefix + text.lstrip("/") if text else base.uri
+            base_id = base.uriBaseId
+        return text, base_id
+
+    def detach_artifact_location(location: object) -> None:
+        if not isinstance(location, dict):
+            return
+        index = location.get("index")
+        if isinstance(index, int) and index >= 0:
+            if location.get("uri") is None and index < len(artifacts):
+                source = artifacts[index].location
+                if source is not None:
+                    location["uri"] = source.uri
+                    if location.get("uriBaseId") is None and source.uriBaseId:
+                        location["uriBaseId"] = source.uriBaseId
+            location.pop("index", None)
+        base_id = location.get("uriBaseId")
+        if base_id is None:
+            return
+        incoming_definition = base_definition(base_id)
+        if incoming_definition is None:
+            return
+        kept = (aggregate.originalUriBaseIds or {}).get(base_id)
+        if kept is None:
+            if aggregate.originalUriBaseIds is None:
+                aggregate.originalUriBaseIds = {}
+            aggregate.originalUriBaseIds[base_id] = incoming_bases[base_id].model_copy(
+                deep=True
+            )
+            return
+        if kept.model_dump(exclude_none=True, exclude={"index"}) == incoming_definition:
+            return
+        expanded, remaining = expand(location.get("uri"), base_id)
+        if remaining == base_id:
+            # The definition names no uri to expand with; left as written.
+            return
+        location["uri"] = expanded
+        location.pop("uriBaseId", None)
+        if remaining is not None:
+            location["uriBaseId"] = remaining
+
+    def detach_location(location: object) -> None:
+        if not isinstance(location, dict):
+            return
+        physical = location.get("physicalLocation")
+        if isinstance(physical, dict):
+            detach_artifact_location(physical.get("artifactLocation"))
+        for logical in location.get("logicalLocations") or []:
+            if isinstance(logical, dict):
+                logical.pop("index", None)
+
+    detach_artifact_location(dumped.get("analysisTarget"))
+    for location in dumped.get("locations") or []:
+        detach_location(location)
+    for location in dumped.get("relatedLocations") or []:
+        detach_location(location)
+    for flow in dumped.get("codeFlows") or []:
+        if not isinstance(flow, dict):
+            continue
+        for thread in flow.get("threadFlows") or []:
+            if not isinstance(thread, dict):
+                continue
+            for step in thread.get("locations") or []:
+                if isinstance(step, dict):
+                    step.pop("index", None)
+                    detach_location(step.get("location"))
 
 
 def _same_tool_component(

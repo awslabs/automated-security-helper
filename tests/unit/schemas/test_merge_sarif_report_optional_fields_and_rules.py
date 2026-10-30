@@ -341,6 +341,180 @@ class TestResultsKeepTheirRuleById:
         assert aggregated.runs[0].results[0].ruleId == "T-9"
 
 
+def _located(uri=None, index=None, uri_base_id=None, **extra) -> dict:
+    artifact: dict = {}
+    if uri is not None:
+        artifact["uri"] = uri
+    if index is not None:
+        artifact["index"] = index
+    if uri_base_id is not None:
+        artifact["uriBaseId"] = uri_base_id
+    location = {"physicalLocation": {"artifactLocation": artifact}}
+    location.update(extra)
+    return _finding("T-1", locations=[location])
+
+
+def _run_with_tables(driver: str, results, artifacts=None, bases=None) -> Run:
+    """A run whose own tables the folded results used to point into."""
+    fields: dict = {"tool": {"driver": {"name": driver}}, "results": results}
+    if artifacts is not None:
+        fields["artifacts"] = [{"location": {"uri": uri}} for uri in artifacts]
+    if bases is not None:
+        fields["originalUriBaseIds"] = {
+            key: {"uri": value} for key, value in bases.items()
+        }
+    return Run(**fields)
+
+
+def _first_artifact_location(report: SarifReport, position: int = 0):
+    result = report.runs[0].results[position]
+    return result.locations[0].physicalLocation.root.artifactLocation
+
+
+class TestFoldedResultsLeaveTheirRunsTablesBehind:
+    """A later run's results are folded into runs[0], which has other tables.
+
+    ``ruleIndex`` was already dropped for this reason. The artifact index, the
+    logical-location index and the ``uriBaseId`` pointed into the incoming run's
+    ``artifacts``, ``logicalLocations`` and ``originalUriBaseIds`` just the same.
+    """
+
+    def test_an_artifact_named_by_index_alone_takes_its_uri_from_its_own_run(self):
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables("tool", [_located(index=0)], artifacts=["second/b.py"])
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert location.uri == "second/b.py"
+        assert location.index in (None, -1)
+
+    def test_a_located_artifact_loses_the_index_and_keeps_its_uri(self):
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool", [_located(uri="src/x.py", index=0)], artifacts=["src/x.py"]
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert location.uri == "src/x.py"
+        assert location.index in (None, -1)
+
+    def test_a_base_id_the_two_runs_define_differently_is_expanded(self):
+        aggregated = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "aggregate", [], bases={"SRCROOT": "file:///repo-one/"}
+                )
+            ]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="src/x.py", uri_base_id="SRCROOT")],
+                    bases={"SRCROOT": "file:///repo-two/"},
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert location.uri == "file:///repo-two/src/x.py"
+        assert location.uriBaseId is None
+        # The aggregate's own definition is untouched.
+        assert aggregated.runs[0].originalUriBaseIds["SRCROOT"].uri == (
+            "file:///repo-one/"
+        )
+
+    def test_a_base_id_only_the_incoming_run_defines_is_folded_and_kept(self):
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="src/x.py", uri_base_id="TARGET")],
+                    bases={"TARGET": "file:///target/"},
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert location.uri == "src/x.py"
+        assert location.uriBaseId == "TARGET"
+        assert aggregated.runs[0].originalUriBaseIds["TARGET"].uri == "file:///target/"
+
+    def test_a_base_id_both_runs_define_alike_is_kept(self):
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], bases={"SRCROOT": "file:///r/"})]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="src/x.py", uri_base_id="SRCROOT")],
+                    bases={"SRCROOT": "file:///r/"},
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert (location.uri, location.uriBaseId) == ("src/x.py", "SRCROOT")
+
+    def test_a_logical_location_keeps_its_name_and_loses_its_index(self):
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _located(
+                            uri="src/x.py",
+                            logicalLocations=[{"name": "handler", "index": 3}],
+                        )
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        logical = aggregated.runs[0].results[0].locations[0].logicalLocations[0]
+        assert logical.name == "handler"
+        assert logical.index in (None, -1)
+
+    def test_the_first_run_adopted_whole_keeps_its_own_indices(self):
+        """The control: an adopted run carries its tables, so nothing is detached."""
+        aggregated = SarifReport(runs=[])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables("tool", [_located(index=0)], artifacts=["second/b.py"])
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert location.index == 0
+        assert aggregated.runs[0].artifacts[0].location.uri == "second/b.py"
+
+
 class TestTheIncomingRunsExtensionsAreFolded:
     def test_a_captured_scanner_report_folds_into_an_aggregate_as_an_extension(
         self,
