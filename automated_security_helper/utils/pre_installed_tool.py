@@ -526,7 +526,19 @@ def _dry_run(
     with ExitStack() as grants:
         grants.enter_context(also_runs(interpreter))
         if target is not None:
-            grants.enter_context(reads_directory(target))
+            try:
+                grants.enter_context(reads_directory(target))
+            except ValueError as refusal:
+                # The staging directory resolves to one the sandbox never grants
+                # (TMPDIR is a home directory, so the directory sits directly in
+                # it). The check cannot run under the sandbox: it answers
+                # "unverifiable", as a staging that could not be done does, not
+                # with an exception out of the scanner's dependency check.
+                reason = (
+                    f"could not grant uv its staging directory to check "
+                    f"{requirement!r}: {refusal}"
+                )
+                return "unverifiable", reason
         result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
     if _did_not_run(result):
         return (

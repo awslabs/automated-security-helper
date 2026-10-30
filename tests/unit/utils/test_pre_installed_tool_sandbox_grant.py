@@ -236,6 +236,33 @@ def test_the_staging_grant_ends_with_the_dry_run(
     assert Path(os.path.realpath(staged_metadata)) not in readable
 
 
+def test_a_staging_directory_the_sandbox_never_grants_is_unverifiable(
+    homes, tool, recorded, staged_metadata, monkeypatch
+):
+    """TMPDIR that is a home: the staging directory sits directly in a home.
+
+    The read grant refuses it, so the dry run cannot run under the sandbox; it
+    answers "unverifiable" with a reason naming the directory, as a staging that
+    could not be done does, never with an exception out of the dependency check.
+    """
+    uv, interpreter, _venv, _python_root = tool
+    monkeypatch.setattr(
+        policy_module,
+        "_homes",
+        lambda: [Path(os.path.realpath(staged_metadata.parent))],
+    )
+    spawned_before = len(recorded.policies)
+
+    status, reason = pre_installed_tool._dry_run(
+        str(uv), str(interpreter), "faketool", str(staged_metadata)
+    )
+
+    assert status == "unverifiable"
+    assert "staging directory" in reason
+    assert staged_metadata.name in reason
+    assert len(recorded.policies) == spawned_before
+
+
 def test_a_dry_run_without_a_target_grants_no_directory(
     homes, tool, recorded, staged_metadata
 ):
