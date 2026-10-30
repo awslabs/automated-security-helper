@@ -591,8 +591,16 @@ async def _tell_client(
     except Exception:
         # A closed transport is the expected condition here: one line at warning
         # names the lost send, and the traceback stays at debug, matching the
-        # monitor's _safe_send instead of an ERROR traceback per send.
-        logger.warning(f"Failed to send {level} message to client: {message}")
+        # monitor's _safe_send instead of an ERROR traceback per send. The line
+        # names the send by its level and size, never by its text: every message
+        # a tool hands here is already shown text (its controls escaped for the
+        # client), and a log line that repeats it shows it a second time, so a
+        # name holding an escape reads as the text of one. The tool's own result
+        # carries what the client needed; the log is the courtesy that was lost.
+        logger.warning(
+            f"Failed to send {level} message to client ({len(message)} characters); "
+            "the tool's result carries what it said"
+        )
         logger.debug(f"The {level} send that failed, with why:", exc_info=True)
 
 

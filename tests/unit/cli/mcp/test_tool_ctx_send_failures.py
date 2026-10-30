@@ -550,6 +550,28 @@ def test_a_failed_send_is_logged_with_the_exception_that_failed_it(caplog) -> No
     assert "client gone" in str(tracebacks[0].exc_info[1]), tracebacks[0].exc_info
 
 
+def test_a_failed_send_does_not_repeat_the_message_in_the_log(caplog) -> None:
+    """Every message a tool hands the guard is already shown text, its controls
+    escaped for the client, so a warning that repeated it showed it a second
+    time, and each escape in it read as the text of one. The warning names the
+    lost send by its level and size; the message's text stays out of the log."""
+    ctx = _ctx()
+    message = "a name holding an escape: a\\x1b[2Kb and 7 more"
+
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
+        asyncio.run(mcp_server._tell_client(ctx, "warning", message))
+
+    logged = [r.getMessage() for r in caplog.records]
+    warnings = [
+        text for r, text in zip(caplog.records, logged) if r.levelno == logging.WARNING
+    ]
+    assert warnings, logged
+    assert all(message not in text for text in logged), logged
+    assert all("a name holding an escape" not in text for text in logged), logged
+    assert f"({len(message)} characters)" in warnings[0], warnings[0]
+    assert "Failed to send warning message to client" in warnings[0], warnings[0]
+
+
 def test_control_a_working_log_send_is_awaited_once_with_the_error() -> None:
     """The cells above count one send; a context that can send gets exactly one."""
     ctx = _ctx(NOT_A_SESSION_ID)
