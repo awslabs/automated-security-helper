@@ -1,10 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Any, Callable, Dict, List, Literal, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -114,8 +115,8 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
                     run = sarif.runs[0]
                     run.invocations = list(run.invocations or []) + invocations
                 for run_index, project_invocations in per_project:
-                    if 0 <= run_index < len(sarif.runs):
-                        run = sarif.runs[run_index]
+                    run = run_of_project(sarif.runs, run_index, project_invocations)
+                    if run is not None:
                         run.invocations = (
                             list(run.invocations or []) + project_invocations
                         )
@@ -225,6 +226,60 @@ def workspace_converter_invocations(
             )
         pairs.append((run_index, invocations))
     return pairs
+
+
+def _stamped_property(owner: Any, name: str) -> Optional[str]:
+    """A string property of a run or an invocation, by attribute or ``model_extra``.
+
+    ``PropertyBag`` allows extras, so a key the schema does not declare lands in
+    ``model_extra`` on a validated object and as an attribute on one built by
+    ``model_construct``; both are read.
+    """
+    props = getattr(owner, "properties", None)
+    if props is None:
+        return None
+    value = getattr(props, name, None)
+    if value is None:
+        extra = getattr(props, "model_extra", None)
+        value = extra.get(name) if isinstance(extra, dict) else None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def run_of_project(runs: List[Any], run_index: int, invocations: List[Any]) -> Any:
+    """The run a project's converter invocations belong on, or None to attach none.
+
+    ``sarif_run_index`` says which run the project contributed, and the run the
+    aggregator wrote carries ``properties.workspace_project`` naming the same
+    project. Trusting the index alone wrote one project's converter failures onto
+    another project's run whenever the runs had been filtered, reordered or
+    merged before the reporter saw them, and nothing said so. So the run at the
+    index is used only when it carries no stamp (a document this cannot check)
+    or its stamp names the project; otherwise the run stamped for the project is
+    used wherever it sits, and when none is, nothing is attached and the log says
+    which project's shortfalls the document does not carry.
+    """
+    key = (
+        _stamped_property(invocations[0], "workspace_project") if invocations else None
+    )
+    at_index = runs[run_index] if 0 <= run_index < len(runs) else None
+    stamped = _stamped_property(at_index, "workspace_project") if at_index else None
+    if at_index is not None and (stamped is None or key is None or stamped == key):
+        return at_index
+    for run in runs:
+        if key is not None and _stamped_property(run, "workspace_project") == key:
+            ASH_LOGGER.debug(
+                f"Converter shortfalls of project '{key}' attached to the run "
+                f"stamped for it, not to run index {run_index}"
+            )
+            return run
+    ASH_LOGGER.warning(
+        f"No run of the SARIF document is stamped for project '{key}' (its "
+        f"sarif_run_index is {run_index}); its converter shortfalls are not "
+        "attached to this document. The project's own ash.sarif carries them."
+    )
+    return None
 
 
 def complete_results_for_the_dump(sarif: Any) -> Callable[[], None]:

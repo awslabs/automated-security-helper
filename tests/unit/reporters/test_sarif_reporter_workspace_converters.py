@@ -26,6 +26,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_report
     workspace_converter_invocations,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    PropertyBag,
     Run,
     SarifReport,
     Tool,
@@ -53,8 +54,17 @@ def _project(key: str, **overrides) -> WorkspaceProjectResult:
     return WorkspaceProjectResult(**fields)
 
 
-def _run() -> Run:
-    return Run(tool=Tool(driver=ToolComponent(name="ASH")), results=[])
+def _run(stamped_for: str | None = None) -> Run:
+    """A run; with *stamped_for*, the ``properties.workspace_project`` stamp the
+    aggregator writes on every run it adds to the unified model."""
+    properties = (
+        PropertyBag.model_validate({"workspace_project": stamped_for})
+        if stamped_for
+        else None
+    )
+    return Run(
+        tool=Tool(driver=ToolComponent(name="ASH")), results=[], properties=properties
+    )
 
 
 @pytest.fixture
@@ -159,6 +169,77 @@ def test_two_converters_give_two_invocations_on_the_projects_run(
         "jupyter",
     ]
     assert all(i["executionSuccessful"] is False for i in web_run["invocations"])
+
+
+def _stamped_model(*stamps: str, projects):
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(version="2.1.0", runs=[_run(stamp) for stamp in stamps])
+    model.workspace = WorkspaceResults(
+        workspace_file="/w/.ash-workspace.yaml",
+        workspace_root="/w",
+        exit_code=0,
+        projects=list(projects),
+    )
+    return model
+
+
+def test_the_invocation_follows_the_run_stamped_for_the_project(test_plugin_context):
+    """``sarif_run_index`` was trusted alone, so runs reordered after the index
+    was recorded received another project's converter failures. The run that
+    carries the project's own stamp is the one written onto, wherever it sits."""
+    model = _stamped_model(
+        "web",
+        "api",
+        projects=[
+            _project("api", sarif_run_index=1),
+            _project(
+                "web", sarif_run_index=1, incomplete_converters={"archive": "crashed"}
+            ),
+        ],
+    )
+
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+
+    web_run, api_run = doc["runs"]
+    assert [i["properties"]["workspace_project"] for i in web_run["invocations"]] == [
+        "web"
+    ]
+    assert "invocations" not in api_run
+
+
+def test_a_run_stamped_for_another_project_is_never_written_onto(test_plugin_context):
+    """No run of the document is the project's: nothing is attached, rather than
+    the shortfall landing on whichever run the stale index names."""
+    model = _stamped_model(
+        "api",
+        "other",
+        projects=[
+            _project("api", sarif_run_index=0),
+            _project(
+                "web", sarif_run_index=1, incomplete_converters={"archive": "crashed"}
+            ),
+        ],
+    )
+
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+
+    assert all("invocations" not in run for run in doc["runs"])
+
+
+def test_an_unstamped_run_at_the_index_is_still_the_projects_run(
+    test_plugin_context,
+):
+    """A document whose runs carry no stamp cannot be checked; the index is the
+    only word there is and is used as before."""
+    model = _workspace_model(
+        _project("api", sarif_run_index=0),
+        _project("web", sarif_run_index=1, incomplete_converters={"archive": "x"}),
+    )
+
+    doc = json.loads(SarifReporter(context=test_plugin_context).report(model))
+
+    assert "invocations" not in doc["runs"][0]
+    assert len(doc["runs"][1]["invocations"]) == 1
 
 
 def test_the_scans_own_sarif_is_left_alone(model, test_plugin_context):
