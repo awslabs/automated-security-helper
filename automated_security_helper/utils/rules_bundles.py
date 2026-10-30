@@ -616,6 +616,7 @@ def _install_locked(
         os.chmod(staging, 0o755)  # nosec B103 - read-only rules directory
         for child in staging.iterdir():
             os.chmod(child, 0o644)
+        aside: Optional[Path] = None
         if final.exists() or final.is_symlink():
             # Moved aside, not deleted in place, so the final name is never a
             # half-removed directory. A symlink is unlinked rather than followed.
@@ -635,15 +636,39 @@ def _install_locked(
                     f"the rules directory is writable, or set {RULES_DIR_ENV} to "
                     "a directory ASH can write."
                 ) from exc
-            shutil.rmtree(aside, ignore_errors=True)
         try:
             os.replace(staging, final)
         except OSError as exc:
+            # The rules that were in place go back before the refusal, so a
+            # failed rename leaves the bundle as it was, as the docstring
+            # promises, not a rules root with no bundle under the final name.
+            # The aside is kept until the new bundle is in place for this.
+            restored = aside is None
+            if aside is not None:
+                try:
+                    os.replace(aside.joinpath("old"), final)
+                    restored = True
+                except OSError:
+                    restored = False
+            if aside is not None and restored:
+                shutil.rmtree(aside, ignore_errors=True)
+            where = (
+                ""
+                if aside is None
+                else (
+                    " The rules that were in place were moved back."
+                    if restored
+                    else " The rules that were in place could not be moved back; "
+                    f"they are at {aside.joinpath('old')}."
+                )
+            )
             raise RulesBundleUnavailable(
                 f"{problem}, and the downloaded rules could not be moved into "
-                f"place at {final} ({exc}). Make the rules directory writable, "
-                f"or set {RULES_DIR_ENV} to a directory ASH can write."
+                f"place at {final} ({exc}).{where} Make the rules directory "
+                f"writable, or set {RULES_DIR_ENV} to a directory ASH can write."
             ) from exc
+        if aside is not None:
+            shutil.rmtree(aside, ignore_errors=True)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

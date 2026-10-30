@@ -485,6 +485,24 @@ class _OsWithoutRename:
         return getattr(os, name)
 
 
+class _OsRefusingTheRenameInto(_OsWithoutRename):
+    """``replace`` refuses only a rename whose destination is ``final``: the
+    move-aside of the old bundle succeeds, the rename of the new one fails, and
+    the move back (destination ``final`` again) is let through so the recovery
+    can be read; every other rename is the real one."""
+
+    def __init__(self, final: Path, error: OSError):
+        super().__init__(error)
+        self._final = Path(final)
+        self._refused = False
+
+    def replace(self, src, dst):
+        if Path(dst) == self._final and not self._refused:
+            self._refused = True
+            raise self._error
+        return os.replace(src, dst)
+
+
 class TestALocalFailureIsTheDocumentedRefusal:
     """Every local failure of the install is a RulesBundleUnavailable naming the
     remedy, as the docstring promises: the lock take and the two renames used
@@ -559,6 +577,31 @@ class TestALocalFailureIsTheDocumentedRefusal:
         message = str(refused.value)
         assert "could not be moved aside" in message, message
         assert _tree(final) == before, "the rules in place are left as they were"
+        assert _leftovers(tmp_path / "rules") == []
+
+    def test_a_failed_rename_into_place_puts_the_old_rules_back(
+        self, tmp_path, bundle_zip, monkeypatch
+    ):
+        """The move-aside succeeds and the rename of the new bundle into place
+        fails: the old bundle was already removed, so a rules root with no
+        bundle under the final name was left where the docstring promised the
+        rules in place would stay. The aside is kept until the new bundle is in
+        place and moved back on a failed rename."""
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        before = _tree(final)
+        monkeypatch.setattr(
+            rules_bundles,
+            "os",
+            _OsRefusingTheRenameInto(final, PermissionError(errno.EACCES, "denied")),
+        )
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, [], force=True)
+        message = str(refused.value)
+        assert "could not be moved into place" in message, message
+        assert "were moved back" in message, message
+        assert final.is_dir(), "the final name holds a bundle again"
+        assert _tree(final) == before, "the rules in place are the old ones"
         assert _leftovers(tmp_path / "rules") == []
 
 
