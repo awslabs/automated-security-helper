@@ -1001,7 +1001,10 @@ class TestTheScanLoop:
     def test_a_raised_audit_is_logged_and_recorded_redacted(self, context, online):
         """The exception's text quotes the command line, token in plain text
         and in a URL's userinfo both; the recorded failure and the log line
-        carry neither. The log is read through a handler of our own (ASH's
+        carry neither. The log line is the scan loop's own warning ("Failed to
+        run npm audit in ..."): ``scan`` is called directly here, so the base's
+        ``safe_scan`` wrapper, which would log the raised error's text as well,
+        never runs. The log is read through a handler of our own (ASH's
         logger does not propagate, so caplog sees nothing), with the level set
         and restored through setLevel so the logger's level cache is left as
         found. The plain-text token is the one the values redaction must
@@ -1037,8 +1040,9 @@ class TestTheScanLoop:
         assert "the audit raised OSError" in str(raised.value)
         assert TOKEN not in str(raised.value)
         assert "https://***@registry.example/" in str(raised.value)
-        logged = [m for m in messages.texts if "the audit raised" in m]
-        assert logged, messages.texts
+        logged = [m for m in messages.texts if "Failed to run npm audit in" in m]
+        assert len(logged) == 1, messages.texts
+        assert "https://***@registry.example/" in logged[0], logged
         assert not any(TOKEN in m for m in messages.texts), messages.texts
 
     def test_results_json_keeps_both_lockfiles_nodes_for_one_package(
