@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Two small makers of the redaction machinery keep what they are given.
+"""The record of carried values survives pickle and copy, and the scalar maker
+keeps the shown text it is given.
 
 A section's record of the values its configuration read is pickled and copied
 with the section. Pickle protocols 0 and 1 skip ``__setstate__`` when
@@ -9,9 +10,10 @@ with the section. Pickle protocols 0 and 1 skip ``__setstate__`` when
 the restored record had no ``values`` slot and every read of it raised
 AttributeError.
 
-``env_resolved_scalar`` took its ``shown`` argument through ``or``, so an
-empty string given on purpose was replaced by the ``${VARIABLE}`` form, and
-the scalar showed a reference where its maker asked for nothing.
+``env_resolved_scalar`` keeps a shown text it is given and answers the bare
+reference when none is given. An empty shown text is also answered with the
+bare reference, by design; tests/unit/utils/test_env_resolved_scalar_survives_
+copying.py pins that.
 """
 
 import copy
@@ -51,12 +53,6 @@ def test_a_copied_record_is_a_record_of_its_own():
     copied = copy.deepcopy(record)
     assert copied is not record
     assert copied.values == ("held-value-one",)
-
-
-def test_an_empty_shown_text_is_kept_as_given():
-    scalar = env_resolved_scalar("text", VARIABLE, shown="")
-    assert scalar.shown == ""
-    assert scalar.variable == VARIABLE
 
 
 def test_a_shown_text_left_out_is_the_bare_reference():

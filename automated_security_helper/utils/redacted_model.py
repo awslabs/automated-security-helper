@@ -272,12 +272,14 @@ def env_resolved_scalar(
     the class); *from_environment* is False when the reference's default
     supplied the text because the variable was unset. A caller that has only
     the name (the test fixtures) leaves both out and gets the bare
-    ``${variable}`` form of a variable that was read. Leaving *shown* out is
-    None: an empty string given on purpose is the form to show, and is kept.
+    ``${variable}`` form of a variable that was read. An empty *shown* is
+    left out too, on purpose: ``shown`` is what a summary row prints, and an
+    empty one would print nothing where the value came from the environment
+    (tests/unit/utils/test_env_resolved_scalar_survives_copying.py pins it).
     """
     resolved = EnvResolvedScalar(text)
     resolved.variable = variable
-    resolved.shown = shown if shown is not None else "${" + variable + "}"
+    resolved.shown = shown or "${" + variable + "}"
     resolved.from_environment = from_environment
     return resolved
 
