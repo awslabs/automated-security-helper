@@ -219,13 +219,18 @@ def test_yarn_2_and_later_audit_every_workspace(plugin_context):
     without ``--all`` audits the root workspace's dependencies only, so the member
     workspaces' dependencies were never checked; ``--all`` audits every workspace
     from the same lockfile, as npm does. yarn 1 has one ``yarn audit`` for the whole
-    project and takes no such flag."""
+    project and takes no such flag.
+
+    This pins the argument; yarn does not care where it stands among the
+    others. What the flag changes in a report (an advisory reached only through
+    a member workspace) is not pinned here: every yarn 2+ capture in the test
+    data comes from a single-workspace project run without ``--all``, and a
+    two-workspace capture has to be recorded by running the tool."""
     for_yarn_1, _ = _scan(plugin_context, _capture("classic-clean"))
     for_yarn_4, commands = _scan(plugin_context, _capture("berry-clean"))
 
     (audit,) = [c for c in commands if "--version" not in c]
     assert "--all" in audit, audit
-    assert audit.index("--all") < audit.index("--recursive"), audit
     assert for_yarn_1.runs[0].results == for_yarn_4.runs[0].results == []
 
 
