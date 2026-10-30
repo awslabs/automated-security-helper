@@ -405,20 +405,23 @@ class ScannerStatisticsCalculator:
                 else:
                     counts.increment(_resolve_result_severity(result))
 
-        if counts.total + counts.suppressed == 0:
-            # Nothing in the SARIF for this scanner. A scanner that returned a
-            # dict (``severity_counts`` or a ``findings`` list) instead of SARIF
-            # has findings the merged SARIF never holds: the executor graded its
-            # row from the counts it read, and ScanResultProcessor keeps those
-            # counts on the per-target report beside the dict. Read them here,
-            # so the summary, the scanner row and the exit code see the findings
-            # the row was graded on instead of rebuilding it PASSED with 0
-            # actionable. Only a report that still carries a dict ``raw_results``
-            # is read: the processor drops ``raw_results`` from a SARIF report's
-            # entry, and that report's findings are in the SARIF above.
-            counts = ScannerStatisticsCalculator._dict_result_counts(
-                asharp_model, scanner_name
-            )
+        # A scanner that returned a dict (``severity_counts`` or a ``findings``
+        # list) instead of SARIF has findings the merged SARIF never holds: the
+        # executor graded its row from the counts it read, and
+        # ScanResultProcessor keeps those counts on the per-target report beside
+        # the dict. Added here, whatever the SARIF holds, so the summary, the
+        # scanner row and the exit code see the findings the row was graded on:
+        # a scanner can return SARIF for one target and a dict for another, and
+        # reading the dict counts only when the SARIF held nothing dropped that
+        # dict target's findings whenever a sibling target had one SARIF result.
+        # Only a report that still carries a dict ``raw_results`` is read: the
+        # processor drops ``raw_results`` from a SARIF report's entry, and that
+        # report's findings are in the SARIF above, so nothing is counted twice.
+        dict_counts = ScannerStatisticsCalculator._dict_result_counts(
+            asharp_model, scanner_name
+        )
+        for field in ("suppressed", "critical", "high", "medium", "low", "info"):
+            setattr(counts, field, getattr(counts, field) + getattr(dict_counts, field))
 
         return (
             counts.suppressed,

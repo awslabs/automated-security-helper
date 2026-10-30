@@ -7,8 +7,10 @@ the merged SARIF, read 0 for the scanner; with 0 actionable and no recorded row 
 unified metrics rebuilt the scanner PASSED, and summary_stats counted it passed.
 
 Two halves, pinned together: ``ScanResultProcessor`` keeps the executor's counts on
-the dict result's per-target report, and ``extract_sarif_counts_for_scanner`` reads
-them when the SARIF holds nothing for the scanner. The controls say a SARIF
+the dict result's per-target report, and ``extract_sarif_counts_for_scanner`` adds
+them to the scanner's SARIF counts, whatever the SARIF holds (a scanner can return
+SARIF for one target and a dict for another; read only when the SARIF held nothing,
+one SARIF result dropped the dict target's findings). The controls say a SARIF
 scanner's counts come from the SARIF alone, and a report whose result was SARIF
 (``raw_results`` dropped) adds nothing.
 """
@@ -152,6 +154,33 @@ class TestTheStatisticsReadADictResultsCounts:
         assert ScannerStatisticsCalculator.get_scanner_status(model, SCANNER) == (
             "FAILED"
         )
+
+    def test_a_dict_target_is_counted_beside_a_sarif_target(self):
+        """One scanner, SARIF on source and a dict on converted: both targets'
+        findings reach the row. Read only when the SARIF held nothing, the dict
+        target's high finding was dropped by the sibling's one SARIF result."""
+        converted = _dict_result_report(high=1)
+        converted["target_type"] = "converted"
+        model = _model()
+        model.additional_reports = {
+            SCANNER: {
+                "source": {
+                    "scanner_name": SCANNER,
+                    "target_type": "source",
+                    "status": "FAILED",
+                    "finding_count": 1,
+                    "severity_counts": {"critical": 1},
+                },
+                "converted": converted,
+            }
+        }
+        model.sarif = _sarif(SCANNER, ["error"])
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats[SCANNER]["critical"] == 1
+        assert stats[SCANNER]["high"] == 1
+        assert stats[SCANNER]["total"] == 2
 
 
 class TestControls:
