@@ -299,8 +299,19 @@ def _write_target(config_path: Path) -> Path:
     A rename over the link's own name would turn the link into a regular file;
     the plain write these commands made wrote through the link, so the file it
     points to is the one replaced, and the link is kept.
+
+    A path that is not a link is written where it was given. ``realpath`` of a
+    relative path joins it to ``os.getcwd()``, and the plain write never read
+    the working directory's name: it resolved the path through the open, as the
+    staged write beside it does. A process whose ``os.getcwd`` does not answer
+    with the directory the files are in (one that reports a display name for it,
+    or whose working directory was renamed) then wrote beside a directory that
+    is not there.
     """
-    return Path(os.path.realpath(config_path))
+    target = Path(config_path)
+    if target.is_symlink():
+        return Path(os.path.realpath(target))
+    return target
 
 
 def _mode_to_keep(target: Path) -> int | None:
