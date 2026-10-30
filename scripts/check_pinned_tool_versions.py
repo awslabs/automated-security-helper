@@ -167,7 +167,10 @@ RELEASE_BINARY = "release-binary"  # TOOL_VERSIONS: one release asset per platfo
 UV_TOOL = "uv-tool"  # THIRD_PARTY_LICENSES with a distribution: a PyPI release
 RULES_BUNDLE = "rules-bundle"  # RULES_BUNDLES: one release archive of rule files
 GEM = "gem"  # GEM_PINS: a RubyGems release
-PIN_KINDS = (RELEASE_BINARY, UV_TOOL, RULES_BUNDLE, GEM)
+# THIRD_PARTY_LICENSES with bundled_in: a library another pinned wheel carries, whose
+# version is that wheel's. Listed and held, never looked up (see BUNDLED below).
+BUNDLED_LIBRARY = "bundled-library"
+PIN_KINDS = (RELEASE_BINARY, UV_TOOL, RULES_BUNDLE, GEM, BUNDLED_LIBRARY)
 
 # The gem CFN_NAG_GEM_VERSION is the version of; see assets/Gemfile.
 CFN_NAG_GEM = "cfn-nag"
@@ -382,6 +385,7 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                     ecosystem=BUNDLED,
                     project=entry.bundled_in,
                     pinned_in=("THIRD_PARTY_LICENSES (bundled)",),
+                    kind=BUNDLED_LIBRARY,
                 )
             )
             continue
@@ -1115,12 +1119,30 @@ def _gem_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     return steps + _license_steps(pins, pin.tool, latest)
 
 
+def _bundled_library_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    """A bundled library has no bump of its own: its version is its wheel's.
+
+    The checker never reports one as outdated (it is held), so these steps are
+    reached only when a bump of the wheel changes what it bundles. They say which
+    entry follows the wheel rather than naming an upstream release to fetch.
+    """
+    return [
+        (
+            f"{pin.tool} is bundled by {pin.project} and is not pinned on its own: after "
+            f"a {pin.project} bump, read the version of {pin.tool} the new wheel carries "
+            f'and set THIRD_PARTY_LICENSES["{pin.tool}"].version to it, with its commit '
+            "and license-file digests taken from that release"
+        )
+    ]
+
+
 # One function per kind in PIN_KINDS; a test keeps the two in step.
 _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     RELEASE_BINARY: _release_binary_steps,
     UV_TOOL: _uv_tool_steps,
     RULES_BUNDLE: _rules_bundle_steps,
     GEM: _gem_steps,
+    BUNDLED_LIBRARY: _bundled_library_steps,
 }
 
 

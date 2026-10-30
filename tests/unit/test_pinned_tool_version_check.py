@@ -737,6 +737,8 @@ def _kind(pins: Any, tool: str) -> str:
     entry = pins.THIRD_PARTY_LICENSES.get(tool)
     if entry is not None and entry.distribution:
         return "uv-tool"
+    if entry is not None and getattr(entry, "bundled_in", None):
+        return "bundled-library"
     return "unknown"
 
 
@@ -954,8 +956,11 @@ class TestBumpStepsNameEveryValueABumpChanges:
             "uv-tool",
         }
         # The script's own list: each kind it knows has a real pin above, so the
-        # parametrized test covers it, and each has its own steps.
-        assert set(checker.PIN_KINDS) == set(kinds.values())
+        # parametrized test covers it, and each has its own steps. The one kind with
+        # no shipped pin today is the bundled library (its entries left with the
+        # GuardDog plugin and return with it); TestBundledLibrariesAreListedButNotLookedUp
+        # covers that kind on planted entries until then.
+        assert set(checker.PIN_KINDS) == set(kinds.values()) | {checker.BUNDLED_LIBRARY}
         assert set(checker._KIND_STEPS) == set(checker.PIN_KINDS)
 
     @pytest.mark.unit
@@ -1259,6 +1264,23 @@ class TestBundledLibrariesAreListedButNotLookedUp:
         for tool, entry in bundled.items():
             assert by_tool[tool].ecosystem == checker.BUNDLED, tool
             assert by_tool[tool].project == entry.bundled_in, tool
+            assert by_tool[tool].kind == checker.BUNDLED_LIBRARY, tool
+            assert by_tool[tool].kind == _kind(pins, tool), tool
+
+    def test_a_bump_of_the_wheel_names_the_library_as_following_it(
+        self, pins, monkeypatch
+    ):
+        """bump_steps has steps for the bundled kind, and they name the wheel."""
+        self._plant(pins, self.LIBRARY, bundled_in=self.WHEEL)
+        monkeypatch.setattr(checker, "_copy_steps", lambda *a, **k: [])
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}[self.LIBRARY]
+        steps = checker.bump_steps(pins, checker.Result(pin, "9.9.9", "outdated"))
+        assert steps, "a bundled-library pin has no steps"
+        assert (
+            self.WHEEL in steps[0]
+            and f'THIRD_PARTY_LICENSES["{self.LIBRARY}"]' in steps[0]
+        )
+        assert "gh api" not in " ".join(steps)
 
     def test_a_bundled_pin_is_held_and_never_fetched(self, pins):
         self._plant(pins, self.LIBRARY, bundled_in=self.WHEEL)
