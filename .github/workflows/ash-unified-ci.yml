@@ -615,7 +615,7 @@ jobs:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
@@ -682,7 +682,7 @@ jobs:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
@@ -714,7 +714,7 @@ jobs:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
