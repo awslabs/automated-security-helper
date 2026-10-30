@@ -23,9 +23,11 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import List, Literal
 
 import pytest
+from pydantic import model_validator
 
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
@@ -77,7 +79,26 @@ class BrokenDefaultConfig(ConverterPluginConfigBase):
         raise TypeError("a computed default went wrong")
 
 
+class ContextReadingConfig(ConverterPluginConfigBase):
+    """A model whose validator reads the validation context it is built under."""
+
+    name: Literal["probe"] = "probe"
+    saw_context: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_context(cls, data, info):
+        if isinstance(data, dict) and (info.context or {}).get("probe"):
+            return {**data, "saw_context": True}
+        return data
+
+
 class SectionNeedingConverter(ConverterPluginBase[SectionNeedingConfig]):
+    def convert(self) -> List[Path]:
+        return []
+
+
+class ContextReadingConverter(ConverterPluginBase[ContextReadingConfig]):
     def convert(self) -> List[Path]:
         return []
 
@@ -103,6 +124,38 @@ class ToolNeedingConverter(ConverterPluginBase[PlainConfig]):
 
     def convert(self) -> List[Path]:
         return []
+
+
+def _the_union_is_not_asked(value):
+    raise AssertionError("the declared model validates the section, not the union")
+
+
+def test_the_wrap_validator_hands_its_validation_info_to_the_declared_model():
+    """The wrap validator on ``config`` passes the field's ValidationInfo on, so a
+    section validated by the converter's own model is validated under the same
+    context as the field would have been; it used to pass none. Called as pydantic
+    calls it: PluginBase's own ``__init__`` is what every construction route runs
+    through, and it validates with no context of its own, so the field is the
+    place where a context can be read (see the record of this change)."""
+    info = SimpleNamespace(context={"probe": True})
+
+    built = ContextReadingConverter._config_is_validated_by_the_declared_model(
+        {"enabled": False}, _the_union_is_not_asked, info
+    )
+
+    assert isinstance(built, ContextReadingConfig)
+    assert built.saw_context is True
+    assert built.enabled is False
+
+
+def test_the_declared_model_sees_no_context_where_the_field_has_none():
+    """The control."""
+    built = ContextReadingConverter._config_is_validated_by_the_declared_model(
+        {"enabled": False}, _the_union_is_not_asked, SimpleNamespace(context=None)
+    )
+
+    assert isinstance(built, ContextReadingConfig)
+    assert built.saw_context is False
 
 
 def test_a_converter_built_without_a_context_raises_the_named_error():

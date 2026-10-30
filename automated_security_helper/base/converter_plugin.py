@@ -18,6 +18,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     ValidationError,
+    ValidationInfo,
     ValidatorFunctionWrapHandler,
     field_validator,
     model_validator,
@@ -94,16 +95,19 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     @field_validator("config", mode="wrap")
     @classmethod
     def _config_is_validated_by_the_declared_model(
-        cls, value: Any, handler: ValidatorFunctionWrapHandler
+        cls, value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
     ) -> Any:
         """A converter that declares a config model is configured by that model.
 
         A section it refuses is a ValidationError, which ``ConvertPhase`` records
         as that converter's failure, naming the option, before it goes on with
-        the others. See ``plugin_config.config_validated_by_declared_model``.
+        the others. The model validates under this field's own validation context
+        (``info``), so what the converter was validated with (the stored-config
+        tolerance's notes, say) reaches the model's validators as it would have
+        through the union. See ``plugin_config.config_validated_by_declared_model``.
         """
         return config_validated_by_declared_model(
-            cls, ConverterPluginConfigBase, value, handler
+            cls, ConverterPluginConfigBase, value, handler, info
         )
 
     @model_validator(mode="after")
@@ -230,12 +234,11 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         model can hold. So the warning is shown here, once, with
         utils/terminal_text.py's shown_on_one_line, which writes a surrogate as its
         escape (``\\udce9``). Each field of the record is the text as given, with
-        only its lone surrogates written as escapes (utils/undecodable_text.py),
-        and then as the record model keeps it: ``RefusedInputInfo`` and
-        ``FailedInputInfo`` strip leading and trailing whitespace from every
-        string field (``str_strip_whitespace``), so a name that ends in a space
-        is recorded without it, while the warning shown here keeps it. Whatever
-        prints the record shows it for its own sink.
+        only its lone surrogates written as escapes (utils/undecodable_text.py);
+        ``RefusedInputInfo`` and ``FailedInputInfo`` keep every string field as
+        given, whitespace included, so a name that ends in a space is recorded
+        with it, as the warning shown here shows it. Whatever prints the record
+        shows it for its own sink.
 
         Args:
             refusal: What :meth:`open_source_file` raised, or an equivalent built for
