@@ -688,6 +688,34 @@ class TestLocationReadings:
         ]
         assert uris == ["secr%E9t.py"]
 
+    def test_a_byte_the_filesystem_encoding_refuses_adds_no_spelling(
+        self, tmp_path, monkeypatch
+    ):
+        """Windows decodes file names as UTF-8 with ``surrogatepass``, which refuses
+        a byte that is not UTF-8, so the filesystem spelling of ``secr%E9t.py``
+        raised ``UnicodeDecodeError`` out of the filter and failed the scan. Such a
+        reading adds no spelling: the finding is placed by its other readings, and
+        here it names no changed file, so it is dropped while the rest go on."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+
+        def refuse(raw):
+            raise UnicodeDecodeError("utf-8", bytes(raw), 4, 5, "invalid start byte")
+
+        monkeypatch.setattr(os, "fsdecode", refuse)
+        results = _make_results_with_sarif(
+            [_make_result("secr%E9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["other.py"]
+
 
 @pytest.mark.unit
 class TestTheKeptCountIsSaidOnce:

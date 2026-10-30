@@ -94,13 +94,16 @@ def _filesystem_readings(readings: List[str]) -> List[str]:
     ``os.fsdecode``, the decoding git's names and the changed set are in. A
     spelling equal to an earlier one is left out, so a UTF-8 host sees the
     readings it did before; a text that cannot be re-encoded (a lone surrogate
-    outside the escape range) adds none.
+    outside the escape range) adds none, and neither does one the filesystem
+    encoding cannot decode (Windows decodes with ``surrogatepass``, which
+    refuses a byte that is not UTF-8), rather than that one location raising
+    out of the filter and failing the scan.
     """
     spellings = list(readings)
     for reading in readings:
         try:
             spelling = os.fsdecode(reading.encode("utf-8", "surrogateescape"))
-        except UnicodeEncodeError:
+        except (UnicodeEncodeError, UnicodeDecodeError):
             continue
         if spelling not in spellings:
             spellings.append(spelling)
