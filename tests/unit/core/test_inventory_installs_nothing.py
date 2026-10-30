@@ -168,13 +168,17 @@ def test_list_scanners_installs_nothing(sandbox, monkeypatch):
     assert sorted(_by_name(entries)) == UV_TOOL_NAMES
 
 
+@pytest.mark.asyncio
 @pytest.mark.integration
-def test_the_list_scanners_tool_installs_nothing(sandbox, monkeypatch):
+async def test_the_list_scanners_tool_installs_nothing(sandbox, monkeypatch):
+    """The server's tool runs the same inventory off the event loop, so the
+    call is awaited: a coroutine left unawaited would read as entries that
+    could not be iterated, never as the sandbox's record."""
     from automated_security_helper.cli import mcp_server, mcp_tools
 
     monkeypatch.setattr(mcp_tools, "_loaded_scanner_classes", lambda: list(UV_TOOLS))
 
-    entries = mcp_server.list_scanners()
+    entries = await mcp_server.list_scanners()
 
     assert sandbox.installs() == [], sandbox.calls()
     assert sorted(e["name"] for e in entries) == UV_TOOL_NAMES
