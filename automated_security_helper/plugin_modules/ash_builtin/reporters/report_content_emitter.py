@@ -492,32 +492,22 @@ class ReportContentEmitter:
         """The flattened findings that came from list-form additional reports.
 
         The scanner rows count SARIF results only, so these are the findings a
-        row-based summary does not see. A row the flattening marks with
-        ``source_report`` (the key of the additional report it was listed
-        under; None for a SARIF result) is read by that key wherever it sits.
-        Rows without the marker are read as ``to_flat_vulnerabilities`` laid
-        them out: appended after the SARIF results, one per dict in a scanner's
-        list.
+        row-based summary does not see. Each is read by the ``source_report``
+        the flattening marks it with (the key of the additional report it was
+        listed under), wherever it sits in the list; a row with no marker is a
+        SARIF result. The reading by position and count that preceded the
+        marker is gone: it took a SARIF row of the same scanner that sat in the
+        tail for a listed finding, and dropped a listed finding that did not.
         """
         reports = self.model.additional_reports
         names = {name for name, found in reports.items() if isinstance(found, list)}
         if not names:
             return []
-        if any(hasattr(vuln, "source_report") for vuln in self.flat_vulns):
-            return [
-                vuln
-                for vuln in self.flat_vulns
-                if getattr(vuln, "source_report", None) in names
-            ]
-        count = sum(
-            1 for name in names for entry in reports[name] if isinstance(entry, dict)
-        )
-        if not count:
-            return []
-        tail = self.flat_vulns[-count:]
-        if len(tail) != count or any(vuln.scanner not in names for vuln in tail):
-            return []
-        return tail
+        return [
+            vuln
+            for vuln in self.flat_vulns
+            if getattr(vuln, "source_report", None) in names
+        ]
 
     def get_top_hotspots(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get top hotspots (files with most findings)."""

@@ -411,6 +411,65 @@ class TestFindingsAnAdditionalReportListsAreCounted:
         assert summary["counts"]["low"] == 1, summary
         assert summary["counts"]["critical"] == 0, summary
 
+    def test_the_flattening_marks_each_listed_row_and_the_summary_reads_the_mark(
+        self,
+    ):
+        """The rows ``to_flat_vulnerabilities`` builds carry the marker.
+
+        Two SARIF results and one listed finding share a scanner name. Read by
+        position and count, the listed finding was the last row only while it
+        happened to be last; read by the mark it is found wherever it sits,
+        and the SARIF rows of the same scanner are never taken for it.
+        """
+        model = _model(
+            {
+                "custom-plugin": [
+                    {"title": "a", "severity": "LOW", "file_path": "app.py"}
+                ]
+            }
+        )
+        model.sarif.runs[0].results = [
+            Result(
+                ruleId=f"R{index}",
+                level="error",
+                message=Message(text=f"Finding {index}"),
+                properties=PropertyBag(scanner_name="custom-plugin"),
+            )
+            for index in range(2)
+        ]
+        flat = model.to_flat_vulnerabilities()
+        assert [row.source_report for row in flat] == [None, None, "custom-plugin"]
+        listed = flat[-1]
+
+        emitter = ReportContentEmitter(model)
+        emitter.flat_vulns = list(reversed(flat))
+
+        assert emitter._additional_report_findings() == [listed]
+        assert emitter.get_scan_summary()["counts"]["low"] == 1
+
+    def test_a_row_without_the_mark_is_a_sarif_row_whatever_its_place(self):
+        """A row that carries no marker is never read as a listed finding, even
+        when it is the last row and its scanner is the listed report's key: the
+        reading by position and count is gone."""
+        model = _model(
+            {
+                "custom-plugin": [
+                    {"title": "a", "severity": "LOW", "file_path": "app.py"}
+                ]
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        emitter.flat_vulns = [
+            SimpleNamespace(
+                scanner="custom-plugin",
+                severity="LOW",
+                is_suppressed=False,
+                workspace_project=None,
+            )
+        ]
+
+        assert emitter._additional_report_findings() == []
+
     def test_the_buckets_are_the_five_levels_when_every_severity_is_known(self):
         model = _model(
             {
