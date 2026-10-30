@@ -5,10 +5,12 @@
 
 ``temp_env_vars`` deletes, on teardown, no environment variable it did not set --
 ``PATH`` and ``HOME`` included -- so the next test in the same xdist worker keeps its
-environment. These tests check the environment after the
-fixture's teardown, which only a fixture set up before it can see: pytest tears
-fixtures down in reverse order, so ``environment_check`` (requested first) is torn down
-after ``temp_env_vars`` and the ``monkeypatch`` it uses.
+environment. These tests check the environment after the fixture's teardown. That
+teardown is the shared ``monkeypatch``'s undo, and the autouse unit tool guard
+(tests/unit/conftest.py) takes ``monkeypatch`` before any test fixture is set up, so
+pytest's reverse-order teardown would undo it only AFTER ``environment_check`` has
+compared; ``environment_check`` therefore undoes the shared instance itself before it
+compares, which is the same undo, run first.
 """
 
 from __future__ import annotations
@@ -42,16 +44,23 @@ PYTEST_OWNED = {"PYTEST_CURRENT_TEST"}
 
 
 @pytest.fixture
-def environment_check():
+def environment_check(monkeypatch):
     """Fail the test unless the environment after teardown is the one it started with.
 
     The sentinels are set through ``os.environ`` rather than ``monkeypatch``, because
-    ``monkeypatch`` would be torn down after this fixture and the comparison would see
-    its undo still pending.
+    ``monkeypatch`` is torn down after this fixture and the comparison would see its
+    undo still pending. For the same reason the fixture undoes ``monkeypatch`` itself
+    before comparing: the shared instance is created by the autouse unit tool guard
+    before this fixture, so pytest would undo it only after this check ran, and the
+    check read the test's own setenv as an environment ``temp_env_vars`` had not put
+    back. ``MonkeyPatch.undo`` is last-in first-out over the one instance (the test's
+    patches, then the guard's), leaves the environment the guard's finalization reads
+    its records against, and the fixture's own undo later finds nothing left to do.
     """
     os.environ.update({KEPT: "kept", OVERWRITTEN: "before"})
     before = {k: v for k, v in os.environ.items() if k not in PYTEST_OWNED}
     yield
+    monkeypatch.undo()
     after = {k: v for k, v in os.environ.items() if k not in PYTEST_OWNED}
     # Put the environment back before asserting, so a failure here cannot leave the
     # rest of this worker's tests without PATH.
