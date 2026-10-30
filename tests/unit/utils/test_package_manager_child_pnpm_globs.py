@@ -84,3 +84,19 @@ def test_the_copy_keeps_only_the_globs_that_stay_inside():
         "packages": ["packages/*", "!**/fixtures/**"],
         "auditConfig": AUDIT_CONFIG,
     }
+
+
+def test_globs_that_all_leave_the_package_drop_the_key():
+    """Control: with no glob left the key goes too, as for a value that is not
+    the list-of-strings shape."""
+    copied = _copy_of(
+        {"packages": ["../*", "/elsewhere/*"], "auditConfig": AUDIT_CONFIG}
+    )
+
+    assert copied == {"auditConfig": AUDIT_CONFIG}
+
+
+def test_a_packages_value_that_is_not_a_list_of_globs_stays_out():
+    copied = _copy_of({"packages": {"glob": "packages/*"}, "auditConfig": AUDIT_CONFIG})
+
+    assert copied == {"auditConfig": AUDIT_CONFIG}
