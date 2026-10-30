@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -59,6 +60,7 @@ from tests.unit.plugin_modules.ash_builtin.test_gitleaks_scanner import (
     _scanner,
     _write,
 )
+from tests.utils.git_isolation import isolate_git_at
 
 pytestmark = pytest.mark.unit
 
@@ -454,17 +456,71 @@ def test_a_backslash_in_a_posix_file_name_is_not_a_separator(tmp_path):
     ]
 
 
-def test_an_earlier_runs_default_output_dir_is_dropped_too(tmp_path):
-    """Every other directory-walking scanner skips the default .ash/ash_output an
-    earlier run left in the tree; gitleaks dropped only this run's."""
+def _tree_with_an_earlier_report(tmp_path) -> Path:
+    """A source tree holding ``app/x.py`` and an earlier run's report under the
+    default ``.ash/ash_output``."""
     source = tmp_path / "src"
     source.mkdir()
     _write(source, "app/x.py")
     _write(source, ".ash/ash_output/reports/old.json", "{}")
+    return source
+
+
+def _repository_at(directory: Path) -> None:
+    """Make ``directory`` a repository with ``app/x.py`` committed, so git can
+    say which of the files below it the repository holds."""
+    environ = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
+    }
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", *args], cwd=directory, env=environ, check=True, capture_output=True
+        )
+
+    git("init", "-q")
+    git("add", "app/x.py")
+    git(
+        "-c",
+        "user.name=ash-test",
+        "-c",
+        "user.email=ash-test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "committed",
+    )
+
+
+def test_an_earlier_runs_default_output_dir_is_dropped_too(tmp_path, monkeypatch):
+    """Every other directory-walking scanner skips the default .ash/ash_output an
+    earlier run left in the tree; gitleaks dropped only this run's.
+
+    The directory is ASH's only where git can say which of its files are
+    committed (``scan_output_dirs.classified_output_dirs``), so the tree is a
+    repository and the earlier report is untracked in it. The first cut of this
+    test built a plain directory and read the designed scan of it as a miss."""
+    isolate_git_at(tmp_path, monkeypatch)
+    source = _tree_with_an_earlier_report(tmp_path)
+    _repository_at(source)
     scanner = _scanner_at(source, tmp_path / "out")
     assert _dropped(
         scanner, source, ".ash/ash_output/reports/old.json", "app/x.py"
     ) == ["app/x.py"]
+
+
+def test_an_earlier_runs_output_dir_outside_a_checkout_is_kept(tmp_path, monkeypatch):
+    """Outside a checkout nothing tells the repository's files in .ash/ash_output
+    from ASH's, so the directory is scanned like the rest of the tree and its
+    findings stay; the scan set warns about it instead."""
+    isolate_git_at(tmp_path, monkeypatch)
+    source = _tree_with_an_earlier_report(tmp_path)
+    scanner = _scanner_at(source, tmp_path / "out")
+    assert _dropped(
+        scanner, source, ".ash/ash_output/reports/old.json", "app/x.py"
+    ) == [".ash/ash_output/reports/old.json", "app/x.py"]
 
 
 # --------------------------------------------------------------------------- #
