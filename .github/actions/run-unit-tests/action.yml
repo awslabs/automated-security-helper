@@ -255,7 +255,7 @@ runs:
           # or uv's tool bin directory would be skipped as absent. Both directories are
           # put on PATH for this step only, as the pre-tiers integration job did, not
           # through GITHUB_PATH, which zizmor's github-env audit reports in a composite
-          # action. ASH's is ASH_BIN_PATH, else ~/.ash/bin (core/constants.py); uv's is
+          # action. ASH's is ASH_BIN_PATH, else ~/.ash/bin (the product's constants module); uv's is
           # what `uv tool dir --bin` prints. Neither comes from a workflow expression.
           ash_bin="${ASH_BIN_PATH:-${HOME}/.ash/bin}"
           tool_dirs=""
@@ -268,7 +268,7 @@ runs:
           export PATH="${tool_dirs}${PATH}"
           # Without this the links test's cfn-guard check skips with "no database here",
           # a false green of the kind the PATH export cures. The cfn-guard install puts the
-          # rules bundle next to ASH's bin directory (utils/rules_bundles.py), and tests
+          # rules bundle next to ASH's bin directory (the product's rules-bundles helper), and tests
           # run with a home of their own, so the default location is not found from there.
           export ASH_CFN_GUARD_RULES_DIR="${ASH_CFN_GUARD_RULES_DIR:-$(dirname "$ash_bin")/share/cfn-guard-rules}"
         fi
