@@ -6,6 +6,7 @@ This script manages template-based documentation where version numbers
 are replaced with placeholders and then dynamically generated.
 """
 
+import enum
 import re
 import sys
 from pathlib import Path
@@ -126,6 +127,18 @@ def _ash_pins(text: str) -> List[Tuple[str, str, int]]:
                     (form, match.string[match.end(1) : match.end()], match.end(1))
                 )
     return found
+
+
+class FileResult(enum.Enum):
+    """What convert_file or generate_file did with one file.
+
+    A bare True or False cannot tell a file that was left alone for a reason that is
+    not an error (a template kept, no version reference) from one that failed.
+    """
+
+    DONE = "done"  # the template or the page was written
+    SKIPPED = "skipped"  # left alone, and that is not an error
+    FAILED = "failed"  # an error, already printed; the *_all methods list the file
 
 
 class VersionTemplateManager:
@@ -402,25 +415,26 @@ class VersionTemplateManager:
             overwrite: Replace an existing template instead of keeping it.
 
         Returns:
-            True if conversion was successful and changes were made. A call made
-            directly returns False for a failure as for a skip and does not touch
-            ``failures``, which describes one convert_all_to_templates run.
+            True if conversion was successful and changes were made. False for a skip
+            and for a failure alike; convert_file tells them apart. A call made
+            directly does not touch ``failures``, which describes one
+            convert_all_to_templates run.
         """
-        return self._convert(file_path, overwrite) is True
+        return self.convert_file(file_path, overwrite) is FileResult.DONE
 
-    def _convert(self, file_path: Path, overwrite: bool) -> Optional[bool]:
+    def convert_file(self, file_path: Path, overwrite: bool = False) -> FileResult:
         """convert_to_template, telling a failure from a skip.
 
-        Returns True when a template was written, False for a skip that is not an
-        error (a template kept, no version reference, no change), and None for a
-        failure, which it has already reported.
+        DONE when a template was written; SKIPPED for a reason that is not an error (a
+        template kept, no version reference, no change); FAILED for an error, which it
+        has already printed, a listed page that does not exist included.
         """
         if not file_path.exists():
             # A listed target with no page is the convert-side twin of a target with no
             # template, which generate reports as a failure: the list names a file that
             # was renamed or deleted, and a run that exits 0 over it hides that.
             print(f"Error: File {file_path} does not exist.")
-            return None
+            return FileResult.FAILED
 
         template_path = file_path.with_suffix(file_path.suffix + self.template_suffix)
         if template_path.exists() and not overwrite:
@@ -428,7 +442,7 @@ class VersionTemplateManager:
                 f"Template {template_path} exists; keeping it (convert replaces an "
                 "existing template only with --overwrite)"
             )
-            return False
+            return FileResult.SKIPPED
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -439,7 +453,7 @@ class VersionTemplateManager:
 
             if not patterns:
                 print(f"No version references found in {file_path}")
-                return False
+                return FileResult.SKIPPED
 
             # Apply all patterns
             for old_pattern, new_pattern in patterns:
@@ -447,18 +461,18 @@ class VersionTemplateManager:
 
             if content == original_content:
                 print(f"No changes made to {file_path}")
-                return False
+                return FileResult.SKIPPED
 
             # Create template file
             with open(template_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
             print(f"Created template: {template_path}")
-            return True
+            return FileResult.DONE
 
         except Exception as e:
             print(f"Error converting {file_path} to template: {e}")
-            return None
+            return FileResult.FAILED
 
     def _version_to_render(self) -> str:
         """The version of the checkout the templates belong to, never "unknown"."""
@@ -488,13 +502,18 @@ class VersionTemplateManager:
             template_path: Path to the template file.
 
         Returns:
-            True if generation was successful. A call made directly returns False
-            for a failure and does not touch ``failures``, which describes one
-            generate_all_from_templates run.
+            True if generation was successful. False is always a failure here: a
+            template is never skipped. A call made directly does not touch
+            ``failures``, which describes one generate_all_from_templates run.
         """
+        return self.generate_file(template_path) is FileResult.DONE
+
+    def generate_file(self, template_path: Path) -> FileResult:
+        """generate_from_template as a FileResult: DONE or FAILED, never SKIPPED."""
         if not template_path.exists():
-            print(f"Warning: Template {template_path} does not exist, skipping.")
-            return False
+            # The same words as a convert target with no page: both are failures.
+            print(f"Error: Template {template_path} does not exist.")
+            return FileResult.FAILED
 
         try:
             with open(template_path, "r", encoding="utf-8") as f:
@@ -515,11 +534,11 @@ class VersionTemplateManager:
                 f.write(content)
 
             print(f"Generated {output_path} from template")
-            return True
+            return FileResult.DONE
 
         except Exception as e:
             print(f"Error generating from template {template_path}: {e}")
-            return False
+            return FileResult.FAILED
 
     def convert_all_to_templates(self, overwrite: bool = False) -> int:
         """
@@ -539,10 +558,10 @@ class VersionTemplateManager:
 
         for file_path_str in self.target_files:
             file_path = self.project_root / file_path_str
-            converted = self._convert(file_path, overwrite)
-            if converted is None:
+            result = self.convert_file(file_path, overwrite)
+            if result is FileResult.FAILED:
                 self.failures.append(file_path)
-            elif converted:
+            elif result is FileResult.DONE:
                 converted_count += 1
 
         return converted_count

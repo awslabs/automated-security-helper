@@ -31,6 +31,11 @@ once, before the first template, reports it once and lists every target as not g
 ``failures`` is the list of the last ``*_all`` run: a ``convert_to_template`` or
 ``generate_from_template`` called on its own only returns False and leaves it alone, so
 entries from earlier calls no longer pile up in it.
+
+That left a caller of a single-file method with a bare False for a kept template and for
+an unreadable page alike. ``convert_file`` and ``generate_file`` now return a
+``FileResult`` (DONE, SKIPPED or FAILED), the bool methods are true only for DONE, and
+a missing target reads "Error: ... does not exist." for convert and generate alike.
 """
 
 from __future__ import annotations
@@ -236,6 +241,53 @@ class TestFailuresDescribeOneRun:
         manager.generate_from_template(root / "other.md.template")
         assert manager.generate_all_from_templates() == 1
         assert manager.failures == [root / "docs/missing.md.template"]
+
+
+class TestTheSingleFileMethodsTellAFailureFromASkip:
+    def test_convert_file_returns_done_skipped_or_failed(self, tmp_path):
+        """Red before: the three-way answer lived in a private method, so a caller
+        looping over its own files got a bare False for a kept template and for an
+        unreadable page alike."""
+        root = _project(tmp_path / "project")
+        manager = module.VersionTemplateManager(root)
+        result = module.FileResult
+        # The template exists, so convert keeps it: a skip, not an error.
+        assert manager.convert_file(root / "README.md") is result.SKIPPED
+        root.joinpath("plain.md").write_text("no pin here\n", encoding="utf-8")
+        assert manager.convert_file(root / "plain.md") is result.SKIPPED
+        assert manager.convert_file(root / "README.md", overwrite=True) is result.DONE
+        assert manager.convert_file(root / "missing.md") is result.FAILED
+        root.joinpath("unreadable.md").mkdir()  # open(..., "r") on a directory raises
+        assert manager.convert_file(root / "unreadable.md") is result.FAILED
+        assert manager.failures == []
+
+    def test_the_bool_methods_are_true_only_for_done(self, tmp_path):
+        root = _project(tmp_path / "project")
+        manager = module.VersionTemplateManager(root)
+        assert manager.convert_to_template(root / "README.md") is False
+        assert manager.convert_to_template(root / "README.md", overwrite=True) is True
+        assert manager.generate_from_template(root / "README.md.template") is True
+
+    def test_generate_file_returns_done_or_failed(self, tmp_path):
+        root = _project(tmp_path / "project")
+        manager = module.VersionTemplateManager(root)
+        result = module.FileResult
+        assert manager.generate_file(root / "README.md.template") is result.DONE
+        assert manager.generate_file(root / "missing.md.template") is result.FAILED
+
+    def test_a_missing_target_reads_the_same_for_convert_and_generate(
+        self, tmp_path, capsys
+    ):
+        """Red before: generate called a missing template a warning and said it was
+        skipping, then the run counted it as a failure and exited 1."""
+        root = _project(tmp_path / "project")
+        manager = module.VersionTemplateManager(root)
+        manager.convert_file(root / "a.md")
+        manager.generate_file(root / "b.md.template")
+        assert capsys.readouterr().out.splitlines() == [
+            f"Error: File {root / 'a.md'} does not exist.",
+            f"Error: Template {root / 'b.md.template'} does not exist.",
+        ]
 
 
 class TestConvertExitStatus:
