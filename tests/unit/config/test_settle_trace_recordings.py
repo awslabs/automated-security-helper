@@ -56,11 +56,11 @@ the compile fails, the ``probe_install`` row says so and the wrapper-level rows
 supports 3.10), editing the source, and syrupy snapshots.
 
 Rows are JSON lines. Each cell publishes them four ways, any of which survives a
-passing run: ``print`` (visible with ``-s`` or ``-rP``), the testcase's
-``<properties>`` in the junit file (appended to ``request.node.user_properties``
-directly: the ``record_property`` fixture warns at the setup of every test that
-requests it under pytest's default ``junit_family``, xunit2, which no config of
-this repository changes), the terminal reporter (the
+passing run: ``print`` (visible with ``-s`` or ``-rP``), the testsuite's
+``<properties>`` in the junit file (through ``record_testsuite_property``, the
+one property element pytest's default ``junit_family``, xunit2, admits; a
+testcase's ``<properties>``, which the ``record_property`` fixture writes and
+warns about, is not in that schema), the terminal reporter (the
 console log), and ``settle-trace-<cell>.jsonl`` under the test's ``tmp_path`` and
 under ``$ASH_SETTLE_TRACE_DIR`` when that is set to an existing directory. Every
 line starts ``SETTLE-TRACE <cell> `` so a log can be filtered with one pattern.
@@ -348,14 +348,16 @@ def _publish(
         print(f"SETTLE-TRACE END {cell}")
 
     def to_junit() -> None:
-        # The testcase's <properties>, written by the junit plugin from the
-        # node's user_properties. Appended directly: the record_property
-        # fixture appends to the same list, but its setup warns under the
-        # default junit_family (xunit2), once per test that requests it.
+        # The testsuite's <properties>, the one place the default junit_family
+        # (xunit2) admits a property: a testcase's <properties> breaks that
+        # schema, which is what the record_property fixture warns about, and
+        # appending to the node's user_properties wrote the same element
+        # without the warning. The property names carry the cell, so the rows
+        # stay attributable without a per-testcase element. Requested here,
+        # not as a parameter, so a cell that never publishes asks for nothing.
+        record = request.getfixturevalue("record_testsuite_property")
         for index, line in enumerate(lines, 1):
-            request.node.user_properties.append(
-                (f"settle-trace.{cell}.{index:03d}", line)
-            )
+            record(f"settle-trace.{cell}.{index:03d}", line)
 
     def to_files() -> None:
         _write_rows(directory, cell, lines)
