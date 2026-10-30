@@ -1274,9 +1274,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # executionSuccessful the tool set to false. Replacing the list outright
         # discarded both, so a run the tool itself called unsuccessful read as a
         # complete one with no notifications.
+        tool_own_invocations = list(sarif_report.runs[0].invocations or [])
         tool_notifications: List[Any] = []
         tool_said_unsuccessful = False
-        for own in sarif_report.runs[0].invocations or []:
+        for own in tool_own_invocations:
             notes = getattr(own, "toolExecutionNotifications", None)
             if notes:
                 tool_notifications.extend(notes)
@@ -1304,7 +1305,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 exitCodeDescription="\n".join(self.errors) if self.errors else "",
                 workingDirectory=working_dir,
                 **extras,
-            )
+            ),
+            # Whatever the tool recorded after its first invocation stays, after
+            # ASH's own: the list was replaced outright before, which dropped
+            # every further invocation a tool wrote.
+            *tool_own_invocations[1:],
         ]
         # Mirror the un-migrated scanner pattern: attach per-result and
         # tool-driver scanner_details so downstream consumers (and the

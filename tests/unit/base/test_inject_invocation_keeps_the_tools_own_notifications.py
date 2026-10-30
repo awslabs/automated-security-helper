@@ -76,3 +76,53 @@ def test_the_tools_notifications_and_its_failure_survive(plugin_context, tmp_pat
     assert invocation.executionSuccessful is False
     # ASH's own facts are still written on the merged invocation.
     assert invocation.exitCode == 0
+
+
+def _sarif_with_invocations(*invocations: dict) -> dict:
+    return {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "stub-tool", "version": "1.0.0"}},
+                "invocations": list(invocations),
+                "results": [],
+            }
+        ],
+    }
+
+
+def test_a_tool_that_says_it_succeeded_does_not_undo_a_failed_grade(
+    plugin_context, tmp_path
+):
+    """The merge keeps ASH's graded rule: a tool writing its own
+    ``executionSuccessful: true`` (semgrep does) must not lift a run ASH grades
+    failed because a target failed."""
+    scanner = _scanner(plugin_context)
+    scanner.exit_code = 0
+    scanner.targets_attempted = 1
+    scanner.targets_failed = 1
+    report = SarifReport.model_validate(
+        _sarif_with_invocations({"executionSuccessful": True})
+    )
+
+    scanner._inject_invocation(report, ["stub-tool", "scan"], Path(tmp_path))
+
+    assert report.runs[0].invocations[0].executionSuccessful is False
+
+
+def test_the_tools_later_invocations_stay_after_ashs_own(plugin_context, tmp_path):
+    scanner = _scanner(plugin_context)
+    scanner.exit_code = 0
+    report = SarifReport.model_validate(
+        _sarif_with_invocations(
+            {"executionSuccessful": True},
+            {"executionSuccessful": True, "commandLine": "second-pass"},
+        )
+    )
+
+    scanner._inject_invocation(report, ["stub-tool", "scan"], Path(tmp_path))
+
+    invocations = report.runs[0].invocations
+    assert len(invocations) == 2, invocations
+    assert invocations[0].commandLine != "second-pass"
+    assert invocations[1].commandLine == "second-pass"
