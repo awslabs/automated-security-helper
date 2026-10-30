@@ -1305,9 +1305,10 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             if is_not_a_finding(result):
                 # Evaluated and passed, not applicable, or informational: not
                 # a vulnerability finding, and neither a success nor a failure
-                # of the conversion.
+                # of the conversion. Counted here and taken off the total after
+                # the loop; decremented inside it, the total changed meaning
+                # partway and the per-result line read "5/3".
                 non_finding_count += 1
-                total_results_count -= 1
                 ASH_LOGGER.debug(
                     f"Result {rule_id} states no problem (kind "
                     f"{getattr(getattr(result, 'kind', None), 'value', getattr(result, 'kind', None))}); "
@@ -1357,6 +1358,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 continue
 
         processed_results_count = len(vulnerability_findings)
+        # The results that are findings: what the rates below are over.
+        finding_results_count = total_results_count - non_finding_count
         if non_finding_count:
             ASH_LOGGER.info(
                 f"{non_finding_count} SARIF result(s) state no problem (kind pass, "
@@ -1367,11 +1370,11 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         # finding whose builder failed and whose fallback kept what it could;
         # it is counted apart from the findings read whole, and with the
         # failures in the rate, so the rate says what the array is worth.
-        if total_results_count > 0:
+        if finding_results_count > 0:
             whole_count = processed_results_count - degraded_findings_count
-            success_rate = (whole_count / total_results_count) * 100
+            success_rate = (whole_count / finding_results_count) * 100
             ASH_LOGGER.info(
-                f"OCSF report processing complete: {whole_count}/{total_results_count} "
+                f"OCSF report processing complete: {whole_count}/{finding_results_count} "
                 f"findings created whole, {degraded_findings_count} degraded, "
                 f"{failed_results_count} failed ({success_rate:.1f}% success rate)"
             )
@@ -1380,7 +1383,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             )
 
             if failed_results_count > 0:
-                failure_rate = (failed_results_count / total_results_count) * 100
+                failure_rate = (failed_results_count / finding_results_count) * 100
                 ASH_LOGGER.warning(
                     f"{failed_results_count} findings failed to process and were skipped ({failure_rate:.1f}% failure rate)"
                 )
@@ -1388,7 +1391,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             ASH_LOGGER.debug("No SARIF results to process")
 
         # Handle case where all findings failed to process
-        if total_results_count > 0 and processed_results_count == 0:
+        if finding_results_count > 0 and processed_results_count == 0:
             ASH_LOGGER.error(
                 "All SARIF results failed to process - returning error response"
             )

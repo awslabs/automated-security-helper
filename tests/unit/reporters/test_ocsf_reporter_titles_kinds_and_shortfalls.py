@@ -261,6 +261,30 @@ class TestNonFindingKinds:
 
         assert [r["vulnerabilities"][0]["title"] for r in payload] == ["B102"]
 
+    def test_a_document_of_only_non_findings_is_an_empty_array(self, reporter):
+        """Nothing was a finding, so nothing failed: not the all-failed error
+        response, which the rates would reach if they ran over every result."""
+        payload = json.loads(
+            reporter.report(
+                _model(
+                    Result(
+                        ruleId="CDK-1",
+                        kind=Kind.pass_,
+                        level=Level.none,
+                        message=Message(text="x"),
+                    ),
+                    Result(
+                        ruleId="CDK-2",
+                        kind=Kind.informational,
+                        level=Level.none,
+                        message=Message(text="y"),
+                    ),
+                )
+            )
+        )
+
+        assert payload == []
+
 
 class TestOneBadLocation:
     def test_the_other_locations_and_the_description_are_kept(self, reporter):
