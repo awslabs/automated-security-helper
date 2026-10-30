@@ -15,9 +15,12 @@ from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
+    community_scanner_refusal,
     exclusions_matching_no_scanner,
     refuse_selection_matching_no_scanner,
     selection_after_exclusions,
+    unloaded_community_hint,
+    unloaded_community_scanners,
     selection_names,
 )
 from automated_security_helper.models.asharp_model import (
@@ -1027,62 +1030,30 @@ class ScanPhase(EnginePhase):
                 known_names = registered_names | construction_failed
                 requested = [(name, name.lower().strip()) for name in enabled_scanners]
                 unresolved = [name for name, key in requested if key not in known_names]
-                from automated_security_helper.core.community_scanners import (
-                    community_module_for,
-                )
-
-                # "Not loaded" means no scanner class handed to this phase comes
-                # from the module. A module that did supply this run's scanners,
-                # but not the requested name, falls through to the generic
-                # message: the module hint would send the operator to add what is
-                # already there. Read from the classes, not sys.modules, because
-                # anything in the process may have imported a module this run did
-                # not list.
-                loaded_modules = {
-                    str(getattr(cls, "__module__", "")) for cls in scanner_classes
-                }
-                unloaded: Dict[str, str] = {}
-                for name in unresolved:
-                    module = community_module_for(name)
-                    if module and not any(
-                        m == module or m.startswith(module + ".")
-                        for m in loaded_modules
-                    ):
-                        unloaded[name] = module
-                hint = ""
-                if unloaded:
-                    modules = sorted(set(unloaded.values()))
-                    hint = (
-                        f" {', '.join(sorted(unloaded))} "
-                        f"{'is a community scanner' if len(unloaded) == 1 else 'are community scanners'}"
-                        " whose plugin module is not loaded. Add "
-                        f"{', '.join(modules)} to ash_plugin_modules in the ASH "
-                        "config, or pass "
-                        + " ".join(f"--ash-plugin-modules {m}" for m in modules)
-                        + "."
+                # The module hint and the refusal text are the engine's too
+                # (core.scanner_selection): one text for the construction-time
+                # check and this backstop. "Not loaded" is judged from the
+                # classes handed to this phase, not sys.modules.
+                hint = unloaded_community_hint(
+                    unloaded_community_scanners(
+                        unresolved, known_names, scanner_classes
                     )
+                )
                 if unresolved:
                     ASH_LOGGER.warning(
                         "No registered scanner matches "
                         f"{', '.join(sorted(unresolved))}. Registered scanners: "
                         f"{', '.join(sorted(registered_names))}"
-                        + (f".{hint}" if hint else "")
+                        + (f". {hint}" if hint else "")
                     )
                 # A refusal whose requested names are all unresolved and at least one
                 # is a community scanner from an unloaded module names the module to
-                # add, not spelling. Names beside it that no scanner goes by are
-                # named too: the hint alone sent the operator to add a module and
-                # then to a second refusal about the misspelling it had dropped.
-                if hint and not any(key in known_names for _, key in requested):
-                    misspelled = sorted(set(unresolved) - set(unloaded))
-                    also = (
-                        " No registered scanner matches "
-                        f"{', '.join(misspelled)} either: check the spelling, "
-                        "names use hyphens, not underscores."
-                        if misspelled
-                        else ""
-                    )
-                    raise ScannerSelectionError(hint.strip() + also)
+                # add, not spelling, and the misspelled names beside it.
+                refusal = community_scanner_refusal(
+                    list(enabled_scanners), known_names, scanner_classes
+                )
+                if refusal:
+                    raise ScannerSelectionError(refusal)
                 # ScanExecutionEngine makes the same refusal when it is built, from
                 # the registered classes; this is the backstop for an engine built
                 # some other way. known_names, so a scanner whose construction

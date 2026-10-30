@@ -120,8 +120,12 @@ def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
 
     for module_name in internal_modules:
         try:
-            # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-            module = importlib.import_module(module_name)
+            # Inside the manager's declaring window: a handler the package's
+            # decorators subscribe while it imports is recorded as the
+            # package's, not as the program's.
+            with ash_plugin_manager.declaring_import(module_name):
+                # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+                module = importlib.import_module(module_name)
             ASH_LOGGER.debug(f"Loaded internal plugin module: {module_name}")
 
             # Before the lists are read: a group lost to the order the process
@@ -528,12 +532,22 @@ def scan_handler_filter(
             module == name or module.startswith(name + ".") for name in names
         ):
             return True
-        declared_by = registry.handler_declared_by(callback)
-        if declared_by is not None:
-            # A declared handler belongs to its declaring module even when the
-            # declaration itself can no longer be re-read (a one-shot iterator
-            # the loader consumed), so the record decides, not the re-read.
-            return declared_by in names
+        declarers, program = registry.handler_owners(callback)
+        if program:
+            # The program running the scan subscribed it itself (a subscribe
+            # with no declarer outside any loader import window): notified in
+            # every scan the program runs, whatever plugin modules also list it.
+            return True
+        if declarers:
+            # Owned by plugin modules only: by the module that listed it or
+            # whose import subscribed it, even when the declaration can no
+            # longer be re-read (a one-shot iterator the loader consumed), so
+            # the record decides, not the re-read. ASH's own package counts as
+            # named, as scan_plugin_filter counts it.
+            return any(
+                owner in names or _is_builtin_plugin_module(owner)
+                for owner in declarers
+            )
         if module is None:
             return False
         return not _is_allowed_module_path(module)
@@ -1228,8 +1242,14 @@ def load_additional_plugin_modules(
             ASH_LOGGER.info(f"Importing additional plugin module: {label}")
             # The import runs the module's decorators, and the plugin manager
             # prints the module path they register under: those lines hide
-            # every masked module of this load while it runs.
-            with masked_module_names(masked_scope):
+            # every masked module of this load while it runs. The declaring
+            # window makes a handler a decorator subscribes here this module's,
+            # not the program's (the ASH_EVENT_HANDLERS loop below records the
+            # same owner for the listed ones).
+            with (
+                ash_plugin_manager.declaring_import(module_path),
+                masked_module_names(masked_scope),
+            ):
                 # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
                 module = importlib.import_module(module_path)
             # The import itself should trigger plugin registration

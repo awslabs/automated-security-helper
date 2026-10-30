@@ -15,6 +15,7 @@ from typing import (
     Callable,
     Dict,
     Annotated,
+    FrozenSet,
     Iterable,
     Iterator,
     List,
@@ -291,6 +292,23 @@ FAILED_IMPORT_RETRY_SECONDS = 60.0
 _monotonic = time.monotonic
 
 
+class _HandlerOwners:
+    """Who subscribed one event-handler callback (see ``_declared_handler_modules``).
+
+    ``declarers`` are the plugin modules that own it; ``program`` is True when
+    the program running the scan subscribed it itself. Mutable: owners are
+    added as subscribes arrive, in any order. The callback is kept so a reused
+    id is never read as this record.
+    """
+
+    __slots__ = ("callback", "declarers", "program")
+
+    def __init__(self, callback: Any) -> None:
+        self.callback = callback
+        self.declarers: Set[str] = set()
+        self.program = False
+
+
 class _Resolution(NamedTuple):
     """What ``plugin_modules`` resolved one plugin kind to, and from what."""
 
@@ -333,16 +351,21 @@ class AshPluginManager(BaseModel):
     #: differently-configured scans against it concurrently, so subscribe and
     #: notify cannot both touch the same list unsynchronised.
     _event_lock: Lock = PrivateAttr(default_factory=Lock)
-    #: ``id(callback)`` -> (module path, callback) for every handler a plugin
-    #: module declared through ``ASH_EVENT_HANDLERS`` (the loader subscribes
-    #: those with ``declared_by``). A handler's ``__module__`` says where its
-    #: function was defined, not which plugin module listed it: a plugin module
-    #: may list a function from a helper library, or a functools.partial, and a
-    #: scan's handler filter has to know that such a handler belongs to a plugin
-    #: module (one this scan did or did not name) rather than to the program
-    #: running the scan. The callback is kept beside its owner so a reused id
-    #: is never read as a record of a different object. Guarded by
-    #: ``_event_lock``, with the handler lists it describes.
+    #: ``id(callback)`` -> :class:`_HandlerOwners` for every subscribed callback:
+    #: the plugin modules that own it (the module whose ``ASH_EVENT_HANDLERS``
+    #: listed it, which the loader subscribes with ``declared_by``, or the
+    #: module whose import subscribed it through a decorator inside a
+    #: :meth:`declaring_import` window) and whether the program running the
+    #: scan subscribed it itself (a subscribe with no declarer outside any
+    #: import window). A handler's ``__module__`` says where its function was
+    #: defined, not who subscribed it: a plugin module may list a function from
+    #: a helper library, or a functools.partial, and the same callable can be
+    #: both a module's and the program's. A scan's handler filter reads both
+    #: facts (:meth:`handler_owners`) and admits the program's handlers in every
+    #: scan and a module's only in a scan naming the module. The callback is
+    #: kept beside its record so a reused id is never read as a record of a
+    #: different object. Guarded by ``_event_lock``, with the handler lists it
+    #: describes.
     _declared_handler_modules: dict = PrivateAttr(default_factory=dict)
     #: Which registrations an untrusted import made, so a scan is offered only
     #: the classes its own modules load (``plugins_loaded_by``). By plugin type
@@ -378,12 +401,15 @@ class AshPluginManager(BaseModel):
         """Subscribe a callback to a specific event type, at most once.
 
         ``declared_by`` names the plugin module whose ``ASH_EVENT_HANDLERS``
-        listed the callback, when the loader is the caller; it is recorded for
-        :meth:`handler_declared_by`, so a scan's handler filter can tell a
-        handler a plugin module declared (admitted only when the scan names
-        that module, wherever its function was defined) from one the program
-        running the scan subscribed itself. A callback already recorded keeps
-        its first owner.
+        listed the callback, when the loader is the caller. A subscribe with no
+        declarer made while the loader imports a plugin module (inside
+        :meth:`declaring_import`, where the module's decorators run) belongs to
+        that module; one made outside any import window is the program's own.
+        Every owner is recorded (:meth:`handler_owners`), in whatever order the
+        subscribes arrive: a plugin's handler that its import subscribed
+        before the loader's declared subscribe is still the plugin's, not the
+        program's, and a callable both the program and a plugin module
+        subscribed is admitted in every scan as the program's.
 
         Idempotent, and locked, because both properties are load-bearing once
         more than one differently-configured scan runs in a process:
@@ -409,15 +435,25 @@ class AshPluginManager(BaseModel):
         event uses is accepted with a warning instead of silently.
         """
         event_type = declared_event_type(event_type)
+        # Read outside the lock: the window is this thread's own.
+        window = getattr(self._importing, "declaring", None)
         with self._event_lock:
-            # The first subscriber owns the callback: a program's own subscribe
-            # (no declarer) records None, so a plugin module that lists the same
-            # callback later does not take it over and silence it in scans that
-            # do not name that module. A declared subscribe records its module.
+            # Every owner is recorded, never only the first: a decorator that
+            # runs while the loader imports a plugin module subscribes before
+            # the loader's declared subscribe, and a first-owner rule read that
+            # handler as the program's and ran it in every scan; the reverse
+            # order silenced a program handler a plugin module also listed.
+            record = self._declared_handler_modules.get(id(callback))
+            if record is None or record.callback is not callback:
+                record = _HandlerOwners(callback)
+                self._declared_handler_modules[id(callback)] = record
             owner = (
-                declared_by if isinstance(declared_by, str) and declared_by else None
+                declared_by if isinstance(declared_by, str) and declared_by else window
             )
-            self._declared_handler_modules.setdefault(id(callback), (owner, callback))
+            if owner:
+                record.declarers.add(owner)
+            else:
+                record.program = True
             handlers = self.plugin_library.event_handlers.setdefault(event_type, [])
             if callback in handlers:
                 ASH_LOGGER.debug(
@@ -432,19 +468,53 @@ class AshPluginManager(BaseModel):
         )
         return callback  # Return for decorator usage
 
-    def handler_declared_by(self, callback: Any) -> str | None:
-        """The plugin module whose ``ASH_EVENT_HANDLERS`` declared *callback*, or None.
+    def handler_owners(self, callback: Any) -> Tuple[FrozenSet[str], bool]:
+        """Who subscribed *callback*: ``(plugin modules, the program did)``.
 
-        None for a callback the program running the scan subscribed itself, and
-        for one no loader has subscribed with ``declared_by``. Matched by
-        identity: a record whose callback is a different object with a reused
-        id is no record of this one.
+        The modules are the ones whose ``ASH_EVENT_HANDLERS`` listed it (the
+        loader's ``declared_by``) and the ones whose import subscribed it
+        through a decorator (:meth:`declaring_import`); the flag is True when a
+        subscribe with no declarer arrived outside any import window, the
+        program running the scan subscribing its own handler. Both can hold at
+        once. ``(frozenset(), False)`` for a callback never subscribed, or
+        whose record belongs to a different object with a reused id.
         """
         with self._event_lock:
-            entry = self._declared_handler_modules.get(id(callback))
-        if entry is None or entry[1] is not callback:
-            return None
-        return entry[0]
+            record = self._declared_handler_modules.get(id(callback))
+            if record is None or record.callback is not callback:
+                return frozenset(), False
+            return frozenset(record.declarers), record.program
+
+    def handler_declared_by(self, callback: Any) -> str | None:
+        """One plugin module that owns *callback*, or None.
+
+        The first of :meth:`handler_owners`' modules in sorted order; None for
+        a callback only the program subscribed, and for one never subscribed.
+        A callback both the program and a module subscribed has a module here
+        AND the program flag in :meth:`handler_owners`, which is what a scan's
+        handler filter reads; this is the one-module view for logs and tests.
+        """
+        declarers, _program = self.handler_owners(callback)
+        return min(declarers) if declarers else None
+
+    @contextmanager
+    def declaring_import(self, module_name: str) -> Iterator[None]:
+        """Attribute what this thread subscribes inside the block to ``module_name``.
+
+        For the loader's import of a plugin module: the module's decorators
+        (``event_subscriber``) subscribe handlers with no declarer while it
+        imports, and without the window those subscribes read as the program's,
+        which admitted the module's handlers into every scan of the process.
+        Per thread, as :meth:`untrusted_import` is, and for the same reason;
+        the two windows are independent (an operator-named module is a
+        declaring import and not an untrusted one).
+        """
+        previous = getattr(self._importing, "declaring", None)
+        self._importing.declaring = module_name
+        try:
+            yield
+        finally:
+            self._importing.declaring = previous
 
     def notify(
         self,

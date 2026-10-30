@@ -1105,10 +1105,12 @@ class ValidationCheckpointer:
             "Processing queue validation errors and ensuring scan continuity"
         )
 
-        # Not gated on has_issues(): that counts discrepancies and errors, and the
-        # checkpoint validate_task_queue builds carries neither for a scanner that was
-        # enabled but never queued. Behind that gate, such a scanner got no failure
-        # reason from here at all.
+        # Not gated on has_issues(). validate_task_queue now records a discrepancy
+        # for a scanner that was enabled but never queued, so the gate would hold
+        # today; it stays off because this method's job is the failure reason on
+        # each missing scanner's state, which a checkpoint built some other way
+        # (expected names absent from the actual ones, no discrepancy recorded)
+        # would otherwise lose behind that gate.
         missing_scanners = validation_checkpoint.get_missing_scanners()
         if missing_scanners:
             self.logger.warning(

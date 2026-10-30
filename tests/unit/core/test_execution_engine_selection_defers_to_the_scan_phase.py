@@ -11,8 +11,10 @@ its selectable name only as ``config.name`` on an instance the phase constructs,
 so the engine keyed it by its lowercased class name and refused the configured
 name the phase accepts, making the scanner unselectable. And a request naming a
 community scanner whose module this run did not load was refused as a spelling
-error; it is still refused here, before anything is cleared, but with the
-phase's own text naming the module to add.
+error; it is still refused here, before anything is cleared, but with the one
+text the phase also raises (core.scanner_selection.community_scanner_refusal),
+which names the module to add and any misspelled name beside it, and only when
+some scanner class is in scope to judge the names against.
 
 The last test pins the other engine-level fix in this file's subject: a report
 over existing results keeps the stored scan's timing.
@@ -111,6 +113,33 @@ def test_a_community_scanner_whose_module_is_not_loaded_is_refused_naming_the_mo
 
     assert "community scanner" in str(refused.value)
     assert "--ash-plugin-modules" in str(refused.value)
+
+
+def test_a_misspelled_name_is_named_beside_the_unloaded_community_scanner(
+    tmp_path,
+):
+    """Red before the fix: the refusal named the community scanner only, so the
+    operator added the module and was refused again for the misspelling."""
+    engine = _engine(tmp_path)
+
+    with pytest.raises(ScannerSelectionError) as refused:
+        _reinitialize(engine, ["snyk-code", "bandt"], [_NamedScanner])
+
+    text = str(refused.value)
+    assert "ash_snyk_plugins" in text
+    assert "bandt" in text
+    assert "check the spelling" in text
+
+
+def test_no_registered_scanner_defers_every_refusal_to_the_phase(tmp_path):
+    """Red before the fix: with no scanner class in scope the community hint
+    ran on an empty declared set and refused the request, where the phase and
+    refuse_selection_matching_no_scanner skip a registry with nothing in it."""
+    engine = _engine(tmp_path)
+
+    _reinitialize(engine, ["snyk-code"], [])
+
+    assert engine._initialized is True
 
 
 def test_a_declared_name_beside_an_unloaded_community_scanner_is_not_refused(

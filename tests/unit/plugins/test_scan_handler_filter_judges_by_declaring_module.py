@@ -18,6 +18,14 @@ nothing) was left out of the scan that named the package. A callback the program
 subscribed first and a plugin module listed later was taken over by the module and
 silenced in scans not naming it. And a declared handler whose declaration could no
 longer be re-read was refused even by the scan naming its module.
+
+A fourth round: the first-owner rule that fixed the program-first order broke
+the other orders. A plugin's handler that its own import subscribed through the
+``event_subscriber`` decorator, before the loader's declared subscribe, read as
+the program's and ran in every scan; a program handler a plugin module had
+listed first was silenced. The manager now records every owner (the modules, and
+whether the program subscribed outside any loader import window), and the filter
+admits the program's handlers always and a module's in scans naming the module.
 """
 
 from __future__ import annotations
@@ -75,9 +83,10 @@ class _ModuleHiding:
 
 
 def test_a_partial_is_judged_by_the_function_it_wraps():
-    """The scan names the module that defines ``mine`` exactly: the plugin
-    filter selects a module by its own name, never a submodule of a named
-    package (tests/unit/plugins/test_plugin_module_name_rules.py pins that)."""
+    """Three partials, judged by the functions they wrap: another module's
+    refused, this scan's admitted, the program's admitted. The scan names the
+    module that defines ``mine`` so the test reads the partial rule alone; the
+    submodule arm (a handler below a named package) is pinned separately."""
     theirs = functools.partial(_handler_in("zz_their_ash_plugins.events"), 1)
     mine = functools.partial(_handler_in("zz_mine_ash_plugins.events"), 1)
     program = functools.partial(_handler_in("zz_program.hooks"), 1)
@@ -150,8 +159,68 @@ def test_the_program_keeps_a_callback_a_plugin_module_lists_later():
         AshEventType.SCAN_START, shared, declared_by="zz_claims_ash_plugins"
     )
 
-    assert manager.handler_declared_by(shared) is None
+    assert manager.handler_owners(shared) == (
+        frozenset({"zz_claims_ash_plugins"}),
+        True,
+    )
     assert scan_handler_filter([], manager=manager)(shared)
+
+
+def test_the_program_keeps_a_callback_a_plugin_module_listed_first():
+    """Red before the fix: the first record won, so the program's own
+    subscribe of a callable a plugin module had listed was silenced in every
+    scan not naming that module."""
+    shared = _handler_in("zz_program.hooks")
+    manager = _manager()
+    manager.subscribe(
+        AshEventType.SCAN_START, shared, declared_by="zz_claims_ash_plugins"
+    )
+    manager.subscribe(AshEventType.SCAN_COMPLETE, shared)
+
+    assert manager.handler_owners(shared) == (
+        frozenset({"zz_claims_ash_plugins"}),
+        True,
+    )
+    assert scan_handler_filter([], manager=manager)(shared)
+
+
+def test_a_decorator_subscribe_during_a_plugin_import_is_the_plugins_not_the_programs():
+    """Red before the fix: a subscribe with no declarer was the program's
+    wherever it came from, so a plugin's handler that its import subscribed
+    before the loader's declared subscribe ran in every scan."""
+    helper = _handler_in("zz_helper_lib.callbacks")
+    manager = _manager()
+    with manager.declaring_import("zz_decl_ash_plugins"):
+        manager.subscribe(AshEventType.SCAN_COMPLETE, helper)
+    manager.subscribe(
+        AshEventType.SCAN_COMPLETE, helper, declared_by="zz_decl_ash_plugins"
+    )
+
+    assert manager.handler_owners(helper) == (frozenset({"zz_decl_ash_plugins"}), False)
+    assert manager.handler_declared_by(helper) == "zz_decl_ash_plugins"
+    assert not scan_handler_filter([], manager=manager)(helper), (
+        "a scan not naming the module was notified"
+    )
+    assert scan_handler_filter(["zz_decl_ash_plugins"], manager=manager)(helper)
+
+
+def test_the_declaring_window_is_per_thread_and_restored():
+    manager = _manager()
+    first = _handler_in("zz_helper_lib.one")
+    second = _handler_in("zz_helper_lib.two")
+    with manager.declaring_import("zz_outer_ash_plugins"):
+        with manager.declaring_import("zz_inner_ash_plugins"):
+            manager.subscribe(AshEventType.SCAN_COMPLETE, first)
+        manager.subscribe(AshEventType.SCAN_COMPLETE, second)
+    program = _handler_in("zz_helper_lib.three")
+    manager.subscribe(AshEventType.SCAN_COMPLETE, program)
+
+    assert manager.handler_owners(first) == (frozenset({"zz_inner_ash_plugins"}), False)
+    assert manager.handler_owners(second) == (
+        frozenset({"zz_outer_ash_plugins"}),
+        False,
+    )
+    assert manager.handler_owners(program) == (frozenset(), True)
 
 
 def test_a_declared_record_admits_the_handler_when_its_module_is_named(
@@ -272,3 +341,44 @@ def test_the_loader_records_which_module_declared_each_handler(site):
     assert manager.handler_declared_by(handler) == "zzdecl_ash_plugins"
     assert not scan_handler_filter([], manager=manager)(handler)
     assert scan_handler_filter(["zzdecl_ash_plugins"], manager=manager)(handler)
+
+
+def test_a_helper_decorated_with_event_subscriber_and_listed_stays_the_plugins(site):
+    """The case the filter's docstring promises, end to end through the loader.
+
+    The helper library decorates ``on_event`` with ``event_subscriber``, so the
+    plugin module's import subscribes it (no declarer) BEFORE the loader's
+    declared subscribe. Red before the fix: the first record won, the handler
+    read as the program's, and every scan of the process notified it.
+    """
+    _write(
+        site,
+        "zzdecohelper_pkg/__init__.py",
+        "from automated_security_helper.plugins.decorators import event_subscriber\n"
+        "@event_subscriber('scan_complete')\n"
+        "def on_event(**kwargs):\n"
+        "    pass\n",
+    )
+    _write(
+        site,
+        "zzdeco_ash_plugins/__init__.py",
+        "from zzdecohelper_pkg import on_event\n"
+        "ASH_EVENT_HANDLERS = {'scan_complete': [on_event]}\n",
+    )
+    importlib.invalidate_caches()
+    manager = _manager()
+
+    with (
+        patch("automated_security_helper.plugins.loader.ash_plugin_manager", manager),
+        patch(
+            "automated_security_helper.plugins.decorators.ash_plugin_manager", manager
+        ),
+    ):
+        load_additional_plugin_modules(["zzdeco_ash_plugins"], record={})
+
+    handler = sys.modules["zzdecohelper_pkg"].on_event
+    assert manager.handler_owners(handler) == (frozenset({"zzdeco_ash_plugins"}), False)
+    assert not scan_handler_filter([], manager=manager)(handler), (
+        "a scan that never named the plugin module was notified"
+    )
+    assert scan_handler_filter(["zzdeco_ash_plugins"], manager=manager)(handler)

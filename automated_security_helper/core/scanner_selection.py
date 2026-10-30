@@ -26,7 +26,7 @@ unloaded (see tests/unit/models/test_forward_ref_resolves_in_any_import_order.py
 """
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Literal, Sequence
+from typing import Dict, Iterable, List, Literal, Mapping, Sequence
 
 from automated_security_helper.core.exceptions import ScannerSelectionError
 
@@ -165,6 +165,95 @@ def refuse_selection_matching_no_scanner(
         "the spelling -- names use hyphens, not underscores -- or "
         f"drop {selection_names(origin).allowlist} to run them all."
     )
+
+
+def unloaded_community_scanners(
+    requested: Iterable[str],
+    known_names: Iterable[str],
+    scanner_classes: Iterable[type],
+) -> Dict[str, str]:
+    """``{requested name: plugin module}`` for the names that resolve to nothing
+    but name a community scanner ASH ships whose module this run did not load.
+
+    ``core.community_scanners`` maps each in-tree community scanner's name to
+    its plugin module without importing it. "Not loaded" means no class in
+    *scanner_classes* comes from the module: a module that did supply this
+    run's scanners, but not the requested name, is not reported (the hint would
+    send the operator to add what is already there), and ``sys.modules`` is not
+    consulted, because anything in the process may have imported a module this
+    run did not list. Names are compared lower-cased and stripped, as ScanPhase
+    compares them.
+    """
+    from automated_security_helper.core.community_scanners import (
+        community_module_for,
+    )
+
+    known = {str(name).lower().strip() for name in known_names}
+    loaded = {str(getattr(cls, "__module__", "")) for cls in scanner_classes}
+    unloaded: Dict[str, str] = {}
+    for name in requested:
+        if name.lower().strip() in known:
+            continue
+        module = community_module_for(name)
+        if module and not any(
+            loaded_module == module or loaded_module.startswith(module + ".")
+            for loaded_module in loaded
+        ):
+            unloaded[name] = module
+    return unloaded
+
+
+def unloaded_community_hint(unloaded: Mapping[str, str]) -> str:
+    """The sentence naming the module(s) to add for *unloaded*, or "" for none."""
+    if not unloaded:
+        return ""
+    modules = sorted(set(unloaded.values()))
+    return (
+        f"{', '.join(sorted(unloaded))} "
+        f"{'is a community scanner' if len(unloaded) == 1 else 'are community scanners'}"
+        " whose plugin module is not loaded. Add "
+        f"{', '.join(modules)} to ash_plugin_modules in the ASH config, or pass "
+        + " ".join(f"--ash-plugin-modules {module}" for module in modules)
+        + "."
+    )
+
+
+def community_scanner_refusal(
+    requested: Sequence[str],
+    known_names: Iterable[str],
+    scanner_classes: Iterable[type],
+) -> str:
+    """The refusal text for an allowlist that resolves to nothing and names an
+    unloaded community scanner, or "" when this refusal does not apply.
+
+    One text for the engine's construction-time check and ScanPhase's backstop,
+    so both refuse in the same words: the module to add, and beside it every
+    requested name that is neither registered nor a community scanner, so the
+    operator is not sent to add a module and then refused again for the
+    misspelling the first refusal dropped. Not when nothing is registered
+    (*scanner_classes* empty): there is nothing to judge the names against, and
+    :func:`refuse_selection_matching_no_scanner` and ScanPhase skip that case
+    too. Not when any requested name resolves: such a run scans what resolved
+    and ScanPhase warns about the rest.
+    """
+    scanner_classes = list(scanner_classes)
+    if not requested or not scanner_classes:
+        return ""
+    known = {str(name).lower().strip() for name in known_names}
+    if any(name.lower().strip() in known for name in requested):
+        return ""
+    unloaded = unloaded_community_scanners(requested, known, scanner_classes)
+    if not unloaded:
+        return ""
+    misspelled = sorted(set(requested) - set(unloaded))
+    also = (
+        " No registered scanner matches "
+        f"{', '.join(misspelled)} either: check the spelling, "
+        "names use hyphens, not underscores."
+        if misspelled
+        else ""
+    )
+    return unloaded_community_hint(unloaded) + also
 
 
 def exclusions_matching_no_scanner(
