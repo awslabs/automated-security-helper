@@ -1127,7 +1127,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             if warn and not entries:
                 ASH_LOGGER.warning(
                     text_without_values(
-                        f"bandit excluded_paths entry '{item.path}' has no bandit "
+                        f"bandit excluded_paths entry {item.path!r} has no bandit "
                         "--exclude form, so it excludes nothing: write a file, a "
                         "directory, or a glob without ',', a line break or a NUL, "
                         "and without '.' or empty path components.",
@@ -1141,10 +1141,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 # operator was told nothing and the entry excluded nothing.
                 ASH_LOGGER.warning(
                     text_without_values(
-                        f"bandit excluded_paths entry '{item.path}' is written as "
+                        f"bandit excluded_paths entry {item.path!r} is written as "
                         "an absolute path, but every entry is read relative to "
                         "the scanned target, so it is read as "
-                        f"'{item.path.replace(chr(92), '/').lstrip('/')}' below "
+                        f"{item.path.replace(chr(92), '/').lstrip('/')!r} below "
                         "the target. Write the path relative to the target.",
                         environment_values,
                     ),
@@ -1200,7 +1200,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     # their findings afterwards.
                     ASH_LOGGER.warning(
                         text_without_values(
-                            f"Global ignore path '{ignore_path.path}' holds a line "
+                            f"Global ignore path {ignore_path.path!r} holds a line "
                             "break or a NUL character, which no --exclude entry can "
                             "carry, so bandit gets no entry for it and reads the "
                             "files it covers; their findings are dropped after the "

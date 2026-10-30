@@ -140,7 +140,11 @@ def test_a_nul_entry_leaves_the_other_exclusions_in_place(tmp_path, caplog):
     assert not any("\0" in entry for entry in entries), entries
     for entry in bandit_excluded_path_globs(source.as_posix(), "vendor"):
         assert entry in entries
-    assert any("NUL" in message for message in _warnings(caplog)), _warnings(caplog)
+    nul_lines = [message for message in _warnings(caplog) if "NUL" in message]
+    assert nul_lines, _warnings(caplog)
+    # No warning carries the entry's NUL raw; the entry is written as its repr.
+    assert not any("\0" in message for message in _warnings(caplog)), _warnings(caplog)
+    assert any("\\x00" in message for message in nul_lines), nul_lines
 
 
 def test_a_global_ignore_path_with_a_nul_is_warned_about(tmp_path, caplog):
@@ -156,9 +160,17 @@ def test_a_global_ignore_path_with_a_nul_is_warned_about(tmp_path, caplog):
     entries = _entries(argv)
     assert not any("\0" in entry for entry in entries), entries
     assert f"{source.as_posix()}/vendor/*" in entries
-    assert any(
-        "ignore path" in message and "NUL" in message for message in _warnings(caplog)
-    ), _warnings(caplog)
+    nul_lines = [
+        message
+        for message in _warnings(caplog)
+        if "ignore path" in message and "NUL" in message
+    ]
+    assert nul_lines, _warnings(caplog)
+    # The entry is written as its repr: the NUL is visible as an escape and
+    # a line break in an entry cannot start a log line of its own.
+    assert all("\0" not in message and "\\x00" in message for message in nul_lines), (
+        nul_lines
+    )
 
 
 def test_an_ini_exclude_entry_with_a_nul_is_dropped_and_counted(tmp_path, caplog):
