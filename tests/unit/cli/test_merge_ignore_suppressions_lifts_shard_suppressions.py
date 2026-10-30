@@ -326,10 +326,15 @@ def test_the_flag_records_the_lift_on_the_merged_metadata(tmp_path):
 
 
 def test_without_the_flag_the_metadata_records_no_lift(tmp_path):
-    """The control for the field."""
+    """The control for the field: without the flag the merge never writes it, so
+    it reads as the field's declared default. ReportMetadata admits the attribute
+    ahead of a declaration (extra="allow"), where it is absent; declared, its
+    default is None ("not recorded"), not False ("recorded as not ignored"). The
+    reporter reads it through bool(), so either reads as "not ignored"."""
     merged = _merged(tmp_path, ignore_suppressions=False)
 
-    assert getattr(merged.metadata, "suppressions_ignored", False) is False
+    assert getattr(merged.metadata, "suppressions_ignored", None) in (None, False)
+    assert not getattr(merged.metadata, "suppressions_ignored", None)
 
 
 def test_the_unused_reporter_reads_the_merged_file_as_not_evaluated(tmp_path):
