@@ -411,7 +411,9 @@ def test_refused_candidates_are_named_in_the_skipped_reason(
         CFN_TEMPLATE, encoding="utf-8"
     )
     monkeypatch.setattr(
-        cdk_nag_scanner, "refusal_reason", lambda path, root: "it is a symbolic link"
+        cdk_nag_scanner,
+        "refusal_reason",
+        lambda path, root, **options: "it is a symbolic link",
     )
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
