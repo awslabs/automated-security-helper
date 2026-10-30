@@ -113,7 +113,11 @@ class TestCheckFieldPresenceInReports:
         assert presence[self.FIELD]["in_flat"]["plain"] is False
 
     def test_a_text_report_with_a_mapping_shows_the_mapped_name(self):
-        presence = self._presence({"csv": "Rule ID,Description,Severity\n"})
+        # The header is whatever the csv reporter maps the field to: the static
+        # table's when the reporters cannot be imported, the reporter's own when
+        # they can.
+        header = get_reporter_mappings()["csv"]["runs[].results[].message.text"]
+        presence = self._presence({"csv": f"rule,{header},level\n"})
 
         assert presence[self.FIELD]["in_flat"]["csv"] is True
 
