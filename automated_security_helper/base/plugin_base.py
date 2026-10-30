@@ -2208,9 +2208,14 @@ class PluginBase(UVToolMixin, BaseModel):
             # ``earlier`` is the response's own error text, so the joined text
             # is redacted whole: the run's error can carry a configured value
             # too, and this field is copied into the recorded post-run error,
-            # the executor's report and the results file.
+            # the executor's report and the results file. Without the values
+            # (``withheld``) nothing could redact it, and the runner keeps it
+            # raw, so it is left out and the note stands alone, as the other
+            # records of this handler do.
             post_run["error"] = text_without_values(
-                f"{earlier}; {described}" if earlier else described,
+                f"{earlier}; {described}"
+                if earlier and withheld is None
+                else described,
                 environment_values,
             )
             if not any(response.get(flag) is True for flag in RESPONSE_FLAGS):
