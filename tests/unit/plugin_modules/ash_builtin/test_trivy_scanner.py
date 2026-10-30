@@ -216,9 +216,29 @@ def _assert_expected(report: SarifReport) -> None:
 
 @pytest.fixture(autouse=True)
 def _online(monkeypatch):
-    """No test here inherits ASH_OFFLINE, or a TRIVY_CONFIG, from the shell running it."""
+    """No test here inherits ASH_OFFLINE, or a TRIVY_CONFIG, from the shell running it.
+
+    This module is a probe subject (tests/unit/conftest.py PROBE_SUBJECT_MODULES) for
+    trivy's version probe, which its staleness tests reach under their own doubles,
+    so the unit guard's probe stand-ins are not installed here. No test here reads
+    trivy's ``--help``, and building a trivy-repo scanner runs it (the default
+    misconfig scanners, ``trivy_default_misconfig_scanners``), which the guard records
+    as a tool start on a host without trivy. The memo it reads first is replaced
+    the way the guard replaces it elsewhere, so no ``--help`` runs.
+    """
+    from tests.utils.tool_guard import _NoDefaultMisconfigScanners
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base,
+    )
+
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.delenv("TRIVY_CONFIG", raising=False)
+    monkeypatch.setattr(
+        _trivy_scanner_base,
+        "_DEFAULT_MISCONFIG_SCANNERS",
+        _NoDefaultMisconfigScanners(),
+    )
 
 
 # --------------------------------------------------------------------------- #
