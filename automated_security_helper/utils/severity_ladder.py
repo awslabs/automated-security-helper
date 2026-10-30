@@ -103,7 +103,18 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional, Tuple
+import logging
+from typing import Any, Callable, Dict, Optional, Set, Tuple
+
+# ASH's logger by name, not through utils.log: that module imports the console,
+# the thread wrapper and the process environment, and this module is imported by
+# the models they build on, so the import would be a cycle.
+_LOGGER = logging.getLogger("ash")
+
+#: The off-table threshold values warned about so far, one warning per value per
+#: process: the gate runs once per finding, and a warning per finding would say
+#: the same thing hundreds of times.
+_WARNED_OFF_TABLE: Set[str] = set()
 
 # The ladder, as data. Ordered strictest to loosest -- see the module docstring
 # for why that is the opposite of the severity ordering.
@@ -375,8 +386,29 @@ def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
     """
     if not threshold:
         return False
+    if threshold not in _THRESHOLD_MIN_RANK:
+        _warn_off_table_threshold(threshold)
     rank = _SEVERITY_RANK.get(severity.upper(), _UNKNOWN_SEVERITY_RANK)
     return rank >= _THRESHOLD_MIN_RANK.get(threshold, _UNKNOWN_THRESHOLD_MIN_RANK)
+
+
+def _warn_off_table_threshold(threshold: str) -> None:
+    """Log once per process that *threshold* is off the ladder and gates like CRITICAL.
+
+    Every configured route normalizes at its edge (``normalize_threshold``, the
+    Literal-typed config fields), so a value reaching here is a free-text one an
+    external plugin or caller passed straight through; silently gating it like
+    CRITICAL hid a loosened gate. The warning names the value and the ladder,
+    and says the matching is case-sensitive, which is the usual cause.
+    """
+    if threshold in _WARNED_OFF_TABLE:
+        return
+    _WARNED_OFF_TABLE.add(threshold)
+    _LOGGER.warning(
+        f"Severity threshold {threshold!r} is not one of "
+        f"{', '.join(SEVERITY_THRESHOLDS)} (case-sensitive); it gates like "
+        "CRITICAL, so only critical findings fail against it"
+    )
 
 
 def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) -> bool:

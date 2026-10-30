@@ -181,6 +181,65 @@ class TestSeverityFailsThreshold:
         assert severity_fails_threshold("SEVERE", None) is False
 
 
+class TestOffTableThresholdIsSaidOnce:
+    """An off-table threshold gates like CRITICAL, and the ladder says so once.
+
+    The ladder used to gate such a value silently, so a plugin's ``"low"`` or a
+    typo loosened the gate to critical-only with nothing in the log. The gate
+    itself is unchanged (the pins above); the warning is the addition, one per
+    value per process because the gate runs once per finding.
+    """
+
+    @pytest.fixture
+    def ash_log(self, monkeypatch, caplog):
+        import logging
+
+        from automated_security_helper.utils import severity_ladder
+
+        logger = logging.getLogger("test-severity-ladder")
+        logger.propagate = True
+        monkeypatch.setattr(severity_ladder, "_LOGGER", logger)
+        monkeypatch.setattr(severity_ladder, "_WARNED_OFF_TABLE", set())
+        caplog.set_level(logging.WARNING, logger=logger.name)
+        return caplog
+
+    def test_an_off_table_threshold_is_warned_about_and_gates_like_critical(
+        self, ash_log
+    ):
+        assert severity_fails_threshold("HIGH", "BOGUS") is False
+        assert severity_fails_threshold("CRITICAL", "BOGUS") is True
+
+        warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]
+        assert warnings == [
+            (
+                "Severity threshold 'BOGUS' is not one of ALL, LOW, MEDIUM, HIGH, "
+                "CRITICAL (case-sensitive); it gates like CRITICAL, so only critical "
+                "findings fail against it"
+            )
+        ]
+
+    def test_a_lower_case_threshold_is_warned_about_once_per_value(self, ash_log):
+        for _ in range(3):
+            assert severity_fails_threshold("LOW", "low") is False
+        assert sarif_level_fails_threshold("note", "low") is False
+        assert severity_fails_threshold("MEDIUM", "medium") is False
+
+        values = [
+            r.getMessage().split("'")[1]
+            for r in ash_log.records
+            if r.levelname == "WARNING"
+        ]
+        assert values == ["low", "medium"]
+
+    def test_a_ladder_value_and_no_threshold_log_nothing(self, ash_log):
+        for threshold in SEVERITY_THRESHOLDS:
+            severity_fails_threshold("HIGH", threshold)
+        severity_fails_threshold("HIGH", None)
+        severity_fails_threshold("HIGH", "")
+
+        assert [r for r in ash_log.records if r.levelname == "WARNING"] == []
+
+
 # ---------------------------------------------------------------------------
 # Tests: sarif_level_fails_threshold
 #
