@@ -2851,16 +2851,28 @@ def _value_folded_into(written: Any, merged: Any) -> bool:
     that holds a base's keys too never matched the file's, and a respelled
     mapping-valued field (``global-settings``) the chain did fold was said to be
     ignored. Any other value (a scalar, a list) the merge replaces whole, so it
-    is held only when equal. An empty mapping sets nothing, so nothing of it is
-    applied: it is not held, and the warning for it says to write the declared
-    spelling, not that the chain applies its value.
+    is held only when equal. An empty mapping as the file's whole value sets
+    nothing, so nothing of it is applied: it is not held, and the warning for it
+    says to write the declared spelling, not that the chain applies its value.
+    An empty mapping nested inside a value the file does set (``mcp: {}`` under
+    ``global-settings``) is a part of a value the chain applies: the merge
+    places it where the file wrote it, so it is held wherever the merged value
+    there is a mapping. Read as "nothing of it is applied" at every level, that
+    one nested ``{}`` said the whole value was ignored.
     """
+    if isinstance(written, dict) and not written:
+        return False
+    return _value_held_as_merged(written, merged)
+
+
+def _value_held_as_merged(written: Any, merged: Any) -> bool:
+    """``_value_folded_into`` below its top level: a mapping is held when each
+    of its keys is, under the merge's spelling rule, an empty mapping included;
+    any other value is held when equal."""
     if isinstance(written, dict) and isinstance(merged, dict):
-        if not written:
-            return False
         for key, value in written.items():
             target = _resolve_dict_key(merged, key) if isinstance(key, str) else key
-            if target not in merged or not _value_folded_into(value, merged[target]):
+            if target not in merged or not _value_held_as_merged(value, merged[target]):
                 return False
         return True
     return written == merged

@@ -437,6 +437,33 @@ def test_an_empty_respelled_mapping_field_is_not_named_as_applied(tmp_path):
     assert "write 'global_settings'" in respelled[0], respelled
 
 
+def test_a_respelled_mapping_with_an_empty_nested_mapping_is_named_as_folded(
+    tmp_path,
+):
+    """``mcp: {}`` nested under a respelled ``global-settings`` the chain does
+    fold: the merge applies ``severity_threshold: HIGH`` and places the empty
+    mapping where the file wrote it, so the whole value is folded and applied.
+    Reading the empty-mapping rule at every level said the value was ignored."""
+    base = tmp_path / "base.yaml"
+    base.write_text(
+        "project_name: demo\nglobal_settings:\n  severity_threshold: LOW\n",
+        encoding="utf-8",
+    )
+    child = tmp_path / ".ash.yaml"
+    child.write_text(
+        "extends: base.yaml\nglobal-settings:\n  severity_threshold: HIGH\n  mcp: {}\n",
+        encoding="utf-8",
+    )
+
+    check = ConfigValidator.check_config_file(child)
+
+    folded = [
+        w for w in check.warnings if w.startswith("Unknown top-level field 'global-")
+    ]
+    assert folded, check.warnings
+    assert "folds it onto 'global_settings' and applies its value" in folded[0], folded
+
+
 def test_an_unknown_top_level_field_is_still_unknown(tmp_path):
     cfg = tmp_path / ".ash.yaml"
     cfg.write_text("project_name: demo\nfoo_unknown: 1\n", encoding="utf-8")
