@@ -128,6 +128,28 @@ class TestChildEnvironment:
         # timeout can stop ASH and the tools it started together.
         assert recorded.get("start_new_session", False) is hasattr(os, "setsid")
 
+    def test_run_ash_selects_exactly_the_two_gate_scanners(
+        self, policy_script, tmp_path: Path, monkeypatch
+    ):
+        """Unnarrowed, `ash scan` loads every default scanner and exits 1 on the
+        MISSING ones under the default completeness gate, which the gate read as
+        two crashed runs on its first real host (bandit and checkov only)."""
+        recorded: dict = {}
+
+        class FakePopen(_FakeScanChild):
+            def __init__(self, argv, **kwargs):
+                super().__init__()
+                recorded["argv"] = argv
+
+        monkeypatch.setattr(policy_script.subprocess, "Popen", FakePopen)
+        policy_script.run_ash(tmp_path / "ws", tmp_path / "out", timeout=1.0)
+        argv = recorded["argv"]
+        selected = [
+            argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "--scanners"
+        ]
+        assert selected == list(policy_script.GATE_SCANNERS)
+        assert set(selected) == {"bandit", "checkov"}
+
 
 class _FakeScanChild:
     """A Popen stand-in for run_ash: exited, with the pipes still readable."""

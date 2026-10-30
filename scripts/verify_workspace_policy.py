@@ -213,6 +213,16 @@ def build_fixture(root: Path) -> Path:
 #: ran until the runner's own limit cancelled it with no output from this script.
 DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
 
+#: The two scanners every run of this gate selects, and the only two it asserts
+#: on (bandit for the ceiling, checkov for its limit; the module docstring says
+#: why these two). Named on the command line because ``ash scan`` loads every
+#: default-enabled scanner otherwise, and with ``fail_on_incomplete_scanners``
+#: on by default a host without the other tools makes every scan exit 1 on
+#: MISSING scanners, which this gate reads as a crashed run. Measured on the
+#: first real run of this script (a desk with bandit and checkov installed and
+#: nothing else): every policy check passed and both runs exited 1.
+GATE_SCANNERS = ("bandit", "checkov")
+
 #: Seconds the scan child gets to shut down after SIGTERM before it is killed.
 SHUTDOWN_GRACE_SECONDS = 15.0
 
@@ -370,6 +380,8 @@ def run_ash(
         "--no-progress",
         "--simple",
     ]
+    for scanner in GATE_SCANNERS:
+        argv += ["--scanners", scanner]
     if policy is not None:
         argv += ["--workspace-config", str(policy)]
 
