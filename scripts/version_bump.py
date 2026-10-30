@@ -299,9 +299,22 @@ class VersionBumper:
             print("Warning: No template files found. Run 'convert' first.")
             return False
 
+        # Every target the manager lists, as `set` counts them and `generate`
+        # renders them, and not the templates that happen to exist: a listed
+        # target whose template is missing is skipped with a warning by generate,
+        # so a loop over the existing templates never reached it and validate
+        # passed over a page that `set` reports as not regenerated.
         suffix = self.template_manager.template_suffix
-        for template in templates:
-            target = template.parent / template.name[: -len(suffix)]
+        for relative in self.template_manager.target_files:
+            target = self.project_root / relative
+            template = self.project_root / (relative + suffix)
+            if not template.exists():
+                print(
+                    f"Error: {template} does not exist, so {target} cannot be "
+                    "regenerated; run 'convert' to create it"
+                )
+                consistent = False
+                continue
             try:
                 actual = target.read_text(encoding="utf-8")
             except FileNotFoundError:

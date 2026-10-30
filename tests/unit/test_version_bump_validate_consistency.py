@@ -22,6 +22,9 @@ What is asserted
   that writes both from [tool.commitizen] version, and does not compare the pages:
   rendered with either number they would all read as stale, and the advice would
   name whichever side was hand-edited. A page that does not exist is still reported.
+* It checks every target the template manager lists, as ``set`` counts them, so a
+  listed target whose template is missing fails here too; a template that is not
+  listed is not looked at.
 * It passes on a tree where all of them agree.
 * The version it prints comes from the pyproject.toml at the project root; with no
   such file it fails and prints no version that came from somewhere else.
@@ -165,6 +168,54 @@ class TestADisagreementFailsTheValidation:
         out = capsys.readouterr().out
         assert "[tool.commitizen] version is 1.2.2" in out
         assert "README.md does not exist" in out
+
+
+class TestEveryListedTargetIsChecked:
+    def test_a_listed_target_with_no_template_fails_validate(
+        self, project, monkeypatch, capsys
+    ):
+        # Red before: validate looped over the templates that exist, so a listed
+        # target whose template is missing was never reached and the tree passed,
+        # while `set` on the same tree fails with "1 of 2 targets were not
+        # regenerated".
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        bumper.template_manager.target_files = ["README.md", "docs/missing.md"]
+        assert bumper.validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "missing.md.template does not exist" in out
+        assert "cannot be regenerated" in out
+        assert "validation passed" not in out
+
+    def test_validate_and_set_agree_about_a_missing_template(
+        self, project, monkeypatch, capsys
+    ):
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        bumper.template_manager.target_files = ["README.md", "docs/missing.md"]
+        assert bumper.set_version("1.2.4") is False
+        assert bumper.validate_consistency() is False
+
+    def test_a_template_that_is_not_listed_is_not_checked(
+        self, project, monkeypatch, capsys
+    ):
+        # generate never renders it, so validate has nothing to say about it.
+        project.joinpath("OTHER.md.template").write_text("x\n", encoding="utf-8")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is True
+        assert "OTHER.md" not in capsys.readouterr().out
+
+    def test_a_missing_template_is_reported_next_to_a_stale_page(
+        self, project, monkeypatch, capsys
+    ):
+        project.joinpath("README.md").write_text("stale\n", encoding="utf-8")
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        bumper.template_manager.target_files = ["README.md", "docs/missing.md"]
+        assert bumper.validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "README.md is not its template rendered for 1.2.3" in out
+        assert "missing.md.template does not exist" in out
 
 
 class TestDisagreeingTablesAreReportedOnceNotAsEveryPageStale:
