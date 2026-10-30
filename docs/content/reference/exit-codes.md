@@ -12,7 +12,7 @@ On every command, a command-line usage error exits 5: an unknown option, subcomm
 |---|---|
 | 0 | No actionable findings; or findings, with `fail_on_findings` off. With `fail_on_incomplete_scanners` off, also an incomplete scan, including one in which no selected scanner had a file to scan. Also `--version`, and `--workspace` with `--dry-run`. |
 | 1 | The scan is incomplete: a selected scanner ended ERROR or MISSING or lost some of its targets, no scanner ran (every selected scanner was SKIPPED, also when none of them had a file to scan), or a converter failed (with `fail_on_incomplete_scanners` on, the default) |
-| 1 | A rule could not be evaluated |
+| 1 | A rule could not be evaluated, or a scanner tool ASH could not stop (also with `fail_on_incomplete_scanners` off) |
 | 1 | A content database is past its age bound, with `content_db_staleness: fail` (the default). A scanner that passed against that database is recorded ERROR, and one that failed its threshold stays FAILED. This row sets the code for both, also with `fail_on_incomplete_scanners` off. |
 | 1 | A report file a reporter is about to write, such as `reports/ash.sarif`, is a link ([Output files](output-files.md#links)) |
 | 1 | `--use-existing` finds no `ash_aggregated_results.json` in the output directory. The command is well formed, but what it asks to use is not on disk, so this is the code `ash report` gives for missing results and not a usage error |
@@ -109,7 +109,7 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress --min-sever
 ASH stops at the first of these that applies:
 
 1. A usage error in the command line itself, such as an unknown option, an invalid value, or a missing required option: 5.
-2. A check before scanning: the shard and workspace options, workspace resolution, the source directory, an output directory that is a link or is reached through one, then an output directory that is not a directory, cannot be entered or written, or has a file on the way to it, `--use-existing`, `--output-formats`, an output directory that cannot be created for another reason, such as a parent directory that cannot be written, the config, then the scanner selection, which ASH checks when the scan phase starts. Each exits as the table above says (3, 4, or 5).
+2. A check before scanning: the shard and workspace options, workspace resolution, the source directory, an output directory that is a link or is reached through one, then an output directory that is not a directory, cannot be entered or written, or has a file on the way to it, `--use-existing`, `--output-formats`, an output directory that cannot be created for another reason, such as a parent directory that cannot be written, the config, then the scanner selection, which ASH checks when the scan phase starts. Each exits as the table above says: 3, 4 or 5, except `--use-existing` with no results to use, which exits 1 as the table says, and which is checked before `--output-formats` and the config, so a command that also carries one of those mistakes reports the missing results first.
 3. With `fail_on_incomplete_scanners` on: a selected scanner ERROR, MISSING, or with lost targets; then no scanner ran; then a failed converter: 1.
 4. A rule could not be evaluated: 1.
 5. A stale content database under `content_db_staleness: fail`: 1.
@@ -150,7 +150,7 @@ With `--workspace`, ASH scans each project and combines their verdicts. The firs
 | 5 | A usage error, including a `--scanners` selection that matches no scanner or that `--exclude-scanners` cancels. ASH refuses it once, before it scans any project. |
 | 0 | `--dry-run`; or nothing was scanned because every project was skipped as unchanged, counting a missing project that `--allow-missing-projects` tolerated as neither scanned nor failed (it is listed in the results, not in the exit code) |
 
-A project that is incomplete exits 1 even when it also has findings, as the same project scanned alone does. Workspace mode checks the same unconditional causes as a single scan: a rule a scanner could not evaluate, a scanner tool ASH could not stop, and a stale content database under a `fail` policy each fail the project whatever `fail_on_incomplete_scanners` says.
+A project that is incomplete exits 1 even when it also has findings, as the same project scanned alone does. Workspace mode checks the same unconditional causes as a single scan: a rule a scanner could not evaluate, a scanner tool ASH could not stop, and a stale content database under a `fail` policy each fail the project whatever `fail_on_incomplete_scanners` says. One exception, and only in workspace mode: a stale database of a scanner that the workspace policy alone added (`additional_scanners`) with `policy_scanners_gate` off is listed in the project's `stale_content_databases` and does not fail it, as that scanner's missing tool and findings decide nothing either.
 
 ## `ash merge` {#merge}
 
@@ -180,10 +180,10 @@ ash merge --results no-such-shard --output-dir merged
 | Code | Condition |
 |---|---|
 | 0 | The report was printed |
-| 1 | Results that cannot be read; the reporter failed; an AWS reporter's pre-flight check refused, for a missing setting or for credentials it cannot find ([AWS reporters](../plugins/aws.md#ash-report)) |
+| 1 | No results to report on (no `ash_aggregated_results.json` in any of the places an output directory is searched; nothing is created, and the same code `--use-existing` gives a scan for the same reason); results that cannot be read; the reporter failed; an AWS reporter's pre-flight check refused, for a missing setting or for credentials it cannot find ([AWS reporters](../plugins/aws.md#ash-report)) |
 | 3 | The output directory, a directory on the way to it, or `reports` in it is a link ([Output files](output-files.md#links)) |
 | 3 | The `--config` file cannot be used or is invalid, as for a scan, including an option that a plugin loaded from `ash_plugin_modules` does not accept; an override is invalid; or the configuration recorded in the results reads a field that takes a fixed choice, a boolean, or a number from the environment, and neither `--config-overrides` nor `--config` supplies the field; or two reporters that the command loads have the same name or names that read as one, as for a scan |
-| 5 | No results to report on, or a results file in more than one of the places an output directory is searched (nothing is created, and an output directory under a directory ASH cannot search counts as one with no results); an output directory that is a file (`Output directory is not a directory:`), or a path the system cannot look up, such as one holding a NUL character (`Output directory is not a valid path:`), each with the path as given; an unknown `--format`, also when there are no results; an output directory that exists but cannot be entered (`Output directory cannot be entered:` and the path as given); any other usage error |
+| 5 | A results file in more than one of the places an output directory is searched (nothing is created, and an output directory under a directory ASH cannot search counts as one with no results); an output directory that is a file (`Output directory is not a directory:`), or a path the system cannot look up, such as one holding a NUL character (`Output directory is not a valid path:`), each with the path as given; an unknown `--format`, also when there are no results; an output directory that exists but cannot be entered (`Output directory cannot be entered:` and the path as given); any other usage error |
 
 ASH checks the config first, then `--format`, then the results:
 
