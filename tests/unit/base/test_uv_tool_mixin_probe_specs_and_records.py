@@ -193,7 +193,10 @@ class TestAFailedResponseStillGradesTheScan:
         with caplog.at_level(logging.DEBUG, logger="ash"):
             response = plugin._uv_response(_BrokenResult(), None)
         assert response.get("post_run_error") is True
-        assert "read broke" in response["error"]
+        # With no usable values the handling error's text cannot be redacted,
+        # so the response keeps its type and says why the text is not shown.
+        assert "RuntimeError" in response["error"]
+        assert "values hook failed" in response["error"]
 
 
 class TestTheOfflineExplainerReadsOnlyThisRunsLog:

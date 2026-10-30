@@ -18,6 +18,7 @@ import contextvars
 import logging
 import os
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,14 +106,23 @@ def guarded_values_read(plugin: Any) -> GuardedValues:
     """The ONE guarded read of ``plugin._values_to_redact()``, with why it failed.
 
     ``values`` is ``None`` when the hook raised or answered something that is
-    not a value set (``None``, a number): then no redaction can be done, and
-    the caller takes its conservative arm (a value-free note, a skipped
+    not a value set (``None``, a number, bytes, a mapping, an iterable holding
+    anything but strings and paths): then no redaction can be done, and the
+    caller takes its conservative arm (a value-free note, a skipped
     best-effort line, a refused run). It is ``()`` when there are genuinely
     none, and a bare string or path is ONE value, never its characters
     (``utils.redacted_model.environment_strings``, the normalizer every sink
     reads values through). An iterable is drained here, outside the
     normalizer's own TypeError arm, so one that raises mid-iteration takes the
     guarded path too.
+
+    Why bytes, mappings and non-string entries are unusable rather than
+    normalized: the normalizer drops every entry that is not a string or a
+    path, so bytes (an iterable of integers) and a list of integers normalized
+    to ``()``, the "genuinely none" answer that licenses every sink to record
+    its lines in clear, and a mapping yielded its KEYS as the value set while
+    the values it held printed. A broken answer is a broken hook, and the
+    conservative arm is the one for a broken hook.
 
     A function over the plugin rather than a method, so a caller holding only
     the hook (the unbound ``PluginBase`` and mixin methods are also called on
@@ -125,11 +135,29 @@ def guarded_values_read(plugin: Any) -> GuardedValues:
         answered = plugin._values_to_redact()
         if isinstance(answered, (str, os.PathLike)):
             return GuardedValues(environment_strings(answered), None)
+        if isinstance(answered, (bytes, bytearray, memoryview, Mapping)):
+            return GuardedValues(None, None)
         if isinstance(answered, Iterable):
-            return GuardedValues(environment_strings(tuple(answered)), None)
+            entries = tuple(answered)
+            if any(not isinstance(entry, (str, os.PathLike)) for entry in entries):
+                return GuardedValues(None, None)
+            return GuardedValues(environment_strings(entries), None)
     except Exception as hook_error:  # noqa: BLE001 -- an overridable hook
         return GuardedValues(None, type(hook_error).__name__)
     return GuardedValues(None, None)
+
+
+def _redacted_line(text: str, values: Optional[Tuple[str, ...]], withheld: str) -> str:
+    """``text`` redacted with ``values``, or ``withheld`` when there are none.
+
+    For a log line that quotes an error's text after the plugin's values hook
+    was read guarded: with no usable values nothing can redact the text, and an
+    empty value set would print what the values would have hidden, so the line
+    is replaced by the caller's value-free words.
+    """
+    if values is None:
+        return withheld
+    return text_without_values(text, values)
 
 
 def guarded_values(plugin: Any) -> Optional[Tuple[str, ...]]:
@@ -170,15 +198,51 @@ def deferred_tool_version_probes() -> Iterator[None]:
         _DEFER_VERSION_PROBES.reset(token)
 
 
-def _uv_unavailable(runner: Any) -> str:
-    """Why ``runner``'s last availability check failed: absent uv, or a refusal.
+def _uv_unavailable(runner: Any, failure: Optional[str] = None) -> str:
+    """Why ``runner``'s last availability check failed: absent uv, a probe that
+    failed, or a refusal.
 
-    A sandbox scope that refuses the check says nothing about uv; logging that as
-    "UV is not available" sends the operator to install a uv they already have.
+    ``failure`` is the probe's own failure as :func:`_uv_available` carries it
+    ("the probe timed out after 10 seconds"); with one, the words name it. A
+    sandbox scope that refuses the check, or a probe that timed out or was
+    killed, says nothing about uv; logging either as "UV is not available"
+    sends the operator to install a uv they already have.
     """
+    if failure:
+        return f"uv is not available ({failure})"
     reason = getattr(runner, "unavailable_reason", None)
     text = reason() if callable(reason) else None
     return text if isinstance(text, str) else "UV is not available"
+
+
+def _uv_available(runner: Any) -> Tuple[bool, Optional[str]]:
+    """``runner.uv_availability()``: ``(available, the probe's failure or None)``.
+
+    The one read of uv's availability for the mixin's gates, so each of them can
+    say why uv did not answer (``_uv_unavailable``) instead of reading the bare
+    ``is_uv_available()`` and dropping the failure the probe carried. A runner
+    without the two-valued form (an older stand-in) is read through
+    ``is_uv_available()`` with no failure.
+    """
+    availability = getattr(runner, "uv_availability", None)
+    if callable(availability):
+        answer = availability()
+        if isinstance(answer, tuple) and len(answer) == 2:
+            available, failure = answer
+            return bool(available), failure if isinstance(failure, str) else None
+    return bool(runner.is_uv_available()), None
+
+
+def _without_whitespace(requirement: str) -> str:
+    """``requirement`` in the canonical spelling ``packaging`` prints, which holds
+    no whitespace; the string as given when it is not a requirement at all (the
+    caller's check decides what to do with that)."""
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    try:
+        return str(Requirement(requirement))
+    except InvalidRequirement:
+        return requirement
 
 
 class UVToolMixin:
@@ -271,6 +335,35 @@ class UVToolMixin:
             self._plugin_log(message, level=logging.WARNING)
             return None
 
+    def _checked_uv_from_spec(self) -> Optional[str]:
+        """:meth:`_uv_from_spec`, refused when it does not name this plugin's package.
+
+        For the PROBE sites of this mixin (the version probe, the installation
+        info, the cached-tool check, the post-install version read), which hand
+        the spec to ``uv tool run --from`` and so resolve whatever package it
+        names. The spec is glued from the package name and the plugin's
+        constraint, and a constraint without an operator ("2" from an
+        overridden hook) glues into a valid requirement for ANOTHER package
+        ("bandit2"); the run path checks its own spec against the package
+        (``UVToolRunner.run_tool``), while the probes ran the glued one.
+        ``UVToolRunnerError`` is the runner's own refusal, which every probe
+        site here already handles (a refused spec is a refused probe, logged by
+        the site's own arm). :meth:`_uv_probe_from_spec` above is the sibling
+        for the scanners' dependency-check probe, which logs the refusal and
+        probes bare instead. The record sites keep the unchecked spec: they
+        hide the string as built.
+        """
+        from automated_security_helper.utils.uv_tool_runner import checked_requirement
+
+        spec = self._uv_from_spec()
+        if spec is None:
+            return None
+        return checked_requirement(
+            spec,
+            f"the --from spec for {self.command}",
+            package=self.uv_tool_package_name or self.command,
+        )
+
     def _uv_stderr_log_identity(
         self, results_dir: Optional[Path]
     ) -> Optional[Tuple[int, int, int, int]]:
@@ -346,33 +439,46 @@ class UVToolMixin:
             # plugin was built with. See deferred_tool_version_probes.
             self._deferred_tool_version_probe = (tool_name, package_name)
             return None
-        if package_name is None:
-            package_name = self._uv_from_spec()
+        # The ONE guarded read of the overridable values hook for this call
+        # (_values_to_redact's guarding rule), taken BEFORE the try: the
+        # error arms below quote the runner's text and need the values too,
+        # and reading the hook bare inside a handler let a raising hook turn
+        # a logged-and-returned failure into an exception escaping scanner
+        # construction. The carried version is redacted before its first-line
+        # cut, so the probe gets the same values. The runner memoizes the
+        # answer it carries, so a probe run without the values could keep the
+        # unredacted text for the process: with no usable values the probe is
+        # not run and the version stays unknown.
+        read = guarded_values_read(self)
+        probe_values = read.values
+        withheld = f"(error text not shown: the plugin's values hook {read.failure()})"
 
         try:
+            # UVToolRunnerError is the module's own import: a local import of
+            # it here would leave the except arms below reading an unbound
+            # name when this import is what raised (the ImportError arm was
+            # unreachable: evaluating ``except UVToolRunnerError`` raised
+            # UnboundLocalError first).
             from automated_security_helper.utils.uv_tool_runner import (
                 get_uv_tool_runner,
-                UVToolRunnerError,
             )
 
             runner = get_uv_tool_runner()
 
-            if not runner.is_uv_available():
+            uv_available, probe_failure = _uv_available(runner)
+            if not uv_available:
                 self._plugin_log(
-                    f"{_uv_unavailable(runner)} for {tool_name} version detection",
+                    f"{_uv_unavailable(runner, probe_failure)} for {tool_name} "
+                    "version detection",
                     level=logging.WARNING,
                 )
                 return None
 
-            # The carried version is redacted before its first-line cut, so
-            # the probe gets the plugin's values; guarded as every read of
-            # the overridable hook is (_values_to_redact's guarding rule). The
-            # runner memoizes the answer it carries, so a probe run without
-            # the values could keep the unredacted text for the process: with
-            # no usable values the probe is not run and the version stays
-            # unknown.
-            read = guarded_values_read(self)
-            probe_values = read.values
+            if package_name is None:
+                # Refused, not probed, when the built spec names another
+                # package than this plugin's: see _checked_uv_from_spec.
+                package_name = self._checked_uv_from_spec()
+
             if probe_values is None:
                 self._plugin_log(
                     f"Could not determine UV tool {tool_name} version: the "
@@ -402,30 +508,34 @@ class UVToolMixin:
         except UVToolRunnerError as e:
             # The runner's text can embed the full argv, and an argument can
             # carry a value the plugin's config read from the environment:
-            # redacted with the plugin's own values, as the mixin's lines are
-            # (the same class as the dispatch and run arms below).
+            # redacted with the method's one guarded read of the plugin's
+            # values, as the mixin's lines are (the same class as the dispatch
+            # and run arms below); with no usable values the text is withheld.
             self._plugin_log(
-                text_without_values(
+                _redacted_line(
                     f"UV tool runner error getting {tool_name} version: {e}",
-                    self._values_to_redact(),
+                    probe_values,
+                    f"UV tool runner error getting {tool_name} version {withheld}",
                 ),
                 level=logging.WARNING,
             )
             return None
         except ImportError as e:
             self._plugin_log(
-                text_without_values(
+                _redacted_line(
                     f"UV tool runner module not available for {tool_name}: {e}",
-                    self._values_to_redact(),
+                    probe_values,
+                    f"UV tool runner module not available for {tool_name} {withheld}",
                 ),
                 level=logging.ERROR,
             )
             return None
         except Exception as e:
             self._plugin_log(
-                text_without_values(
+                _redacted_line(
                     f"Unexpected error getting UV tool {tool_name} version: {e}",
-                    self._values_to_redact(),
+                    probe_values,
+                    f"Unexpected error getting UV tool {tool_name} version {withheld}",
                 ),
                 level=logging.WARNING,
             )
@@ -607,6 +717,10 @@ class UVToolMixin:
                     check=False,
                     package_extras=package_extras,
                     version_constraint=version_constraint,
+                    # The plugin's extra dependencies, as the install passes
+                    # them and as the run's records count them: a run that
+                    # resolves an ephemeral environment lacked them.
+                    with_dependencies=self._get_tool_with_dependencies(),
                     results_dir=results_dir,
                     stdout_preference=stdout_preference,
                     stderr_preference=stderr_preference,
@@ -630,16 +744,20 @@ class UVToolMixin:
             # for the launch's own spawn (the runner's watched_launch scope),
             # never for a helper probe or an install.
             self._uv_run_failure = str(e)
-            # The runner's spawn and timeout texts quote the full argv, and an
-            # argument can carry a value the plugin's config read from the
+            # The runner's spawn and timeout texts can quote the full argv, and
+            # an argument can carry a value the plugin's config read from the
             # environment: the log line is redacted with the method's one
-            # guarded read of the plugin's values. _uv_run_failure keeps the
-            # raw text for the refused record, whose printers redact with the
-            # run's values.
+            # guarded read of the plugin's values THROUGH THE UV LAYER, the
+            # same arms every other record of this run gets (the pre-dispatch
+            # line, the report lines), so a glued or respelled spec hidden
+            # there cannot print here through the plain value layer.
+            # _uv_run_failure keeps the raw text for the refused record, whose
+            # printers redact with the run's values.
             self._plugin_log(
-                text_without_values(
+                self._shown_run_text(
                     f"UV tool runner error for {self.command}: {e}",
                     record_values,
+                    record_inputs,
                 ),
                 level=logging.WARNING,
             )
@@ -671,7 +789,7 @@ class UVToolMixin:
             # Redacted like the runner-error arm above: the raise can quote the
             # full argv, and an argument can carry an env-read value.
             self._plugin_log(
-                text_without_values(logged, record_values),
+                self._shown_run_text(logged, record_values, record_inputs),
                 level=logging.WARNING,
             )
             return None
@@ -683,9 +801,10 @@ class UVToolMixin:
                 return after
             self._uv_run_failure = f"{type(e).__name__}: {e}"
             self._plugin_log(
-                text_without_values(
+                self._shown_run_text(
                     f"Unexpected error during UV tool execution for {self.command}: {e}",
                     record_values,
+                    record_inputs,
                 ),
                 level=logging.WARNING,
             )
@@ -707,6 +826,30 @@ class UVToolMixin:
 
         return self._uv_response(
             result, results_dir, stderr_log_before=stderr_log_before
+        )
+
+    def _shown_run_text(
+        self,
+        text: str,
+        record_values: Tuple[str, ...],
+        record_inputs: Tuple[str, ...],
+    ) -> str:
+        """``text`` about this plugin's uv run, redacted with the uv layer.
+
+        The run's records all hide the same set: the plugin's env-read values
+        in every spelling uv prints them in, and the plugin-built inputs (the
+        ``--from`` spec, the ``--with`` entries) that hold one. A line about a
+        run that went through the plain value layer alone printed a respelled
+        or glued value the report lines beside it hid.
+        """
+        from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+        return shown_uv_output(
+            text,
+            record_values,
+            plugin_inputs=record_inputs,
+            tool_name=self.command,
+            limit=None,
         )
 
     def _uv_failure_after_the_start(
@@ -812,9 +955,26 @@ class UVToolMixin:
             # other's inputs mid-call, weakening its redaction. The seam
             # stays the documented one-argument signature.
             self._process_command_response(response)
-            self._explain_offline_resolve_failure(
-                response, results_dir, stderr_log_before=stderr_log_before
-            )
+            # The explainer is best-effort, cause-first text about a run that
+            # has already been processed: a raise inside it (a hook it reads
+            # raising, say) used to fall into the handler below and grade the
+            # run as post_run_error, so it is guarded on its own and its
+            # failure logged at DEBUG, leaving the scan's real error alone.
+            try:
+                self._explain_offline_resolve_failure(
+                    response, results_dir, stderr_log_before=stderr_log_before
+                )
+            except Exception as explainer_error:  # noqa: BLE001 -- best effort
+                explainer_values = guarded_values(self)
+                if explainer_values is not None:
+                    self._plugin_log(
+                        text_without_values(
+                            "The offline-resolve explainer could not run: "
+                            f"{type(explainer_error).__name__}: {explainer_error}",
+                            explainer_values,
+                        ),
+                        level=logging.DEBUG,
+                    )
 
             self._plugin_log(
                 f"UV tool execution completed for {self.command} with exit code {response['returncode']}",
@@ -827,90 +987,106 @@ class UVToolMixin:
             # As at the mixin's other sites: the message and the traceback it
             # carries can quote a path with an env-read value, so both pass
             # through the plugin's redaction instead of exc_info's raw print.
-            # The values hook is overridable and read GUARDED here: a raise
-            # from it inside this handler would escape, and the tool that ran
-            # (and maybe timed out) would be recorded as a spawn failure. With
-            # no values the line is not shown, since nothing could redact it.
-            if ASH_LOGGER.isEnabledFor(logging.DEBUG):
-                debug_values = guarded_values(self)
-                if debug_values is not None:
-                    import traceback
+            # The values hook is overridable and read GUARDED here, once for
+            # the handler: a raise from it inside this handler would escape,
+            # and the tool that ran (and maybe timed out) would be recorded as
+            # a spawn failure. With no values the DEBUG line is not shown,
+            # since nothing could redact it, and the error text kept in the
+            # response is reduced to the exception's type.
+            handler_values = guarded_values(self)
+            if ASH_LOGGER.isEnabledFor(logging.DEBUG) and handler_values is not None:
+                import traceback
 
-                    ASH_LOGGER.debug(
-                        text_without_values(
-                            "UV tool response error details (redacted):\n"
-                            + "".join(traceback.format_exception(e)),
-                            debug_values,
-                        ),
-                        extra=NO_MARKUP,
-                    )
-            if response is not None:
-                failed: Dict[str, Any] = dict(response)
-            else:
-                # Building the response raised: every field is read on its own,
-                # so one unreadable field does not drop the others, and the
-                # flags the result carries still grade the scan. A timed-out,
-                # cancelled, rejected or signaled run keeps that flag, its code
-                # and its reason; it is never turned into post_run_error below.
-                failed = {"stdout": "", "stderr": "", "returncode": None}
-                for field in ("stdout", "stderr"):
+                ASH_LOGGER.debug(
+                    text_without_values(
+                        "UV tool response error details (redacted):\n"
+                        + "".join(traceback.format_exception(e)),
+                        handler_values,
+                    ),
+                    extra=NO_MARKUP,
+                )
+            # Whatever the response holds so far is kept, and every field it
+            # does not hold yet is read on its own, so one unreadable field
+            # does not drop the others, and the flags the result carries still
+            # grade the scan. A timed-out, cancelled, rejected or signaled run
+            # keeps that flag, its code and its reason; it is never turned
+            # into post_run_error below. The per-field reads used to run only
+            # when the response dict was never created, so a raise after it
+            # was (reading one flag) kept a half-built response that had lost
+            # the later flags, the could-not-stop state and the runner's
+            # reason, and graded the run as a plain post-run error.
+            rebuilt = response is None
+            failed: Dict[str, Any] = dict(response) if response is not None else {}
+            for field in ("stdout", "stderr"):
+                if field not in failed:
+                    failed[field] = ""
                     try:
                         failed[field] = getattr(result, field, "") or ""
                     except Exception:
                         pass
+            if "returncode" not in failed:
+                failed["returncode"] = None
                 try:
                     failed["returncode"] = getattr(result, "returncode", None)
                 except Exception:
                     pass
-                for flag in RESPONSE_FLAGS:
-                    try:
-                        if getattr(result, flag, False) is True:
-                            failed[flag] = True
-                    except Exception:
-                        pass
-                # Whether the result's could-not-stop state could be read at
-                # all. A read that raises leaves it UNKNOWN, which is not the
-                # same as False: the fallback below answers 124 only for a
-                # stop that is known to have worked, because 124 says ASH
-                # stopped the tool, and that is never claimed blind.
-                could_not_stop_readable = True
+            for flag in RESPONSE_FLAGS:
+                if flag in failed:
+                    continue
+                try:
+                    if getattr(result, flag, False) is True:
+                        failed[flag] = True
+                except Exception:
+                    pass
+            # Whether the result's could-not-stop state could be read at
+            # all. A read that raises leaves it UNKNOWN, which is not the
+            # same as False: the fallback below answers 124 only for a
+            # stop that is known to have worked, because 124 says ASH
+            # stopped the tool, and that is never claimed blind.
+            could_not_stop_readable = True
+            if "could_not_stop" not in failed:
                 try:
                     if getattr(result, "could_not_stop", False) is True:
                         failed["could_not_stop"] = True
                 except Exception:
                     could_not_stop_readable = False
+            if "could_not_stop_pid" not in failed:
                 try:
                     pid = getattr(result, "could_not_stop_pid", None)
                     if isinstance(pid, int) and not isinstance(pid, bool):
                         failed["could_not_stop_pid"] = pid
                 except Exception:
                     pass
-                if failed.get("signaled"):
-                    try:
-                        failed["signal"] = getattr(result, "signal", None)
-                    except Exception:
-                        failed["signal"] = None
-                if any(failed.get(flag) is True for flag in RESPONSE_FLAGS):
-                    try:
-                        failed["error"] = str(
-                            getattr(result, "error", "") or failed["stderr"] or ""
-                        )
-                    except Exception:
-                        pass
-                if (
-                    failed.get("timed_out") is True
-                    and failed["returncode"] is None
-                    and could_not_stop_readable
-                    and failed.get("could_not_stop") is not True
-                ):
-                    # ASH stopped this tool at the limit, so its code is the
-                    # timeout's own: no code is only for a run that failed after
-                    # the start or a child ASH could not stop. The latter is the
-                    # result's recorded could_not_stop state, copied above; the
-                    # reason's text is never read for it, so a tool quoting the
-                    # words keeps its 124, and a reason that could not be read
-                    # drops no real could-not-stop.
-                    failed["returncode"] = TIMEOUT_RETURNCODE
+            if failed.get("signaled") and "signal" not in failed:
+                try:
+                    failed["signal"] = getattr(result, "signal", None)
+                except Exception:
+                    failed["signal"] = None
+            if "error" not in failed and any(
+                failed.get(flag) is True for flag in RESPONSE_FLAGS
+            ):
+                try:
+                    failed["error"] = str(
+                        getattr(result, "error", "") or failed["stderr"] or ""
+                    )
+                except Exception:
+                    pass
+            if (
+                rebuilt
+                and failed.get("timed_out") is True
+                and failed["returncode"] is None
+                and could_not_stop_readable
+                and failed.get("could_not_stop") is not True
+            ):
+                # ASH stopped this tool at the limit, so its code is the
+                # timeout's own: no code is only for a run that failed after
+                # the start or a child ASH could not stop. The latter is the
+                # result's recorded could_not_stop state, copied above; the
+                # reason's text is never read for it, so a tool quoting the
+                # words keeps its 124, and a reason that could not be read
+                # drops no real could-not-stop. Only for a response built
+                # here: one the normal path built carries the code it read.
+                failed["returncode"] = TIMEOUT_RETURNCODE
             earlier = failed.get("error")
             if failed.get("could_not_stop") is True:
                 try:
@@ -925,12 +1101,30 @@ class UVToolMixin:
                     # never lost to text that happened to be unreadable. The
                     # shared marker is written here, never parsed.
                     earlier = could_not_stop_default(failed.get("could_not_stop_pid"))
-            failed["error"] = (
-                f"{earlier}; {error_text(e)}" if earlier else error_text(e)
+            # The handling error's text reaches the results through the
+            # response's error field, so it is redacted with the handler's one
+            # guarded read, as the direct path redacts the same field; with no
+            # usable values only the exception's type is kept, since nothing
+            # could redact its text.
+            handling = (
+                error_text(e, handler_values)
+                if handler_values is not None
+                else f"{type(e).__name__} (text not shown: the values hook failed)"
             )
+            failed["error"] = f"{earlier}; {handling}" if earlier else handling
             if not any(failed.get(flag) is True for flag in RESPONSE_FLAGS):
                 failed["post_run_error"] = True
                 failed["spawn_failed"] = False
+            # The normal path registered the response it processed; the copy
+            # returned here stands for it, so the dispatcher does not process
+            # the same run's lines a second time.
+            processed = getattr(self, "_processed_response_ids", None)
+            if response is not None and processed is not None:
+                try:
+                    if id(response) in processed:
+                        processed.add(id(failed))
+                except Exception:  # noqa: BLE001 -- a stand-in without the set
+                    pass
             # The tool ran and this is its code: folded into the plugin's exit
             # code here, because _process_command_response, which does that
             # fold on the normal path, raised or never ran, and a run that
@@ -1013,15 +1207,18 @@ class UVToolMixin:
                 )
             except Exception:  # noqa: BLE001 -- reading the log is best-effort
                 return
-        # Quoted below as text, so without the escape codes: they would be
-        # shown as escapes on a terminal and written into the reports. The
-        # full CSI set, the SAME codes the shown layers strip -- a non-color
-        # code (an erase-line \x1b[K) inside the phrase otherwise defeats the
-        # cause match below while the quoted text beside it strips clean.
-        stderr = _ANSI_ESCAPE.sub("", stderr)
+        # The cause match reads the text without its escape codes: a non-color
+        # code (an erase-line \x1b[K) inside the phrase otherwise defeats it.
+        # Only the MATCH reads the stripped copy. The text quoted below goes to
+        # the shower as written, which matches the values against it first and
+        # strips the codes itself: a whole-text strip here first left only the
+        # stripped spelling for a value that holds a code, and a short value of
+        # that kind glued to word characters then printed (the shower's
+        # documented order).
+        matchable = _ANSI_ESCAPE.sub("", stderr)
         # uv wraps the message at the scan's COLUMNS, so it is matched with every
         # run of whitespace as one space.
-        if "No solution found when resolving" not in " ".join(stderr.split()):
+        if "No solution found when resolving" not in " ".join(matchable.split()):
             # The excerpt's read keeps only what the message can show, and
             # the resolver's error can come after more earlier output than
             # that bound: the cause match then consults the log itself, with
@@ -1113,8 +1310,16 @@ class UVToolMixin:
         # named log path can sit under an env-read output path. The pieces
         # already redacted are unchanged by a second pass.
         message = text_without_values(message, values)
-        self.errors.insert(0, message)
+        # Cause first, once: an ERROR-level _plugin_log appends the message to
+        # errors itself (with the plugin's prefix), so inserting it at the
+        # front as well recorded it twice. The appended entry is moved to the
+        # front; a stand-in whose _plugin_log appends nothing gets the insert.
+        before = len(self.errors)
         self._plugin_log(message, level=logging.ERROR)
+        if len(self.errors) > before and self.errors[-1].endswith(message):
+            self.errors.insert(0, self.errors.pop())
+        else:
+            self.errors.insert(0, message)
 
     # ------------------------------------------------------------------
     # Availability / validation
@@ -1129,19 +1334,26 @@ class UVToolMixin:
         if not self.use_uv_tool:
             return True
 
+        # The method's one guarded read of the values hook, for the error arms
+        # (which quote the runner's text); a raising hook used to escape them.
+        read = guarded_values_read(self)
+        withheld = f"(error text not shown: the plugin's values hook {read.failure()})"
+
         try:
+            # UVToolRunnerError is the module's own import (see
+            # _get_uv_tool_version): a local import left the except arm unbound
+            # when the import raised.
             from automated_security_helper.utils.uv_tool_runner import (
                 get_uv_tool_runner,
-                UVToolRunnerError,
             )
 
             runner = get_uv_tool_runner()
-            is_available = runner.is_uv_available()
+            is_available, probe_failure = _uv_available(runner)
 
             if not is_available:
                 self._plugin_log(
                     f"UV tool execution is required for {self.command}, but: "
-                    f"{_uv_unavailable(runner)}",
+                    f"{_uv_unavailable(runner, probe_failure)}",
                     level=logging.WARNING,
                 )
                 return False
@@ -1155,27 +1367,30 @@ class UVToolMixin:
         except UVToolRunnerError as e:
             # Same class as the run arm: the runner's text can quote argv.
             self._plugin_log(
-                text_without_values(
+                _redacted_line(
                     f"UV tool runner error during validation: {e}",
-                    self._values_to_redact(),
+                    read.values,
+                    f"UV tool runner error during validation {withheld}",
                 ),
                 level=logging.WARNING,
             )
             return False
         except ImportError as e:
             self._plugin_log(
-                text_without_values(
+                _redacted_line(
                     f"UV tool runner module not available during validation: {e}",
-                    self._values_to_redact(),
+                    read.values,
+                    f"UV tool runner module not available during validation {withheld}",
                 ),
                 level=logging.ERROR,
             )
             return False
         except Exception as e:
             self._plugin_log(
-                text_without_values(
+                _redacted_line(
                     f"Unexpected error during UV tool validation: {e}",
-                    self._values_to_redact(),
+                    read.values,
+                    f"Unexpected error during UV tool validation {withheld}",
                 ),
                 level=logging.WARNING,
             )
@@ -1203,26 +1418,48 @@ class UVToolMixin:
         validation_result["installation_info"] = installation_info
 
         if installation_info["available"]:
-            validation_result["available"] = True
             validation_result["validation_method"] = installation_info[
                 "preferred_source"
             ]
 
             if installation_info["preferred_source"] == "uv":
                 self._plugin_log(
-                    f"Tool {self.command} validated via UV tool (version: {installation_info.get('uv_version', 'unknown')})",
+                    f"Tool {self.command} validated via UV tool (version: {installation_info.get('uv_version') or 'unknown'})",
                     level=15,
                 )
             elif installation_info["preferred_source"] == "pre_installed":
+                # The info dict carries the key with None (the PATH copy's
+                # version is not probed), so a .get default never applied and
+                # the line read "version: None".
                 self._plugin_log(
                     f"Tool {self.command} validated via pre-installed executable "
-                    f"(version: {installation_info.get('pre_installed_version', 'unknown')}, "
-                    f"path: {installation_info.get('pre_installed_path', 'unknown')})",
+                    f"(version: {installation_info.get('pre_installed_version') or 'unknown'}, "
+                    f"path: {installation_info.get('pre_installed_path') or 'unknown'})",
                     level=15,
                 )
+
+            # How the tool runs is decided here, not merely reported: the
+            # "pre_installed" branch used to log the PATH copy as the validated
+            # route, warn that it was being used, and leave use_uv_tool True,
+            # so the scan still went through `uv tool run --from <spec>` while
+            # the copy was never verified against the requirement (the shape
+            # that failed offline with uv's resolver text). _select_tool_execution
+            # verifies the copy and switches to it, keeps uv, or refuses offline.
+            validation_result["available"] = bool(
+                self._select_tool_execution(installation_info)
+            )
+            if not validation_result["available"]:
+                reason = getattr(self, "dependency_unavailable_reason", None)
+                validation_result["errors"].append(
+                    reason
+                    or f"Tool {self.command} is not usable for this scan's requirement"
+                )
+            elif installation_info["preferred_source"] == "pre_installed" and getattr(
+                self, "use_uv_tool", False
+            ):
                 validation_result["warnings"].append(
-                    f"Using pre-installed {self.command} instead of UV-managed version. "
-                    f"Consider installing via UV for better dependency isolation."
+                    f"The pre-installed {self.command} was not verified to satisfy "
+                    "this scanner's requirement, so it runs through uv, not directly."
                 )
 
             return validation_result
@@ -1330,9 +1567,25 @@ class UVToolMixin:
         # scan runs under, not one named after the executable.
         package = self.uv_tool_package_name or self.command
         requirement = build_requirement(package, extras, constraint)
-        # The values hook is read ONCE for the verify and every record below:
-        # it is overridable, and two reads can disagree with each other.
-        values = self._values_to_redact()
+        # The values hook is read ONCE, guarded, for the verify and every
+        # record below: it is overridable, two reads can disagree with each
+        # other, and a bare read let a raising hook (or one answering None, or
+        # a generator the verify drained before the record lines read it)
+        # crash the dependency check instead of degrading it. With no usable
+        # values the copy cannot be verified (the probe's excerpt could not be
+        # redacted and would be memoized in clear), so the previous behavior
+        # is kept: the run goes through uv, and the line says why.
+        read = guarded_values_read(self)
+        if read.values is None:
+            self._plugin_log(
+                f"The pre-installed {self.command} was not verified: the plugin's "
+                f"values hook {read.failure()}, so its check could not be "
+                "redacted. It runs through uv, as before.",
+                level=logging.WARNING,
+            )
+            self.dependencies_satisfied = True
+            return True
+        values: Tuple[str, ...] = read.values
         verdict = verify_pre_installed_tool(
             executable,
             package,
@@ -1413,12 +1666,24 @@ class UVToolMixin:
                 if verdict.status == "unsatisfied"
                 else "could not be verified"
             )
+            # The log gets the full story: the copy's path and the verdict's
+            # detail, which quotes uv's own words. The REASON that reaches the
+            # results (dependency_unavailable_reason) gets the verdict's
+            # summary, the path-free, excerpt-free line the verdict provides
+            # for exactly that use; the detail stands in only for a verdict
+            # that carries no summary.
+            self._plugin_log(
+                _shown(
+                    f"Offline mode: {self.command} at {executable} {cannot}: "
+                    f"{verdict.detail}. {remedy}"
+                ),
+                level=logging.ERROR,
+            )
+            summary = getattr(verdict, "summary", "") or verdict.detail
             reason = _shown(
-                f"Offline mode: {self.command} at {executable} {cannot}: "
-                f"{verdict.detail}. {remedy}"
+                f"Offline mode: {self.command} {cannot}: {summary}. {remedy}"
             )
             self.dependency_unavailable_reason = reason
-            self._plugin_log(reason, level=logging.ERROR)
             self.dependencies_satisfied = False
             return False
 
@@ -1555,7 +1820,11 @@ class UVToolMixin:
         tool_spec = install_inputs.spec
 
         try:
-            checked_requirement(tool_spec, "the tool spec")
+            # Against the package, as the scan-time install checks its own
+            # spec: a constraint without an operator glued onto the name is a
+            # valid requirement for ANOTHER package, and `ash dependencies
+            # install` would have installed it.
+            checked_requirement(tool_spec, "the tool spec", package=tool_name)
         except UVToolRunnerError as error:
             self.uv_tool_install_commands = []
             # The refusal's text carries no part of the spec, and the tool is
@@ -1584,11 +1853,27 @@ class UVToolMixin:
         # The plugin's extra dependencies, as the scan-time install passes
         # them (UVToolRunner.install_tool_with_version): without them the
         # command `ash dependencies` runs built a different environment than
-        # the scan's. A requirement string carries no whitespace, so the
-        # whitespace split above keeps each as one element.
+        # the scan's.
         for dependency in self._get_tool_with_dependencies() or []:
-            install_cmd_parts.extend(["--with", dependency])
-        install_cmd_parts.append(tool_spec)
+            install_cmd_parts.extend(["--with", _without_whitespace(dependency)])
+        # The stored command is ONE string that get_installation_commands
+        # splits on whitespace, so every requirement in it is spelled without
+        # any: a plugin-built constraint such as ">= 1.0" parses (the check
+        # above accepts it) but was torn into two uv arguments. The canonical
+        # spelling packaging prints carries none; a part that still holds
+        # whitespace after that cannot be stored safely and refuses the
+        # command, as the refused spec above does.
+        install_cmd_parts.append(_without_whitespace(tool_spec))
+        torn = [part for part in install_cmd_parts if any(c.isspace() for c in part)]
+        if torn:
+            self.uv_tool_install_commands = []
+            self._plugin_log(
+                f"{tool_name}: the UV tool install command was not stored: "
+                f"{len(torn)} of its argument(s) hold whitespace, which the "
+                "stored command cannot carry",
+                level=logging.WARNING,
+            )
+            return
 
         install_cmd_str = " ".join(install_cmd_parts)
         self.uv_tool_install_commands = [install_cmd_str]
@@ -1701,22 +1986,24 @@ class UVToolMixin:
             return False
 
         try:
+            # UVToolRunnerError is the module's own import (see
+            # _get_uv_tool_version): a local import left the except arm unbound
+            # when the import raised.
             from automated_security_helper.utils.uv_tool_runner import (
                 get_uv_tool_runner,
                 UVToolRetryConfig,
-                UVToolRunnerError,
             )
 
             runner = get_uv_tool_runner()
 
             uv_check_start = time.time()
-            uv_available = runner.is_uv_available()
+            uv_available, probe_failure = _uv_available(runner)
             uv_check_time = time.time() - uv_check_start
 
             if not uv_available:
                 self._plugin_log(
-                    f"[INSTALLATION_FAILED] {_uv_unavailable(runner)} for tool "
-                    "installation",
+                    f"[INSTALLATION_FAILED] {_uv_unavailable(runner, probe_failure)} "
+                    "for tool installation",
                     f"UV availability check took {uv_check_time:.3f}s",
                     "Fallback strategy: Scanner will attempt direct tool execution",
                     level=logging.WARNING,
@@ -1742,7 +2029,12 @@ class UVToolMixin:
                     level=logging.DEBUG,
                 )
 
-            if retry_config:
+            # `is not None`, not truthiness: a caller's EMPTY dict asks for the
+            # defaults through the retry path (and gets them, every key
+            # defaulted), where a falsy test logged it as the default
+            # configuration and passed None, which the runner reads the same
+            # way today but which hid the caller's choice from the log.
+            if retry_config is not None:
                 config = UVToolRetryConfig(
                     max_retries=retry_config.get("max_retries", 3),
                     base_delay=retry_config.get("base_delay", 1.0),
@@ -1861,9 +2153,13 @@ class UVToolMixin:
             if already_installed:
                 # Probed under the scan's own --from spec (the extras and the
                 # constraint), the environment the scan runs in, not a bare
-                # package name's.
+                # package name's; the spec checked against the package (see
+                # _checked_uv_from_spec); the version it carries redacted with
+                # the method's one guarded read, as every other line here is.
                 validation_result = runner.validate_cached_tool(
-                    self.command, self._uv_from_spec()
+                    self.command,
+                    self._checked_uv_from_spec(),
+                    values=record_values,
                 )
 
                 if validation_result["is_functional"]:
@@ -1964,7 +2260,7 @@ class UVToolMixin:
                 try:
                     post_install_version = runner.get_installed_tool_version(
                         self.command,
-                        self._uv_from_spec(),
+                        self._checked_uv_from_spec(),
                         values=record_values,
                         **self._uv_python_kwargs(),
                     )
@@ -1982,6 +2278,13 @@ class UVToolMixin:
                         level=logging.DEBUG,
                     )
 
+                # The version the install produced is the plugin's tool
+                # version from here on: it was only logged before, so the
+                # scanner's reports kept the version a pre-install probe read
+                # (or none) for a tool that had just been installed.
+                if post_install_version:
+                    self.tool_version = post_install_version
+
                 self._plugin_log(
                     f"[INSTALLATION_SUCCESS] Successfully installed UV tool '{self.command}'",
                     f"Installed version: {post_install_version or 'unknown'}",
@@ -1991,8 +2294,15 @@ class UVToolMixin:
                 )
                 return True
             else:
+                # The runner's False is documented as "nothing was installed":
+                # offline, a dependency question, or the install itself
+                # exhausting its attempts. The install arm above has already
+                # returned for the first two, so here it is the attempts; the
+                # line says what False means rather than asserting a retry
+                # count the runner may not have reached.
                 self._plugin_log(
-                    f"[INSTALLATION_FAILED] Failed to install UV tool '{self.command}' after all retry attempts",
+                    f"[INSTALLATION_FAILED] UV tool '{self.command}' was not installed; "
+                    "the install did not succeed within its attempts",
                     f"Total installation time: {installation_time:.3f}s",
                     "Fallback strategy: Scanner will attempt direct tool execution or validation",
                     level=logging.WARNING,
@@ -2078,50 +2388,77 @@ class UVToolMixin:
         if not self.use_uv_tool or not self.command:
             return False
 
+        # The method's one guarded read of the values hook, for the error
+        # arms: the runner's text can quote argv, and these lines printed it
+        # through no redaction at all.
+        read = guarded_values_read(self)
+        withheld = f"(error text not shown: the plugin's values hook {read.failure()})"
+
         try:
+            # UVToolRunnerError is the module's own import (see
+            # _get_uv_tool_version): a local import left the except arms
+            # unbound when the import raised.
             from automated_security_helper.utils.uv_tool_runner import (
                 get_uv_tool_runner,
-                UVToolRunnerError,
             )
 
             runner = get_uv_tool_runner()
 
-            if not runner.is_uv_available():
+            uv_available, probe_failure = _uv_available(runner)
+            if not uv_available:
+                self._plugin_log(
+                    f"{_uv_unavailable(runner, probe_failure)}; {self.command} is "
+                    "not installed as a UV tool",
+                    level=logging.DEBUG,
+                )
                 return False
 
             try:
                 installed_tools = runner.list_available_tools()
-                is_installed = self.command in installed_tools
-
+            except UVToolRunnerError as e:
+                # The listing is the question "is it installed"; its failure
+                # is answered "not known to be", never by running the tool.
+                # The fallback used to probe `uv tool run --from <spec>
+                # <tool> --version`, which SUCCEEDS for a tool uv can resolve
+                # into an ephemeral environment on the spot, so a tool that
+                # was not installed read as installed whenever the listing
+                # was unavailable, and the install was skipped.
                 self._plugin_log(
-                    f"UV tool {self.command} installation status: {'installed' if is_installed else 'not installed'}",
-                    level=logging.DEBUG,
+                    _redacted_line(
+                        f"UV tool {self.command}: the installed-tool listing failed, "
+                        f"so it is treated as not installed: {e}",
+                        read.values,
+                        f"UV tool {self.command}: the installed-tool listing failed, "
+                        f"so it is treated as not installed {withheld}",
+                    ),
+                    level=logging.WARNING,
                 )
+                return False
 
-                return is_installed
-
-            except UVToolRunnerError:
-                # Under the scan's own --from spec: the environment the scan
-                # runs in, not a bare package name's.
-                version = runner.get_tool_version(self.command, self._uv_from_spec())
-                is_installed = version is not None
-
-                self._plugin_log(
-                    f"UV tool {self.command} installation status (via version check): {'installed' if is_installed else 'not installed'}",
-                    level=logging.DEBUG,
-                )
-
-                return is_installed
+            is_installed = self.command in installed_tools
+            self._plugin_log(
+                f"UV tool {self.command} installation status: {'installed' if is_installed else 'not installed'}",
+                level=logging.DEBUG,
+            )
+            return is_installed
 
         except (UVToolRunnerError, ImportError) as e:
             self._plugin_log(
-                f"Error checking UV tool installation status: {e}",
+                _redacted_line(
+                    f"Error checking UV tool installation status: {e}",
+                    read.values,
+                    f"Error checking UV tool installation status {withheld}",
+                ),
                 level=logging.WARNING,
             )
             return False
         except Exception as e:
             self._plugin_log(
-                f"Unexpected error checking UV tool installation: {e}",
+                _redacted_line(
+                    f"Unexpected error checking UV tool installation: {e}",
+                    read.values,
+                    f"Unexpected error checking UV tool installation {withheld}",
+                ),
                 level=logging.WARNING,
             )
             return False
@@ -2144,6 +2481,9 @@ class UVToolMixin:
                 "available": False,
             }
 
+        # The method's one guarded read of the values hook, for the error arm.
+        read = guarded_values_read(self)
+
         try:
             from automated_security_helper.utils.uv_tool_runner import (
                 get_uv_tool_runner,
@@ -2152,8 +2492,11 @@ class UVToolMixin:
             runner = get_uv_tool_runner()
             # The version probe runs under the scan's own --from spec (the
             # package, its extras and the constraint), the environment the scan
-            # runs in; a bare package name probed a different one.
-            info = runner.get_tool_installation_info(self.command, self._uv_from_spec())
+            # runs in; a bare package name probed a different one. The spec is
+            # checked against the package first (see _checked_uv_from_spec).
+            info = runner.get_tool_installation_info(
+                self.command, self._checked_uv_from_spec()
+            )
             info["tool_name"] = self.command
 
             self._plugin_log(
@@ -2168,20 +2511,40 @@ class UVToolMixin:
             return info
 
         except Exception as e:
+            # The uv side raised (the runner could not be imported, a probe
+            # was refused, a spec was refused), which says nothing about a
+            # copy of the tool on PATH: that side is read on its own here, so
+            # the tool is not reported as absent because uv could not answer.
+            # The error's text can quote argv and is redacted or withheld with
+            # the method's one guarded read; the dict keeps only the type.
             self._plugin_log(
-                f"Error getting tool installation info: {e}",
+                _redacted_line(
+                    f"Error getting tool installation info: {e}",
+                    read.values,
+                    "Error getting tool installation info (error text not shown: "
+                    f"the plugin's values hook {read.failure()})",
+                ),
                 level=logging.WARNING,
             )
+            pre_installed_path: Optional[str] = None
+            try:
+                from automated_security_helper.utils.uv_tool_runner import (
+                    find_executable,
+                )
+
+                pre_installed_path = find_executable(self.command)
+            except Exception:  # noqa: BLE001 -- best effort beside the error
+                pre_installed_path = None
             return {
                 "tool_name": self.command,
                 "is_uv_installed": False,
-                "is_pre_installed": False,
+                "is_pre_installed": pre_installed_path is not None,
                 "uv_version": None,
                 "pre_installed_version": None,
-                "pre_installed_path": None,
-                "preferred_source": "none",
-                "available": False,
-                "error": str(e),
+                "pre_installed_path": pre_installed_path,
+                "preferred_source": "pre_installed" if pre_installed_path else "none",
+                "available": pre_installed_path is not None,
+                "error": type(e).__name__,
             }
 
     def _should_install_tool(self, prefer_cached: bool = True) -> bool:
@@ -2217,16 +2580,21 @@ class UVToolMixin:
             # the scan then started a tool that was not there. An answer that
             # cannot be read is not the runner's no; the install is attempted,
             # and a failure of its own is recorded by the install.
-            message = (
-                f"Could not determine whether {self.command} should be "
-                f"installed via UV ({e}); attempting the installation"
-            )
             # The runner's text can quote argv, as on the availability check's
-            # error arm; read guarded, since this is a record line.
-            values = self._guarded_values()
-            if values:
-                message = text_without_values(message, values)
-            self._plugin_log(message, level=logging.WARNING)
+            # error arm: redacted or withheld with one guarded read, as the
+            # sibling arms are.
+            read = guarded_values_read(self)
+            self._plugin_log(
+                _redacted_line(
+                    f"Could not determine whether {self.command} should be "
+                    f"installed via UV ({e}); attempting the installation",
+                    read.values,
+                    f"Could not determine whether {self.command} should be "
+                    "installed via UV (error text not shown: the plugin's values "
+                    f"hook {read.failure()}); attempting the installation",
+                ),
+                level=logging.WARNING,
+            )
             return True
 
     # ------------------------------------------------------------------

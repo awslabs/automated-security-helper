@@ -857,17 +857,23 @@ class TestValidateToolAvailabilityWithPreInstalled:
     def test_returns_available_with_pre_installed(self):
         plugin = FakePlugin(command="bandit")
 
-        with patch.object(
-            plugin,
-            "_get_tool_installation_info",
-            return_value={
-                "available": True,
-                "preferred_source": "pre_installed",
-                "pre_installed_version": "1.6.0",
-                "pre_installed_path": "/usr/bin/bandit",
-                "is_uv_installed": False,
-                "is_pre_installed": True,
-            },
+        # The decision how the copy runs is _select_tool_execution's (it
+        # verifies the copy against the requirement); here it keeps uv, so the
+        # unverified copy is reported with a warning.
+        with (
+            patch.object(
+                plugin,
+                "_get_tool_installation_info",
+                return_value={
+                    "available": True,
+                    "preferred_source": "pre_installed",
+                    "pre_installed_version": "1.6.0",
+                    "pre_installed_path": "/usr/bin/bandit",
+                    "is_uv_installed": False,
+                    "is_pre_installed": True,
+                },
+            ),
+            patch.object(plugin, "_select_tool_execution", return_value=True),
         ):
             result = plugin._validate_tool_availability_with_pre_installed()
             assert result["available"] is True
@@ -1418,7 +1424,10 @@ class TestIsUvToolInstalled:
             assert plugin._is_uv_tool_installed() is False
 
     @pytest.mark.unit
-    def test_falls_back_to_version_check_on_list_error(self):
+    def test_a_list_error_answers_not_installed_without_running_the_tool(self):
+        """The listing is the question; a `uv tool run --version` fallback
+        succeeded for a tool uv could resolve on the spot, so an uninstalled
+        tool read as installed whenever the listing failed."""
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
         with patch(
@@ -1433,7 +1442,8 @@ class TestIsUvToolInstalled:
             mock_runner.get_tool_version.return_value = "1.7.0"
             mock_get_runner.return_value = mock_runner
 
-            assert plugin._is_uv_tool_installed() is True
+            assert plugin._is_uv_tool_installed() is False
+            assert mock_runner.get_tool_version.call_count == 0
 
 
 class TestGetToolInstallationInfo:
@@ -1473,9 +1483,17 @@ class TestGetToolInstallationInfo:
     def test_returns_error_info_on_exception(self):
         plugin = FakePlugin(command="bandit")
 
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
-            side_effect=RuntimeError("broken"),
+        # The uv side raised; the PATH side is read on its own, so the test
+        # pins what PATH answers rather than reading the host's.
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                side_effect=RuntimeError("broken"),
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value=None,
+            ),
         ):
             info = plugin._get_tool_installation_info()
             assert info["available"] is False
