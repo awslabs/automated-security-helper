@@ -13,7 +13,8 @@
 - A recorded ERROR row is not explained away by one tree's partial loss when
   another tree's run raised.
 - The per-target walks read only this scanner's own reports: one naming another
-  scanner, or none, is not read.
+  scanner is not read; one naming no scanner is read for the key it is filed
+  under (its duration, counters and ERROR), but gives no status.
 - get_scanner_status grades unusable counters ERROR, as the unified metrics do.
 - The scanner-level report is found under the Python None key too.
 - A scanner recorded only under a converted-tree report reads that report.
@@ -278,14 +279,44 @@ class TestTheRecordedRun:
             "PASSED"
         )
 
-    def test_a_report_that_names_no_scanner_is_not_this_scanners(self):
-        """A scan writes every report under the name it carries, so an entry
-        without one is no report of this version's: the scanner has no recorded
-        status and reads as errored, as one with nothing recorded always has."""
-        model = _model({"bandit": {"source": {"status": "PASSED"}}})
+    def test_a_report_that_names_no_scanner_gives_no_status(self):
+        """A status filed under the wrong key would flip a row, so a report that
+        names no scanner gives none, under the source key or under any other tree's
+        (the fallback that reads a converted-only report): the scanner has no
+        recorded status and reads as errored, as one with nothing recorded always
+        has."""
+        source_only = _model({"bandit": {"source": {"status": "PASSED"}}})
+        converted_only = _model({"bandit": {"converted": {"status": "PASSED"}}})
 
-        assert ScannerStatisticsCalculator.get_scanner_status_info(model, "bandit") == (
-            False,
-            False,
-            True,
+        for model in (source_only, converted_only):
+            assert ScannerStatisticsCalculator.get_scanner_status_info(
+                model, "bandit"
+            ) == (False, False, True)
+
+    def test_a_name_less_reports_duration_and_counters_are_read_for_their_key(self):
+        """A report that names no scanner (a results file written before the field
+        existed, or built by hand) is still the scanner's for everything but its
+        status: its duration is summed, and its ERROR and counters are read, for the
+        key it is filed under, as the metrics' own_target_reports read them."""
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "status": "ERROR",
+                        "duration": 1.5,
+                        "targets_attempted": 3,
+                        "targets_failed": 3,
+                        "raw_results": {"status": "ok", "findings": []},
+                        "severity_counts": {"high": 2},
+                    }
+                }
+            }
+        )
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats["bandit"]["duration"] == 1.5
+        assert ScannerStatisticsCalculator.any_target_errored(model, "bandit") is True
+        assert (
+            ScannerStatisticsCalculator._dict_result_counts(model, "bandit").high == 2
         )

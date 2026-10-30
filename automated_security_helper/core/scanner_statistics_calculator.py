@@ -228,18 +228,16 @@ class ScannerStatisticsCalculator:
             # results file put together by hand, or merged from another, can
             # hold a value under the scanner's name that is not a container (a
             # null, a list), and indexing it raised TypeError here, after the
-            # scan ran.
-            reports = ScannerStatisticsCalculator.reports_for(
+            # scan ran. The reports are this scanner's own (``_own_reports``): one
+            # naming another scanner is not read, one naming none is read for the
+            # key it is filed under.
+            reports = ScannerStatisticsCalculator._own_reports(
                 asharp_model, scanner_name
             )
             recorded_durations = [
                 report["duration"]
-                for report in (reports.values() if isinstance(reports, dict) else ())
-                if isinstance(report, dict)
-                and ScannerStatisticsCalculator._same_scanner(
-                    report.get("scanner_name"), scanner_name
-                )
-                and isinstance(report.get("duration"), (int, float))
+                for report in reports.values()
+                if isinstance(report.get("duration"), (int, float))
                 and not isinstance(report.get("duration"), bool)
             ]
             if recorded_durations:
@@ -356,19 +354,19 @@ class ScannerStatisticsCalculator:
     ) -> Dict[Any, Dict[str, Any]]:
         """The per-target reports filed under *scanner_name* that are this scanner's.
 
-        A mapping that names another scanner, or none, is not one of them:
-        ``additional_reports`` is keyed by name, and a results file merged from
-        another, or written by hand, can file a report under the wrong key, while
-        a scan writes every report under the name it carries, so an entry without
-        one is no report of this version's (``get_scanner_status_info`` reads it as
-        no recorded status). The counters' readers in ``core.unified_metrics``
-        (``own_target_reports``) refuse a report that names ANOTHER scanner and keep
-        a name-less one: a status filed under the wrong key would flip a row, while
-        the counters and unscanned inputs are read for the key they sit under, as
-        the console summary and the partial-audit claim read them (see there). The
-        key and the recorded name are matched in any
-        case (``reports_for``, ``_same_scanner``): the name a row is read under is
-        the union's first spelling, and the reports can sit under another.
+        A mapping that names another scanner is not one of them: ``additional_reports``
+        is keyed by name, and a results file merged from another, or written by
+        hand, can file a report under the wrong key. A report that names no scanner
+        (one written before the field existed, or built by hand) is kept and read
+        for the key it is filed under, as ``core.unified_metrics.own_target_reports``
+        keeps it: the durations, the counters, the ERROR and partial-loss reads of
+        the walks below are read for the key. Only a STATUS is never taken from a
+        name-less report, because a status filed under the wrong key would flip a
+        row: ``_recorded_report`` and ``get_scanner_status_info``'s fallback over
+        these reports refuse one, so the scanner reads as having no recorded
+        status. The key and the recorded name are matched in any case
+        (``reports_for``, ``_same_scanner``): the name a row is read under is the
+        union's first spelling, and the reports can sit under another.
         """
         reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
         if not isinstance(reports, dict):
@@ -377,8 +375,11 @@ class ScannerStatisticsCalculator:
             key: report
             for key, report in reports.items()
             if isinstance(report, dict)
-            and ScannerStatisticsCalculator._same_scanner(
-                report.get("scanner_name"), scanner_name
+            and (
+                report.get("scanner_name") is None
+                or ScannerStatisticsCalculator._same_scanner(
+                    report.get("scanner_name"), scanner_name
+                )
             )
         }
 
@@ -532,20 +533,15 @@ class ScannerStatisticsCalculator:
         shape) whose ``raw_results`` is a dict: the executor read the counts from
         that dict and the processor left both on the report. A report whose counts
         do not validate, or whose result was SARIF (``raw_results`` dropped), adds
-        nothing. All zero when the scanner has no such report.
+        nothing. All zero when the scanner has no such report. The reports are this
+        scanner's own (``_own_reports``): one naming another scanner adds nothing,
+        one naming none is counted for the key it is filed under.
         """
         total = ScannerSeverityCount()
-        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
-        if not isinstance(reports, dict):
-            return total
+        reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
         for report in reports.values():
-            if (
-                not isinstance(report, dict)
-                or not ScannerStatisticsCalculator._same_scanner(
-                    report.get("scanner_name"), scanner_name
-                )
-                or not isinstance(report.get("raw_results"), dict)
-                or not isinstance(report.get("severity_counts"), dict)
+            if not isinstance(report.get("raw_results"), dict) or not isinstance(
+                report.get("severity_counts"), dict
             ):
                 continue
             try:
@@ -569,19 +565,13 @@ class ScannerStatisticsCalculator:
         them), or carries counts that do not validate. Its findings sit in
         ``raw_results`` uncounted, so the finding counts read from the file say
         nothing about whether the gate failed; the recorded row's status is the
-        only evidence left, and a reading that overrides it must not run.
+        only evidence left, and a reading that overrides it must not run. The
+        reports are this scanner's own (``_own_reports``), as ``_dict_result_counts``
+        reads them.
         """
-        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
-        if not isinstance(reports, dict):
-            return False
+        reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
         for report in reports.values():
-            if (
-                not isinstance(report, dict)
-                or not ScannerStatisticsCalculator._same_scanner(
-                    report.get("scanner_name"), scanner_name
-                )
-                or not isinstance(report.get("raw_results"), dict)
-            ):
+            if not isinstance(report.get("raw_results"), dict):
                 continue
             counts = report.get("severity_counts")
             if not isinstance(counts, dict):
@@ -1666,7 +1656,10 @@ class ScannerStatisticsCalculator:
         else:
             # One tree's report: the source tree's first, else any other tree's
             # (a scanner recorded only under "converted", with no row, read as
-            # "nothing says it ran" and ERROR while its report said PASSED).
+            # "nothing says it ran" and ERROR while its report said PASSED). A
+            # report that names no scanner gives no status, as _recorded_report
+            # gives none: _own_reports keeps it for the counters and durations,
+            # but a status filed under the wrong key would flip the row.
             tree_report = source_report
             if tree_report is None:
                 own_reports = ScannerStatisticsCalculator._own_reports(
@@ -1674,6 +1667,10 @@ class ScannerStatisticsCalculator:
                 )
                 for key in sorted(own_reports, key=str):
                     if key in (None, "None"):
+                        continue
+                    if not ScannerStatisticsCalculator._same_scanner(
+                        own_reports[key].get("scanner_name"), scanner_name
+                    ):
                         continue
                     if own_reports[key].get("status"):
                         tree_report = own_reports[key]
