@@ -1151,6 +1151,15 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # _execute_scan's own reset, so without this the converted target read
         # the source target's exit code as its own.
         self.exit_code = 0
+        # The same for the rest of the per-target state the template resets at
+        # the top of its own scan(): the "nothing to audit" return below never
+        # reaches it, so the previous target's start would pair with this
+        # target's end (a duration spanning both scans), and this target's
+        # stderr lines would follow the previous target's in its record.
+        self.start_time = None
+        self.end_time = None
+        self.output = []
+        self.errors = []
         if not (target.exists() and any(target.iterdir())):
             return super().scan(
                 target, target_type, global_ignore_paths, config, *args, **kwargs

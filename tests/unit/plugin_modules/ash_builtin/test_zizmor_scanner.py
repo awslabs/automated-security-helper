@@ -18,6 +18,7 @@ import logging
 import os
 import shutil
 import threading
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -1254,6 +1255,33 @@ def test_a_target_with_nothing_to_audit_does_not_inherit_the_previous_exit_code(
     assert report.runs[0].results == []
     assert scanner.targets_attempted == 0
     assert scanner.exit_code == 0
+
+
+def test_a_target_with_nothing_to_audit_does_not_inherit_the_previous_timing(
+    tmp_path,
+):
+    """The same early return skips the template's per-target reset of the
+    times and the stream lines: the source target's start paired with the
+    converted target's end, and its stderr lines led this target's record."""
+    converted = tmp_path / "converted"
+    converted.mkdir()
+    (converted / "app.py").write_text("print(1)\n")
+    source = tmp_path / "src"
+    source.mkdir()
+    scanner = _scanner(source)
+    _fake_run(scanner, stdout="never read")
+    earlier = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    scanner.start_time = earlier
+    scanner.end_time = earlier
+    scanner.errors = ["the source target's stderr"]
+    scanner.output = ["the source target's stdout"]
+
+    scanner.scan(converted, "converted", [])
+
+    assert scanner.start_time is not None and scanner.start_time != earlier
+    assert scanner.end_time is not None and scanner.end_time >= scanner.start_time
+    assert "the source target's stderr" not in scanner.errors
+    assert scanner.output == []
 
 
 # --------------------------------------------------------------------------- #
