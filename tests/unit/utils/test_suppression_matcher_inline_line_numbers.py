@@ -58,19 +58,31 @@ def test_a_non_line_feed_separator_does_not_shift_the_line_number(tmp_path, sepa
     assert found == [InlineSuppression(line_number=2, rule_id="R1", reason="why")]
 
 
-@pytest.mark.parametrize("line_break", ["\r\n", "\r", "\n"], ids=["crlf", "cr", "lf"])
+@pytest.mark.parametrize("line_break", ["\r\n", "\n"], ids=["crlf", "lf"])
 @pytest.mark.parametrize("with_scan_root", [False, True], ids=["plain", "scan-root"])
-def test_every_line_break_kind_counts_once_on_both_read_paths(
+def test_lf_and_crlf_count_once_on_both_read_paths(
     tmp_path, line_break, with_scan_root
 ):
-    """CRLF and a lone CR end a line as LF does, as Python's universal newlines
-    (which the Python-based scanners read source through) count them; the
-    reason carries no CR; and the bytes path given a scan root numbers the
-    same as the plain path."""
+    """CRLF ends a line as LF does (a scanner's startLine counts the line feed;
+    the carriage return belongs to the line before it), the reason carries no
+    CR, and the bytes path given a scan root numbers the same as the plain
+    path."""
     source = _write(
         tmp_path,
         f"x = 1{line_break}# ash-ignore-next-line: R2 known{line_break}y = 2{line_break}",
     )
+
+    found = find_inline_suppressions(source, tmp_path if with_scan_root else None)
+
+    assert found == [InlineSuppression(line_number=3, rule_id="R2", reason="known")]
+
+
+@pytest.mark.parametrize("with_scan_root", [False, True], ids=["plain", "scan-root"])
+def test_a_lone_cr_is_not_a_line_break(tmp_path, with_scan_root):
+    """Both read paths count by line feed: a lone CR inside line 1 does not
+    start a new line, so the directive on line 2 targets line 3, as a scanner
+    counting line feeds numbers it."""
+    source = _write(tmp_path, "x = 1\ry = 1\n# ash-ignore-next-line: R2 known\nz = 2\n")
 
     found = find_inline_suppressions(source, tmp_path if with_scan_root else None)
 

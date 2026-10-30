@@ -697,13 +697,15 @@ def find_inline_suppressions(
         ASH_LOGGER.debug(f"Could not read {file_path} for inline suppressions: {exc}")
         return suppressions
 
-    # Lines are counted as the scanners count them: LF, CRLF and a lone CR each
-    # end a line (Python's universal newlines, which the Python-based scanners
-    # read source through), and nothing else does. str.splitlines also breaks
-    # a line at a form feed, a vertical tab, NEL, LINE SEPARATOR, PARAGRAPH
-    # SEPARATOR and the \x1c-\x1e separators, so after any of those every
-    # directive was attached to a line number the SARIF results never carry.
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Lines are counted as a scanner's SARIF startLine counts them: by line
+    # feed, with a CRLF file's carriage return belonging to the line before
+    # it. A lone CR is not a line break here (the scanners whose results these
+    # suppressions match are not all Python, and they count LF), and neither
+    # is anything str.splitlines would also break at (a form feed, a vertical
+    # tab, NEL, LINE SEPARATOR, PARAGRAPH SEPARATOR, the \x1c-\x1e
+    # separators), which once attached every later directive to a line number
+    # the SARIF results never carry.
+    text = text.replace("\r\n", "\n")
     for line_num_0, line in enumerate(text.split("\n")):
         line_num = line_num_0 + 1  # 1-based
 
