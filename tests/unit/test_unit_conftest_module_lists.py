@@ -66,6 +66,20 @@ def test_every_listed_module_is_a_test_module_path(pytestconfig, name):
     assert odd == [], f"{name} holds paths outside the list's shape: {odd}"
 
 
+def test_the_runner_memo_seam_modules_keep_their_probes(pytestconfig):
+    """A module that sets the runner's availability memo itself
+    (``runner._uv_available_cache = True``) and reads the uv command from it is a
+    probe subject: under the guard, ``uv_availability`` is replaced class-wide and
+    the memo seam answers nothing, so five tests of the python-request module read
+    "no uv" and failed on main for that reason alone."""
+    conftest = _unit_conftest(pytestconfig)
+    assert "utils/test_uv_tool_python_request.py" in conftest.PROBE_SUBJECT_MODULES
+    source = (UNIT_TESTS / "utils/test_uv_tool_python_request.py").read_text(
+        encoding="utf-8"
+    )
+    assert "_uv_available_cache = True" in source, "the seam the entry exists for"
+
+
 def test_a_module_in_both_tool_lists_marks_only_some_of_its_tests(pytestconfig):
     conftest = _unit_conftest(pytestconfig)
     both = sorted(conftest.REAL_TOOL_MODULES & conftest.PROBE_SUBJECT_MODULES)
