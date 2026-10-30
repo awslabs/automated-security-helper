@@ -901,12 +901,18 @@ def _verify_scanner_union(
 
     seen: Dict[str, Path] = {}
     statuses: Dict[str, set[str]] = {}
+    # Whether every row a name carries says the operator deselected the scanner
+    # (``excluded``), read beside the status; False as soon as one row does not.
+    deselected: Dict[str, bool] = {}
     for results_file, results, _ in shards:
         for scanner, entry in results.scanner_results.items():
             key = _normalized(scanner)
             seen.setdefault(key, results_file)
             status = getattr(entry, "status", None)
             statuses.setdefault(key, set()).add(str(getattr(status, "value", status)))
+            deselected[key] = deselected.get(key, True) and bool(
+                getattr(entry, "excluded", False)
+            )
 
     # An unclaimed row is only an offence when it claims its scanner's outcome is
     # KNOWN, and that narrowing is what keeps this check answering the question it
@@ -950,11 +956,29 @@ def _verify_scanner_union(
     # name recorded PASSED by one shard and ERROR by another is the original defect,
     # and taking the ERROR as permission would hide it. A name with no readable status
     # at all is not exempt either.
+    #
+    # A THIRD ROW SHAPE, written by ScanPhase since the constructor-failure
+    # recording moved ahead of the selection filter: a scanner whose constructor
+    # raised AND which the operator deselected (excluded, left out of --scanners,
+    # disabled in config) is recorded SKIPPED with ``excluded=True`` under its
+    # config name, which no shard claims because it never constructed. That row is
+    # the operator's own decision, not a partitioning disagreement, and the scan's
+    # record of it is right (the skip is real information), so it is exempt here
+    # when EVERY row the name carries is SKIPPED and excluded. A SKIPPED row with
+    # ``excluded`` False (one shard's selection or config left the scanner out while
+    # no shard owns it) stays refused: that is the shape the harm above describes.
     orphans = set(seen) - set(owner_by_scanner)
     exempted = sorted(
         name
         for name in orphans
-        if statuses.get(name) and statuses[name] <= _NEVER_ATTEMPTED_STATUSES
+        if statuses.get(name)
+        and (
+            statuses[name] <= _NEVER_ATTEMPTED_STATUSES
+            or (
+                statuses[name] == {ScannerStatus.SKIPPED.value}
+                and deselected.get(name, False)
+            )
+        )
     )
     unclaimed = sorted(orphans - set(exempted))
 
@@ -974,7 +998,8 @@ def _verify_scanner_union(
             shown_on_one_line(
                 f"{len(exempted)} scanner(s) appear in shard results that no shard "
                 f"was assigned: {exempt_detail}. Each row records the scanner as "
-                f"never attempted, which is why this is not refused as a "
+                f"never attempted, or as deselected by the operator (SKIPPED, "
+                f"excluded), which is why this is not refused as a "
                 f"partitioning disagreement and the merge continues. The coverage is "
                 f"still short: --fail-on-incomplete-scanners is what turns that into "
                 f"a non-zero exit code, and under --no-fail-on-incomplete-scanners "
@@ -1002,7 +1027,9 @@ def _verify_scanner_union(
             f"scanner was excluded by every shard's partition. A scanner that failed "
             f"to construct, or whose plugin module failed to import, is recorded "
             f"ERROR or MISSING instead and is reported through "
-            f"--fail-on-incomplete-scanners rather than refused here."
+            f"--fail-on-incomplete-scanners rather than refused here; one the "
+            f"operator deselected is recorded SKIPPED as excluded and is not "
+            f"refused either."
         )
 
     unrecorded_by_owner = sorted(

@@ -32,6 +32,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.cli.merge import (
+    ShardCoverageError,
     ShardSettingsDisagreeError,
     _adopt_owning_shard_results,
     apply_aggregated_suppressions,
@@ -494,6 +495,57 @@ class TestAScannerRowNoShardOwnsIsKept:
         # The union check exempts the row from its refusal, and the merged
         # report still lists every owned scanner beside it.
         assert set(SCANNERS) <= set(merged.scanner_results)
+
+    def test_a_deselected_scanner_that_never_constructed_merges_as_skipped(self):
+        """A scanner whose constructor raised AND which the operator deselected
+        (excluded, left out of --scanners, disabled in config) is recorded by the
+        scan SKIPPED with ``excluded`` under its config name, which no shard claims
+        because it never constructed. That row is the operator's own decision, so
+        the merge keeps it instead of refusing a partitioning disagreement that
+        did not happen. Red at the base: ShardCoverageError on every such merge."""
+        shards = build_shards(2)
+        for shard in shards:
+            shard.scanner_results["left-out-scanner"] = ScannerStatusInfo(
+                status=ScannerStatus.SKIPPED,
+                excluded=True,
+                dependencies_satisfied=True,
+            )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        row = merged.scanner_results["left-out-scanner"]
+        assert row.status == ScannerStatus.SKIPPED
+        assert row.excluded is True
+        assert set(SCANNERS) <= set(merged.scanner_results)
+
+    def test_an_unowned_skipped_row_the_operator_did_not_deselect_refuses(self):
+        """The control: SKIPPED without ``excluded`` is a shard's own selection or
+        config leaving a scanner out while no shard owns it, the partitioning
+        disagreement the check exists for; it still refuses."""
+        shards = build_shards(2)
+        shards[1].scanner_results["stray-scanner"] = ScannerStatusInfo(
+            status=ScannerStatus.SKIPPED,
+            excluded=False,
+            dependencies_satisfied=True,
+        )
+
+        with pytest.raises(ShardCoverageError, match="stray-scanner"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_a_deselection_on_some_shards_only_still_refuses(self):
+        """The control for "every row": one shard records the deselection and
+        another records a plain skip, so the shards disagree about the scanner,
+        and the merge refuses as before."""
+        shards = build_shards(2)
+        shards[0].scanner_results["half-left-out"] = ScannerStatusInfo(
+            status=ScannerStatus.SKIPPED, excluded=True, dependencies_satisfied=True
+        )
+        shards[1].scanner_results["half-left-out"] = ScannerStatusInfo(
+            status=ScannerStatus.SKIPPED, excluded=False, dependencies_satisfied=True
+        )
+
+        with pytest.raises(ShardCoverageError, match="half-left-out"):
+            merge_shard_results(as_loaded(shards))
 
     def test_an_unowned_error_row_survives_adoption(self):
         shards = build_shards(2)
