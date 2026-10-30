@@ -430,3 +430,39 @@ class TestResolveScannerThreshold:
             ASH_DEFAULT_SEVERITY_LEVEL,
             "global",
         )
+
+    @pytest.mark.parametrize("configured", ["", "   "], ids=["empty", "blank"])
+    def test_a_blank_global_threshold_falls_to_the_default(self, configured):
+        """``""`` returned as the global threshold turned every scanner's gate off:
+        the resolver's own promise is that it never returns such a value."""
+        from automated_security_helper.core.constants import (
+            ASH_DEFAULT_SEVERITY_LEVEL,
+        )
+
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold=configured)
+        )
+
+        assert resolve_scanner_threshold(None, config) == (
+            ASH_DEFAULT_SEVERITY_LEVEL,
+            "global",
+        )
+
+    @pytest.mark.parametrize("configured", ["low", " Low ", "LOW"])
+    def test_a_global_threshold_on_the_ladder_is_normalized(self, configured):
+        """The global value is normalized as the scanner's own is: ``"low"`` graded
+        as an unrecognised value, which fails CRITICAL only, not as LOW."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold=configured)
+        )
+
+        assert resolve_scanner_threshold(None, config) == ("LOW", "global")
+
+    def test_a_global_threshold_off_the_ladder_comes_back_as_given(self):
+        """Pinned beside the scanner-side rule: an unrecognised global value is
+        shown as written and graded at its unrecognised rank, never replaced."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="bogus")
+        )
+
+        assert resolve_scanner_threshold(None, config) == ("bogus", "global")

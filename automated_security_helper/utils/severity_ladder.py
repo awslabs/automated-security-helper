@@ -61,8 +61,11 @@ argument sits earlier in it.
 
 A falsy threshold (``None`` or ``""``) is looser still: nothing fails, not even
 a critical finding. That is deliberate and predates this module -- it is how an
-operator turns the gate off -- so it is preserved exactly. Note that this makes
-the falsy value *not* a synonym for ``CRITICAL``.
+operator turns the gate off -- so the comparison functions preserve it exactly.
+Note that this makes the falsy value *not* a synonym for ``CRITICAL``. The one
+place that never returns a falsy value is :func:`resolve_scanner_threshold`: a
+scanner's or the global settings' ``severity_threshold`` left blank is an unset
+value there, not a request for no gate, and falls through to the next default.
 
 Why the workspace field is called ``max_severity_threshold``
 -----------------------------------------------------------
@@ -518,13 +521,14 @@ def resolve_scanner_threshold(
     the ladder as an unrecognised value, and None, which turns the gate off, is
     never returned.
 
-    The scanner's own value is free text from an external plugin's section, so it
-    is normalized once here, at the edge (:func:`normalize_threshold`): ``"high"``
-    grades as ``HIGH`` rather than as an unrecognised value that fails only
-    CRITICAL, and a blank value, which would turn the gate off, falls through to
-    the global threshold as an unset one does. A non-blank value off the ladder is
-    returned as written: the summary row shows it, and the ladder grades it at
-    its unrecognised rank.
+    Both values are free text at this edge (an external plugin's section; a config
+    built without validation), so both are normalized once here
+    (:func:`normalize_threshold`): ``"high"`` grades as ``HIGH`` rather than as an
+    unrecognised value that fails only CRITICAL, and a blank value, which would
+    turn the gate off, is read as an unset one: a blank scanner value falls through
+    to the global threshold, a blank global value to ``ASH_DEFAULT_SEVERITY_LEVEL``.
+    A non-blank value off the ladder is returned as written, from either side: the
+    summary row shows it, and the ladder grades it at its unrecognised rank.
     """
     if scanner_threshold is not None:
         normalized = normalize_threshold(scanner_threshold)
@@ -536,7 +540,11 @@ def resolve_scanner_threshold(
     if global_settings is not None and hasattr(global_settings, "severity_threshold"):
         configured = global_settings.severity_threshold
         if isinstance(configured, str):
-            return configured, "global"
+            normalized = normalize_threshold(configured)
+            if normalized is not None:
+                return normalized, "global"
+            if configured.strip():
+                return configured, "global"
     from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 
     return ASH_DEFAULT_SEVERITY_LEVEL, "global"
