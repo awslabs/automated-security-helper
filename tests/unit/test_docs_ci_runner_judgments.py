@@ -1685,7 +1685,8 @@ def test_junit_counts_read_the_reports_the_codebuild_agent_zips(tmp_path):
     (tmp_path / "zipped" / "ash.junit.xml").unlink()
     (tmp_path / "zipped" / "notes.xml").unlink()
     (tmp_path / "broken.zip").write_bytes(b"PK\x03\x04 not a zip")
-    assert counts(tmp_path) == (7, 3)
+    # 1 failed + 1 passed in the plain report, 3 failed + 2 passed in the zipped one.
+    assert counts(tmp_path) == (7, 4)
 
 
 def test_the_gate_job_reads_the_exit_code_the_scan_job_kept(tmp_path):
