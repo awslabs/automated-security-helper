@@ -1723,3 +1723,29 @@ def test_many_inputs_are_audited_in_several_runs_and_one_report(repo, monkeypatc
     assert scanner.targets_attempted == len(EXPECTED_INPUTS)
     assert scanner.targets_failed == 0
     assert len(report.runs[0].results) == len(EXPECTED_INPUTS) * len(EXPECTED_FINDINGS)
+
+
+def test_a_run_declined_after_earlier_batches_keeps_their_counters(repo, monkeypatch):
+    """When the template declines a later batch (its dependency check says no),
+    the scan's answer is that refusal, and the counters still say how many
+    inputs the earlier batches audited, not the last run's own count."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", 40, raising=False)
+    scanner = _scanner(repo)
+    _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
+    checks: list = []
+
+    def dependencies_until_the_third_batch() -> bool:
+        checks.append(len(checks))
+        return len(checks) < 3
+
+    object.__setattr__(
+        scanner, "validate_plugin_dependencies", dependencies_until_the_third_batch
+    )
+
+    result = scanner.scan(repo, "source", [])
+
+    assert result is False
+    assert len(checks) == 3
+    assert scanner.targets_attempted == 2
+    assert scanner.targets_failed == 0
+    assert scanner.exit_code == 0

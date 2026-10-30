@@ -1183,7 +1183,13 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             )
             if not isinstance(result, SarifReport):
                 # The template declined to run (dependencies, pre-scan); its
-                # answer is the scan's.
+                # answer is the scan's. The batches that did run are still
+                # counted: the declined run leaves the previous batch's own
+                # counters in place, so without this the executor read one
+                # batch's count as the whole target's.
+                self.targets_attempted = attempted
+                self.targets_failed = failed
+                self.exit_code = worst_exit_code
                 return result
             attempted += self.targets_attempted
             failed += self.targets_failed
