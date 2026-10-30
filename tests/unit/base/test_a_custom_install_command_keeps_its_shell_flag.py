@@ -52,8 +52,11 @@ def _plugin(context) -> PluginBase:
 
 
 def test_a_custom_command_is_returned_as_declared(plugin_context):
+    """The shell=True example is a command line that needs the shell (a variable
+    to expand); an argv that already names its program is declared shell=False.
+    Neither is run here: the test pins the shape the installer is handed."""
     plugin = _plugin(plugin_context)
-    through_the_shell = CustomCommand(args=["sh", "-c", "echo ready"], shell=True)
+    through_the_shell = CustomCommand(args=["echo", "$HOME"], shell=True)
     plain = CustomCommand(args=["echo", "ready"])
     plugin.custom_install_commands = {"linux": {"amd64": [through_the_shell, plain]}}
 
@@ -69,7 +72,7 @@ def test_the_installer_reads_the_shell_flag_off_the_returned_command(plugin_cont
     plugin.custom_install_commands = {
         "linux": {
             "amd64": [
-                CustomCommand(args=["sh", "-c", "echo ready"], shell=True),
+                CustomCommand(args=["echo", "$HOME"], shell=True),
                 CustomCommand(args=["echo", "ready"]),
             ]
         }
@@ -77,7 +80,7 @@ def test_the_installer_reads_the_shell_flag_off_the_returned_command(plugin_cont
 
     checked = _well_formed_commands(plugin.get_installation_commands("linux", "amd64"))
 
-    assert checked == [(["sh", "-c", "echo ready"], True), (["echo", "ready"], False)]
+    assert checked == [(["echo", "$HOME"], True), (["echo", "ready"], False)]
 
 
 def test_a_dependency_still_renders_as_an_argv_without_a_shell(plugin_context):
