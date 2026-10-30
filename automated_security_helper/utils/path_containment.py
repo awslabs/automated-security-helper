@@ -80,7 +80,14 @@ Failure modes and known limitations
   code 2 and should not assume a raised exception on rejection. That includes a
   path ``resolve()`` cannot follow: a symlink loop in an intermediate component
   raises ``RuntimeError`` on CPython 3.10-3.12, which is returned as a
-  ``SYMLINK`` rejection rather than propagated. It also includes a candidate or
+  ``SYMLINK`` rejection rather than propagated. CPython 3.13 raises nothing
+  there: it resolves as far as it can and appends the rest unchecked, so the
+  loop stayed in the answer, ``is_relative_to`` read the text as inside, and
+  the path was accepted. The resolved path is therefore asked about once more
+  with ``os.lstat`` (``_is_a_loop``), which the kernel answers with ``ELOOP``
+  for a loop on any version, and that is the same ``SYMLINK`` rejection. A path
+  that does not exist answers ``ENOENT`` there, not ``ELOOP``, so
+  ``must_exist=False`` is unchanged. It also includes a candidate or
   root holding a NUL character, which no file system path can: ``os.lstat`` and
   ``resolve()`` raise ``ValueError`` for one, and it is returned as an
   ``EMBEDDED_NUL`` rejection before either is asked.
@@ -98,6 +105,7 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
+import errno
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -211,6 +219,23 @@ def _reject(
     )
 
 
+def _is_a_loop(resolved: Path) -> bool:
+    """Whether a component of *resolved* is a symlink loop ``resolve()`` left in.
+
+    CPython 3.13's non-strict ``resolve()`` raises nothing on a loop: it keeps
+    the looping component and appends what follows unchecked, so the text of
+    the answer looks like a path below the root. ``os.lstat`` follows every
+    component but the last, and the kernel answers ``ELOOP`` for a loop among
+    them on every version; a path that merely does not exist answers ``ENOENT``
+    and is not a loop. Any other error is left to the checks that follow.
+    """
+    try:
+        os.lstat(resolved)
+    except OSError as error:
+        return error.errno == errno.ELOOP
+    return False
+
+
 def validate_contained_path(
     candidate: PathLike,
     root: PathLike,
@@ -265,10 +290,14 @@ def validate_contained_path(
     # resolve() raises RuntimeError on CPython 3.10-3.12 when a component on the
     # way is a symlink loop (and OSError for a few other unreadable shapes). The
     # module promises a returned rejection, never a raised one: the workspace
-    # resolver catches only OSError and ValueError around this call.
+    # resolver catches only OSError and ValueError around this call. CPython
+    # 3.13 raises nothing and leaves the loop in the answer (_is_a_loop).
     try:
         resolved_root = Path(root).resolve()
+        unresolved = _is_a_loop(resolved_root)
     except (RuntimeError, OSError):
+        unresolved = True
+    if unresolved:
         return _reject(
             PathContainmentViolation.SYMLINK,
             root,
@@ -313,7 +342,10 @@ def validate_contained_path(
 
     try:
         resolved = joined.resolve()
+        unresolved = _is_a_loop(resolved)
     except (RuntimeError, OSError):
+        unresolved = True
+    if unresolved:
         return _reject(
             PathContainmentViolation.SYMLINK,
             candidate,
