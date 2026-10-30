@@ -155,6 +155,11 @@ def shown_shard_text(value: object) -> str:
     return NAMED_HASH_COMMAND.sub(hash_command_broken, text)
 
 
+#: The (shard index, ignored fields) pairs ShardAssignment has warned about in
+#: this process; see ShardAssignment._name_the_dropped_keys.
+_WARNED_PROVENANCE_KEYS: set[tuple[str, tuple[str, ...]]] = set()
+
+
 class ShardAssignment(StrippedRecordModel):
     """What one shard was actually asked to run.
 
@@ -209,12 +214,22 @@ class ShardAssignment(StrippedRecordModel):
     @model_validator(mode="before")
     @classmethod
     def _name_the_dropped_keys(cls, data: Any) -> Any:
-        """Log the keys of a provenance record this version ignores, by name."""
+        """Log the keys of a provenance record this version ignores, by name.
+
+        Once per record per process: one merge reads the same shard's record
+        several times (collecting the assignments, ordering the shards, naming a
+        shard in a message), and a line repeated five or six times for one
+        shard reads as five or six shards.
+        """
         if isinstance(data, dict):
             known = set(cls.model_fields)
             dropped = sorted(str(key) for key in data if key not in known)
             if dropped:
                 shard = data.get("shard_index")
+                memo_key = (repr(shard), tuple(dropped))
+                if memo_key in _WARNED_PROVENANCE_KEYS:
+                    return data
+                _WARNED_PROVENANCE_KEYS.add(memo_key)
                 where = (
                     f"shard {shown_shard_text(str(shard))}"
                     if shard is not None

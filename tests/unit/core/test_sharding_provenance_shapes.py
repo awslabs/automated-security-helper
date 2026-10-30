@@ -52,18 +52,22 @@ class TestAnUnknownProvenanceFieldIsDropped:
 
         from automated_security_helper.core import sharding
 
+        sharding._WARNED_PROVENANCE_KEYS.clear()
+        record = {
+            "shard_index": 1,
+            "shard_count": 2,
+            "assigned_scanners": ["bandit"],
+            "field_from_a_newer_ash": {"anything": True},
+        }
         with patch.object(sharding.ASH_LOGGER, "warning") as warning:
-            ShardAssignment.model_validate(
-                {
-                    "shard_index": 1,
-                    "shard_count": 2,
-                    "assigned_scanners": ["bandit"],
-                    "field_from_a_newer_ash": {"anything": True},
-                }
-            )
+            # A merge validates one shard's record several times; the warning
+            # is said once per record.
+            ShardAssignment.model_validate(record)
+            ShardAssignment.model_validate(dict(record))
+            ShardAssignment.model_validate({**record, "shard_index": 0})
 
-        assert warning.call_count == 1, warning.call_args_list
-        text = warning.call_args.args[0]
+        assert warning.call_count == 2, warning.call_args_list
+        text = warning.call_args_list[0].args[0]
         assert "field_from_a_newer_ash" in text
         assert "shard 1" in text
 
@@ -73,6 +77,7 @@ class TestAnUnknownProvenanceFieldIsDropped:
 
         from automated_security_helper.core import sharding
 
+        sharding._WARNED_PROVENANCE_KEYS.clear()
         with patch.object(sharding.ASH_LOGGER, "warning") as warning:
             ShardAssignment.model_validate(
                 {"shard_index": 0, "shard_count": 2, "assigned_scanners": ["bandit"]}
