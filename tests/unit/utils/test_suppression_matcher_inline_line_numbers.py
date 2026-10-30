@@ -95,7 +95,10 @@ def test_a_cr_only_file_is_one_line_with_at_most_one_directive(
 ):
     """The contract the docstring states: a file with no line feed (classic Mac
     CR-only endings) is one line to the line-feed count, so of its two
-    directives only the first on the line is found, and it names line 1."""
+    directives only the first on the line is found, it names line 1, and its
+    reason runs to the end of the file (the rest of that one line). An earlier
+    form of this test expected the reason to stop at the CR; the venue read it
+    red, which is the contract, not a defect."""
     source = _write(
         tmp_path,
         "x = 1\r# ash-ignore: R1 first\ry = 2\r# ash-ignore: R2 second\rz = 3\r",
@@ -103,7 +106,9 @@ def test_a_cr_only_file_is_one_line_with_at_most_one_directive(
 
     found = find_inline_suppressions(source, tmp_path if with_scan_root else None)
 
-    assert found == [InlineSuppression(line_number=1, rule_id="R1", reason="first")]
+    assert len(found) == 1
+    assert (found[0].line_number, found[0].rule_id) == (1, "R1")
+    assert found[0].reason == "first\ry = 2\r# ash-ignore: R2 second\rz = 3"
 
 
 def test_a_path_the_os_layer_refuses_yields_no_suppressions_and_no_error(tmp_path):

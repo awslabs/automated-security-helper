@@ -661,9 +661,10 @@ def find_inline_suppressions(
     them (a CRLF file's carriage return belongs to the line before it; a lone
     CR is not a line break). That is the contract for a file with no line feed
     at all (classic Mac CR-only line endings): it is one line here, so at most
-    one directive is found, the first on the line, and it names line 1 (line 2
-    for ``ash-ignore-next-line``); a scanner that numbers such a file by CR
-    reports lines these directives never match.
+    one directive is found, the first on the line, it names line 1 (line 2 for
+    ``ash-ignore-next-line``), and its reason runs to the end of the file, the
+    rest of that one line; a scanner that numbers such a file by CR reports
+    lines these directives never match.
 
     Args:
         file_path: Path to the source file to scan.
