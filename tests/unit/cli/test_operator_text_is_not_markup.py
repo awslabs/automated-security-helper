@@ -781,7 +781,14 @@ def test_plugin_list_shows_a_plugins_config_and_error_as_text(in_tmp, monkeypatc
 
     def get_plugin_config(self, plugin_type, plugin_name):
         if plugin_name == "bandit":
-            return {"name": "bandit", "enabled": True, "note": text}
+            # A declared option that takes free text: the declared config model
+            # validates as a config file does, so an undeclared key would be
+            # refused as unknown and the column would show that refusal instead.
+            return {
+                "name": "bandit",
+                "enabled": True,
+                "options": {"additional_formats": [text]},
+            }
         if plugin_name == "semgrep":
             raise ValueError(f"cannot build: {text}")
         return real(self, plugin_type=plugin_type, plugin_name=plugin_name)
