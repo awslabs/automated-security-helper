@@ -48,6 +48,8 @@ import warnings
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 import typer
 from typer.core import TyperCommand, TyperOption
@@ -237,14 +239,19 @@ def build_skeleton(command: Any, ctx: Context) -> dict[str, Any]:
 
     Keys are parameter names. A parameter whose default is computed at run time
     (``source_dir`` defaults to the working directory inside the command) shows
-    ``null``, which ``--cli-json-input`` reads as "not provided".
+    ``null``, which ``--cli-json-input`` reads as "not provided". So does a
+    parameter that has an environment variable (``mode`` and ASH_MODE): the
+    document sits above the environment, so a skeleton that wrote such a
+    parameter's default as an explicit value overrode the variable with the
+    default on every run of the unedited skeleton. The variable keeps its say
+    until the key is filled in.
     """
     skeleton: dict[str, Any] = {}
     for param in json_input_parameters(command, ctx):
         default = param.default
         if callable(default):
             default = default()
-        if param.required:
+        if param.required or getattr(param, "envvar", None):
             default = None
         if param.name is not None:
             skeleton[param.name] = _to_json(default)
@@ -295,15 +302,58 @@ def _refused(message: str, ctx: Context) -> DocumentRefused:
     return DocumentRefused(shown_on_one_line(message), ctx=ctx)
 
 
+def _document_path(source: str, ctx: Context) -> str:
+    """The file *source* names: a path as given, or a ``file://`` URI's path.
+
+    The URI's path is percent-decoded and, on Windows, its ``/C:/...`` form made
+    a drive path (``url2pathname``), so a URI a tool wrote is read as the file it
+    names, not as the literal text after the prefix. A host other than the local
+    one is refused: this command reads local files only.
+    """
+    if not source.startswith(_FILE_URI_PREFIX):
+        return source
+    parts = urlsplit(source)
+    if parts.netloc not in ("", "localhost"):
+        raise _refused(
+            f"{CLI_JSON_INPUT_FLAG}: {source} names the host {parts.netloc}; a "
+            "file:// URI here names a local file only",
+            ctx,
+        )
+    return url2pathname(parts.path)
+
+
+def _read_stdin(ctx: Context) -> str:
+    """The document on stdin, read as UTF-8 whatever the locale, or a refusal.
+
+    Read from the bytes under the stream, so a document piped on Windows is
+    decoded as the file branch decodes a file, not with the process's code
+    page; a stream with no byte buffer under it (a test's) is read as text. A
+    byte order mark is dropped, as for a file. A read that fails, or bytes that
+    are not UTF-8, are the same refusal the file branch gives, not a traceback.
+    """
+    stream = typer.get_text_stream("stdin")
+    binary = getattr(stream, "buffer", None)
+    try:
+        if binary is not None:
+            return binary.read().decode("utf-8-sig")
+        return stream.read().removeprefix("\ufeff")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise _refused(
+            f"{CLI_JSON_INPUT_FLAG}: cannot read stdin: {error_text(exc)}", ctx
+        ) from exc
+
+
 def _read_document(source: str, ctx: Context) -> dict[str, Any]:
     if source == "-":
         label = "stdin"
-        text = typer.get_text_stream("stdin").read()
+        text = _read_stdin(ctx)
     else:
-        path = source.removeprefix(_FILE_URI_PREFIX)
+        path = _document_path(source, ctx)
         label = path
         try:
-            text = Path(path).read_text(encoding="utf-8")
+            # utf-8-sig: a document a Windows editor or PowerShell 5 saved starts
+            # with a byte order mark, which json.loads refuses as text.
+            text = Path(path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError) as exc:
             # The message names the file, so an OSError's own copy of it is dropped.
             reason = (
@@ -321,6 +371,14 @@ def _read_document(source: str, ctx: Context) -> dict[str, Any]:
             object_pairs_hook=_reject_duplicate_keys,
             parse_constant=_reject_constant,
         )
+    except RecursionError:
+        # A document nested deeper than the parser can follow is refused like
+        # one that does not parse, not left as a traceback.
+        raise _refused(
+            f"{CLI_JSON_INPUT_FLAG}: {label} is not valid JSON: nested too deeply "
+            "to parse",
+            ctx,
+        ) from None
     except ValueError as exc:
         raise _refused(
             f"{CLI_JSON_INPUT_FLAG}: {label} is not valid JSON: {exc}", ctx
@@ -340,7 +398,15 @@ def _is_scalar(value: Any) -> bool:
 
 
 def _check_shape(param: Parameter, value: Any) -> str | None:
-    """Why ``value`` cannot be this parameter's value, or None if it can."""
+    """Why ``value`` cannot be this parameter's value, or None if it can.
+
+    The checks are the ones argv makes impossible and JSON does not. A JSON
+    number for a true/false parameter is refused: click reads 0 and 1 as the
+    booleans, and every other number reached its text conversion and raised
+    AttributeError. A JSON number with a fraction for an integer parameter is
+    refused too, as ``--shard-index 3.5`` is: click's integer type truncated
+    ``3.5`` to 3 without a word.
+    """
     takes_list = param.multiple or param.nargs != 1
     items = value if isinstance(value, list) else [value]
     if takes_list and not isinstance(value, list):
@@ -415,6 +481,10 @@ def _validated_values(
             except typer.BadParameter as exc:
                 # Its value as given, not yet shown: the refusal shows it once.
                 problem = _typed_text(exc)
+            except OverflowError:
+                # A number JSON reads as infinite (1e400) handed to an integer
+                # parameter: click's conversion raises past its own check.
+                problem = "the number is too large for this parameter"
         if problem is not None:
             raise _refused(
                 f"{CLI_JSON_INPUT_FLAG}: invalid value for key '{key}' in {label}: "
@@ -471,7 +541,15 @@ class CliJsonInputCommand(TyperCommand):
             # real parse below would raise for the same argv.
             opts, _, _ = self.make_parser(ctx).parse_args(args=list(args))
             source = opts.get(CLI_JSON_INPUT_FLAG.lstrip("-").replace("-", "_"))
-            if source is not None:
+            # --help and --generate-cli-skeleton are eager: click runs them
+            # before any other value is processed, and the command never runs.
+            # The document is read before that processing, so a document that
+            # does not parse blocked both; it is not read when either is asked.
+            # The pre-parse has already put a token that is another option's
+            # value where it belongs, so a value spelled "--help" is not help.
+            skeleton = GENERATE_CLI_SKELETON_FLAG.lstrip("-").replace("-", "_")
+            eager = bool(opts.get("help")) or bool(opts.get(skeleton))
+            if source is not None and not eager:
                 label = "stdin" if source == "-" else str(source)
                 document = _read_document(str(source), ctx)
                 supplied = _validated_values(document, self, ctx, label)
