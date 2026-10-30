@@ -92,9 +92,10 @@ them. The environment variable `ASH_TEST_TIER_FLOOR` is its only trigger: the
 on the e2e legs for now. In warn mode the floor prints its line with a warning prefix and
 a `::warning` annotation, which shows on the workflow run's page, and leaves the exit
 status alone, and the e2e legs change to `1` once a hosted run shows each
-of them executing a real test with its scanners installed. Any other non-empty value of
-the variable is a usage error, so a mistyped `WARN` cannot turn the floor off without a
-word. A shard alone does not turn
+of them executing a real test with its scanners installed. An empty value, or `0`,
+`false` or `off` in any letter case, leaves the floor off, which is how a developer says
+"no floor" for a whole-suite run. Any other value of the variable is a usage error, so a
+mistyped `WARN` cannot turn the floor off without a word. A shard alone does not turn
 the floor on, so `ASH_TEST_SHARD=3of4 uv run pytest -m integration` on a developer
 machine is not failed for tests that a missing `pytest --run-integration` skipped. A
 leg whose every skip comes from a `skipif` marker whose condition held is admitted, with

@@ -1147,10 +1147,25 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         )
         assert int(pytest.ExitCode.USAGE_ERROR) == 4
         assert (
-            "ASH_TEST_TIER_FLOOR: 'WARN' is not accepted; use 1 or warn, or leave it empty"
-            in done.stdout + done.stderr
+            "ASH_TEST_TIER_FLOOR: 'WARN' is not accepted; "
+            "use 1, warn, or 0 (off), or leave it empty" in done.stdout + done.stderr
         ), done.stdout + done.stderr
         assert "executed no test" not in done.stdout, done.stdout
+
+    @pytest.mark.parametrize("value", ["0", "false", "off", "OFF"])
+    def test_an_off_spelling_runs_the_suite_with_the_floor_not_armed(
+        self, tmp_path, value
+    ):
+        """``ASH_TEST_TIER_FLOOR=0`` is what a developer exports to say no floor.
+
+        The same tree that fails under ``1`` and ends in a usage error for ``WARN``
+        exits 0 here and prints no floor line.
+        """
+        self._plant(tmp_path, absent_tool=1)
+        done = self._run(tmp_path, floor=value, gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "executed no test" not in done.stdout, done.stdout
+        assert "is not accepted" not in done.stdout + done.stderr
 
 
 @pytest.mark.unit
@@ -1911,10 +1926,14 @@ class TestATierRunThatExecutedNoTestFails:
         assert config.stash[sharding._FLOOR_KEY] is True
 
     @pytest.mark.parametrize(
-        "value", ["true", "0", "yes", "WARN", "Warn", "warning", " 1", "1 ", "warn "]
+        "value", ["true", "yes", "WARN", "Warn", "warning", " 1", "1 ", "warn "]
     )
     def test_only_the_values_1_and_warn_opt_a_run_in(self, monkeypatch, value):
-        """Any other non-empty value is a usage error, never a silently off floor."""
+        """Any value that is neither an opt-in nor an off spelling is a usage error.
+
+        It is never a silently off floor: ``WARN`` and ``true`` do not read as ``warn``
+        and ``1``, and the message names the spellings that are accepted.
+        """
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
         monkeypatch.setenv(sharding.FLOOR_ENV_VAR, value)
         manager = pytest.PytestPluginManager()
@@ -1925,12 +1944,13 @@ class TestATierRunThatExecutedNoTestFails:
         assert sharding.FLOOR_ENV_VAR in message, message
         assert repr(value) in message, message
         assert "1" in message and sharding.FLOOR_WARN_VALUE in message, message
+        assert "0 (off)" in message, message
         assert "\n" not in message, "a one-line message"
         assert manager.get_plugin("ash-tier-run-outcome") is None
         assert sharding.FLOOR_ENV_VAR not in os.environ
 
     def test_an_empty_value_leaves_the_floor_off(self, monkeypatch):
-        """Only an empty value is the same as no value."""
+        """An empty value is the same as no value."""
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
         monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "")
         manager = pytest.PytestPluginManager()
@@ -1939,6 +1959,21 @@ class TestATierRunThatExecutedNoTestFails:
         assert manager.get_plugin("ash-tier-run-outcome") is None
         assert config.stash[sharding._FLOOR_KEY] is False
         assert config.stash[sharding._FLOOR_WARN_KEY] is False
+
+    @pytest.mark.parametrize(
+        "value", ["0", "false", "off", "OFF", "Off", "False", " 0", "off "]
+    )
+    def test_an_off_spelling_leaves_the_floor_off(self, monkeypatch, value):
+        """``0``, ``false`` and ``off`` (any case, blanks ignored) are explicit off."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, value)
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-tier-run-outcome") is None
+        assert config.stash[sharding._FLOOR_KEY] is False
+        assert config.stash[sharding._FLOOR_WARN_KEY] is False
+        assert sharding.FLOOR_ENV_VAR not in os.environ
 
     def test_the_value_warn_opts_a_run_in_as_a_report_only_floor(self, monkeypatch):
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
