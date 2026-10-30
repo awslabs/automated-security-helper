@@ -395,7 +395,8 @@ def reporter_matches_requested_formats(
             tuple), not an iterator: an iterator is always truthy, so an empty
             one would read as a request for nothing, and a full one is spent by
             the first reporter asked about it, so every later reporter would be
-            matched against an empty request.
+            matched against an empty request. One string names one format, not
+            one format per character.
 
     Returns:
         ``True`` if this reporter should run. An empty request means every
@@ -403,7 +404,7 @@ def reporter_matches_requested_formats(
         the configured default set, not for nothing.
 
     Raises:
-        TypeError: ``output_formats`` is an iterator.
+        TypeError: ``output_formats`` is an iterator, or bytes.
     """
     if isinstance(output_formats, Iterator):
         raise TypeError(
@@ -411,6 +412,16 @@ def reporter_matches_requested_formats(
             f"an iterator ({type(output_formats).__name__}), which only the first "
             "reporter asked about could read."
         )
+    if isinstance(output_formats, (bytes, bytearray)):
+        raise TypeError(
+            "output_formats must be a collection of format names, not "
+            f"{type(output_formats).__name__}."
+        )
+    if isinstance(output_formats, str):
+        # A string is a collection of its characters: read as one, "markdown"
+        # asked for "m", "a", "r" and the rest, and every reporter was dropped.
+        # An empty string is still an empty request.
+        output_formats = (output_formats,) if output_formats else ()
     if not output_formats:
         return True
     requested = {str(getattr(fmt, "value", fmt)) for fmt in output_formats}
