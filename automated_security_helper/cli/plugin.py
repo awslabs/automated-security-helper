@@ -208,6 +208,12 @@ def list_plugins(
             for kind in ("scanner", "converter", "reporter")
         }
         selected = ash_plugin_manager.plugins_loaded_by(selected, split_modules)
+        # The option's entries as given, not split_modules: the trust filter
+        # splits its operator_modules itself (plugin_module_trust.
+        # drop_untrusted_off_host_plugins, through split_plugin_modules), and
+        # the engine passes it the same unsplit list (core/execution_engine.py),
+        # so a comma-joined ASH_PLUGIN_MODULES names each of its modules here
+        # as it does there.
         selected = drop_untrusted_off_host_plugins(
             ash_config, selected, ash_plugin_modules
         )
