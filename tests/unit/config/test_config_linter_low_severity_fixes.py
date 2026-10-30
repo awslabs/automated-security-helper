@@ -436,11 +436,13 @@ class TestWhichSuppressionsTheReportLists:
 
         result = ConfigLinter.lint(config_path, output_dir=out, check_unused=True)
 
+        # The per-entry lines are INFO (a report's listing, not a defect of the
+        # file); the category and the message prefix pick them out.
         unused = {
             issue.message: issue.fixable
             for issue in result.issues
             if issue.category == LintCategory.SUPPRESSION_UNUSED
-            and issue.severity == LintSeverity.WARNING
+            and issue.message.startswith("Unused suppression:")
         }
         own = [
             fixable for message, fixable in unused.items() if "src/own.py" in message

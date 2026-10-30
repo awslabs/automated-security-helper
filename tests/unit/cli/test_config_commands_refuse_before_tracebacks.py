@@ -326,20 +326,25 @@ def test_update_refuses_an_oversized_integer_literal_in_a_list(config_file):
     assert _no_traceback(result), repr(result.exception)
 
 
-def test_update_leaves_a_key_with_surrounding_whitespace_to_the_apply(config_file):
+def test_update_refuses_a_padded_key_as_the_apply_does_not_as_an_unknown_section(
+    config_file,
+):
     """The pre-check compared the first segment as typed, so ' scanners' was
-    reported as not a top-level key while listing scanners as one."""
+    reported as not a top-level key while listing scanners as one. The apply
+    refuses a key with whitespace in a part (resolve_config), naming the key
+    and the rule, and that refusal is the one update reports: the file is left
+    as it was, never "updated" with a key nothing reads."""
+    before = config_file.read_bytes()
+
     result = _invoke(
         ["update", str(config_file), "--set", " scanners.bandit.enabled=false"]
     )
 
     assert "is not a top-level configuration key" not in result.output, result.output
-    # The apply strips each key segment, so the padded key reaches the field: a
-    # pre-check that merely stayed silent while the apply dropped the key would
-    # report "updated" and change nothing.
-    assert result.exit_code == 0, result.output
-    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-    assert data["scanners"]["bandit"]["enabled"] is False
+    assert result.exit_code == INVALID_CONFIG_EXIT, result.output
+    assert "' scanners.bandit.enabled'" in result.output
+    assert "holds whitespace" in result.output
+    assert config_file.read_bytes() == before
 
 
 def test_update_reports_a_text_it_cannot_parse_for_keep_from(config_file, monkeypatch):

@@ -413,30 +413,72 @@ def test_a_comment_between_entries_is_kept_as_it_is(tmp_path):
         ),
     ],
 )
-def test_an_unused_entry_whose_anchor_a_kept_entry_uses_is_refused(
-    tmp_path, config_text
-):
-    """Red at the base: the first entry was commented out, its anchor with it,
-    the alias in the kept entry pointed at nothing, and the written file no
-    longer parsed ("found undefined alias"); the next lint exited 3 on it."""
+def test_an_unused_entry_whose_anchor_a_kept_entry_uses_is_refused(config_text):
+    """The text walker, given the anchored entry to comment out: at the base it
+    commented the first entry out, its anchor with it, the alias in the kept
+    entry then pointed at nothing, and the text no longer parsed ("found
+    undefined alias"). The walker is called directly because the config loader
+    refuses every alias before the fixer runs (the next test), so through the
+    product this layout never reaches it; the refusal is defense in depth for
+    a caller that hands the walker a text itself."""
+    with pytest.raises(UnusedSuppressionsNotEditable, match="anchor"):
+        ConfigLinter._comment_out_suppressions(config_text, {0}, "2026-10-30")
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        pytest.param(
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - path: tests/a.py\n"
+            "      rule_id: B101\n"
+            '      reason: &shared "Test code"\n'
+            "    - path: tests/b.py\n"
+            "      rule_id: B102\n"
+            "      reason: *shared\n",
+            id="reason-aliased",
+        ),
+        pytest.param(
+            "base: &base\n"
+            "  suppressions:\n"
+            "    - path: src/a.py\n"
+            "      rule_id: B101\n"
+            "      reason: one\n"
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  <<: *base\n",
+            id="merge-key",
+        ),
+    ],
+)
+def test_a_file_with_an_alias_never_reaches_the_fixer(tmp_path, config_text):
+    """The fact the two walker tests above rest on: ASH's config loader refuses
+    every YAML alias (``_NoAliasSafeLoader``, against alias expansion in the
+    process that serializes the config), so ``fix_unused_suppressions`` reads
+    such a file as one that does not parse: no content, no issues, the file
+    untouched. Lint reports the parse refusal (exit 3) before any fix runs."""
     config_path = _setup(
         tmp_path,
         config_text,
-        [{"path": "tests/a.py", "rule_id": "B101", "reason": "r"}],
+        [{"path": "tests/a.py", "rule_id": "B101", "reason": "Test code"}],
     )
     before = config_path.read_bytes()
 
-    with pytest.raises(UnusedSuppressionsNotEditable, match="anchor"):
-        ConfigLinter.fix_unused_suppressions(config_path)
+    fixed_content, fixed_issues, timestamp = ConfigLinter.fix_unused_suppressions(
+        config_path
+    )
 
+    assert (fixed_content, fixed_issues, timestamp) == (None, [], None)
     assert config_path.read_bytes() == before
 
 
-def test_an_anchor_inside_the_commented_entries_only_is_no_refusal(tmp_path):
-    """The control: an anchor whose every alias is in an entry commented out
-    with it leaves a file that parses, and the edit is made."""
-    config_path = _setup(
-        tmp_path,
+def test_an_anchor_inside_the_commented_entries_only_is_no_refusal():
+    """The control for the anchor refusal, on the walker directly: an anchor
+    whose every alias is in an entry commented out with it leaves a text that
+    parses, and the edit is made."""
+    text = (
         "project_name: demo\n"
         "global_settings:\n"
         "  suppressions:\n"
@@ -448,29 +490,27 @@ def test_an_anchor_inside_the_commented_entries_only_is_no_refusal(tmp_path):
         "      reason: *shared\n"
         "    - path: tests/c.py\n"
         "      rule_id: B103\n"
-        "      reason: three\n",
-        [
-            {"path": "tests/a.py", "rule_id": "B101", "reason": "Test code"},
-            {"path": "tests/b.py", "rule_id": "B102", "reason": "Test code"},
-        ],
+        "      reason: three\n"
     )
 
-    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(config_path)
+    fixed, commented = ConfigLinter._comment_out_suppressions(
+        text, {0, 1}, "2026-10-30"
+    )
 
-    assert len(fixed_issues) == 2
-    data = _active_yaml(fixed_content)
+    assert commented == {0, 1}
+    data = _active_yaml(fixed)
     assert [s["path"] for s in data["global_settings"]["suppressions"]] == [
         "tests/c.py"
     ]
 
 
-def test_a_list_supplied_through_a_merge_key_is_refused_not_called_done(tmp_path):
-    """Red at the base: the loaded document holds the entries (the merge key
-    supplies them), the composer does not flatten the merge, so the walker
-    found no list and reported nothing to do, right after lint listed the
-    entries as fixable."""
-    config_path = _setup(
-        tmp_path,
+def test_a_list_supplied_through_a_merge_key_is_refused_not_called_done():
+    """The walker, given entries to comment out in a text whose list a merge
+    key supplies: the composer does not flatten the merge, so at the base the
+    walker found no list and reported nothing to do. Called directly, as the
+    anchor tests are: the loader refuses the merge key's alias before the fixer
+    runs through the product."""
+    text = (
         "base: &base\n"
         "  suppressions:\n"
         "    - path: src/a.py\n"
@@ -478,15 +518,11 @@ def test_a_list_supplied_through_a_merge_key_is_refused_not_called_done(tmp_path
         "      reason: one\n"
         "project_name: demo\n"
         "global_settings:\n"
-        "  <<: *base\n",
-        [{"path": "src/a.py", "rule_id": "B101", "reason": "one"}],
+        "  <<: *base\n"
     )
-    before = config_path.read_bytes()
 
     with pytest.raises(UnusedSuppressionsNotEditable, match="merge key"):
-        ConfigLinter.fix_unused_suppressions(config_path)
-
-    assert config_path.read_bytes() == before
+        ConfigLinter._comment_out_suppressions(text, {0}, "2026-10-30")
 
 
 def test_a_tagged_list_is_refused_for_its_tag(tmp_path):
