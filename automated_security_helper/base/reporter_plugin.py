@@ -628,6 +628,12 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         declaration is read the same way at every one of those sites. Read off
         the class, not its ``__dict__``: a plain mixin's ``sends_off_host = 1``
         is inherited, and is converted here and set on this class.
+
+        A declaration that cannot be read off the class (a ``property``, which
+        the class returns as the property object) is truthy, so it reads as
+        ``True``: a reporter whose answer is not known before it is built is
+        run as one that sends findings off the host, which needs ``enabled:
+        true``, never as a local one.
         """
         super().__pydantic_init_subclass__(**kwargs)
         declared = getattr(cls, "sends_off_host", False)
