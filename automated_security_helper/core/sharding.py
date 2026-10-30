@@ -100,8 +100,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from itertools import islice
 
-from pydantic import ConfigDict, Field
+from typing import Any
 
+from pydantic import ConfigDict, Field, model_validator
+
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.undecodable_text import StrippedRecordModel
 
 from automated_security_helper.core.exceptions import (
@@ -195,10 +198,36 @@ class ShardAssignment(StrippedRecordModel):
     # keys are dropped, not refused: a results file written by a newer ASH can
     # carry a provenance field this version does not know, and refusing it made
     # ``ash merge`` report the shard as having no provenance at all, which
-    # named the wrong cause. Every field this version reads is still validated.
+    # named the wrong cause. Every field this version reads is still validated,
+    # and the dropped keys are named at WARNING (below): the rest of this module
+    # fails closed on a version mismatch, so a silent drop would be the one
+    # place a mismatch left no trace.
     model_config = ConfigDict(
         str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _name_the_dropped_keys(cls, data: Any) -> Any:
+        """Log the keys of a provenance record this version ignores, by name."""
+        if isinstance(data, dict):
+            known = set(cls.model_fields)
+            dropped = sorted(str(key) for key in data if key not in known)
+            if dropped:
+                shard = data.get("shard_index")
+                where = (
+                    f"shard {shown_shard_text(str(shard))}"
+                    if shard is not None
+                    else "a shard"
+                )
+                names = ", ".join(shown_shard_text(name) for name in dropped)
+                ASH_LOGGER.warning(
+                    f"The provenance of {where} carries {len(dropped)} field(s) this "
+                    f"ASH does not know and ignores: {names}. The results file was "
+                    "written by another ASH version; the fields this version knows "
+                    "are read as usual."
+                )
+        return data
 
     shard_index: int = Field(
         ge=0, description="Zero-based index of this shard within the run."

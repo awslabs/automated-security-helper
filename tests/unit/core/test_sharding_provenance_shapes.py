@@ -45,6 +45,41 @@ class TestAnUnknownProvenanceFieldIsDropped:
         assert restored.assigned_scanners == ["bandit"]
         assert not hasattr(restored, "field_from_a_newer_ash")
 
+    def test_a_dropped_field_is_named_at_warning(self):
+        """The module fails closed on every other version mismatch, so a dropped
+        field is said once, by name, rather than ignored in silence."""
+        from unittest.mock import patch
+
+        from automated_security_helper.core import sharding
+
+        with patch.object(sharding.ASH_LOGGER, "warning") as warning:
+            ShardAssignment.model_validate(
+                {
+                    "shard_index": 1,
+                    "shard_count": 2,
+                    "assigned_scanners": ["bandit"],
+                    "field_from_a_newer_ash": {"anything": True},
+                }
+            )
+
+        assert warning.call_count == 1, warning.call_args_list
+        text = warning.call_args.args[0]
+        assert "field_from_a_newer_ash" in text
+        assert "shard 1" in text
+
+    def test_a_record_with_only_known_fields_logs_nothing(self):
+        """The control for the warning."""
+        from unittest.mock import patch
+
+        from automated_security_helper.core import sharding
+
+        with patch.object(sharding.ASH_LOGGER, "warning") as warning:
+            ShardAssignment.model_validate(
+                {"shard_index": 0, "shard_count": 2, "assigned_scanners": ["bandit"]}
+            )
+
+        assert warning.call_count == 0, warning.call_args_list
+
     def test_the_known_fields_are_still_validated(self):
         """The control: dropping unknown keys must not loosen the known ones."""
         from pydantic import ValidationError
