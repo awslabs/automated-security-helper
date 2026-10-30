@@ -126,6 +126,40 @@ class TestAnExtraTheInstalledVersionDoesNotDeclare:
         )
         assert _dry_run("/opt/uv", sys.executable, "bandit[sarif]")[0] == "satisfied"
 
+    def test_another_packages_missing_extra_is_not_this_copys(self, monkeypatch):
+        """uv prints the warning for every package in the resolution: a transitive
+        dependency asking for an extra the installed urllib3 no longer declares
+        says nothing about the requested copy, which uv reports unchanged."""
+        monkeypatch.setattr(
+            pre_installed_tool,
+            "_run",
+            lambda command, timeout: subprocess.CompletedProcess(
+                command,
+                0,
+                "",
+                "warning: The package `urllib3==2.2.1` does not have an extra "
+                "named `secure`\nWould make no changes\n",
+            ),
+        )
+        assert _dry_run("/opt/uv", sys.executable, "bandit[sarif]")[0] == "satisfied"
+
+    def test_the_requested_package_is_matched_by_its_canonical_name(self, monkeypatch):
+        """The control for the scoping: uv spells the name as installed, the
+        requirement may spell it another way, and the two still meet."""
+        monkeypatch.setattr(
+            pre_installed_tool,
+            "_run",
+            lambda command, timeout: subprocess.CompletedProcess(
+                command,
+                0,
+                "",
+                "warning: The package `bandit==1.7.0` does not have an extra "
+                "named `sarif`\nWould make no changes\n",
+            ),
+        )
+        status, _ = _dry_run("/opt/uv", sys.executable, "Bandit[sarif]")
+        assert status == "unsatisfied"
+
 
 class TestNixStaging:
     def test_a_staging_error_is_an_unverifiable_verdict(self, tmp_path, monkeypatch):

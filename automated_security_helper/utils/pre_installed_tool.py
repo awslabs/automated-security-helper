@@ -509,6 +509,40 @@ def _probe(command: List[str], timeout: int, cwd: Optional[str]) -> _ProbeAnswer
 #: substring of its flowed output: "The package `bandit==1.7.0` does not have an
 #: extra named `sarif`".
 _UV_UNKNOWN_EXTRA_MARKER = "does not have an extra named"
+#: The same warning with the package it names captured: uv prints it for every
+#: package in the resolution, so the check has to tell the requested package's
+#: missing extra from a transitive dependency's.
+_UV_UNKNOWN_EXTRA_PATTERN = (
+    r"The package `([A-Za-z0-9][A-Za-z0-9._-]*)(?:==[^`]*)?` "
+    + _UV_UNKNOWN_EXTRA_MARKER
+)
+
+
+def _requested_package_lacks_an_extra(requirement: str, flowed: str) -> bool:
+    """Whether uv's unknown-extra warning in ``flowed`` names the package that
+    ``requirement`` asks for.
+
+    uv prints the warning for every package in the resolution, a transitive
+    dependency included (one asking for ``urllib3[secure]`` with urllib3 2.x
+    installed), and such a copy is satisfied all the same: only the requested
+    package's own missing extra means the copy never provides what the extra
+    brings. The bare marker matched any package's warning, so a satisfied copy
+    read as unsatisfied and, offline, was refused in favor of ``uv tool run
+    --offline``, the fallback this module exists to prevent.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    try:
+        requested = canonicalize_name(Requirement(requirement).name)
+    except (InvalidRequirement, ValueError):
+        # Not a requirement the parser reads (a URL, a path): the marker's own
+        # reading, as before.
+        return _UV_UNKNOWN_EXTRA_MARKER in flowed
+    return any(
+        canonicalize_name(match.group(1)) == requested
+        for match in re.finditer(_UV_UNKNOWN_EXTRA_PATTERN, flowed)
+    )
 
 
 def _dry_run(
@@ -583,11 +617,13 @@ def _dry_run(
     # Matched with every run of whitespace as one space, so a message wrapped
     # across lines still matches.
     flowed = " ".join(output.split())
-    if _UV_UNKNOWN_EXTRA_MARKER in flowed:
+    if _requested_package_lacks_an_extra(requirement, flowed):
         # The installed version declares no extra of a requested name (it
         # predates the extra): uv warns, installs nothing for it and reports
         # no changes, so the "satisfied" reading below would run a copy that
-        # never provides what the extra brings.
+        # never provides what the extra brings. Matched for the requested
+        # package alone: the same warning about a transitive dependency's
+        # extra says nothing about this copy.
         return "unsatisfied", output
     if result.returncode == 0 and "Would make no changes" in flowed:
         return "satisfied", ""
