@@ -339,6 +339,40 @@ class TestARuleIgittigittCannotCompile:
             warning
         )
 
+    def test_a_negation_it_cannot_compile_is_skipped_too(self, tmp_path, monkeypatch):
+        """The check holds the rule alone, so it has to compile a negation without a
+        positive rule before it matching first. A parser that kept negations apart
+        and compiled them only after a positive rule matched would pass the check
+        and raise at the first file that positive rule reached."""
+        real = igittigitt_module._globmatch
+
+        def refusing(path, glob):
+            if "BADRULE" in glob:
+                raise re.error("bad character range")
+            return real(path, glob)
+
+        monkeypatch.setattr(igittigitt_module, "_globmatch", refusing)
+        root = _build(tmp_path / "src", {"BADRULE.log": "x\n", "a.log": "l\n"})
+        lines = [
+            f"{gss.START_MARKER_PREFIX}${{SOURCE_DIR}}/.gitignore{gss.MARKER_SUFFIX}",
+            "*.log",
+            "!BADRULE.log",
+            f"{gss.END_MARKER_PREFIX}${{SOURCE_DIR}}/.gitignore{gss.MARKER_SUFFIX}",
+        ]
+
+        with patch.object(gss.ASH_LOGGER, "warning") as warning:
+            spec, _ids = gss.get_ash_ignorespec_with_attribution(lines, root)
+            included = gss.get_files_not_matching_spec(
+                str(root),
+                spec,
+                _all_files=[str(root / name) for name in ("BADRULE.log", "a.log")],
+            )
+
+        assert included == []
+        assert any("Skipped ignore rule" in text for text in _said(warning)), _said(
+            warning
+        )
+
 
 class TestTheOrderOfIgnoreFiles:
     def test_one_outside_the_tree_sorts_the_same_for_a_relative_and_an_absolute_source(
