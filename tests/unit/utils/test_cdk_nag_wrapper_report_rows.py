@@ -19,6 +19,8 @@ of the report or one field of the SARIF result built from it:
   a compliant evaluation, and the failure text names the pack instead; a pack that
   reported failure and whose every listed violation could not be placed on a resource
   is such a failed pack too;
+- a requested pack whose name could not be read is checked for presence by count: fewer
+  entries that could be its than nameless packs is a missing pack;
 - the not-evaluated warning names the rule and the pack, not cdk-nag's exception text;
 - SARIF columns count from 1 and ``endColumn`` is the character after the id;
 - a rule that never ran carries no in-template suppression;
@@ -326,6 +328,70 @@ def test_an_unrequested_pack_with_only_unplaceable_violations_does_not_fail_the_
 
     assert failure is None
     assert per_pack == {"AwsSolutions": []}
+
+
+# ---------------------------------------------------------------------------
+# A requested pack whose name could not be read is still checked for presence
+# ---------------------------------------------------------------------------
+#
+# The caller cannot look such a pack up by name, so the check counts instead: the entries
+# that are neither a requested name nor CDK's own plugin are the only ones that can be
+# its, and fewer of those than nameless packs means a requested pack has no entry.
+
+
+def test_a_nameless_requested_pack_with_no_entry_standing_for_it_is_missing(tmp_path):
+    """At the base the presence check read only the readable names, so a report holding
+    the named pack and CDK's own plugin read as a complete evaluation though the second
+    requested pack, whose name could not be read, wrote nothing."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "success", "violations": []},
+        {
+            "pluginName": "CloudFormation Validate",
+            "conclusion": "success",
+            "violations": [],
+        },
+    )
+    per_pack, failure = _violations_from_validation_report(
+        report, ["AwsSolutions"], every_requested_named=False, unnamed_requested=1
+    )
+
+    assert failure is not None
+    assert "1 requested pack(s) whose reported name could not be read" in failure
+    assert per_pack == {"AwsSolutions": [], "CloudFormation Validate": []}
+
+
+def test_an_unrequested_entry_stands_for_a_nameless_requested_pack(tmp_path, caplog):
+    """Enough unaccounted entries: the match is assumed and said, not failed."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "success", "violations": []},
+        {"pluginName": "HIPAA.Security", "conclusion": "success", "violations": []},
+    )
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        _, failure = _violations_from_validation_report(
+            report, ["AwsSolutions"], every_requested_named=False, unnamed_requested=1
+        )
+
+    assert failure is None
+    assert any(
+        "cannot be paired" in r.getMessage() and "HIPAA.Security" in r.getMessage()
+        for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_every_requested_named_false_alone_counts_one_nameless_pack(tmp_path):
+    """The flag without a count is the older calling shape; it means one."""
+    report = _write_report(
+        tmp_path,
+        {"pluginName": "AwsSolutions", "conclusion": "success", "violations": []},
+    )
+    _, failure = _violations_from_validation_report(
+        report, ["AwsSolutions"], every_requested_named=False
+    )
+
+    assert failure is not None
+    assert "whose reported name could not be read" in failure
 
 
 def test_a_successful_pack_with_nothing_to_list_keeps_its_empty_entry(tmp_path):
