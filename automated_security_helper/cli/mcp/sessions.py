@@ -796,6 +796,56 @@ def _remove_session_state(session_id: str) -> None:
     get_default_registry().forget(session_id)
 
 
+def _set_session_state_aside(session_id: str, sandbox: Path) -> Optional[Path]:
+    """:func:`_remove_session_state` up to the delete of the tree, for a caller holding the presence guard.
+
+    The guard is held so that the check for a scan's entry and the removal of the
+    workspace are one step: once the workspace is renamed to its hidden delete
+    name, a :class:`ScanPresence` taking the guard next finds no marker at the
+    session's path and registers nothing, so the delete of the renamed tree
+    needs no guard. Held through the whole delete, as it was, the guard made
+    every other server sharing the root wait out an ``rmtree`` of any size:
+    their scans' registrations, their sweeps, and the busy gate of a change to
+    a session's tree (:func:`a_scan_in_another_server_holds`), which now answers
+    busy after its bounded wait.
+
+    So this does the rename aside (``source_delivery._set_aside_for_removal``:
+    None when nothing is on disk, the workspace itself when the rename is
+    refused), drops the delivered-source record, the bound profile and the
+    registry entry, and returns the path to give :func:`_remove_set_aside_tree`
+    once the guard is released. ``sandbox`` is the session's directory the caller
+    resolved; the caller has already decided the session has one (a session with
+    none takes :func:`_remove_session_state` and no guard).
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_session_state,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        _drop_session_source_dir,
+        _set_aside_for_removal,
+    )
+
+    doomed = _set_aside_for_removal(sandbox, session_id)
+    _drop_session_source_dir(session_id)
+    clear_session_state(session_id)
+    get_default_registry().forget(session_id)
+    return doomed
+
+
+def _remove_set_aside_tree(doomed: Optional[Path]) -> None:
+    """Delete what :func:`_set_session_state_aside` renamed aside, guard released.
+
+    ``source_delivery._remove_tree`` clears read-only bits and retries, as the
+    removal of an ended session always did; what it still cannot remove stays
+    under the hidden delete name, which the TTL sweep clears once it is older
+    than the TTL (``_remove_stale_leftover``). Nothing is raised.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import _remove_tree
+
+    if doomed is not None:
+        _remove_tree(doomed)
+
+
 def end_session(session_id: str) -> bool:
     """Remove everything the server holds for ``session_id``, which has ended.
 
@@ -953,10 +1003,14 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
                 return None
             if _a_scan_holds(holder):
                 return False
-            _remove_session_state(session_id)
+            doomed = _set_session_state_aside(session_id, sandbox)
             with contextlib.suppress(OSError):
                 holder.rmdir()
-            return True
+        # The guard is released: the tree, renamed to its hidden delete name,
+        # is deleted without holding up the other servers' registrations,
+        # sweeps and busy gates (_set_session_state_aside says why that is safe).
+        _remove_set_aside_tree(doomed)
+        return True
     except OSError as exc:
         # The check for a scan or the removal failed after the lock was taken.
         # Nothing proves that no scan holds the session, so the tree stays for
@@ -2440,10 +2494,13 @@ def _remove_stale_session_state(
                 # order guarantees the touch is visible before the entry is gone.
                 if not _is_stale_workspace(sandbox, cutoff):
                     return False
-                _remove_session_state(session_id)
+                doomed = _set_session_state_aside(session_id, sandbox)
                 _forget_sweep_failure(session_id)
                 with contextlib.suppress(OSError):
                     (root / SCAN_PRESENCE_DIR / session_id).rmdir()
+            # The guard is released: the tree is deleted under its hidden name
+            # without holding up the other servers (_set_session_state_aside).
+            _remove_set_aside_tree(doomed)
         except OSError as exc:
             # The check for a scan, or the removal, failed after the guard was
             # taken: the workspace stays for the next pass, and the failure is
