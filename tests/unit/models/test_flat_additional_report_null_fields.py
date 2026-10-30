@@ -7,7 +7,7 @@
 ``dict.get`` defaults, which cover only a missing key. An entry whose field was
 present with null failed the model's ``str`` fields with a ValidationError, and
 one such entry aborted ``to_flat_vulnerabilities`` for every flat report. A null
-or non-string value is read as absent.
+is read as absent; any other value is read as text.
 """
 
 from __future__ import annotations

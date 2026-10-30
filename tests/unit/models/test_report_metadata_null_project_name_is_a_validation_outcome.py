@@ -18,13 +18,11 @@ from automated_security_helper.models.asharp_model import ReportMetadata
 pytestmark = pytest.mark.unit
 
 
-def test_a_null_project_name_is_not_an_attribute_error():
-    try:
-        metadata = ReportMetadata.model_validate({"project_name": None})
-    except ValidationError:
-        # The model's own refusal, if it ever chooses one, is an outcome a
-        # caller can read; an AttributeError is not.
-        return
+def test_a_null_project_name_loads_as_none():
+    # The contract is "loads": a results file with a null project_name must
+    # stay readable, so a refusal here would be a regression, not an outcome.
+    metadata = ReportMetadata.model_validate({"project_name": None})
+
     assert metadata.project_name is None
 
 

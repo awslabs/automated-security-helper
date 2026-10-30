@@ -76,3 +76,15 @@ def test_a_context_region_is_still_the_fallback_when_the_region_has_no_lines():
     )
 
     assert (flat.line_start, flat.line_end) == (5, 20)
+
+
+def test_a_region_that_exists_without_lines_falls_back_to_the_context_too():
+    """A region with a character offset and no startLine gives no lines: the
+    fallback is decided by the lines, not by the region being None."""
+    flat = FlatVulnerability.from_sarif_result(
+        _result(Region(charOffset=3), Region(startLine=5, endLine=20)),
+        "bandit",
+        "SAST",
+    )
+
+    assert (flat.line_start, flat.line_end) == (5, 20)

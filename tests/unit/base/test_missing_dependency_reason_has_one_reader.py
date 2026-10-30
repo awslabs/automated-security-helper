@@ -140,7 +140,7 @@ def test_the_reader_module_is_where_the_hook_is_read() -> None:
 def test_each_caller_binds_the_reader_itself(module) -> None:
     """The name each caller reads is the reader function, not a copy. A
     source-text check of the name was satisfied by a comment; this reads the
-    binding, and the two behavioral checks below drive the calls."""
+    binding, and the behavioral checks below drive the calls."""
     assert (
         module.plugin_missing_dependency_reason
         is scanner_plugin.plugin_missing_dependency_reason
@@ -201,10 +201,3 @@ def test_the_executor_s_reason_after_a_scan_asks_the_one_reader(monkeypatch) -> 
 
     assert reason == "the plugin's own reason"
     assert asked == [(plugin, ("a-value",))]
-
-
-def test_the_scan_phase_and_the_cli_ask_the_same_reader() -> None:
-    reader = scanner_plugin.plugin_missing_dependency_reason
-    assert scan_phase.plugin_missing_dependency_reason is reader
-    assert scanner_executor.plugin_missing_dependency_reason is reader
-    assert dependencies.plugin_missing_dependency_reason is reader

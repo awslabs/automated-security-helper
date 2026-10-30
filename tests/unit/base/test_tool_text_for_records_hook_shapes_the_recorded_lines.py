@@ -46,7 +46,10 @@ def plugin_context(tmp_path):
 def test_an_override_shapes_both_recorded_streams(plugin_context, monkeypatch):
     scanner = _scanner(plugin_context)
 
+    streams: list[str] = []
+
     def _without_the_planted(self, text, stream):
+        streams.append(stream)
         return None if text is None else text.replace(PLANTED, "[removed]")
 
     monkeypatch.setattr(type(scanner), "_tool_text_for_records", _without_the_planted)
@@ -62,6 +65,10 @@ def test_an_override_shapes_both_recorded_streams(plugin_context, monkeypatch):
     assert PLANTED not in " ".join(scanner.output), scanner.output
     assert PLANTED not in " ".join(scanner.errors), scanner.errors
     assert any("[removed]" in line for line in scanner.output), scanner.output
+    # The stderr lines were shaped too, not dropped: a swapped stream label or a
+    # lost stream would leave the PLANTED checks above green.
+    assert any("[removed]" in line for line in scanner.errors), scanner.errors
+    assert streams == ["stdout", "stderr"], streams
     assert scanner.exit_code == 1
 
 

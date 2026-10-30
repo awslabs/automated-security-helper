@@ -106,23 +106,35 @@ def test_the_reader_redacts_before_the_cut(tmp_path):
     assert CANARY not in shown, shown[-200:]
     assert "ENVCANARY" not in shown, shown[-200:]
     assert REDACTED in shown, shown[-200:]
-    assert shown.endswith((" ...[truncated]", "tail")), shown[-60:]
+    # The redacted text is longer than the limit's remainder, so the cut always
+    # happens; a "tail" ending would mean the value was not redacted first.
+    assert shown.endswith(" ...[truncated]"), shown[-60:]
+    assert "/nonexist" not in shown, shown[-200:]
 
 
-def test_a_raising_values_hook_leaves_the_notifications_unquoted(tmp_path):
+def _raising_hook(*_args, **_kwargs):
+    raise RuntimeError("hook broke")
+
+
+def _none_hook(*_args, **_kwargs):
+    return None
+
+
+@pytest.mark.parametrize("hook", [_raising_hook, _none_hook], ids=["raises", "none"])
+def test_a_values_hook_with_no_usable_answer_leaves_the_notifications_unquoted(
+    tmp_path, hook
+):
     # A REJECTED result: its stderr log is named, never read, so the only
     # text the hook guards here is the notification excerpt. (On a
     # non-rejected failure the stderr block reads the hook first and returns
-    # with the log named before the notifications are reached.)
+    # with the log named before the notifications are reached.) A hook that
+    # raises and one that answers None are the same broken answer.
     scanner = _scanner(_context(tmp_path, [CANARY]))
     scanner.exit_code = 2
     scanner.errors = []
     results = _results_file(tmp_path, f"rules file {CANARY} could not be read")
 
-    def _raising_hook(*_args, **_kwargs):
-        raise RuntimeError("hook broke")
-
-    with patch.object(scanner, "_values_to_redact", side_effect=_raising_hook):
+    with patch.object(scanner, "_values_to_redact", side_effect=hook):
         detail = scanner._describe_scan_failure(
             _RejectedResultError("planted"), results
         )

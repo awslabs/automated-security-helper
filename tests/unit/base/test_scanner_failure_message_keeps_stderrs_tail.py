@@ -12,6 +12,8 @@ and its omitted count was wrong.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -51,3 +53,19 @@ def test_the_tools_last_words_survive_a_long_stderr(plugin_context):
 
     assert "LASTWORDS" in detail, detail[-300:]
     assert len(detail) < _STDERR_EXCERPT_LIMIT + 1000, len(detail)
+    # The head is kept too, and the omitted figure is exactly the text that was
+    # left out between the head and the tail.
+    assert "progress line 0" in detail, detail[:400]
+    full = "\n".join(scanner.errors)
+    marker = re.search(r" \.\.\.\[(\d+) characters omitted\]\.\.\. ", detail)
+    assert marker is not None, detail
+    kept_head = detail[: marker.start()]
+    kept_head = kept_head[kept_head.index("progress line 0") :]
+    after = detail[marker.end() :]
+    kept_tail = after[: after.index("LASTWORDS") + len("LASTWORDS")]
+    assert int(marker.group(1)) == len(full) - len(kept_head) - len(kept_tail), (
+        marker.group(1),
+        len(full),
+        len(kept_head),
+        len(kept_tail),
+    )

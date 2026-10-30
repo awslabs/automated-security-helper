@@ -115,4 +115,7 @@ def test_a_hook_that_raises_after_the_run_started_stays_inside_the_handler(
     assert "text not shown" in response["error"], response
     assert "ENVCANARY-run-9c1" not in response["error"], response
     assert "ENVCANARY-run-9c1" not in response["stderr"], response
+    # The hook's own message is kept out too, not only the runner's.
+    assert "ENVCANARY-9c1" not in response["error"], response
+    assert "ENVCANARY-9c1" not in response["stderr"], response
     assert scanner.exit_code == SPAWN_FAILURE_RETURNCODE

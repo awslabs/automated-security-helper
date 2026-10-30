@@ -11,13 +11,13 @@ Path. And ``_resolve_forward_refs`` imported ``config.ash_config`` inside its
 lock while that module's import calls the resolver back, so a thread
 importing the module and a thread first building a context could each hold
 the lock the other waited for; the import now runs before the lock. The lock
-order is read from the source, since a race that reproduces the deadlock would
-hang the run that measures it.
+order is measured by a probe thread that tries the lock without blocking, since a
+race that reproduces the deadlock would hang the run that measures it.
 """
 
 from __future__ import annotations
 
-import inspect
+import threading
 from pathlib import Path
 
 import pytest
@@ -69,14 +69,35 @@ def test_a_str_assigned_to_output_dir_is_stored_as_a_path(context, tmp_path):
     assert isinstance(context.output_dir, Path), type(context.output_dir)
 
 
-def test_the_import_precedes_the_lock():
-    """The context resolves through the shared once-only resolver, whose
-    import step runs before its lock."""
-    assert isinstance(plugin_context_module._forward_refs, OnceOnlyResolver)
-    source = inspect.getsource(OnceOnlyResolver.resolve)
-    import_at = source.index("target = import_target()")
-    lock_at = source.index("with self._lock:")
+def test_the_context_imports_its_forward_reference_outside_the_resolver_lock(
+    monkeypatch,
+):
+    """The context's own resolve function, run against a fresh resolver with a
+    stub import, imports before the lock is taken. The reentrant lock can only be
+    read from another thread, so the stub starts one with a non-blocking acquire
+    and a join timeout; it cannot hang."""
+    resolver: OnceOnlyResolver[type] = OnceOnlyResolver()
+    took_the_lock: list[bool] = []
 
-    assert import_at < lock_at, source
+    def _stub_import() -> type:
+        def _probe() -> None:
+            got = resolver._lock.acquire(blocking=False)
+            took_the_lock.append(got)
+            if got:
+                resolver._lock.release()
+
+        thread = threading.Thread(target=_probe, daemon=True)
+        thread.start()
+        thread.join(timeout=10)
+        assert not thread.is_alive(), "the probe thread did not finish"
+        return object
+
+    monkeypatch.setattr(plugin_context_module, "_forward_refs", resolver)
+    monkeypatch.setattr(plugin_context_module, "_import_ash_config", _stub_import)
+    # The bind would rebuild the real model on the stub; the import is the subject.
+    monkeypatch.setattr(plugin_context_module, "_bind_ash_config", lambda target: None)
+
     plugin_context_module._resolve_forward_refs()
-    assert plugin_context_module._forward_refs.resolved is True
+
+    assert took_the_lock == [True], "the import ran while the lock was held"
+    assert resolver.resolved is True

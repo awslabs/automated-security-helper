@@ -8,13 +8,15 @@ scanner left running can replace the file with a link to any file on the
 host), blocked ASH for good on a FIFO at the name, and read without bound.
 The read now goes through ``fs_guard.read_bytes_at_most``: the link is
 refused, a FIFO cannot block the open, and a file over the bound is refused
-with its size. The FIFO case is not measured here: at the base it would hang
-the run that measures the base.
+with its size. The FIFO case runs the read on a daemon thread with a join
+timeout and releases the FIFO afterwards, so a regression to a blocking open
+fails the test and cannot hang the run that measures it.
 """
 
 from __future__ import annotations
 
 import os
+import threading
 
 import pytest
 
@@ -56,6 +58,37 @@ def test_a_link_at_the_results_name_is_refused(plugin_context, tmp_path):
 
     with pytest.raises(OSError):
         scanner._read_results_file(link)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+def test_a_fifo_at_the_results_name_is_refused_without_blocking(
+    plugin_context, tmp_path
+):
+    fifo = tmp_path / "results.json"
+    os.mkfifo(fifo)
+    scanner = _scanner(plugin_context)
+    outcome: list[BaseException | None] = []
+
+    def _read() -> None:
+        try:
+            scanner._read_results_file(fifo)
+            outcome.append(None)
+        except BaseException as error:  # noqa: BLE001
+            outcome.append(error)
+
+    reader = threading.Thread(target=_read, daemon=True)
+    reader.start()
+    try:
+        reader.join(timeout=10)
+        finished = not reader.is_alive()
+    finally:
+        # Opening a FIFO read-write never blocks and releases a reader stuck in
+        # its own open, so a hung reader does not outlive the test.
+        os.close(os.open(fifo, os.O_RDWR))
+        reader.join(timeout=10)
+
+    assert finished, "the reader blocked on the FIFO"
+    assert len(outcome) == 1 and isinstance(outcome[0], OSError), outcome
 
 
 def test_a_results_file_over_the_bound_is_refused_with_its_size(

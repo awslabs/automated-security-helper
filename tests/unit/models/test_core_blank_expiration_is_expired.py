@@ -54,7 +54,13 @@ def test_a_kept_blank_expiration_stops_a_suppression_from_matching():
         rule_id="B101",
         file_path="app.py",
     )
+    # The control: the same entry with no expiration matches this finding, so
+    # the False below comes from the kept blank expiration alone.
+    unexpiring = AshSuppression.model_validate(
+        {"path": "app.py", "reason": "r", "rule_id": "B101"}
+    )
 
+    assert unexpiring.matches(finding) is True
     assert suppression.matches(finding) is False
 
 
