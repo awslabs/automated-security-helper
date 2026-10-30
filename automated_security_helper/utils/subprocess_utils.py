@@ -130,6 +130,11 @@ _find_executable_cache: Dict[
 # step against a clear; no search runs under it.
 _find_executable_generation = 0
 _find_executable_lock = threading.Lock()
+#: How many lookups the cache keeps. A long-running server scans many trees, and
+#: each tree's root is part of the key, so the cache grew with every scan; past
+#: the bound the oldest entries go. A miss is never kept: it is searched for
+#: again on every call anyway (_lookup), so keeping it only spent memory.
+_FIND_EXECUTABLE_CACHE_LIMIT = 1024
 
 
 def _is_executable_file(path: str) -> bool:
@@ -654,10 +659,14 @@ def run_succeeded(result: Any) -> bool:
     if isinstance(result, dict):
         if any(result.get(flag) is True for flag in RESPONSE_FLAGS):
             return False
-        return result.get("returncode") == 0
-    if any(getattr(result, flag, False) is True for flag in RESPONSE_FLAGS):
-        return False
-    return getattr(result, "returncode", None) == 0
+        code = result.get("returncode")
+    else:
+        if any(getattr(result, flag, False) is True for flag in RESPONSE_FLAGS):
+            return False
+        code = getattr(result, "returncode", None)
+    # Through is_exit_code, as every exit-code reader: a returncode of False
+    # is a flag's stand-in, not a 0, and read as a success through ``== 0``.
+    return is_exit_code(code) and code == 0
 
 
 def signal_ending(returncode: Any, cmd_str: str) -> Optional[Tuple[int, str]]:
@@ -1316,9 +1325,12 @@ def _lookup(command: str, sandbox: bool = False) -> Optional[str]:
         # Remembered only if no clear ran while the search was under way: a
         # search that began before an install found what was there before it,
         # and the clear after the install is what makes the next lookup search
-        # again.
+        # again. A miss is not remembered (it is searched for again on every
+        # call), and the cache is bounded, oldest entries first.
         with _find_executable_lock:
-            if generation == _find_executable_generation:
+            if generation == _find_executable_generation and cached[0] is not None:
+                while len(_find_executable_cache) >= _FIND_EXECUTABLE_CACHE_LIMIT:
+                    _find_executable_cache.pop(next(iter(_find_executable_cache)))
                 _find_executable_cache[key] = cached
     found, refused = cached
     if refused is not None and scope is not None:
@@ -1326,6 +1338,11 @@ def _lookup(command: str, sandbox: bool = False) -> Optional[str]:
         # later scan of the same tree sees why the tool is missing.
         scope.refusals.setdefault(command, refused)
         scope.events.append(command)
+    elif found is not None and scope is not None:
+        # A usable copy found now: an earlier refusal of this command is no
+        # longer why the tool is missing, since it is not. Left in place, the
+        # incomplete-scan message named a tool that did run as one not run.
+        scope.refusals.pop(command, None)
     return found
 
 
@@ -1420,11 +1437,17 @@ def _child_got_the_terminals_interrupt() -> bool:
     """
     if os.name == "nt":
         return _has_a_console()
-    try:
-        return os.tcgetpgrp(sys.stdin.fileno()) == os.getpgrp()
-    except (AttributeError, OSError, ValueError):
-        # No terminal: CI, a pipe.
-        return False
+    # Whichever standard stream is the terminal: ``ash scan < inputs`` has its
+    # input redirected and its output still at the terminal, and asked of the
+    # input alone the probe read "no terminal" and sent the typed Ctrl-C a
+    # second time.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            return os.tcgetpgrp(stream.fileno()) == os.getpgrp()
+        except (AttributeError, OSError, ValueError):
+            continue
+    # No terminal: CI, a pipe.
+    return False
 
 
 class HeldInterrupt:
@@ -1598,15 +1621,24 @@ def discard_tool_pid_before_reap(
     rest of its run.
     """
     if process.returncode is None:
+        deadline = time.monotonic() + _REAP_POLL_BOUND_SECONDS if just_killed else None
         if hasattr(os, "waitid"):
-            try:
-                os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
-            except OSError:
-                pass
+            # Observed in slices, with the bound the just-killed arm promises:
+            # a blocking waitid on a child in uninterruptible sleep held the
+            # caller for as long as the child chose to stay.
+            while True:
+                try:
+                    waited = os.waitid(
+                        os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
+                    )
+                except OSError:
+                    break
+                if waited is not None:
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                time.sleep(INTERRUPT_WAIT_SLICE_SECONDS)
         else:
-            deadline = (
-                time.monotonic() + _REAP_POLL_BOUND_SECONDS if just_killed else None
-            )
             while process.poll() is None and (
                 deadline is None or time.monotonic() < deadline
             ):
@@ -1648,7 +1680,12 @@ def stop_after_interrupt(
     """
     if child_got_the_interrupt is None:
         child_got_the_interrupt = _child_got_the_terminals_interrupt()
+    # The exit is observed, and the record discarded, before any signal:
+    # send_signal and kill poll first, which reaps a child that has exited,
+    # and a record discarded after that reap could name a reused pid. The
+    # signal is still sent: on a child that has exited it does nothing.
     if not child_got_the_interrupt:
+        discard_tool_pid_once_exited(process)
         try:
             if os.name == "nt":
                 process.terminate()
@@ -1659,16 +1696,20 @@ def stop_after_interrupt(
     try:
         _wait_out(process, grace)
     except KeyboardInterrupt:
+        discard_tool_pid_once_exited(process)
         if _kill_unless_refused(process):
             # Observed, discarded, then reaped: the die-now record must not
-            # outlive the reap (discard_tool_pid_before_reap).
+            # outlive the reap (discard_tool_pid_before_reap). The reap is
+            # bounded: a child SIGKILL did not end, in uninterruptible sleep
+            # say, is not waited for without end (_wait_after_kill).
             discard_tool_pid_before_reap(process)
-            process.wait()
+            _wait_after_kill(process)
         raise
     except Exception:
+        discard_tool_pid_once_exited(process)
         if _kill_unless_refused(process):
             discard_tool_pid_before_reap(process)
-            process.wait()
+            _wait_after_kill(process)
 
 
 def _kill_unless_refused(process: "subprocess.Popen[Any]") -> bool:
@@ -1989,14 +2030,14 @@ def _resolve_for_spawn(
     Any other name it does not find is passed on as it was, for ``subprocess`` to
     start or fail on.
     """
-    name = args[0]
+    name = os.fspath(args[0]) if isinstance(args[0], os.PathLike) else args[0]
     if os.path.dirname(name) and not _is_anchored(name):
         return FileNotFoundError(
             errno.ENOENT,
             f"{name} is a path relative to the working directory, which is not run",
             name,
         )
-    found = find_executable(name)
+    found = find_executable(name) or _found_on_the_childs_path(name, env)
     if found:
         args[0] = found
         if _starts_through_cmd_exe(found):
@@ -2018,6 +2059,40 @@ def _resolve_for_spawn(
     if platform.system().lower() == "windows" and _refuse_unresolved_on_windows:
         return FileNotFoundError(errno.ENOENT, f"{name} was not found on PATH", name)
     return None
+
+
+def _found_on_the_childs_path(
+    name: str, env: Optional[Dict[str, str]]
+) -> Optional[str]:
+    """The program as the CHILD's PATH names it, when the caller gave one.
+
+    ``find_executable`` searches ASH's own PATH. A caller that hands the child
+    an environment of its own (a tool's bin directory put first) had argv[0]
+    resolved against ASH's PATH, or refused as not found, while the child's own
+    search would have found it. The child's anchored entries are searched the
+    way ASH's are, with the scan's in-tree refusal applied (``_first_usable``).
+    None when the caller gave no PATH of its own, or when it names nothing.
+    """
+    if env is None or os.path.dirname(name):
+        return None
+    path_value = env.get("PATH")
+    if not path_value or path_value == os.environ.get("PATH"):
+        return None
+    entries = [
+        entry for entry in path_value.split(os.pathsep) if entry and _is_anchored(entry)
+    ]
+    if not entries:
+        return None
+
+    def candidates() -> Iterator[str]:
+        for candidate in _executable_candidate_names(name):
+            for entry in entries:
+                found = shutil.which(os.path.join(entry, candidate))
+                if found:
+                    yield found
+
+    found, _refused = _first_usable(name, candidates(), _TREE_SCOPE.get())
+    return found
 
 
 #: Whether a bare name ASH's lookup cannot resolve is refused on Windows instead of
@@ -2070,14 +2145,20 @@ def _prepare_spawn(
         prepare_spawn,
     )
 
-    if active_scope() is None:
+    scope = active_scope()
+    if scope is None:
         return None
     if shell or isinstance(args, str):
         # No builtin scanner spawns through a shell. Refused rather than wrapped as
         # `sh -c`, so that a string command cannot reach the sandbox unparsed.
-        raise SandboxUnavailable(
+        # Counted as the scope's other refusals are (scope.prepare_spawn), so a
+        # converter's row reports this one too.
+        refusal = SandboxUnavailable(
             "a scanner tried to start a shell command, which the sandbox does not wrap"
         )
+        scope.refused_spawns += 1
+        scope.last_refusal = str(refusal)
+        raise refusal
     return prepare_spawn(args, env, cwd)
 
 
@@ -2149,7 +2230,7 @@ class _StartedChild:
             return None
         if not self.stop_refused:
             try:
-                if self.process.poll() is not None:
+                if _has_exited(self.process):
                     return None
             except OSError:
                 return None
@@ -2180,6 +2261,35 @@ class _StartedChild:
         if self.exit_code() is None:
             return f"ASH stopped the tool after: {error}"
         return str(error)
+
+
+def _has_exited(process: subprocess.Popen) -> bool:
+    """Whether the child has ended, read so that another thread's reap cannot
+    make a dead child read as running.
+
+    ``Popen.poll`` answers from ``returncode`` alone when another thread holds
+    the reaping lock (the registry sweep's own poll, _forget_exited_groups), so
+    a child that thread was reaping read as still running, and a stop that
+    worked was flagged as one ASH could not perform. The exit is read from the
+    kernel with ``waitid`` and ``WNOWAIT`` where the build has it, which neither
+    reaps nor waits for the lock; a child already reaped (``ChildProcessError``)
+    has ended. Without ``waitid`` the poll is the answer.
+    """
+    if process.returncode is not None:
+        return True
+    if os.name != "nt" and hasattr(os, "waitid"):
+        try:
+            waited = os.waitid(
+                os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
+            )
+        except ChildProcessError:
+            return True
+        except OSError:
+            return process.poll() is not None
+        if waited is not None:
+            return True
+        return process.returncode is not None
+    return process.poll() is not None
 
 
 def _text_of(error: BaseException) -> str:
@@ -2594,6 +2704,10 @@ def _run_plain(
         except subprocess.TimeoutExpired as expired:
             # SIGKILL at once to the whole group, as subprocess.run kills its
             # child at once; a refused stop is logged and recorded (_stop_child).
+            # The record says ASH stopped it, so its signal is never read as the
+            # tool's exit code.
+            if started is not None:
+                started.stopped = True
             _stop_child(_argv_of(process), process, _stop_tree, 0.0, None)
             # On POSIX communicate already put what it read in the exception;
             # Windows reads the pipes in threads joined at the timeout, so what
@@ -2744,9 +2858,7 @@ def _note_stop_refused(process: subprocess.Popen) -> None:
     if started is None or started.process is not process:
         return
     try:
-        if process.poll() is not None and (
-            os.name == "nt" or not _group_exists(process.pid)
-        ):
+        if _has_exited(process) and (os.name == "nt" or not _group_exists(process.pid)):
             return
     except OSError:
         return
@@ -2795,6 +2907,11 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
                 stdout, stderr = process.communicate(input_data, timeout=timeout)
             except subprocess.TimeoutExpired as expired:
                 stdout, stderr = expired.output, expired.stderr
+                # The child was running at the timeout, and ASH stops it: the
+                # record says so, so a later reading of the record never takes
+                # ASH's own signal for the tool's exit code.
+                if started is not None:
+                    started.stopped = True
                 # A SIGTERM the kernel refused has no grace to wait out.
                 if _send_stop(process, process.terminate):
                     try:
@@ -2810,6 +2927,13 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
                         # timeout would stop being one.
                         if _send_stop(process, process.kill):
                             _wait_after_kill(process)
+                    except BaseException:
+                        # A Ctrl-C during the grace: the escalation still
+                        # happens, so the child is not left SIGTERMed only, and
+                        # the interrupt goes on as it would have.
+                        if _send_stop(process, process.kill):
+                            _wait_after_kill(process)
+                        raise
                 expired.stdout, expired.stderr = stdout, stderr
                 raise
             except BaseException as error:
@@ -2914,9 +3038,19 @@ def _stop(
     as for _wait_out_grace.
     """
     process.terminate()
-    _wait_out_grace(
-        process, None, SANDBOX_STOP_GRACE_SECONDS if grace is None else grace, prompt
-    )
+    try:
+        _wait_out_grace(
+            process,
+            None,
+            SANDBOX_STOP_GRACE_SECONDS if grace is None else grace,
+            prompt,
+        )
+    except BaseException:
+        # A Ctrl-C during the grace: the SIGKILL still follows, so the child is
+        # not left SIGTERMed only while the interrupt goes on.
+        if process.poll() is None:
+            process.kill()
+        raise
     if process.poll() is None:
         process.kill()
         _wait_after_kill(process)
@@ -2972,7 +3106,12 @@ def _windows_system_directory() -> Optional[str]:
     None when neither gives an absolute path. Read from the OS rather than from the
     search path, which on Windows starts in the current directory.
     """
-    import ctypes
+    try:
+        import ctypes
+    except ImportError:
+        # A Python built without _ctypes: the environment's answer stands alone,
+        # where the import used to raise past the stop and leave the child alive.
+        ctypes = None  # type: ignore[assignment]
 
     windll = getattr(ctypes, "windll", None)
     if windll is not None:
@@ -3067,7 +3206,15 @@ def _stop_tree(
             if process.poll() is not None:
                 return
         else:
-            _wait_out_grace(process, pgid, grace, prompt)
+            try:
+                _wait_out_grace(process, pgid, grace, prompt)
+            except BaseException:
+                # A Ctrl-C during the grace: the group is still SIGKILLed, so
+                # the tool is not left SIGTERMed only while the interrupt goes
+                # on. The group id is still the child's: the leader is not
+                # reaped before the wait returns.
+                _signal_group(pgid, signal.SIGKILL)
+                raise
             if process.poll() is not None and not _group_exists(pgid):
                 # The wait reaps the leader and can end with the group
                 # observed empty; the kernel has then released the id, and
@@ -3286,17 +3433,37 @@ def _kill_group(process: subprocess.Popen) -> bool:
     """SIGKILL the child's process group, or the child when it leads none.
 
     True when something was signalled. On Windows, the child alone.
+
+    A child already reaped is signalled only while its pid still names its own
+    group: reaped, the pid can be another process's, and the group id another
+    group's. The kernel keeps a pid from reuse while it names a live group, so
+    a reaped leader whose group survives (a sandbox wrapper's) is still ours;
+    a reaped leader whose pid names a live PROCESS is a stranger's, and
+    nothing of ours is left to kill. A child that leads no group (a sandbox
+    wrapper before its setsid, a Landlock wrapper, whose scanner it forked into
+    a session of its own) is sent SIGTERM first, which such a wrapper turns
+    into the end of its tree, and SIGKILL after a short settle; killed
+    outright, the wrapper died and the scanner it started ran on.
     """
     if os.name == "nt":
         if process.poll() is None:
             process.kill()
             return True
         return False
-    if _signal_group(process.pid, signal.SIGKILL):
-        return True
+    if process.returncode is not None:
+        if _pid_names_a_live_process(process.pid):
+            return False
+        if not _group_exists(process.pid):
+            return False
+    if _leads_its_own_group(process) or process.returncode is not None:
+        if _signal_group(process.pid, signal.SIGKILL):
+            return True
     if process.poll() is None:
-        # A sandbox wrapper that has not called setsid yet leads no group.
-        process.kill()
+        process.terminate()
+        try:
+            process.wait(timeout=_KILLED_GROUP_SETTLE_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
         return True
     return False
 
@@ -3352,6 +3519,9 @@ def kill_running_groups() -> int:
     signalled = []
     for process in processes:
         try:
+            # _kill_group reads whether the child was reaped meanwhile (by
+            # another thread's sweep, or this lock-timeout fallback skipping
+            # the sweep) and signals no group id a reaped pid no longer names.
             if _kill_group(process):
                 signalled.append(process.pid)
         except OSError as error:
@@ -3745,8 +3915,13 @@ def _run_cancellable(
                         if deadline is not None and time.monotonic() >= deadline:
                             # Marked before the stop, not after: a stop that fails
                             # must not be tried again below with the full cancel
-                            # grace.
+                            # grace. The record says so too: the child was
+                            # running at the timeout and ASH stops it, so a
+                            # later reading of the record never takes ASH's own
+                            # signal for the tool's exit code.
                             stopped = True
+                            if started is not None:
+                                started.stopped = True
                             if own_group or _leads_its_own_group(process):
                                 grace = (
                                     SANDBOX_STOP_GRACE_SECONDS
@@ -3821,11 +3996,7 @@ def _run_cancellable(
                             + ((tool, process.pid),),
                         ) from error
                 raise
-            if (
-                isinstance(process.returncode, int)
-                and process.returncode < 0
-                and _server_stopping()
-            ):
+            if _stopped_by_the_server(process.returncode):
                 # The wait ended because a signal killed the child while the
                 # server's last stop (kill_running_groups) ran: ASH's own stop,
                 # so the scan ends as a cancel, as a child killed by
@@ -3841,6 +4012,30 @@ def _run_cancellable(
     if check:
         result.check_returncode()
     return result
+
+
+#: The signals the server's last stop sends (kill_running_groups' SIGKILL, and
+#: the SIGTERM _kill_group sends a groupless child first), as negative codes.
+_SERVER_STOP_RETURNCODES = frozenset(
+    -number
+    for number in (getattr(signal, "SIGKILL", None), getattr(signal, "SIGTERM", None))
+    if number is not None
+)
+
+
+def _stopped_by_the_server(returncode: Any) -> bool:
+    """Whether the child's code is the server's own stop, and nothing else.
+
+    Only a SIGKILL or SIGTERM death while the server stops is ASH's: a tool
+    that died of a SIGSEGV, or that the operator killed with another signal, in
+    those same seconds is not a stop ASH performed, and reporting it as one hid
+    the tool's own ending.
+    """
+    return (
+        is_exit_code(returncode)
+        and returncode in _SERVER_STOP_RETURNCODES
+        and _server_stopping()
+    )
 
 
 def _runner(sandboxed: bool) -> Any:
@@ -3913,7 +4108,9 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
     ``stdin=sys.stdin`` or ``stdin=0``.
     """
     if args and not kwargs.get("shell", False):
-        args = list(args)
+        # A string is the program's name, as subprocess.run reads it without a
+        # shell; list() turned it into its characters.
+        args = _argv_list(args)
         refused = _resolve_for_spawn(args, kwargs.get("cwd"), kwargs.get("env"))
         if refused is not None:
             raise refused
@@ -4028,6 +4225,45 @@ def run_ended_with_the_server(
 
 
 #: The option whose values a shown command line writes as their keys.
+def _argv_list(args: Any) -> Any:
+    """``args`` as a list of its own, for the program to be resolved in.
+
+    A list or a tuple is copied, so the caller's sequence is left as it was (and
+    a tuple, which cannot take the resolved program, no longer raises TypeError
+    outside the spawn's handling). A string without a shell is the program's
+    name, as subprocess reads it, so it becomes a one-element list; ``list()``
+    turned it into its characters and ran the wrong command. Anything else is
+    passed on for subprocess to accept or refuse.
+    """
+    if isinstance(args, (str, bytes, os.PathLike)):
+        return [args]
+    if isinstance(args, (list, tuple)):
+        return list(args)
+    return args
+
+
+def _resolved_or_refused(
+    args: Any,
+    cwd: "str | os.PathLike[str] | None",
+    env: Optional[Dict[str, str]],
+    shell: bool,
+) -> Optional[BaseException]:
+    """``_resolve_for_spawn`` as the spawn helpers call it: the refusal to raise
+    inside the spawn's own try, or None.
+
+    An exception the resolution itself raises (``os.getcwd`` on a deleted
+    working directory, a lookup that fails) is returned the same way, so the
+    helper reports a command that could not start instead of raising past the
+    result it promises.
+    """
+    if not args or shell:
+        return None
+    try:
+        return _resolve_for_spawn(args, cwd, env)
+    except Exception as error:  # noqa: BLE001 -- reported as the spawn's failure
+        return error
+
+
 _CONFIG_OVERRIDES_OPTION = "--config-overrides"
 
 
@@ -4149,12 +4385,14 @@ def run_command(
         subprocess.TimeoutExpired: If the command times out
         PostRunError: If check=True and ASH failed after the command started
     """
-    # Copy args to avoid mutating the caller's list
-    args = list(args)
+    # Copy args to avoid mutating the caller's list. A string without a shell is
+    # the program's name (_argv_list); with a shell it goes to the shell as it is.
+    args = _argv_list(args) if not shell or not isinstance(args, str) else args
 
-    # Resolve the full path to the executable if possible. A refusal is raised in
-    # the try below, so it is reported as a command that could not start.
-    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
+    # Resolve the full path to the executable if possible. A refusal, or a
+    # failure of the resolution itself, is raised in the try below, so it is
+    # reported as a command that could not start.
+    refused = _resolved_or_refused(args, cwd, env, shell)
 
     # Log the command being executed
     # str() each argument: a Path or an int in the list made the join raise
@@ -4177,8 +4415,12 @@ def run_command(
         extra=NO_MARKUP,
     )
 
-    # Set encoding for Windows compatibility
-    if encoding is None and platform.system().lower() == "windows":
+    # Set encoding for Windows compatibility. In bytes mode (text=False) no
+    # encoding and no error handler are passed: either one switches Popen to
+    # text mode, so a caller that asked for bytes got str.
+    if not text:
+        encoding, errors = None, None  # type: ignore[assignment]
+    elif encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
     # A cancelled scan starts no more children. Outside the try below, whose
@@ -4239,11 +4481,16 @@ def run_command(
             )
             return signaled
 
-        # Log command result
+        # Log command result. A caller that asked for its command to be logged
+        # below INFO (a sweep's rm of a container that may be gone) gets the
+        # failure line at that level too; every other caller keeps WARNING.
         if result.returncode == 0:
             ASH_LOGGER.debug(f"Command succeeded with return code {result.returncode}")
         else:
-            ASH_LOGGER.warning(f"Command failed with return code {result.returncode}")
+            ASH_LOGGER.log(
+                log_level if log_level < logging.INFO else logging.WARNING,
+                f"Command failed with return code {result.returncode}",
+            )
             # Built only when the record would be EMITTED: .debug() is gated
             # by the logger's level (isEnabledFor), and the record then has
             # to reach a handler whose level admits it (utils.log.delivers,
@@ -4422,15 +4669,24 @@ def _write_stream_log(
     preference: str,
     text: str,
 ) -> None:
-    """Write one captured stream to ``<results_dir>/<class_name>.<stream>.log``."""
+    """Write one captured stream to ``<results_dir>/<class_name>.<stream>.log``.
+
+    An empty stream truncates the log an earlier run left at the name, and
+    creates none: the file read back as this run's output used to be the
+    previous command's in the same results directory.
+    """
     if results_dir is None or preference not in ["write", "both"]:
         return
     from automated_security_helper.utils.sandbox.scope import active_scope
 
     results_dir_path = Path(results_dir)
-    results_dir_path.mkdir(parents=True, exist_ok=True)
     filename = f"{class_name}.{stream_name}.log" if class_name else f"{stream_name}.log"
     path = results_dir_path.joinpath(filename)
+    if not text:
+        if path.is_symlink() or not path.is_file():
+            return
+    else:
+        results_dir_path.mkdir(parents=True, exist_ok=True)
     # Not a plain open(): a sandboxed scanner can leave a symlink at this name, and
     # ASH is not sandboxed. See utils/sandbox/fs_guard.py. Under a sandbox the
     # scope's results directory is named as the root: the spawn released its own
@@ -4479,7 +4735,14 @@ def _write_stream_logs(
     line.
     """
     clauses: List[str] = []
-    todo = [(name, pref, text) for name, pref, text in streams if text]
+    # An empty stream is still written: _write_stream_log truncates the log a
+    # previous run left at the name (and creates none), so the stale text is
+    # not read back as this run's.
+    todo = [
+        (name, pref, text or "")
+        for name, pref, text in streams
+        if pref in ("write", "both")
+    ]
     if todo and sandbox_plan is not None:
         sandbox_plan.run_cleanup()
     for stream_name, preference, text in todo:
@@ -4572,12 +4835,14 @@ def run_command_with_output_handling(
     """
     # The resolved program replaces the first element, so it is resolved in a copy:
     # the caller's list is left as it was, as in spawn_run, and a list passed again
-    # is resolved again from the name.
-    if isinstance(command, list):
-        command = list(command)
-    # Resolve the full path to the executable if possible. A refusal is raised in
-    # the spawn's try below, so it is reported as a command that could not start.
-    refused = _resolve_for_spawn(command, cwd, env) if command and not shell else None
+    # is resolved again from the name. A tuple is copied too, and a string
+    # without a shell is the program's name (_argv_list).
+    if not shell or not isinstance(command, str):
+        command = _argv_list(command)
+    # Resolve the full path to the executable if possible. A refusal, or a
+    # failure of the resolution itself, is raised in the spawn's try below, so
+    # it is reported as a command that could not start.
+    refused = _resolved_or_refused(command, cwd, env, shell)
 
     # Log the command being executed
     # Shown as in run_command: the join ran before the spawn's try.
@@ -5027,12 +5292,14 @@ def run_command_stream_output(
     """
     # The resolved program replaces the first element, so it is resolved in a copy:
     # the caller's list is left as it was, as in spawn_run, and a list passed again
-    # is resolved again from the name.
-    if isinstance(args, list):
-        args = list(args)
-    # Resolve the full path to the executable if possible. A refusal is raised in
-    # the try below, so it is reported as a command that could not start.
-    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
+    # is resolved again from the name. A tuple is copied too, and a string
+    # without a shell is the program's name (_argv_list).
+    if not shell or not isinstance(args, str):
+        args = _argv_list(args)
+    # Resolve the full path to the executable if possible. A refusal, or a
+    # failure of the resolution itself, is raised in the try below, so it is
+    # reported as a command that could not start.
+    refused = _resolved_or_refused(args, cwd, env, shell)
 
     # Log the command being executed
     # str() each argument: a Path or an int in the list made the join raise
@@ -5048,6 +5315,11 @@ def run_command_stream_output(
     # Set encoding for Windows compatibility
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
+
+    # A cancelled scan starts no more children, as in run_command. Outside the
+    # try below, whose handler would report the cancel as a failed start.
+    raise_if_cancelled()
+    cancel_event = current_cancel_event()
 
     sandbox_plan = None
     # Bound before the spawn: the finally below reads it, and a plan prepared
@@ -5092,11 +5364,26 @@ def run_command_stream_output(
         failed = False
         try:
             # Stream output, shown: it is the tool's, and quotes what it scanned.
+            # The scan's cancel is read between lines: once it is set the child
+            # is stopped and the cancel raised, as the cancellable runner does,
+            # instead of the child running on and this call waiting without
+            # bound on a cancelled scan.
             for line in process.stdout:
                 print(shown_not_obeyed(line.rstrip()))
+                if cancel_event is not None and cancel_event.is_set():
+                    _stop_child(
+                        args,
+                        process,
+                        _stop,
+                        _stop_grace(cancel_event),
+                        getattr(cancel_event, "prompt", None),
+                    )
+                    raise_if_cancelled()
 
             # Wait for process to complete
             process.wait()
+        except ScanCancelled:
+            raise
         except Exception as e:
             failed = True
             _log_unrecorded_run(cmd_str, e)
@@ -5253,12 +5540,14 @@ def create_process_with_pipes(
     """
     # The resolved program replaces the first element, so it is resolved in a copy:
     # the caller's list is left as it was, as in spawn_run, and a list passed again
-    # is resolved again from the name.
-    if isinstance(args, list):
-        args = list(args)
-    # Resolve the full path to the executable if possible. A refusal is raised in
-    # the try below, which logs and re-raises it as it does a failed Popen.
-    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
+    # is resolved again from the name. A tuple is copied too, and a string
+    # without a shell is the program's name (_argv_list).
+    if not shell or not isinstance(args, str):
+        args = _argv_list(args)
+    # Resolve the full path to the executable if possible. A refusal, or a
+    # failure of the resolution itself, is raised in the try below, which logs
+    # and re-raises it as it does a failed Popen.
+    refused = _resolved_or_refused(args, cwd, env, shell)
 
     # Log the command being executed
     # str() each argument: a Path or an int in the list made the join raise
@@ -5279,10 +5568,14 @@ def create_process_with_pipes(
 
     stderr = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
 
-    # Set encoding for Windows compatibility
-    if encoding is None and platform.system().lower() == "windows":
+    # Set encoding for Windows compatibility. In bytes mode no encoding and no
+    # error handler are passed: either one switches Popen to text mode.
+    if not text:
+        encoding, errors = None, None  # type: ignore[assignment]
+    elif encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    sandbox_plan = None
     try:
         if refused is not None:
             raise refused
@@ -5310,7 +5603,20 @@ def create_process_with_pipes(
             weakref.finalize(process, _run_cleanup_off_the_finalizer, sandbox_plan)
         return process
     except Exception as e:
-        ASH_LOGGER.error(f"Error creating process with pipes: {e}", extra=NO_MARKUP)
+        if sandbox_plan is not None:
+            # No process owns the plan: its writable-root registrations and its
+            # private temporary directory would otherwise outlive this call.
+            sandbox_plan.run_cleanup()
+        # Redacted of the spawn's values and kept to one line, as the start
+        # line above is: the error quotes the argv.
+        ASH_LOGGER.error(
+            shown_on_one_line(
+                _logged_without(
+                    f"Error creating process with pipes: {e}", _SPAWN_VALUES.get()
+                )
+            ),
+            extra=NO_MARKUP,
+        )
         raise
 
 
