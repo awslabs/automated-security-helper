@@ -547,6 +547,33 @@ class TestALocalFailureIsTheDocumentedRefusal:
             _install(tmp_path, bundle, archive, [])
         assert _contents(tmp_path / "rules") == []
 
+    def test_a_kernel_timeout_opening_the_lock_is_not_another_install(
+        self, tmp_path, bundle_zip
+    ):
+        """An open on a hung network mount raises TimeoutError WITH errno
+        ETIMEDOUT; file_lock's own wait raises one with no errno. Only the
+        latter means another ASH process holds the lock, so the kernel's reads
+        as the lock file that could not be opened, with the reachability remedy."""
+        archive, bundle = bundle_zip
+
+        @contextmanager
+        def hung_mount(path):
+            raise TimeoutError(errno.ETIMEDOUT, "Connection timed out", str(path))
+            yield  # pragma: no cover
+
+        with (
+            patch(
+                "automated_security_helper.utils.file_lock.exclusive_lock",
+                hung_mount,
+            ),
+            pytest.raises(RulesBundleUnavailable) as refused,
+        ):
+            _install(tmp_path, bundle, archive, [])
+        message = str(refused.value)
+        assert "could not be opened" in message, message
+        assert "another ASH process" not in message, message
+        assert _contents(tmp_path / "rules") == []
+
     def test_a_rename_into_place_that_fails(self, tmp_path, bundle_zip, monkeypatch):
         archive, bundle = bundle_zip
         monkeypatch.setattr(

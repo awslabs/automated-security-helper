@@ -524,6 +524,16 @@ def install_rules_bundle(
         try:
             held.enter_context(exclusive_lock(lock_path))
         except TimeoutError as exc:
+            if exc.errno is not None:
+                # The kernel's ETIMEDOUT (an open on a hung network mount),
+                # not file_lock's own wait: file_lock raises a TimeoutError
+                # with no errno once another holder has kept the lock past
+                # its bound, and only that one means another install.
+                raise RulesBundleUnavailable(
+                    f"{problem}, and the install lock {lock_path} could not be "
+                    f"opened ({exc}). Make the rules directory reachable and "
+                    f"writable, or set {RULES_DIR_ENV} to a directory ASH can write."
+                ) from exc
             raise RulesBundleUnavailable(
                 f"{problem}, and another ASH process held the install lock "
                 f"{lock_path} for too long ({exc}). Wait for that install to "
