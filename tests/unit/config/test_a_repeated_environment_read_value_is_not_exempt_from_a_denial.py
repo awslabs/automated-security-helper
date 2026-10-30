@@ -28,33 +28,30 @@ from automated_security_helper.config.runtime_patch import config_document_denia
 pytestmark = pytest.mark.unit
 
 CANARY = "ash-canary-x25a-0123456789"
-LITERAL_IGNORE = {"path": "vendored/**", "reason": "vendored"}
 
 ALLOWLIST = RuntimeOverridesConfig(
     enabled=True,
     allowed_paths=["/global_settings/**"],
-    denied_paths=["/project_name", "/global_settings/ignore_paths"],
+    denied_paths=["/project_name", "/fail_on_findings"],
 )
 
 
 @pytest.fixture
 def trusted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """A trusted config whose project_name the file wrote as a reference."""
+    """A trusted config whose project_name the file wrote as a reference and
+    whose fail_on_findings it wrote as a literal."""
     from automated_security_helper.config.resolve_config import load_config_file_for_run
 
     monkeypatch.setenv("ASH_X25_PN", CANARY)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = tmp_path / ".ash.yaml"
     path.write_text(
-        "project_name: ${ASH_X25_PN}\n"
-        "global_settings:\n"
-        "  ignore_paths:\n"
-        "    - path: vendored/**\n"
-        "      reason: vendored\n",
+        "project_name: ${ASH_X25_PN}\nfail_on_findings: false\n",
         encoding="utf-8",
     )
     _, config = load_config_file_for_run(path)
     assert config.project_name == CANARY, "the control: the reference was read"
+    assert config.fail_on_findings is False
     return config
 
 
@@ -79,7 +76,13 @@ def test_a_document_with_another_value_is_refused_as_before(trusted) -> None:
 
 
 def test_a_document_repeating_a_literal_value_is_still_exempt(trusted) -> None:
-    """The control: the exemption stands for a value the file wrote as text."""
-    document = {"global_settings": {"ignore_paths": [dict(LITERAL_IGNORE)]}}
+    """The control: the exemption stands for a scalar the file wrote as a
+    literal and the document repeats. (A list of mappings is no such control:
+    the trusted dump writes every defaulted field of each entry, so a document
+    that writes only the file's keys never compares equal to it.)"""
+    assert _denied({"fail_on_findings": False}, trusted) == []
 
-    assert _denied(document, trusted) == []
+
+def test_a_document_changing_a_literal_value_is_refused(trusted) -> None:
+    """The control's control: the same denied field with another value."""
+    assert _denied({"fail_on_findings": True}, trusted) == ["fail_on_findings"]

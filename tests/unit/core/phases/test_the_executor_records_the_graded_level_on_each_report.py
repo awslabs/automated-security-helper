@@ -61,6 +61,11 @@ class EmptySarifScanner(ScannerPluginBase):
     def validate_plugin_dependencies(self) -> bool:
         return True
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):
+        # The abstract hook of the template scan(); this stub overrides scan()
+        # whole, so the hook is never reached.
+        raise NotImplementedError
+
     def scan(self, target, target_type, global_ignore_paths=None, config=None):
         self._pre_scan(target=target, target_type=target_type, config=config)
         self._post_scan(target=target, target_type=target_type)
