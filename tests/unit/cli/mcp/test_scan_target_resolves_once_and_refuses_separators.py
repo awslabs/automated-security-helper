@@ -119,10 +119,9 @@ class TestOutputPartsAreOneComponentEach:
         assert refusal is not None
         assert "path separator" in str(refusal)
         # The context renders the component joined under ``.ash`` as a path of
-        # the platform, so on Windows ``a/b`` reads back as ``a\b``.
-        assert refusal.context["output_component"].endswith(
-            part.replace("/", os.sep).replace("\\", os.sep)
-        )
+        # the platform: on Windows ``a/b`` reads back as ``a\b``, while on POSIX
+        # the backslash is one flat name and reads back as written.
+        assert refusal.context["output_component"].endswith(part.replace("/", os.sep))
 
     def test_plain_parts_are_still_admitted(self, tmp_path):
         """Control: the usual output tree is a contained path."""
