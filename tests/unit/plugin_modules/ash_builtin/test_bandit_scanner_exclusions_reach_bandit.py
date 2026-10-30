@@ -674,9 +674,16 @@ def test_the_platform_reading_of_a_skipped_files_uri_defaults_to_the_host(
     """Without ``windows`` the spelling reads the running platform, so the
     scanner's own calls need no argument: the drive reading on Windows, the
     POSIX one elsewhere. Both platforms are read here, on any host, so the
-    default is pinned to the platform and not to whichever host runs the test."""
-    monkeypatch.setattr(os, "name", platform)
-    assert _spelled_path("file:///C:/x.py", uri=True) == expected
+    default is pinned to the platform and not to whichever host runs the test.
+
+    The patch of ``os.name`` is undone before the call returns: left in place
+    until the test's own teardown, it made every ``Path()`` the shared fixtures
+    build there a ``WindowsPath``, which a POSIX host cannot instantiate, so the
+    test ERRORED in teardown on the hosted runners."""
+    with monkeypatch.context() as patched:
+        patched.setattr(os, "name", platform)
+        spelled = _spelled_path("file:///C:/x.py", uri=True)
+    assert spelled == expected
 
 
 def test_a_skipped_file_with_a_percent_in_its_name_is_told_from_its_decoded_twin(
