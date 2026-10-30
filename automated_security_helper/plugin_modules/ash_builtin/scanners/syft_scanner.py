@@ -581,12 +581,15 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             self.end_time = datetime.now(timezone.utc)
             # Redacted, as the module's other error paths are: the text can quote
             # a path the configuration read from the environment.
-            raise ScannerError(
-                text_without_values(
-                    f"{self.__class__.__name__} scan failed: {str(e)}",
-                    self._values_to_redact(),
-                )
+            failure = text_without_values(
+                f"{self.__class__.__name__} scan failed: {str(e)}",
+                self._values_to_redact(),
             )
+        # Raised outside the except block, so the original exception, whose text
+        # is not redacted, is attached to the new one neither as __context__ nor
+        # as __cause__: `raise ... from None` would only hide it from the default
+        # traceback while leaving it readable on the object.
+        raise ScannerError(failure)
 
 
 def _target_is_empty(target: Path) -> bool:

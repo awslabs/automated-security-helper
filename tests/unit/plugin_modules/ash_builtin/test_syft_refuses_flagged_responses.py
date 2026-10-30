@@ -123,6 +123,28 @@ def test_a_run_a_foreign_signal_ended_did_not_finish(scanner):
     assert "did not finish" in str(excinfo.value), str(excinfo.value)
 
 
+def test_the_wrapped_error_carries_no_unredacted_original(scanner):
+    """The catch-all redacts the text it raises. The exception it caught is not
+    redacted, so it must not ride along on the new error: raised inside the
+    except block it would be its __context__ (and `from None` would only hide it
+    from the traceback printer, not from a reader of the object)."""
+
+    def run(command, **kwargs):
+        raise RuntimeError("the tool's own words, as written")
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_run_subprocess", side_effect=run),
+    ):
+        with pytest.raises(ScannerError) as excinfo:
+            scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
+
+    assert "scan failed" in str(excinfo.value), str(excinfo.value)
+    assert excinfo.value.__context__ is None
+    assert excinfo.value.__cause__ is None
+
+
 def test_control_an_unflagged_run_is_graded_on_its_file(scanner):
     """The file the fake wrote is parsed and returned as the SBOM model: None, a
     bool or a swallowed error would all have passed a looser check."""
