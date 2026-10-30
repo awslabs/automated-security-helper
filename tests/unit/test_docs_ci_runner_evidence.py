@@ -297,6 +297,41 @@ def test_a_job_needing_a_failing_job_runs_only_when_its_if_admits_that():
 
 
 @pytest.mark.unit
+def test_an_input_given_as_an_expression_is_unknown_before_the_run():
+    """A caller's ``with:`` value written as ``${{ ... }}`` has no value the plan can
+    read: a called job whose ``if`` reads it stays expected (unknown keeps the job),
+    and the scan workflow's SARIF upload stays expected under such a
+    ``collect-sarif-report``; a plain ``true`` or ``false`` is read as before."""
+    load = _api("reports", "load_workflow")
+    plan = _api("reports", "act_job_plan")
+    called = {
+        "quiet.yml": load(
+            "on:\n  workflow_call:\n    inputs:\n      quiet:\n"
+            "        type: boolean\n        default: false\n"
+            "jobs:\n  loud:\n    if: ${{ !inputs.quiet }}\n"
+            "    steps:\n      - run: echo\n"
+        )
+    }
+    caller = (
+        "on:\n  push:\njobs:\n  call:\n    uses: ./.github/workflows/quiet.yml\n"
+        "    with:\n      quiet: {value}\n"
+    )
+    expression = "${{ github.event_name == 'push' }}"
+    assert "loud" in plan(load(caller.format(value=expression)), called)
+    assert "loud" in plan(load(caller.format(value="false")), called)
+    assert "loud" not in plan(load(caller.format(value="true")), called)
+    expected = _api("reports", "sarif_upload_expected")
+    real = _called_workflows()
+    with_expression = REUSABLE.replace(
+        "      ash-version: 0123456789abcdef0123456789abcdef01234567\n",
+        "      ash-version: 0123456789abcdef0123456789abcdef01234567\n"
+        f"      collect-sarif-report: {expression}\n",
+    )
+    assert expected(plan(load(with_expression), real), "pull_request") is True
+    assert expected(plan(load(with_expression), real), "push") is False
+
+
+@pytest.mark.unit
 def test_failure_reads_every_ancestor_of_a_job():
     """GitHub's ``failure()`` is true when any ancestor job failed, not only a job in
     the direct ``needs``: a job two below the gated scan, behind an ``always()`` job,

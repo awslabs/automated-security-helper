@@ -581,7 +581,9 @@ class _JobCondition:
                 return ""
             return None
         if parts[0] == "inputs" and len(parts) == 2:
-            return self.inputs.get(parts[1])
+            value = self.inputs.get(parts[1])
+            # A value the caller gives as an expression is unknown before the run.
+            return None if _is_expression(value) else value
         return None
 
 
@@ -614,6 +616,12 @@ def _and_values(left: Any, right: Any) -> bool | None:
     if a is False or b is False:
         return False
     return True if a and b else None
+
+
+def _is_expression(value: Any) -> bool:
+    """Whether a workflow value is written as a ``${{ }}`` expression, whose value the
+    plan cannot know before the run."""
+    return isinstance(value, str) and "${{" in value
 
 
 #: The status functions of a job-level ``if``; an ``if`` naming none of them is read
@@ -955,7 +963,10 @@ def sarif_upload_expected(
         if entry.workflow == SARIF_WORKFLOW:
             return True
         if entry.workflow == SCAN_WORKFLOW and event == "pull_request":
-            if _truth((entry.inputs or {}).get("collect-sarif-report", True)):
+            value = (entry.inputs or {}).get("collect-sarif-report", True)
+            # An input given as an expression is unknown before the run, and an
+            # unknown input keeps the upload expected, so a missing one is named.
+            if _truth(None if _is_expression(value) else value) is not False:
                 return True
     return False
 
