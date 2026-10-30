@@ -2366,6 +2366,7 @@ class ScannerExecutor:
         scanner_name: str,
         scanner_plugin: ScannerPluginBase,
         scan_targets: List[Dict[str, Any]],
+        announce_start: bool = False,
     ) -> Tuple[List[ScanResultsContainer], bool]:
         """Wrap _execute_scanner so unexpected exceptions become failure containers.
 
@@ -2380,12 +2381,21 @@ class ScannerExecutor:
         cancel that reached one scanner directly with that event unset: the
         scanner's own ScanCancelled sets it, and the next start is refused even
         when a worker dequeued it before the queue-shutdown could cancel it.
+
+        With *announce_start*, SCAN_START is issued here, after those checks and
+        on the thread that runs the scanner: both run loops pass it, so the
+        event means the scanner starts. Sent by the loops before this call, it
+        meant "queued": a parallel run of fifteen scanners on four workers
+        announced all fifteen at once, and a queued scanner the cancel removed
+        got a SCAN_START with no SCAN_COMPLETE or ERROR after it.
         """
         raise_if_cancelled()
         if self._cancel_seen.is_set():
             raise ScanCancelled(
                 f"the scan was cancelled; scanner {scanner_name} is not started"
             )
+        if announce_start:
+            self._notify_scan_start(scanner_name, scanner_plugin, scan_targets)
         try:
             return self._execute_scanner(
                 scanner_name, scanner_plugin, scan_targets
@@ -2475,10 +2485,9 @@ class ScannerExecutor:
                 )
                 ASH_LOGGER.info(f"Running scanner: {scanner_name}")
 
-                self._notify_scan_start(scanner_name, scanner_plugin, scan_targets)
-
+                # SCAN_START is issued inside, once the cancel checks pass.
                 results_list, scanner_succeeded = self._safe_execute_scanner(
-                    scanner_name, scanner_plugin, scan_targets
+                    scanner_name, scanner_plugin, scan_targets, announce_start=True
                 )
 
                 if results_list is None:
@@ -2695,10 +2704,13 @@ class ScannerExecutor:
                     description=f"[blue]({escape_markup(scanner_name)}) Queued scan...",
                 )
                 ASH_LOGGER.debug(f"Submitting {scanner_name} to thread pool")
-                # The same event the sequential loop announces per scanner, from
-                # the submitting thread: subscribers saw SCAN_COMPLETE for every
-                # scanner of a parallel run with no SCAN_START before it.
-                self._notify_scan_start(scanner_name, scanner_plugin, scan_targets)
+                # SCAN_START is issued by the worker that runs the scanner, once
+                # its cancel checks pass (_safe_execute_scanner, announce_start),
+                # so the event means the scanner starts: sent from here it meant
+                # "queued", every scanner at once, and a scanner the cancel took
+                # off the queue announced a start it never made. Subscribers
+                # are therefore called from worker threads for this event, as
+                # they are for SCAN_COMPLETE and ERROR in a parallel run.
                 # Run in a copy of this thread's context, which carries the
                 # scanned-tree scope (utils/subprocess_utils.scanning_tree) and
                 # the scan's cancel event (core/cancellation.py) into the
@@ -2711,6 +2723,7 @@ class ScannerExecutor:
                     scanner_name,
                     scanner_plugin,
                     scan_targets,
+                    announce_start=True,
                 )
                 future.scanner_name = scanner_name  # type: ignore[attr-defined]
                 future.scanner_task_key = task_key  # type: ignore[attr-defined]

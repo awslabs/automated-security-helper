@@ -76,7 +76,7 @@ Subscribers to one event run in the order they were subscribed. The order betwee
 | `CONVERT_PHASE_START`, `SCAN_PHASE_START`, `REPORT_PHASE_START`, `INSPECT_PHASE_START` | when each phase starts; inspect runs only with `--inspect` | the scan phase adds `enabled_scanners`, `excluded_scanners`, `parallel`, `max_workers`, `global_ignore_paths`, `shard_index`, and `shard_count`; the report phase adds `report_dir` and `cli_output_formats` |
 | `CONVERT_START` | before each converter runs | `converter`, `converter_class`, `message` |
 | `CONVERT_COMPLETE` | after each converter that did not raise | the same, plus `converted_files` and `file_count` |
-| `SCAN_START` | before each scanner, when scanners run one at a time: with `--strategy sequential`, or when only one scanner runs | `scanner`, `scanner_class`, `scan_targets`, `message` |
+| `SCAN_START` | when each scanner starts, after the scan's cancel checks, so a scanner a cancel kept from starting never announces; under the default parallel strategy it is sent from the worker thread that runs the scanner | `scanner`, `scanner_class`, `scan_targets`, `message` |
 | `SCAN_COMPLETE` | after each scanner's turn, including one that failed: `succeeded` is `False` when the scanner's results were not recorded (its `scan()` raised, or its results could not be merged), and such a scanner is not in `completed_scanners` | `scanner`, `completed_count`, `total_count`, `remaining_count`, `remaining_scanners`, `succeeded`, `message` |
 | `REPORT_START` | before each reporter | `reporter`, `reporter_class`, `message` |
 | `REPORT_COMPLETE` | after each reporter that returned a string; when the string was empty, no file was written, and `output_file` and `output_filename` are `None` | the same, plus `output_file` and `output_filename` |
@@ -84,7 +84,7 @@ Subscribers to one event run in the order they were subscribed. The order betwee
 | `EXECUTION_COMPLETE` | once, at the end, also when the scan failed | `phases`, `results`, `duration` (seconds), `completed_scanners`, `message` |
 | `ERROR`, `WARNING`, `INFO` | when ASH records a problem or a validation checkpoint | `message`, and details that depend on the source |
 
-`AshEventType` also has `EXECUTION_PROGRESS`, `CONVERT_PHASE_PROGRESS`, `SCAN_PHASE_PROGRESS`, `REPORT_PHASE_PROGRESS`, `INSPECT_PHASE_PROGRESS`, `INSPECT_START`, and `INSPECT_COMPLETE`. ASH never emits them. When two or more scanners run under the default parallel strategy, `SCAN_START` is not emitted either; use `SCAN_PHASE_START` to learn which scanners will run.
+`AshEventType` also has `EXECUTION_PROGRESS`, `CONVERT_PHASE_PROGRESS`, `SCAN_PHASE_PROGRESS`, `REPORT_PHASE_PROGRESS`, `INSPECT_PHASE_PROGRESS`, `INSPECT_START`, and `INSPECT_COMPLETE`. ASH never emits them. `SCAN_PHASE_START` names every scanner that will run; `SCAN_START` follows for each one as it starts.
 
 ## When a subscriber fails
 
