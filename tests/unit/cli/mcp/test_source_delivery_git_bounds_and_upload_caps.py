@@ -18,8 +18,9 @@ so no ``core.symlinks`` setting is pinned here.
   bytes alone, so each upload grew to the per-upload cap on its own.
 * A zip entry named with backslashes passed the traversal checks as a nested path
   and was extracted on POSIX as one flat file.
-* ``clear_source`` removed the materialized profile and kept the binding that
-  named it.
+* ``clear_source`` removes the materialized profile and keeps the binding that
+  named it: the binding is the source of truth, and the resolver writes the
+  profile again from it when the file is gone.
 """
 
 from __future__ import annotations
@@ -354,9 +355,17 @@ class TestZipEntriesNamedWithBackslashesAreRefused:
         assert (target / "src" / "main.py").exists()
 
 
-class TestClearSourceDropsTheBinding:
-    def test_the_bound_profile_goes_with_the_workspace(self, tmp_path):
-        """Red at the base: the binding stayed and named a file clear_source removed."""
+class TestClearSourceKeepsTheBinding:
+    def test_the_bound_profile_outlives_the_workspace(self, tmp_path):
+        """The binding is the source of truth: its files are removed, it stays.
+
+        An earlier shape of this test pinned the opposite: ``clear_source``
+        dropped the binding with the workspace. The resolver has since been
+        taught to write a bound profile again from the binding when its file is
+        gone, and to refuse the scan when it cannot
+        (``test_profile_registry_binding_outlives_clear_source``), so the
+        binding ends with the session, not with ``clear_source``.
+        """
         payload = _zip_bytes({"a.py": b"print(1)\n"})
         _finalize("fine", _upload(payload, "fine", tmp_path), tmp_path)
         bind_session_config(SESSION, config=AshConfig(), profile_name="strict")
@@ -364,11 +373,11 @@ class TestClearSourceDropsTheBinding:
 
         sd.clear_source(SESSION, workspace_root=tmp_path)
 
-        assert not session_has_binding(SESSION)
+        assert session_has_binding(SESSION)
         assert sd.get_session_source_dir(SESSION) is None
 
     def test_another_sessions_binding_is_kept(self, tmp_path):
-        """Control: only the cleared session's binding goes."""
+        """Control: a clear of one session touches no other session's binding."""
         bind_session_config("other", config=AshConfig(), profile_name="strict")
 
         sd.clear_source(SESSION, workspace_root=tmp_path)
