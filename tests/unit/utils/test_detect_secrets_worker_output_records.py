@@ -50,6 +50,15 @@ def _secret(filename: str, value, line: int = 1, kind: str = "Secret Keyword"):
         # The value spells the variable it is assigned to: the key is passed over.
         ("password=password", "password", 9),
         ("password: password", "password", 10),
+        # The same with spaces around the operator, and with the key quoted as
+        # JSON, TOML / HCL and PHP write it: the quote and the spaces between the
+        # key and its operator do not make the key a value.
+        ("password = password", "password", 11),
+        ('{"password": "password"}', "password", 14),
+        ('"password" = "password"', "password", 14),
+        ("'password' => 'password'", "password", 15),
+        # A quoted value followed by a comma or a bracket is still the value.
+        ('["password", "other"]', "password", 2),
         # The only occurrence, bounded or not, is still found.
         ("token=ABC", "ABC", 6),
         ("xABCx", "ABC", 1),

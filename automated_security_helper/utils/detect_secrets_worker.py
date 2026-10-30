@@ -127,16 +127,35 @@ def _is_name_character(character: str) -> bool:
     return character.isalnum() or character == "_"
 
 
+def _names_a_key(line: str, before: str, end: int) -> bool:
+    """Whether the token ending at *end* in *line* is a key rather than a value.
+
+    A key is followed by ``=`` or ``:`` (so also ``=>``), past the quote that
+    closes it when *before*, the character ahead of the token, opened one, and
+    past spaces and tabs. Reading only the one character after the token took
+    ``password = password``, ``{"password": "password"}``, ``"password" =
+    "password"`` and ``'password' => 'password'`` for values, so the column
+    pointed at the key, and two secrets on one such line could share it.
+    """
+    cursor = end
+    if before in ('"', "'") and cursor < len(line) and line[cursor] == before:
+        cursor += 1
+    while cursor < len(line) and line[cursor] in (" ", "\t"):
+        cursor += 1
+    return cursor < len(line) and line[cursor] in ("=", ":")
+
+
 def _value_index(line: str, value: str) -> int:
     """Where *value* starts in *line*, or -1.
 
     Of the places the value occurs, the first that is a whole token is taken: not
-    inside a longer run of letters, digits and underscores, and not followed by
-    ``=`` or ``:``, which make it a key rather than a value. The first occurrence
-    of any kind is the fallback. The first occurrence alone gave the wrong column
-    when the value was the start of a longer secret earlier in the line, or
-    spelled the same as the variable it is assigned to (``password=password``),
-    and two secrets of one type on one line then shared a column.
+    inside a longer run of letters, digits and underscores, and not a key
+    (``_names_a_key``: followed by ``=`` or ``:``, past its closing quote and any
+    spaces). The first occurrence of any kind is the fallback. The first
+    occurrence alone gave the wrong column when the value was the start of a
+    longer secret earlier in the line, or spelled the same as the variable it is
+    assigned to (``password=password``), and two secrets of one type on one line
+    then shared a column.
     """
     whole_tokens = []
     start = line.find(value)
@@ -148,7 +167,7 @@ def _value_index(line: str, value: str) -> int:
             after and _is_name_character(after)
         )
         if bounded:
-            if after not in ("=", ":"):
+            if not _names_a_key(line, before, end):
                 return start
             whole_tokens.append(start)
         start = line.find(value, start + 1)
