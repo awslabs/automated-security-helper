@@ -129,7 +129,12 @@ class ConverterRefusal:
     def message(self) -> str:
         text = f"{self.converter}: {self.subject()} was not scanned: {self.reason}"
         if self.accepted:
-            text += f" (accepted by a suppression: {self.accepted_reason})"
+            # A record with no stored reason names the acceptance alone, never
+            # the word "None".
+            if self.accepted_reason:
+                text += f" (accepted by a suppression: {self.accepted_reason})"
+            else:
+                text += " (accepted by a suppression)"
         return text
 
     def to_dict(self) -> Dict[str, Any]:
@@ -142,6 +147,7 @@ class ConverterRefusal:
             "scan_incomplete": self.scan_incomplete,
             "unlisted_members": self.unlisted_members,
             "accepted": self.accepted,
+            "accepted_reason": self.accepted_reason,
         }
 
 

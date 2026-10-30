@@ -35,6 +35,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_report
     SarifReporter,
 )
 from automated_security_helper.utils.converter_refusals import (
+    ConverterRefusal,
     converter_refusals,
     markdown_summary_lines,
     summary_lines,
@@ -95,6 +96,31 @@ def test_the_message_names_the_accepting_suppression():
     )
     assert not summary_lines([refusal])[0].startswith("[scan incomplete]")
     assert "scan incomplete" not in markdown_summary_lines([refusal])[0]
+
+
+def test_an_acceptance_with_no_stored_reason_names_no_reason():
+    """The message names the acceptance alone, never the word "None", and the
+    flat row carries the reason field as null."""
+    refusal = ConverterRefusal(
+        converter="archive",
+        path="lib/b.zip",
+        reason="it is named as a zip but could not be read as one",
+        failed=True,
+        accepted=True,
+    )
+
+    assert refusal.message().endswith(
+        "could not be read as one (accepted by a suppression)"
+    )
+    assert "None" not in refusal.message()
+    assert refusal.to_dict()["accepted_reason"] is None
+
+
+def test_the_flat_json_carries_the_reason_of_an_acceptance():
+    data = json.loads(FlatJSONReporter(context=_context()).report(_model(ACCEPTED)))
+
+    (row,) = data["converter_refusals"]
+    assert row["accepted_reason"] == "a fixture kept on purpose"
 
 
 def test_the_flat_json_carries_the_acceptance():

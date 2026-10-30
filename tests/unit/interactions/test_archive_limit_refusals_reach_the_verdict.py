@@ -164,6 +164,7 @@ class TestTheReports:
                 "scan_incomplete": True,
                 "unlisted_members": None,
                 "accepted": False,
+                "accepted_reason": None,
             },
             {
                 "converter": "archive",
@@ -174,6 +175,7 @@ class TestTheReports:
                 "scan_incomplete": False,
                 "unlisted_members": None,
                 "accepted": False,
+                "accepted_reason": None,
             },
         ]
 

@@ -143,11 +143,19 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             return ConverterPluginConfigBase()
         try:
             return declared()
-        except ValidationError as error:
+        except Exception as error:
+            # A model that needs a section raises ValidationError; one whose
+            # defaults are computed can raise anything, and a converter given no
+            # config must still run with the generic one.
+            detail = (
+                f"{error.error_count()} error(s)"
+                if isinstance(error, ValidationError)
+                else type(error).__name__
+            )
             ASH_LOGGER.debug(
                 f"{self.__class__.__name__}: its config model "
                 f"{declared.__name__} cannot be built without a section "
-                f"({error.error_count()} error(s)); using the generic one"
+                f"({detail}); using the generic one"
             )
             return ConverterPluginConfigBase()
 
