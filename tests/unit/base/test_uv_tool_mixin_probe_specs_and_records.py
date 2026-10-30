@@ -291,16 +291,28 @@ class TestTheStoredInstallCommand:
         [
             "sarif-om @ https://example.invalid/sarif_om.whl",
             "sarif-om>=1.0; python_version < '3.12'",
-            "jupyter >= 1.0",
         ],
-        ids=["url", "marker", "whitespace"],
+        ids=["url", "marker"],
     )
     def test_a_with_dependency_uv_must_not_see_stores_no_command(self, dependency):
         """The scan-time install checks each --with dependency; the stored
-        command appended them raw, and a spaced one split into argv pieces."""
+        command appended them raw, so a URL or a marker reached
+        `ash dependencies install` unchecked."""
         plugin = FakePlugin(command="bandit", with_dependencies=[dependency])
         plugin._setup_uv_tool_install_commands()
         assert plugin.uv_tool_install_commands == []
+
+    def test_a_spaced_with_dependency_is_stored_in_its_canonical_spelling(self):
+        """A dependency with whitespace inside it (PEP 508 allows "jupyter >= 1.0")
+        is a valid requirement for the right package, so it is not refused; the
+        stored command is one string split on whitespace, so it carries the
+        canonical spelling, which has none. It used to be appended raw and torn
+        into two uv arguments, and for a while it cleared the command."""
+        plugin = FakePlugin(command="bandit", with_dependencies=["jupyter >= 1.0"])
+        plugin._setup_uv_tool_install_commands()
+        assert plugin.uv_tool_install_commands == [
+            "uv tool install --with jupyter>=1.0 bandit"
+        ]
 
 
 class TestEveryProbeRunsInThePluginsEnvironment:
