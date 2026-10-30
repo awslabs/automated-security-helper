@@ -321,12 +321,25 @@ def act_job_results(log: str) -> list[ActJobResult]:
 def act_result_problems(
     log: str, expected: Mapping[str, str], runs: Mapping[str, int] | None = None
 ) -> list[str]:
-    """Every job in ``expected`` must have ended, in every matrix run, as expected.
+    """Every job in ``expected`` must have ended, in every matrix run, as expected, and
+    no other job may have run.
 
-    With ``runs``, a job must also have ended exactly that many times.
+    With ``runs``, a job must also have ended exactly that many times. ``expected`` is
+    the plan: a job it leaves out is one whose ``if`` the plan read as false before the
+    run, so act may report it skipped, or not at all, and nothing else; any other
+    result for it (a success, and above all a failure) means the plan's reading was
+    wrong and the job's own outcome would otherwise go unchecked.
     """
     results = act_job_results(log)
     problems = []
+    for run in results:
+        if run.job in expected or run.result == "skipped":
+            continue
+        matrix = f" {json.dumps(run.matrix, sort_keys=True)}" if run.matrix else ""
+        problems.append(
+            f"job {run.job}{matrix} ended {run.result}, though the plan expected act "
+            "not to run it"
+        )
     for job, want in expected.items():
         ended = [r for r in results if r.job == job]
         if not ended:
