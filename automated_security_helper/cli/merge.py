@@ -2250,6 +2250,7 @@ def apply_aggregated_suppressions(
             # its results record none, and a merged results file whose SARIF now
             # carries none of the shards' suppressions must not say they matched.
             merged.used_suppressions.clear()
+            _warn_ignore_paths_the_flag_cannot_lift(plugin_context.config)
 
     # Recomputed unconditionally, not only when suppressions ran. Under
     # ``--ignore-suppressions`` the counts change when a suppression the shards
@@ -2257,6 +2258,39 @@ def apply_aggregated_suppressions(
     # get refreshed" question on the same branch as "did suppressions run", and the
     # exit code depends on the first.
     return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
+def _warn_ignore_paths_the_flag_cannot_lift(config: Any) -> None:
+    """Name the ignore paths the shards scanned under, which the flag leaves in force.
+
+    ``--ignore-suppressions`` promises every finding regardless of suppression
+    status, as ``ash scan --ignore-suppressions`` gives it. An ignore path is not
+    a suppression the merge can lift: each shard dropped the results under it from
+    its own SARIF before the merge (``apply_suppressions_to_sarif``), and a dropped
+    result is not in the merge to bring back, so a sharded run under the flag
+    reports fewer findings than the scan would. Said at WARNING, with the paths,
+    so the difference is not read as the flag having no effect. Silent when the
+    merged config names none.
+    """
+    settings = getattr(config, "global_settings", None)
+    ignored = [
+        str(getattr(entry, "path", entry))
+        for entry in getattr(settings, "ignore_paths", None) or []
+    ]
+    if not ignored:
+        return
+    ASH_LOGGER.warning(
+        shown_on_one_line(
+            f"--ignore-suppressions lifts the suppressions the shards attached, "
+            f"not the {len(ignored)} ignore path(s) they scanned under "
+            f"({', '.join(ignored)}): each shard dropped the results under them "
+            f"from its own results before the merge, and a dropped result cannot "
+            f"be brought back here, where ash scan --ignore-suppressions keeps "
+            f"them. For every finding, scan without the ignore paths or merge "
+            f"shards that recorded none."
+        ),
+        extra=NO_MARKUP,
+    )
 
 
 def _is_ash_applied_suppression(suppression: Any) -> bool:

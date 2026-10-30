@@ -30,9 +30,11 @@ from __future__ import annotations
 
 import pytest
 
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.cli.merge import (
     ShardSettingsDisagreeError,
     _adopt_owning_shard_results,
+    apply_aggregated_suppressions,
     _merge_converter_rows,
     _parse_instant,
     merge_shard_results,
@@ -438,6 +440,62 @@ class TestIgnoreSuppressionsLiftsTheSuppressionAgreement:
                 as_loaded(self._disagreeing_on_ignore_paths()),
                 ignore_suppressions=True,
             )
+
+    @staticmethod
+    def _agreeing_on_an_ignore_path():
+        shards = build_shards(2)
+        for shard in shards:
+            shard.ash_config.global_settings.ignore_paths = [
+                IgnorePathWithReason(path="vendor/**", reason="third party")
+            ]
+        return shards
+
+    def test_ignore_paths_the_flag_cannot_lift_are_named_under_it(
+        self, tmp_path, capture
+    ):
+        """Shards that agree on an ignore path merge; under the flag the merge
+        then reports fewer findings than ``ash scan --ignore-suppressions``, which
+        keeps the results under the path, since each shard dropped them before
+        the merge. The flag's promise does not hold there, so the paths are named."""
+        merged = merge_shard_results(as_loaded(self._agreeing_on_an_ignore_path()))
+
+        apply_aggregated_suppressions(
+            merged,
+            PluginContext(
+                source_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                config=merged.ash_config,
+                ignore_suppressions=True,
+            ),
+        )
+
+        named = [
+            record.getMessage()
+            for record in capture.records
+            if "ignore path" in record.getMessage()
+        ]
+        assert len(named) == 1, named
+        assert "vendor/**" in named[0], named
+
+    def test_ignore_paths_are_not_named_without_the_flag(self, tmp_path, capture):
+        """The control: without the flag the ignore paths are the scan's own rule."""
+        merged = merge_shard_results(as_loaded(self._agreeing_on_an_ignore_path()))
+
+        apply_aggregated_suppressions(
+            merged,
+            PluginContext(
+                source_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                config=merged.ash_config,
+                ignore_suppressions=False,
+            ),
+        )
+
+        assert not [
+            record.getMessage()
+            for record in capture.records
+            if "ignore path" in record.getMessage()
+        ]
 
     def test_differing_suppressions_are_not_refused_under_the_flag(self):
         """The control: the flag lifts the suppressions, so it lifts their agreement."""
