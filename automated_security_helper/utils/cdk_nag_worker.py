@@ -56,11 +56,13 @@ so one ``scan()`` call never runs past the limit however many children it took. 
 child used to get the full limit afresh, so a batch whose children kept dying ran for
 many multiples of the configured time.) A child that dies keeps the answers it gave,
 fails the template it was working on, and a new child takes the rest, whether it died on
-the first template or a later one. A child killed at the timeout fails every template
-still pending, and so does a second child in a row that answers nothing with the same
-reason as the first (a failure every child shares, such as cdk-nag not importing), each
-with the child's exit status (or the timeout) and the tail of its stderr, redacted whole
-with the scan's environment values before it is cut into lines. A child the spawn helper
+the first template or a later one; a child that never wrote its protocol header reached
+no template, fails none, and the whole list goes to one more child. A child killed at
+the timeout fails every template still pending, and so does a second child in a row that
+answers nothing with the same reason as the first (a failure every child shares, such as
+the interpreter not starting), each with the child's exit status (or the timeout) and
+the tail of its stderr, redacted whole with the scan's environment values before it is
+cut into lines. A child the spawn helper
 could not wait for and could not stop fails every pending template too, and no new child
 is started beside it: it may still be evaluating the same templates into the same output
 directory. ``SystemExit`` and ``KeyboardInterrupt`` raised inside the child are not
@@ -75,6 +77,7 @@ wrong place there.
 
 from __future__ import annotations
 
+import builtins
 import contextvars
 import json
 import logging
@@ -217,11 +220,24 @@ def _raised_answer(exc: BaseException) -> Dict[str, Any]:
         answer["strerror"] = (
             exc.strerror if isinstance(exc.strerror, str) else None  # type: ignore[attr-defined]
         )
+        # Windows carries the native error code beside errno and prints it
+        # ("[WinError 5] Access is denied"); a rebuilt error without it printed
+        # "[Errno 13]" instead, so the text did not survive the crossing there.
+        winerror = getattr(exc, "winerror", None)
+        answer["winerror"] = (
+            winerror
+            if isinstance(winerror, int) and not isinstance(winerror, bool)
+            else None
+        )
         for attribute in ("filename", "filename2"):
             value = getattr(exc, attribute, None)
-            answer[attribute] = (
-                os.fsdecode(value) if isinstance(value, (str, bytes)) else None
-            )
+            if isinstance(value, (str, bytes)):
+                answer[attribute] = os.fsdecode(value)
+            elif isinstance(value, int) and not isinstance(value, bool):
+                # A file descriptor, which OSError prints as ": 3".
+                answer[attribute] = value
+            else:
+                answer[attribute] = None
     return answer
 
 
@@ -376,16 +392,36 @@ def _raise_as_reported(answer: Dict[str, Any]) -> None:
         # here. OSError's own __str__ is kept: that is what error_text rewrites. With
         # no errno there is nothing for that text to be built from, so the message
         # crosses as the class's text instead.
-        os_cls = type(name, (OSError,), {})
+        #
+        # The builtin class itself when the name is one (FileNotFoundError,
+        # PermissionError, ...), so an `except PermissionError` or an isinstance
+        # check in the parent sees what the child saw. A class made by name over
+        # OSError had the name and nothing else: CPython maps errno to its subclass
+        # only when OSError itself is constructed, and a made class is not it.
+        builtin = getattr(builtins, name, None)
+        os_cls = (
+            builtin
+            if isinstance(builtin, type) and issubclass(builtin, OSError)
+            else type(name, (OSError,), {})
+        )
         errno = answer.get("errno")
         if isinstance(errno, int) and not isinstance(errno, bool):
-            raise os_cls(
+            fields = (
                 errno,
                 str(answer.get("strerror") or message),
                 answer.get("filename"),
-                None,
+                # The native code on Windows, which the text there is built from;
+                # read and ignored on every other platform.
+                answer.get("winerror"),
                 answer.get("filename2"),
             )
+            try:
+                rebuilt: OSError = os_cls(*fields)
+            except TypeError:
+                # A builtin whose constructor reads the fields differently
+                # (BlockingIOError takes a count where the file name goes).
+                rebuilt = type(name, (OSError,), {})(*fields)
+            raise rebuilt
         raise os_cls(message)
     raise type(name, (Exception,), {})(message)
 
@@ -459,6 +495,12 @@ _MAX_RESPONSE_BYTES = 512 * 1024 * 1024
 #: kilobytes; the cap is enforced on the running total instead.
 _READ_CHUNK_BYTES = 1024 * 1024
 
+#: The least of the batch's time limit a new child is started with. A child needs
+#: seconds to start the jsii kernel before it can answer anything; one started with
+#: less is certain to time out, and used to add a timed-out record and a "killed at
+#: the limit" reason for templates that were never going to be evaluated.
+_MIN_CHILD_SECONDS = 5.0
+
 
 def _key(template: "str | Path") -> str:
     """One spelling per template, whatever separator or type the caller used."""
@@ -470,15 +512,22 @@ def _read_answers(response_path: Path) -> List[Dict[str, Any]]:
     return _read_response(response_path)[1]
 
 
-def _read_response(response_path: Path) -> tuple[bool, List[Dict[str, Any]]]:
-    """``(started, answers)``: whether the child wrote its protocol header, and the
-    complete answer lines it wrote after it, in order.
+def _read_response(
+    response_path: Path,
+) -> tuple[bool, List[Dict[str, Any]], bool]:
+    """``(started, answers, cut)``: whether the child wrote its protocol header, the
+    complete answer lines it wrote after it, in order, and whether the response ran
+    past the size cap so that answers after the cap were not read.
 
     The header is the first thing the child writes, before it looks at a template, so
     its absence is a structural fact about the child's run: it never got as far as its
-    templates (the interpreter did not start, cdk-nag did not import, node was refused),
-    which is a failure the next child shares whatever the stderr says. A header with no
-    answers is a child that started and died on its first template.
+    templates (the interpreter did not start, ASH's own import failed, the request
+    could not be read). The wrapper imports cdk-nag and resolves node lazily, inside
+    the first template's evaluation, after the header is written, so those two failures
+    come back as a ``failure`` or ``raised`` answer, not as a child with no header. The
+    batch gives a first child with no header one more try, and reads a second child
+    with no header as a failure every child shares, whatever the stderr says. A header
+    with no answers is a child that started and died on its first template.
 
     The file is in a directory a sandboxed child can write, so it is opened without
     following a symlink and read up to a cap: a child must not be able to point the
@@ -496,16 +545,23 @@ def _read_response(response_path: Path) -> tuple[bool, List[Dict[str, Any]]]:
     response being dropped: a child that answered every template into a response
     larger than the cap used to fail the whole batch with "exited 0 before
     answering", and the answers it had written were lost with it. The answers that
-    fit are kept; the template whose line crosses the cap, and those after it, are
-    the ones the caller fails for want of an answer.
+    fit are kept and ``cut`` is True; the template whose line crosses the cap is the
+    one the caller fails, naming the cap, and those after it go to a new child.
+
+    An answer line too deep for the JSON parser (a RecursionError, which is not a
+    ValueError) ends the answers as a malformed line does; the parser's own recursion
+    limit is the bound on what a child may hand the parent. What this function cannot
+    read without raising (a symlink the sandboxed child swapped in between the checks
+    and the open, which ``O_NOFOLLOW`` refuses with ELOOP) raises to the caller, which
+    keeps the runner's outcome for the child whatever became of its response.
     """
     if not response_path.exists() or response_path.is_symlink():
-        return False, []
+        return False, [], False
     try:
         if not stat.S_ISREG(os.lstat(response_path).st_mode):
-            return False, []
+            return False, [], False
     except OSError:
-        return False, []
+        return False, [], False
     flags = (
         os.O_RDONLY
         | getattr(os, "O_NOFOLLOW", 0)
@@ -515,7 +571,7 @@ def _read_response(response_path: Path) -> tuple[bool, List[Dict[str, Any]]]:
     fd = os.open(response_path, flags)
     with os.fdopen(fd, "rb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            return False, []
+            return False, [], False
         # In bounded pieces up to one byte past the cap, so the cap check below
         # still sees a response that crossed it without a cap-sized allocation.
         chunks: List[bytes] = []
@@ -527,32 +583,33 @@ def _read_response(response_path: Path) -> tuple[bool, List[Dict[str, Any]]]:
             chunks.append(chunk)
             total += len(chunk)
         data = b"".join(chunks)
-    if len(data) > _MAX_RESPONSE_BYTES:
+    cut = len(data) > _MAX_RESPONSE_BYTES
+    if cut:
         # Only what fits, cut back to the last complete line; the fragment after it
         # is dropped below as a line cut short.
         data = data[:_MAX_RESPONSE_BYTES]
         data = data[: data.rfind(b"\n") + 1]
     lines = data.decode("utf-8", errors="replace").split("\n")
     if not lines:
-        return False, []
+        return False, [], cut
     try:
         header = json.loads(lines[0])
-    except ValueError:
-        return False, []
+    except (ValueError, RecursionError):
+        return False, [], cut
     if not isinstance(header, dict) or header.get("protocol") != PROTOCOL_VERSION:
-        return False, []
+        return False, [], cut
     answers: List[Dict[str, Any]] = []
     # The last element is the text after the final newline: empty for a complete
     # file, a fragment for a child that died mid-write. Either way it is not an answer.
     for line in lines[1:-1]:
         try:
             answer = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             break
         if not isinstance(answer, dict) or not isinstance(answer.get("status"), str):
             break
         answers.append(answer)
-    return True, answers
+    return True, answers, cut
 
 
 def _failure_signature(response: Dict[str, Any], reason: str) -> tuple:
@@ -565,6 +622,10 @@ def _failure_signature(response: Dict[str, Any], reason: str) -> tuple:
     paid a third child for it.
     """
     masked = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s|'\"]+", "<path>", reason)
+    # Hex before decimal: a faulthandler thread id ("Current thread 0x7f3c2a...") or a
+    # native frame address in a node fatal-error line differ from run to run too, and
+    # masking only their digits left their letters, so the same crash still read as two.
+    masked = re.sub(r"0[xX][0-9a-fA-F]+", "<n>", masked)
     masked = re.sub(r"\d+", "<n>", masked)
     return (response.get("returncode"), masked)
 
@@ -688,7 +749,19 @@ def _run_child(
             timeout=timeout,
             values=values,
         )
-        started, answers = _read_response(response_path)
+        # The runner's outcome is known here, whatever becomes of the response. A
+        # read that raises (ELOOP from O_NOFOLLOW on a symlink the sandboxed child
+        # swapped in after the checks, an OSError on a device planted at the path)
+        # used to escape this function, and the batch then dropped the outcome and
+        # started a new child beside one that may still be running, the hazard the
+        # could-not-stop branch below exists to prevent. The response then reads as
+        # a child with no header, and the reason names the read that failed.
+        unreadable: Optional[str] = None
+        try:
+            started, answers, cut = _read_response(response_path)
+        except Exception as exc:
+            started, answers, cut = False, [], False
+            unreadable = type(exc).__name__
         answers = answers[: len(templates)]
         # A copy of the runner's response with one fact of this run added: whether
         # the child wrote its protocol header, that is, reached its templates. The
@@ -761,12 +834,29 @@ def _run_child(
         ]
         tail = " | ".join(stderr[-5:]) if stderr else "no stderr"
         code = outcome.get("returncode")
+        if cut and code == 0:
+            # The child answered every template and exited clean; its response
+            # outgrew the cap. The complete answers inside the cap were kept above;
+            # the template whose answer crossed it is failed here by name of the
+            # cap, not as a worker death, and the templates after it get a new child.
+            reason = (
+                f"the cdk-nag worker's response outgrew its {_MAX_RESPONSE_BYTES}-byte "
+                f"cap after {len(answers)} complete answer(s), so this template's "
+                "answer was not read; the templates after it are evaluated by a new "
+                "worker"
+            )
+            return answers, reason, False, recorded
         ended = (
             f"exited {code}"
             if isinstance(code, int) and not isinstance(code, bool)
             else "ended without an exit status"
         )
         reason = f"the cdk-nag worker process {ended} before answering: {tail}"
+        if unreadable is not None:
+            reason = (
+                f"the cdk-nag worker's response could not be read ({unreadable}); "
+                + reason
+            )
         return answers, reason, False, recorded
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -805,11 +895,12 @@ class _Batch:
         # What the scanner records about the children, the way it records any other
         # tool's run: the runner's response for every child that did not answer
         # everything it was asked (its exit code, in order), and the response of a
-        # timed-out child whose stop failed, which is still running. Neither used to
-        # leave this module: the child's death reached the scanner as per-template
-        # text only, so the plugin's exit-code record and its could-not-stop state
-        # never saw a worker child, and the run-level could-not-stop gate (which
-        # fail_on_incomplete_scanners does not relax) never fired for cdk-nag.
+        # child whose stop failed, which is still running, whether or not it had
+        # answered everything first. Neither used to leave this module: the child's
+        # death reached the scanner as per-template text only, so the plugin's
+        # exit-code record and its could-not-stop state never saw a worker child, and
+        # the run-level could-not-stop gate (which fail_on_incomplete_scanners does
+        # not relax) never fired for cdk-nag.
         self.failed_child_responses: List[Dict[str, Any]] = []
         self.could_not_stop_response: Optional[Dict[str, Any]] = None
 
@@ -828,29 +919,40 @@ class _Batch:
         A child that dies fails only the template it was working on; the rest go to a
         new child. That holds for a death on the first template too: a crash the first
         template provokes used to fail every template in the batch, while the same
-        crash on a later template failed only that one. The retry is bounded so a
-        failure every child shares (cdk-nag not importing, node refused) is not paid
-        once per template: a second child in a row that answers nothing fails
-        everything still pending when its failure is the first's. Two signals say so.
-        The structural one: a child that never wrote its protocol header never reached
-        its templates, so its failure is a startup failure the next child shares,
-        whatever the text says. The textual one, for a child that did start: the same
-        exit code and the same reason once paths and numbers are masked (a per-run
-        scratch path or a pid in the text does not make two failures of one). Two
-        neighboring templates that each crash a started child for their own reasons
-        give two different signatures, so the second is not taken as shared and the
-        next template still gets its own child; three answerless children in a row
-        fail the rest whatever their signatures, so a run of crashing templates stays
-        bounded. A child that ran out of time fails everything still pending at once,
-        as before, and so does a child the runner could not stop.
+        crash on a later template failed only that one. A child that never wrote its
+        protocol header never reached a template, so no template is blamed for it:
+        the whole pending list goes to one more child, and a one-off startup failure
+        (an OOM kill, a spawn that did not happen) costs nothing. The retry is bounded
+        so a failure every child shares is not paid once per template: a second child
+        in a row that answers nothing fails everything still pending when its failure
+        is the first's. Two signals say so. The structural one: a second child with no
+        header is a startup failure every child shares, whatever the text says. The
+        textual one, for a child that did start: the same exit code and the same
+        reason once paths and numbers are masked (a per-run scratch path or a pid in
+        the text does not make two failures of one). Two neighboring templates that
+        each crash a started child for their own reasons give two different
+        signatures, so the second is not taken as shared and the next template still
+        gets its own child; three answerless children in a row fail the rest whatever
+        their signatures, so a run of crashing templates stays bounded. A child that
+        ran out of time fails everything still pending at once, as before, and so does
+        a child the runner could not stop.
 
         The timeout bounds the whole of this call, not each child. The first child
         gets the configured limit; a child started after one died gets what is left
-        of it, and when nothing is left the pending templates fail with the timeout
-        reason without a child being started. Each child used to get the full limit
-        afresh, so a batch whose children kept dying ran for about half as many
-        limits as it had templates.
+        of it, and when nothing is left, or less than a child needs to get past jsii
+        startup, the pending templates fail with the timeout reason without a child
+        being started. Each child used to get the full limit afresh, so a batch whose
+        children kept dying ran for about half as many limits as it had templates.
+
+        A child the runner could not stop is recorded for the scanner's run-level
+        gate whether or not it had answered every template first: a child that
+        answered everything and then hung in teardown past the limit, with a failed
+        stop, is still a process that may be running.
         """
+        from automated_security_helper.utils.subprocess_utils import (
+            response_could_not_stop,
+        )
+
         answerless_in_a_row = 0
         last_signature: Optional[tuple] = None
         deadline = None if self.timeout is None else time.monotonic() + self.timeout
@@ -860,7 +962,7 @@ class _Batch:
                 child_timeout = self.timeout
             else:
                 remaining = deadline - time.monotonic()
-                if remaining <= 0:
+                if remaining <= _MIN_CHILD_SECONDS:
                     from automated_security_helper.utils.error_text import (
                         timeout_limit_token,
                     )
@@ -868,9 +970,10 @@ class _Batch:
                     limit = timeout_limit_token(self.timeout, ())
                     error = (
                         f"the cdk-nag worker's time ran out after {limit}: earlier "
-                        "worker children spent the scan's limit, so these templates "
-                        "were not evaluated. Raise scanners.cdk-nag.options.scan_timeout "
-                        "if these templates legitimately need longer."
+                        "worker children spent the scan's limit, or left too little "
+                        "of it for another to start, so these templates were not "
+                        "evaluated. Raise scanners.cdk-nag.options.scan_timeout if "
+                        "these templates legitimately need longer."
                     )
                     for template in pending:
                         self.errors[template] = error
@@ -893,6 +996,16 @@ class _Batch:
             for template, answer in zip(pending, answers):
                 self.answers[template] = answer
             if error is None:
+                if (
+                    response
+                    and response_could_not_stop(response)
+                    and self.could_not_stop_response is None
+                ):
+                    # Every template answered, then the runner could not stop the
+                    # child (a hang in jsii or node teardown past the limit whose
+                    # stop failed). Not a failed child, so no exit-code record; a
+                    # process that may still be running, so the gate has to see it.
+                    self.could_not_stop_response = response
                 return
             if response:
                 # An empty response is the runner raising before any child ran; it
@@ -915,6 +1028,14 @@ class _Batch:
                 for template in rest:
                     self.errors[template] = error
                 return
+            if not answers and not started and answerless_in_a_row == 0:
+                # The first child with no header: it never reached a template, so
+                # none is failed for it. The same list goes to one more child; a
+                # second child with no header is the shared failure above and fails
+                # them all, so this costs at most one extra child.
+                answerless_in_a_row = 1
+                last_signature = signature
+                continue
             if answers:
                 answerless_in_a_row = 0
                 last_signature = None
@@ -942,7 +1063,16 @@ class _Batch:
             single = _Batch(
                 [key], self.work_root, self.cwd, self.timeout, values=self.values
             )
-            return single.answer_for(key, options)
+            try:
+                return single.answer_for(key, options)
+            finally:
+                # Its child is a child of this scan: a death or a failed stop there
+                # reaches the scanner's records through this batch, which is the one
+                # the scanner reads after its loop. Thrown away with the batch, that
+                # child never reached the exit-code record or the could-not-stop gate.
+                self.failed_child_responses.extend(single.failed_child_responses)
+                if self.could_not_stop_response is None:
+                    self.could_not_stop_response = single.could_not_stop_response
         if key not in self.answers and key not in self.errors:
             self._evaluate(
                 [
@@ -976,8 +1106,9 @@ def cdk_nag_worker_batch(
     """Evaluate ``templates`` in one child, on the first call made inside the block.
 
     ``work_root`` must be a directory the scanner may write, which inside a sandbox
-    means its results directory. ``timeout`` bounds each child; a child killed at it
-    fails every template it had not answered. ``values`` are the scan config's
+    means its results directory. ``timeout`` bounds the whole batch: the first child
+    gets all of it, a child started after one died gets what is left, and a child
+    killed at it fails every template it had not answered. ``values`` are the scan config's
     environment values, which the worker's failure reasons are redacted with:
     required, with no empty default, so a caller cannot silently run the
     worker with redaction off.

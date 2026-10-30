@@ -121,6 +121,40 @@ def test_no_child_is_started_once_the_scan_timeout_is_spent(tmp_path, monkeypatc
     assert "scan_timeout" in batch.errors["c.yaml"]
 
 
+def test_no_child_is_started_with_less_than_it_needs_to_start(tmp_path, monkeypatch):
+    """With 0.3 s of the limit left a child was still started; it cannot get past jsii
+    startup, is certain to time out, and the pending templates then read "timed out
+    after 300 s ... was killed" beside an extra timed-out record. Below the minimum the
+    "time ran out" reason, which describes this case, is given without a child."""
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(cdk_nag_worker.time, "monotonic", lambda: clock["now"])
+    seen = []
+
+    def fake_run_child(
+        pending, options, work_root, cwd, timeout, values, *, declared_timeout=None
+    ):
+        seen.append(list(pending))
+        clock["now"] += 300.0 - 0.3
+        return (
+            [NOT_CFN],
+            "the cdk-nag worker process exited 1 before answering: x",
+            False,
+            {"returncode": 1},
+        )
+
+    monkeypatch.setattr(cdk_nag_worker, "_run_child", fake_run_child)
+    batch = cdk_nag_worker._Batch(
+        ["a.yaml", "b.yaml", "c.yaml"], tmp_path, tmp_path, timeout=300.0, values=()
+    )
+
+    batch._evaluate(list(batch.templates), {})
+
+    assert len(seen) == 1
+    assert "time ran out" in batch.errors["c.yaml"]
+    assert "was killed" not in batch.errors["c.yaml"]
+    assert batch.failed_child_responses == [{"returncode": 1}]
+
+
 def test_a_batch_with_no_timeout_bounds_nothing(tmp_path, monkeypatch):
     seen = []
 
@@ -270,6 +304,53 @@ def test_an_os_error_with_two_files_keeps_both():
 
     assert excinfo.value.filename == "/a"
     assert excinfo.value.filename2 == "/b"
+    assert str(excinfo.value) == str(raised)
+
+
+def test_a_rebuilt_os_error_is_the_builtin_subclass_the_child_raised():
+    """A class made by name over OSError had the name and nothing else: an
+    ``except PermissionError`` or an isinstance check in the parent missed it, because
+    CPython maps errno to its subclass only when OSError itself is constructed."""
+    raised = PermissionError(13, "Permission denied", "/tree/secret.yaml")
+
+    answer = cdk_nag_worker._raised_answer(raised)
+    with pytest.raises(PermissionError) as excinfo:
+        cdk_nag_worker._raise_as_reported(answer)
+
+    assert isinstance(excinfo.value, OSError)
+    assert excinfo.value.errno == 13
+    assert excinfo.value.filename == "/tree/secret.yaml"
+    assert str(excinfo.value) == str(raised)
+
+
+def test_an_os_error_carries_its_windows_error_code_across():
+    """Windows prints the native code ("[WinError 5] ...") and the text of a rebuilt
+    error without it read "[Errno 13]" there; the code crosses in the answer and is
+    given back to the constructor, which every other platform reads and ignores."""
+    raised = OSError(13, "Access is denied", "x")
+    answer = cdk_nag_worker._raised_answer(raised)
+    assert "winerror" in answer
+    assert answer["winerror"] == getattr(raised, "winerror", None)
+
+    # The wire form a Windows child would send; rebuilt on any platform.
+    answer["winerror"] = 5
+    with pytest.raises(OSError) as excinfo:
+        cdk_nag_worker._raise_as_reported(answer)
+    assert excinfo.value.errno == 13
+    assert excinfo.value.filename == "x"
+
+
+def test_an_os_error_on_a_file_descriptor_keeps_the_descriptor():
+    """An integer filename (a descriptor) prints as ": 3"; it was dropped as not a
+    path, and the suffix with it."""
+    raised = OSError(9, "Bad file descriptor", 3)
+
+    answer = cdk_nag_worker._raised_answer(raised)
+    assert answer["filename"] == 3
+    with pytest.raises(OSError) as excinfo:
+        cdk_nag_worker._raise_as_reported(answer)
+
+    assert excinfo.value.filename == 3
     assert str(excinfo.value) == str(raised)
 
 

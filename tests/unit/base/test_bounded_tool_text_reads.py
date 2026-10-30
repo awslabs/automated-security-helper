@@ -255,9 +255,10 @@ _ALLOWED_SIZED_READS = {
     "operator input, not tool output",
     (
         "utils/cdk_nag_worker.py",
-        "_read_answers",
-    ): "bounded+1 read of the worker's structured response, dropped whole "
-    "over the cap, parsed as JSON lines",
+        "_read_response",
+    ): "bounded+1 read of the worker's structured response in chunks; the "
+    "complete lines inside the cap are kept and parsed as JSON lines, the "
+    "line that crosses it and everything after are dropped",
     ("utils/download_utils.py", "sha256_file"): "whole-file hash in chunks",
     (
         "utils/download_utils.py",
