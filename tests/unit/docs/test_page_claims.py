@@ -10164,10 +10164,11 @@ def test_a_sessions_profile_copy_holds_the_reference_and_its_scan_the_value(
 #: other servers.
 _BUSY_WHILE_THE_SWEEP_REMOVES = (
     "`set_source_zip_chunk` and `select_profile` are refused with `error_type` "
-    "`session_workspace_busy` while an HTTP server removes the session's workspace for "
-    "being unused longer than `--session-workspace-ttl`. The upload and the bound "
-    "profile go with the workspace, so the client selects the profile again and sends "
-    "the upload again from chunk 0."
+    "`session_workspace_busy` while an HTTP server removes the workspace of a session it "
+    "does not hold as issued, such as a stateless server's, for being unused longer than "
+    "`--session-workspace-ttl`. The upload and the bound profile go with the workspace, "
+    "so the client selects the profile again and sends the upload again from chunk 0. A "
+    "session the server holds as issued is kept until it ends; see [Clean up](#clean-up)."
 )
 _SWEEP_LOCK_WAIT_IS_BOUNDED = (
     "Servers that share one workspace root take a lock under the root before a sweep "
