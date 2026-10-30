@@ -949,10 +949,11 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         directly: ``use_uv_tool`` is turned off, which the final fallback never
         did before.
         """
-        if Path(command[0]).name == "uv":
-            # The resolver names uv bare or by its path; either is the uv route,
-            # which stays on. (Compared as the bare word, an absolute uv path
-            # read as a bandit binary and was "verified" as one.)
+        if Path(command[0]).name.lower().removesuffix(".exe") == "uv":
+            # The resolver names uv bare or by its path, on Windows as uv.exe;
+            # each is the uv route, which stays on. (Compared as the bare word,
+            # an absolute uv path read as a bandit binary and was "verified" as
+            # one; compared by name alone, uv.exe still did.)
             self.dependencies_satisfied = True
             return True
         from automated_security_helper.utils.pre_installed_tool import (

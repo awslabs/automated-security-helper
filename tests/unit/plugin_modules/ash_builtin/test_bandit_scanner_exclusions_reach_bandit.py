@@ -661,12 +661,14 @@ def test_after_a_failed_install_a_path_binary_runs_directly(tmp_path, monkeypatc
     assert scanner.dependencies_satisfied is True
 
 
-def test_a_uv_answer_by_path_keeps_the_uv_route(tmp_path, monkeypatch):
-    """The resolver may name uv by its path; compared as the bare word, that
-    answer was taken for a bandit binary, verified as one, and run directly."""
+@pytest.mark.parametrize("name", ["uv", "uv.exe", "UV.EXE"])
+def test_a_uv_answer_by_path_keeps_the_uv_route(tmp_path, monkeypatch, name):
+    """The resolver may name uv by its path, on Windows as ``uv.exe``; compared
+    as the bare word, or by name without the suffix in mind, that answer was
+    taken for a bandit binary, verified as one, and run directly."""
     source = _tree(tmp_path, ["app.py"])
     scanner = _scanner(source, tmp_path)
-    uv = str(tmp_path / "tools" / "uv")
+    uv = str(tmp_path / "tools" / name)
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: True
     )
