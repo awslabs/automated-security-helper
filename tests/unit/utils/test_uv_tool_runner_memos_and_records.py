@@ -31,10 +31,11 @@ from __future__ import annotations
 import math
 import os
 import subprocess  # nosec B404
+import sys
 import threading
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -473,3 +474,75 @@ def test_the_probe_lock_helper_still_serializes():
         second = uv_tool_runner._get_or_create_probe_lock("version::bandit")
     assert first is second
     assert isinstance(first, type(threading.Lock()))
+
+
+class TestARefusedCheckIsReportedAsTheSandboxRefusingUv:
+    """The runner records a sandbox refusal on the check that it refused, and
+    the mixin's words for that check name the refusal, not the failed spawn.
+
+    This module keeps the real probes (``tests/unit/conftest.py``), so the
+    refusal below reaches the runner the way it does in a scan: the spawn layer
+    resolves the program (an existing one, this interpreter) and then asks the
+    active scope, which refuses, and the runner's refused-spawn arm records it.
+    """
+
+    @staticmethod
+    def _refused(runner):
+        from automated_security_helper.base.uv_tool_mixin import _uv_available
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "firejail is not installed")):  # type: ignore[arg-type]
+            return _uv_available(runner)
+
+    def test_the_reporting_names_the_refusal_before_the_spawn_words(self):
+        from automated_security_helper.base.uv_tool_mixin import _uv_unavailable
+
+        runner = UVToolRunner(uv_executable=sys.executable)
+        available, failure = self._refused(runner)
+        assert available is False
+        # The control: the refusal did reach the runner as a refused spawn, so
+        # the probe's own words name the exception, and the recorded refusal
+        # is what the mixin has to prefer.
+        assert failure is not None and "SandboxUnavailable" in failure, failure
+        text = _uv_unavailable(runner, failure)
+        assert "scanner sandbox refused to run uv" in text, text
+        assert "firejail is not installed" in text, text
+        assert "SandboxUnavailable" not in text, text
+        assert "UV is not available" not in text, text
+
+    def test_the_version_check_logs_the_refusal(self):
+        from tests.unit.base.test_uv_tool_mixin_guards_and_decisions import (
+            FakePlugin,
+        )
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        plugin = FakePlugin(command="jupyter-nbconvert", use_uv_tool=True)
+        runner = UVToolRunner(uv_executable=sys.executable)
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                return_value=runner,
+            ),
+            sandbox_scope(RefusingScope("jupyter", "firejail is not installed")),  # type: ignore[arg-type]
+        ):
+            assert plugin._get_uv_tool_version("jupyter-nbconvert") is None
+        ((message,), _level) = plugin._log_messages[-1]
+        assert "scanner sandbox refused to run uv" in message, message
+        assert "firejail is not installed" in message, message
+        assert "jupyter-nbconvert version detection" in message, message
+        assert "UV is not available" not in message, message
+
+    def test_a_probe_failure_that_is_not_a_refusal_keeps_its_own_words(self):
+        """The control for the order: with nothing recorded, the probe's words win."""
+        from automated_security_helper.base.uv_tool_mixin import _uv_unavailable
+
+        runner = UVToolRunner(uv_executable=sys.executable)
+        text = _uv_unavailable(runner, "the probe timed out after 10 seconds")
+        assert text == "uv is not available (the probe timed out after 10 seconds)"
+        assert _uv_unavailable(runner, None) == "UV is not available"
