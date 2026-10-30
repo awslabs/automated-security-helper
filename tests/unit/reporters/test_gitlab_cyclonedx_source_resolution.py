@@ -206,6 +206,68 @@ class TestTheReportLevelSourceIsOneEcosystem:
             props["gitlab:dependency_scanning:input_file:path"] == "package-lock.json"
         )
 
+    def test_a_virtual_environment_inventory_keeps_one_ecosystem(self, tmp_path):
+        """Ten Python components found in wheel METADATA files and three npm
+        components found in a nested yarn.lock, all under a .venv: Python wins
+        the vote, no Python component names a manifest, so the report is pip with
+        the pip default, never pip refined to yarn by the nested lockfile."""
+        site = "/.venv/lib/python3.12/site-packages"
+        python = [
+            _component(
+                f"pkg{n}", f"{site}/pkg{n}-1.0.dist-info/METADATA", f"pkg:pypi/pkg{n}@1"
+            )
+            for n in range(10)
+        ]
+        npm = [
+            _component(
+                f"js{n}", f"{site}/jupyterlab/staging/yarn.lock", f"pkg:npm/js{n}@1.0.0"
+            )
+            for n in range(3)
+        ]
+
+        props = _metadata_props(_report(_reporter(tmp_path), python + npm))
+
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "pip"
+        assert props["gitlab:dependency_scanning:language:name"] == "Python"
+        assert props["gitlab:dependency_scanning:input_file:path"] == "requirements.txt"
+
+    def test_an_ecosystem_with_no_location_names_its_own_default_file(self, tmp_path):
+        """Two Java archives with no location and one Python component declared by
+        requirements.txt: Java wins the vote and the file is pom.xml, never the
+        Python file."""
+        java = [
+            {
+                "type": "library",
+                "name": name,
+                "properties": [{"name": "syft:package:type", "value": "java-archive"}],
+            }
+            for name in ("guava", "okio")
+        ]
+        python = _component("requests", "/requirements.txt", "pkg:pypi/requests@2")
+
+        props = _metadata_props(_report(_reporter(tmp_path), java + [python]))
+
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "maven"
+        assert props["gitlab:dependency_scanning:language:name"] == "Java"
+        assert props["gitlab:dependency_scanning:input_file:path"] == "pom.xml"
+
+    def test_a_manager_override_for_an_absent_ecosystem_names_its_default_file(
+        self, tmp_path
+    ):
+        """The operator says cargo while every component is npm: the report-level
+        file is the cargo default, never package-lock.json."""
+        doc = _report(
+            _reporter(tmp_path, package_manager_override="cargo"),
+            [
+                _component("a", "/package-lock.json", "pkg:npm/a@1.0.0"),
+                _component("b", "/package-lock.json", "pkg:npm/b@1.0.0"),
+            ],
+        )
+
+        props = _metadata_props(doc)
+        assert props["gitlab:dependency_scanning:package_manager:name"] == "cargo"
+        assert props["gitlab:dependency_scanning:input_file:path"] == "Cargo.lock"
+
     def test_a_syft_type_and_a_purl_type_of_one_ecosystem_vote_together(self, tmp_path):
         """Two Python components typed by Syft, two by PURL, three npm ones:
         Python wins four to three once the two keys are one ecosystem."""
