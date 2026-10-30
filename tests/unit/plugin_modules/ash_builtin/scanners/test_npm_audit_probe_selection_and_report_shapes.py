@@ -398,6 +398,58 @@ class TestTheSelection:
 
         assert started == ["npm"], started
 
+    def test_a_sole_lockfile_an_ignore_file_leaves_out_is_still_audited(
+        self, context, online
+    ):
+        """A library that lists package-lock.json in its .gitignore: the walk
+        never lists the lockfile, so the selection kept none beside the
+        manifest. The lookup then falls back to the one on disk, as it did
+        before the selection existed; refusing it skipped the package with
+        nothing recorded."""
+        _package(context.source_dir / "lib", "package-lock.json")
+        (context.source_dir / ".gitignore").write_text(
+            "package-lock.json\n", encoding="utf-8"
+        )
+        started = _audited(online)
+
+        _scanner(context).scan(target=context.source_dir, target_type="source")
+
+        assert started == ["npm"], started
+
+    def test_a_sole_lockfile_outside_the_scan_set_is_still_audited(
+        self, context, online, monkeypatch
+    ):
+        """The shape the scanner's older tests use: the scan set is stubbed with
+        the manifest alone. The lockfile beside it is not kept and not ignored,
+        so it is the one audited."""
+        package = _package(context.source_dir / "app", "yarn.lock")
+        monkeypatch.setattr(
+            npm_audit_scanner,
+            "scan_set",
+            lambda **kwargs: [str(package / "package.json")],
+        )
+        started = _audited(online)
+
+        _scanner(context).scan(target=context.source_dir, target_type="source")
+
+        assert started == ["yarn"], started
+
+    def test_a_sole_lockfile_an_ignore_path_names_is_not_audited(self, context, online):
+        """Control for the fallback: a lockfile an ignore path names stays
+        passed over even when it is the only one beside the manifest."""
+        _package(context.source_dir / "app", "yarn.lock")
+        started = _audited(online)
+
+        _scanner(context).scan(
+            target=context.source_dir,
+            target_type="source",
+            global_ignore_paths=[
+                IgnorePathWithReason(path="app/yarn.lock", reason="not this one")
+            ],
+        )
+
+        assert started == [], started
+
     def test_the_lookup_reads_the_selection_of_the_manifests_own_tree(
         self, context, online
     ):

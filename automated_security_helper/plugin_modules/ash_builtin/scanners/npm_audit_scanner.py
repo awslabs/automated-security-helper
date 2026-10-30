@@ -684,13 +684,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         Among the lockfiles beside the manifest, the first in order that the
         last selection of the manifest's tree kept (``_lockfile_selection``):
         one an ignore path dropped, or one an ignore file left out of the walk,
-        is passed over, so the next name in order (or none) is the answer. With
-        no selection recorded for the tree the filesystem decides. A link of a
-        lockfile's name is taken as it is found (unless an ignore path named
-        it): one that resolves to nothing counts as the lockfile, and the
-        package is then refused in ``scan()`` with the link named and its
-        reason, where reading it as "no lockfile" passed the package over with
-        nothing recorded.
+        is passed over in favor of a kept one beside it. When no kept lockfile
+        sits beside the manifest, the first present one not named by an ignore
+        path is the answer, as it was before the selection existed: a package
+        whose only lockfile the walk left out (a ``.gitignore`` that lists
+        ``package-lock.json``, the common library layout) is still audited,
+        where refusing it skipped the package with nothing recorded. A lockfile
+        an ignore path named is never the answer. With no selection recorded
+        for the tree the filesystem decides. A link of a lockfile's name is
+        taken as it is found (unless an ignore path named it): one that
+        resolves to nothing counts as the lockfile, and the package is then
+        refused in ``scan()`` with the link named and its reason, where reading
+        it as "no lockfile" passed the package over with nothing recorded.
         """
         parent = Path(package_file).parent
         kept: Set[Path] | None = None
@@ -707,6 +712,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         ]
         if holding:
             _, (kept, ignored) = max(holding, key=lambda item: len(item[0].parts))
+        unlisted: List[Path] = []
         for name in self.LOCKFILE_NAMES:
             candidate = parent.joinpath(name)
             if candidate in ignored:
@@ -716,9 +722,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             if not candidate.exists():
                 continue
             if kept is not None and candidate not in kept:
+                unlisted.append(candidate)
                 continue
             return candidate
-        return None
+        return unlisted[0] if unlisted else None
 
     def nothing_to_scan_reason(self) -> str | None:
         """None when either tree holds a package.json with a lockfile beside it.
