@@ -1520,17 +1520,24 @@ def run_ash_scan_cli_command(
         # none; silently ignoring --workspace-config would scan with no policy
         # for someone who believes a severity ceiling is in force. The policy
         # file is the one option here with an environment variable, so the
-        # refusal names it: with ASH_WORKSPACE_CONFIG exported, every scan
+        # refusal names the source the value came from, which click records
+        # (_from_environment): with ASH_WORKSPACE_CONFIG exported, every scan
         # outside workspace mode was refused for a flag the command line did
-        # not carry.
+        # not carry, and naming both sources at once told the operator who
+        # passed the flag to look for a variable that was not set.
+        policy_from_environment = _from_environment(ctx, "workspace_config")
         offending = [
             flag
             for flag, given in (
                 ("--dry-run", dry_run),
                 ("--allow-missing-projects", allow_missing_projects),
                 (
-                    "--workspace-config (or ASH_WORKSPACE_CONFIG in the environment)",
-                    workspace_config is not None,
+                    "ASH_WORKSPACE_CONFIG in the environment",
+                    workspace_config is not None and policy_from_environment,
+                ),
+                (
+                    "--workspace-config",
+                    workspace_config is not None and not policy_from_environment,
                 ),
             )
             if given
