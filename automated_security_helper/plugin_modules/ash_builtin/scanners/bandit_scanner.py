@@ -287,12 +287,33 @@ def _spelled_path(text: str, *, uri: bool) -> str:
     Unquoting the key too read a file named ``x%41.py`` as ``xA.py``, so a
     skipped file with a ``%`` in its name was counted as scanned and two
     different files could collide.
+
+    On Windows ``to_uri`` spells an absolute path as ``file:///C:/x.py`` and a
+    UNC path as ``file://server/share/x.py`` (``PureWindowsPath.as_uri``), while
+    the key is the path as walked, ``C:\\x.py`` and ``\\\\server\\share\\x.py``.
+    Dropping the prefix alone left ``/C:/x.py`` against ``C:/x.py`` and
+    ``server/share/x.py`` against ``//server/share/x.py``, so no skipped file
+    matched its key there and every one was counted as scanned.
     """
     from urllib.parse import unquote
 
     spelled = text
     if uri:
-        spelled = unquote(spelled, errors="surrogateescape").removeprefix("file://")
+        spelled = unquote(spelled, errors="surrogateescape")
+        if spelled.startswith("file://"):
+            spelled = spelled[len("file://") :]
+            if (
+                len(spelled) >= 3
+                and spelled[0] == "/"
+                and spelled[1].isascii()
+                and spelled[1].isalpha()
+                and spelled[2] == ":"
+            ):
+                # ``file:///C:/x.py``: the key starts at the drive letter.
+                spelled = spelled[1:]
+            elif not spelled.startswith("/"):
+                # ``file://server/share/x.py``: the key is ``\\server\share\x.py``.
+                spelled = "//" + spelled
     spelled = spelled.replace("\\", "/")
     while spelled.startswith("./"):
         spelled = spelled[2:]
@@ -1636,6 +1657,32 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 )
             entries.append(spelled)
         return entries
+
+    def _invocation_extras(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: Path,
+    ) -> dict:
+        """bandit's ``toolConfigurationNotifications``, carried into ASH's invocation.
+
+        The base replaces ``runs[0].invocations`` with one ASH ``Invocation``
+        before ``_post_process_sarif`` runs, and carries over only the tool's
+        ``toolExecutionNotifications``. bandit names the files it could not parse
+        in ``toolConfigurationNotifications`` (``formatters/sarif
+        .add_skipped_file_notifications``, 1.9.4), so with them dropped the
+        skipped set ``_record_scanned_files`` read was always empty in a real
+        scan, and a target whose every Python file failed to parse was still
+        graded PASSED with zero findings.
+        """
+        notifications: List[Any] = []
+        for own in sarif_report.runs[0].invocations or []:
+            notes = getattr(own, "toolConfigurationNotifications", None)
+            if notes:
+                notifications.extend(notes)
+        if not notifications:
+            return {}
+        return {"toolConfigurationNotifications": notifications}
 
     def _post_process_sarif(
         self,

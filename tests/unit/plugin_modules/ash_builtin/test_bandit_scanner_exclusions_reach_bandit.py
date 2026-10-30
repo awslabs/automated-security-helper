@@ -51,6 +51,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     BanditScanner,
     BanditScannerConfig,
     BanditScannerConfigOptions,
+    _spelled_path,
     bandit_exclude_globs,
     bandit_excluded_path_globs,
 )
@@ -408,6 +409,55 @@ def test_a_target_whose_every_file_failed_to_parse_is_not_passed(tmp_path):
 
     with pytest.raises(ScannerError, match="scanned no file"):
         scanner._record_scanned_files(_report(source, [], ["a.py"]), [], source)
+
+
+def test_the_skipped_files_are_still_read_after_the_invocation_record(tmp_path):
+    """The scan records ASH's own invocation before the skipped-file count runs,
+    and that record replaced bandit's invocations, which is where bandit names
+    the files it could not parse. Read in the scan's own order, every skipped
+    file counted as scanned and an all-syntax-error target graded PASSED."""
+    source = _tree(tmp_path, ["a.py"])
+    scanner = _scanner(source, tmp_path)
+    report = _report(source, [], ["a.py"])
+
+    scanner._inject_invocation(report, ["bandit"], source)
+    with pytest.raises(ScannerError, match="scanned no file"):
+        scanner._post_process_sarif(report, ["bandit"], source)
+
+    [invocation] = report.runs[0].invocations
+    [note] = invocation.toolConfigurationNotifications
+    uri = note.locations[0].physicalLocation.artifactLocation.uri
+    assert uri.endswith("/a.py")
+
+
+def test_a_parsed_file_is_still_counted_after_the_invocation_record(tmp_path):
+    source = _tree(tmp_path, ["a.py", "b.py"])
+    scanner = _scanner(source, tmp_path)
+    report = _report(source, ["b.py"], ["a.py"])
+
+    scanner._inject_invocation(report, ["bandit"], source)
+    scanner._post_process_sarif(report, ["bandit"], source)
+
+    assert scanner.targets_attempted == 1
+
+
+@pytest.mark.parametrize(
+    ("uri", "key"),
+    [
+        ("file:///C:/proj/x.py", "C:\\proj\\x.py"),
+        ("file://server/share/proj/x.py", "\\\\server\\share\\proj\\x.py"),
+        ("file:///home/u/proj/x.py", "/home/u/proj/x.py"),
+        ("proj/x%41.py", "proj/x%41.py"),
+    ],
+    ids=["drive", "unc", "posix", "relative-encoded"],
+)
+def test_a_skipped_files_uri_spells_the_same_path_as_its_metrics_key(uri, key):
+    """bandit spells a skipped file as ``to_uri(fname)`` and its metrics key as
+    ``fname`` walked; on Windows the URI of an absolute path starts
+    ``file:///C:/`` and a UNC path's ``file://server/``, which dropping the
+    prefix alone left as ``/C:/...`` and ``server/...`` against keys spelled
+    ``C:/...`` and ``//server/...``."""
+    assert _spelled_path(uri, uri=True) == _spelled_path(key, uri=False)
 
 
 def test_a_skipped_file_with_a_percent_in_its_name_is_told_from_its_decoded_twin(
