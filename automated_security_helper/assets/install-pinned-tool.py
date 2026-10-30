@@ -628,24 +628,16 @@ def _prepare_executable(staged: Path, final: Path) -> Path:
     renames only that file over it. The rename replaces a symlink with the new
     file instead of writing through it.
 
-    The file is renamed into place when both directories share a filesystem (a
-    Docker overlay, where the staging directory and ``/usr/local/bin`` are one
-    mount) and copied only when the rename fails with EXDEV, so the usual case
-    neither reads nor writes the 80 MB twice. Returns the file beside ``final``,
-    or leaves nothing behind and raises.
-
-    Known limit, a row for the owner: a renamed file keeps the inode it had in the
-    staging directory, so it keeps that directory's SELinux label (``tmp_t`` or
-    ``user_tmp_t``) and none of ``final.parent``'s default ACLs or setgid group,
-    which a file created there would have received. The copy this replaced gave
-    the destination's attributes. In the image build that does not matter (no
-    SELinux, one user). On an SELinux-enforcing host (RHEL family, where ``/tmp``
-    is usually on the root filesystem) a binary installed to ``/usr/local/bin``
-    this way can be refused by a confined domain until ``restorecon`` is run on
-    it. The cheapest cure is to stage the extraction under ``final.parent``
-    instead of the system temp directory, so every file is created with the
-    destination's attributes; it moves the 80 MB of extraction writes onto
-    ``final``'s filesystem, which is why it is not done here.
+    The bytes are always copied, never renamed from ``staged``, even when both
+    directories share a filesystem. The file beside ``final`` is created by
+    ``mkstemp`` in ``final.parent``, so it gets that directory's SELinux label,
+    default ACLs and setgid group; a file renamed in from the staging directory
+    would keep that directory's label (``tmp_t`` or ``user_tmp_t``) and none of
+    the others, and on an SELinux-enforcing host a binary installed to
+    ``/usr/local/bin`` that way can be refused by a confined domain until
+    ``restorecon`` is run on it. The cost is one more read and write of the 80 MB
+    at install time. Returns the file beside ``final``, or leaves nothing behind
+    and raises.
     """
     descriptor, partial_name = tempfile.mkstemp(
         prefix=f".{final.name}.", suffix=".partial", dir=final.parent
@@ -653,12 +645,7 @@ def _prepare_executable(staged: Path, final: Path) -> Path:
     os.close(descriptor)
     partial = Path(partial_name)
     try:
-        try:
-            os.replace(staged, partial)
-        except OSError as exc:
-            if exc.errno != errno.EXDEV:
-                raise
-            shutil.copyfile(staged, partial)
+        shutil.copyfile(staged, partial)
         partial.chmod(0o755)
     except BaseException:
         partial.unlink(missing_ok=True)

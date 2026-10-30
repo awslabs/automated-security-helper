@@ -15,8 +15,9 @@ Each class pins one way the install could leave the destination wrong:
   failed extraction left the new release's license directory beside an old binary.
 * They were still published before the executable was copied beside its destination,
   so a copy that ran out of space (ENOSPC, EIO, EACCES) left the same state. The copy
-  now comes first and only a rename follows the publish. The staged file is renamed
-  into place when both sit on one filesystem and copied only across filesystems.
+  now comes first and only a rename follows the publish. The staged file is always
+  copied into a file made beside the destination, never renamed in from the staging
+  directory, so the file has the destination directory's label, ACLs and group.
 * Two installs of one tool with ``third_party_dir`` set: the one that loses the
   license publish finds the same files in place and still installs the binary.
 * ``publish_third_party`` deleted the old license directory before the move, and
@@ -36,6 +37,7 @@ import io
 import os
 import shutil
 import tarfile
+import tempfile
 import types
 import zipfile
 from pathlib import Path
@@ -410,54 +412,54 @@ class TestPreparingTheExecutable:
         (tmp_path / "bin").mkdir()
         return staged
 
-    def test_a_staged_file_on_the_same_filesystem_is_renamed_not_copied(
-        self, tmp_path, monkeypatch
-    ):
+    def test_a_staged_file_on_the_same_filesystem_is_copied_not_renamed(self, tmp_path):
         staged = self._staged(tmp_path)
-        copies: list = []
-        monkeypatch.setattr(shutil, "copyfile", lambda *a, **k: copies.append(a))
 
         partial = installer._prepare_executable(staged, tmp_path / "bin" / "demo")
 
-        assert copies == []
         assert partial.parent == tmp_path / "bin"
         assert partial.read_bytes() == _PAYLOAD
-        assert not staged.exists()
+        assert staged.read_bytes() == _PAYLOAD, "the staged file was renamed away"
         if os.name != "nt":
             assert partial.stat().st_mode & 0o777 == 0o755
 
-    def test_a_cross_filesystem_rename_falls_back_to_a_copy(
+    @pytest.mark.skipif(os.name == "nt", reason="inode numbers are not stable here")
+    def test_the_file_beside_the_destination_keeps_the_inode_made_there(
         self, tmp_path, monkeypatch
     ):
+        """A renamed-in file keeps the staging directory's label and loses the
+        destination directory's default ACLs and group; the file created there has
+        the destination's, so the bytes must be written into it."""
         staged = self._staged(tmp_path)
+        made: list = []
+        real_mkstemp = tempfile.mkstemp
 
-        def replace(src, dst, *args, **kwargs):
-            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        def mkstemp(*args, **kwargs):
+            descriptor, name = real_mkstemp(*args, **kwargs)
+            made.append(os.fstat(descriptor).st_ino)
+            return descriptor, name
 
-        monkeypatch.setattr(os, "replace", replace)
+        monkeypatch.setattr(tempfile, "mkstemp", mkstemp)
 
         partial = installer._prepare_executable(staged, tmp_path / "bin" / "demo")
 
-        assert partial.read_bytes() == _PAYLOAD
-        assert staged.read_bytes() == _PAYLOAD
+        assert made == [partial.stat().st_ino]
 
-    def test_an_error_other_than_exdev_is_not_turned_into_a_copy(
+    def test_a_copy_that_fails_leaves_nothing_beside_the_destination(
         self, tmp_path, monkeypatch
     ):
-        """Control: only the cross-device case is the copy's to handle."""
         staged = self._staged(tmp_path)
-        copies: list = []
-        monkeypatch.setattr(shutil, "copyfile", lambda *a, **k: copies.append(a))
 
-        def replace(src, dst, *args, **kwargs):
-            raise PermissionError(errno.EACCES, "Permission denied")
+        def full_disk(src, dst, *args, **kwargs):
+            Path(dst).write_bytes(Path(src).read_bytes()[:4])
+            raise OSError(errno.ENOSPC, "No space left on device")
 
-        monkeypatch.setattr(os, "replace", replace)
+        monkeypatch.setattr(shutil, "copyfile", full_disk)
 
-        with pytest.raises(PermissionError):
+        with pytest.raises(OSError) as raised:
             installer._prepare_executable(staged, tmp_path / "bin" / "demo")
 
-        assert copies == []
+        assert raised.value.errno == errno.ENOSPC
         assert list((tmp_path / "bin").iterdir()) == []
         assert staged.read_bytes() == _PAYLOAD
 
