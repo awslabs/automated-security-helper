@@ -87,13 +87,53 @@ class TestFixedLengthLeadingThatCannotSpanThePrefix:
         assert _down("?roject-a/src/x.py", "project-a") == "src/x.py"
         _contract_holds("?roject-a/src/x.py", "project-a", "src/x.py")
 
-    def test_a_leading_whose_separator_lands_inside_the_prefix_is_still_refused(
-        self,
+    @pytest.mark.parametrize(
+        "pattern,prefix",
+        [
+            # The separator is the one between "a" and "b", so "src" would have
+            # to be "b".
+            ("?/src/x.py", "a/b"),
+            # Written for the project "docs", pushed to "apps/web": the same
+            # shape one component deeper, which refused the whole scan.
+            ("????/src/x.py", "apps/web"),
+            ("?/src/x.py", "a/b/c"),
+        ],
+    )
+    def test_a_separator_inside_the_prefix_then_another_name_is_none(
+        self, pattern, prefix
     ):
-        """``?`` over ``a/b``: the pattern's separator is the one between ``a``
-        and ``b``, so the remainder would have to absorb ``b``. Still refused."""
-        with pytest.raises(WorkspacePatternError):
-            _down("?/src/x.py", "a/b")
+        """What follows the separator starts at the prefix's next component, and
+        a plain name that is not that component matches nothing under the
+        prefix: a pattern about another project, as for the rows above."""
+        converted = _down(pattern, prefix)
+
+        assert converted is None
+        _contract_holds(pattern, prefix, converted)
+
+    def test_an_ignore_path_of_that_shape_is_none_too(self):
+        converted = _down("?/vendor", "a/b", kind=IGNORE_PATH)
+
+        assert converted is None
+        for path in PROBE_PATHS + ["vendor/x.py", "sub/vendor/x.py", "vendor"]:
+            assert ignore_path_matches(f"a/b/{path}", "?/vendor") is False, path
+
+    @pytest.mark.parametrize(
+        "pattern,prefix",
+        [
+            # A glob there can absorb the rest of the prefix.
+            ("?/*/x.py", "a/b"),
+            # The next component itself: what is left past it has to be rewritten
+            # for the project, which no rule here does.
+            ("?/b/src/x.py", "a/b"),
+        ],
+    )
+    def test_a_separator_inside_the_prefix_that_the_remainder_may_absorb_is_refused(
+        self, pattern, prefix
+    ):
+        with pytest.raises(WorkspacePatternError) as excinfo:
+            _down(pattern, prefix)
+
+        assert "fixed number of characters" in str(excinfo.value)
 
     def test_a_remainder_the_literal_reading_widens_is_refused(self):
         """The matcher reads a path equal to the pattern's text as a match

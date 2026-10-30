@@ -176,8 +176,11 @@ reasoning about glob semantics alone:
   ``sub/src/x.py``. With ``**`` in the pattern this rule does not apply: there a
   ``?`` stays inside one component, so ``???/**`` covers nothing in ``a/b``. One
   that cannot span the prefix (``?pi/src/x.py`` over ``services``: the pattern's
-  separator would have to land on the ``v``), or that alone would match only the
-  bare prefix, is ``None``, like a literal anchored elsewhere. One whose remainder
+  separator would have to land on the ``v``), whose separator lands inside the
+  prefix but whose remainder opens with a plain name other than the prefix's next
+  component (``?/src/x.py`` over ``a/b``: the ``src`` would have to be ``b``), or
+  that alone would match only the bare prefix, is ``None``, like a literal
+  anchored elsewhere. One whose remainder
   is a glob that does not match its own text (``?pi/[x].py``) is refused: the
   matcher reads a path equal to a pattern's text as a match before any glob, so
   project-side ``[x].py`` would also cover the file ``[x].py``.
@@ -203,9 +206,11 @@ put it here:
    component's span is pinned to neither end. ``*b*`` over project ``a/b`` is
    satisfied by the prefix supplying the ``b``, so no project-relative pattern
    reproduces it.
-4. A fixed-length leading that does not span the prefix exactly (``?`` over
-   ``a/b``, ``?????????`` alone). The pattern's separator can land INSIDE the
-   prefix, or the verdict rests on the joined path's total length --
+4. A fixed-length leading that does not span the prefix exactly and is not
+   shown to match nothing (``?/*/x.py`` or ``?/b/src/x.py`` over ``a/b``,
+   ``?????????`` alone). The pattern's separator can land INSIDE the prefix and
+   the remainder can absorb the rest of it, or the match rests on the
+   joined path's total length --
    ``?????????`` matches ``api/x.txt`` (nine characters) while matching neither
    ``api`` nor ``x.txt``.
 5. A literal component after the leading wildcard that also matches part of the
@@ -677,6 +682,18 @@ def _down_convert_unanchored(
             # separator sits inside the project path, and that is refused below:
             # the remainder would have to absorb the rest of the prefix.)
             return None
+        if width < len(joined) and rest and not _is_glob_component(rest[0]):
+            # Both hold: the pattern's separator is the one inside the prefix, so
+            # what follows it starts at the next component of the prefix. A
+            # remainder that opens with a plain name matches there only when the
+            # name is that component, whatever comes after it and whether the
+            # entry is a suppression or an ignore path. Another name matches
+            # nothing under this prefix: a pattern about another project, as the
+            # arms above read one. A glob there could absorb the rest of the
+            # prefix, and an equal name leaves the remainder to be rewritten
+            # past it; both are refused below.
+            if rest[0] != joined[width + 1 :].split("/", 1)[0]:
+                return None
         if width == len(joined):
             if not rest or not fnmatch.fnmatchcase(joined, leading):
                 # The leading alone matches only the bare prefix, which names no
