@@ -106,6 +106,44 @@ def _workspace(tmp_path, *projects) -> WorkspaceResults:
     )
 
 
+def _one_medium_finding_model(project: "str | None") -> AshAggregatedResults:
+    """One MEDIUM (SARIF ``warning``) bandit finding, attributed to *project*
+    when one is named; no recorded config, so the scanner resolver grades at
+    ASH's default."""
+    properties = {"scanner_name": "bandit"}
+    if project is not None:
+        properties["workspace_project"] = project
+    model = AshAggregatedResults()
+    model.ash_config = None
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "ASH"}},
+                    "results": [
+                        {
+                            "ruleId": "RULE-MEDIUM",
+                            "level": "warning",
+                            "message": {"text": "a medium finding"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": "src/a.py"}
+                                    }
+                                }
+                            ],
+                            "properties": properties,
+                        }
+                    ],
+                    "invocations": [],
+                }
+            ],
+        }
+    )
+    return model
+
+
 class TestAWorkspaceFindingIsGradedByItsProjectsGate:
     @pytest.fixture
     def model(self, tmp_path) -> AshAggregatedResults:
@@ -175,6 +213,47 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         assert rows, "the fixture must exercise the scanner-row path"
         assert sum(row["actionable"] for row in rows) == 0, rows
         assert emitter.get_scan_summary()["actionable"] == 1
+
+    def test_the_title_follows_the_recount_when_a_project_gate_is_stricter(
+        self, tmp_path
+    ):
+        """A project gated at HIGH with one MEDIUM finding is not "Review required".
+
+        The recount above fixed the headline's number and left its title on the
+        rows: the bandit row, graded at ASH's default MEDIUM, reads FAILED, so
+        the summary read title "Review required", tone danger, over the
+        description "0 findings at or above the configured scanner
+        thresholds". The title follows the recount now, as the description and
+        the cards already did.
+        """
+        model = _one_medium_finding_model("svc")
+        model.workspace = _workspace(
+            tmp_path, _project("svc", severity_threshold="HIGH")
+        )
+        model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        rows = emitter.get_scanner_results()
+        assert any(row["status"] == "FAILED" for row in rows), rows
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["actionable"] == 0
+        assert summary["title"] == "No actionable findings", summary
+        assert summary["tone"] == "success", summary
+
+    def test_the_same_finding_in_a_single_directory_scan_needs_review(self):
+        """The control: with no workspace the default gate grades it, and the
+        title says so."""
+        model = _one_medium_finding_model(None)
+        model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        assert any(row["status"] == "FAILED" for row in emitter.get_scanner_results())
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["actionable"] == 1
+        assert summary["title"] == "Review required", summary
+        assert summary["tone"] == "danger", summary
 
     def test_a_lowercase_recorded_gate_grades_as_its_upper_case_name(self, model):
         """A recorded ``"medium"`` grades at MEDIUM in every report.

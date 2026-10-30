@@ -337,6 +337,10 @@ class ReportContentEmitter:
         }
         actionable = sum(result["actionable"] for result in results)
         suppressed = sum(result["suppressed"] for result in results)
+        # A FAILED row is a scanner the resolver graded as carrying findings at
+        # or above its threshold; the "Review required" title reads it below so
+        # a run whose rows fail reads as such even when the counts disagree.
+        rows_failed = any(result["status"] == "FAILED" for result in results)
         if is_workspace_scan(self.model):
             # The scanner rows grade each finding by the scanner resolver's
             # answer, which with the merged file's missing ash_config is ASH's
@@ -348,6 +352,14 @@ class ReportContentEmitter:
             actionable = sum(
                 self.is_finding_actionable(vuln) for vuln in self.flat_vulns
             )
+            # The rows' FAILED status is that same resolver grading, so it
+            # cannot decide the title here either: a project whose recorded
+            # gate is stricter than ASH's default (HIGH, with one MEDIUM
+            # finding) has a FAILED bandit row and a recount of 0, and reading
+            # the row made the headline "Review required" over "0 findings at
+            # or above the configured scanner thresholds". The title follows
+            # the recount, the one grading the whole document shares.
+            rows_failed = False
         if not results:
             # Imported SARIF can contain findings without execution metadata.
             # Count those findings while making no completion claim.
@@ -450,7 +462,7 @@ class ReportContentEmitter:
             title, tone = "Scan needs attention", gap_tone
             description = f"{actionable} actionable {finding_label}. Content database freshness needs review."
             next_step = "Review the database notices, refresh the affected scanners, and scan again."
-        elif actionable or any(result["status"] == "FAILED" for result in results):
+        elif actionable or rows_failed:
             title, tone = "Review required", "danger"
             description = f"{actionable} {finding_label} at or above the configured scanner thresholds."
             next_step = "Review findings by severity, then inspect the source."
