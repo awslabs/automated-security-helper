@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import errno
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import List
 
@@ -224,3 +226,125 @@ def test_ending_the_stdio_session_waits_for_a_sibling_servers_scan(root) -> None
     assert kept, "the stdio workspace was removed under the sibling server's scan"
     assert ended_after is True
     assert not sandbox.exists()
+
+
+# ---------------------------------------------------------------------------
+# The gate's wait for the presence lock is bounded. Another server holds the
+# lock through a whole tree removal (its sweep, its shutdown ending every
+# session in turn); the gate runs on one of the few delivery threads while it
+# holds the session's change, so a wait as long as that holder keeps the lock
+# held the thread and refused this server's own scans of the session meanwhile.
+# A lock still held at the end of the bounded wait is answered as "busy", the
+# same retryable refusal the caller gives for a scan.
+# ---------------------------------------------------------------------------
+
+#: Slack over the gate's own bound for a loaded host. The gate that waited for
+#: as long as it takes never returned while the holder lived, so the bound this
+#: asserts is finite against infinite, not a timing guess.
+_SLACK_SECONDS = 3.0
+
+
+@pytest.fixture
+def another_servers_lock(root: Path):
+    """The presence lock file, held exclusively as another server would hold it.
+
+    Held on a handle of this process's own: the lock calls the product uses
+    refuse a second handle on the same file whoever opened it, so the gate under
+    test meets the same refusal it would meet from another process.
+    """
+    registry = root / sessions.SCAN_PRESENCE_DIR
+    registry.mkdir(exist_ok=True)
+    handle = open(registry / sessions._SCAN_PRESENCE_LOCK, "a+b")
+    try:
+        sessions._lock_blocking(handle)
+        yield handle
+    finally:
+        handle.close()
+
+
+def _in_the_background(call) -> "tuple[threading.Thread, dict]":
+    result: dict = {}
+
+    def run() -> None:
+        started = time.monotonic()
+        try:
+            result["value"] = call()
+        except BaseException as error:  # reported by the test
+            result["error"] = error
+        result["seconds"] = time.monotonic() - started
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, result
+
+
+def test_the_gate_answers_busy_within_the_bound_while_another_server_holds_the_lock(
+    root, another_servers_lock
+) -> None:
+    _sandbox(root, REPLICATED)
+    bound = sessions._BUSY_GATE_LOCK_WAIT_SECONDS
+
+    asking, result = _in_the_background(
+        lambda: sessions.a_scan_in_another_server_holds(REPLICATED)
+    )
+    asking.join(timeout=bound + _SLACK_SECONDS)
+
+    assert not asking.is_alive(), (
+        "the gate was still waiting for the lock another server holds "
+        f"{bound + _SLACK_SECONDS} s after it asked"
+    )
+    assert "error" not in result, result
+    assert result["value"] is True, "a lock another server holds was read as free"
+    assert result["seconds"] >= bound * 0.5, (
+        "the gate gave up before asking for the lock for about the bound"
+    )
+
+
+def test_a_change_is_refused_as_busy_while_another_server_holds_the_lock(
+    root, another_servers_lock
+) -> None:
+    """The caller's side of the same answer: the change is refused with the
+    retryable busy error, holds nothing afterwards, and goes on once the lock
+    is free."""
+    _sandbox(root, REPLICATED)
+    bound = sessions._BUSY_GATE_LOCK_WAIT_SECONDS
+
+    def change() -> None:
+        with sd._no_scan_running(REPLICATED):
+            pytest.fail("the change began while another server held the lock")
+
+    changing, result = _in_the_background(change)
+    changing.join(timeout=bound + _SLACK_SECONDS)
+
+    assert not changing.is_alive(), "the change was still waiting for the lock"
+    assert isinstance(result.get("error"), sd.SourceDeliveryBusyError), result
+    session = sessions.get_default_registry().session_for(REPLICATED)
+    assert session.try_claim_scan(), "the refused change kept the session"
+    session.release_scan()
+    another_servers_lock.close()
+    with sd._no_scan_running(REPLICATED):
+        pass  # the change goes on once the lock is free
+
+
+def test_registering_a_scan_still_waits_for_the_lock_the_gate_gives_up(
+    root, another_servers_lock
+) -> None:
+    """The bound is the gate's alone: a scan's registration waits for as long
+    as it takes, so no scan runs unregistered because the lock was held for a
+    second (the sweep's bound has the same guard; this pins the gate's)."""
+    done = threading.Event()
+
+    def take_the_guard_the_way_a_scan_does() -> None:
+        with sessions._scan_presence_guard(root):
+            pass
+        done.set()
+
+    waiter = threading.Thread(target=take_the_guard_the_way_a_scan_does, daemon=True)
+    waiter.start()
+    assert not done.wait(sessions._BUSY_GATE_LOCK_WAIT_SECONDS + 0.5), (
+        "a scan's registration gave the lock up instead of waiting for it"
+    )
+    another_servers_lock.close()
+    assert done.wait(_SLACK_SECONDS * 2), (
+        "a scan's registration did not take the lock once it was free"
+    )

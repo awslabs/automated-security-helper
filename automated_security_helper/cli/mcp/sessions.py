@@ -1557,6 +1557,17 @@ _SCAN_PRESENCE_LOCK = PRESENCE_LOCK_NAME
 #: a scan that ran unregistered could have its tree removed under it.
 _SWEEP_LOCK_WAIT_SECONDS = 1.0
 
+#: How long the busy gate of a change to a session's tree
+#: (:func:`a_scan_in_another_server_holds`) waits for the scan presence lock
+#: another server holds, in seconds. The gate runs on one of the server's few
+#: delivery threads while it holds the session's change, so a wait as long as
+#: the holder keeps the lock (another server's sweep deleting a tree, or its
+#: shutdown ending every session in turn) would hold that thread and refuse
+#: this server's own scans of the session meanwhile. A lock still held at the
+#: end of the wait is answered as "busy", which the caller reports as the
+#: retryable refusal it reports for a scan.
+_BUSY_GATE_LOCK_WAIT_SECONDS = _SWEEP_LOCK_WAIT_SECONDS
+
 #: How often a bounded wait asks for the lock again.
 _LOCK_POLL_SECONDS = 0.05
 
@@ -1611,7 +1622,8 @@ def _scan_presence_guard(root: Path, *, wait: Optional[float] = None) -> Iterato
 
     ``wait`` is None to wait for as long as it takes (registering a scan), or the
     seconds to ask for the lock before giving up with :class:`_PresenceLockHeld`
-    (the TTL sweep, ``_SWEEP_LOCK_WAIT_SECONDS``).
+    (the TTL sweep, ``_SWEEP_LOCK_WAIT_SECONDS``; the busy gate of a change to a
+    session's tree, ``_BUSY_GATE_LOCK_WAIT_SECONDS``).
     """
     registry = root / SCAN_PRESENCE_DIR
     make_private_dir(registry)
@@ -1865,6 +1877,15 @@ def a_scan_in_another_server_holds(session_id: str) -> bool:
     once. As :func:`scan_presence_held` says, False is "no scan is known to
     hold", not permission; what holds the session for the change is the
     session's change.
+
+    Bounded: the guard is asked for ``_BUSY_GATE_LOCK_WAIT_SECONDS``, not for
+    as long as another server keeps it. The gate runs on a delivery thread
+    while it holds the session's change, so a wait as long as another server's
+    sweep (a whole tree removal under the guard) or shutdown (every session
+    ended in turn) would hold that thread and refuse this server's own scans
+    of the session meanwhile. A lock still held at the end of the wait answers
+    True: "busy", not "a scan was seen", which the caller reports as the same
+    retryable refusal, so the client asks again rather than the thread waits.
     """
     try:
         root = _workspace_root()
@@ -1882,8 +1903,14 @@ def a_scan_in_another_server_holds(session_id: str) -> bool:
     if not has_workspace:
         return False
     try:
-        with _scan_presence_guard(root):
+        with _scan_presence_guard(root, wait=_BUSY_GATE_LOCK_WAIT_SECONDS):
             return _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id)
+    except _PresenceLockHeld:
+        # Another server kept the lock for the whole wait: whatever it is doing
+        # under it (a sweep's removal, a shutdown's ends), the registry cannot
+        # be read now, and a change that went on regardless could replace the
+        # tree under a scan that holds an entry behind that lock.
+        return True
     except OSError as exc:
         _warn_guard_refused_once(
             root,
