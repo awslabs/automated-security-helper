@@ -2118,27 +2118,44 @@ class Evaluator:
     def _call_scope(self, module: _Module, call: ast.Call) -> Optional[_Scope]:
         """The scope an argument of ``call`` is read in, or None.
 
-        The module's for a call at module level. For a call inside a function,
-        that function's, with each function around it as a parent, so a name the
-        function binds (a parameter, an assignment, a loop target) is read as the
-        function's own and not as the module name it shadows; a parameter, whose
-        value this scope does not carry, is unread. A class body between a method
-        and the module is passed over, since its names are not in scope inside the
-        method. None for a call inside a lambda, a comprehension or a class body
-        itself, where a name can be bound by something this reader does not follow.
+        The module's for a call at module level. For a call inside a function's
+        body, that function's, with each function around it as a parent, so a
+        name the function binds (a parameter, an assignment, a loop target) is
+        read as the function's own and not as the module name it shadows; a
+        parameter, whose value this scope does not carry, is unread. A call in a
+        function's header (a default value, a decorator, an annotation) is read in
+        the scope around the function, where Python evaluates it, and so is a call
+        in a class's bases, keywords or decorators. A class body between a method
+        and the module is passed over, since its names are not in scope inside
+        the method. None for a call inside a lambda's body, a comprehension or a
+        class body itself, where a name can be bound by something this reader
+        does not follow.
         """
         parents = self._parent_map(module)
         funcs: list[ast.AST] = []
+        child: ast.AST = call
         node = parents.get(id(call))
         while node is not None:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                funcs.append(node)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                in_header = (
+                    child is node.args
+                    or child is getattr(node, "returns", None)
+                    or any(child is d for d in getattr(node, "decorator_list", []))
+                )
+                if not in_header:
+                    if isinstance(node, ast.Lambda):
+                        return None
+                    funcs.append(node)
             elif isinstance(node, ast.ClassDef):
-                if not funcs:
+                in_header = any(
+                    child is n
+                    for n in [*node.bases, *node.keywords, *node.decorator_list]
+                )
+                if not in_header and not funcs:
                     return None
             elif isinstance(node, _OPAQUE_SCOPES):
                 return None
-            node = parents.get(id(node))
+            child, node = node, parents.get(id(node))
         scope = _Scope(module=module)
         for func in reversed(funcs):
             scope = _Scope(
