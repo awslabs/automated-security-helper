@@ -36,6 +36,9 @@ from tests.utils.helpers import mark_git_checkout
 pytestmark = pytest.mark.unit
 
 PLUGIN = "my-plugin-scanner"
+#: The operator's spelling of the plugin's section, and a repository's respelling
+#: of it, which the lookup folds onto the same plugin.
+SPELLINGS = (PLUGIN, "MyPluginScanner")
 
 
 def _trusted_pin() -> AshConfig:
@@ -60,30 +63,42 @@ def test_the_operators_pin_is_restored_when_the_section_omits_it(tmp_path):
     assert _pin_of(config) == "==1.2.3"
 
 
-def test_the_operators_pin_is_restored_when_the_section_has_no_options(tmp_path):
-    config = AshConfig.model_validate({"scanners": {PLUGIN: {"enabled": True}}})
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_the_operators_pin_is_restored_when_the_section_has_no_options(
+    tmp_path, spelling
+):
+    """The pin lands in the section as the repository spelled it, the one the
+    plugin reads, under the operator's spelling and a respelling alike."""
+    config = AshConfig.model_validate({"scanners": {spelling: {"enabled": True}}})
 
     confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
 
+    extra = config.scanners.model_extra or {}
+    assert extra[spelling]["options"]["tool_version"] == "==1.2.3", extra
     assert _pin_of(config) == "==1.2.3"
 
 
-def test_the_operators_pin_is_restored_when_options_is_left_empty(tmp_path):
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_the_operators_pin_is_restored_when_options_is_left_empty(tmp_path, spelling):
     """``options:`` with nothing under it reads as None: no mapping for the pin
     to land in, and no warning either, since nothing was written there. A
     mapping is made for it, as for a section with no options key."""
-    config = AshConfig.model_validate({"scanners": {PLUGIN: {"options": None}}})
+    config = AshConfig.model_validate({"scanners": {spelling: {"options": None}}})
 
     confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
 
+    extra = config.scanners.model_extra or {}
+    assert extra[spelling]["options"]["tool_version"] == "==1.2.3", extra
     assert _pin_of(config) == "==1.2.3"
 
 
-def test_a_non_mapping_options_value_is_named_in_a_warning_and_left(tmp_path):
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_a_non_mapping_options_value_is_named_in_a_warning_and_left(tmp_path, spelling):
     """A plugin section whose ``options`` is not a mapping cannot hold the pin.
     The value is left as written for the plugin to refuse, and a warning names
-    the section and the pin, so the omission is not silent."""
-    config = AshConfig.model_validate({"scanners": {PLUGIN: {"options": "oops"}}})
+    the section, as the repository spelled it, and the pin, so the omission is
+    not silent."""
+    config = AshConfig.model_validate({"scanners": {spelling: {"options": "oops"}}})
     records: List[logging.LogRecord] = []
 
     class _Collect(logging.Handler):
@@ -97,11 +112,11 @@ def test_a_non_mapping_options_value_is_named_in_a_warning_and_left(tmp_path):
     finally:
         ASH_LOGGER.removeHandler(handler)
 
-    section = config.get_plugin_config("scanner", PLUGIN) or {}
+    section = (config.scanners.model_extra or {})[spelling]
     assert section.get("options") == "oops", section
     warnings = [r.getMessage() for r in records if r.levelno == logging.WARNING]
     assert any(
-        f"scanners.{PLUGIN}.options is not a mapping" in w and "tool_version" in w
+        f"scanners.{spelling}.options is not a mapping" in w and "tool_version" in w
         for w in warnings
     ), warnings
 
@@ -166,10 +181,14 @@ def _checkout(tmp_path: Path, repo_text: str) -> Path:
     return checkout
 
 
+@pytest.mark.parametrize("spelling", ["ferret-scan", "ferret_scan", "FerretScan"])
+@pytest.mark.parametrize("written", ["true", '"yes"', "1"])
 def test_a_repository_configs_respect_gitignore_is_the_operators_choice(
-    tmp_path, ash_log
+    tmp_path, ash_log, spelling, written
 ):
-    """The repository's ``true`` is dropped and named in the warning.
+    """The repository's value is dropped and named in the warning, under any
+    spelling of the section the lookup reads as ferret-scan's, and for any
+    value that is not the default: a boolean, text, a number.
 
     ferret-scan is a plugin section, a plain dict holding only what a file
     wrote, and the trusted base (the defaults, no operator config) pins
@@ -178,8 +197,8 @@ def test_a_repository_configs_respect_gitignore_is_the_operators_choice(
     """
     checkout = _checkout(
         tmp_path,
-        "project_name: repo\nscanners:\n  ferret-scan:\n    options:\n"
-        "      respect_gitignore: true\n",
+        f"project_name: repo\nscanners:\n  {spelling}:\n    options:\n"
+        f"      respect_gitignore: {written}\n",
     )
 
     config = resolve_config(source_dir=checkout)
@@ -191,7 +210,7 @@ def test_a_repository_configs_respect_gitignore_is_the_operators_choice(
         r.getMessage()
         for r in ash_log
         if r.levelno == logging.WARNING
-        and "scanners.ferret-scan.options.respect_gitignore" in r.getMessage()
+        and f"scanners.{spelling}.options.respect_gitignore" in r.getMessage()
     ]
     assert warnings, [r.getMessage() for r in ash_log if r.levelno == logging.WARNING]
 
