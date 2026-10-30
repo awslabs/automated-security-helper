@@ -1133,6 +1133,22 @@ def _rename_or_copy(src: Path, dst: Path) -> None:
             raise
 
 
+def _same_files(first: Path, second: Path) -> bool:
+    """Whether two directories hold the same plain files with the same bytes."""
+    try:
+        names = sorted(p.name for p in first.iterdir())
+        if names != sorted(p.name for p in second.iterdir()):
+            return False
+        return all(
+            (first / name).is_file()
+            and (second / name).is_file()
+            and (first / name).read_bytes() == (second / name).read_bytes()
+            for name in names
+        )
+    except OSError:
+        return False
+
+
 def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     """Move a staged tool directory into ``third_party_dir``, world-readable.
 
@@ -1160,13 +1176,22 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
         incoming.chmod(0o755)
         old = work / "old"
         if final.is_symlink() or final.exists():
-            _rename_or_copy(final, old)
+            try:
+                _rename_or_copy(final, old)
+            except FileNotFoundError:
+                # A concurrent publish of this tool moved it aside first.
+                pass
         try:
             os.replace(incoming, final)
-        except BaseException:
-            if old.is_symlink() or old.exists():
-                _rename_or_copy(old, final)
-            raise
+        except BaseException as exc:
+            # A concurrent publish of the same tool can have put its directory at
+            # the name first, and a directory cannot be renamed onto a populated
+            # one. The files are the same pinned files, so what is there is what
+            # this call was asked to publish and its own copy is surplus.
+            if not (isinstance(exc, OSError) and _same_files(incoming, final)):
+                if old.is_symlink() or old.exists():
+                    _rename_or_copy(old, final)
+                raise
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print(f"Installed {staged.name} license files to {final}", flush=True)
