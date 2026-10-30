@@ -9,7 +9,9 @@ shorter ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_CONVERTERS``. The reference
 pages are built from those lists, and ``discover`` read them without reading the
 errors, so a page built while a group was lost published the survivors as the
 whole set with nothing on it to say so. ``discover`` now retries the lost groups
-the way ``plugins/loader.py`` does and raises for what still fails.
+the way ``plugins/loader.py`` does and raises for what still fails, when the
+failure can shorten the page being built: a group another page lists, or a
+renamed event-handler export, refuses nothing here.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = REPO_ROOT / "scripts"
 REPORTERS = "automated_security_helper.plugin_modules.ash_builtin.reporters"
+EVENT_HANDLERS = "automated_security_helper.plugin_modules.ash_builtin.event_handlers"
 
 
 def _plugin_reference():
@@ -66,7 +69,69 @@ def test_a_group_that_still_fails_to_import_fails_the_reference(
     message = str(caught.value)
     assert REPORTERS in message
     assert "an optional dependency is absent" in message
-    assert "smaller set" in message
+    assert "fewer reporters" in message
+
+
+def test_a_lost_group_refuses_only_the_page_that_lists_it(builtin_only, monkeypatch):
+    """The scanner page lists no reporter, so a lost reporters group cannot
+    shorten it; the refusal is the reporter page's."""
+    reference, ash_builtin = builtin_only
+    still_lost = {REPORTERS: "ImportError: an optional dependency is absent"}
+    monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", dict(still_lost))
+    monkeypatch.setattr(
+        ash_builtin,
+        "retry_failed_plugin_groups",
+        lambda: dict(ash_builtin.ASH_PLUGIN_LOAD_ERRORS),
+    )
+
+    scanners = reference.discover("scanner")
+    converters = reference.discover("converter")
+    with pytest.raises(ImportError):
+        reference.discover("reporter")
+
+    assert scanners and all(plugin.builtin for plugin in scanners)
+    assert converters
+
+
+def test_a_lost_event_handler_export_refuses_no_page(builtin_only, monkeypatch):
+    """A renamed handler export is recorded under the handlers module and the
+    attribute; no reference page lists event handlers."""
+    reference, ash_builtin = builtin_only
+    lost_handler = {
+        f"{EVENT_HANDLERS}.handle_scan_completion_logging": "AttributeError: renamed"
+    }
+    monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", dict(lost_handler))
+    monkeypatch.setattr(
+        ash_builtin,
+        "retry_failed_plugin_groups",
+        lambda: dict(ash_builtin.ASH_PLUGIN_LOAD_ERRORS),
+    )
+
+    for kind in ("scanner", "reporter", "converter"):
+        assert reference.discover(kind), kind
+
+
+def test_a_record_keyed_outside_every_known_group_still_refuses(
+    builtin_only, monkeypatch
+):
+    """A failure the page cannot attribute to another group is read strictly."""
+    reference, ash_builtin = builtin_only
+    monkeypatch.setattr(
+        ash_builtin,
+        "ASH_PLUGIN_LOAD_ERRORS",
+        {f"{reference.BUILTIN_PACKAGE}.extras": "ImportError: no such module"},
+    )
+    monkeypatch.setattr(
+        ash_builtin,
+        "retry_failed_plugin_groups",
+        lambda: dict(ash_builtin.ASH_PLUGIN_LOAD_ERRORS),
+    )
+
+    with pytest.raises(ImportError) as caught:
+        reference.discover("scanner")
+
+    assert "scanner page cannot rule out" in str(caught.value)
+    assert "extras" in str(caught.value)
 
 
 def test_the_record_is_read_from_the_module_not_from_what_the_retry_returns(

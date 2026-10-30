@@ -85,6 +85,16 @@ REGISTRY_LISTS = {
     "reporter": "ASH_REPORTERS",
     "converter": "ASH_CONVERTERS",
 }
+#: The subpackage each plugin group is imported from, under a plugin package
+#: (``ash_builtin._PLUGIN_GROUPS`` names the same four; the record of a lost
+#: group is keyed by that module's dotted path, and a lost event-handler export
+#: by the handlers module's path plus the attribute).
+PLUGIN_GROUP_MODULES = {
+    "scanner": "scanners",
+    "reporter": "reporters",
+    "converter": "converters",
+    "event_handler": "event_handlers",
+}
 
 
 @dataclass
@@ -146,8 +156,13 @@ def plugin_packages() -> list[str]:
     return sorted(names, key=lambda n: (n != BUILTIN_PACKAGE, n))
 
 
-def _refuse_lost_plugin_groups(package: str, module: Any) -> None:
-    """Raise when a group of ``package``'s plugins failed to import.
+def _under(name: str, prefix: str) -> bool:
+    return name == prefix or name.startswith(prefix + ".")
+
+
+def _refuse_lost_plugin_groups(package: str, module: Any, kind: str) -> None:
+    """Raise when a group of ``package``'s plugins the ``kind`` page lists failed
+    to import.
 
     ``ash_builtin`` isolates each plugin group's import and records a failure in
     ``ASH_PLUGIN_LOAD_ERRORS`` instead of raising, so the package imports with a
@@ -157,6 +172,14 @@ def _refuse_lost_plugin_groups(package: str, module: Any) -> None:
     (``retry_failed_plugin_groups``, which ``plugins/loader.py`` calls the same
     way before it reads the lists); a group that still fails is the error the
     page would otherwise hide.
+
+    Only a failure that can shorten THIS page's list refuses it. A record keyed
+    under another group's module (a lost reporters group while the scanner page
+    is built; a renamed event-handler export, keyed under the handlers module)
+    cannot change what this page lists and is left to that group's own page or
+    to the scan. A record keyed anywhere else is not provably about another
+    group, so it refuses the page: a package that records its failures under
+    other names is read strictly rather than trusted.
     """
     retry = getattr(module, "retry_failed_plugin_groups", None)
     if callable(retry):
@@ -175,11 +198,24 @@ def _refuse_lost_plugin_groups(package: str, module: Any) -> None:
             f"mapping of failed module to error text, so the page cannot tell "
             f"whether every plugin group loaded"
         )
-    if errors:
-        failed = "; ".join(f"{name}: {error}" for name, error in sorted(errors.items()))
+    other_groups = [
+        f"{package}.{group}"
+        for page_kind, group in PLUGIN_GROUP_MODULES.items()
+        if page_kind != kind
+    ]
+    relevant = {
+        name: error
+        for name, error in errors.items()
+        if not any(_under(str(name), other) for other in other_groups)
+    }
+    if relevant:
+        failed = "; ".join(
+            f"{name}: {error}" for name, error in sorted(relevant.items())
+        )
         raise ImportError(
-            f"{package} did not load every plugin group, so a page built from it "
-            f"would list a smaller set than ASH ships: {failed}"
+            f"{package} recorded a plugin load failure the {kind} page cannot "
+            f"rule out, so a page built from it could list fewer {kind}s than "
+            f"ASH ships: {failed}"
         )
 
 
@@ -187,16 +223,16 @@ def discover(kind: str) -> list[Plugin]:
     """Every plugin of ``kind`` any package declares, in package then name order.
 
     A package that fails to import is an error, and so is a package that imported
-    with a plugin group missing (``_refuse_lost_plugin_groups``): listing what
-    survived would publish a smaller set than ASH ships with nothing on the page
-    to say so.
+    with the ``kind`` plugin group missing (``_refuse_lost_plugin_groups``):
+    listing what survived would publish a smaller set than ASH ships with nothing
+    on the page to say so.
     """
     attr = REGISTRY_LISTS[kind]
     plugins: list[Plugin] = []
     seen: set[type] = set()
     for package in plugin_packages():
         module = importlib.import_module(package)
-        _refuse_lost_plugin_groups(package, module)
+        _refuse_lost_plugin_groups(package, module, kind)
         for cls in getattr(module, attr, None) or []:
             if cls in seen:
                 continue
