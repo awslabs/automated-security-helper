@@ -18,6 +18,9 @@ configuration's models only: a fixed-choice field elsewhere in the results
 
 from __future__ import annotations
 
+import json
+import re
+
 import jsonschema
 import pytest
 
@@ -67,6 +70,111 @@ def test_a_fixed_choice_field_outside_the_configuration_stays_strict(results_sch
     validator = _validator_for(results_schema, "CycloneDXReport")
     assert validator.is_valid({"bomFormat": "CycloneDX", "specVersion": "1.6"})
     assert not validator.is_valid({"bomFormat": "${BOM_FORMAT}", "specVersion": "1.6"})
+
+
+def test_a_required_fixed_choice_field_does_not_admit_a_reference(results_schema):
+    """A Literal with no default has no default to fall back to.
+
+    The load drops a fixed-choice field that holds a reference and reads the
+    model again; a required field then fails as missing and the whole results
+    file is refused (recorded_config.without_unreadable_references), so the
+    schema refuses it too.
+    """
+    validator = _validator_for(results_schema, "ContentDbStalenessOverride")
+    entry = {
+        "database": "trivy-db",
+        "policy": "warn",
+        "expiration": "2030-01-01",
+        "reason": "upstream paused",
+    }
+    assert validator.is_valid(entry)
+    assert not validator.is_valid({**entry, "policy": "${ASH_DB_POLICY}"})
+    policy = results_schema["$defs"]["ContentDbStalenessOverride"]["properties"][
+        "policy"
+    ]
+    assert "anyOf" not in policy, policy
+
+
+def test_an_output_formats_entry_admits_a_reference(results_schema):
+    """The load drops a whole fixed-choice list that holds a reference entry.
+
+    ``output_formats`` entries are refused by their own validator, as a value
+    error at the entry, and recorded_config._a_choice_refused admits exactly
+    that location, so the list is read as its default. The schema admits the
+    reference on each entry and on the single-value form, beside the enum.
+    """
+    validator = _validator_for(results_schema, "AshConfig")
+    assert validator.is_valid({"output_formats": ["sarif", "${ASH_FORMAT}"]})
+    assert validator.is_valid({"output_formats": "${ASH_FORMAT}"})
+    assert validator.is_valid({"output_formats": ["sarif"]})
+    assert not validator.is_valid({"output_formats": [5]})
+    # The results schema is generated in serialization mode, where the entries
+    # render as the strings a dump writes and the Enum has no definition of its
+    # own; a definition it does have is left as pydantic emits it.
+    enum = results_schema["$defs"].get("ExportFormat")
+    assert enum is None or "anyOf" not in enum, enum
+
+
+def test_control_a_true_false_or_number_field_keeps_refusing_a_reference(
+    results_schema,
+):
+    """The load refuses a reference in a bool or number field as any wrong value."""
+    validator = _validator_for(results_schema, "AshConfig")
+    assert not validator.is_valid({"fail_on_findings": "${ASH_FAIL}"})
+    assert validator.is_valid({"fail_on_findings": False})
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["${X}", "${X:default}", "!ENV ${X}", "${X:a}b}", "${long_name_1:}"],
+)
+def test_the_schema_pattern_and_the_loader_agree_on_a_reference(text):
+    from automated_security_helper.config.recorded_config import _is_reference
+
+    assert re.match(ENV_REFERENCE_JSON_SCHEMA["pattern"], text)
+    assert _is_reference(text)
+
+
+@pytest.mark.parametrize("text", ["BOGUS", "$X", "${}", "MEDIUM", ""])
+def test_the_schema_pattern_and_the_loader_agree_on_a_non_reference(text):
+    from automated_security_helper.config.recorded_config import _is_reference
+
+    assert not re.match(ENV_REFERENCE_JSON_SCHEMA["pattern"], text)
+    assert not _is_reference(text)
+
+
+def test_the_schema_pattern_is_anchored_at_the_end():
+    """The one place the two differ: the loader reads a reference as a prefix.
+
+    ash_config.ENV_REFERENCE_PATTERN is matched with re.match and has no end
+    anchor, so ``${X}BOGUS`` is a reference to the load. The schema's copy
+    ends at the closing brace: the generated document never holds a reference
+    with trailing text, and admitting one would admit any string that starts
+    like a reference.
+    """
+    from automated_security_helper.config.recorded_config import _is_reference
+
+    for text in ("${X}BOGUS", "${A B}"):
+        assert not re.match(ENV_REFERENCE_JSON_SCHEMA["pattern"], text), text
+        assert _is_reference(text), text
+
+
+def test_the_stored_configuration_is_described_in_serialization_mode(results_schema):
+    """The results schema names the configuration model it stores, and keeps
+    the computed fields serialization mode exists for.
+
+    ``ash_config`` is written through a wrap serializer annotated ``Any``; in
+    serialization mode pydantic would describe the field by that annotation and
+    the whole stored configuration, with every reference rule, would read as
+    "anything".
+    """
+    ash_config = results_schema["properties"]["ash_config"]
+    refs = {branch.get("$ref") for branch in ash_config.get("anyOf", [ash_config])}
+    assert "#/$defs/AshConfig" in refs, ash_config
+    assert "AshConfigGlobalSettingsSection" in results_schema["$defs"]
+    assert "skipped_projects" in json.dumps(results_schema), (
+        "the computed field serialization mode exists for is missing"
+    )
 
 
 def test_the_reference_branch_is_the_shared_one(results_schema):

@@ -27,7 +27,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -113,7 +113,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -1037,7 +1037,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -1477,7 +1477,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -1523,25 +1523,6 @@
             }
           },
           "description": "Converter configurations by name."
-        },
-        "extends": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Base config file(s) this config extends: a path, or a list of paths applied in order, relative to this file. Mappings merge key by key; lists and scalars from this file replace the base's. Paths must stay inside the repository being scanned; URLs are refused.",
-          "title": "Extends"
         },
         "external_reports_to_include": {
           "default": [],
@@ -1718,37 +1699,19 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/ExportFormat"
+                "type": "string"
               },
               "type": "array"
             },
             {
-              "$ref": "#/$defs/ExportFormat"
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "default": [],
           "description": "Reports to write, by reporter name (for example sarif, markdown, github-ghas): a list, one name, or names separated by commas. Narrows the enabled reporters; it does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats list on the command line replaces this list.",
           "title": "Output Formats"
-        },
-        "patch": {
-          "anyOf": [
-            {
-              "items": {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list.",
-          "title": "Patch"
         },
         "project_name": {
           "default": "ash-scan",
@@ -2295,7 +2258,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -2705,7 +2668,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -2823,7 +2786,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -2899,12 +2862,12 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
           "default": "ONLINE",
-          "description": "Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning.",
+          "description": "Not used: nothing reads this setting, so it changes neither the container image build nor the scan. To scan offline, pass --offline or set ASH_OFFLINE.",
           "title": "Build Mode"
         },
         "custom_scanners": {
@@ -2925,7 +2888,7 @@
             "type": "array"
           },
           "default": {},
-          "description": "Map of tool names to their installation scripts",
+          "description": "Not used: nothing reads this setting, so no script listed here runs. Map of tool names to their installation scripts.",
           "title": "Tool Install Scripts",
           "type": "object"
         }
@@ -2954,7 +2917,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -3051,7 +3014,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -3134,7 +3097,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -3326,7 +3289,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -3407,7 +3370,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -3438,7 +3401,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -3523,7 +3486,7 @@
         },
         "regions": {
           "default": [],
-          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read.",
+          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "items": {
             "type": "string"
           },
@@ -3558,7 +3521,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -3602,7 +3565,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -3659,7 +3622,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -3690,7 +3653,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -3749,7 +3712,7 @@
               },
               {
                 "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
             ]
@@ -3824,7 +3787,7 @@
               },
               {
                 "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
             ]
@@ -3872,7 +3835,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -3937,7 +3900,7 @@
               },
               {
                 "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
             ]
@@ -4718,7 +4681,7 @@
               "type": "null"
             }
           ],
-          "default": "required",
+          "default": null,
           "description": "Specifies the scope of the component. If scope is not specified, 'required' scope SHOULD be assumed by the consumer of the BOM.",
           "title": "Component Scope"
         },
@@ -5529,22 +5492,13 @@
           "type": "string"
         },
         "policy": {
-          "anyOf": [
-            {
-              "enum": [
-                "fail",
-                "warn"
-              ],
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
-              "type": "string"
-            }
-          ],
           "description": "The policy this database is held to while the entry is in effect.",
-          "title": "Policy"
+          "enum": [
+            "fail",
+            "warn"
+          ],
+          "title": "Policy",
+          "type": "string"
         },
         "reason": {
           "description": "Required. Why this database is held differently.",
@@ -6326,7 +6280,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -6926,7 +6880,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -7029,7 +6983,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -7740,36 +7694,6 @@
         "unknown"
       ],
       "title": "ExecutionEnvironment",
-      "type": "string"
-    },
-    "ExportFormat": {
-      "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict, asff and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
-      "enum": [
-        "aggregated",
-        "text",
-        "flat-json",
-        "yaml",
-        "csv",
-        "html",
-        "dict",
-        "junitxml",
-        "markdown",
-        "sarif",
-        "asff",
-        "ocsf",
-        "cyclonedx",
-        "spdx",
-        "custom",
-        "github-ghas",
-        "gitlab-sast",
-        "gitlab-cyclonedx",
-        "unused-suppressions",
-        "aws-security-hub",
-        "bedrock-summary-reporter",
-        "cloudwatch-logs",
-        "s3"
-      ],
-      "title": "ExportFormat",
       "type": "string"
     },
     "ExternalProperties": {
@@ -8758,7 +8682,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -9001,7 +8925,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -9052,7 +8976,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -9146,7 +9070,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -9192,7 +9116,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -9307,7 +9231,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -9690,7 +9614,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -9765,7 +9689,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -9800,7 +9724,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -9871,7 +9795,6 @@
         "email": {
           "anyOf": [
             {
-              "format": "email",
               "type": "string"
             },
             {
@@ -11177,7 +11100,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -11223,7 +11146,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -11297,11 +11220,841 @@
       "title": "Kind1",
       "type": "string"
     },
+    "License": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/License1"
+        },
+        {
+          "$ref": "#/$defs/License2"
+        }
+      ],
+      "description": "Specifies the details and attributes related to a software license. It can either include a valid SPDX license identifier or a named license, along with additional properties such as license acknowledgment, comprehensive commercial licensing information, and the full text of the license.",
+      "title": "License"
+    },
+    "License1": {
+      "additionalProperties": false,
+      "properties": {
+        "acknowledgement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LicenseAcknowledgementEnumeration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schema"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "A valid SPDX license identifier. If specified, this value must be one of the enumeration of valid SPDX license identifiers defined in the spdx.schema.json (or spdx.xml) subschema which is synchronized with the official SPDX license list.",
+          "examples": [
+            "Apache-2.0"
+          ],
+          "title": "License ID (SPDX)"
+        },
+        "licensing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Licensing"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Licensing details describing the licensor/licensee, license type, renewal and expiration dates, and other important metadata",
+          "title": "Licensing information"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The name of the license. This may include the name of a commercial or proprietary license or an open source license that may not be defined by SPDX.",
+          "examples": [
+            "Acme Software License"
+          ],
+          "title": "License Name"
+        },
+        "properties": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Property"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provides the ability to document properties in a name-value store. This provides flexibility to include data not officially supported in the standard without having to use additional namespaces or create extensions. Unlike key-value stores, properties support duplicate names, each potentially having different values. Property names of interest to the general public are encouraged to be registered in the [CycloneDX Property Taxonomy](https://github.com/CycloneDX/cyclonedx-property-taxonomy). Formal registration is optional.",
+          "title": "Properties"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/automated_security_helper__schemas__cyclonedx_bom_1_6_schema__Attachment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional way to include the textual content of a license.",
+          "title": "License text"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The URL to the license file. If specified, a 'license' externalReference should also be specified for completeness",
+          "examples": [
+            "https://www.apache.org/licenses/LICENSE-2.0.txt"
+          ],
+          "title": "License URL"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "License1",
+      "type": "object"
+    },
+    "License2": {
+      "additionalProperties": false,
+      "properties": {
+        "acknowledgement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LicenseAcknowledgementEnumeration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schema"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A valid SPDX license identifier. If specified, this value must be one of the enumeration of valid SPDX license identifiers defined in the spdx.schema.json (or spdx.xml) subschema which is synchronized with the official SPDX license list.",
+          "examples": [
+            "Apache-2.0"
+          ],
+          "title": "License ID (SPDX)"
+        },
+        "licensing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Licensing1"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Licensing details describing the licensor/licensee, license type, renewal and expiration dates, and other important metadata",
+          "title": "Licensing information"
+        },
+        "name": {
+          "description": "The name of the license. This may include the name of a commercial or proprietary license or an open source license that may not be defined by SPDX.",
+          "examples": [
+            "Acme Software License"
+          ],
+          "title": "License Name",
+          "type": "string"
+        },
+        "properties": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Property"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provides the ability to document properties in a name-value store. This provides flexibility to include data not officially supported in the standard without having to use additional namespaces or create extensions. Unlike key-value stores, properties support duplicate names, each potentially having different values. Property names of interest to the general public are encouraged to be registered in the [CycloneDX Property Taxonomy](https://github.com/CycloneDX/cyclonedx-property-taxonomy). Formal registration is optional.",
+          "title": "Properties"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/automated_security_helper__schemas__cyclonedx_bom_1_6_schema__Attachment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional way to include the textual content of a license.",
+          "title": "License text"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The URL to the license file. If specified, a 'license' externalReference should also be specified for completeness",
+          "examples": [
+            "https://www.apache.org/licenses/LICENSE-2.0.txt"
+          ],
+          "title": "License URL"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "License2",
+      "type": "object"
+    },
+    "LicenseAcknowledgementEnumeration": {
+      "enum": [
+        "declared",
+        "concluded"
+      ],
+      "title": "LicenseAcknowledgementEnumeration",
+      "type": "string"
+    },
     "LicenseChoice": {
       "description": "EITHER (list of SPDX licenses and/or named licenses) OR (tuple of one SPDX License Expression)",
-      "items": {},
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LicenseEntry"
+          },
+          {
+            "$ref": "#/$defs/LicenseExpression"
+          }
+        ]
+      },
       "title": "License Choice",
       "type": "array"
+    },
+    "LicenseEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "license": {
+          "$ref": "#/$defs/License",
+          "description": "A license by SPDX identifier or by name, with its optional details."
+        }
+      },
+      "required": [
+        "license"
+      ],
+      "title": "LicenseEntry",
+      "type": "object"
+    },
+    "LicenseExpression": {
+      "additionalProperties": false,
+      "properties": {
+        "acknowledgement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LicenseAcknowledgementEnumeration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bom-ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+          "title": "BOM Reference"
+        },
+        "expression": {
+          "description": "A valid SPDX license expression.\nRefer to https://spdx.org/specifications for syntax requirements",
+          "examples": [
+            "Apache-2.0 AND (MIT OR GPL-2.0-only)",
+            "GPL-3.0-only WITH Classpath-exception-2.0"
+          ],
+          "title": "SPDX License Expression",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression"
+      ],
+      "title": "LicenseExpression",
+      "type": "object"
+    },
+    "LicenseType": {
+      "enum": [
+        "academic",
+        "appliance",
+        "client-access",
+        "concurrent-user",
+        "core-points",
+        "custom-metric",
+        "device",
+        "evaluation",
+        "named-user",
+        "node-locked",
+        "oem",
+        "perpetual",
+        "processor-points",
+        "subscription",
+        "user",
+        "other"
+      ],
+      "title": "LicenseType",
+      "type": "string"
+    },
+    "Licensee": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalContact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual, not associated with an organization, that was granted the license",
+          "title": "Licensee (Individual)"
+        },
+        "organization": {
+          "$ref": "#/$defs/OrganizationalEntity",
+          "description": "The organization that was granted the license",
+          "title": "Licensee (Organization)"
+        }
+      },
+      "required": [
+        "organization"
+      ],
+      "title": "Licensee",
+      "type": "object"
+    },
+    "Licensee1": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "$ref": "#/$defs/OrganizationalContact",
+          "description": "The individual, not associated with an organization, that was granted the license",
+          "title": "Licensee (Individual)"
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalEntity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The organization that was granted the license",
+          "title": "Licensee (Organization)"
+        }
+      },
+      "required": [
+        "individual"
+      ],
+      "title": "Licensee1",
+      "type": "object"
+    },
+    "Licensee2": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalContact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual, not associated with an organization, that was granted the license",
+          "title": "Licensee (Individual)"
+        },
+        "organization": {
+          "$ref": "#/$defs/OrganizationalEntity",
+          "description": "The organization that was granted the license",
+          "title": "Licensee (Organization)"
+        }
+      },
+      "required": [
+        "organization"
+      ],
+      "title": "Licensee2",
+      "type": "object"
+    },
+    "Licensee3": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "$ref": "#/$defs/OrganizationalContact",
+          "description": "The individual, not associated with an organization, that was granted the license",
+          "title": "Licensee (Individual)"
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalEntity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The organization that was granted the license",
+          "title": "Licensee (Organization)"
+        }
+      },
+      "required": [
+        "individual"
+      ],
+      "title": "Licensee3",
+      "type": "object"
+    },
+    "Licensing": {
+      "additionalProperties": false,
+      "properties": {
+        "altIds": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "License identifiers that may be used to manage licenses and their lifecycle",
+          "title": "Alternate License Identifiers"
+        },
+        "expiration": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The timestamp indicating when the current license expires (if applicable).",
+          "title": "Expiration"
+        },
+        "lastRenewal": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The timestamp indicating when the license was last renewed. For new purchases, this is often the purchase or acquisition date. For non-perpetual licenses or subscriptions, this is the timestamp of when the license was last renewed.",
+          "title": "Last Renewal"
+        },
+        "licenseTypes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LicenseType"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The type of license(s) that was granted to the licensee.",
+          "title": "License Type"
+        },
+        "licensee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Licensee"
+            },
+            {
+              "$ref": "#/$defs/Licensee1"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual or organization for which a license was granted to",
+          "title": "Licensee"
+        },
+        "licensor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Licensor"
+            },
+            {
+              "$ref": "#/$defs/Licensor1"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual or organization that grants a license to another individual or organization",
+          "title": "Licensor"
+        },
+        "purchaseOrder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The purchase order identifier the purchaser sent to a supplier or vendor to authorize a purchase",
+          "title": "Purchase Order"
+        },
+        "purchaser": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Purchaser"
+            },
+            {
+              "$ref": "#/$defs/Purchaser1"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual or organization that purchased the license",
+          "title": "Purchaser"
+        }
+      },
+      "title": "Licensing",
+      "type": "object"
+    },
+    "Licensing1": {
+      "additionalProperties": false,
+      "properties": {
+        "altIds": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "License identifiers that may be used to manage licenses and their lifecycle",
+          "title": "Alternate License Identifiers"
+        },
+        "expiration": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The timestamp indicating when the current license expires (if applicable).",
+          "title": "Expiration"
+        },
+        "lastRenewal": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The timestamp indicating when the license was last renewed. For new purchases, this is often the purchase or acquisition date. For non-perpetual licenses or subscriptions, this is the timestamp of when the license was last renewed.",
+          "title": "Last Renewal"
+        },
+        "licenseTypes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LicenseType"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The type of license(s) that was granted to the licensee.",
+          "title": "License Type"
+        },
+        "licensee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Licensee2"
+            },
+            {
+              "$ref": "#/$defs/Licensee3"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual or organization for which a license was granted to",
+          "title": "Licensee"
+        },
+        "licensor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Licensor2"
+            },
+            {
+              "$ref": "#/$defs/Licensor3"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual or organization that grants a license to another individual or organization",
+          "title": "Licensor"
+        },
+        "purchaseOrder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The purchase order identifier the purchaser sent to a supplier or vendor to authorize a purchase",
+          "title": "Purchase Order"
+        },
+        "purchaser": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Purchaser2"
+            },
+            {
+              "$ref": "#/$defs/Purchaser3"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual or organization that purchased the license",
+          "title": "Purchaser"
+        }
+      },
+      "title": "Licensing1",
+      "type": "object"
+    },
+    "Licensor": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalContact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual, not associated with an organization, that granted the license",
+          "title": "Licensor (Individual)"
+        },
+        "organization": {
+          "$ref": "#/$defs/OrganizationalEntity",
+          "description": "The organization that granted the license",
+          "title": "Licensor (Organization)"
+        }
+      },
+      "required": [
+        "organization"
+      ],
+      "title": "Licensor",
+      "type": "object"
+    },
+    "Licensor1": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "$ref": "#/$defs/OrganizationalContact",
+          "description": "The individual, not associated with an organization, that granted the license",
+          "title": "Licensor (Individual)"
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalEntity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The organization that granted the license",
+          "title": "Licensor (Organization)"
+        }
+      },
+      "required": [
+        "individual"
+      ],
+      "title": "Licensor1",
+      "type": "object"
+    },
+    "Licensor2": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalContact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual, not associated with an organization, that granted the license",
+          "title": "Licensor (Individual)"
+        },
+        "organization": {
+          "$ref": "#/$defs/OrganizationalEntity",
+          "description": "The organization that granted the license",
+          "title": "Licensor (Organization)"
+        }
+      },
+      "required": [
+        "organization"
+      ],
+      "title": "Licensor2",
+      "type": "object"
+    },
+    "Licensor3": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "$ref": "#/$defs/OrganizationalContact",
+          "description": "The individual, not associated with an organization, that granted the license",
+          "title": "Licensor (Individual)"
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalEntity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The organization that granted the license",
+          "title": "Licensor (Organization)"
+        }
+      },
+      "required": [
+        "individual"
+      ],
+      "title": "Licensor3",
+      "type": "object"
     },
     "Lifecycles": {
       "additionalProperties": false,
@@ -11867,7 +12620,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -12761,7 +13514,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -12818,7 +13571,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -12854,7 +13607,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -12973,7 +13726,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -13046,7 +13799,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -13098,7 +13851,7 @@
               },
               {
                 "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
             ]
@@ -13120,7 +13873,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -13170,7 +13923,6 @@
         "email": {
           "anyOf": [
             {
-              "format": "email",
               "type": "string"
             },
             {
@@ -14626,6 +15378,118 @@
         "kty"
       ],
       "title": "PublicKey",
+      "type": "object"
+    },
+    "Purchaser": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalContact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual, not associated with an organization, that purchased the license",
+          "title": "Purchaser (Individual)"
+        },
+        "organization": {
+          "$ref": "#/$defs/OrganizationalEntity",
+          "description": "The organization that purchased the license",
+          "title": "Purchaser (Organization)"
+        }
+      },
+      "required": [
+        "organization"
+      ],
+      "title": "Purchaser",
+      "type": "object"
+    },
+    "Purchaser1": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "$ref": "#/$defs/OrganizationalContact",
+          "description": "The individual, not associated with an organization, that purchased the license",
+          "title": "Purchaser (Individual)"
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalEntity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The organization that purchased the license",
+          "title": "Purchaser (Organization)"
+        }
+      },
+      "required": [
+        "individual"
+      ],
+      "title": "Purchaser1",
+      "type": "object"
+    },
+    "Purchaser2": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalContact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The individual, not associated with an organization, that purchased the license",
+          "title": "Purchaser (Individual)"
+        },
+        "organization": {
+          "$ref": "#/$defs/OrganizationalEntity",
+          "description": "The organization that purchased the license",
+          "title": "Purchaser (Organization)"
+        }
+      },
+      "required": [
+        "organization"
+      ],
+      "title": "Purchaser2",
+      "type": "object"
+    },
+    "Purchaser3": {
+      "additionalProperties": false,
+      "properties": {
+        "individual": {
+          "$ref": "#/$defs/OrganizationalContact",
+          "description": "The individual, not associated with an organization, that purchased the license",
+          "title": "Purchaser (Individual)"
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationalEntity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The organization that purchased the license",
+          "title": "Purchaser (Organization)"
+        }
+      },
+      "required": [
+        "individual"
+      ],
+      "title": "Purchaser3",
       "type": "object"
     },
     "QuantitativeAnalysis": {
@@ -17769,111 +18633,7 @@
           "type": "array"
         },
         "denied_paths": {
-          "default": [
-            "/fail_on_findings",
-            "/fail_on_incomplete_scanners",
-            "/content_db_staleness",
-            "/content_db_staleness_overrides",
-            "/honor_ignore_files",
-            "/content_db_staleness_offline_image_default",
-            "/sandbox",
-            "/sandbox/**",
-            "/ash_plugin_modules",
-            "/ash_plugin_modules/**",
-            "/scanners/detect-secrets/options/scan_settings/filters_used",
-            "/scanners/detect-secrets/options/scan_settings/filters_used/**",
-            "/scanners/detect-secrets/options/scan_settings/plugins_used",
-            "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
-            "/scanners/detect-secrets/options/baseline_file",
-            "/global_settings/ignore_paths",
-            "/global_settings/suppressions",
-            "/global_settings/mcp",
-            "/global_settings/mcp/**",
-            "/scanners/opengrep/options/exclude_rule",
-            "/scanners/semgrep/options/exclude_rule",
-            "/scanners/bandit/options/confidence_level",
-            "/scanners/checkov/options/frameworks",
-            "/scanners/checkov/options/skip_frameworks",
-            "/scanners/opengrep/options/config",
-            "/scanners/opengrep/options/patterns",
-            "/scanners/opengrep/options/severity",
-            "/scanners/semgrep/options/config",
-            "/scanners/semgrep/options/severity",
-            "/scanners/detect-secrets/options/scan_settings",
-            "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
-            "/scanners/ferret-scan/options/checks",
-            "/scanners/ferret-scan/options/confidence_levels",
-            "/scanners/ferret-scan/options/disable_ip_types",
-            "/scanners/ferret-scan/options/enable_preprocessors",
-            "/scanners/ferret-scan/options/finding_limit",
-            "/scanners/ferret-scan/options/profile",
-            "/scanners/ferret-scan/options/recursive",
-            "/scanners/ferret-scan/options/respect_gitignore",
-            "/scanners/ferret-scan/options/use_default_config",
-            "/scanners/ferret-scan/options/validator_budget",
-            "/scanners/trivy-repo/options/license_full",
-            "/scanners/trivy-repo/options/scanners",
-            "/scanners/cfn-guard/options/rule_sets",
-            "/scanners/cfn-lint/options/ignore_checks",
-            "/scanners/cfn-lint/options/regions",
-            "/scanners/gitleaks/options/baseline_path",
-            "/scanners/trivy/options/scanners",
-            "/scanners/trivy/options/ignore_unfixed",
-            "/scanners/*/options/offline",
-            "/scanners/ferret-scan/options/max_live_bytes",
-            "/scanners/gitleaks/options/max_target_megabytes",
-            "/scanners/bandit/options/config_file",
-            "/scanners/checkov/options/config_file",
-            "/scanners/ferret-scan/options/config_file",
-            "/scanners/grype/options/config_file",
-            "/scanners/syft/options/config_file",
-            "/scanners/trivy-repo/options/secret_config_file",
-            "/scanners/trivy-repo/options/config_file",
-            "/scanners/trivy-repo/options/module_dir",
-            "/scanners/trivy/options/config_file",
-            "/scanners/trivy/options/secret_config_file",
-            "/scanners/actionlint/options/config_file",
-            "/scanners/actionlint/options/shellcheck",
-            "/scanners/actionlint/options/pyflakes",
-            "/scanners/cfn-guard/options/rules_paths",
-            "/scanners/cfn-lint/options/config_file",
-            "/scanners/gitleaks/options/config_file",
-            "/scanners/zizmor/options/config_file",
-            "/scanners/zizmor/options/online_audits",
-            "/scanners/snyk-code/options/honor_tree_exclusions",
-            "/scanners/cfn-lint/options/honor_inline_ignores",
-            "/scanners/gitleaks/options/honor_inline_ignores",
-            "/scanners/zizmor/options/honor_inline_ignores",
-            "/scanners/*/options/tool_version",
-            "/converters/jupyter/options/tool_version",
-            "/scanners/opengrep/options/version",
-            "/scanners/opengrep/options/sha256",
-            "/scanners/opengrep/options/metrics",
-            "/scanners/semgrep/options/metrics",
-            "/reporters/bedrock-summary-reporter/options/aws_*",
-            "/reporters/cloudwatch-logs/**",
-            "/reporters/aws-security-hub/**",
-            "/reporters/bedrock-summary-reporter/options/model_id",
-            "/reporters/bedrock-summary-reporter/options/output_file",
-            "/reporters/bedrock-summary-reporter/options/output_executive_file",
-            "/reporters/bedrock-summary-reporter/options/output_technical_file",
-            "/reporters/s3/**",
-            "/reporters/bedrock-summary-reporter/**",
-            "/reporters/gitlab-sast/options/exclude_suppressed",
-            "/scanners/detect-secrets/**",
-            "/scanners/npm-audit/**",
-            "/scanners/opengrep/**",
-            "/scanners/semgrep/**",
-            "/scanners/snyk-code/**",
-            "/scanners/trivy-repo/**",
-            "/scanners/trivy/**",
-            "/scanners/zizmor/**",
-            "/converters/archive/options/max_members",
-            "/converters/archive/options/max_member_bytes",
-            "/converters/archive/options/max_total_bytes",
-            "/converters/archive/options/max_compression_ratio"
-          ],
-          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code and trivy-repo scanners) are added to it.",
+          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code, trivy, trivy-repo and zizmor scanners) are added to it.",
           "items": {
             "type": "string"
           },
@@ -17926,7 +18686,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -17968,7 +18728,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -18026,7 +18786,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -18476,7 +19236,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -18957,6 +19717,741 @@
       "title": "ScannerToolType",
       "type": "string"
     },
+    "Schema": {
+      "enum": [
+        "0BSD",
+        "3D-Slicer-1.0",
+        "AAL",
+        "Abstyles",
+        "AdaCore-doc",
+        "Adobe-2006",
+        "Adobe-Display-PostScript",
+        "Adobe-Glyph",
+        "Adobe-Utopia",
+        "ADSL",
+        "AFL-1.1",
+        "AFL-1.2",
+        "AFL-2.0",
+        "AFL-2.1",
+        "AFL-3.0",
+        "Afmparse",
+        "AGPL-1.0",
+        "AGPL-1.0-only",
+        "AGPL-1.0-or-later",
+        "AGPL-3.0",
+        "AGPL-3.0-only",
+        "AGPL-3.0-or-later",
+        "Aladdin",
+        "AMD-newlib",
+        "AMDPLPA",
+        "AML",
+        "AML-glslang",
+        "AMPAS",
+        "ANTLR-PD",
+        "ANTLR-PD-fallback",
+        "any-OSI",
+        "Apache-1.0",
+        "Apache-1.1",
+        "Apache-2.0",
+        "APAFML",
+        "APL-1.0",
+        "App-s2p",
+        "APSL-1.0",
+        "APSL-1.1",
+        "APSL-1.2",
+        "APSL-2.0",
+        "Arphic-1999",
+        "Artistic-1.0",
+        "Artistic-1.0-cl8",
+        "Artistic-1.0-Perl",
+        "Artistic-2.0",
+        "ASWF-Digital-Assets-1.0",
+        "ASWF-Digital-Assets-1.1",
+        "Baekmuk",
+        "Bahyph",
+        "Barr",
+        "bcrypt-Solar-Designer",
+        "Beerware",
+        "Bitstream-Charter",
+        "Bitstream-Vera",
+        "BitTorrent-1.0",
+        "BitTorrent-1.1",
+        "blessing",
+        "BlueOak-1.0.0",
+        "Boehm-GC",
+        "Borceux",
+        "Brian-Gladman-2-Clause",
+        "Brian-Gladman-3-Clause",
+        "BSD-1-Clause",
+        "BSD-2-Clause",
+        "BSD-2-Clause-Darwin",
+        "BSD-2-Clause-first-lines",
+        "BSD-2-Clause-FreeBSD",
+        "BSD-2-Clause-NetBSD",
+        "BSD-2-Clause-Patent",
+        "BSD-2-Clause-Views",
+        "BSD-3-Clause",
+        "BSD-3-Clause-acpica",
+        "BSD-3-Clause-Attribution",
+        "BSD-3-Clause-Clear",
+        "BSD-3-Clause-flex",
+        "BSD-3-Clause-HP",
+        "BSD-3-Clause-LBNL",
+        "BSD-3-Clause-Modification",
+        "BSD-3-Clause-No-Military-License",
+        "BSD-3-Clause-No-Nuclear-License",
+        "BSD-3-Clause-No-Nuclear-License-2014",
+        "BSD-3-Clause-No-Nuclear-Warranty",
+        "BSD-3-Clause-Open-MPI",
+        "BSD-3-Clause-Sun",
+        "BSD-4-Clause",
+        "BSD-4-Clause-Shortened",
+        "BSD-4-Clause-UC",
+        "BSD-4.3RENO",
+        "BSD-4.3TAHOE",
+        "BSD-Advertising-Acknowledgement",
+        "BSD-Attribution-HPND-disclaimer",
+        "BSD-Inferno-Nettverk",
+        "BSD-Protection",
+        "BSD-Source-beginning-file",
+        "BSD-Source-Code",
+        "BSD-Systemics",
+        "BSD-Systemics-W3Works",
+        "BSL-1.0",
+        "BUSL-1.1",
+        "bzip2-1.0.5",
+        "bzip2-1.0.6",
+        "C-UDA-1.0",
+        "CAL-1.0",
+        "CAL-1.0-Combined-Work-Exception",
+        "Caldera",
+        "Caldera-no-preamble",
+        "Catharon",
+        "CATOSL-1.1",
+        "CC-BY-1.0",
+        "CC-BY-2.0",
+        "CC-BY-2.5",
+        "CC-BY-2.5-AU",
+        "CC-BY-3.0",
+        "CC-BY-3.0-AT",
+        "CC-BY-3.0-AU",
+        "CC-BY-3.0-DE",
+        "CC-BY-3.0-IGO",
+        "CC-BY-3.0-NL",
+        "CC-BY-3.0-US",
+        "CC-BY-4.0",
+        "CC-BY-NC-1.0",
+        "CC-BY-NC-2.0",
+        "CC-BY-NC-2.5",
+        "CC-BY-NC-3.0",
+        "CC-BY-NC-3.0-DE",
+        "CC-BY-NC-4.0",
+        "CC-BY-NC-ND-1.0",
+        "CC-BY-NC-ND-2.0",
+        "CC-BY-NC-ND-2.5",
+        "CC-BY-NC-ND-3.0",
+        "CC-BY-NC-ND-3.0-DE",
+        "CC-BY-NC-ND-3.0-IGO",
+        "CC-BY-NC-ND-4.0",
+        "CC-BY-NC-SA-1.0",
+        "CC-BY-NC-SA-2.0",
+        "CC-BY-NC-SA-2.0-DE",
+        "CC-BY-NC-SA-2.0-FR",
+        "CC-BY-NC-SA-2.0-UK",
+        "CC-BY-NC-SA-2.5",
+        "CC-BY-NC-SA-3.0",
+        "CC-BY-NC-SA-3.0-DE",
+        "CC-BY-NC-SA-3.0-IGO",
+        "CC-BY-NC-SA-4.0",
+        "CC-BY-ND-1.0",
+        "CC-BY-ND-2.0",
+        "CC-BY-ND-2.5",
+        "CC-BY-ND-3.0",
+        "CC-BY-ND-3.0-DE",
+        "CC-BY-ND-4.0",
+        "CC-BY-SA-1.0",
+        "CC-BY-SA-2.0",
+        "CC-BY-SA-2.0-UK",
+        "CC-BY-SA-2.1-JP",
+        "CC-BY-SA-2.5",
+        "CC-BY-SA-3.0",
+        "CC-BY-SA-3.0-AT",
+        "CC-BY-SA-3.0-DE",
+        "CC-BY-SA-3.0-IGO",
+        "CC-BY-SA-4.0",
+        "CC-PDDC",
+        "CC0-1.0",
+        "CDDL-1.0",
+        "CDDL-1.1",
+        "CDL-1.0",
+        "CDLA-Permissive-1.0",
+        "CDLA-Permissive-2.0",
+        "CDLA-Sharing-1.0",
+        "CECILL-1.0",
+        "CECILL-1.1",
+        "CECILL-2.0",
+        "CECILL-2.1",
+        "CECILL-B",
+        "CECILL-C",
+        "CERN-OHL-1.1",
+        "CERN-OHL-1.2",
+        "CERN-OHL-P-2.0",
+        "CERN-OHL-S-2.0",
+        "CERN-OHL-W-2.0",
+        "CFITSIO",
+        "check-cvs",
+        "checkmk",
+        "ClArtistic",
+        "Clips",
+        "CMU-Mach",
+        "CMU-Mach-nodoc",
+        "CNRI-Jython",
+        "CNRI-Python",
+        "CNRI-Python-GPL-Compatible",
+        "COIL-1.0",
+        "Community-Spec-1.0",
+        "Condor-1.1",
+        "copyleft-next-0.3.0",
+        "copyleft-next-0.3.1",
+        "Cornell-Lossless-JPEG",
+        "CPAL-1.0",
+        "CPL-1.0",
+        "CPOL-1.02",
+        "Cronyx",
+        "Crossword",
+        "CrystalStacker",
+        "CUA-OPL-1.0",
+        "Cube",
+        "curl",
+        "cve-tou",
+        "D-FSL-1.0",
+        "DEC-3-Clause",
+        "diffmark",
+        "DL-DE-BY-2.0",
+        "DL-DE-ZERO-2.0",
+        "DOC",
+        "Dotseqn",
+        "DRL-1.0",
+        "DRL-1.1",
+        "DSDP",
+        "dtoa",
+        "dvipdfm",
+        "ECL-1.0",
+        "ECL-2.0",
+        "eCos-2.0",
+        "EFL-1.0",
+        "EFL-2.0",
+        "eGenix",
+        "Elastic-2.0",
+        "Entessa",
+        "EPICS",
+        "EPL-1.0",
+        "EPL-2.0",
+        "ErlPL-1.1",
+        "etalab-2.0",
+        "EUDatagrid",
+        "EUPL-1.0",
+        "EUPL-1.1",
+        "EUPL-1.2",
+        "Eurosym",
+        "Fair",
+        "FBM",
+        "FDK-AAC",
+        "Ferguson-Twofish",
+        "Frameworx-1.0",
+        "FreeBSD-DOC",
+        "FreeImage",
+        "FSFAP",
+        "FSFAP-no-warranty-disclaimer",
+        "FSFUL",
+        "FSFULLR",
+        "FSFULLRWD",
+        "FTL",
+        "Furuseth",
+        "fwlw",
+        "GCR-docs",
+        "GD",
+        "GFDL-1.1",
+        "GFDL-1.1-invariants-only",
+        "GFDL-1.1-invariants-or-later",
+        "GFDL-1.1-no-invariants-only",
+        "GFDL-1.1-no-invariants-or-later",
+        "GFDL-1.1-only",
+        "GFDL-1.1-or-later",
+        "GFDL-1.2",
+        "GFDL-1.2-invariants-only",
+        "GFDL-1.2-invariants-or-later",
+        "GFDL-1.2-no-invariants-only",
+        "GFDL-1.2-no-invariants-or-later",
+        "GFDL-1.2-only",
+        "GFDL-1.2-or-later",
+        "GFDL-1.3",
+        "GFDL-1.3-invariants-only",
+        "GFDL-1.3-invariants-or-later",
+        "GFDL-1.3-no-invariants-only",
+        "GFDL-1.3-no-invariants-or-later",
+        "GFDL-1.3-only",
+        "GFDL-1.3-or-later",
+        "Giftware",
+        "GL2PS",
+        "Glide",
+        "Glulxe",
+        "GLWTPL",
+        "gnuplot",
+        "GPL-1.0",
+        "GPL-1.0+",
+        "GPL-1.0-only",
+        "GPL-1.0-or-later",
+        "GPL-2.0",
+        "GPL-2.0+",
+        "GPL-2.0-only",
+        "GPL-2.0-or-later",
+        "GPL-2.0-with-autoconf-exception",
+        "GPL-2.0-with-bison-exception",
+        "GPL-2.0-with-classpath-exception",
+        "GPL-2.0-with-font-exception",
+        "GPL-2.0-with-GCC-exception",
+        "GPL-3.0",
+        "GPL-3.0+",
+        "GPL-3.0-only",
+        "GPL-3.0-or-later",
+        "GPL-3.0-with-autoconf-exception",
+        "GPL-3.0-with-GCC-exception",
+        "Graphics-Gems",
+        "gSOAP-1.3b",
+        "gtkbook",
+        "Gutmann",
+        "HaskellReport",
+        "hdparm",
+        "Hippocratic-2.1",
+        "HP-1986",
+        "HP-1989",
+        "HPND",
+        "HPND-DEC",
+        "HPND-doc",
+        "HPND-doc-sell",
+        "HPND-export-US",
+        "HPND-export-US-acknowledgement",
+        "HPND-export-US-modify",
+        "HPND-export2-US",
+        "HPND-Fenneberg-Livingston",
+        "HPND-INRIA-IMAG",
+        "HPND-Intel",
+        "HPND-Kevlin-Henney",
+        "HPND-Markus-Kuhn",
+        "HPND-merchantability-variant",
+        "HPND-MIT-disclaimer",
+        "HPND-Pbmplus",
+        "HPND-sell-MIT-disclaimer-xserver",
+        "HPND-sell-regexpr",
+        "HPND-sell-variant",
+        "HPND-sell-variant-MIT-disclaimer",
+        "HPND-sell-variant-MIT-disclaimer-rev",
+        "HPND-UC",
+        "HPND-UC-export-US",
+        "HTMLTIDY",
+        "IBM-pibs",
+        "ICU",
+        "IEC-Code-Components-EULA",
+        "IJG",
+        "IJG-short",
+        "ImageMagick",
+        "iMatix",
+        "Imlib2",
+        "Info-ZIP",
+        "Inner-Net-2.0",
+        "Intel",
+        "Intel-ACPI",
+        "Interbase-1.0",
+        "IPA",
+        "IPL-1.0",
+        "ISC",
+        "ISC-Veillard",
+        "Jam",
+        "JasPer-2.0",
+        "JPL-image",
+        "JPNIC",
+        "JSON",
+        "Kastrup",
+        "Kazlib",
+        "Knuth-CTAN",
+        "LAL-1.2",
+        "LAL-1.3",
+        "Latex2e",
+        "Latex2e-translated-notice",
+        "Leptonica",
+        "LGPL-2.0",
+        "LGPL-2.0+",
+        "LGPL-2.0-only",
+        "LGPL-2.0-or-later",
+        "LGPL-2.1",
+        "LGPL-2.1+",
+        "LGPL-2.1-only",
+        "LGPL-2.1-or-later",
+        "LGPL-3.0",
+        "LGPL-3.0+",
+        "LGPL-3.0-only",
+        "LGPL-3.0-or-later",
+        "LGPLLR",
+        "Libpng",
+        "libpng-2.0",
+        "libselinux-1.0",
+        "libtiff",
+        "libutil-David-Nugent",
+        "LiLiQ-P-1.1",
+        "LiLiQ-R-1.1",
+        "LiLiQ-Rplus-1.1",
+        "Linux-man-pages-1-para",
+        "Linux-man-pages-copyleft",
+        "Linux-man-pages-copyleft-2-para",
+        "Linux-man-pages-copyleft-var",
+        "Linux-OpenIB",
+        "LOOP",
+        "LPD-document",
+        "LPL-1.0",
+        "LPL-1.02",
+        "LPPL-1.0",
+        "LPPL-1.1",
+        "LPPL-1.2",
+        "LPPL-1.3a",
+        "LPPL-1.3c",
+        "lsof",
+        "Lucida-Bitmap-Fonts",
+        "LZMA-SDK-9.11-to-9.20",
+        "LZMA-SDK-9.22",
+        "Mackerras-3-Clause",
+        "Mackerras-3-Clause-acknowledgment",
+        "magaz",
+        "mailprio",
+        "MakeIndex",
+        "Martin-Birgmeier",
+        "McPhee-slideshow",
+        "metamail",
+        "Minpack",
+        "MirOS",
+        "MIT",
+        "MIT-0",
+        "MIT-advertising",
+        "MIT-CMU",
+        "MIT-enna",
+        "MIT-feh",
+        "MIT-Festival",
+        "MIT-Khronos-old",
+        "MIT-Modern-Variant",
+        "MIT-open-group",
+        "MIT-testregex",
+        "MIT-Wu",
+        "MITNFA",
+        "MMIXware",
+        "Motosoto",
+        "MPEG-SSG",
+        "mpi-permissive",
+        "mpich2",
+        "MPL-1.0",
+        "MPL-1.1",
+        "MPL-2.0",
+        "MPL-2.0-no-copyleft-exception",
+        "mplus",
+        "MS-LPL",
+        "MS-PL",
+        "MS-RL",
+        "MTLL",
+        "MulanPSL-1.0",
+        "MulanPSL-2.0",
+        "Multics",
+        "Mup",
+        "NAIST-2003",
+        "NASA-1.3",
+        "Naumen",
+        "NBPL-1.0",
+        "NCBI-PD",
+        "NCGL-UK-2.0",
+        "NCL",
+        "NCSA",
+        "Net-SNMP",
+        "NetCDF",
+        "Newsletr",
+        "NGPL",
+        "NICTA-1.0",
+        "NIST-PD",
+        "NIST-PD-fallback",
+        "NIST-Software",
+        "NLOD-1.0",
+        "NLOD-2.0",
+        "NLPL",
+        "Nokia",
+        "NOSL",
+        "Noweb",
+        "NPL-1.0",
+        "NPL-1.1",
+        "NPOSL-3.0",
+        "NRL",
+        "NTP",
+        "NTP-0",
+        "Nunit",
+        "O-UDA-1.0",
+        "OAR",
+        "OCCT-PL",
+        "OCLC-2.0",
+        "ODbL-1.0",
+        "ODC-By-1.0",
+        "OFFIS",
+        "OFL-1.0",
+        "OFL-1.0-no-RFN",
+        "OFL-1.0-RFN",
+        "OFL-1.1",
+        "OFL-1.1-no-RFN",
+        "OFL-1.1-RFN",
+        "OGC-1.0",
+        "OGDL-Taiwan-1.0",
+        "OGL-Canada-2.0",
+        "OGL-UK-1.0",
+        "OGL-UK-2.0",
+        "OGL-UK-3.0",
+        "OGTSL",
+        "OLDAP-1.1",
+        "OLDAP-1.2",
+        "OLDAP-1.3",
+        "OLDAP-1.4",
+        "OLDAP-2.0",
+        "OLDAP-2.0.1",
+        "OLDAP-2.1",
+        "OLDAP-2.2",
+        "OLDAP-2.2.1",
+        "OLDAP-2.2.2",
+        "OLDAP-2.3",
+        "OLDAP-2.4",
+        "OLDAP-2.5",
+        "OLDAP-2.6",
+        "OLDAP-2.7",
+        "OLDAP-2.8",
+        "OLFL-1.3",
+        "OML",
+        "OpenPBS-2.3",
+        "OpenSSL",
+        "OpenSSL-standalone",
+        "OpenVision",
+        "OPL-1.0",
+        "OPL-UK-3.0",
+        "OPUBL-1.0",
+        "OSET-PL-2.1",
+        "OSL-1.0",
+        "OSL-1.1",
+        "OSL-2.0",
+        "OSL-2.1",
+        "OSL-3.0",
+        "PADL",
+        "Parity-6.0.0",
+        "Parity-7.0.0",
+        "PDDL-1.0",
+        "PHP-3.0",
+        "PHP-3.01",
+        "Pixar",
+        "pkgconf",
+        "Plexus",
+        "pnmstitch",
+        "PolyForm-Noncommercial-1.0.0",
+        "PolyForm-Small-Business-1.0.0",
+        "PostgreSQL",
+        "PPL",
+        "PSF-2.0",
+        "psfrag",
+        "psutils",
+        "Python-2.0",
+        "Python-2.0.1",
+        "python-ldap",
+        "Qhull",
+        "QPL-1.0",
+        "QPL-1.0-INRIA-2004",
+        "radvd",
+        "Rdisc",
+        "RHeCos-1.1",
+        "RPL-1.1",
+        "RPL-1.5",
+        "RPSL-1.0",
+        "RSA-MD",
+        "RSCPL",
+        "Ruby",
+        "SAX-PD",
+        "SAX-PD-2.0",
+        "Saxpath",
+        "SCEA",
+        "SchemeReport",
+        "Sendmail",
+        "Sendmail-8.23",
+        "SGI-B-1.0",
+        "SGI-B-1.1",
+        "SGI-B-2.0",
+        "SGI-OpenGL",
+        "SGP4",
+        "SHL-0.5",
+        "SHL-0.51",
+        "SimPL-2.0",
+        "SISSL",
+        "SISSL-1.2",
+        "SL",
+        "Sleepycat",
+        "SMLNJ",
+        "SMPPL",
+        "SNIA",
+        "snprintf",
+        "softSurfer",
+        "Soundex",
+        "Spencer-86",
+        "Spencer-94",
+        "Spencer-99",
+        "SPL-1.0",
+        "ssh-keyscan",
+        "SSH-OpenSSH",
+        "SSH-short",
+        "SSLeay-standalone",
+        "SSPL-1.0",
+        "StandardML-NJ",
+        "SugarCRM-1.1.3",
+        "Sun-PPP",
+        "Sun-PPP-2000",
+        "SunPro",
+        "SWL",
+        "swrule",
+        "Symlinks",
+        "TAPR-OHL-1.0",
+        "TCL",
+        "TCP-wrappers",
+        "TermReadKey",
+        "TGPPL-1.0",
+        "threeparttable",
+        "TMate",
+        "TORQUE-1.1",
+        "TOSL",
+        "TPDL",
+        "TPL-1.0",
+        "TTWL",
+        "TTYP0",
+        "TU-Berlin-1.0",
+        "TU-Berlin-2.0",
+        "UCAR",
+        "UCL-1.0",
+        "ulem",
+        "UMich-Merit",
+        "Unicode-3.0",
+        "Unicode-DFS-2015",
+        "Unicode-DFS-2016",
+        "Unicode-TOU",
+        "UnixCrypt",
+        "Unlicense",
+        "UPL-1.0",
+        "URT-RLE",
+        "Vim",
+        "VOSTROM",
+        "VSL-1.0",
+        "W3C",
+        "W3C-19980720",
+        "W3C-20150513",
+        "w3m",
+        "Watcom-1.0",
+        "Widget-Workshop",
+        "Wsuipa",
+        "WTFPL",
+        "wxWindows",
+        "X11",
+        "X11-distribute-modifications-variant",
+        "Xdebug-1.03",
+        "Xerox",
+        "Xfig",
+        "XFree86-1.1",
+        "xinetd",
+        "xkeyboard-config-Zinoviev",
+        "xlock",
+        "Xnet",
+        "xpp",
+        "XSkat",
+        "xzoom",
+        "YPL-1.0",
+        "YPL-1.1",
+        "Zed",
+        "Zeeff",
+        "Zend-2.0",
+        "Zimbra-1.3",
+        "Zimbra-1.4",
+        "Zlib",
+        "zlib-acknowledgement",
+        "ZPL-1.1",
+        "ZPL-2.0",
+        "ZPL-2.1",
+        "389-exception",
+        "Asterisk-exception",
+        "Asterisk-linking-protocols-exception",
+        "Autoconf-exception-2.0",
+        "Autoconf-exception-3.0",
+        "Autoconf-exception-generic",
+        "Autoconf-exception-generic-3.0",
+        "Autoconf-exception-macro",
+        "Bison-exception-1.24",
+        "Bison-exception-2.2",
+        "Bootloader-exception",
+        "Classpath-exception-2.0",
+        "CLISP-exception-2.0",
+        "cryptsetup-OpenSSL-exception",
+        "DigiRule-FOSS-exception",
+        "eCos-exception-2.0",
+        "Fawkes-Runtime-exception",
+        "FLTK-exception",
+        "fmt-exception",
+        "Font-exception-2.0",
+        "freertos-exception-2.0",
+        "GCC-exception-2.0",
+        "GCC-exception-2.0-note",
+        "GCC-exception-3.1",
+        "Gmsh-exception",
+        "GNAT-exception",
+        "GNOME-examples-exception",
+        "GNU-compiler-exception",
+        "gnu-javamail-exception",
+        "GPL-3.0-interface-exception",
+        "GPL-3.0-linking-exception",
+        "GPL-3.0-linking-source-exception",
+        "GPL-CC-1.0",
+        "GStreamer-exception-2005",
+        "GStreamer-exception-2008",
+        "i2p-gpl-java-exception",
+        "KiCad-libraries-exception",
+        "LGPL-3.0-linking-exception",
+        "libpri-OpenH323-exception",
+        "Libtool-exception",
+        "Linux-syscall-note",
+        "LLGPL",
+        "LLVM-exception",
+        "LZMA-exception",
+        "mif-exception",
+        "Nokia-Qt-exception-1.1",
+        "OCaml-LGPL-linking-exception",
+        "OCCT-exception-1.0",
+        "OpenJDK-assembly-exception-1.0",
+        "openvpn-openssl-exception",
+        "PCRE2-exception",
+        "PS-or-PDF-font-exception-20170817",
+        "QPL-1.0-INRIA-2004-exception",
+        "Qt-GPL-exception-1.0",
+        "Qt-LGPL-exception-1.1",
+        "Qwt-exception-1.0",
+        "RRDtool-FLOSS-exception-2.0",
+        "SANE-exception",
+        "SHL-2.0",
+        "SHL-2.1",
+        "stunnel-exception",
+        "SWI-exception",
+        "Swift-exception",
+        "Texinfo-exception",
+        "u-boot-exception-2.0",
+        "UBDL-exception",
+        "Universal-FOSS-exception-1.0",
+        "vsftpd-openssl-exception",
+        "WxWindows-exception-3.1",
+        "x11vnc-openssl-exception"
+      ],
+      "title": "Schema",
+      "type": "string"
+    },
     "Scope": {
       "enum": [
         "required",
@@ -19064,7 +20559,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -19142,7 +20637,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -19185,7 +20680,7 @@
               },
               {
                 "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
             ]
@@ -19207,7 +20702,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -19902,8 +21397,6 @@
               "$ref": "#/$defs/Algorithm"
             },
             {
-              "format": "uri",
-              "minLength": 1,
               "type": "string"
             }
           ],
@@ -19978,6 +21471,40 @@
         "value"
       ],
       "title": "Signer",
+      "type": "object"
+    },
+    "SkippedProject": {
+      "description": "One entry of the ``workspace.skipped_projects`` payload.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Human-readable explanation of the skip",
+          "title": "Detail"
+        },
+        "project": {
+          "description": "Workspace-relative path of the skipped project, which is also the key it is attributed under elsewhere in the results.",
+          "minLength": 1,
+          "title": "Project",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/SkippedProjectReason",
+          "description": "Whether the project was skipped by error or as unchanged"
+        }
+      },
+      "required": [
+        "project",
+        "reason"
+      ],
+      "title": "SkippedProject",
       "type": "object"
     },
     "SkippedProjectReason": {
@@ -20550,7 +22077,7 @@
               "type": "null"
             }
           ],
-          "default": false,
+          "default": null,
           "description": "Maps to the patch of a SoftwareIdentity.",
           "title": "Patch"
         },
@@ -20568,7 +22095,7 @@
               "type": "null"
             }
           ],
-          "default": 0,
+          "default": null,
           "description": "Maps to the tagVersion of a SoftwareIdentity.",
           "title": "Tag Version"
         },
@@ -20607,7 +22134,7 @@
               "type": "null"
             }
           ],
-          "default": "0.0",
+          "default": null,
           "description": "Maps to the version of a SoftwareIdentity.",
           "title": "Version"
         }
@@ -20635,7 +22162,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -20685,7 +22212,7 @@
               },
               {
                 "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
             ]
@@ -20753,7 +22280,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -21109,7 +22636,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -22324,7 +23851,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -22446,7 +23973,7 @@
               },
               {
                 "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-                "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
             ]
@@ -22486,7 +24013,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -22707,7 +24234,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -22870,7 +24397,7 @@
               "type": "null"
             }
           ],
-          "default": "affected",
+          "default": null,
           "description": "The vulnerability status for the version or range of versions.",
           "title": "Status"
         },
@@ -22901,7 +24428,7 @@
               "type": "null"
             }
           ],
-          "default": "affected",
+          "default": null,
           "description": "The vulnerability status for the version or range of versions.",
           "title": "Status"
         },
@@ -22937,7 +24464,7 @@
               "type": "null"
             }
           ],
-          "default": "filesystem",
+          "default": null,
           "description": "The mode for the volume instance.",
           "title": "Mode"
         },
@@ -24299,14 +25826,6 @@
           "title": "Scan Incomplete",
           "type": "boolean"
         },
-        "scanner_reasons": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Why each SKIPPED, MISSING or ERROR scanner gave no result, for this project alone: a SKIPPED or MISSING row's skipped_reason or missing_reason, and the first error an ERROR scanner's reports recorded, such as a constructor that raised. A scanner that ran, or that recorded no reason, is not listed. Empty in a workspace file written before the field existed.",
-          "title": "Scanner Reasons",
-          "type": "object"
-        },
         "scanner_thresholds": {
           "additionalProperties": {
             "type": "string"
@@ -24459,6 +25978,15 @@
           "description": "Why the workspace was refused, for status='refused'. Null for a run that scanned anything.",
           "title": "Refusal Detail"
         },
+        "skipped_projects": {
+          "description": "The Phase 0 ``skipped_projects`` payload, derived from the projects.\n\nDerived rather than stored so the two cannot disagree, and a\n``computed_field`` so it serialises -- a downstream consumer must be able\nto see that a project was dropped, and cannot read stderr.",
+          "items": {
+            "$ref": "#/$defs/SkippedProject"
+          },
+          "readOnly": true,
+          "title": "Skipped Projects",
+          "type": "array"
+        },
         "status": {
           "default": "completed",
           "description": "Whether projects were scanned at all. The discriminator for the code-2 collision -- see the module docstring.",
@@ -24499,7 +26027,8 @@
       "required": [
         "workspace_file",
         "workspace_root",
-        "exit_code"
+        "exit_code",
+        "skipped_projects"
       ],
       "title": "WorkspaceResults",
       "type": "object"
@@ -24525,7 +26054,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -24562,7 +26091,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -24644,7 +26173,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
           ],
@@ -24680,7 +26209,7 @@
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it. The field is read with its default.",
-              "pattern": "^(!ENV )?\\$\\{\\w+:?.*\\}",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -24725,7 +26254,7 @@
               "type": "null"
             }
           ],
-          "default": "text/plain",
+          "default": null,
           "description": "Specifies the format and nature of the data being attached, helping systems correctly interpret and process the content. Common content type examples include `application/json` for JSON data and `text/plain` for plan text documents.\n [RFC 2045 section 5.1](https://www.ietf.org/rfc/rfc2045.html#section-5.1) outlines the structure and use of content types. For a comprehensive list of registered content types, refer to the [IANA media types registry](https://www.iana.org/assignments/media-types/media-types.xhtml).",
           "examples": [
             "text/plain",
