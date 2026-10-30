@@ -601,14 +601,21 @@ def test_an_older_results_files_summary_adds_up(tmp_path, config):
     assert summary["unused_suppressions"] == 2, summary
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 def test_an_older_results_file_then_fix_unused_keeps_the_entry_it_applied(
-    tmp_path, config
+    tmp_path, config, newline
 ):
     """The sequence the unused report feeds: re-render a results file written
     before used ids took the written form, then ``ash config lint
     --fix-unused``. The entry that file recorded by its resolved id was
     applied, so the fixer leaves it in place; the entry nothing used is
-    commented out."""
+    commented out.
+
+    The fixer keeps the config's own line breaks, so the checks read the result
+    with them taken out. Before, they looked for a bare ``\\n``: the fixture is
+    written in the platform's line break (CRLF on Windows), the result kept it,
+    and the one test failed there alone. Both line breaks are written here as
+    bytes, so the CRLF case runs on any platform."""
     from automated_security_helper.config.config_linter import ConfigLinter
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
@@ -630,17 +637,26 @@ def test_an_older_results_file_then_fix_unused_keeps_the_entry_it_applied(
         UnusedSuppressionsReporter(context=context).report(model), encoding="utf-8"
     )
 
+    profile = tmp_path / "suppressions.ash.yaml"
+    # The fixture wrote the file in the platform's line break; write it again in
+    # the one under test. The loaded config is not affected.
+    as_written = profile.read_bytes().decode("utf-8").replace("\r\n", "\n")
+    profile.write_bytes(as_written.replace("\n", newline).encode("utf-8"))
+
     fixed, issues, _stamp = ConfigLinter.fix_unused_suppressions(
-        tmp_path / "suppressions.ash.yaml", output_dir=tmp_path / "out"
+        profile, output_dir=tmp_path / "out"
     )
 
     # The control: the entry nothing used was commented out.
     assert [issue.path for issue in issues] == ["global_settings.suppressions[2]"], [
         issue.message for issue in issues
     ]
-    assert "# - path: never-used/*.py" in fixed, fixed
-    assert f"    - path: {WRITTEN}\n      rule_id: SECRET-AWS-ACCESS-KEY" in fixed, (
-        fixed
+    # Every line break of the result is the file's own.
+    assert "\n" not in fixed.replace(newline, ""), repr(fixed)
+    lines = fixed.replace(newline, "\n")
+    assert "# - path: never-used/*.py" in lines, lines
+    assert f"    - path: {WRITTEN}\n      rule_id: SECRET-AWS-ACCESS-KEY" in lines, (
+        lines
     )
 
 
