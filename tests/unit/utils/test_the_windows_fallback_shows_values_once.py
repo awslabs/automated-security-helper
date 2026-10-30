@@ -36,9 +36,11 @@ pytestmark = pytest.mark.unit
 #: turns into a tag ("[↓x]" shown is no tag; "[vx]" is one).
 VALUE = "a\x1bb [↓x]"
 
-#: What every sink shows for the message: the value's control as its escape,
-#: once, in the rewrite's ASCII.
+#: What the console and the last resort show for the message: the value's
+#: control as its escape, once, in the rewrite's ASCII. The UTF-8 files write
+#: the text as logged, so they keep the arrow (log.py, _UNFILTERED_ATTR).
 EXPECTED = "p a\\x1bb [vx]"
+EXPECTED_IN_THE_FILE = "p a\\x1bb [↓x]"
 
 
 def _filtered_record() -> logging.LogRecord:
@@ -73,11 +75,16 @@ def test_the_console_shows_the_fallback_text_once():
 
 
 def test_ash_log_shows_the_fallback_text_once():
+    """The last resort's formatter (unfiltered=False) writes the console form;
+    ash.log's (the default) writes the record as logged. Each shows the value's
+    control once."""
     record = _filtered_record()
 
+    console_form = TextFileFormatter("%(message)s", unfiltered=False).format(record)
     written = TextFileFormatter("%(message)s").format(record)
 
-    assert written == EXPECTED, written
+    assert console_form == EXPECTED, console_form
+    assert written == EXPECTED_IN_THE_FILE, written
 
 
 def test_control_a_kept_rewrite_still_shows_once():
