@@ -33,7 +33,7 @@ the allowlist is a visible change.
 
 The entries only work where git reads safe.directory from the command scope, which is
 believed to be git 2.38 and later. Every test here replaces git with a stub, so none
-shows a real git accepting an entry (that is an integration cell for a host with a
+shows a real git accepting an entry (that needs an integration run on a host with a
 second user and a git of each age); what these tests can pin is that the version
 bound is recorded where a reader of the code will find it, in the docstrings of
 ``_safe_directory_config`` and ``_get_commit_sha``.
