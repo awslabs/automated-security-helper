@@ -369,17 +369,21 @@ class VersionBumper:
             consistent = False
             tables_agree = False
 
+        targets = list(self.template_manager.target_files)
         templates = self.template_manager.list_templates()
         if not templates:
+            # Not an early return: the loop below names every listed target whose
+            # template is missing, and a version error printed above still gets
+            # the failure summary.
             print("Warning: No template files found. Run 'convert' first.")
-            return False
+            consistent = False
 
         # Every target the manager lists, as `set` counts them and `generate`
         # renders them, and not the templates that happen to exist: a listed
         # target whose template is missing is skipped with a warning by generate,
         # so a loop over the existing templates never reached it and validate
         # passed over a page that `set` reports as not regenerated.
-        for relative in self.template_manager.target_files:
+        for relative in targets:
             target = self.project_root / relative
             template = self.template_manager.template_path_for(relative)
             if not template.exists():
@@ -420,7 +424,9 @@ class VersionBumper:
                 )
                 consistent = False
 
-        print(f"Found {len(templates)} template files")
+        # Counted against the targets the manager lists, as the loop is: a template
+        # on disk that no target names is not looked at and not counted.
+        print(f"Found templates for {len(templates)} of {len(targets)} listed targets")
         if not consistent:
             print("Version consistency validation failed")
             return False

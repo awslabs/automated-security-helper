@@ -109,7 +109,7 @@ class TestAConsistentTreePasses:
         assert _bumper(module, project).validate_consistency() is True
         out = capsys.readouterr().out
         assert "Current version from pyproject.toml: 1.2.3" in out
-        assert "Found 1 template files" in out
+        assert "Found templates for 1 of 1 listed targets" in out
         assert "Version consistency validation passed" in out
 
     def test_the_installed_distribution_is_not_asked_for_its_version(
@@ -275,7 +275,48 @@ class TestEveryListedTargetIsChecked:
         project.joinpath("OTHER.md.template").write_text("x\n", encoding="utf-8")
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is True
-        assert "OTHER.md" not in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "OTHER.md" not in out
+        # list_templates already walks the listed targets, so the unlisted template
+        # was never counted; the summary now also says how many targets are listed.
+        assert "Found templates for 1 of 1 listed targets" in out
+
+    def test_the_summary_counts_listed_targets_that_have_a_template(
+        self, project, monkeypatch, capsys
+    ):
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        bumper.template_manager.target_files = ["README.md", "docs/missing.md"]
+        assert bumper.validate_consistency() is False
+        assert "Found templates for 1 of 2 listed targets" in capsys.readouterr().out
+
+    def test_no_templates_at_all_still_names_each_target_and_the_summary(
+        self, project, monkeypatch, capsys
+    ):
+        # Red before: validate returned at "No template files found" before the
+        # per-target errors, and without the failure summary.
+        project.joinpath("README.md.template").unlink()
+        module = _load_version_bump(monkeypatch)
+        bumper = _bumper(module, project)
+        bumper.template_manager.target_files = ["README.md", "docs/missing.md"]
+        assert bumper.validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "No template files found" in out
+        assert "README.md.template does not exist" in out
+        assert "missing.md.template does not exist" in out
+        assert "Found templates for 0 of 2 listed targets" in out
+        assert "Version consistency validation failed" in out
+
+    def test_a_version_error_is_followed_by_the_summary_when_no_template_exists(
+        self, project, monkeypatch, capsys
+    ):
+        project.joinpath("README.md.template").unlink()
+        _write_pyproject(project, "1.2.3", "1.2.2")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "[tool.commitizen] version is 1.2.2" in out
+        assert out.rstrip().endswith("Version consistency validation failed")
 
     def test_a_missing_template_is_reported_next_to_a_stale_page(
         self, project, monkeypatch, capsys
