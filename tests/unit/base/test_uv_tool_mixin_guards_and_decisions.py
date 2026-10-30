@@ -620,6 +620,30 @@ class TestTheStoredInstallCommand:
         plugin._setup_uv_tool_install_commands()
         assert plugin.uv_tool_install_commands == ["uv tool install bandit[sarif]>=1.7"]
 
+    def test_the_with_dependencies_hook_is_read_once(self):
+        """One read serves the checks, the spec builder and the stored command.
+
+        The hook is overridable, so two reads can disagree: a hook that answers
+        differently on each call would have its first answer checked, its
+        second built into the spec's record and its third stored as the
+        ``--with`` arguments. The stored command carries the ONE answer that was
+        checked.
+        """
+        answers = iter([["first>=1"], ["second>=2"], ["third>=3"]])
+        reads: list = []
+
+        class ShiftingPlugin(FakePlugin):
+            def _get_tool_with_dependencies(self):
+                answer = next(answers)
+                reads.append(answer)
+                return answer
+
+        plugin = ShiftingPlugin(constraint=">=1.7")
+        plugin._setup_uv_tool_install_commands()
+        (command,) = plugin.uv_tool_install_commands
+        assert command == "uv tool install --with first>=1 bandit>=1.7"
+        assert len(reads) == 1, reads
+
 
 class TestTheProbeSitesRefuseAnotherPackagesSpec:
     def test_the_installation_info(self):

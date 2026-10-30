@@ -1911,9 +1911,11 @@ class UVToolMixin:
         # The plugin's extra dependencies, as the scan-time install passes
         # them (UVToolRunner.install_tool_with_version): without them the
         # command `ash dependencies` runs built a different environment than
-        # the scan's. Each was checked above and refused if it carried
-        # whitespace.
-        for dependency in self._get_tool_with_dependencies() or []:
+        # the scan's. The ONE read above serves the checks, the spec builder
+        # and this loop: the hook is overridable, and a second read could
+        # answer differently from the one that was checked. Each is stored
+        # in its canonical spelling, as the tool spec below is.
+        for dependency in with_dependencies:
             install_cmd_parts.extend(["--with", _without_whitespace(dependency)])
         # The stored command is ONE string that get_installation_commands
         # splits on whitespace, so every requirement in it is spelled without
