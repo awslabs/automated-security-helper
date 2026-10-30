@@ -2242,14 +2242,15 @@ _MAX_INCOMING_BYTES: int = 2 * _MAX_ZIP_BYTES
 _UPLOAD_SUFFIXES = (".zip.part", ".zip")
 
 
-def _refuse_another_upload(incoming: Path, upload_id: str) -> None:
-    """Refuse the first chunk of an upload the session has no room for.
+def _other_uploads(incoming: Path, upload_id: str) -> Tuple[int, int]:
+    """How many archives and partial archives other than ``upload_id``'s own sit
+    in ``incoming/``, and how many bytes they hold together.
 
-    Counts the archives and partial archives in ``incoming/`` other than
-    ``upload_id``'s own (an upload sent again under its id replaces its own
-    file) and their bytes. An upload whose chunks all arrived and whose finalize
-    was never sent holds its bytes until the next delivery, a clear or the end of
-    the session; this is the bound on how many of those a session keeps.
+    An upload sent again under its id replaces its own file, so its own files
+    are left out. An upload whose chunks all arrived and whose finalize was never
+    sent holds its bytes until the next delivery, a clear or the end of the
+    session; this is what the per-session bounds below count. ``(0, 0)`` when the
+    directory cannot be read.
     """
     own = {f"{upload_id}{suffix}" for suffix in _UPLOAD_SUFFIXES}
     held = 0
@@ -2257,7 +2258,7 @@ def _refuse_another_upload(incoming: Path, upload_id: str) -> None:
     try:
         entries = list(os.scandir(incoming))
     except OSError:
-        return
+        return 0, 0
     for entry in entries:
         if not entry.name.endswith(_UPLOAD_SUFFIXES) or entry.name in own:
             continue
@@ -2269,15 +2270,36 @@ def _refuse_another_upload(incoming: Path, upload_id: str) -> None:
             continue
         held += 1
         held_bytes += st.st_size
+    return held, held_bytes
+
+
+def _refuse_another_upload(incoming: Path, upload_id: str) -> None:
+    """Refuse the first chunk of an upload when the session holds the most it may."""
+    held, _held_bytes = _other_uploads(incoming, upload_id)
     if held >= _MAX_UPLOADS_PER_SESSION:
         raise ValueError(
             f"too many uploads in progress for this session: {held} already held, "
             f"the limit is {_MAX_UPLOADS_PER_SESSION}; finalize or clear them first"
         )
-    if held_bytes >= _MAX_INCOMING_BYTES:
+
+
+def _refuse_a_chunk_past_the_session_bound(
+    incoming: Path, upload_id: str, own_bytes: int
+) -> None:
+    """Refuse a chunk that would take the session's held bytes past the bound.
+
+    ``own_bytes`` is what this upload will hold once the chunk is appended: its
+    partial archive so far plus the chunk. Read on every chunk, not only the
+    first: a bound read only at an upload's first chunk let each of a session's
+    uploads start small and then grow to ``_MAX_ZIP_BYTES`` on its own, and the
+    session's uploads together held that many times the per-upload cap.
+    """
+    _held, held_bytes = _other_uploads(incoming, upload_id)
+    if held_bytes + own_bytes > _MAX_INCOMING_BYTES:
         raise ValueError(
-            f"uploads in progress for this session hold {held_bytes} bytes, the "
-            f"limit is {_MAX_INCOMING_BYTES}; finalize or clear them first"
+            f"uploads in progress for this session hold {held_bytes} bytes and "
+            f"this chunk would make it {held_bytes + own_bytes}, the limit is "
+            f"{_MAX_INCOMING_BYTES}; finalize or clear them first"
         )
 
 
@@ -2301,12 +2323,27 @@ def _write_next_sequence(session_dir: Path, upload_id: str, value: int) -> None:
 _UPLOAD_LOCK_STRIPES = 64
 _UPLOAD_LOCKS = tuple(threading.Lock() for _ in range(_UPLOAD_LOCK_STRIPES))
 
+#: Locks that serialize the chunk writers of one session against each other,
+#: taken before the upload's own lock. The per-session bounds are read from the
+#: directory and enforced under this lock: with only the per-upload lock, two
+#: first chunks of two uploads each counted the other as absent and both passed.
+#: The session's write hold (``sessions.writing_session_state``) does not
+#: serialize writes against each other, by design.
+_SESSION_UPLOAD_LOCKS = tuple(threading.Lock() for _ in range(_UPLOAD_LOCK_STRIPES))
+
 
 def _upload_lock(session_id: str, upload_id: str) -> threading.Lock:
     """The lock held while a chunk of this upload reads and moves its sequence."""
 
     digest = hashlib.sha256(f"{session_id}\0{upload_id}".encode()).digest()
     return _UPLOAD_LOCKS[digest[0] % _UPLOAD_LOCK_STRIPES]
+
+
+def _session_upload_lock(session_id: str) -> threading.Lock:
+    """The lock held while a chunk of any of this session's uploads is appended."""
+
+    digest = hashlib.sha256(session_id.encode()).digest()
+    return _SESSION_UPLOAD_LOCKS[digest[0] % _UPLOAD_LOCK_STRIPES]
 
 
 def set_source_zip_chunk(
@@ -2344,7 +2381,11 @@ def set_source_zip_chunk(
     """
     from automated_security_helper.cli.mcp.sessions import writing_session_state
 
-    with writing_session_state(session_id), _upload_lock(session_id, upload_id):
+    with (
+        writing_session_state(session_id),
+        _session_upload_lock(session_id),
+        _upload_lock(session_id, upload_id),
+    ):
         return _append_zip_chunk(
             upload_id,
             sequence,
@@ -2385,6 +2426,21 @@ def _append_zip_chunk(
 
     if len(decoded) > _MAX_CHUNK_BYTES:
         raise ValueError(f"chunk too large: {len(decoded)} > {_MAX_CHUNK_BYTES} bytes")
+
+    try:
+        so_far = part.stat().st_size
+    except OSError:
+        so_far = 0
+    try:
+        _refuse_a_chunk_past_the_session_bound(
+            part.parent, upload_id, so_far + len(decoded)
+        )
+    except ValueError:
+        # As for the per-upload cap below: what this upload holds is dropped
+        # with the refusal, and the upload is sent again from its first chunk.
+        part.unlink(missing_ok=True)
+        _meta_path(session_dir, upload_id).unlink(missing_ok=True)
+        raise
 
     # Append. Open in "ab" so successive chunks accumulate.
     with part.open("ab") as f:

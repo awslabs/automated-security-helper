@@ -13,7 +13,9 @@ so no ``core.symlinks`` setting is pinned here.
 * A clone with no ref of a repository whose HEAD names no commit exits 0 with an
   empty tree, which was registered as the session's source and scanned clean.
 * Uploads were capped per upload id only, and an archive the finalize refused
-  stayed on disk, so one session could hold any number of archives.
+  stayed on disk, so one session could hold any number of archives. The bound
+  across uploads then read at a first chunk only, and compared the other uploads'
+  bytes alone, so each upload grew to the per-upload cap on its own.
 * A zip entry named with backslashes passed the traversal checks as a nested path
   and was extracted on POSIX as one flat file.
 * ``clear_source`` removed the materialized profile and kept the binding that
@@ -241,6 +243,65 @@ class TestUploadsAreBoundedPerSession:
 
         with pytest.raises(ValueError, match="hold"):
             _upload(payload, "second", tmp_path)
+
+    def test_a_first_chunk_counts_its_own_bytes_against_the_bound(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the bound compared what the OTHER uploads held, so a
+        first chunk that itself crossed the bound was admitted."""
+        monkeypatch.setattr(sd, "_MAX_INCOMING_BYTES", 30)
+        _upload(b"x" * 20, "first", tmp_path)
+
+        with pytest.raises(ValueError, match="hold"):
+            _upload(b"y" * 15, "second", tmp_path)
+
+    def test_a_later_chunk_that_grows_past_the_bound_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the bound was read at an upload's first chunk only, so
+        each upload could start small and grow to the per-upload cap on its own."""
+        monkeypatch.setattr(sd, "_MAX_INCOMING_BYTES", 30)
+        _upload(b"x" * 20, "first", tmp_path)
+        sd.set_source_zip_chunk(
+            upload_id="second",
+            sequence=0,
+            data_b64=_b64(b"y" * 5),
+            last=False,
+            workspace_root=tmp_path,
+            session_id=SESSION,
+        )
+
+        with pytest.raises(ValueError, match="hold"):
+            sd.set_source_zip_chunk(
+                upload_id="second",
+                sequence=1,
+                data_b64=_b64(b"z" * 10),
+                last=False,
+                workspace_root=tmp_path,
+                session_id=SESSION,
+            )
+
+        incoming = tmp_path / SESSION / "incoming"
+        assert not (incoming / "second.zip.part").exists()
+        assert not (incoming / "second.next").exists()
+        assert (incoming / "first.zip").stat().st_size == 20
+
+    def test_a_chunk_within_the_bound_is_appended(self, tmp_path, monkeypatch):
+        """Control: the bound counts bytes, and a chunk that fits is kept."""
+        monkeypatch.setattr(sd, "_MAX_INCOMING_BYTES", 30)
+        _upload(b"x" * 20, "first", tmp_path)
+
+        answer = sd.set_source_zip_chunk(
+            upload_id="second",
+            sequence=0,
+            data_b64=_b64(b"y" * 10),
+            last=False,
+            workspace_root=tmp_path,
+            session_id=SESSION,
+        )
+
+        assert answer["received"] == 10
+        assert (tmp_path / SESSION / "incoming" / "second.zip.part").exists()
 
     def test_an_archive_the_finalize_refuses_is_removed(self, tmp_path):
         """Red at the base: the refused zip stayed in incoming/ until the session ended."""
