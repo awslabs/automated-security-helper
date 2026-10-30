@@ -88,6 +88,20 @@ def test_a_wide_merge_is_refused_before_its_list_is_built():
         get_model_from_template_text(text, "wide.yaml")
 
 
+def test_a_mapping_that_merges_itself_builds_empty_as_pyyaml_does():
+    """``a: &a {<<: *a}``: PyYAML deletes the merge key before it recurses and builds
+    ``{}``. At the previous tip the pre-check flattened the merged node while the
+    key was still there and recursed into the same node until RecursionError,
+    which the model then reported as "nested past the YAML loader's recursion
+    limit" for a one-line file."""
+    loaded = yaml.load("a: &a {<<: *a}\n", Loader=cfn_template_model._TemplateLoader)  # nosec B506
+    assert loaded == {"a": {}}
+    text = "Defaults: &d {<<: *d}\nResources:\n  B:\n    Type: AWS::S3::Bucket\n"
+    model = get_model_from_template_text(text, "self-merge.yaml")
+    assert model is not None
+    assert model.Resources["B"].Type == "AWS::S3::Bucket"
+
+
 def test_a_merge_well_within_the_bound_across_the_document_is_still_merged():
     text = _chain_then(
         8,

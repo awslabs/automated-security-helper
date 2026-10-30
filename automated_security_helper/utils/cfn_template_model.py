@@ -122,43 +122,69 @@ def _flatten_mapping_within_bound(
     refused as one large merge is. ``flatten`` (the base class's) runs only when
     both sums are within the bound; it finds the merged mappings already flat.
 
+    A mapping that merges itself (``a: &a {<<: *a}``) is left to the base class,
+    which deletes the merge key before it recurses and builds ``{}``: the
+    pre-check flattens each merged mapping while the merging node still holds its
+    key, so a merged node that is itself being flattened is skipped here, not
+    flattened again. Without the skip the pre-check recursed into the same node
+    until ``RecursionError``, and a one-line file was reported as nested past the
+    loader's recursion limit.
+
     Raises:
         ConstructorError: the merge would expand this mapping, or the document's
             merges together, past ``MERGED_MAPPING_PAIRS_BOUND`` pairs.
     """
-    incoming = 0
-    for key_node, value_node in list(node.value):
-        if getattr(key_node, "tag", None) != _MERGE_TAG:
-            continue
-        if isinstance(value_node, yaml.MappingNode):
-            merged_nodes = [value_node]
-        elif isinstance(value_node, yaml.SequenceNode):
-            # A non-mapping item is left for the base class to refuse.
-            merged_nodes = [
-                item for item in value_node.value if isinstance(item, yaml.MappingNode)
-            ]
-        else:
-            merged_nodes = []
-        for merged_node in merged_nodes:
-            loader.flatten_mapping(merged_node)
-            incoming += len(merged_node.value)
-    if incoming:
-        expanded = incoming + len(node.value)
-        document_total = getattr(loader, "_merged_pairs_added", 0) + incoming
-        if (
-            expanded > MERGED_MAPPING_PAIRS_BOUND
-            or document_total > MERGED_MAPPING_PAIRS_BOUND
-        ):
-            raise ConstructorError(
-                None,
-                None,
-                f"a merge key (<<) would expand this mapping to {expanded} key/value "
-                f"pairs ({document_total} added by this document's merges), more "
-                f"than the {MERGED_MAPPING_PAIRS_BOUND} ASH reads",
-                node.start_mark,
-            )
-        loader._merged_pairs_added = document_total
-    flatten(node)
+    in_progress = getattr(loader, "_flattening_node_ids", None)
+    if in_progress is None:
+        in_progress = set()
+        loader._flattening_node_ids = in_progress
+    entered = id(node) not in in_progress
+    if entered:
+        in_progress.add(id(node))
+    try:
+        incoming = 0
+        for key_node, value_node in list(node.value):
+            if getattr(key_node, "tag", None) != _MERGE_TAG:
+                continue
+            if isinstance(value_node, yaml.MappingNode):
+                merged_nodes = [value_node]
+            elif isinstance(value_node, yaml.SequenceNode):
+                # A non-mapping item is left for the base class to refuse.
+                merged_nodes = [
+                    item
+                    for item in value_node.value
+                    if isinstance(item, yaml.MappingNode)
+                ]
+            else:
+                merged_nodes = []
+            for merged_node in merged_nodes:
+                if id(merged_node) in in_progress:
+                    # The node merges itself, or a mapping that is merging it:
+                    # the base class drops the merge key before it recurses, so
+                    # nothing is added by it.
+                    continue
+                loader.flatten_mapping(merged_node)
+                incoming += len(merged_node.value)
+        if incoming:
+            expanded = incoming + len(node.value)
+            document_total = getattr(loader, "_merged_pairs_added", 0) + incoming
+            if (
+                expanded > MERGED_MAPPING_PAIRS_BOUND
+                or document_total > MERGED_MAPPING_PAIRS_BOUND
+            ):
+                raise ConstructorError(
+                    None,
+                    None,
+                    f"a merge key (<<) would expand this mapping to {expanded} "
+                    f"key/value pairs ({document_total} added by this document's "
+                    f"merges), more than the {MERGED_MAPPING_PAIRS_BOUND} ASH reads",
+                    node.start_mark,
+                )
+            loader._merged_pairs_added = document_total
+        flatten(node)
+    finally:
+        if entered:
+            in_progress.discard(id(node))
 
 
 #: The byte order mark as UTF-8 decoding keeps it, U+FEFF, spelled by code point.
