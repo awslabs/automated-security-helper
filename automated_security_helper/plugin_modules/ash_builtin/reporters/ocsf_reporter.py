@@ -61,8 +61,15 @@ TITLE_MAX_LENGTH = 120
 #: failed, kept with what could still be read of it (the gate's severity, the
 #: project). Same ``key:value`` shape as the other labels, so a SIEM can set it
 #: apart from a finding the builder read whole. Such records were counted as
-#: successes, so the failure rate never reflected them.
+#: successes, so the failure rate never reflected them. The label marks every
+#: fallback, the whole-record one and the two inner ones (a ``Vulnerability``
+#: or a ``FindingInfo`` the builder could not read); the inner ones carried
+#: no mark, so the rate and the shortfall record left them out.
 DEGRADED_FINDING_LABEL = "ash_row_type:degraded_finding"
+
+#: The description of a ``Vulnerability`` built by its fallback: the rule id is
+#: kept, the rest of the finding could not be read.
+_FALLBACK_VULNERABILITY_DESC = "Error processing vulnerability details"
 
 #: Marks the one record that stands for findings this array does not carry:
 #: results whose construction and fallback both failed, and findings whose
@@ -365,13 +372,22 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         return super().model_post_init(context)
 
     def _create_vulnerability_from_result(self, result: Result) -> Vulnerability:
+        """The ``Vulnerability`` for a SARIF result, whole or built by the
+        fallback; :meth:`_build_vulnerability` says which."""
+        return self._build_vulnerability(result)[0]
+
+    def _build_vulnerability(self, result: Result) -> Tuple[Vulnerability, bool]:
         """Extract vulnerability data from SARIF result.
 
         Args:
             result: SARIF result object
 
         Returns:
-            Vulnerability object with data extracted from SARIF result
+            The Vulnerability object with data extracted from the SARIF result,
+            and whether it was built by the fallback path (True) rather than
+            read whole (False). The flag is what lets the record carry
+            :data:`DEGRADED_FINDING_LABEL`; a fallback that returned the object
+            alone was counted as a finding read whole.
         """
         rule_id = "Unknown Rule"
         try:
@@ -534,7 +550,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
             vulnerability = Vulnerability(**vuln_dict)
             ASH_LOGGER.debug(f"Successfully created vulnerability object for {rule_id}")
-            return vulnerability
+            return vulnerability, False
 
         except Exception as e:
             ASH_LOGGER.error(
@@ -542,12 +558,12 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             )
             # Return minimal vulnerability object as fallback
             fallback_vuln = Vulnerability(
-                desc="Error processing vulnerability details",
+                desc=_FALLBACK_VULNERABILITY_DESC,
                 title=rule_id if rule_id != "Unknown Rule" else "Unknown Rule",
                 severity="MEDIUM",
             )
             ASH_LOGGER.debug(f"Created fallback vulnerability object for {rule_id}")
-            return fallback_vuln
+            return fallback_vuln, True
 
     def _determine_status_from_suppressions(
         self, suppressions: Optional[List[Suppression]], rule_id: str = "Unknown"
@@ -722,9 +738,12 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         ASH_LOGGER.debug(f"Creating VulnerabilityFinding for {rule_id}")
 
         try:
-            # Create vulnerability from result (this method has its own error handling)
+            # Create vulnerability from result (this method has its own error
+            # handling). A vulnerability its fallback built makes the record
+            # degraded: the label below marks it so report() counts it apart
+            # from the findings read whole.
             ASH_LOGGER.debug(f"Creating vulnerability object for {rule_id}")
-            vulnerability = self._create_vulnerability_from_result(result)
+            vulnerability, degraded = self._build_vulnerability(result)
 
             # Determine status from suppressions (this method has its own error handling)
             ASH_LOGGER.debug(f"Determining suppression status for {rule_id}")
@@ -812,6 +831,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 ASH_LOGGER.warning(
                     f"Error creating FindingInfo for {rule_id}, using minimal version: {str(e)}"
                 )
+                # A finding whose title and description could not be built is
+                # degraded too; without the mark the rate counted it whole.
+                degraded = True
                 fallback_uid = _finding_uid(f"{identity}|fallback-info")
                 finding_info = FindingInfo(
                     uid=fallback_uid,
@@ -820,6 +842,12 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 )
                 ASH_LOGGER.debug(
                     f"Created fallback FindingInfo for {rule_id} with UID: {fallback_uid}"
+                )
+
+            record_metadata = _metadata_for_project(metadata, result)
+            if degraded:
+                record_metadata = _metadata_with_labels(
+                    record_metadata, DEGRADED_FINDING_LABEL
                 )
 
             # Create OCSF vulnerability finding
@@ -833,7 +861,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 "category_uid": 2,  # Vulnerability Finding category ID
                 "category_name": "Findings",
                 "time": current_time_ms,
-                "metadata": _metadata_for_project(metadata, result),
+                "metadata": record_metadata,
                 "finding_info": finding_info,
                 "vulnerabilities": [vulnerability],
             }
@@ -885,7 +913,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 )
 
                 fallback_vulnerability = Vulnerability(
-                    desc="Error processing vulnerability details",
+                    desc=_FALLBACK_VULNERABILITY_DESC,
                     title=rule_id if rule_id != "Unknown Rule" else "Unknown Rule",
                     severity=fallback_severity,
                 )

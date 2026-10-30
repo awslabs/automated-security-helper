@@ -26,6 +26,9 @@
 * The error response's failed count left out the results the builder dropped
   when every record failed to serialize, and the catch-all response counted
   records that never reached the file as processed.
+* A record whose ``Vulnerability`` or ``FindingInfo`` the inner fallback built
+  carried no degraded label, so the rate and the shortfall record counted it
+  as a finding read whole.
 """
 
 import json
@@ -35,6 +38,9 @@ from datetime import datetime, timezone
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+    ocsf_reporter as ocsf_module,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
     CONVERSION_SHORTFALL_LABEL,
     DEGRADED_FINDING_LABEL,
@@ -258,9 +264,7 @@ class TestShortfalls:
         def broken_vulnerability(self, result):
             raise RuntimeError("no vulnerability")
 
-        monkeypatch.setattr(
-            OcsfReporter, "_create_vulnerability_from_result", broken_vulnerability
-        )
+        monkeypatch.setattr(OcsfReporter, "_build_vulnerability", broken_vulnerability)
         payload = json.loads(
             reporter.report(
                 _model(
@@ -281,6 +285,59 @@ class TestShortfalls:
         assert "could not be converted" not in shortfall["finding_info"]["title"]
         assert "incomplete" not in shortfall["status_detail"].lower()
         assert shortfall["status"] == "Degraded"
+
+    def test_a_vulnerability_built_by_its_fallback_is_counted_degraded(
+        self, reporter, monkeypatch
+    ):
+        """The inner fallback carried no label, so the rate and the shortfall
+        record counted the record as a finding read whole."""
+        real = ocsf_module.Vulnerability
+
+        def picky(**kwargs):
+            if kwargs.get("desc") != "Error processing vulnerability details":
+                raise ValueError("rejected by the schema")
+            return real(**kwargs)
+
+        monkeypatch.setattr(ocsf_module, "Vulnerability", picky)
+        payload = json.loads(
+            reporter.report(
+                _model(
+                    Result(ruleId="R1", level=Level.error, message=Message(text="x"))
+                )
+            )
+        )
+
+        record, shortfall = payload
+        assert record["vulnerabilities"][0]["desc"] == (
+            "Error processing vulnerability details"
+        )
+        assert DEGRADED_FINDING_LABEL in record["metadata"]["labels"]
+        assert CONVERSION_SHORTFALL_LABEL in shortfall["metadata"]["labels"]
+        assert "1 record(s) were built by the fallback" in shortfall["status_detail"]
+
+    def test_a_finding_info_built_by_its_fallback_is_counted_degraded(
+        self, reporter, monkeypatch
+    ):
+        real = ocsf_module.FindingInfo
+
+        def picky(**kwargs):
+            if kwargs.get("title") != "Error creating finding title":
+                raise ValueError("rejected by the schema")
+            return real(**kwargs)
+
+        monkeypatch.setattr(ocsf_module, "FindingInfo", picky)
+        payload = json.loads(
+            reporter.report(
+                _model(
+                    Result(ruleId="R1", level=Level.error, message=Message(text="x"))
+                )
+            )
+        )
+
+        record, shortfall = payload
+        assert record["finding_info"]["title"] == "Error creating finding title"
+        assert DEGRADED_FINDING_LABEL in record["metadata"]["labels"]
+        assert "1 record(s) were built by the fallback" in shortfall["status_detail"]
 
     @staticmethod
     def _shortfall_uid_for(reporter, monkeypatch, project_name: str) -> str:

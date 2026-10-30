@@ -20,6 +20,9 @@ import json
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+    ocsf_reporter as ocsf_module,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
     OcsfReporter,
     _metadata_for_project,
@@ -280,14 +283,14 @@ class TestVulnerabilityExtractionFaults:
         assert vuln.title == "R1"
         assert vuln.affected_code is None or vuln.affected_code == []
 
-    def test_invalid_region_data_degrades_to_a_minimal_vulnerability(self, reporter):
+    def test_a_bad_location_is_skipped_and_the_vulnerability_read_whole(self, reporter):
         """A region the schema refuses costs that one location, not the record.
 
         Each affected_code entry is validated as it is built, so a non-integer
         startLine is skipped on its own and the description, title and severity
-        read from the result are kept. Before that, the whole Vulnerability was
-        validated at once and the outermost handler replaced all of it with the
-        fixed fallback text.
+        read from the result are kept; the builder says the record is not
+        degraded. Before that, the whole Vulnerability was validated at once and
+        the outermost handler replaced all of it with the fixed fallback text.
         """
         result = Result(ruleId="R1", level=Level.error, message=Message(text="m"))
         location = Location(
@@ -301,25 +304,48 @@ class TestVulnerabilityExtractionFaults:
         location.physicalLocation.root.region.startLine = "not-a-line-number"
         result.locations = [location]
 
-        vuln = reporter._create_vulnerability_from_result(result)
+        vuln, degraded = reporter._build_vulnerability(result)
 
+        assert degraded is False
         assert vuln.title == "R1", "the rule id is preserved"
         assert vuln.desc == "m", "the message text is kept, not the fallback text"
         assert vuln.severity == "CRITICAL", "level error, as the gate reads it"
         assert not vuln.affected_code, "the one unreadable location is left out"
 
-    def test_fallback_title_is_unknown_rule_when_the_rule_id_is_absent(self, reporter):
+    @staticmethod
+    def _reject_whole_vulnerabilities(monkeypatch):
+        """Vulnerability() rejects everything but the fallback's own shape, so
+        the outermost handler is reached whatever the locations held."""
+        real = ocsf_module.Vulnerability
+
+        def picky(**kwargs):
+            if kwargs.get("desc") != "Error processing vulnerability details":
+                raise ValueError("rejected by the schema")
+            return real(**kwargs)
+
+        monkeypatch.setattr(ocsf_module, "Vulnerability", picky)
+
+    def test_a_rejected_vulnerability_degrades_to_a_minimal_one(
+        self, reporter, monkeypatch
+    ):
+        """If Vulnerability() itself rejects the assembled data, a stub is
+        returned and the builder says it is degraded."""
+        self._reject_whole_vulnerabilities(monkeypatch)
+        result = Result(ruleId="R1", level=Level.error, message=Message(text="m"))
+
+        vuln, degraded = reporter._build_vulnerability(result)
+
+        assert degraded is True
+        assert vuln.title == "R1", "the rule id is preserved in the fallback"
+        assert vuln.desc == "Error processing vulnerability details"
+        assert vuln.severity == "MEDIUM"
+        assert reporter._create_vulnerability_from_result(result).desc == vuln.desc
+
+    def test_fallback_title_is_unknown_rule_when_the_rule_id_is_absent(
+        self, reporter, monkeypatch
+    ):
+        self._reject_whole_vulnerabilities(monkeypatch)
         result = Result(level=Level.error, message=Message(text="m"))
-        location = Location(
-            physicalLocation=PhysicalLocation(
-                root=PhysicalLocation2(
-                    artifactLocation=ArtifactLocation(uri="src/app.py"),
-                    region=Region(startLine=1),
-                )
-            )
-        )
-        location.physicalLocation.root.region.startLine = "not-a-line-number"
-        result.locations = [location]
 
         vuln = reporter._create_vulnerability_from_result(result)
 
