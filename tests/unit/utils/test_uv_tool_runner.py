@@ -4416,3 +4416,42 @@ def test_a_tools_own_version_answer_keeps_its_version_and_hides_the_spec():
 
     assert shown.startswith("vtool 1.0 "), shown
     assert "==1.0" not in shown, shown
+
+
+def test_a_value_holding_input_is_hidden_whole_not_only_its_value():
+    """The value layer runs before the input arm, so by the time the arm
+    looked for a hidden input's own spelling the value inside it already read
+    as the value layer's placeholder, and a raw replace of the input found
+    nothing: the input's REMAINDER -- here a repository path, elsewhere an
+    index URL -- printed around a hidden value, against the contract that an
+    input holding a value is hidden, not partly shown. The arm now matches
+    the input in that respelled form too. The whole-input case (the input IS
+    the value) keeps the value layer's own placeholder: respelling it would
+    re-label every hidden value in the text as an argument. The tool's own
+    name and uninvolved text stay."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    host = "example.invalid"
+    spec = f"tool @ git+https://{host}/it's-a-spec.git"
+    shown = shown_uv_output(
+        f"uv tool run --from {spec} tool failed to resolve",
+        (host,),
+        plugin_inputs=(spec,),
+        tool_name="tool",
+        limit=None,
+    )
+
+    assert host not in shown, shown
+    assert "it's-a-spec" not in shown, shown
+    assert "git+https" not in shown, shown
+    expected = "uv tool run --from <argument 1 not shown> tool failed to resolve"
+    assert shown == expected, shown
+
+    whole = shown_uv_output(
+        f"index {host} refused the request",
+        (host,),
+        plugin_inputs=(host,),
+        tool_name="tool",
+        limit=None,
+    )
+    assert whole == "index <value> refused the request", whole

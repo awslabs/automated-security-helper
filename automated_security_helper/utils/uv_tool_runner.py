@@ -594,7 +594,12 @@ def shown_uv_output(
     is the answer and no file name is printed) -- while with an explicit
     iterable only the inputs
     that hold one of the values are hidden, so a builtin constraint, the
-    very thing a resolver conflict is about, stays diagnosable. The contract
+    very thing a resolver conflict is about, stays diagnosable. A hidden
+    input is matched as written AND as the value layer has just respelled it
+    (its values replaced by that layer's placeholder): the layer ran first,
+    so the input's own spelling is already gone from the text, and matching
+    only that spelling left the rest of the input -- a repository path, an
+    index URL -- in clear around the hidden value. The contract
     behind that: ``values`` is the run's COMPLETE env-read set (the same set
     redact_values is given), so a plugin that reads the environment itself
     must add the value through _environment_values(), or an input built from
@@ -752,6 +757,24 @@ def shown_uv_output(
         # (set order is not).
         key=lambda token: (-len(token), token),
     )
+    # The value layer ran first, so a token that holds a value no longer reads
+    # as written in ``shown``: the value inside it reads as the value layer's
+    # placeholder, and a replace of the token's own spelling finds nothing,
+    # leaving the REST of the input (a repository path, an index URL) in clear
+    # around a hidden value. Each such token is therefore also matched in that
+    # respelled form -- the token with its values hidden the way the layer hid
+    # them in the text (the same function, the same spellings). A token the
+    # layer eats whole (the input IS the value, or values glued together)
+    # respells to the bare placeholder and is left out: replacing that would
+    # re-label every hidden value in the text as an argument.
+    respelled: Dict[str, str] = {}
+    if value_spellings:
+        from automated_security_helper.config.config_validator import REDACTED
+
+        for token in plugin_built:
+            hidden_form = text_without_values(token, value_spellings)
+            if hidden_form != token and hidden_form.replace(REDACTED, ""):
+                respelled[token] = hidden_form
     # Each placeholder is written as one private-use character that neither
     # the text nor a token holds, and spelled out after the last replacement.
     # A later token can then never be found inside an earlier placeholder's
@@ -759,11 +782,18 @@ def shown_uv_output(
     # "<argument 1 not shown>" and renumbered it. With every character of the
     # block taken (a text built to use them up) the placeholders are written
     # out as the tokens are replaced.
-    marks = _free_marks(len(plugin_built), set(shown).union(*plugin_built))
+    marks = _free_marks(
+        len(plugin_built), set(shown).union(*plugin_built, *respelled.values())
+    )
     for position, token in enumerate(plugin_built, start=1):
         placeholder = (
             marks[position - 1] if marks else f"<argument {position} not shown>"
         )
+        if token in respelled:
+            # A token that holds a value is replaced wherever it appears (the
+            # arm below), so its respelled form is too: the form holds the
+            # value layer's placeholder, a spelling no name boundary applies to.
+            shown = shown.replace(respelled[token], placeholder)
         if token in name_tokens and not _holds_value(token, value_spellings):
             # A name is made of word characters, so a raw substring replace
             # mangles every word that contains it ("toml" inside
