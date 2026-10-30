@@ -2179,15 +2179,30 @@ def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
     return {key: value for key, value in child_environ().items() if key not in dropped}
 
 
-def _core_worktree_names_a_tree(git_dir: str) -> bool:
-    """Whether the repository at *git_dir* sets ``core.worktree``.
+def _core_worktree_names_a_tree(git_dir: str, started_in: str) -> bool:
+    """Whether the repository at *git_dir* sets ``core.worktree`` to a directory
+    that holds *started_in*.
 
-    With it, GIT_DIR alone describes the layout in full: git takes its working
-    directory for the top of the tree only when none of ``--work-tree``,
-    GIT_WORK_TREE and ``core.worktree`` is given. Read with ``git --git-dir <dir>
-    config --get core.worktree``, which exits 0 and prints the value when it is
-    set and 1 when it is not; a git that cannot be started, is missing or times
-    out reads as not set, which drops the variable and lets discovery answer.
+    With ``core.worktree`` set, GIT_DIR alone describes the layout in full: git
+    takes its working directory for the top of the tree only when none of
+    ``--work-tree``, GIT_WORK_TREE and ``core.worktree`` is given. Read with ``git
+    --git-dir <dir> config --get core.worktree``, which exits 0 and prints the
+    value as written when it is set and 1 when it is not (128 when the value
+    names a directory that is gone: git enters the configured tree before it
+    answers). A relative value is relative to the git directory itself, not to
+    the directory git is started in, so it is joined onto *git_dir* before the
+    check. A git that cannot be started, is missing or times out, an answer that
+    is not text, a value naming no directory, and a value naming a directory that
+    does not hold *started_in* all read as False, which drops the variable and
+    lets discovery answer.
+
+    The containment check is the same one the GIT_DIR and GIT_WORK_TREE pair gets
+    in :func:`_layout_environ`, for the same reason: a GIT_DIR left exported for
+    another repository (a hook's, a dotfiles checkout's) whose config names its
+    own tree would otherwise make the root lookup and the diff describe that
+    tree while the scan reads this one, and the changed set would intersect the
+    scanned directory to nothing. git honors such a GIT_DIR from any directory;
+    the scan honors it only where git's and the scan's trees are the same.
     """
     git = _git_executable()
     if git is None:
@@ -2205,7 +2220,17 @@ def _core_worktree_names_a_tree(git_dir: str) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return result.returncode == 0 and bool(result.stdout.strip())
+    if result.returncode != 0:
+        return False
+    try:
+        work_tree = _git_text(result.stdout).strip()
+    except UnicodeDecodeError:
+        return False
+    if not work_tree:
+        return False
+    if not os.path.isabs(work_tree):
+        work_tree = os.path.join(git_dir, work_tree)
+    return os.path.isdir(work_tree) and _is_at_or_below(started_in, work_tree)
 
 
 def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
@@ -2238,9 +2263,13 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     GIT_WORK_TREE unset, GIT_DIR alone is the hook shape where git takes its
     working directory for the top of the tree, and the variables are dropped so
     that git discovers the repository (the docstring above); unless that
-    repository sets ``core.worktree`` (:func:`_core_worktree_names_a_tree`), in
-    which case GIT_DIR alone describes the layout in full and is kept, as it was
-    before the drop. A GIT_WORK_TREE that names no directory is not honored
+    repository sets ``core.worktree`` to a directory that holds *cwd*
+    (:func:`_core_worktree_names_a_tree`), in which case GIT_DIR alone describes
+    the layout in full and is kept, as it was before the drop. The containment
+    rule is the pair's: a GIT_DIR left exported for another repository whose
+    config names its own tree is as stale as a stale pair, and honored from
+    outside that tree it would make the root and the diff describe a tree the
+    scan is not reading. A GIT_WORK_TREE that names no directory is not honored
     either: git would answer with that name unchecked, and the lookup would join
     the diff's paths onto a path that does not exist.
     """
@@ -2262,7 +2291,7 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
         and _is_at_or_below(started_in, work_tree)
     ):
         return environ
-    if git_dir and not work_tree and _core_worktree_names_a_tree(git_dir):
+    if git_dir and not work_tree and _core_worktree_names_a_tree(git_dir, started_in):
         return environ
     return _git_environ()
 
