@@ -3518,9 +3518,9 @@ def _refuse_a_clients_test_op(ops: Any, where: str) -> None:
         if isinstance(op, dict) and op.get("op") == "test":
             raise ASHConfigSourceError(
                 f"'{PATCH_KEY}' entry {index} in {where} is a test op, which a "
-                "config file that came from an MCP client may not use: it "
-                "compares values of the configuration the file is given, which "
-                "the client may not read. Remove the test op."
+                "config file chosen by this caller may not use: it compares "
+                "values of the configuration the file is given, which the "
+                "caller may not read. Remove the test op."
             )
 
 
