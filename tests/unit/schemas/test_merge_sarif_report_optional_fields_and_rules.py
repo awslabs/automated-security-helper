@@ -191,16 +191,32 @@ class TestResultsKeepTheirRuleById:
         merged = aggregated.runs[0].results[0]
         assert merged.ruleId == "T-0"
         reference = merged.rule.root.model_dump(exclude_unset=True)
-        assert reference == {"id": "T-0"}
+        assert reference["id"] == "T-0"
+        assert "index" not in reference
+        assert "toolComponent" not in reference
+        # The copy is a full dump, so None-valued keys (guid, properties) may
+        # ride along in the kept reference; whether they are dropped is pinned
+        # by the test of the kept reference's value filter, not here.
 
     def test_a_rule_index_with_a_tool_component_reads_that_components_rules(self):
-        """SARIF 3.27.6: ruleIndex indexes the component rule.toolComponent names."""
+        """SARIF 3.27.6: ruleIndex indexes the component rule.toolComponent names.
+
+        A reportingDescriptorReference carries one of index, guid or id (the
+        schema's anyOf), so a reference that only names the component spells its
+        own index as -1, SARIF's absent value, and ruleIndex is the index.
+        """
         aggregated = SarifReport(runs=[_run("aggregate", [], [])])
         incoming = SarifReport(
             runs=[
                 _run(
                     "tool",
-                    [_finding(None, ruleIndex=1, rule={"toolComponent": {"index": 0}})],
+                    [
+                        _finding(
+                            None,
+                            ruleIndex=1,
+                            rule={"index": -1, "toolComponent": {"index": 0}},
+                        )
+                    ],
                     [],
                     rules=[{"id": "D-0"}, {"id": "D-1"}],
                     extensions=[
@@ -261,7 +277,13 @@ class TestResultsKeepTheirRuleById:
             runs=[
                 _run(
                     "tool",
-                    [_finding(None, ruleIndex=0, rule={"toolComponent": {"index": 7}})],
+                    [
+                        _finding(
+                            None,
+                            ruleIndex=0,
+                            rule={"index": -1, "toolComponent": {"index": 7}},
+                        )
+                    ],
                     [],
                     rules=[{"id": "D-0"}],
                 )
