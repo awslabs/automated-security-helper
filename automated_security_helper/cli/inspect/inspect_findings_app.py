@@ -212,14 +212,21 @@ def _line_ends(chunk: bytes) -> int:
     return chunk.count(b"\n") + chunk.count(b"\r") - chunk.count(b"\r\n")
 
 
-def _read_chunk(handle: BinaryIO, budget: int) -> bytes:
-    """Up to _READ_CHUNK bytes of *handle*, within *budget*, never ending between
-    the two bytes of a ``\\r\\n``: a chunk that ends on ``\\r`` reads one more byte, so
-    the pair is never counted as two line ends."""
+def _read_chunk(handle: BinaryIO, budget: int, after_cr: bool) -> tuple[bytes, int]:
+    """Up to _READ_CHUNK bytes of *handle*, within *budget*, and how many of them
+    were dropped: when the chunk before ended on ``\\r`` (*after_cr*) and this one
+    starts with ``\\n``, that byte is the second half of a ``\\r\\n`` whose first half
+    was already counted as a line end, so it is dropped and never counted again.
+    A ``\\r\\n`` split by a chunk is then one line end whatever the chunk holds.
+    Reading one more byte after a ``\\r`` instead still split ``\\r\\r\\n``, and the
+    lines after it were numbered one more than the finding numbers them.
+
+    An empty chunk with nothing dropped is the end of the file or of the budget.
+    """
     chunk = handle.read(min(budget, _READ_CHUNK))
-    if chunk.endswith(b"\r") and len(chunk) < budget:
-        chunk += handle.read(1)
-    return chunk
+    if after_cr and chunk.startswith(b"\n"):
+        return chunk[1:], 1
+    return chunk, 0
 
 
 def _offset_of_line(handle: BinaryIO, line: int, budget: int) -> Optional[int]:
@@ -234,34 +241,51 @@ def _offset_of_line(handle: BinaryIO, line: int, budget: int) -> Optional[int]:
     """
     to_skip = line - 1
     offset = 0
+    after_cr = False
     while to_skip > 0:
-        chunk = _read_chunk(handle, budget - offset)
+        chunk, dropped = _read_chunk(handle, budget - offset, after_cr)
+        offset += dropped
         if not chunk:
+            if dropped:
+                after_cr = False
+                continue
             return None
         ends = _line_ends(chunk)
         if ends >= to_skip:
             for match in _LINE_END.finditer(chunk):
                 to_skip -= 1
                 if to_skip == 0:
-                    return offset + match.end()
+                    end = offset + match.end()
+                    if (
+                        match.end() == len(chunk)
+                        and chunk.endswith(b"\r")
+                        and end < budget
+                        and handle.read(1) == b"\n"
+                    ):
+                        # The wanted line ends on the chunk's last byte, a lone
+                        # carriage return so far: a newline right after it is
+                        # the same line end, and the next line starts past it.
+                        end += 1
+                    return end
         to_skip -= ends
         offset += len(chunk)
+        after_cr = chunk.endswith(b"\r")
     return offset
 
 
 def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
-    """Lines *first* to *last* (counted from 1) of *handle*, each cut by _line_text.
+    """Lines *first* to *last* (counted from 1) of *handle*, each whole (its line
+    end removed, _line_text) or replaced by SOURCE_LINE_NOT_SHOWN.
 
     At most SOURCE_READ_LIMIT bytes are read, the lines before *first* only counted
     (_offset_of_line), and only the head of each wanted line is kept, so a line
     that never ends (minified code, a sparse file) costs that many bytes of reading
-    and no more memory than its head. A line longer than its head, or one the limit
-    ended inside, is replaced by SOURCE_LINE_NOT_SHOWN: shown as its head alone, a
-    value that started in the shown part and ended past the head reached the masker
-    cut, was not matched, and its start was shown (an ASCII value of about 1,500
-    characters, such as a one-line private key; after multibyte text a far shorter
-    one). Fewer lines when the file, or the limit, ends first. *handle* is a regular
-    file, so it can seek back to where *first* starts.
+    and no more memory than its head. A line longer than its head
+    (_LINE_HEAD_BYTES), or one the limit ended inside, is replaced by
+    SOURCE_LINE_NOT_SHOWN: shown as its head alone, a value that started in the
+    shown part and ended past the head reached the masker cut, was not matched, and
+    its start was shown. Fewer lines when the file, or the limit, ends first.
+    *handle* is a regular file, so it can seek back to where *first* starts.
     """
     start = _offset_of_line(handle, first, SOURCE_READ_LIMIT)
     if start is None:
@@ -272,6 +296,7 @@ def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
     number = first
     head = bytearray()
     overflowed = False
+    after_cr = False
 
     def keep(segment: bytes) -> None:
         nonlocal overflowed
@@ -285,10 +310,14 @@ def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
         # readline ends a line at "\n" alone, so a lone "\r" stayed inside a
         # line and the lines after it were numbered one less than the finding
         # numbers them.
-        chunk = _read_chunk(handle, budget)
+        chunk, dropped = _read_chunk(handle, budget, after_cr)
+        budget -= len(chunk) + dropped
         if not chunk:
+            if dropped:
+                after_cr = False
+                continue
             break
-        budget -= len(chunk)
+        after_cr = chunk.endswith(b"\r")
         position = 0
         for match in _LINE_END.finditer(chunk):
             keep(chunk[position : match.start()])

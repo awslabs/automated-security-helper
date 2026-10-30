@@ -51,6 +51,25 @@ class TestOffsetOfLine:
 
         assert _offset_of_line(handle, 2, _BUDGET) == _READ_CHUNK
 
+    def test_a_return_return_newline_split_by_a_chunk_is_two_ends(self):
+        # The second return and the newline are one end: the newline opens the
+        # next chunk, and reading one byte past a return did not reach it.
+        handle = io.BytesIO(b"x" * (_READ_CHUNK - 1) + b"\r\r\n" + b"y\n")
+
+        assert _offset_of_line(handle, 2, _BUDGET) == _READ_CHUNK
+        handle.seek(0)
+        assert _offset_of_line(handle, 3, _BUDGET) == _READ_CHUNK + 2
+        handle.seek(0)
+        assert _offset_of_line(handle, 4, _BUDGET) == _READ_CHUNK + 4
+
+    def test_a_newline_alone_in_the_next_chunk_is_not_an_end_of_its_own(self):
+        # A return ends one chunk and its newline is the whole of the next read.
+        handle = io.BytesIO(b"x" * (_READ_CHUNK - 1) + b"\r\n")
+
+        assert _offset_of_line(handle, 2, _BUDGET) == _READ_CHUNK + 1
+        handle.seek(0)
+        assert _offset_of_line(handle, 3, _BUDGET) is None
+
 
 class TestReadLines:
     def test_lines_are_split_at_every_line_end(self):
@@ -72,6 +91,13 @@ class TestReadLines:
         assert lines[1] == "y"
         # One byte short of a chunk fits the line head, so the line is whole.
         assert lines[0] == "x" * (_READ_CHUNK - 1)
+
+    def test_a_return_return_newline_split_by_a_chunk_splits_two_lines(self):
+        handle = io.BytesIO(b"x" * (_READ_CHUNK - 1) + b"\r\r\n" + b"y\n")
+
+        lines = _read_lines(handle, 1, 3)
+
+        assert lines == ["x" * (_READ_CHUNK - 1), "", "y"], lines
 
     def test_a_line_longer_than_a_chunk_is_not_shown(self):
         handle = io.BytesIO(b"x" * (3 * _READ_CHUNK) + b"\ny\n")
