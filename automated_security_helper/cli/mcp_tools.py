@@ -3156,20 +3156,30 @@ async def _run_scan(
         registry may let the directory go (occupies_its_directory). The
         registry attaches them only to an entry the server stopped; a scan that
         ended on its own has no records. On a network transport the client's
-        warning names the tools only, and the process ids go to this log.
+        warning names the tools only, and the process ids go to this log. Never
+        raises: it runs in the thread's finally, ahead of runner_done, and the
+        caller sets runner_done whatever happens here.
         """
-        from automated_security_helper.cli.mcp.sandbox import transport_is_networked
+        try:
+            from automated_security_helper.cli.mcp.sandbox import (
+                transport_is_networked,
+            )
 
-        records = entry.cancel_event.could_not_stop_records()
-        if not records:
-            return
-        if registry.record_cancel_outcome(
-            scan_id, records, name_process_ids=not transport_is_networked()
-        ):
-            named = ", ".join(f"{tool} (pid {pid})" for tool, pid in records)
+            records = entry.cancel_event.could_not_stop_records()
+            if not records:
+                return
+            if registry.record_cancel_outcome(
+                scan_id, records, name_process_ids=not transport_is_networked()
+            ):
+                named = ", ".join(f"{tool} (pid {pid})" for tool, pid in records)
+                _logger.warning(
+                    f"Scan {scan_id} was stopped, but {len(records)} scanner "
+                    f"tool(s) could not be stopped and may still be running: {named}"
+                )
+        except Exception as recording_error:  # noqa: BLE001 -- the thread's finally must go on
             _logger.warning(
-                f"Scan {scan_id} was stopped, but {len(records)} scanner tool(s) "
-                f"could not be stopped and may still be running: {named}"
+                f"Scan {scan_id}: the tools the stop could not end were not "
+                f"recorded: {type(recording_error).__name__}"
             )
 
     def _scan_under_session_lock() -> Any:
@@ -3219,9 +3229,14 @@ async def _run_scan(
             return results
         finally:
             # Before runner_done: from then on the registry may let the
-            # directory go, and a tool still running would write into it.
-            _record_the_tools_the_stop_could_not_end()
-            entry.runner_done.set()
+            # directory go, and a tool still running would write into it. In
+            # its own try: a record step that raised would otherwise skip
+            # runner_done, and the entry would hold its directory for the
+            # server's life (occupies_its_directory), refusing every rescan.
+            try:
+                _record_the_tools_the_stop_could_not_end()
+            finally:
+                entry.runner_done.set()
             # After run_ash_scan ended on this thread, so the scan can no
             # longer load it.
             _discard_the_scans_profile_snapshot()

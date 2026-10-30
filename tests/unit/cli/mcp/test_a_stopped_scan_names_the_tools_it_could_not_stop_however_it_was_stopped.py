@@ -209,6 +209,49 @@ async def test_on_a_network_transport_the_warning_names_the_tool_not_its_pid(
 
 
 @pytest.mark.asyncio
+async def test_a_record_step_that_raises_still_lets_the_directory_go(
+    tmp_path, monkeypatch
+):
+    """The record runs in the scan thread's finally ahead of runner_done. A
+    raise out of it must not skip runner_done: the entry would then hold its
+    directory for the server's life and refuse every rescan and cleanup.
+
+    Red at the base of this commit: the record call sat before runner_done with
+    no guard, so the raise propagated and runner_done stayed clear."""
+    registry, scan_id, output_dir = _registered(tmp_path, monkeypatch)
+
+    def a_registry_whose_record_step_breaks(*args: Any, **kwargs: Any) -> bool:
+        raise RuntimeError("the record step broke")
+
+    monkeypatch.setattr(
+        registry, "record_cancel_outcome", a_registry_whose_record_step_breaks
+    )
+
+    def a_scan_the_timer_stops(*args: Any, **kwargs: Any) -> None:
+        _stop_as_the_timer_does(registry, scan_id)
+        _a_scanner_tool_that_would_not_end("bandit", 4242)
+
+    async def run() -> None:
+        await mcp_tools._run_scan_async(
+            scan_id=scan_id,
+            directory_path=str(tmp_path),
+            output_dir=str(output_dir),
+            severity_threshold=None,
+        )
+
+    await _run_to_the_end(registry, scan_id, a_scan_the_timer_stops, run)
+
+    entry = registry.get_scan(scan_id)
+    assert entry.runner_done.is_set(), (
+        "runner_done stayed clear after the record step raised"
+    )
+    assert entry.status == MCScanStatus.FAILED
+    # Nothing was recorded, so nothing holds the directory.
+    assert entry.could_not_stop == ()
+    assert entry.occupies_its_directory() is False
+
+
+@pytest.mark.asyncio
 async def test_a_stop_that_ended_every_tool_adds_no_warning(tmp_path, monkeypatch):
     """Control: a timeout with nothing left running stays a plain timeout."""
     registry, scan_id, output_dir = _registered(tmp_path, monkeypatch)
