@@ -71,7 +71,22 @@ declared 24h.
   database refresh is the separate step above. trivy does not ask about new
   versions either: online every scan gets ``--skip-version-check``
   (``ONLINE_FLAGS``), and offline ``TRIVY_SKIP_VERSION_CHECK`` in its environment
-  turns that check off (``utils/offline_tool_env.py``).
+  turns that check off (``utils/offline_tool_env.py``). The one exception is the
+  ``misconfig`` scanner, off by default here: its Terraform checks download the
+  module sources a ``.tf`` file names whatever flags are passed. Offline those
+  checks are left out (``TrivyScannerBase._offline_misconfig_args``); online, with
+  ``misconfig`` turned on, they run and can reach registry.terraform.io, git and
+  the archive URLs the scanned repository's modules name.
+
+* The operator's own ``TRIVY_*`` settings reach trivy (the sandbox passes every
+  ``TRIVY_`` variable through). Those that drop results from the report with
+  nothing in the run saying so (``TRIVY_SEVERITY``, ``TRIVY_IGNORE_UNFIXED`` and
+  the others in ``OUTPUT_RESTRICTING_TRIVY_ENV``) are named in a warning, as the
+  ``ignore_unfixed`` option is. ``TRIVY_SKIP_DIRS`` and ``TRIVY_SKIP_FILES``, and
+  ``scan.skip-dirs`` / ``scan.skip-files`` in an honored config file, are given
+  back to trivy as tokens of their own whenever ASH passes a skip flag itself:
+  trivy reads a list flag from one source only, so ASH's flag would otherwise
+  replace the operator's list rather than add to it.
 
 The database is only read by ``vuln``. With ``vuln`` turned off nothing is
 measured and the offline database check is skipped.
@@ -355,9 +370,6 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             options.model_dump() if options is not None else {}
         )
 
-    def _reads_vulnerability_db(self) -> bool:
-        return "vuln" in self._options().scanners
-
     def nothing_to_scan_reason(self) -> Optional[str]:
         """None: ASH cannot tell before trivy runs whether it reads any file.
 
@@ -405,33 +417,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         if self.config is not None:
             self.config.options = options.model_copy(update={"scanners": default})
 
-    def validate_plugin_dependencies(self) -> bool:
-        """The binary, and offline, a vulnerability database for it to read.
-
-        trivy refuses ``--skip-db-update`` when its cache holds no database ("cannot
-        be specified on the first run"), so an offline scan without one is reported
-        MISSING with the reason before trivy runs, rather than as a tool error.
-        """
-        if not super().validate_plugin_dependencies():
-            return False
-        if not (self._offline() and self._reads_vulnerability_db()):
-            return True
-        from automated_security_helper.utils.content_db_staleness import (
-            _built_from_trivy,
-        )
-
-        try:
-            _built_from_trivy(self.content_database_probe_context())
-        except Exception as exc:  # noqa: BLE001 - every failure means "no usable database"
-            self.dependency_unavailable_reason = (
-                "trivy is in offline mode and has no vulnerability database to read "
-                f"({exc}). Download one with network access (`trivy image "
-                "--download-db-only`, with TRIVY_CACHE_DIR set to the cache this scan "
-                "uses), or turn offline mode off."
-            )
-            self._plugin_log(self.dependency_unavailable_reason, level=logging.WARNING)
-            return False
-        return True
+    # validate_plugin_dependencies is TrivyScannerBase's: the binary, and offline a
+    # vulnerability database for the scan to read, shared with trivy-repo.
 
     def content_databases_in_use(self) -> List[Any]:
         """trivy's vulnerability database, when the ``vuln`` scanner ran."""
@@ -516,12 +503,17 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 )
                 skipped = [whole]
         for relative in skipped:
-            extra.append(f"--skip-dirs={skip_dirs_value(relative.as_posix())}")
+            # None for a path trivy's CSV read cannot carry (a line break): the
+            # directory is read and ASH drops its findings there after the scan.
+            value = self._skip_dirs_value(relative, target_type)
+            if value is not None:
+                extra.append(f"--skip-dirs={value}")
         # trivy reads trivy.yaml and .trivyignore from its working directory, which
         # is the scanned repository. Either can drop findings with nothing in the
         # report saying so, so ASH passes its own unless the operator chose one
         # (TrivyScannerBase._trivy_config_file, as trivy-repo does).
-        extra.append(f"--config={self._trivy_config_file()}")
+        config_token = f"--config={self._trivy_config_file()}"
+        extra.append(config_token)
         # trivy loads the WASM modules in --module-dir (default ~/.trivy/modules,
         # or a trivy.yaml's module.dir). This scanner has no module_dir option, so
         # it always gets an empty directory, as trivy-repo does when its option is
@@ -529,13 +521,22 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         modules = empty_tool_directory("trivy-modules", context=self.context)
         extra.append(f"--module-dir={modules.as_posix()}")
         # .trivyignore and trivy-secret.yaml as trivy-repo passes them
-        # (TrivyScannerBase._trivy_input_file).
+        # (TrivyScannerBase._trivy_input_file). The secret config is read only by
+        # the secret scanner, so a missing operator file fails only a scan that
+        # runs it; the scanner set is read from the --config token just added.
         extra.append(f"--ignorefile={self._ignore_file()}")
-        extra.append(f"--secret-config={self._secret_config_file()}")
+        extra.append(f"--secret-config={self._secret_config_file([config_token])}")
         # Each link leaving the target, and each path the global ignore paths ignore.
         extra.extend(self._link_skip_args(target, global_ignore_paths))
-        # Before the target, which _resolve_arguments places after the options.
-        target_index = final_args.index(Path(target).as_posix())
+        # The operator's own skip lists, which ASH's skip flags would otherwise
+        # replace (TrivyScannerBase._operator_skip_args).
+        extra.extend(self._operator_skip_args(extra))
+        # Before the target, which _resolve_arguments places LAST (after the
+        # options): the last token equal to the target's spelling, not the first,
+        # so a relative target spelled like an earlier value ("sarif", "vuln",
+        # "trivy") does not move the insertion point into the options.
+        target_token = Path(target).as_posix()
+        target_index = len(final_args) - 1 - final_args[::-1].index(target_token)
         final_args[target_index:target_index] = extra
         if self._offline():
             # Only with misconfig, which the operator has to add: trivy's Terraform
