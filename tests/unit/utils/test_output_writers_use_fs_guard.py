@@ -326,6 +326,14 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "MCPSessionRegistry._rename_for_removal_locked",
         "os.rename",
     ): (1, _MCP_SESSION_WORKSPACE),
+    # The source-delivery end of a session: the same rename of the session's
+    # workspace directory to its hidden delete name, from the delivery module
+    # (source_delivery.py, main's since #830).
+    (
+        f"{_ASH}/cli/mcp/source_delivery.py",
+        "_set_aside_for_removal",
+        "os.rename",
+    ): (1, _MCP_SESSION_WORKSPACE),
     (f"{_ASH}/cli/mcp_tools.py", "mcp_validate_config", "write_text"): (
         1,
         "a TemporaryDirectory of its own",
