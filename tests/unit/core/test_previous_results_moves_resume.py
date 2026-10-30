@@ -140,8 +140,11 @@ def test_a_restore_refused_halfway_then_retried_puts_every_entry_back(
     with pytest.raises(PermissionError):
         previous.restore()
     disarm()
-    assert not holds_restored_results(output), (
-        "a restore that stopped halfway says the results were put back"
+    # The marker is written before the first move: a restore that stopped on a
+    # refused rename left previous results at the top level, and a report must
+    # not present them as the new scan's from that moment on.
+    assert holds_restored_results(output), (
+        "a restore that stopped halfway put previous results back and does not say so"
     )
 
     previous.restore()
@@ -310,12 +313,14 @@ def test_an_interrupt_after_the_rename_to_the_held_set_reports_nothing_lost(
     assert _contents(output) == PREVIOUS
 
 
-def test_a_refused_put_back_of_a_stage_still_drops_the_restored_marker(
+def test_a_refused_put_back_of_a_stage_keeps_the_restored_marker(
     tmp_path, refuse_second_rename
 ):
-    """A scan is starting even when what a killed set_aside staged cannot all be
-    moved back yet: the marker that says the directory holds put-back results
-    goes first, so the starting scan is not reported as holding them."""
+    """No scan starts when what a killed set_aside staged cannot all be moved
+    back: the set aside raises, the put-back results are at the top level, and
+    the marker that says the directory holds put-back results stays until a
+    set aside completes its moves. Removing it before the renames left them
+    there as if they were the next scan's."""
     arm, disarm = refuse_second_rename
     output = _with_previous(tmp_path)
     _killed_while_staging(output, "every-entry-staged")
@@ -326,9 +331,12 @@ def test_a_refused_put_back_of_a_stage_still_drops_the_restored_marker(
         PreviousResults(output).set_aside()
     disarm()
 
-    assert not holds_restored_results(output)
+    assert holds_restored_results(output)
     assert (output / STAGING).is_dir(), "what was not moved back was not kept staged"
     PreviousResults(output).set_aside()
+    assert not holds_restored_results(output), (
+        "the completed set aside keeps the marker"
+    )
     assert _contents(output) == _held()
 
 
