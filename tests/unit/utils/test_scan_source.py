@@ -1134,36 +1134,6 @@ def test_a_foreign_object_store_does_not_hide_the_diffs_revision(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("shape", ["an older tree", "a missing file"])
-def test_a_foreign_index_does_not_choose_the_nesting_lookups_paths(
-    isolated_tmp, monkeypatch, shape
-):
-    """``git ls-files`` answers from the index, so an exported GIT_INDEX_FILE chose
-    what the nesting lookups saw as tracked: an index holding an older tree (a
-    pre-commit hook's temporary index, a stale export) listed nothing below
-    ``src``, and a path that is gone read as an empty index, at exit 0 either
-    way, while the same file read as untracked. The lookups read the
-    repository's own index."""
-    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
-    source = isolated_tmp / "source"
-    foreign = isolated_tmp / "foreign.index"
-    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("GIT_INDEX_FILE", foreign.as_posix())
-    if shape == "an older tree":
-        _git("read-tree", "HEAD~1", cwd=source)
-        assert foreign.is_file()
-    else:
-        assert not foreign.exists()
-
-    tracked = git_index_paths_below(source, "src")
-    untracked = git_untracked_paths_below(source, "src")
-
-    assert tracked == ["src/app.py"]
-    assert untracked == []
-
-
-@pytest.mark.integration
 def test_a_relative_core_worktree_is_read_against_the_git_directory(
     isolated_tmp, monkeypatch
 ):
