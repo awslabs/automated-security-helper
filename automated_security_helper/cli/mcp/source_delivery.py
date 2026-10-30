@@ -2606,21 +2606,22 @@ def _refusing_after_close(
 
 
 @contextlib.contextmanager
-def _removing_a_refused_zip(final: Path) -> Iterator[None]:
-    """Remove ``final`` when the validation or extraction inside refuses it.
+def _removing_a_refused_zip(remove_zip: Callable[[], None]) -> Iterator[None]:
+    """Call ``remove_zip`` when the validation or extraction inside refuses the zip.
 
-    Entered outside the ``zipfile.ZipFile`` that opens ``final``, so the handle
-    is closed before the unlink: Windows does not delete a file that is open.
-    Best effort, as for the oversize and checksum refusals: a held file must not
-    replace the refusal the caller is owed, and a zip that stays is refused again
-    by the same call. Only a refusal (``ValueError``, ``zipfile.BadZipFile``)
-    removes it; a failure on disk (``OSError``) leaves it for the next attempt.
+    Entered outside the handle and the ``zipfile.ZipFile`` that read the zip, so
+    both are closed before the removal: Windows does not delete a file that is
+    open. Best effort, as for the oversize and checksum refusals: a held file
+    must not replace the refusal the caller is owed, and a zip that stays is
+    refused again by the same call. Only a refusal (``ValueError``,
+    ``zipfile.BadZipFile``) removes it; a failure on disk (``OSError``) leaves it
+    for the next attempt.
     """
     try:
         yield
     except (ValueError, zipfile.BadZipFile):
         with contextlib.suppress(OSError):
-            final.unlink()
+            remove_zip()
         raise
 
 
@@ -2654,33 +2655,51 @@ def _finalize_zip_upload(
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = _created_session_dir(root, session_id)
     final = _final_zip_path(session_dir, upload_id)
-    if not final.exists():
+    # The one handle every read below uses: the size bound, the checksum and the
+    # extraction all see the file that was open here, whatever a chunk of the
+    # same upload (set_source_zip_chunk's last=True renames a new zip over the
+    # path) puts at the path meanwhile. ``opened`` identifies that file, so each
+    # removal (_remove_zip_still_at) deletes the path only while it still names
+    # it, and a newer zip is kept for its own finalize.
+    try:
+        handle = final.open("rb")
+    except FileNotFoundError:
         raise UploadNotFoundError(
             f"no finalized zip for upload_id={upload_id!r} "
             f"(did the last chunk arrive with last=True?)"
         ) from None
+    opened = os.fstat(handle.fileno())
+
+    def remove_zip() -> None:
+        _remove_zip_still_at(final, opened, session_id, upload_id)
 
     # Hard limit on the on-disk zip size.
-    actual_size = final.stat().st_size
+    actual_size = opened.st_size
     if actual_size > _MAX_ZIP_BYTES:
+        handle.close()
         # Removing the refused zip is scratch cleanup, best effort: an AV scanner
         # or indexer holding the file (routine on Windows) makes the unlink raise
         # PermissionError, and that must not replace the refusal the caller is
         # owed. A zip that stays is refused again by the same call.
         with contextlib.suppress(OSError):
-            final.unlink()
+            remove_zip()
         raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
-    # Verify checksum before opening the archive.
+    # Verify checksum before opening the archive, from the same handle.
     digest = hashlib.sha256()
-    with final.open("rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
+    try:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
+        handle.seek(0)
+    except BaseException:
+        handle.close()
+        raise
     actual_sha = digest.hexdigest()
     if actual_sha.lower() != expected_sha256.lower():
+        handle.close()
         # Best effort, as above: the mismatch is the answer, not a held file.
         with contextlib.suppress(OSError):
-            final.unlink()
+            remove_zip()
         raise ValueError(
             f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
         )
@@ -2714,7 +2733,13 @@ def _finalize_zip_upload(
         # one of them refuses is removed with the refusal (_removing_a_refused_zip):
         # it held its bytes in incoming/ until the session ended otherwise, and a
         # client that sends the same finalize again is told the upload is gone.
-        with _removing_a_refused_zip(final), zipfile.ZipFile(final) as zf:
+        # The archive is read from the handle the checksum read, so the bytes
+        # extracted are the bytes hashed; the handle closes before the removal.
+        with (
+            _removing_a_refused_zip(remove_zip),
+            handle,
+            zipfile.ZipFile(handle) as zf,
+        ):
             infos = zf.infolist()
             if len(infos) > _MAX_FILES:
                 raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
@@ -2785,8 +2810,9 @@ def _finalize_zip_upload(
     # The on-disk zip is no longer needed. Best effort: the delivery took effect
     # at _set_session_source_dir, and a failed unlink of a scratch file must not
     # report that delivery as failed, which invites a retry of a done delivery.
+    # Only the zip that was delivered: a newer one at the path is kept.
     with contextlib.suppress(OSError):
-        final.unlink()
+        remove_zip()
     return target
 
 
