@@ -5,7 +5,7 @@ import os
 import random
 import re
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
 import uuid
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
@@ -24,7 +24,9 @@ from automated_security_helper.utils.log import (
     escape_markup,
 )
 from automated_security_helper.utils.severity_ladder import (
+    component_labels,
     resolve_missing_levels,
+    result_scanner_labels,
     result_severity,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -520,23 +522,54 @@ _CANONICAL_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
 
 
 def _rule_for_result(
-    result: Any, components: List[list], rules_by_id: Dict[Any, Any]
+    result: Any,
+    components: List[list],
+    rules_by_id: Dict[Any, Any],
+    component_names: Optional[List[frozenset]] = None,
 ) -> Any:
     """The rule *result* names, from the run's tool components, or None.
 
     *components* is the rule list of the driver followed by those of the
-    extensions; *rules_by_id* maps a rule id to its rule across them. SARIF
-    3.27.5 lets a result name its rule three ways, read in this order: the
-    ``rule`` reference (``toolComponent.index`` into the extensions, else the
-    driver; ``index`` into that component's rules; else ``id``), ``ruleIndex``
-    into the driver's rules, and ``ruleId``. An indexed rule whose id disagrees
-    with the id the result also states is not the one: the id is looked up
-    instead. Reading the driver's rules alone, by index or id, gave a result
-    whose rule lives in an extension another rule's severity or none.
+    extensions; *rules_by_id* maps a rule id to its rule across them, first copy
+    first; *component_names* (optional) is the parallel list of each component's
+    ``component_labels``. SARIF 3.27.5 lets a result name its rule three ways,
+    read in this order: the ``rule`` reference (``toolComponent.index`` into the
+    extensions, else the driver; ``index`` into that component's rules; else
+    ``id``), ``ruleIndex`` into the driver's rules, and ``ruleId``. An indexed
+    rule whose id disagrees with the id the result also states is not the one:
+    the id is looked up instead. Reading the driver's rules alone, by index or
+    id, gave a result whose rule lives in an extension another rule's severity
+    or none.
+
+    A lookup by id is scoped before it is global: the component the reference
+    names, then the component whose labels share a name with the result's
+    scanner (``result_scanner_labels``), then *rules_by_id*. Two scanners can
+    share a rule id (grype and trivy both name a CVE) and the merge keeps each
+    scanner's rules in its own extension while dropping the result's component
+    reference; read first-wins across every component, one scanner's copy of
+    the id gave another scanner's result its security-severity, or none.
     """
     reference = getattr(result, "rule", None)
     body = getattr(reference, "root", reference)
     stated_id = getattr(result, "ruleId", None) or getattr(body, "id", None)
+    named_rules: Optional[list] = None
+    scanner = result_scanner_labels(result) if component_names else frozenset()
+
+    def by_stated_id() -> Any:
+        if not stated_id:
+            return None
+        if named_rules is not None:
+            for rule in named_rules:
+                if getattr(rule, "id", None) == stated_id:
+                    return rule
+        if scanner:
+            for rules, labels in zip(components, component_names or []):
+                if labels and not labels.isdisjoint(scanner):
+                    for rule in rules:
+                        if getattr(rule, "id", None) == stated_id:
+                            return rule
+        return rules_by_id.get(stated_id)
+
     if body is not None:
         component_ref = getattr(body, "toolComponent", None)
         component_index = getattr(component_ref, "index", -1)
@@ -546,21 +579,20 @@ def _rule_for_result(
             rules = components[component_index + 1]
         else:
             rules = []
+        named_rules = rules
         index = getattr(body, "index", -1)
         if index is not None and 0 <= index < len(rules):
             rule = rules[index]
             if not stated_id or rule.id == stated_id:
                 return rule
         if stated_id:
-            return rules_by_id.get(stated_id)
+            return by_stated_id()
     rule_index = getattr(result, "ruleIndex", None)
     if rule_index is not None and 0 <= rule_index < len(components[0]):
         rule = components[0][rule_index]
         if not stated_id or rule.id == stated_id:
             return rule
-    if stated_id:
-        return rules_by_id.get(stated_id)
-    return None
+    return by_stated_id()
 
 
 def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
@@ -578,9 +610,15 @@ def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
     for run in sarif_report.runs:
         tool = run.tool
         driver = getattr(tool, "driver", None) if tool is not None else None
-        components = [list(getattr(driver, "rules", None) or [])]
-        for extension in getattr(tool, "extensions", None) or []:
-            components.append(list(getattr(extension, "rules", None) or []))
+        tool_components = [driver] + list(getattr(tool, "extensions", None) or [])
+        components = [
+            list(getattr(component, "rules", None) or [])
+            for component in tool_components
+        ]
+        component_names = [component_labels(c) for c in tool_components]
+        # First copy wins across components: the global fallback of
+        # _rule_for_result, which looks in the named and the scanner's
+        # component before it.
         rules_by_id: Dict[Any, Any] = {}
         for rules in components:
             for rule in rules:
@@ -609,7 +647,7 @@ def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
                         setattr(result.properties, "issue_severity", canonical)  # noqa: B010
                     continue
 
-            rule = _rule_for_result(result, components, rules_by_id)
+            rule = _rule_for_result(result, components, rules_by_id, component_names)
 
             if rule is None or rule.properties is None:
                 continue

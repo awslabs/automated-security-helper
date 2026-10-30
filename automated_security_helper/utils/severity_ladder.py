@@ -212,7 +212,62 @@ def _rule_default_level(rule: object) -> Optional[str]:
     return effective_sarif_level(configuration)
 
 
-def _rule_of(result: object, components: list, by_id: Dict[Any, object]) -> object:
+def component_labels(component: object) -> frozenset:
+    """The names a tool component answers to: its ``name`` and ``fullName``,
+    lower-cased, empty when it states neither. Compared with
+    :func:`result_scanner_labels` to find the component a result's scanner
+    wrote."""
+    labels = set()
+    for field in ("name", "fullName"):
+        value = getattr(component, field, None)
+        if isinstance(value, str) and value.strip():
+            labels.add(value.strip().lower())
+    return frozenset(labels)
+
+
+def result_scanner_labels(result: object) -> frozenset:
+    """The names of the scanner that produced *result*, lower-cased:
+    ``properties.scanner_name`` (an attribute or a ``model_extra`` key) and
+    ``properties.scanner_details.tool_name`` (a mapping or an object). Empty when
+    the result names none, or when a read raises: this runs on every result,
+    stand-ins included."""
+    labels = set()
+    try:
+        props = getattr(result, "properties", None)
+        if props is None:
+            return frozenset()
+        extra = getattr(props, "model_extra", None)
+        extra = extra if isinstance(extra, dict) else {}
+        candidates = [getattr(props, "scanner_name", None), extra.get("scanner_name")]
+        details = getattr(props, "scanner_details", None)
+        if details is None:
+            details = extra.get("scanner_details")
+        if isinstance(details, dict):
+            candidates.append(details.get("tool_name"))
+        elif details is not None:
+            candidates.append(getattr(details, "tool_name", None))
+        for value in candidates:
+            if isinstance(value, str) and value.strip():
+                labels.add(value.strip().lower())
+    except Exception:  # noqa: BLE001 -- see the docstring
+        return frozenset()
+    return frozenset(labels)
+
+
+def _first_rule_with_id(rules: list, identifier: object) -> object:
+    """The first rule in *rules* whose ``id`` is *identifier*, or None."""
+    for rule in rules:
+        if getattr(rule, "id", None) == identifier:
+            return rule
+    return None
+
+
+def _rule_of(
+    result: object,
+    components: list,
+    by_id: Dict[Any, object],
+    component_names: Optional[list] = None,
+) -> object:
     """The rule *result* names, read as SARIF 3.27.5 lets a result name one.
 
     In order: the ``rule`` reference (its ``toolComponent.index`` picks an
@@ -221,15 +276,43 @@ def _rule_of(result: object, components: list, by_id: Dict[Any, object]) -> obje
     rule whose id disagrees with the id the result also states is passed over
     for the id. A hierarchical id (``CA1001/sub``) falls back to each shorter
     prefix at a ``/``, so the rule ``CA1001`` grades its sub-results.
+
+    A lookup by id is scoped before it is global. *components* is the driver's
+    rule list followed by the extensions'; *component_names* (optional) is the
+    parallel list of each component's :func:`component_labels`. An id is looked
+    for first in the component the reference names, then in the component whose
+    labels share a name with the result's scanner (:func:`result_scanner_labels`),
+    and only then across every component in order (*by_id*, first copy wins,
+    which is SARIF's reading of a bare ``ruleId``: the driver's rule). Two
+    scanners can share a rule id (grype and trivy both name a CVE), and the
+    merge that aggregates their runs keeps each scanner's rules in its own
+    extension while dropping the result's component reference; read across every
+    component first-wins, a level-less copy of the id in one scanner's extension
+    graded another scanner's result "warning" where its own rule said "error".
     """
     reference = getattr(result, "rule", None)
     body = getattr(reference, "root", reference)
     stated_id = getattr(result, "ruleId", None) or getattr(body, "id", None)
+    named_rules: Optional[list] = None
+    scanner = result_scanner_labels(result) if component_names else frozenset()
+
+    def in_scope(candidate):
+        if named_rules is not None:
+            found = _first_rule_with_id(named_rules, candidate)
+            if found is not None:
+                return found
+        if scanner:
+            for rules, labels in zip(components, component_names or []):
+                if labels and not labels.isdisjoint(scanner):
+                    found = _first_rule_with_id(rules, candidate)
+                    if found is not None:
+                        return found
+        return by_id.get(candidate)
 
     def by_stated_id():
         candidate = stated_id
         while candidate:
-            found = by_id.get(candidate)
+            found = in_scope(candidate)
             if found is not None:
                 return found
             if "/" not in candidate:
@@ -246,6 +329,7 @@ def _rule_of(result: object, components: list, by_id: Dict[Any, object]) -> obje
             rules = components[component_index + 1]
         else:
             rules = []
+        named_rules = rules
         index = getattr(body, "index", -1)
         if index is not None and 0 <= index < len(rules):
             rule = rules[index]
@@ -276,11 +360,16 @@ def resolve_missing_levels(sarif_report: object) -> None:
     """
     for run in getattr(sarif_report, "runs", None) or []:
         tool = getattr(run, "tool", None)
+        tool_components = [getattr(tool, "driver", None)] + list(
+            getattr(tool, "extensions", None) or []
+        )
         components = [
             list(getattr(component, "rules", None) or [])
-            for component in [getattr(tool, "driver", None)]
-            + list(getattr(tool, "extensions", None) or [])
+            for component in tool_components
         ]
+        component_names = [component_labels(c) for c in tool_components]
+        # First copy wins across components: the global fallback of _rule_of,
+        # which looks in the named and the scanner's component before it.
         by_id: Dict[Any, object] = {}
         for rules in components:
             for rule in rules:
@@ -293,7 +382,7 @@ def resolve_missing_levels(sarif_report: object) -> None:
             if kind != "fail":
                 result.level = "none"
                 continue
-            rule = _rule_of(result, components, by_id)
+            rule = _rule_of(result, components, by_id, component_names)
             level = _rule_default_level(rule) if rule is not None else None
             result.level = level or MISSING_SARIF_LEVEL
 
