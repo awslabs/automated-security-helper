@@ -213,8 +213,27 @@ def test_a_walk_past_its_deadline_returns_what_it_has_found(procfs, monkeypatch)
         landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
     )
 
-    assert landlock_exec._descendants(until=5.0) == [11]
+    assert landlock_exec._descendants(until=lambda: 5.0) == [11]
     assert _children_file(11, 11) not in proc.opened
+
+
+def test_a_stop_during_a_walk_moves_its_deadline(procfs, monkeypatch):
+    """The deadline is asked again before every read, not once per pass: a stop
+    that lands mid-walk (the deadline moves from far off to already past) ends the
+    walk at the next read."""
+    proc = procfs(_three_levels())
+    monkeypatch.setattr(
+        landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
+    )
+    asked: List[int] = []
+
+    def deadline() -> float:
+        asked.append(1)
+        return 20.0 if len(asked) == 1 else 5.0
+
+    assert landlock_exec._descendants(until=deadline) == [11, 21]
+    assert len(asked) >= 2
+    assert _children_file(21, 21) not in proc.opened
 
 
 def test_a_walk_inside_its_deadline_reads_the_whole_tree(procfs, monkeypatch):
@@ -224,7 +243,7 @@ def test_a_walk_inside_its_deadline_reads_the_whole_tree(procfs, monkeypatch):
         landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
     )
 
-    assert landlock_exec._descendants(until=20.0) == [11, 21, 31]
+    assert landlock_exec._descendants(until=lambda: 20.0) == [11, 21, 31]
     assert landlock_exec._descendants() == [11, 21, 31]
 
 
@@ -364,4 +383,4 @@ def test_a_late_pass_without_children_files_still_reads_the_direct_children(
         landlock_exec, "time", types.SimpleNamespace(monotonic=lambda: 10.0)
     )
 
-    assert landlock_exec._descendants(until=5.0) == [101]
+    assert landlock_exec._descendants(until=lambda: 5.0) == [101]

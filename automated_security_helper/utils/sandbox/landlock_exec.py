@@ -524,15 +524,16 @@ def _children_files(pid: int = 0) -> Optional[List[int]]:
 
 
 def _parent_map(
-    until: Optional[float] = None, limit: Optional[int] = None
+    until: Optional[Callable[[], float]] = None, limit: Optional[int] = None
 ) -> Dict[int, List[int]]:
     """Parent pid to child pids, from one listing of /proc.
 
     The fallback for a kernel without children files: every /proc/<pid>/stat,
     which on a host with thousands of processes costs a few hundred
     milliseconds. At most ``limit`` entries are read (PROC_SCAN_LIMIT), and none
-    past the time.monotonic() deadline ``until``, so the map holds what was read
-    by then.
+    once ``until()`` (a time.monotonic() deadline, asked again before every entry
+    so a stop that arrives mid-scan moves it) has passed, so the map holds what
+    was read by then.
     """
     if limit is None:
         limit = PROC_SCAN_LIMIT
@@ -541,7 +542,7 @@ def _parent_map(
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
-        if read >= limit or (until is not None and time.monotonic() >= until):
+        if read >= limit or (until is not None and time.monotonic() >= until()):
             break
         read += 1
         try:
@@ -618,12 +619,14 @@ def _kill_descendant(pid: int, tree: Set[int]) -> bool:
         return False
 
 
-def _descendants(until: Optional[float] = None) -> List[int]:
+def _descendants(until: Optional[Callable[[], float]] = None) -> List[int]:
     """Every process below this one, at any depth, breadth first.
 
-    ``until`` is a time.monotonic() deadline: past it the walk returns what it
-    has found by then, so one reap pass ends inside STOP_REAP_DEADLINE_SECONDS
-    however deep the tree or slow /proc, and that pass kills that much. The
+    ``until()`` is a time.monotonic() deadline, asked again before every read so
+    a stop that arrives mid-walk moves it: once it has passed the walk returns
+    what it has found by then, so one reap pass ends inside
+    STOP_REAP_DEADLINE_SECONDS however deep the tree or slow /proc, and that
+    pass kills that much. The
     direct children are always read, on either path: the listing that finds them
     is bounded by PROC_SCAN_LIMIT alone, so a late pass still kills what the
     scanner itself started. On a kernel without children files /proc is listed
@@ -639,7 +642,7 @@ def _descendants(until: Optional[float] = None) -> List[int]:
         found += frontier
         following: List[int] = []
         for child in frontier:
-            if until is not None and time.monotonic() >= until:
+            if until is not None and time.monotonic() >= until():
                 return found
             if parents is None:
                 read = _children_files(child)
@@ -758,7 +761,7 @@ def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
     leftovers: List[int] = []
     while passes == 0 or time.monotonic() < deadline():
         passes += 1
-        leftovers = _descendants(until=deadline())
+        leftovers = _descendants(until=deadline)
         if not leftovers:
             quiet += 1
             if quiet >= 5:
