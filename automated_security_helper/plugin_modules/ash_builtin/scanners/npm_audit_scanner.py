@@ -704,10 +704,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         scan_root = Path(
             getattr(config, "_scanned_root", None) or self.context.source_dir
         )
+        skip = [Path(self.context.output_dir)]
+        workspace_output = getattr(self.context, "workspace_output_dir", None)
+        if workspace_output:
+            # Left out of the scan set like the project's own output directory
+            # (``_package_manifests``); the package manager's own walk (a yarn
+            # project's member manifests, the inputs it refuses) pruned only
+            # the project's, so under a yarn project at the workspace root it
+            # went into the workspace output below it, and converted copies
+            # there were copied, or refused, which failed the audit.
+            skip.append(Path(workspace_output))
         return {
             "parent": Path(results_dir),
             "scan_root": scan_root,
-            "skip": [Path(self.context.output_dir)],
+            "skip": skip,
             "roots": [scan_root, Path(target)],
             "ignore_suppressions": bool(
                 getattr(self.context, "ignore_suppressions", False)

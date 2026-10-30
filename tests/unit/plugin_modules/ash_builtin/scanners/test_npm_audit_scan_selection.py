@@ -303,6 +303,31 @@ class TestWorkspaceOutputDirectory:
             call.get("workspace_output_dir") == str(workspace_output) for call in calls
         ), calls
 
+    def test_the_workspace_output_directory_is_skipped_by_the_package_manager_walk(
+        self, tmp_path
+    ):
+        """The package manager's own walk (a yarn project's member manifests,
+        the inputs it refuses) prunes the skip directories; only the project's
+        output directory was in the list, so under a yarn project at the
+        workspace root the walk went into the workspace output below it."""
+        workspace_output = tmp_path / "repo" / "workspace-out"
+        context = _context(tmp_path, workspace_output_dir=workspace_output)
+
+        options = _scanner(context)._package_manager_options(
+            context.output_dir / "scanners" / "npm-audit", context.source_dir
+        )
+
+        assert options["skip"] == [Path(context.output_dir), workspace_output]
+
+    def test_no_workspace_skips_the_output_directory_only(self, tmp_path):
+        context = _context(tmp_path)
+
+        options = _scanner(context)._package_manager_options(
+            context.output_dir / "scanners" / "npm-audit", context.source_dir
+        )
+
+        assert options["skip"] == [Path(context.output_dir)]
+
     def test_no_workspace_passes_none(self, online, tmp_path):
         context = _context(tmp_path)
         _package(context.source_dir / "app")
