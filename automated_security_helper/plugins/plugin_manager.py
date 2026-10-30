@@ -609,10 +609,15 @@ class AshPluginManager(BaseModel):
             try:
                 results.append(callback(*args, **kwargs))
             except Exception as handler_error:  # noqa: BLE001 -- the other subscribers still get the event
+                # The exception's text is plugin output and can quote anything
+                # (a value the run's configuration read from the environment
+                # included); the callers that catch the re-raised error redact
+                # it before logging, so this line names only the type and the
+                # subscriber and leaves the message to them.
                 ASH_LOGGER.warning(
                     f"Subscriber {callback_display_name(callback)} of event "
-                    f"{event_type} raised; the remaining subscribers are still "
-                    f"notified: {handler_error!r}"
+                    f"{event_type} raised {type(handler_error).__name__}; the "
+                    "remaining subscribers are still notified"
                 )
                 if first_error is None:
                     first_error = handler_error
