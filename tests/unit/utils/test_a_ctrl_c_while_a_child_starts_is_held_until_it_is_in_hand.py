@@ -96,6 +96,10 @@ def stops(monkeypatch):
             (stop.__name__, process)
         ),
     )
+    # The stand-in child has no process, so the real question (os.getpgid on its
+    # pid) could only fail, and a failure reads as "end the group as well"; the
+    # path without a group of its own is pinned on a child that leads none.
+    monkeypatch.setattr(subprocess_utils, "_leads_its_own_group", lambda process: False)
     return recorded
 
 
@@ -287,8 +291,26 @@ def _stopped_as_a_group(child: _Child, stops: _Stops) -> None:
     assert stops.stopped == [("_stop_tree", child)]
 
 
+def _stopped_alone(child: _Child, stops: _Stops) -> None:
+    assert stops.stopped == [("_stop", child)]
+
+
+def _run_cancellable_without_a_group():
+    """The cancellable runner as a sandboxed spawn calls it: the child is not put
+    in a group of its own (its wrapper calls setsid itself), and a child that leads
+    none is stopped alone."""
+    return subprocess_utils._run_cancellable(
+        ["tool"],
+        cancel_event=threading.Event(),
+        graceful_timeout=False,
+        own_group=False,
+    )
+
+
 #: Each path with the stop its failure handling owes the child, read the way the
-#: Ctrl-C cells above read it.
+#: Ctrl-C tests above read it. The hold and its release are the same block of
+#: _run_cancellable with or without a group of the child's own; what own_group
+#: changes is how the child is started and which ending it gets.
 _PATHS_WITH_STOPS = [
     pytest.param(
         lambda: subprocess_utils._run_stoppable(["tool"]),
@@ -296,6 +318,11 @@ _PATHS_WITH_STOPS = [
         id="run_stoppable",
     ),
     pytest.param(_run_cancellable_path, _stopped_as_a_group, id="run_cancellable"),
+    pytest.param(
+        _run_cancellable_without_a_group,
+        _stopped_alone,
+        id="run_cancellable_without_a_group",
+    ),
 ]
 
 
