@@ -198,17 +198,27 @@ def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
     ]
     assert rows == EXPECTED
     assert scanner.exit_code == 1
-    note = ".github/actionlint.yaml in the scanned tree cannot be read as YAML"
+    # Both shapes move the run to the copy, by different routes, and each says
+    # so: the malformed file is actionlint's own refusal (exit 3 on its first
+    # run, then the batch again from the copy); the link is never run against
+    # in the tree (judged by stat before actionlint starts).
     if shape == "malformed":
-        assert note in caplog.text
+        assert (
+            "actionlint exited 3 with a repository actionlint config present"
+            in caplog.text
+        )
     else:
-        assert note not in caplog.text
+        assert ".github/actionlint.yaml at" in caplog.text
+        assert "is a link" in caplog.text
+    assert "linted from a copy outside the tree" in caplog.text
+    # Nothing of the outside file reaches the records. actionlint parses a valid
+    # linked config silently, so a quiet stderr alone would show nothing; the
+    # positive check is the staging note above, and these reads say the marker
+    # is in none of the places a read-through could have put it.
+    recorded = "\n".join(str(line) for line in scanner.errors)
+    assert "OUTSIDE-MARKER-LABEL" not in recorded
+    assert "OUTSIDE-MARKER-LABEL" not in report.model_dump_json()
     stderr_log = Path(scanner.results_dir) / "source" / "ActionlintScanner.stderr.log"
-    # The log exists only when actionlint wrote to stderr: an empty stream
-    # creates no file (subprocess_utils._write_stream_log), and a clean lint
-    # writes none. Had the outside file been read, actionlint would have quoted
-    # it on stderr and the file would be here, so a missing log is a clean run,
-    # not a wrong path.
     if stderr_log.exists():
         assert "OUTSIDE-MARKER-LABEL" not in stderr_log.read_text(
             encoding="utf-8", errors="replace"
