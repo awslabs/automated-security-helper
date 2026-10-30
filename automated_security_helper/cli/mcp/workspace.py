@@ -159,7 +159,6 @@ from automated_security_helper.cli.mcp.progress_monitor import (
 from automated_security_helper.cli.mcp.sandbox import (
     caller_is_remote,
     config_base_gate,
-    transport_is_networked,
 )
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
@@ -1596,12 +1595,16 @@ def _close_registrations(
     payload: Optional[WorkspaceResults],
     *,
     error: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """Move every entry this call made out of the active set.
 
     Left pending, they would each block a later scan of the same project
     directory and would make ``list_active_scans`` report work nobody is doing.
     Called on the failure path too, with ``error`` set, for the same reason.
+    ``session_id`` is the calling session's: the coverage kept on each entry
+    names the pids of the tools the stop could not end only when that caller is
+    local, the same request-scoped reading the response makes.
     """
     registry = get_scan_registry()
     outcomes = (
@@ -1640,12 +1643,15 @@ def _close_registrations(
             # project's own verdict, computed with the gate and the
             # policy-scanner exclusion already applied; re-deriving it from
             # incomplete_scanners here would ignore both.
-            # The coverage is kept on the entry and read by any later progress
-            # call, whoever makes it, so the process-wide transport decides
-            # whether its could_not_stop reasons name pids, as the cancel
-            # warning's rule does (_stop_at_timeout).
+            # The coverage is kept on the entry and read back by any later
+            # progress call. Whether its could_not_stop reasons name pids is
+            # decided by the SAME request-scoped predicate the response takes
+            # (caller_is_remote, which honours the operator's every-caller-remote
+            # override), so what this call returns and what a later progress
+            # call reads back agree: read by the process-wide transport alone,
+            # the stored coverage kept the pids the response had withheld.
             coverage = _project_coverage(
-                outcome, name_process_ids=not transport_is_networked()
+                outcome, name_process_ids=not caller_is_remote(session_id)
             )
             if outcome.scan_incomplete and coverage_has_gap(coverage):
                 registry.finish_scan(
@@ -2563,16 +2569,20 @@ async def _scan_workspace(
         directory may still be written to. Called on the thread before the
         projects' directories are let go (_settle), and on the task once the
         entries are closed, because either may run first; a pair already
-        recorded is not recorded twice. On a network transport the warning
-        names the tools only, and the process ids go to this log. Never raises:
-        it runs inside the settle, which must finish.
+        recorded is not recorded twice. Whether the stored reasons name the
+        process ids is decided by the same request-scoped predicate the response
+        takes (caller_is_remote, honouring the operator's every-caller-remote
+        override), never by the process-wide transport alone, so a later
+        progress call reads back what this call's response showed; for a remote
+        caller the reasons name the tools only. Never raises: it runs inside the
+        settle, which must finish.
         """
         try:
             records = stop.could_not_stop_records()
             if not records:
                 return
             registry = get_scan_registry()
-            name_pids = not transport_is_networked()
+            name_pids = not caller_is_remote(session_id)
             attached = [
                 scan_id
                 for scan_id in registered.values()
@@ -2788,7 +2798,7 @@ async def _scan_workspace(
             # attached once the entries are closed, in case the thread's own
             # record found them still open.
             reason = timed_out[0] if timed_out else "Workspace scan was cancelled"
-            _close_registrations(registered, None, error=reason)
+            _close_registrations(registered, None, error=reason, session_id=session_id)
             _record_the_tools_the_stop_could_not_end()
             return _stopped_response(
                 reason,
@@ -2827,7 +2837,9 @@ async def _scan_workspace(
                         )
                     }
             try:
-                _close_registrations(registered, None, error=error_text(exc))
+                _close_registrations(
+                    registered, None, error=error_text(exc), session_id=session_id
+                )
             except Exception as close_error:  # noqa: BLE001 -- the error that reached this arm wins
                 # Logged and swallowed: this arm maps the run's own failure to
                 # an exit code, and a close failure escaping here would replace
@@ -2866,6 +2878,7 @@ async def _scan_workspace(
                     registered,
                     None,
                     error=f"Workspace scan ended without a result: {type(exc).__name__}",
+                    session_id=session_id,
                 )
                 # The entries are closed and their events set: a tool the stop
                 # could not end, recorded on `stop` by then, is attached here;
@@ -2900,7 +2913,7 @@ async def _scan_workspace(
             timed_out[0], registered, timeout_seconds, environment_values
         )
 
-    _close_registrations(registered, result.payload)
+    _close_registrations(registered, result.payload, session_id=session_id)
 
     exit_code = int(result.exit_code)
     return {

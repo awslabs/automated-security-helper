@@ -391,7 +391,7 @@ class TestTheExitCodeAndTheStatusShareOneVerdict:
 
 
 class TestWorkspaceProjectsFollowTheSameRule:
-    def _close(self, tmp_path, networked: bool = False, **outcome_fields):
+    def _close(self, tmp_path, remote: bool = False, **outcome_fields):
         from automated_security_helper.cli.mcp import workspace as ws
         from automated_security_helper.models.workspace import (
             ProjectRunStatus,
@@ -412,22 +412,37 @@ class TestWorkspaceProjectsFollowTheSameRule:
             **outcome_fields,
         )
         payload = WorkspaceResults.model_construct(projects=[outcome])
+        asked: Dict[str, Any] = {}
+
+        def caller_is_remote(session_id):
+            asked["session_id"] = session_id
+            return remote
+
+        # Red at the base: the store read the process-wide transport (stdio here,
+        # so "not networked"), not the caller, and kept the pid for a remote
+        # caller; the module no longer imports that reading, so it is not patched.
         with (
             patch.object(ws, "get_scan_registry", return_value=registry),
-            patch.object(ws, "transport_is_networked", return_value=networked),
+            patch.object(ws, "caller_is_remote", side_effect=caller_is_remote),
         ):
-            ws._close_registrations({"app": scan_id}, payload)
+            ws._close_registrations(
+                {"app": scan_id}, payload, session_id="the-calling-session"
+            )
+        if "could_not_stop" in (registry.get_scan(scan_id).coverage or {}):
+            assert asked.get("session_id") == "the-calling-session", asked
         return registry.get_scan(scan_id)
 
-    def test_on_a_network_transport_the_stored_reason_names_no_pid(self, tmp_path):
+    def test_for_a_remote_caller_the_stored_reason_names_no_pid(self, tmp_path):
         """Red at the base: the coverage kept on the registry entry, read back by
-        any later progress call, carried the executor's reason with the pid in
-        it on every transport, while the cancel warning withheld the pid from a
-        network transport."""
+        any later progress call, decided whether to name the pid by the
+        process-wide transport, while the response decided by the request-scoped
+        ``caller_is_remote`` (which honours the operator's every-caller-remote
+        override). On stdio under that override the response withheld the pid,
+        the stored coverage kept it, and a later progress call returned it."""
         reason = "bandit's tool was still running after the stop (pid 7)"
         entry = self._close(
             tmp_path,
-            networked=True,
+            remote=True,
             scanners={"bandit": "PASSED"},
             unstoppable_tools={"bandit": reason},
             scan_incomplete=True,
@@ -439,6 +454,21 @@ class TestWorkspaceProjectsFollowTheSameRule:
                 "scanner": "bandit",
                 "reason": "bandit's tool was still running after the stop",
             }
+        ]
+
+    def test_for_a_local_caller_the_stored_reason_keeps_the_pid(self, tmp_path):
+        """Control: a local caller reads the reason as recorded, pid included."""
+        reason = "bandit's tool was still running after the stop (pid 7)"
+        entry = self._close(
+            tmp_path,
+            remote=False,
+            scanners={"bandit": "PASSED"},
+            unstoppable_tools={"bandit": reason},
+            scan_incomplete=True,
+        )
+
+        assert entry.coverage["could_not_stop"] == [
+            {"scanner": "bandit", "reason": reason}
         ]
 
     def test_a_project_whose_gate_fired_is_incomplete(self, tmp_path):
