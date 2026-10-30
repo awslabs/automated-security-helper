@@ -1,8 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
+import re
 from typing import Dict, List, Any, TYPE_CHECKING
 
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
@@ -39,10 +40,76 @@ def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
             "coverage unknown; its recorded target counters could not be read, "
             "so how many targets it evaluated is not known"
         )
+    # A record whose failed count exceeds its attempted count is inconsistent;
+    # the evaluated count is never printed below zero.
     return (
-        f"evaluated {attempted - failed} of {attempted} target(s); "
+        f"evaluated {max(attempted - failed, 0)} of {attempted} target(s); "
         f"{failed} could not be evaluated"
     )
+
+
+def refuse_negative_limit(value: int) -> int:
+    """*value* if it is 0 or more; otherwise refuse it.
+
+    For the reporters' ``max_detailed_findings`` and ``top_hotspots_limit``: a
+    negative number slices a list from its end, so it dropped the last findings
+    and hotspots instead of meaning none, and the text report printed
+    "Showing -1 of N".
+    """
+    if value < 0:
+        raise ValueError(
+            "must be 0 or more: 0 lists none, and a negative number would drop "
+            "the last items instead"
+        )
+    return value
+
+
+#: The layouts a scan time is recorded in, once its offset and fractional
+#: seconds are taken off.
+_SCAN_TIME_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d - %H:%M (UTC)",
+    "%Y-%m-%d %H:%M:%S",
+)
+
+#: A trailing ``+HH:MM`` or ``-HH:MM`` UTC offset.
+_UTC_OFFSET = re.compile(r"([+-])(\d{2}):(\d{2})$")
+
+
+def parse_scan_time(text: str) -> datetime | None:
+    """The instant a recorded scan time names, timezone-aware, or None.
+
+    A trailing ``Z`` and a ``+HH:MM`` or ``-HH:MM`` offset are read as the zone
+    the time was written in, so the instant is the one the writer meant. A time
+    with no offset, and the explicitly UTC layout (``2026-01-15 - 12:00 (UTC)``),
+    is UTC. Fractional seconds are dropped. Dropping the offset and labelling
+    the local wall time UTC, as this did, made ``time_delta`` wrong by the
+    offset; leaving the UTC layout without a zone made its subtraction from an
+    aware ``now`` raise and ``time_delta`` come back None.
+    """
+    cleaned = text.strip()
+    zone = timezone.utc
+    if cleaned.endswith("Z"):
+        cleaned = cleaned[:-1]
+    else:
+        match = _UTC_OFFSET.search(cleaned)
+        if match:
+            sign = -1 if match.group(1) == "-" else 1
+            try:
+                zone = timezone(
+                    sign
+                    * timedelta(hours=int(match.group(2)), minutes=int(match.group(3)))
+                )
+            except ValueError:
+                return None
+            cleaned = cleaned[: match.start()]
+    cleaned = cleaned.split(".")[0]
+    for layout in _SCAN_TIME_FORMATS:
+        try:
+            return datetime.strptime(cleaned, layout).replace(tzinfo=zone)
+        except ValueError:
+            continue
+    return None
 
 
 class ReportContentEmitter:
@@ -63,8 +130,12 @@ class ReportContentEmitter:
         which the flattened findings already carry. It gives the emitter its own
         copy of each row, as the model memoizes them for every reporter of a
         run: a human report that writes one changes no later report's rows.
+        It also has the scanner rows say "no duration" (None) where a person
+        would read a measured zero (see :meth:`get_scanner_results`); the
+        machine-readable exports keep the number the results recorded.
         """
         self.model = model
+        self._human_presentation = human_presentation
         self.flat_vulns = model.to_flat_vulnerabilities()
         if human_presentation:
             self.flat_vulns = [vuln.model_copy() for vuln in self.flat_vulns]
@@ -99,34 +170,9 @@ class ReportContentEmitter:
 
         if scan_time_str != "Unknown":
             try:
-                # Strip timezone offset or fractional seconds from the
-                # timestamp so strptime can parse the date/time portion.
-                # Handles +HH:MM, -HH:MM, Z suffix, and .fractional seconds.
-                import re as _re
-
-                cleaned = scan_time_str
-                # Remove trailing Z (Zulu/UTC indicator)
-                cleaned = cleaned.rstrip("Z")
-                # Remove timezone offset (+HH:MM or -HH:MM) at the end
-                cleaned = _re.sub(r"[+-]\d{2}:\d{2}$", "", cleaned)
-                # Remove fractional seconds
-                cleaned = cleaned.split(".")[0]
-
-                # Try to parse the scan time string to calculate delta
-                # Handle different possible formats
-                for fmt in [
-                    "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%d - %H:%M (UTC)",
-                    "%Y-%m-%d %H:%M:%S",
-                ]:
-                    try:
-                        scan_time = datetime.strptime(cleaned, fmt)
-                        if fmt != "%Y-%m-%d - %H:%M (UTC)":
-                            scan_time = scan_time.replace(tzinfo=timezone.utc)
-                        time_delta = current_time - scan_time
-                        break
-                    except ValueError:
-                        continue
+                scan_time = parse_scan_time(scan_time_str)
+                if scan_time is not None:
+                    time_delta = current_time - scan_time
             except Exception:
                 ASH_LOGGER.debug(
                     "Report parsing has failed, showing what had been resolved"
@@ -165,7 +211,25 @@ class ReportContentEmitter:
         """Get scanner results with pass/fail status based on severity thresholds."""
         # Convert scanner metrics to dictionary format for reporters
         results = []
+        # The merged file of a workspace scan carries no per-scanner duration,
+        # so the metrics default every scanner to 0.0 there.
+        durations_unrecorded = is_workspace_scan(self.model)
         for metrics in self.scanner_metrics:
+            # In a report for people, a scanner that did not run took no time,
+            # and a duration the results never recorded is not a measured
+            # zero: both are None, which the reports show as "N/A". The
+            # metrics default to 0.0, so these rows read "<1ms" as if the
+            # scanner had run and been fast. A machine-readable export keeps
+            # the recorded number.
+            did_not_run = self._human_presentation and metrics.status in (
+                "SKIPPED",
+                "MISSING",
+            )
+            unrecorded = (
+                self._human_presentation
+                and durations_unrecorded
+                and not metrics.duration
+            )
             results.append(
                 {
                     "scanner_name": metrics.scanner_name,
@@ -188,11 +252,12 @@ class ReportContentEmitter:
                     # for every other status.
                     "missing_reason": metrics.missing_reason,
                     "skipped_reason": metrics.skipped_reason,
-                    # Seconds the scanner took, or None when it did not run. The
+                    # Seconds the scanner took; None, in a report for people, when
+                    # it did not run or the results record no duration for it. The
                     # text and html reporters render a Duration column from this
                     # key with format_duration(result.get("duration", 0)); while
                     # the key was missing that default made every row read "<1ms".
-                    "duration": metrics.duration,
+                    "duration": None if did_not_run or unrecorded else metrics.duration,
                     # How much of its input the scanner actually evaluated. Every other key here
                     # describes what was found; these two describe how much was looked at, and
                     # without them a report cannot distinguish a clean scan from one that
@@ -297,6 +362,20 @@ class ReportContentEmitter:
                 self.is_finding_actionable(vuln) for vuln in self.flat_vulns
             )
             suppressed = sum(vuln.is_suppressed for vuln in self.flat_vulns)
+        else:
+            # The scanner rows count SARIF results. Findings an additional
+            # report lists (a plugin's own list of finding dicts) reach the
+            # cards and the hotspots, and a headline that left them out read
+            # "No actionable findings" above cards marked Actionable.
+            extras = self._additional_report_findings()
+            for vuln in extras:
+                if vuln.is_suppressed:
+                    suppressed += 1
+                elif vuln.severity.lower() in counts:
+                    counts[vuln.severity.lower()] += 1
+            if not is_workspace_scan(self.model):
+                # A workspace scan counted every finding above, these included.
+                actionable += sum(self.is_finding_actionable(vuln) for vuln in extras)
         completed = sum(ran(result) for result in results)
         skipped = sum(result["status"] == "SKIPPED" for result in results)
         unavailable = [
@@ -318,6 +397,12 @@ class ReportContentEmitter:
             for name, _ in coverage.scanners
             if name not in unavailable and name not in shortfall_scanners
         )
+        # A scanner that ran can still be named for attention (a FAILED scanner
+        # missing a dependency on one tree); it is counted as completed, so the
+        # masthead's unavailable figure leaves it out, or completed, disabled
+        # and unavailable would add up to more than the scanners there are.
+        completed_names = {result["scanner_name"] for result in results if ran(result)}
+        unavailable_count = sum(name not in completed_names for name in unavailable)
         active = sum(counts.values())
         # A tool ASH could not stop fails the run whatever the gate says, and it
         # may still be writing into the output directory after this report is
@@ -335,6 +420,14 @@ class ReportContentEmitter:
             or could_not_stop
         )
         finding_label = "finding" if actionable == 1 else "findings"
+        # A coverage gap is a warning, but not when findings at the gate are also
+        # on the page: the run fails on them, and a warning tone read as the
+        # lesser of the two.
+        gap_tone = (
+            "danger"
+            if actionable or any(result["status"] == "FAILED" for result in results)
+            else "warning"
+        )
 
         if not completed:
             title, tone = "No scanners completed", "warning"
@@ -343,18 +436,18 @@ class ReportContentEmitter:
                 "Check scanner results and dependencies, then run the scan again."
             )
         elif could_not_stop:
-            title, tone = "Scan incomplete", "warning"
+            title, tone = "Scan incomplete", gap_tone
             description = (
                 f"{actionable} actionable {finding_label}. A scanner tool could not be "
                 "stopped and may still be writing, so this report may not be final."
             )
             next_step = "Stop the named tool, then run the scan again."
         elif incomplete:
-            title, tone = "Scan incomplete", "warning"
+            title, tone = "Scan incomplete", gap_tone
             description = f"{actionable} actionable {finding_label}. Some inputs or scanners were not evaluated."
             next_step = "Review findings, resolve coverage gaps, and scan again."
         elif stale:
-            title, tone = "Scan needs attention", "warning"
+            title, tone = "Scan needs attention", gap_tone
             description = f"{actionable} actionable {finding_label}. Content database freshness needs review."
             next_step = "Review the database notices, refresh the affected scanners, and scan again."
         elif actionable or any(result["status"] == "FAILED" for result in results):
@@ -380,6 +473,9 @@ class ReportContentEmitter:
             "scanners": len(results),
             "skipped": skipped,
             "unavailable": unavailable,
+            # How many of those did not complete: the figure for a count of
+            # scanners, where the list above is for naming them.
+            "unavailable_count": unavailable_count,
             "shortfalls": shortfalls,
             "stale": stale,
             "converter_gaps": coverage.converters,
@@ -387,6 +483,25 @@ class ReportContentEmitter:
             # (scanner, reason) rows, the reason naming the process id.
             "could_not_stop": could_not_stop,
         }
+
+    def _additional_report_findings(self) -> List[FlatVulnerability]:
+        """The flattened findings that came from list-form additional reports.
+
+        ``to_flat_vulnerabilities`` appends them after the SARIF results, one
+        per dict in a scanner's list. The scanner rows count SARIF results
+        only, so these are the findings a row-based summary does not see.
+        """
+        reports = self.model.additional_reports
+        names = {name for name, found in reports.items() if isinstance(found, list)}
+        count = sum(
+            1 for name in names for entry in reports[name] if isinstance(entry, dict)
+        )
+        if not count:
+            return []
+        tail = self.flat_vulns[-count:]
+        if len(tail) != count or any(vuln.scanner not in names for vuln in tail):
+            return []
+        return tail
 
     def get_top_hotspots(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get top hotspots (files with most findings)."""
@@ -484,7 +599,10 @@ class ReportContentEmitter:
                 vuln.rule_id or "",
             )
         )
-        findings_to_show = actionable_findings[:max_findings]
+        # A negative limit would slice from the end and drop the last findings
+        # instead of none; the reporters refuse one, and a caller that passes
+        # one anyway gets none.
+        findings_to_show = actionable_findings[: max(max_findings, 0)]
 
         return [self._create_detailed_finding(vuln) for vuln in findings_to_show]
 
@@ -540,6 +658,16 @@ class ReportContentEmitter:
             if "snippet" in raw_data:
                 return _snippet_text(raw_data["snippet"])
 
+            # SARIF puts a snippet in a location's physicalLocation, under its
+            # region (or its context region), never on the result or on a
+            # thread-flow location itself.
+            locations = raw_data.get("locations")
+            if isinstance(locations, list):
+                for location in locations:
+                    found = _location_snippet(location)
+                    if found:
+                        return found
+
             # Check in code flows
             if "codeFlows" in raw_data and raw_data["codeFlows"]:
                 for flow in raw_data["codeFlows"]:
@@ -549,6 +677,11 @@ class ReportContentEmitter:
                                 for loc in thread["locations"]:
                                     if "snippet" in loc:
                                         return _snippet_text(loc["snippet"])
+                                    # A thread-flow location wraps a SARIF
+                                    # location: ``{"location": {...}}``.
+                                    found = _location_snippet(loc.get("location"))
+                                    if found:
+                                        return found
 
             # Check in message
             if "message" in raw_data and "text" in raw_data["message"]:
@@ -563,6 +696,26 @@ class ReportContentEmitter:
             pass
 
         return None
+
+
+def _location_snippet(location: Any) -> str | None:
+    """The snippet text of a SARIF location object, or None.
+
+    Read from ``physicalLocation.region.snippet`` and then
+    ``physicalLocation.contextRegion.snippet``, where SARIF 2.1.0 puts it.
+    """
+    if not isinstance(location, dict):
+        return None
+    physical = location.get("physicalLocation")
+    if not isinstance(physical, dict):
+        return None
+    for key in ("region", "contextRegion"):
+        region = physical.get(key)
+        if isinstance(region, dict):
+            text = _snippet_text(region.get("snippet"))
+            if text:
+                return text
+    return None
 
 
 def _snippet_text(snippet: Any) -> str | None:

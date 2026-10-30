@@ -1,6 +1,6 @@
 # ASH security scan analysis
 
-> [!WARNING]
+> [!CAUTION]
 > **Scan incomplete**
 >
 > 6 actionable findings. Some inputs or scanners were not evaluated.
