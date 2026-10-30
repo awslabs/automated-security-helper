@@ -147,7 +147,9 @@ def test_a_trusted_reference_past_the_trusted_list_refuses_the_carry(root: Path)
 
 def test_distinct_trusted_entries_are_each_carried(root: Path):
     """The contrast: two trusted entries reading two variables carry one
-    reference each, at the index the merged list gives each name."""
+    reference each, at the index the merged list gives each NAME: the merged
+    list holds the two names in the reverse of the trusted order, so a carry by
+    trusted index would put each variable at the other name's slot."""
     from automated_security_helper.config.plugin_module_trust import (
         _carry_trusted_module_references,
     )
@@ -165,5 +167,8 @@ def test_distinct_trusted_entries_are_each_carried(root: Path):
 
     for attribute in _LISTS:
         carried = _module_references(config, attribute)
-        indices = sorted(reference.path[1] for reference in carried)
-        assert indices == [1, 2], (attribute, carried)
+        by_index = {reference.path[1]: reference.written for reference in carried}
+        assert by_index == {1: "${ASH_RECV_TWO}", 2: "${ASH_RECV_ONE}"}, (
+            attribute,
+            carried,
+        )

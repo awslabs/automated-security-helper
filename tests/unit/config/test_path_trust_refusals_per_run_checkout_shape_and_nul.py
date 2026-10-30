@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Four judgments of ``config/path_trust.py``.
+"""Judgments of ``config/path_trust.py``.
 
 * A path refusal is logged once per scan run, not once per process: a
   long-lived process (the MCP server) that refuses the same option and path in
@@ -12,6 +12,12 @@
 * A baseline reached through a link that sits inside the checkout holding the
   scan root is the repository's, as the other reason tiers read a link in the
   tree.
+* ``OperatorPaths`` credits a value under the key the scanner asks about: an
+  override under a respelled scanner section (``DetectSecrets``) is the
+  operator's for the declared section (a document under a respelled section is
+  measured in test_path_trust_checkout_rule.py), and a value spelled with
+  ``..`` is not credited by its normalized form, since the operating system
+  walks ``..`` through whatever the directory is at run time.
 * A value holding a NUL names no file: ``honored_path`` drops it instead of
   raising out of the scanner's construction.
 """
@@ -140,20 +146,6 @@ def test_a_baseline_reached_through_a_link_inside_the_checkout_is_the_repository
     reason = scanned_checkout_reason(named, app)
 
     assert reason is not None and "a link inside" in reason, reason
-
-
-def test_an_operator_document_under_a_respelled_scanner_section_is_credited():
-    """The operator's file spells the section ``Syft``; the configuration reads
-    it as the syft scanner's (case and separators dropped), so the path it names
-    is the operator's under the key the scanner asks about."""
-    paths = OperatorPaths(
-        documents=[
-            {"scanners": {"Syft": {"options": {"config_file": "/ops/syft.yaml"}}}}
-        ]
-    )
-
-    assert paths.named("scanners.syft.options.config_file", "/ops/syft.yaml")
-    assert not paths.named("scanners.syft.options.config_file", "/ops/other.yaml")
 
 
 def test_a_value_carrying_dot_dot_is_not_credited_by_its_normalized_form():

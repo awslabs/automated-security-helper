@@ -729,10 +729,11 @@ def test_off_by_default_an_in_tree_config_cannot_enable_it(
 def test_off_by_default_a_delivered_config_cannot_enable_it(
     tmp_path, ash_log, defaults_off, reporter
 ):
-    """Refused under the default denied_paths, and under a policy that lists
-    nothing of its own as well: a reporter that sends findings off the host is
-    denied whole whatever the list (ALWAYS_DENIED_PATHS). The confinement on its
-    own is covered by the in-tree route above."""
+    """Refused under the default denied_paths, and under a policy whose own list
+    names only ``/fail_on_findings`` (``_client_policy_helpers``) as well: a
+    reporter that sends findings off the host is denied whole whatever the list
+    (ALWAYS_DENIED_PATHS). The confinement on its own is covered by the in-tree
+    route above."""
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
     upload = _write_config(

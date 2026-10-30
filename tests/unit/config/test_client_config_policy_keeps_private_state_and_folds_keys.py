@@ -1,8 +1,18 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Two readings of ``config/client_config_policy.py``.
+"""Four readings of ``config/client_config_policy.py``.
 
+* ``_with_own_patch``, the per-op walk the restrict-only check reads a delivered
+  file's ``patch`` through: a failed ``test`` op ends it with the unpatched
+  document, as resolution aborts the whole patch; a ``test`` that passes is
+  applied without error and the walk goes on to the ops after it; and the walk
+  starts from the trusted base merged with the document's own fields, so a
+  ``test`` of a value the document itself sets passes here as it passes in the
+  load.
+* ``trusted_default_config`` reads ``ASH_CONFIG`` once, through
+  ``get_default_config`` and its ``views`` carry, and takes the built-in
+  defaults when that chain names a file under the MCP workspace root.
 * ``_writes_plugin_default`` forgives a denial only where the trusted base has
   no value for the option. A plugin scanner's section is a plain dict, so the
   trusted base can spell the option ``ignore-file``; the lookup reads either
@@ -73,27 +83,91 @@ def test_a_failed_test_op_leaves_the_document_unpatched_in_the_per_op_walk():
     assert seen is document, seen
 
 
+def test_a_passing_test_op_does_not_end_the_per_op_walk():
+    """The control for the failed-test case: a ``test`` op that passes over the
+    base applies without error, so the walk goes on and reads the grant written
+    after it. A walk that ended at any ``test`` op, passing or failing, would
+    let a delivered file hide a grant behind a test it knows passes."""
+    document = {
+        "patch": [
+            {"op": "remove", "path": "/no/such/place/at/all"},
+            {"op": "test", "path": "/project_name", "value": AshConfig().project_name},
+            {"op": "add", "path": "/sandbox/extra_read_paths", "value": ["/etc"]},
+        ],
+    }
+
+    seen = _with_own_patch(document, AshConfig())
+
+    assert seen.get("sandbox", {}).get("extra_read_paths") == ["/etc"], seen
+
+
+def test_a_test_op_of_the_documents_own_value_passes_as_the_load_applies_it():
+    """The walk starts from the base merged with the document's own fields, as
+    the load patches the merged chain: a ``test`` of a value the delivered
+    document itself sets passes here as it passes in the load, so the grant
+    after it is read rather than hidden behind a test that fails over the bare
+    base."""
+    document = {
+        "project_name": "delivered-name",
+        "patch": [
+            {"op": "remove", "path": "/no/such/place/at/all"},
+            {"op": "test", "path": "/project_name", "value": "delivered-name"},
+            {"op": "add", "path": "/sandbox/extra_read_paths", "value": ["/etc"]},
+        ],
+    }
+
+    seen = _with_own_patch(document, AshConfig())
+
+    assert seen.get("sandbox", {}).get("extra_read_paths") == ["/etc"], seen
+
+
 def test_the_trusted_default_config_is_read_once(tmp_path: Path, monkeypatch):
     """The chain the server trusts is judged from the files the load itself
-    read, not from a second resolution of ASH_CONFIG that a file changed in
-    between could make disagree with the configuration returned."""
+    read (the ``views`` carry of the one ``get_default_config`` call), not from
+    a second resolution of ASH_CONFIG that a file changed in between could make
+    disagree with the configuration returned. The file is rewritten the moment
+    the first read returns, so any second read of it, through
+    ``get_default_config`` again or through the chain readers, shows."""
     operator = tmp_path / "operator" / "ash.yaml"
     operator.parent.mkdir()
     operator.write_text(yaml.safe_dump({"project_name": "op"}), encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
 
-    def second_read():
+    calls = []
+    first_read = default_config.get_default_config
+
+    def one_read(*args, **kwargs):
+        config = first_read(*args, **kwargs)
+        calls.append(sorted(kwargs))
+        operator.write_text(
+            yaml.safe_dump({"project_name": "changed"}), encoding="utf-8"
+        )
+        return config
+
+    def second_read(*args, **kwargs):
         raise AssertionError("ASH_CONFIG was resolved a second time")
 
-    monkeypatch.setattr(default_config, "default_config_document", second_read)
+    monkeypatch.setattr(default_config, "get_default_config", one_read)
+    for reader in (
+        "default_config_document",
+        "default_config_chain",
+        "default_config_names",
+        "default_config_documents",
+    ):
+        monkeypatch.setattr(default_config, reader, second_read)
 
-    assert trusted_default_config().project_name == "op"
+    trusted = trusted_default_config()
+
+    assert trusted.project_name == "op"
+    assert len(calls) == 1 and "views" in calls[0], calls
 
 
 def test_an_ash_config_a_client_delivered_is_not_the_trusted_config(
     tmp_path: Path, monkeypatch
 ):
+    """ASH_CONFIG names a file under the MCP workspace root, a client's: the
+    built-in defaults are the trusted config, not that file."""
     root = tmp_path / "ash-mcp"
     delivered = root / "session-a" / "source" / "ash.yaml"
     delivered.parent.mkdir(parents=True)
@@ -101,7 +175,10 @@ def test_an_ash_config_a_client_delivered_is_not_the_trusted_config(
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
     monkeypatch.setenv("ASH_CONFIG", str(delivered))
 
-    assert trusted_default_config().project_name != "client"
+    trusted = trusted_default_config()
+
+    assert trusted.project_name != "client"
+    assert trusted.project_name == AshConfig().project_name
 
 
 def test_a_kebab_spelled_trusted_option_still_denies_the_delivered_default():

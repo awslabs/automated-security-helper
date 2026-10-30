@@ -80,25 +80,49 @@ def test_a_sandbox_read_path_holding_a_dollar_is_left_for_the_sandbox(tmp_path):
     assert anchored["sandbox"]["extra_read_paths"] == ["$HOME/ops"]
 
 
+@pytest.mark.parametrize("scanner", ["semgrep", "opengrep"])
 @pytest.mark.parametrize(
     "value", ["rules/custom.yaml", "./rules", "../shared/rules.yml"]
 )
-def test_a_missing_rules_file_spelled_as_a_path_is_anchored(tmp_path, value):
-    document = {"scanners": {"semgrep": {"options": {"config": value}}}}
+def test_a_missing_rules_file_spelled_as_a_path_is_anchored(tmp_path, scanner, value):
+    """Nothing is at the value under the base; its spelling (a rules-file
+    suffix, ``./``, ``../``) names a path all the same, so it is anchored, for
+    opengrep's ``config`` as for semgrep's."""
+    document = {"scanners": {scanner: {"options": {"config": value}}}}
 
     anchored = anchor_relative_paths(document, tmp_path)
 
-    assert anchored["scanners"]["semgrep"]["options"]["config"] == _anchored(
+    assert anchored["scanners"][scanner]["options"]["config"] == _anchored(
         tmp_path, value
     )
 
 
-def test_a_registry_entry_is_left_as_written(tmp_path):
-    document = {"scanners": {"semgrep": {"options": {"config": "p/ci"}}}}
+@pytest.mark.parametrize("scanner", ["semgrep", "opengrep"])
+def test_a_registry_entry_is_left_as_written(tmp_path, scanner):
+    document = {"scanners": {scanner: {"options": {"config": "p/ci"}}}}
 
     anchored = anchor_relative_paths(document, tmp_path)
 
-    assert anchored["scanners"]["semgrep"]["options"]["config"] == "p/ci"
+    assert anchored["scanners"][scanner]["options"]["config"] == "p/ci"
+
+
+@pytest.mark.parametrize("scanner", ["semgrep", "opengrep"])
+def test_a_bare_name_is_anchored_only_when_a_file_is_there(tmp_path, scanner):
+    """A bare name (no suffix, no ``./``) is spelled like a registry entry, so
+    it is anchored only when something by that name sits under the base:
+    ``myrules`` does here and is anchored; ``other-rules`` does not and stays as
+    written, as ``p/ci`` beside it does."""
+    (tmp_path / "myrules").mkdir()
+
+    def anchored_config(value: str) -> str:
+        document = {"scanners": {scanner: {"options": {"config": value}}}}
+        return anchor_relative_paths(document, tmp_path)["scanners"][scanner][
+            "options"
+        ]["config"]
+
+    assert anchored_config("myrules") == _anchored(tmp_path, "myrules")
+    assert anchored_config("other-rules") == "other-rules"
+    assert anchored_config("p/ci") == "p/ci"
 
 
 def test_a_root_pointer_operation_has_its_document_anchored(tmp_path):

@@ -46,6 +46,21 @@ _CHECKOUT_RULE = (
 )
 
 
+def test_the_quoted_checkout_rule_is_the_trust_models_own_sentence():
+    """The docstrings below quote the rule rather than cite a line number, and a
+    copied sentence goes stale as silently as a number moves, so the page is
+    read: the sentence is still there, in the ``ash_plugin_modules`` row."""
+    page = (
+        Path(__file__).resolve().parents[3]
+        / "docs"
+        / "content"
+        / "concepts"
+        / "trust-model.md"
+    )
+
+    assert _CHECKOUT_RULE in page.read_text(encoding="utf-8"), page
+
+
 def test_no_scan_root_is_no_scanned_tree():
     """The premise the no-root branch rests on, measured: scanned_trees(None)
     answers no tree at all, never a default such as the process's cwd."""
