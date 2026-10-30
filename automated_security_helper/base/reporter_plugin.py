@@ -174,11 +174,17 @@ class ReporterPluginConfigBase(PluginConfigBase):
 def is_filename_suffix(value: object) -> bool:
     """Whether ``value`` can follow ``ash.`` in a file name without leaving its directory.
 
-    A colon is refused as well, as ``is_report_file_name`` refuses one: on NTFS
-    ``ash.json:stream`` is a stream of the file ``ash.json``, another reporter's.
+    The file-name rule is ``is_report_file_name``'s, asked of ``ash.<value>``, so
+    the two cannot drift apart: a colon (on NTFS ``ash.json:stream`` is a stream
+    of the file ``ash.json``, another reporter's) was missing from a second
+    copy of it once. A ``..`` is refused as well.
     """
-    return isinstance(value, str) and not any(
-        part in value for part in ("/", "\\", ":", "..", "\x00")
+    from automated_security_helper.utils.report_path_links import is_report_file_name
+
+    return (
+        isinstance(value, str)
+        and ".." not in value
+        and is_report_file_name(f"ash.{value}")
     )
 
 
