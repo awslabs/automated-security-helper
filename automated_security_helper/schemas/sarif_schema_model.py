@@ -2487,6 +2487,25 @@ def _relative_text(candidate: str, root: str, fold_case: bool) -> Optional[str]:
     return PurePosixPath(*candidate_parts[len(root_parts) :]).as_posix()
 
 
+def _artifact_uri_by_index(run: "Run", index: Optional[int]) -> Optional[str]:
+    """The URI of ``run.artifacts[index]``'s own location, or None.
+
+    SARIF's default index is -1 (no artifact named); an index outside the
+    run's artifacts, an artifact with no location, or a location with no URI
+    all resolve to nothing. One hop only: an artifact whose location itself
+    names an index is not followed.
+    """
+    if not isinstance(index, int) or index < 0:
+        return None
+    artifacts = run.artifacts or []
+    if index >= len(artifacts):
+        return None
+    location = artifacts[index].location
+    if location is None:
+        return None
+    return location.uri
+
+
 def _resolved_root_text(source_dir: object) -> Optional[str]:
     """*source_dir* resolved on this host, as ``/``-separated text; None for a
     pure path of another flavor (it names no directory here) or a root that
@@ -2607,7 +2626,10 @@ class SarifReport(RecordModel):
         Args:
             file_set: Set of relative file paths (as strings) to retain.
                      Results whose first location maps to a path not in this set
-                     are dropped. Results with no location are always retained.
+                     are dropped. Results with no location are always retained,
+                     and so is a location that names no path: one with no
+                     ``uri`` is read through ``run.artifacts`` when its
+                     ``index`` points there, and retained when nothing resolves.
             source_dir: The source directory used to normalize absolute URIs to
                      relative paths for comparison. A string is read by its
                      shape: one spelled ``//x/y`` is taken as a UNC root
@@ -2653,12 +2675,19 @@ class SarifReport(RecordModel):
                 ):
                     filtered.append(result)
                     continue
-                uri = loc.physicalLocation.root.artifactLocation.uri
+                artifact_location = loc.physicalLocation.root.artifactLocation
+                uri = artifact_location.uri
                 if uri is None:
-                    # The location names its artifact by index or by uriBaseId
-                    # alone, which this filter cannot resolve to a path, and a
-                    # result with no usable location is retained, as one with no
-                    # location is. Comparing it as "" dropped it.
+                    # SARIF 3.4.5: a location may name its artifact only by an
+                    # index into run.artifacts, whose own location carries the
+                    # URI. Read it there, so such a result is filtered like any
+                    # other instead of passing a changed-files filter unseen.
+                    uri = _artifact_uri_by_index(run, artifact_location.index)
+                if uri is None:
+                    # The location names its artifact by uriBaseId alone, or by
+                    # an index nothing resolves, which this filter cannot turn
+                    # into a path; a result with no usable location is retained,
+                    # as one with no location is. Comparing it as "" dropped it.
                     filtered.append(result)
                     continue
                 # SARIF artifact URIs are POSIX-style by spec, so all comparison

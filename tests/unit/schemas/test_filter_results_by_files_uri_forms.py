@@ -21,6 +21,7 @@ from pathlib import Path, PureWindowsPath
 import pytest
 
 from automated_security_helper.schemas.sarif_schema_model import (
+    Artifact,
     ArtifactLocation,
     Location,
     Message,
@@ -286,3 +287,59 @@ class TestALocationWithoutAUri:
         report.filter_results_by_files({"src/kept.py"}, "/work/src")
 
         assert _lines(report) == [1]
+
+    @staticmethod
+    def _report_with_artifacts(*artifact_uris: str) -> SarifReport:
+        """One result whose location names its artifact by index 0 alone."""
+        indexed = Result(
+            ruleId="R",
+            message=Message(text="finding 1"),
+            locations=[
+                Location(
+                    physicalLocation=PhysicalLocation(
+                        root=PhysicalLocation2(
+                            artifactLocation=ArtifactLocation(index=0),
+                            region={"startLine": 1},
+                        )
+                    )
+                )
+            ],
+        )
+        return SarifReport(
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="scanner")),
+                    artifacts=[
+                        Artifact(location=ArtifactLocation(uri=uri))
+                        for uri in artifact_uris
+                    ],
+                    results=[indexed, _result("/work/src/src/kept.py", 2)],
+                )
+            ]
+        )
+
+    def test_a_location_named_by_index_is_read_through_the_runs_artifacts(self):
+        """SARIF 3.4.5: the artifact's own location carries the URI, so a result
+        outside the listed files no longer passes a changed-files filter unseen."""
+        report = self._report_with_artifacts("/work/src/src/other.py")
+
+        report.filter_results_by_files({"src/kept.py"}, "/work/src")
+
+        assert _lines(report) == [2]
+
+    def test_a_location_named_by_index_matches_through_the_runs_artifacts(self):
+        """The control: the same shape pointing at a listed file is kept."""
+        report = self._report_with_artifacts("/work/src/src/kept.py")
+
+        report.filter_results_by_files({"src/kept.py"}, "/work/src")
+
+        assert _lines(report) == [1, 2]
+
+    def test_an_index_nothing_resolves_is_retained(self):
+        """An index past the run's artifacts names no path; the result is kept
+        as a result with no location is."""
+        report = self._report_with_artifacts()
+
+        report.filter_results_by_files({"src/kept.py"}, "/work/src")
+
+        assert _lines(report) == [1, 2]
