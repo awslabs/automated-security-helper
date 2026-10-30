@@ -3165,18 +3165,23 @@ def record_of_config(
             # short value's other occurrences into references the file never
             # wrote, and garbled the record.
             part = rewrite.environment_part
-            if current.startswith(part):
+            # Counted on the string as the configuration holds it, never on
+            # the replaced text: a value that is a substring of its own
+            # reference's spelling ("AB" under ${TAB}) is found again inside
+            # the reference once written, and read as a second occurrence.
+            repeated = current.count(part) > 1
+            if repeated:
+                # A record never holds the value: where it occurs again, every
+                # occurrence is hidden, as the whole-string replace hid them,
+                # since a value shown is the worse side.
+                replaced = current.replace(part, rewrite.reference)
+            elif current.startswith(part):
                 replaced = rewrite.reference + current[len(part) :]
             else:
                 replaced = current.replace(part, rewrite.reference, 1)
             if mark is None:
-                # A record never holds the value: where it occurs again, the
-                # other occurrences are hidden too, as the whole-string
-                # replace hid them, since a value shown is the worse side.
-                if part in replaced:
-                    replaced = replaced.replace(part, rewrite.reference)
                 container[key] = replaced
-            elif part not in replaced and _resolves_back_to(replaced, current):
+            elif not repeated and _resolves_back_to(replaced, current):
                 # One reference, and nothing of the value left as text: a
                 # string that holds the value again is left as the
                 # configuration holds it, which the writer refuses to write.

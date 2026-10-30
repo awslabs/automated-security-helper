@@ -223,6 +223,26 @@ class TestRecordOfConfig:
         assert record_of_config(config, {"a": "xyxy"}, mark=mark) == {"a": "xyxy"}
         assert marks == []
 
+    def test_a_value_inside_its_own_references_spelling_occurs_once(self, monkeypatch):
+        """``AB`` under ``${TAB}``: the value is found again inside the reference
+        once written. Counted on the string as held, it occurs once, so the
+        record holds one clean reference and the writer still writes it."""
+        monkeypatch.setenv("TAB", "AB")
+        config = SimpleNamespace(
+            _written_references=[_value_rewrite(("a",), "${TAB}", "AB", "AB", "${TAB}")]
+        )
+        assert record_of_config(config, {"a": "xABy"}) == {"a": "x${TAB}y"}
+        marks: list = []
+
+        def mark(text):
+            marks.append(text)
+            return text
+
+        assert record_of_config(config, {"a": "xABy"}, mark=mark) == {
+            "a": "!ENV x${TAB}y"
+        }
+        assert marks == ["!ENV x${TAB}y"]
+
     def test_a_key_rename_onto_an_existing_key_keeps_both_entries(self):
         rewrite = EnvironmentRewrite("key", ("m",), "k", "${K}", "k", "${K}")
         config = SimpleNamespace(_written_references=[rewrite])
