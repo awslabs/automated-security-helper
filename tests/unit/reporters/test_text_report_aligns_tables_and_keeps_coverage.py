@@ -9,8 +9,9 @@
   title.
 * The inputs no scanner or converter read stay in the report when the summary
   is turned off, as the coverage notices do.
-* An additional report's severity is the results file's text, so the findings
-  overview and the detailed findings show it as one line.
+* An additional report's severity is read as the gate reads it, so the findings
+  overview and the detailed findings show one line, and none of a value that is
+  not a severity name.
 * A negative limit is refused when the option is read; it used to slice the
   findings from the end.
 """
@@ -68,7 +69,12 @@ class TestEachColumnSitsUnderItsTitle:
     def test_the_suppressed_column(self, test_plugin_context):
         lines = _report(test_plugin_context, _model()).split("\n")
 
-        header = next(line for line in lines if line.startswith("Scanner "))
+        # "Scanner Results:" above the table also starts with "Scanner ".
+        header = next(
+            line
+            for line in lines
+            if line.startswith("Scanner ") and "Suppressed" in line
+        )
         rule = lines[lines.index(header) + 1]
         row = next(line for line in lines if line.startswith("bandit"))
         end = header.index("Suppressed") + len("Suppressed")
@@ -136,7 +142,9 @@ class TestAnAdditionalReportsSeverityIsOneLine:
         assert report.count("Odd severity") >= 2, report
         for line in report.split("\n"):
             assert not line.startswith("INJECTED"), line
-        assert "Severity: HIGH" in report
+        # Text that is not a severity name is graded as a result with no level,
+        # so the detail line is one line of the graded value.
+        assert "Severity: MEDIUM\n" in report, report
 
 
 class TestANegativeLimitIsRefused:
