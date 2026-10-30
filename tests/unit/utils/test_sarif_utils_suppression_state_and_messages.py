@@ -339,3 +339,9 @@ def test_the_written_spelling_is_probed_only_under_the_scan_root(tmp_path):
         _matched_path_text("sub/../fixtures/a%2Fb.json", root)
         == "sub/../fixtures/a%2Fb.json"
     )
+    # A literal backslash is a separator to a Windows stat and is not folded, so
+    # such a spelling is not probed even where a POSIX file of that name exists.
+    (tmp_path / "fixtures" / "a\\..%2Fb.json").write_text("{}", encoding="utf-8")
+    assert (
+        _matched_path_text("fixtures/a\\..%2Fb.json", root) == "fixtures/a\\../b.json"
+    )

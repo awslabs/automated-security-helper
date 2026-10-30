@@ -839,7 +839,8 @@ def _only_the_spelling_as_written_names_a_file(
     Each spelling is probed only where it lies lexically under
     ``source_dir_prefix``: a relative spelling is folded (``a/../b`` is ``b``)
     and joined under the prefix. One that climbs out of the root (``../x``), is
-    absolute, or names a drive or a ``//host/share`` is not probed at all and
+    absolute, names a drive or a ``//host/share``, or holds a literal backslash
+    (a separator to a Windows stat, not folded here) is not probed at all and
     reads False, so the stat never touches a path outside the scan root (a UNC
     spelling would otherwise reach that host). ``os.path.exists`` answers False
     for a name the file system refuses (a NUL, an over-long component), so an
@@ -851,11 +852,15 @@ def _only_the_spelling_as_written_names_a_file(
     def present(text: str) -> bool:
         import posixpath
 
+        # A written relative URI carries no literal backslash (``%5C`` is its
+        # form); one that does is not folded by posixpath and would be read as
+        # a separator by a Windows stat, so it is not probed either.
         if (
             not text
+            or "\\" in text
             or os.path.isabs(text)
             or _DRIVE_PREFIX.match(text)
-            or text.startswith(("/", "\\"))
+            or text.startswith("/")
         ):
             return False
         folded = posixpath.normpath(text)
