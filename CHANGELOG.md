@@ -5384,6 +5384,34 @@
 
 ### Fixes
 
+- **What an archive does to itself is an input error; what the run does is a tool
+  error, and only the first can be accepted.** The archive converter graded every
+  failure as a tool error, so no `ash-unconverted-input` suppression on an archive's
+  path took effect. A damaged, truncated or misnamed archive, an encrypted zip
+  member, a member compressed with a method zipfile does not read, a damaged
+  compressed stream inside a tar, a member name the filesystem refuses, and a member
+  under a path an earlier member made a file are input errors now: a reviewed
+  suppression on the archive's path accepts the record, which keeps the record in the
+  results with the reason it was accepted for (`accepted_reason`, beside
+  `accepted_by`), and the completeness gate leaves it out. A failure of the run (a
+  full, over-quota, read-only or forbidden work directory, or a defect) stays a tool
+  error that no suppression accepts. A suppression a client delivered with its own
+  tree accepts nothing. An empty tar (end-of-archive blocks only, with or without
+  gzip) is a valid archive with no members, extracted to nothing and recorded whole,
+  instead of a failed input. A scan-set path not lexically under the source tree no
+  longer raises when ignore paths are set.
+
+- **Two archive members bound for one path are both extracted and scanned.** A later
+  member written to the same path as an earlier one (`vendor//m.js` after
+  `vendor/m.js`, a tar's repeated name, or two spellings of one name on a
+  case-insensitive filesystem) used to be refused, so the bytes one unpacker produces
+  were never scanned. It is written beside the earlier member under a numbered name
+  (`vendor/m~2.js`) that no member of the archive is named by, with a warning naming
+  both; past the first 20 in one archive, one line counts the rest. An environment
+  file with a stage suffix (`.env.local`, `.env.production`) is extracted as `.env`
+  is. A notebook member whose name is written in another case, or that cannot be
+  encoded by the filesystem, keeps a distinct converted output.
+
 - **ASH now requires uv 0.13.4 or later, and the container image pins uv
   0.13.4.** uv before 0.13.4 is affected by GHSA-hq85-5cpj-mr62 (critical). The
   requirement is `uv>=0.13.4,<0.14`, and the image installs the 0.13.4 release
