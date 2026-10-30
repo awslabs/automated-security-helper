@@ -294,21 +294,39 @@ def keep_tree(source: Path, target: Path) -> None:
 
 
 def junit_counts(root: Path) -> tuple[int, int]:
-    """(tests, failed tests) over every JUnit XML file under ``root``.
+    """(tests, failed tests) over every JUnit XML file under ``root``, plain or inside
+    a zip: the CodeBuild agent keeps each report group as ``reports-<name>.zip``.
 
     A test failed when it has a ``failure`` or an ``error``. A file that is not JUnit
-    XML counts nothing.
+    XML counts nothing, and so does a file that is not a zip.
     """
     tests = failures = 0
     root = Path(root)
     if not root.is_dir():
         return 0, 0
-    for path in sorted(root.rglob("*.xml")):
+    documents: list[bytes] = []
+    for path in sorted(root.rglob("*")):
         if path.is_symlink() or not path.is_file():
             continue
+        if path.suffix == ".xml":
+            try:
+                documents.append(path.read_bytes())
+            except OSError:
+                continue
+        elif path.suffix == ".zip":
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    documents += [
+                        archive.read(member)
+                        for member in archive.namelist()
+                        if member.endswith(".xml")
+                    ]
+            except (OSError, zipfile.BadZipFile):
+                continue
+    for data in documents:
         try:
-            document = ET.parse(path).getroot()
-        except (OSError, ET.ParseError):
+            document = ET.fromstring(data)
+        except ET.ParseError:
             continue
         for case in document.iter("testcase"):
             tests += 1

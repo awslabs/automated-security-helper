@@ -1667,6 +1667,27 @@ def test_junit_counts_read_every_report_under_a_directory(tmp_path):
     assert counts(tmp_path) == (5, 3)
 
 
+def test_junit_counts_read_the_reports_the_codebuild_agent_zips(tmp_path):
+    """The CodeBuild agent keeps each report group as ``reports-<name>.zip`` holding the
+    JUnit files (measured on the hosted codebuild-agent leg: ``reports-ash-findings.zip``
+    with one ``ash.junit.xml``); the zipped members count like plain files, a member
+    that is not JUnit XML counts nothing, and a file that is not a zip is skipped."""
+    counts = _api("reports", "junit_counts")
+    _junit_report(tmp_path / "plain" / "ash.junit.xml", 1, 1)
+    zipped = tmp_path / "zipped"
+    zipped.mkdir()
+    _junit_report(zipped / "ash.junit.xml", 3, 2)
+    (zipped / "notes.xml").write_text("not xml", "utf-8")
+    with zipfile.ZipFile(tmp_path / "reports-ash-findings.zip", "w") as archive:
+        archive.write(zipped / "ash.junit.xml", "ash.junit.xml")
+        archive.write(zipped / "notes.xml", "notes.xml")
+        archive.writestr("readme.txt", "<testcase name='not counted'/>")
+    (tmp_path / "zipped" / "ash.junit.xml").unlink()
+    (tmp_path / "zipped" / "notes.xml").unlink()
+    (tmp_path / "broken.zip").write_bytes(b"PK\x03\x04 not a zip")
+    assert counts(tmp_path) == (7, 3)
+
+
 def test_the_gate_job_reads_the_exit_code_the_scan_job_kept(tmp_path):
     check = _api("pipelines", "gitlab_exit_code_problems")
     pipeline = """\
