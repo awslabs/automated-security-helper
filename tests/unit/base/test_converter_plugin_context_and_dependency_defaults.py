@@ -33,6 +33,7 @@ from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
     ConverterPluginConfigBase,
 )
+from automated_security_helper.base.plugin_config import section_enabled
 from automated_security_helper.core.exceptions import ScannerError
 
 pytestmark = pytest.mark.unit
@@ -184,12 +185,17 @@ def test_the_default_dependency_check_is_true_where_nothing_is_declared(
 def _default_config_records(converter_type, context):
     with _ash_records() as records:
         converter = converter_type(context=context)
-    # The fallback is a deliberate choice, asserted whole: a disabled generic
-    # config, and the converter recorded as unavailable with the model named, so
-    # ConvertPhase does not run it. A converter declared disabled by default with
-    # a required field used to run on the generic config's enabled default.
+    # The fallback is a deliberate choice, asserted whole: the generic config,
+    # ENABLED, and the converter recorded as unavailable with the model named.
+    # ConvertPhase asks an enabled converter's dependency check and records a
+    # False answer as a missing tool, reason and all, without running it; it
+    # reads a disabled converter as one the config turned off, whose check never
+    # ran and whose row carries no reason, so a disabled fallback made the
+    # converter read as deliberately excluded and the reason reached no row. A
+    # converter declared disabled by default with a required field used to run
+    # on the generic config's enabled default.
     assert type(converter.config) is ConverterPluginConfigBase
-    assert converter.config.enabled is False
+    assert section_enabled(converter.config) is True
     assert converter.dependencies_satisfied is False
     assert converter.validate_plugin_dependencies() is False
     reason = converter.dependency_unavailable_reason

@@ -162,10 +162,15 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         converter that declares no model.
 
         A converter whose declared model cannot be built without a section is
-        UNAVAILABLE: it gets a disabled generic config, its dependencies are
+        UNAVAILABLE: it gets the generic config, enabled, its dependencies are
         recorded as not satisfied, and the reason names the model, so
-        ``ConvertPhase`` records it as it records a missing tool and does not run
-        it. Before, such a converter ran on the generic config, whose ``enabled``
+        ``ConvertPhase`` asks its dependency check, reads the answer False and
+        records it as it records a missing tool, with the reason in its row, and
+        does not run it. The config stays enabled on purpose: the phase reads a
+        disabled converter as one the config turned off, whose check never ran
+        and whose row carries no reason, so a disabled fallback made the
+        converter read as deliberately excluded and the reason reached no row.
+        Before, such a converter ran on the generic config, whose ``enabled``
         default is True and whose name is not the converter's: a model declared
         ``enabled = False`` with a required field ran anyway, under a name its
         own model never gave it, and a defect in a computed default (anything but
@@ -197,7 +202,7 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             )
             self.dependencies_satisfied = False
             self.dependency_unavailable_reason = reason
-            return ConverterPluginConfigBase(enabled=False)
+            return ConverterPluginConfigBase()
 
     def configure(
         self,
