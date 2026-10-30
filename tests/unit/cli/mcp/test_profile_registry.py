@@ -338,9 +338,11 @@ class TestAProfileKeptWhereAScanMayRewriteIt:
     below the MCP workspace root (by the scan's own classifier, which admits the
     profile files the server writes in a session's ``config/`` directory), and a
     file under a granted scan root with a git checkout among its ancestors,
-    below the root or holding it. A plain file under a granted root with no
-    checkout above it, and a checkout outside every granted root, register as
-    before."""
+    below the root or holding it. The bases a profile extends are judged the
+    same way once the load has named them (a checkout nested under the
+    profile's directory holds a base the walk up from the profile never meets).
+    A plain file under a granted root with no checkout above it, and a checkout
+    outside every granted root, register as before."""
 
     @pytest.fixture(autouse=True)
     def _roots(self, tmp_path: Path, monkeypatch) -> None:
@@ -435,6 +437,33 @@ class TestAProfileKeptWhereAScanMayRewriteIt:
         registry = register_profiles([f"default={profile}"])
 
         assert registry["default"].config.project_name == "outside"
+
+    def test_a_base_inside_a_nested_checkout_is_refused(self) -> None:
+        """Red at the base: only the profile's own file was judged, so a base in
+        a checkout under the profile's directory was read as the operator's."""
+        vendored = self.allowed / "vendor"
+        (vendored / ".git").mkdir(parents=True)
+        base = _write_yaml(vendored / "base.yaml", "project_name: from-vendor\n")
+        profile = _write_yaml(self.allowed / "p.yaml", "extends: vendor/base.yaml\n")
+
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"default={profile}"])
+
+        message = str(exc.value)
+        assert "extends" in message
+        assert base.name in message
+        assert str(vendored.resolve()) in message
+        assert "ASH_MCP_ALLOWED_ROOTS" in message
+
+    def test_a_base_beside_the_profile_under_a_plain_root_registers(self) -> None:
+        plain = self.allowed / "plain"
+        plain.mkdir()
+        _write_yaml(plain / "base.yaml", "project_name: from-base\n")
+        profile = _write_yaml(plain / "p.yaml", "extends: base.yaml\n")
+
+        registry = register_profiles([f"default={profile}"])
+
+        assert registry["default"].config.project_name == "from-base"
 
     @pytest.mark.skipif(os.name != "posix", reason="symbolic links need a posix host")
     def test_a_link_into_a_scanned_checkout_is_judged_by_where_it_leads(

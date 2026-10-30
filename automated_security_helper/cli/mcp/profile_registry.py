@@ -175,7 +175,9 @@ def _profile_kept_where_a_scan_may_rewrite_it(path: Path) -> Optional[str]:
       root with no checkout above it, are not judged here.
 
     The git walk reads the resolved path, so a link into a checkout counts.
-    Returns None when neither applies.
+    ``register_profiles`` runs this on the profile before reading it, and on each
+    base of its ``extends`` chain once the load has named them. Returns None when
+    neither applies.
     """
     from automated_security_helper.cli.mcp.sandbox import (
         ASH_MCP_ALLOWED_ROOTS_ENV,
@@ -306,6 +308,26 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
         if unparsed is not None:
             # Outside the handler, so the parser's error is not its context.
             raise ProfileRegistryError(f"--profile {name!r}: {unparsed}")
+        # The profile's bases, named by the load: each is read into the profile
+        # as the operator's, so one kept where a client's delivery or a scanned
+        # checkout's owner can rewrite it (a base in a checkout nested under
+        # the profile's directory, which the walk up from the profile never
+        # meets) is the same gap as the profile itself kept there. Judged once
+        # the load has named them, since nothing names a base before it is
+        # read; the profile's own file was judged before the read above.
+        for source in dict.fromkeys(document.chain):
+            base = Path(source)
+            if base.resolve() == path.resolve():
+                continue
+            kept_in = _profile_kept_where_a_scan_may_rewrite_it(base)
+            if kept_in is not None:
+                raise ProfileRegistryError(
+                    f"--profile {name!r} extends {describe_config_path(base)}, "
+                    f"kept inside {kept_in}, so its content is not the "
+                    "operator's alone. Keep profiles and the bases they extend "
+                    "outside the MCP workspace root and outside any checkout the "
+                    "server scans."
+                )
         # Re-validate the *raw* YAML/JSON top-level keys against AshConfig
         # so operator typos in profile YAML fail at MCP boot rather than at
         # silently-ignored runtime. AshConfig.model_config has extra='ignore'
