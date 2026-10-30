@@ -601,10 +601,15 @@ def report_command(
             output_dir_path.joinpath("ash_output", "ash_aggregated_results.json"),
             output_dir_path.joinpath("ash_aggregated_results.json"),
         ]
-    for poss_result_file in results_file_paths:
-        if _exists(poss_result_file):
-            results_file = poss_result_file
-            break
+    # Every place that holds one, not the first: an --output-dir whose three
+    # searched places hold two results files (a scan run from the directory and
+    # another run with --output-dir pointing at it) is ambiguous, and reporting
+    # on the first found read as a report on the other. The refusal is below,
+    # after the configuration and the format are checked, with the other usage
+    # errors; results_file stays the first found for the checks between.
+    found_results_files = [path for path in results_file_paths if _exists(path)]
+    if found_results_files:
+        results_file = found_results_files[0]
     # The output directory is the one the results were read from. --output-dir
     # may name the scanned repository's root (the first candidate reads
     # <dir>/.ash/ash_output/); the plugin context, the work directory and the
@@ -861,6 +866,17 @@ def report_command(
     # is the command line's mistake whatever is on disk), then the results (exit 1,
     # a state problem), and nothing is created on the way: `ash report` in an
     # empty directory leaves no .ash/ash_output behind.
+    if len(found_results_files) > 1:
+        # A usage error, as the docs say (how-to/read-results.md, exit-codes.md):
+        # the operator names the directory that holds the one to report on, and
+        # nothing is reported on or created meanwhile.
+        listed = ", ".join(path.as_posix() for path in found_results_files)
+        _print_refusal(
+            "[red]More than one scan results file found: {}. Point --output-dir "
+            "at the directory that holds the one to report on.[/red]",
+            listed,
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     if results_file is None:
         searched = ", ".join(path.as_posix() for path in results_file_paths)
         missing = (
