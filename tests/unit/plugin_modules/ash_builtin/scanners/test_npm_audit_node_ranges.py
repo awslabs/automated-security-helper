@@ -175,6 +175,15 @@ def test_a_prerelease_copy_keeps_the_result(scanner, monkeypatch):
         ("1.0.0", "^1.0.0", None),
         ("1.0.0", "1.0.0 - 2.0.0", None),
         ("1.0.0-rc.1", "<2.0.0", None),
+        # Numeric suffixes: semver prereleases that packaging reads as
+        # post-releases ABOVE the release, so a False here dropped a result
+        # npm's semver counts as vulnerable. The answer is uncertain: None.
+        ("1.2.5-1", ">=1.0.0 <1.2.5", None),
+        ("2.0.0-0", "<2.0.0", None),
+        ("1.0.0-20240101", "<1.0.0", None),
+        ("1.0.0-r1", "<1.0.0", None),
+        ("1.0.0-post1", "<1.0.0", None),
+        ("1.0.0+build.7", "<2.0.0", None),
         ("2.0.0", ">=2.0.0-0", None),
         ("not a version", "<2.0.0", None),
         (None, "<2.0.0", None),

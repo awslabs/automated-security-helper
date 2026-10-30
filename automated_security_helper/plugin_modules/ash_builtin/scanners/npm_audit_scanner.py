@@ -153,6 +153,11 @@ _RANGE_COMPARATOR = re.compile(
     r"^(<=|>=|<|>|=)?v?(\d+\.\d+\.\d+)([-+][0-9A-Za-z.+-]*)?$"
 )
 
+# An installed version the range check reads: a plain MAJOR.MINOR.PATCH. Any
+# suffix is semver's prerelease or build metadata, whose place in a range is
+# npm's to decide (``_version_in_range``).
+_PLAIN_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
+
 
 def _version_in_range(version: Any, vulnerable_range: Any) -> bool | None:
     """Whether ``version`` is inside npm's ``vulnerable_range``, or None.
@@ -173,17 +178,24 @@ def _version_in_range(version: Any, vulnerable_range: Any) -> bool | None:
     ``2.0.0-0`` (the upper bound node's semver writes for ``^1``) as a
     prerelease below 2.0.0, while packaging reads it as a post-release above
     it, so ``>=2.0.0-0`` against an installed 2.0.0 would have read False and
-    dropped a result the range covers.
+    dropped a result the range covers. The installed version gets the same
+    rule, by its text: only a plain MAJOR.MINOR.PATCH is compared. A numeric
+    suffix (``1.2.5-1``, ``2.0.0-0``, a date stamp, ``-r1``) is a semver
+    prerelease, below its release, but packaging reads it as a post-release
+    above it, and ``is_prerelease`` is False for that, so an installed
+    ``1.2.5-1`` against ``<1.2.5`` read False and the result was dropped
+    where npm's semver (with ``includePrerelease``) counts it as vulnerable.
     """
     from packaging.version import InvalidVersion, Version
 
     if not isinstance(version, str) or not isinstance(vulnerable_range, str):
         return None
-    try:
-        installed = Version(version.strip().lstrip("v"))
-    except InvalidVersion:
+    installed_text = version.strip().lstrip("v")
+    if not _PLAIN_VERSION.match(installed_text):
         return None
-    if installed.is_prerelease or installed.local is not None:
+    try:
+        installed = Version(installed_text)
+    except InvalidVersion:
         return None
     text = vulnerable_range.strip()
     if text in ("", "*"):
