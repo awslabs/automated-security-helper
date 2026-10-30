@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import html
+import math
 import os
 import re
 import string
@@ -497,7 +498,9 @@ def _number_or_default(
     raw: Optional[str], default: str, parse: Callable[[str], Any], name: str
 ) -> Any:
     """``parse`` of ``raw``, the value the environment's ``name`` holds, or of
-    ``default`` when it is unset, empty or not a number ``parse`` reads.
+    ``default`` when it is unset, empty, not a number ``parse`` reads, or a
+    float that is not finite ("nan", "inf": ``float`` reads them, Converse
+    refuses them).
 
     The options model is built for every scan, the reporter enabled or not, so
     a value ``parse`` refuses used to make every scan fail with the model's
@@ -511,12 +514,18 @@ def _number_or_default(
     if raw is None or raw.strip() == "":
         return parse(default)
     try:
-        return parse(raw.strip())
+        value = parse(raw.strip())
     except ValueError:
         ASH_LOGGER.warning(
             f"{name} is set but is not a number; using the default {default}"
         )
         return parse(default)
+    if isinstance(value, float) and not math.isfinite(value):
+        ASH_LOGGER.warning(
+            f"{name} is set but is not a finite number; using the default {default}"
+        )
+        return parse(default)
+    return value
 
 
 #: How many times a model call is retried when the operator sets no
@@ -602,19 +611,30 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     ] = 0.9
     # At least one: zero made the batch split's range() step zero and raise,
     # and a negative count sliced the findings from the end instead of
-    # limiting them.
+    # limiting them. A value a config file sets below one is refused as a
+    # configuration error (exit 3), as every option validator's refusal is
+    # (``aws_region``'s pattern says the same of itself); only the environment
+    # defaults are read tolerantly, because they are read for every scan
+    # whether or not this reporter runs, and these two have none.
     max_findings_to_analyze: Annotated[
         int,
         Field(
             ge=1,
-            description="Maximum number of findings to include in the analysis.",
+            description=(
+                "Maximum number of findings to include in the analysis. At least 1; "
+                "a smaller value is refused as a configuration error."
+            ),
         ),
     ] = 10
     max_findings_per_severity: Annotated[
         int,
         Field(
             ge=1,
-            description="Maximum number of findings to include per severity level when grouping by severity.",
+            description=(
+                "Maximum number of findings to include per severity level when "
+                "grouping by severity. At least 1; a smaller value is refused as a "
+                "configuration error."
+            ),
         ),
     ] = 5
     group_by_severity: Annotated[

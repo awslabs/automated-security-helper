@@ -148,10 +148,11 @@ def _finding(rule_id="R1"):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", ["", "   ", "not-a-number"])
+@pytest.mark.parametrize("value", ["", "   ", "not-a-number", "nan", "inf"])
 def test_a_knob_the_environment_sets_badly_takes_the_default(monkeypatch, value):
     """The options are built for every scan, enabled or not, so a bad value
-    cannot refuse the build; the default is taken."""
+    cannot refuse the build; the default is taken. "nan" and "inf" are
+    numbers ``float`` reads and Converse refuses, so they count as bad too."""
     monkeypatch.setenv("ASH_BEDROCK_TEMPERATURE", value)
     monkeypatch.setenv("ASH_BEDROCK_MAX_TOKENS", value)
 
