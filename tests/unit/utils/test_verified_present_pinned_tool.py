@@ -395,6 +395,37 @@ class TestADifferentBinaryIsStillInstalled:
         assert installed == bin_dir / "grype"
         assert not installed.is_symlink()
 
+    def test_a_link_swapped_in_after_the_by_name_check_is_refused(
+        self, tmp_path, pins, on_path, monkeypatch
+    ):
+        """The candidate is judged on the descriptor that is hashed, not by name.
+
+        A plain file is at the destination when ``is_symlink`` answers, and a link
+        to a file holding the pinned bytes is there by the time the candidate is
+        opened. Judged by name and then hashed through a plain open, that link was
+        accepted and its target left to change later; opened once without following
+        a link, it is refused.
+        """
+        pinned_elsewhere = _binary(tmp_path / "writable-elsewhere", PINNED_GRYPE)
+        bin_dir = tmp_path / "ash-bin"
+        at_destination = _binary(bin_dir, OTHER_VERSION_GRYPE)
+        real_is_symlink = Path.is_symlink
+
+        def swap_then_answer(self):
+            if self != at_destination:
+                return real_is_symlink(self)
+            # The by-name check saw a plain file; the link lands after it.
+            at_destination.unlink()
+            at_destination.symlink_to(pinned_elsewhere)
+            return False
+
+        monkeypatch.setattr(Path, "is_symlink", swap_then_answer)
+        assert (
+            find_verified_pinned_executable("grype", "linux", "amd64", bin_dir) is None
+        )
+        # The link's target is untouched, and still what it was.
+        assert pinned_elsewhere.read_bytes() == PINNED_GRYPE
+
     def test_a_non_executable_copy_is_reinstalled(
         self, tmp_path, pins, on_path, downloads
     ):
