@@ -6,7 +6,8 @@
 A byte order mark on a file or on stdin is dropped; stdin is read as UTF-8 and
 a read that fails is the usage refusal the file branch gives; the text after
 file:// is a path, relative or absolute, percent-decoded, never a host, a query
-or a fragment; a document nested too deeply, an infinite
+or a fragment; a name with a null byte is the cannot-read refusal; a document
+nested too deeply, an infinite
 number for an integer, a number for a true/false parameter and a fraction for
 an integer are refusals, not tracebacks or silent truncation; the skeleton
 leaves a parameter with an environment variable null; --help and
@@ -143,6 +144,18 @@ def test_a_hash_in_the_file_name_stays_in_it(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert mock_run.call_args.kwargs["offline"] is True
+
+
+def test_a_null_byte_in_the_file_name_is_the_cannot_read_refusal():
+    """``file://a%00b`` decodes to a name with a null byte, which the file system
+    refuses with a ValueError; only OSError was caught, so the command ended in a
+    traceback instead of naming the file it cannot read."""
+    result, mock_run = _scan(["--cli-json-input", "file://a%00b"])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "cannotread" in _flat(result.output), result.output
+    mock_run.assert_not_called()
 
 
 @pytest.mark.parametrize(

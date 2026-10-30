@@ -5469,8 +5469,9 @@
   traceback. The text after `file://` is a path, relative or absolute,
   percent-decoded, as the AWS CLI reads the prefix: it used to be parsed as a URI,
   so `file://params.json` was refused as a remote host and a `#` in a file's name
-  cut the name. A document nested too deeply to parse and a number too large for a
-  whole-number parameter are usage refusals, not tracebacks. `--help` and
+  cut the name. A document nested too deeply to parse, a number too large for a
+  whole-number parameter and a file name with a null byte (`file://a%00b`) are
+  usage refusals, not tracebacks. `--help` and
   `--generate-cli-skeleton` run before the document is read, so a bad document
   blocks neither. The document's values rank above environment variables, as
   documented: an environment value the parameter's type refused used to fail the

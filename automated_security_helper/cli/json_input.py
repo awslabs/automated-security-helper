@@ -364,7 +364,9 @@ def _read_document(source: str, ctx: Context) -> dict[str, Any]:
             # utf-8-sig: a document a Windows editor or PowerShell 5 saved starts
             # with a byte order mark, which json.loads refuses as text.
             text = Path(path).read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError) as exc:
+        except (OSError, ValueError) as exc:
+            # ValueError covers a text that is not UTF-8 and a name with a null
+            # byte (file://a%00b), which the file system refuses before it opens.
             # The message names the file, so an OSError's own copy of it is dropped.
             reason = (
                 os_error_without_named_file(exc, path)
