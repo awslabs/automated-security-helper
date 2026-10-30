@@ -24,6 +24,7 @@ instance attributes.
 
 import asyncio
 import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -118,14 +119,42 @@ class TestCleanupWaitsForTheRunner:
     def test_a_runner_that_settles_during_the_wait_is_cleaned_up(
         self, registry, tmp_path
     ):
+        """The event is set 50 ms after the cancel, so the wait starts on an
+        unset event and has to block. (Set inside the cancel, it was already set
+        when the wait began, and a wait that only read is_set() once passed.)"""
         entry = _entry(tmp_path)
         registry.get_scan.return_value = entry
-        registry.cancel_scan.side_effect = lambda scan_id: entry.runner_done.set()
+        timers = []
 
-        with _use(registry):
-            result = asyncio.run(cleanup_scan_resources("scan-1"))
+        def cancel(scan_id):
+            timer = threading.Timer(0.05, entry.runner_done.set)
+            timers.append(timer)
+            timer.start()
+            return True
 
+        registry.cancel_scan.side_effect = cancel
+        real_wait = entry.runner_done.wait
+        unset_at_wait = []
+
+        def wait(timeout=None):
+            unset_at_wait.append(not entry.runner_done.is_set())
+            return real_wait(timeout)
+
+        entry.runner_done.wait = wait
+
+        try:
+            with (
+                _use(registry),
+                patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 2.0),
+            ):
+                result = asyncio.run(cleanup_scan_resources("scan-1"))
+        finally:
+            for timer in timers:
+                timer.cancel()
+
+        assert unset_at_wait == [True]
         assert result["success"] is True
+        registry.cancel_scan.assert_called_once_with("scan-1")
         registry.cleanup_scan.assert_called_once_with("scan-1")
 
     def test_a_scan_with_no_runner_is_not_waited_for(self, registry, tmp_path):
