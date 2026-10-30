@@ -1402,7 +1402,7 @@ def test_an_unsatisfying_binary_offline_is_missing_with_a_reason(
     monkeypatch.setenv("ASH_OFFLINE", "true")
     _with_executable(monkeypatch, output)
     scanner = _scanner(repo)
-    object.__setattr__(scanner, "_resolve_through_uv", lambda: False)
+    object.__setattr__(scanner, "_resolve_through_uv", lambda *_: False)
     assert scanner.validate_plugin_dependencies() is False
     assert scanner.dependencies_satisfied is False
     reason = scanner.dependency_unavailable_reason
@@ -1416,7 +1416,7 @@ def test_an_unsatisfying_binary_offline_is_missing_with_a_reason(
 def test_no_binary_falls_back_to_uv(repo, monkeypatch):
     monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
     scanner = _scanner(repo)
-    object.__setattr__(scanner, "_resolve_through_uv", lambda: True)
+    object.__setattr__(scanner, "_resolve_through_uv", lambda *_: True)
     assert scanner.validate_plugin_dependencies() is True
 
 
@@ -1424,6 +1424,7 @@ def test_offline_without_any_zizmor_does_not_try_to_install(repo, monkeypatch):
     monkeypatch.setenv("ASH_OFFLINE", "true")
     monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
     scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
     object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
     object.__setattr__(
         scanner, "_get_tool_installation_info", lambda: {"available": False}
@@ -1486,15 +1487,142 @@ def test_the_version_probe_keeps_a_prerelease_suffix(repo, monkeypatch):
     assert version_satisfies(version, ZIZMOR_DEFAULT_VERSION_CONSTRAINT) is None
 
 
+def _constrained_probe_answers(scanner, version):
+    """What the constrained version probe (``uv tool run --from <requirement>
+    zizmor --version``) answers for this scanner: a version, or None when uv
+    resolved nothing. The autouse fixture answers 1.30.1 for every scanner."""
+    object.__setattr__(scanner, "_get_uv_tool_version", lambda *_, **__: version)
+
+
+def _rejected_on_path_with_uv_available(repo, monkeypatch, source):
+    """A zizmor on PATH the version check rejects, and a uv runner that reports
+    the tool available from *source*; selecting that answer unprobed is a test
+    failure, since the runner's answer may be the rejected binary itself."""
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    scanner = _scanner(repo)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {
+            "available": True,
+            "preferred_source": source,
+            "pre_installed_path": "/opt/bin/zizmor",
+        },
+    )
+
+    def must_not_select(info):
+        raise AssertionError("the runner's answer was selected unprobed")
+
+    def must_not_install(**_):
+        raise AssertionError("uv installed although the probe's release satisfies")
+
+    object.__setattr__(scanner, "_select_tool_execution", must_not_select)
+    object.__setattr__(scanner, "_install_uv_tool", must_not_install)
+    return scanner
+
+
+@pytest.mark.parametrize("offline", [True, False], ids=["offline", "online"])
+@pytest.mark.parametrize("source", ["pre_installed", "uv"])
+def test_a_satisfying_release_the_probe_resolved_runs_through_uv(
+    repo, monkeypatch, offline, source
+):
+    """An old zizmor earlier on PATH and the right release installed through uv:
+    the constrained probe resolves the right one, so the uv route is accepted
+    and runs it, offline and online alike, with nothing installed. Refusing
+    every uv answer once the PATH binary was rejected read this machine as
+    MISSING offline and installed on every check online."""
+    if offline:
+        monkeypatch.setenv("ASH_OFFLINE", "true")
+    else:
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    scanner = _rejected_on_path_with_uv_available(repo, monkeypatch, source)
+    _constrained_probe_answers(scanner, "1.30.1")
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.dependencies_satisfied is True
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version == "1.30.1"
+    assert scanner.dependency_unavailable_reason is None
+
+
+def test_a_release_the_probe_resolved_that_does_not_satisfy_is_not_accepted(
+    repo, monkeypatch
+):
+    """The probe's own answer is held to the constraint too: a uv route that
+    resolves an old release is no better than the rejected binary."""
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    scanner = _rejected_on_path_with_uv_available(repo, monkeypatch, "uv")
+    _constrained_probe_answers(scanner, "1.28.0")
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert "does not satisfy" in scanner.dependency_unavailable_reason
+
+
+def test_a_probe_that_resolves_a_release_spares_the_install(repo, monkeypatch):
+    """No zizmor on PATH and none the runner lists, but the constrained probe
+    resolves the release from uv's cache: that is the uv route, and installing
+    first would spend a network round trip on what uv already has."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
+    scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, "1.30.1")
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {"available": False, "preferred_source": "none"},
+    )
+
+    def must_not_install(**_):
+        raise AssertionError("uv installed although the probe's release satisfies")
+
+    object.__setattr__(scanner, "_install_uv_tool", must_not_install)
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.use_uv_tool is True
+
+
+def test_an_earlier_checks_path_version_is_not_read_as_the_probes_answer(
+    repo, monkeypatch
+):
+    """The first check found a satisfying zizmor on PATH and recorded its version;
+    by the second check that binary reports an old release and the probe
+    resolves nothing. The version the first check recorded is not the probe's
+    answer, so the second check is MISSING, not satisfied by a stale number."""
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    _with_executable(monkeypatch, "zizmor 1.29.0\n")
+    scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.tool_version == "1.29.0"
+
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {"available": False, "preferred_source": "none"},
+    )
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert "does not satisfy" in scanner.dependency_unavailable_reason
+
+
 def test_a_rejected_path_binary_is_not_handed_back_through_uv_offline(
     repo, monkeypatch
 ):
     """Offline, the only zizmor the uv runner sees on PATH is the one the version
-    probe just rejected: it is not a uv install and is not available, so the
-    scanner is MISSING with the probe's reason, never run to fail later."""
+    probe just rejected: it is not a uv install and is not available, and the
+    constrained probe resolves nothing, so the scanner is MISSING with the
+    probe's reason, never run to fail later."""
     monkeypatch.setenv("ASH_OFFLINE", "true")
     _with_executable(monkeypatch, "zizmor 1.28.0\n")
     scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
     object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
     object.__setattr__(
         scanner,
@@ -1525,6 +1653,7 @@ def test_a_rejected_binary_that_is_a_uv_shim_is_not_selected_unprobed(
     monkeypatch.setenv("ASH_OFFLINE", "true")
     _with_executable(monkeypatch, "zizmor 1.28.0\n")
     scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
     object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
     object.__setattr__(
         scanner,
@@ -1554,6 +1683,7 @@ def test_a_failed_install_does_not_fall_back_to_a_zizmor_the_probe_rejected(
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     _with_executable(monkeypatch, "zizmor 1.28.0\n")
     scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
     object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
     object.__setattr__(
         scanner,
@@ -1588,6 +1718,7 @@ def test_a_uv_route_the_constrained_probe_resolves_still_satisfies(
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     _with_executable(monkeypatch, "zizmor 1.28.0\n")
     scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
     object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
     object.__setattr__(
         scanner,

@@ -780,9 +780,23 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # answer could not change the recorded reason.
         if self.dependency_unavailable_reason:
             return False
+        if self._deferred_tool_version_probe is None:
+            # An earlier check's PATH success cleared the probe and left that
+            # binary's version in tool_version; the binary on PATH no longer
+            # satisfies, so the constrained probe is owed again, and its answer
+            # below is never that stale version.
+            self._deferred_tool_version_probe = ("zizmor", self._uv_from_spec())
         self.resolve_deferred_tool_version()
+        # The constrained probe (uv tool run --from <requirement> zizmor
+        # --version) answered, and the release it resolved satisfies: the uv
+        # route runs that release, so nothing need be installed, and a rejected
+        # binary on PATH is not what runs.
+        probe_satisfies = (
+            self._deferred_tool_version_probe is None
+            and version_satisfies(self.tool_version, constraint) is True
+        )
 
-        if self._resolve_through_uv():
+        if self._resolve_through_uv(probe_satisfies):
             return True
 
         requirement = f"zizmor{constraint or ''}"
@@ -800,39 +814,58 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         self.dependencies_satisfied = False
         return False
 
-    def _resolve_through_uv(self) -> bool:
+    def _resolve_through_uv(self, probe_satisfies: bool = False) -> bool:
         """The uv path checkov uses, with the use_uv_tool flag kept consistent.
 
         The uv runner reports a tool "available" from a uv install or from a
         binary on PATH. When the version probe rejected the zizmor on PATH
         (``_rejected_executable``), nothing the runner found is selected unprobed,
         whatever source it names: the binary may be a uv tool install's own shim,
-        reported as the uv source. Offline the scanner is MISSING, as the
-        docstring of ``validate_plugin_dependencies`` says, and online uv
-        installs the constrained release. After a constrained install that
-        fails, only a uv route the constrained probe resolves satisfies the
-        dependency; a zizmor found by name would be that same rejected binary,
-        and running it would fail the scan at run time where the dependency
-        check already knows the answer.
+        reported as the uv source. What decides then is the constrained version
+        probe the dependency check already ran (*probe_satisfies*): a release it
+        resolved through uv that satisfies the constraint is the one ``uv tool
+        run`` starts, so the uv route is accepted, online and offline, and
+        nothing is installed. Refusing every uv answer here read a machine with
+        an old zizmor earlier on PATH and the right release installed through uv
+        as MISSING offline, and online it installed on every check. Otherwise,
+        offline the scanner is MISSING, as the docstring of
+        ``validate_plugin_dependencies`` says, and online uv installs the
+        constrained release. After a constrained install that fails, only a uv
+        route the resolver returns satisfies the dependency; a zizmor found by
+        name would be that same rejected binary, and running it would fail the
+        scan at run time where the dependency check already knows the answer.
         """
         self.use_uv_tool = True
         if not self._validate_uv_tool_availability():
             return False
         installation_info = self._get_tool_installation_info()
+        if installation_info.get("available") and self._rejected_executable is None:
+            return self._select_tool_execution(installation_info)
+        if probe_satisfies:
+            self._plugin_log(
+                f"Using zizmor {self.tool_version} through uv, the release the "
+                "constrained probe resolved"
+                + (
+                    "; the zizmor on PATH that the version check rejected is not "
+                    "what runs"
+                    if self._rejected_executable is not None
+                    else ""
+                ),
+                level=logging.INFO,
+            )
+            self.dependencies_satisfied = True
+            return True
         if installation_info.get("available"):
-            if self._rejected_executable is not None:
-                # Whatever source the runner names: the PATH binary the version
-                # probe rejected may itself be a uv tool install's shim, which the
-                # runner reports as the uv source, and selecting it unprobed
-                # would run the release the probe just refused. Offline the
-                # scanner is MISSING below; online uv installs the constraint.
-                self._plugin_log(
-                    "The zizmor the uv runner found is the one the version check "
-                    "rejected; it is not used through uv either.",
-                    level=logging.DEBUG,
-                )
-            else:
-                return self._select_tool_execution(installation_info)
+            # Whatever source the runner names: the PATH binary the version
+            # probe rejected may itself be a uv tool install's shim, which the
+            # runner reports as the uv source, and selecting it unprobed would
+            # run the release the probe just refused. Offline the scanner is
+            # MISSING below; online uv installs the constraint.
+            self._plugin_log(
+                "The zizmor the uv runner found is the one the version check "
+                "rejected; it is not used through uv either.",
+                level=logging.DEBUG,
+            )
         if self._is_offline_mode():
             return False
         self._plugin_log(
