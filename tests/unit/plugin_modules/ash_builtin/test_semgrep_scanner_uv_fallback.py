@@ -28,6 +28,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
     SemgrepScannerConfig,
     SemgrepScannerConfigOptions,
 )
+from automated_security_helper.utils import pre_installed_tool
+from automated_security_helper.utils.pre_installed_tool import PreInstalledToolVerdict
 
 pytestmark = pytest.mark.unit
 
@@ -42,6 +44,20 @@ def _scanner(test_plugin_context, monkeypatch) -> SemgrepScanner:
     monkeypatch.setattr(SemgrepScanner, "_scanner_offline", lambda self: False)
     monkeypatch.setattr(
         SemgrepScanner, "unsupported_platform_reason", lambda self: None
+    )
+    # Both binary routes verify the binary they found against the scan's
+    # requirement (test_semgrep_scanner_direct_binary_verified.py is about that
+    # verification). Here the routes are the subject, so the verifier is stood in
+    # for and answers "satisfied": the real one would probe a path that does not
+    # exist, and could start uv or the binary, which this file's docstring rules out.
+    monkeypatch.setattr(
+        pre_installed_tool,
+        "verify_pre_installed_tool",
+        lambda executable, package, extras=None, version_constraint=None, **kw: (
+            PreInstalledToolVerdict(
+                "satisfied", executable, "semgrep>=1.125.0,<2.0.0", "stood in for"
+            )
+        ),
     )
     scanner = SemgrepScanner(
         context=test_plugin_context,

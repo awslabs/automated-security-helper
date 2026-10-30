@@ -228,11 +228,18 @@ def test_online_refuses_a_rule_file_inside_the_scanned_tree(
 @pytest.mark.parametrize(
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )
-def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_online(
+def test_an_in_tree_rules_value_that_resolves_to_nothing_is_refused_online(
     scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
 ):
     """A typo in ``options.config`` fails loudly: the scanner declines with a
     reason naming the option, instead of scanning under the default rulesets.
+
+    What this exercises: a relative value resolves under the source directory,
+    which is the scanned tree, and path trust refuses that before anything asks
+    whether the file exists (the file's docstring and
+    ``test_the_decline_reason_names_a_path_trust_refusal_as_such``). The
+    missing-file branch is reached from a trusted location, in the two
+    ``..._names_the_resolved_path_of_a_missing_rules_file...`` tests.
 
     Fails at the base: the value was passed as written and the tool failed on it
     at scan time, with nothing recorded at build time.
@@ -246,13 +253,15 @@ def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_online
     )
 
     _declined_for_its_config(scanner, scanner.config.name)
-    assert "my-rulez.yaml" not in _configs(scanner)
+    assert not any("my-rulez" in value for value in _configs(scanner)), _configs(
+        scanner
+    )
 
 
 @pytest.mark.parametrize(
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )
-def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_offline(
+def test_an_in_tree_rules_value_that_resolves_to_nothing_is_refused_offline_and_reads_no_cache(
     scanner_cls,
     config_cls,
     options_cls,
@@ -261,8 +270,9 @@ def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_offlin
     tmp_path,
     monkeypatch,
 ):
-    """Offline, the same typo declines the scanner with the same reason, and the
-    cache is NOT read in its place even when one is present.
+    """Offline, the same in-tree typo declines the scanner with the same reason
+    (a path-trust refusal, as online), and the cache is NOT read in its place even
+    when one is present.
 
     Fails at the base: a configured value that resolved to nothing fell through to
     the cache, so the scan ran the cached registry rules in place of the file the
@@ -279,7 +289,7 @@ def test_a_configured_rules_file_that_does_not_exist_declines_the_scanner_offlin
     )
 
     _declined_for_its_config(scanner, scanner.config.name)
-    assert cache.as_posix() not in _configs(scanner), _configs(scanner)
+    assert not any("cache" in value for value in _configs(scanner)), _configs(scanner)
     assert cache_env not in (scanner.dependency_unavailable_reason or "")
 
 
@@ -338,6 +348,49 @@ def test_the_decline_reason_names_the_resolved_path_of_a_missing_rules_file(
 @pytest.mark.parametrize(
     ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
 )
+def test_the_decline_reason_names_the_resolved_path_of_a_missing_rules_file_offline(
+    scanner_cls,
+    config_cls,
+    options_cls,
+    cache_env,
+    context_outside_checkouts,
+    tmp_path,
+    monkeypatch,
+):
+    """The missing-file branch offline, from a trusted location with a cache
+    present: the scanner declines for the file that does not exist, and the cache
+    is NOT read in its place. The in-tree offline test above cannot reach this
+    branch: path trust refuses its value first.
+
+    Fails at the base: a configured value that resolved to nothing fell through to
+    the cache.
+    """
+    _rules_beside_the_tree(context_outside_checkouts)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "registry.yaml").write_text(RULE, encoding="utf-8")
+    monkeypatch.setenv(cache_env, str(cache))
+
+    scanner = scanner_cls(
+        context=context_outside_checkouts,
+        config=config_cls(
+            options=options_cls(
+                offline=True, config="../rules-beside-the-tree/my-rulez.yaml"
+            )
+        ),
+    )
+
+    _declined_for_its_config(scanner, scanner.config.name)
+    reason = scanner.dependency_unavailable_reason or ""
+    assert "does not exist" in reason, reason
+    assert "path trust refused" not in reason, reason
+    assert not any("cache" in value for value in _configs(scanner)), _configs(scanner)
+    assert cache_env not in reason, reason
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
 def test_the_decline_reason_names_a_path_trust_refusal_as_such(
     scanner_cls, config_cls, options_cls, cache_env, test_plugin_context, monkeypatch
 ):
@@ -364,16 +417,23 @@ def test_the_decline_reason_names_a_path_trust_refusal_as_such(
     assert "does not exist" not in reason, reason
 
 
-def _separate_checkout_with_rules(tmp_path: Path) -> Path:
-    """A rules directory inside a checkout of its own, beside the scanned tree.
+def _separate_checkout_with_rules(context, git: bool = True) -> Path:
+    """A rules directory in a directory of its own, beside the scanned tree
+    (``context.source_dir``'s parent, which ``context_outside_checkouts`` keeps
+    outside every checkout), so that only the ``.git`` built here can make path
+    trust read it as a checkout.
 
-    The ``.git`` holds a ``HEAD``: path trust counts a directory as a checkout by
-    the shape git's own discovery opens (``sandbox_grants._git_shaped``), and a bare
-    empty ``.git`` directory, what a stray mkdir leaves, marks none.
+    With ``git`` the directory is a checkout: the ``.git`` holds a ``HEAD``, since
+    path trust counts a directory as a checkout by the shape git's own discovery
+    opens (``sandbox_grants._git_shaped``), and a bare empty ``.git`` directory,
+    what a stray mkdir leaves, marks none. Without it the same layout is a plain
+    directory, the control.
     """
-    other = tmp_path / "other-checkout"
-    (other / ".git").mkdir(parents=True)
-    (other / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    other = Path(context.source_dir).parent / "other-checkout"
+    other.mkdir(parents=True, exist_ok=True)
+    if git:
+        (other / ".git").mkdir()
+        (other / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     rules = other / "rules"
     rules.mkdir()
     (rules / "a.yaml").write_text(RULE, encoding="utf-8")
@@ -389,15 +449,19 @@ def test_a_rules_directory_in_another_checkout_is_refused_from_a_repository_conf
     options_cls,
     cache_env,
     context_outside_checkouts,
-    tmp_path,
     monkeypatch,
 ):
     """A rules directory inside ANY git checkout is refused when the value is not
     the operator's own (the config that names it is read as the scanned
     repository's): ``config/path_trust.honored_path`` judges such a value with
     ``scanned_tree_reason`` (``sandbox_grants.untrusted_reason``: inside any git
-    checkout). The scanner declines and the reason names the operator sources."""
-    rules = _separate_checkout_with_rules(tmp_path)
+    checkout). The scanner declines and the reason names the operator sources.
+
+    The checkout is built beside the scanned tree, outside every other checkout,
+    so the ``.git/HEAD`` is what causes the refusal; the control below is the same
+    layout without it.
+    """
+    rules = _separate_checkout_with_rules(context_outside_checkouts)
     monkeypatch.delenv(cache_env, raising=False)
     _online(monkeypatch, scanner_cls)
 
@@ -407,8 +471,36 @@ def test_a_rules_directory_in_another_checkout_is_refused_from_a_repository_conf
     )
 
     _declined_for_its_config(scanner, scanner.config.name)
-    assert rules.as_posix() not in _configs(scanner)
+    assert not any("other-checkout" in value for value in _configs(scanner)), _configs(
+        scanner
+    )
     assert "--config-overrides" in (scanner.dependency_unavailable_reason or "")
+
+
+@pytest.mark.parametrize(
+    ("scanner_cls", "config_cls", "options_cls", "cache_env"), SCANNERS
+)
+def test_the_same_directory_without_a_checkout_is_admitted_from_a_repository_config(
+    scanner_cls,
+    config_cls,
+    options_cls,
+    cache_env,
+    context_outside_checkouts,
+    monkeypatch,
+):
+    """The control for the test above: the same layout with no ``.git`` is a plain
+    directory beside the scanned tree, which a repository config may name."""
+    rules = _separate_checkout_with_rules(context_outside_checkouts, git=False)
+    monkeypatch.delenv(cache_env, raising=False)
+    _online(monkeypatch, scanner_cls)
+
+    scanner = scanner_cls(
+        context=context_outside_checkouts,
+        config=config_cls(options=options_cls(offline=False, config=str(rules))),
+    )
+
+    assert scanner.dependency_unavailable_reason is None
+    assert _configs(scanner) == [Path(os.path.realpath(rules)).as_posix()]
 
 
 @pytest.mark.parametrize(
@@ -431,7 +523,7 @@ def test_a_rules_directory_in_another_checkout_is_admitted_from_an_operator_sour
     name. Only the scanned tree stays refused for the operator too."""
     from automated_security_helper.config.path_trust import OperatorPaths
 
-    rules = _separate_checkout_with_rules(tmp_path)
+    rules = _separate_checkout_with_rules(context_outside_checkouts)
     monkeypatch.delenv(cache_env, raising=False)
     _online(monkeypatch, scanner_cls)
     config = config_cls(options=options_cls(offline=False, config=str(rules)))
@@ -519,7 +611,7 @@ def test_a_bare_name_that_exists_in_the_source_tree_is_a_path_and_is_refused(
     )
 
     _declined_for_its_config(scanner, scanner.config.name)
-    assert "rules" not in _configs(scanner)
+    assert not any("rules" in value for value in _configs(scanner)), _configs(scanner)
 
 
 @pytest.mark.parametrize(

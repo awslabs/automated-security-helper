@@ -7232,7 +7232,11 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
 
                     scanner = _build()
                     cache_env = getattr(scanner, "cache_dir_env_var", None)
-                    if offline and callable(cache_env):
+                    if callable(cache_env):
+                        # Set for the online build too, so the control varies only
+                        # ASH_OFFLINE: a scanner that declared the database whenever
+                        # its cache variable was set, online as well, would otherwise
+                        # pass the online control.
                         pass_env.setenv(cache_env(), str(_rule_cache(reader)))
                         scanner = _build()
                     reads = [e.name for e in scanner.content_databases_in_use()]

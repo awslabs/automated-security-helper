@@ -32,6 +32,14 @@ def context_outside_checkouts(tmp_path: Path):
     tree = tmp_path / "tree"
     source_dir = tree / "src"
     source_dir.mkdir(parents=True)
+    # The premise, checked: a ``--basetemp`` or ``TMPDIR`` inside a checkout would
+    # otherwise surface as a path-trust refusal in the dependent tests, not as the
+    # broken fixture it is.
+    inside = [parent for parent in (tree, *tree.parents) if (parent / ".git").exists()]
+    assert inside == [], (
+        f"the pytest base temporary directory sits inside a git checkout ({inside}); "
+        "point --basetemp or TMPDIR outside every checkout"
+    )
     return PluginContext(
         source_dir=source_dir,
         output_dir=tree / "out",
