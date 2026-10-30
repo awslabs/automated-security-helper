@@ -8,6 +8,14 @@ completion before the process exited with the plugin's code.
 
 Both handlers now catch SystemExit beside Exception. The control: a keyboard
 interrupt is still not caught and still ends the scan.
+
+Two more facts. The row's reason names the exit: ``str(SystemExit(3))`` is ``3``
+and ``str(SystemExit())`` is empty, so the reason read "...: 3" or ended in nothing
+and never said the plugin called ``sys.exit``. And a SystemExit raised while a
+shutdown signal has asked the scans to stop (an embedder's SIGTERM handler, chained
+before ASH's own, calling ``sys.exit`` on the main thread) is the process's
+shutdown, not the scanner's: both handlers let it through, so the scan ends with
+the process instead of recording one scanner's ERROR and moving on to the next.
 """
 
 from __future__ import annotations
@@ -30,6 +38,7 @@ from automated_security_helper.core.enums import (
     ScannerStatus,
     ScannerToolType,
 )
+from automated_security_helper.core.phases import scanner_executor
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -133,3 +142,105 @@ def test_a_keyboard_interrupt_still_ends_the_scan(plugin_context):
             _scanner(plugin_context, KeyboardInterrupt()),
             _targets(plugin_context),
         )
+
+
+def _reasons(row) -> str:
+    return " ".join(str(error) for error in row.errors)
+
+
+@pytest.mark.parametrize("code", [3, 0, None, "no rules were loaded"])
+def test_the_rows_reason_names_the_exit_and_its_code(plugin_context, code):
+    (row,) = _executor(plugin_context)._execute_scanner(
+        "shape-tool",
+        _scanner(plugin_context, SystemExit(code)),
+        _targets(plugin_context),
+    )
+
+    assert row.status == ScannerStatus.ERROR
+    assert f"the scanner called sys.exit({code!r})" in _reasons(row), row.errors
+    assert not _reasons(row).rstrip().endswith("source:"), row.errors
+
+
+def test_a_failure_containers_reason_names_the_exit_too(plugin_context, monkeypatch):
+    executor = _executor(plugin_context)
+    monkeypatch.setattr(
+        executor,
+        "_execute_scanner",
+        lambda *a, **k: (_ for _ in ()).throw(SystemExit(4)),
+    )
+
+    (container,), succeeded = executor._safe_execute_scanner(
+        "shape-tool", _scanner(plugin_context, SystemExit(4)), _targets(plugin_context)
+    )
+
+    assert succeeded is False
+    assert "the scanner called sys.exit(4)" in _reasons(container), container.errors
+
+
+class TestAShutdownsExitStillEndsTheScan:
+    """A SystemExit raised while shutdown_requested() is True is the process's
+    shutdown (an embedder's SIGTERM handler calling sys.exit on the main thread),
+    not the scanner's own exit: both handlers let it through."""
+
+    def test_the_per_target_handler_lets_it_through(self, plugin_context, monkeypatch):
+        monkeypatch.setattr(scanner_executor, "shutdown_requested", lambda: True)
+
+        with pytest.raises(SystemExit):
+            _executor(plugin_context)._execute_scanner(
+                "shape-tool",
+                _scanner(plugin_context, SystemExit(0)),
+                _targets(plugin_context),
+            )
+
+    def test_the_scanner_handler_lets_it_through(self, plugin_context, monkeypatch):
+        monkeypatch.setattr(scanner_executor, "shutdown_requested", lambda: True)
+        executor = _executor(plugin_context)
+        monkeypatch.setattr(
+            executor,
+            "_execute_scanner",
+            lambda *a, **k: (_ for _ in ()).throw(SystemExit(0)),
+        )
+
+        with pytest.raises(SystemExit):
+            executor._safe_execute_scanner(
+                "shape-tool",
+                _scanner(plugin_context, SystemExit(0)),
+                _targets(plugin_context),
+            )
+
+    def test_control_a_plugins_exit_is_still_caught_with_no_shutdown(
+        self, plugin_context, monkeypatch
+    ):
+        monkeypatch.setattr(scanner_executor, "shutdown_requested", lambda: False)
+
+        (row,) = _executor(plugin_context)._execute_scanner(
+            "shape-tool",
+            _scanner(plugin_context, SystemExit(0)),
+            _targets(plugin_context),
+        )
+
+        assert row.status == ScannerStatus.ERROR
+
+
+def test_a_parallel_run_records_the_exiting_scanner_and_the_clean_one(
+    plugin_context,
+):
+    """The parallel symptom: an escaping SystemExit made the pool run every queued
+    scanner and then exit the process with the plugin's code, recording none."""
+    exiting = _scanner(plugin_context, SystemExit(3))
+    clean = _scanner(plugin_context, SystemExit(0))
+    clean.scan = lambda *a, **k: {"findings": []}  # type: ignore[method-assign]
+    executor = ScannerExecutor(
+        plugin_context=plugin_context,
+        progress_display=MagicMock(),
+        scanner_tasks=[
+            ("exiting", exiting, _targets(plugin_context)),
+            ("clean", clean, _targets(plugin_context)),
+        ],
+        max_workers=2,
+    )
+
+    results = executor.run_parallel(AshAggregatedResults())
+
+    assert results is not None
+    assert executor.completed_scanners == ["clean"]

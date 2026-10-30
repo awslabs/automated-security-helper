@@ -32,6 +32,7 @@ from automated_security_helper.core.cancellation import (
     ScanCancelled,
     current_cancel_event,
     raise_if_cancelled,
+    shutdown_requested,
 )
 from automated_security_helper.utils.get_shortest_name import home_as_tilde
 from automated_security_helper.utils.error_text import (
@@ -129,6 +130,39 @@ def _refuse_to_grade(container: ScanResultsContainer, reason: str) -> None:
 
 def _completed_result_status(status: Any) -> bool:
     return isinstance(status, str) and status.lower() in _COMPLETED_RESULT_STATUSES
+
+
+def _failure_text(error: BaseException, values: Iterable[str]) -> str:
+    """``error_text``, with a SystemExit named as the plugin's own exit.
+
+    ``str(SystemExit(3))`` is ``3`` and ``str(SystemExit())`` is empty, so a row
+    for a scanner that called ``sys.exit`` read "Failed to execute X on source: 3",
+    or ended in nothing, and never said what the plugin did. The exit is named
+    with its code; a message the plugin passed (``sys.exit("no rules")``) is the
+    code and follows the name once.
+    """
+    described = error_text(error, values)
+    if not isinstance(error, SystemExit):
+        return described
+    named = f"the scanner called sys.exit({error.code!r})"
+    if not described or described == str(error.code):
+        return named
+    return f"{named}: {described}"
+
+
+def _exit_is_the_shutdowns(error: BaseException) -> bool:
+    """Whether a SystemExit reaching a scanner's handler is the process's shutdown.
+
+    A scanner's own ``sys.exit`` (a tool run as a library, a plugin's guard) is
+    that scanner's failure. A SystemExit raised while a shutdown signal has asked
+    the registered scans to stop is not: ASH's SIGTERM handler chains to the one
+    installed before it, and an embedder's handler that calls ``sys.exit`` raises
+    on the main thread, inside whatever scanner a sequential scan is running.
+    Recorded as that scanner's failure, the scan went on to the next scanner
+    instead of ending. ``shutdown_requested`` is the record the handler sets
+    before anything else, so the two exits tell apart by it.
+    """
+    return isinstance(error, SystemExit) and shutdown_requested()
 
 
 #: The fields of ScannerSeverityCount a returned dict's ``severity_counts`` can set.
@@ -1374,12 +1408,15 @@ class ScannerExecutor:
                 # with the plugin's code. A cancel (ScanCancelled) and a keyboard
                 # interrupt are not Exceptions and still end the scan.
                 except (Exception, SystemExit) as e:
+                    if _exit_is_the_shutdowns(e):
+                        # The process is going down, not this scanner.
+                        raise
                     # Redacted with the config's environment values and the
                     # plugin's own: the exception can name an option either read
                     # from the environment, and this text goes to ash.log, the
                     # report and the results files.
                     environment_values = self._plugin_environment_values(scanner_plugin)
-                    described = error_text(e, environment_values)
+                    described = _failure_text(e, environment_values)
                     stack_trace = traceback_text(values=environment_values)
                     ASH_LOGGER.debug(
                         f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}",
@@ -2297,10 +2334,14 @@ class ScannerExecutor:
         # scanner to completion and then exit the process with the plugin's code,
         # recording none of their results.
         except (Exception, SystemExit) as e:
+            if _exit_is_the_shutdowns(e):
+                # The process is going down, not this scanner (see the
+                # per-target handler).
+                raise
             # Redacted as the per-target handler redacts: see
             # _plugin_environment_values.
             environment_values = self._plugin_environment_values(scanner_plugin)
-            described = error_text(e, environment_values)
+            described = _failure_text(e, environment_values)
             stack_trace = traceback_text(values=environment_values)
             error_msg = f"Unexpected error in scanner {scanner_name}: {described}"
             ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
