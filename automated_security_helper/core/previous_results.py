@@ -46,8 +46,10 @@ process is killed between two renames leaves part of the set staged, and the nex
 set aside puts that back before it moves anything, so the set it holds is whole.
 A restore first renames the held set to ``.ash_previous_results.restoring``, then
 moves the entries back from there, so a restore that stopped halfway, refused or
-killed, is resumed by the next restore or the next scan's set aside, and the
-marker is written only once everything is back.
+killed, is resumed by the next restore or the next scan's set aside. The marker
+is written right after that rename, before the first entry moves back, so from
+the moment any put-back entry is at the top level the directory says so; a
+restore refused before the rename leaves no marker, because nothing was put back.
 
 Nothing is moved or removed when the output directory is itself a link.
 
@@ -349,7 +351,9 @@ class PreviousResults:
         that is refused (OSError) raises with the rest still in it, and the next
         restore moves those without clearing the top level again: what is there
         by then is previous results it already put back. The marker is written
-        only once every entry is back.
+        right after the rename, before the first move, so a restore that stops
+        on a refused move already says the top level holds put-back results; a
+        restore refused before the rename leaves no marker.
         """
         if self._output_dir_is_a_link():
             return
