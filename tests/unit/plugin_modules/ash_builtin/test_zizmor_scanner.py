@@ -1793,20 +1793,38 @@ def test_a_named_pipe_named_like_an_action_is_skipped_without_blocking(repo, cap
     pipe = repo / "pipes" / "action.yml"
     pipe.parent.mkdir()
     os.mkfifo(pipe)
+    done = threading.Event()
 
     def feed():
-        with open(pipe, "w") as writer:
-            writer.write("name: x\nruns:\n  using: composite\n  steps: []\n")
+        # Serve every open for reading until released: a collection that opens
+        # the pipe twice (a sniff, then a content read) then fails on the
+        # listing instead of hanging the run on the second open.
+        while not done.is_set():
+            with open(pipe, "w") as writer:
+                writer.write("name: x\nruns:\n  using: composite\n  steps: []\n")
 
-    threading.Thread(target=feed, daemon=True).start()
-    scanner = _scanner(repo)
+    writer_thread = threading.Thread(target=feed, daemon=True)
+    writer_thread.start()
+    try:
+        scanner = _scanner(repo)
 
-    with caplog.at_level(logging.WARNING):
-        inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+        with caplog.at_level(logging.WARNING):
+            inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
 
-    assert inputs == EXPECTED_INPUTS
-    assert "Not auditing pipes/action.yml" in caplog.text
-    assert "not a regular file" in caplog.text
+        assert inputs == EXPECTED_INPUTS
+        assert "Not auditing pipes/action.yml" in caplog.text
+        assert "not a regular file" in caplog.text
+    finally:
+        # Release the writer: when the collection behaves it never opens the
+        # pipe, and the thread would otherwise stay blocked in open() for the
+        # rest of the session.
+        done.set()
+        reader = os.open(pipe, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            writer_thread.join(timeout=5)
+        finally:
+            os.close(reader)
+        assert not writer_thread.is_alive()
 
 
 def test_a_link_whose_target_cannot_be_stated_is_skipped_not_raised(
