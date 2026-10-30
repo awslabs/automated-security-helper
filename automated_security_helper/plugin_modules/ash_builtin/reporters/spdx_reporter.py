@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -32,6 +32,15 @@ _NAMESPACE_UUID = uuid.uuid5(uuid.NAMESPACE_URL, _NAMESPACE_BASE)
 
 # SPDX identifiers allow letters, digits, '.' and '-' after the "SPDXRef-" prefix.
 _SPDX_ID_UNSAFE = re.compile(r"[^A-Za-z0-9.-]+")
+
+# A ``LicenseRef-`` identifier inside a license expression. One qualified by an
+# external document (``DocumentRef-x:LicenseRef-y``) is that document's to declare
+# and is not matched (the lookbehind refuses the ':').
+_LICENSE_REF_IN_EXPRESSION = re.compile(r"(?<![A-Za-z0-9.:-])LicenseRef-[A-Za-z0-9.-]+")
+
+#: The CycloneDX 1.6 license acknowledgement that names a license as concluded by
+#: the SBOM's author rather than declared by the component's author.
+_CONCLUDED = "concluded"
 
 
 class SPDXReporterConfigOptions(ReporterOptionsBase):
@@ -91,38 +100,77 @@ def _license_ref(name: str, extracted: Dict[str, Dict[str, str]]) -> str:
     return ref
 
 
-def _declared_license(
+def _declare_license_refs(term: str, extracted: Dict[str, Dict[str, str]]) -> str:
+    """*term*, with each ``LicenseRef-`` identifier in it declared in *extracted*.
+
+    An SBOM's ``id`` or ``expression`` can name a ``LicenseRef-`` term of its own
+    (Syft writes one for a license text it could not match). SPDX requires every
+    such identifier used in the document to be declared in
+    ``hasExtractedLicensingInfos``; copied undeclared, as this once did, the
+    document referred to a license it never defined and failed validation. The
+    declaration says what is known: the identifier as its name, and NOASSERTION
+    for the text the SBOM did not carry. A name-only license that was given the
+    same identifier keeps its entry; the two then share one declaration, which
+    is the SBOM's statement.
+    """
+    for ref in _LICENSE_REF_IN_EXPRESSION.findall(term):
+        extracted.setdefault(
+            ref, {"licenseId": ref, "name": ref, "extractedText": NOASSERTION}
+        )
+    return term
+
+
+def _license_expressions(
     component: Dict[str, Any], extracted: Dict[str, Dict[str, str]]
-) -> str:
-    """The component's license as an SPDX expression, or NOASSERTION.
+) -> Tuple[str, str]:
+    """The component's (declared, concluded) licenses as SPDX expressions.
 
     CycloneDX carries a license as an SPDX ``id``, a free-text ``name`` or an
     ``expression``. ``id`` and ``expression`` are SPDX expressions and are used
-    as they are. A ``name`` is arbitrary text and cannot stand in an expression,
-    so it becomes a ``LicenseRef-`` identifier declared in the document's
-    ``hasExtractedLicensingInfos`` (*extracted*), the SPDX way to declare a
-    license that has no listed identifier. Dropping name-only licenses, as this
-    once did, declared a narrower license than the SBOM states: a component
-    under "Apache-2.0" and a named commercial license read as Apache-2.0 alone.
-    Several terms are joined with AND, the conservative reading of a list.
+    as they are, with any ``LicenseRef-`` term they hold declared
+    (:func:`_declare_license_refs`). A ``name`` is arbitrary text and cannot
+    stand in an expression, so it becomes a ``LicenseRef-`` identifier declared
+    in the document's ``hasExtractedLicensingInfos`` (*extracted*), the SPDX way
+    to declare a license that has no listed identifier. Dropping name-only
+    licenses, as this once did, declared a narrower license than the SBOM
+    states: a component under "Apache-2.0" and a named commercial license read
+    as Apache-2.0 alone. Several terms are joined with AND, the conservative
+    reading of a list.
+
+    CycloneDX 1.6 lets a license entry say whether the component's author
+    ``declared`` it or the SBOM's author ``concluded`` it from the contents.
+    SPDX keeps the two apart as ``licenseDeclared`` and ``licenseConcluded``, so
+    a concluded entry goes to the second; written to the first, as every entry
+    once was, the document attributed the SBOM author's conclusion to the
+    component's author. Either expression is NOASSERTION when it has no term.
     """
-    terms: List[str] = []
+    declared: List[str] = []
+    concluded: List[str] = []
     for choice in component.get("licenses") or []:
         if not isinstance(choice, dict):
             continue
+        license_obj = choice.get("license")
+        acknowledgement = choice.get("acknowledgement")
+        if acknowledgement is None and isinstance(license_obj, dict):
+            acknowledgement = license_obj.get("acknowledgement")
+        terms = concluded if acknowledgement == _CONCLUDED else declared
         expression = choice.get("expression")
         if isinstance(expression, str) and expression.strip():
-            terms.append(expression.strip())
+            terms.append(_declare_license_refs(expression.strip(), extracted))
             continue
-        license_obj = choice.get("license")
         if isinstance(license_obj, dict):
             license_id = license_obj.get("id")
             if isinstance(license_id, str) and license_id.strip():
-                terms.append(license_id.strip())
+                terms.append(_declare_license_refs(license_id.strip(), extracted))
                 continue
             license_name = license_obj.get("name")
             if isinstance(license_name, str) and license_name.strip():
                 terms.append(_license_ref(license_name.strip(), extracted))
+    return _expression(declared), _expression(concluded)
+
+
+def _expression(terms: List[str]) -> str:
+    """*terms* joined with AND as one SPDX expression, or NOASSERTION."""
     if not terms:
         return NOASSERTION
     if len(terms) == 1:
@@ -130,19 +178,68 @@ def _declared_license(
     return " AND ".join(f"({term})" if " " in term else term for term in terms)
 
 
+def _package_name(component: Dict[str, Any], index: int) -> str:
+    """The component's name, qualified by its CycloneDX ``group`` when it has one.
+
+    A CycloneDX ``group`` is the namespace a name is unique in: an npm scope
+    (``@angular`` for ``core``), a Maven groupId (``org.apache.commons`` for
+    ``commons-lang3``). Read from ``name`` alone, as this once was, two
+    components from different groups became one indistinguishable SPDX package
+    name, and the purl in ``externalRefs`` was the only thing telling them
+    apart. The name is written ``<group>/<name>``, the form npm itself uses,
+    unless the name already carries the group.
+    """
+    name = str(component.get("name") or f"component-{index}")
+    group = component.get("group")
+    if isinstance(group, str) and group.strip():
+        group = group.strip()
+        if not name.startswith(f"{group}/"):
+            name = f"{group}/{name}"
+    return name
+
+
+def _exclusion_marks(component: Dict[str, Any]) -> List[str]:
+    """The values of the component's client-exclusion marks, if any.
+
+    The CycloneDX report marks a component a delivered client exclusion would
+    have dropped with a property (``config.client_scanner_exclusions``). The
+    SPDX document is built from the same SBOM and left the mark out, so the two
+    inventories disagreed about those components.
+    """
+    from automated_security_helper.config.client_scanner_exclusions import (
+        SBOM_PROPERTY,
+    )
+
+    marks: List[str] = []
+    for prop in component.get("properties") or []:
+        if isinstance(prop, dict) and prop.get("name") == SBOM_PROPERTY:
+            value = prop.get("value")
+            if value:
+                marks.append(str(value))
+    return marks
+
+
 def _package(
     component: Dict[str, Any], index: int, extracted: Dict[str, Dict[str, str]]
 ) -> Dict[str, Any]:
-    name = str(component.get("name") or f"component-{index}")
+    name = _package_name(component, index)
+    declared, concluded = _license_expressions(component, extracted)
     package: Dict[str, Any] = {
         "SPDXID": f"SPDXRef-Package-{index}-{_SPDX_ID_UNSAFE.sub('-', name)}"[:200],
         "name": name,
         "downloadLocation": NOASSERTION,
         "filesAnalyzed": False,
-        "licenseConcluded": NOASSERTION,
-        "licenseDeclared": _declared_license(component, extracted),
+        "licenseConcluded": concluded,
+        "licenseDeclared": declared,
         "copyrightText": NOASSERTION,
     }
+    marks = _exclusion_marks(component)
+    if marks:
+        package["comment"] = (
+            "ASH: a delivered client exclusion would have dropped this component "
+            f"({'; '.join(marks)}); the SBOM lists it, so this document does too, "
+            "with the same mark the CycloneDX report carries."
+        )
     version = component.get("version")
     if version:
         package["versionInfo"] = str(version)
