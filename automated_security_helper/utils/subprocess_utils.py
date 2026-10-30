@@ -5433,6 +5433,13 @@ def run_command_stream_output(
         flag to tell ASH's failure from the tool's, so a caller that needs one
         uses ``run_command_with_output_handling``, whose response sets
         ``post_run_error`` and keeps the tool's code.
+
+    Raises:
+        ScanCancelled: the scan was cancelled before the tool started, or while
+        it ran. In the second case the tool is stopped first, SIGTERM and then
+        SIGKILL after the cancel's grace, the whole process group when the tool
+        leads one; a tool that is silent when the cancel comes is stopped all
+        the same, by a watcher that reads the cancel every CANCEL_POLL_SECONDS.
     """
     # The resolved program replaces the first element, so it is resolved in a copy:
     # the caller's list is left as it was, as in spawn_run, and a list passed again
@@ -5506,32 +5513,62 @@ def run_command_stream_output(
         # UNRECORDED_RUN_RETURNCODE, never the tool's code: a 0 kept after a
         # failed stop would read as a clean run.
         failed = False
+        # The scan's cancel ends the run while the tool runs, not only between
+        # its output lines: read between lines alone, a tool that printed nothing
+        # more held a cancelled scan at the wait below for as long as it chose to
+        # run. A watcher in the scan's own context (ash_thread carries its
+        # cancellation scope and its log scope) reads the cancel every
+        # CANCEL_POLL_SECONDS and stops the child, the whole group when the child
+        # leads one, as the cancellable runner does; the line loop reads it too,
+        # and the lock makes the two readers one stop. The stop ends the child's
+        # output, so the loop and the wait below return, and the cancel is raised
+        # from this thread.
+        stop_once = threading.Lock()
+        prompt = getattr(cancel_event, "prompt", None)
+
+        def stop_on_cancel() -> None:
+            if not stop_once.acquire(blocking=False):
+                return
+            stop = _stop_tree if _leads_its_own_group(process) else _stop
+            _stop_child(args, process, stop, _stop_grace(cancel_event), prompt)
+
+        watcher_done = threading.Event()
+
+        def watch_for_the_cancel() -> None:
+            while not watcher_done.wait(CANCEL_POLL_SECONDS):
+                if cancel_event.is_set():
+                    stop_on_cancel()
+                    return
+
+        watcher: Optional[threading.Thread] = None
+        if cancel_event is not None:
+            watcher = ash_thread(
+                watch_for_the_cancel, name="ash-stream-cancel-watch", daemon=True
+            )
+            watcher.start()
         try:
             # Stream output, shown: it is the tool's, and quotes what it scanned.
-            # The scan's cancel is read between lines: once it is set the child
-            # is stopped and the cancel raised, as the cancellable runner does,
-            # instead of the child running on and this call waiting without
-            # bound on a cancelled scan.
             for line in process.stdout:
                 print(shown_not_obeyed(line.rstrip()))
                 if cancel_event is not None and cancel_event.is_set():
-                    _stop_child(
-                        args,
-                        process,
-                        _stop,
-                        _stop_grace(cancel_event),
-                        getattr(cancel_event, "prompt", None),
-                    )
+                    stop_on_cancel()
                     raise_if_cancelled()
 
             # Wait for process to complete
             process.wait()
+            # A cancel the watcher answered while the tool was silent: the child
+            # was stopped, and the cancel is raised here, in the caller's thread.
+            # A child that ended on its own keeps its code even in a scan since
+            # cancelled, as the cancellable runner keeps a completed result.
+            if stop_once.locked():
+                raise_if_cancelled()
         except ScanCancelled:
             raise
         except Exception as e:
             failed = True
             _log_unrecorded_run(cmd_str, e)
         finally:
+            watcher_done.set()
             try:
                 if process.poll() is None:
                     process.kill()
@@ -5554,6 +5591,11 @@ def run_command_stream_output(
                         ),
                         extra=NO_MARKUP,
                     )
+            # After the kill above: a watcher still inside a stop's grace returns
+            # once the child is gone. Bounded, as the reap is; a daemon thread
+            # left past the bound holds nothing of the run.
+            if watcher is not None:
+                watcher.join(timeout=_REAP_SECONDS)
             # The read end of the child's output, which nothing else closes. A
             # close that fails loses no output, so it does not change the code;
             # it is logged on one line.
