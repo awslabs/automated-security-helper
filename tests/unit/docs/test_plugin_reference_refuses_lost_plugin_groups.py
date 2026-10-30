@@ -238,13 +238,25 @@ def test_control_an_absent_record_reads_as_a_clean_load(builtin_only, monkeypatc
 
 
 def test_control_a_group_recovered_on_retry_is_listed(builtin_only, monkeypatch):
+    """The page reads the list AFTER the retry, which rebinds it.
+
+    ``retry_failed_plugin_groups`` swaps in new ``ASH_REPORTERS`` and friends on
+    the module, so a ``discover`` that read the list first and retried second
+    would publish the short list from before the retry with the error record
+    cleared. The planted module starts with an EMPTY reporter list and a
+    recorded failure; the fake retry restores the real list as it clears the
+    record, so only a read after the retry sees any reporter.
+    """
     reference, ash_builtin = builtin_only
+    real_reporters = ash_builtin.ASH_REPORTERS
+    monkeypatch.setattr(ash_builtin, "ASH_REPORTERS", [])
     monkeypatch.setattr(
         ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", {REPORTERS: "ImportError: partial"}
     )
 
     def recovered():
-        ash_builtin.ASH_PLUGIN_LOAD_ERRORS = {}
+        monkeypatch.setattr(ash_builtin, "ASH_REPORTERS", real_reporters)
+        monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", {})
         return {}
 
     monkeypatch.setattr(ash_builtin, "retry_failed_plugin_groups", recovered)
@@ -252,7 +264,21 @@ def test_control_a_group_recovered_on_retry_is_listed(builtin_only, monkeypatch)
     plugins = reference.discover("reporter")
 
     assert plugins, "the built-in package declares reporters"
+    assert len(plugins) == len(real_reporters)
     assert ash_builtin.ASH_PLUGIN_LOAD_ERRORS == {}
+
+
+def test_a_read_before_the_retry_would_miss_the_recovered_group(
+    builtin_only, monkeypatch
+):
+    """The must-flag control for the test above: reading the list as planted,
+    before the retry runs, sees no reporter at all."""
+    reference, ash_builtin = builtin_only
+    monkeypatch.setattr(ash_builtin, "ASH_REPORTERS", [])
+    monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", {})
+    monkeypatch.setattr(ash_builtin, "retry_failed_plugin_groups", dict)
+
+    assert reference.discover("reporter") == []
 
 
 def test_control_a_healthy_package_lists_its_plugins(builtin_only, monkeypatch):
