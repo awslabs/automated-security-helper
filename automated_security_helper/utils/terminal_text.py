@@ -245,10 +245,24 @@ def json_controls_shown(text: str) -> str:
     return _OUTSIDE_PRINTABLE_ASCII.sub(shown, text)
 
 
-#: The first colon of a line that starts, after whitespace other than a newline,
+#: The characters that end a line for ``str.splitlines``: a newline, a carriage
+#: return, vertical tab, form feed, the three information separators, NEL and the
+#: Unicode line and paragraph separators. A consumer that reads lines does not all
+#: agree on which of them end one (the stream in utils/command_safe_stream.py ends
+#: a line at a lone carriage return, not at the others), so a "::" after any of
+#: them is a line start here.
+_LINE_ENDS = r"\n\r\x0b\x0c\x1c-\x1e\x85\N{LINE SEPARATOR}\N{PARAGRAPH SEPARATOR}"
+
+#: The first colon of a line that starts, after whitespace that ends no line,
 #: with "::". The runner trims leading whitespace, Unicode's included, before it
-#: reads a line, so indentation does not protect it.
-_LINE_START_COMMAND = re.compile(r"^([^\S\n]*):(?=:)", re.MULTILINE)
+#: reads a line, so indentation does not protect it. A line starts at the text's
+#: start and after each character in :data:`_LINE_ENDS`; the whitespace skipped
+#: leaves those out, so each position is tried once and a long run of them costs
+#: time linear in its length. A "\r\n" is one break: the position between the two
+#: is followed by a newline, which is no colon.
+_LINE_START_COMMAND = re.compile(
+    rf"(?:^|(?<=[{_LINE_ENDS}]))([^\S{_LINE_ENDS}]*):(?=:)"
+)
 
 #: The first "#" of "##" followed by a name and "[" anywhere in a line ("##[cmd]",
 #: "##vso[", "##teamcity["), with any backslashes just before it, which are
