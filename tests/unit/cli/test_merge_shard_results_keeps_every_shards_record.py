@@ -1,0 +1,331 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""``merge_shard_results`` reads every shard's record as the shard wrote it.
+
+Six shapes a sharded fan-out produces that the merge read wrong:
+
+* a shard written before ``selected_scanners`` existed beside shards that record
+  it: its scanners were named as intended by no shard and said to show SKIPPED;
+* the shards' own objects reached the merged report by reference (tool
+  components, their rules, ``additional_reports`` values, ``scanner_results``
+  rows), so the secret masking that follows masked the loaded shards in place;
+* the start and end times were compared as text, which orders two ISO-8601
+  spellings of one instant by their suffix instead of by the instant;
+* a converter failure already folded into the merged row was folded in again
+  from the third shard on, and the reason a converter's dependencies were
+  unavailable was dropped from the merged row;
+* an excluded converter's dependency fields overrode those of the shard that
+  ran it;
+* a ``scanner_results`` row no shard owns, the ERROR or MISSING row the union
+  check exempts from its refusal so that the report still names it, was dropped
+  while its ``additional_reports`` marker was carried;
+* two shards whose recorded suppressions differ were refused under
+  ``--ignore-suppressions``, where neither setting reaches the exit code.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from automated_security_helper.cli.merge import (
+    ShardSettingsDisagreeError,
+    _adopt_owning_shard_results,
+    _merge_converter_rows,
+    merge_shard_results,
+    read_shard_assignment,
+    stamp_shard_assignment,
+    verify_verdict_settings_agree,
+)
+from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.asharp_model import (
+    ConverterStatusInfo,
+    FailedInputInfo,
+    ScannerStatusInfo,
+)
+from automated_security_helper.models.core import IgnorePathWithReason
+from tests.unit.cli.test_merge import as_loaded, build_shards
+
+# pytest registers a fixture under the name it was declared with, so the shared
+# ``capture`` fixture is available to this module under its own name.
+from tests.unit.cli.test_merge import capture as _shared_capture  # noqa: F401
+
+pytestmark = pytest.mark.unit
+
+
+class TestAShardWithoutASelectionRecordIntendedWhatItOwned:
+    def test_its_scanners_are_not_named_as_intended_by_no_shard(self, capture):
+        shards = build_shards(3)
+        for model in shards:
+            assignment = read_shard_assignment(model)
+            assignment.selected_scanners = list(assignment.assigned_scanners)
+            stamp_shard_assignment(model, assignment)
+        # The second shard predates the field: it recorded no selection at all.
+        older = read_shard_assignment(shards[1])
+        older.selected_scanners = None
+        stamp_shard_assignment(shards[1], older)
+
+        merge_shard_results(as_loaded(shards))
+
+        named = [
+            record.getMessage()
+            for record in capture.records
+            if "ran on no shard" in record.getMessage()
+            or "no shard intended to run them" in record.getMessage()
+        ]
+        assert named == [], named
+
+    def test_a_shard_that_recorded_an_empty_selection_is_still_named(self, capture):
+        """The control: an empty selection says the shard intended nothing."""
+        shards = build_shards(3)
+        for model in shards:
+            assignment = read_shard_assignment(model)
+            assignment.selected_scanners = list(assignment.assigned_scanners)
+            stamp_shard_assignment(model, assignment)
+        narrowed = read_shard_assignment(shards[1])
+        narrowed.selected_scanners = []
+        stamp_shard_assignment(shards[1], narrowed)
+
+        merge_shard_results(as_loaded(shards))
+
+        assert any(
+            "no shard intended to run them" in record.getMessage()
+            or "ran on no shard" in record.getMessage()
+            for record in capture.records
+        ), [record.getMessage() for record in capture.records]
+
+
+class TestTheMergedReportSharesNothingWithTheShards:
+    def test_tool_components_and_rules_are_copies(self):
+        shards = build_shards(3)
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        shard_components = {
+            id(component)
+            for model in shards
+            for component in model.sarif.runs[0].tool.extensions
+        }
+        shard_rules = {
+            id(rule)
+            for model in shards
+            for component in model.sarif.runs[0].tool.extensions
+            for rule in component.rules or []
+        }
+        for component in merged.sarif.runs[0].tool.extensions:
+            assert id(component) not in shard_components
+            for rule in component.rules or []:
+                assert id(rule) not in shard_rules
+
+    def test_additional_reports_and_scanner_rows_are_copies(self):
+        shards = build_shards(3)
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        shard_reports = {
+            id(report)
+            for model in shards
+            for report in model.additional_reports.values()
+        }
+        for report in merged.additional_reports.values():
+            assert id(report) not in shard_reports
+        shard_rows = {
+            id(row) for model in shards for row in model.scanner_results.values()
+        }
+        for row in merged.scanner_results.values():
+            assert id(row) not in shard_rows
+
+    def test_editing_the_merged_report_leaves_the_shards_as_loaded(self):
+        shards = build_shards(3)
+        before = [model.model_dump_json() for model in shards]
+
+        merged = merge_shard_results(as_loaded(shards))
+        for component in merged.sarif.runs[0].tool.extensions:
+            component.name = "renamed"
+            for rule in component.rules or []:
+                rule.id = "renamed"
+        for report in merged.additional_reports.values():
+            if isinstance(report, dict):
+                report.clear()
+
+        assert [model.model_dump_json() for model in shards] == before
+
+
+class TestTimingIsOrderedByInstant:
+    def test_the_earliest_start_is_the_earliest_instant_not_the_smallest_text(self):
+        shards = build_shards(2)
+        # 10:00 at +02:00 is 08:00Z, the earlier instant; as text it sorts after
+        # 09:00+00:00.
+        shards[0].metadata.summary_stats.start = "2026-08-28T10:00:00+02:00"
+        shards[1].metadata.summary_stats.start = "2026-08-28T09:00:00+00:00"
+        shards[0].metadata.summary_stats.end = "2026-08-28T10:30:00+02:00"
+        shards[1].metadata.summary_stats.end = "2026-08-28T09:30:00+00:00"
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.metadata.summary_stats.start == "2026-08-28T10:00:00+02:00"
+        # 09:30Z is the later instant; as text 10:30+02:00 (08:30Z) sorts after it.
+        assert merged.metadata.summary_stats.end == "2026-08-28T09:30:00+00:00"
+
+    def test_text_that_does_not_parse_is_ordered_as_text(self):
+        """The fallback, so a hand-written stamp cannot crash the merge."""
+        shards = build_shards(2)
+        shards[0].metadata.summary_stats.start = "not a time"
+        shards[1].metadata.summary_stats.start = "2026-08-28T09:00:00"
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.metadata.summary_stats.start == "2026-08-28T09:00:00"
+
+
+class TestConverterRowsAcrossThreeShards:
+    def test_a_failure_folded_in_once_is_not_repeated_by_a_third_shard(self):
+        first = ConverterStatusInfo(failure="RuntimeError: crashed")
+        second = ConverterStatusInfo(failure="TimeoutError: timed out")
+        third = ConverterStatusInfo(failure="RuntimeError: crashed")
+
+        row = _merge_converter_rows(_merge_converter_rows(first, second), third)
+
+        assert row.failure == "RuntimeError: crashed; TimeoutError: timed out"
+
+    def test_the_dependency_reason_reaches_the_merged_row(self):
+        ran = ConverterStatusInfo(converted_paths=["converted/nb.py"])
+        unavailable = ConverterStatusInfo(
+            dependencies_satisfied=False,
+            candidate_inputs=2,
+            dependency_unavailable_reason="jupyter nbconvert is not installed",
+        )
+
+        row = _merge_converter_rows(ran, unavailable)
+
+        assert row.dependencies_satisfied is False
+        assert row.dependency_unavailable_reason == "jupyter nbconvert is not installed"
+
+    def test_an_excluded_shard_does_not_mark_a_converter_that_ran_unavailable(self):
+        excluded = ConverterStatusInfo(
+            excluded=True,
+            dependencies_satisfied=False,
+            dependency_unavailable_reason="never checked: excluded",
+        )
+        ran = ConverterStatusInfo(converted_paths=["converted/nb.py"])
+
+        row = _merge_converter_rows(excluded, ran)
+
+        assert row.excluded is False
+        assert row.dependencies_satisfied is True
+        assert row.dependency_unavailable_reason is None
+
+    def test_an_accepted_record_does_not_hide_another_shards_tool_failure(self):
+        accepted = ConverterStatusInfo(
+            failed_inputs=[
+                FailedInputInfo(
+                    path="nb.ipynb",
+                    reason="not a notebook",
+                    kind="input",
+                    accepted=True,
+                    accepted_reason="known fixture",
+                )
+            ]
+        )
+        failed = ConverterStatusInfo(
+            failed_inputs=[
+                FailedInputInfo(path="nb.ipynb", reason="nbconvert exited with code 1")
+            ]
+        )
+
+        row = _merge_converter_rows(accepted, failed)
+
+        assert [(r.path, r.accepted) for r in row.failed_inputs] == [
+            ("nb.ipynb", False)
+        ]
+        assert row.failed_inputs[0].reason == "nbconvert exited with code 1"
+
+    def test_two_excluded_rows_keep_their_dependency_fields(self):
+        """The control: with no shard that ran it, the rows' own fields stand."""
+        first = ConverterStatusInfo(excluded=True, dependencies_satisfied=False)
+        second = ConverterStatusInfo(excluded=True, dependencies_satisfied=False)
+
+        row = _merge_converter_rows(first, second)
+
+        assert row.excluded is True
+        assert row.dependencies_satisfied is False
+
+
+class TestAScannerRowNoShardOwnsIsKept:
+    def test_an_unowned_error_row_survives_adoption(self):
+        shards = build_shards(2)
+        shards[1].scanner_results["broken.plugin.module"] = ScannerStatusInfo(
+            status=ScannerStatus.ERROR,
+            excluded=False,
+            dependencies_satisfied=True,
+            missing_reason="the module failed to import",
+        )
+        merged = shards[0].model_copy(deep=True)
+        entries = [
+            (path, model, read_shard_assignment(model))
+            for path, model in as_loaded(shards)
+        ]
+        owners = {
+            scanner.lower(): position
+            for position, (_, _, assignment) in enumerate(entries)
+            for scanner in assignment.assigned_scanners
+        }
+
+        _adopt_owning_shard_results(merged, entries, owners)
+
+        row = merged.scanner_results["broken.plugin.module"]
+        assert row.status == ScannerStatus.ERROR
+        assert row.missing_reason == "the module failed to import"
+        assert row is not shards[1].scanner_results["broken.plugin.module"]
+
+    def test_a_non_owning_shards_skip_marker_is_still_dropped(self):
+        """The control: owned scanners keep only their owner's row."""
+        shards = build_shards(2)
+        merged = shards[0].model_copy(deep=True)
+        entries = [
+            (path, model, read_shard_assignment(model))
+            for path, model in as_loaded(shards)
+        ]
+        owners = {
+            scanner.lower(): position
+            for position, (_, _, assignment) in enumerate(entries)
+            for scanner in assignment.assigned_scanners
+        }
+
+        _adopt_owning_shard_results(merged, entries, owners)
+
+        for name, position in owners.items():
+            assert merged.scanner_results[name].excluded is False, name
+            assert (
+                merged.scanner_results[name].model_dump()
+                == entries[position][1].scanner_results[name].model_dump()
+            )
+
+
+class TestIgnoreSuppressionsLiftsTheSuppressionAgreement:
+    @staticmethod
+    def _disagreeing_on_ignore_paths():
+        shards = build_shards(2)
+        shards[1].ash_config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/**", reason="third party")
+        ]
+        return shards
+
+    def test_the_disagreement_is_refused_without_the_flag(self):
+        with pytest.raises(ShardSettingsDisagreeError, match="ignore_paths"):
+            verify_verdict_settings_agree(
+                as_loaded(self._disagreeing_on_ignore_paths())
+            )
+
+    def test_the_disagreement_is_not_refused_under_the_flag(self):
+        verify_verdict_settings_agree(
+            as_loaded(self._disagreeing_on_ignore_paths()), ignore_suppressions=True
+        )
+
+    def test_a_verdict_setting_is_still_refused_under_the_flag(self):
+        """The control: the flag lifts the two suppression settings only."""
+        shards = build_shards(2)
+        shards[1].ash_config.fail_on_findings = False
+
+        with pytest.raises(ShardSettingsDisagreeError, match="fail_on_findings"):
+            verify_verdict_settings_agree(as_loaded(shards), ignore_suppressions=True)
