@@ -691,7 +691,7 @@ def _bundle_members(bundle_zip: zipfile.ZipFile, bundle) -> "list[tuple]":
     so no path from the archive is used as a destination.
     """
     members = []
-    seen = set()
+    seen: "dict[str, str]" = {}
     for info in bundle_zip.infolist():
         if info.is_dir():
             continue
@@ -709,11 +709,17 @@ def _bundle_members(bundle_zip: zipfile.ZipFile, bundle) -> "list[tuple]":
             raise _refuse(
                 f"bundle member {info.filename!r} has an unsafe name", _EXIT_INTEGRITY
             )
-        if name in seen:
-            raise _refuse(f"bundle holds two members named {name}", _EXIT_INTEGRITY)
+        # Names are compared with case folded, as extract_bundle does: on a
+        # case-insensitive filesystem the second of "Rules.guard" and "rules.guard"
+        # would be written over the first.
+        if name.lower() in seen:
+            raise _refuse(
+                f"bundle holds two members named {seen[name.lower()]} and {name}",
+                _EXIT_INTEGRITY,
+            )
         if info.file_size > _MAX_MEMBER_BYTES:
             raise _refuse(f"bundle member {name} is over the size cap", _EXIT_INTEGRITY)
-        seen.add(name)
+        seen[name.lower()] = name
         members.append((info, name))
     if not members:
         raise _refuse(

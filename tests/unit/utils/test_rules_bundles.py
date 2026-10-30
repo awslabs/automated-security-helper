@@ -608,6 +608,28 @@ class TestRefusedArchiveEntriesInBothInstallers:
         with zipfile.ZipFile(archive) as z, pytest.raises(SystemExit, match="unsafe"):
             _script()._bundle_members(z, REAL)
 
+    def test_two_names_that_differ_only_in_case_are_refused_by_both(self, tmp_path):
+        # A case-insensitive filesystem (macOS, Windows) would write the second over
+        # the first, so extract_bundle folds case before it compares names. The image's
+        # script has to refuse the same archive, or the two installers disagree about
+        # which archives are acceptable.
+        archive = _zip(
+            tmp_path / "b.zip",
+            {
+                "output/Rules.guard": "rule A { }\n",
+                "output/rules.guard": "rule B { }\n",
+            },
+        )
+        staging = tmp_path / "s"
+        staging.mkdir()
+        with pytest.raises(ToolDownloadIntegrityError, match="two members"):
+            extract_bundle(archive, REAL, staging)
+        with (
+            zipfile.ZipFile(archive) as z,
+            pytest.raises(SystemExit, match="two members"),
+        ):
+            _script()._bundle_members(z, REAL)
+
     def test_the_total_size_cap_is_enforced_on_bytes_read(self, tmp_path, monkeypatch):
         # Each member is under the per-member cap; together they exceed the total.
         monkeypatch.setattr(rules_bundles, "_MAX_TOTAL_BYTES", 100)
