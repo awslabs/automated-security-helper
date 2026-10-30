@@ -118,8 +118,9 @@ Failure modes and known limitations
   together (``scanner_pins.compare_pin_set``), since three pins can be
   satisfiable two at a time and jointly not. The message names the pairs that
   clash, or the whole set, not a minimal explanation of the clash.
-* Only an enabled DECLARED scanner's pin is recorded and compared: its tool does
-  not run, so its pin cannot conflict with another project's. An extra,
+* Only an enabled DECLARED scanner's pin is recorded and compared: a disabled
+  declared scanner's tool does not run, so its pin cannot conflict with another
+  project's. An extra,
   plugin-provided section is read by a reduced name, and which of its spellings
   a plugin's registered name selects is unknown here, so the section the lookup
   reads records its pin whether or not it is on, and a pair the plan cannot
