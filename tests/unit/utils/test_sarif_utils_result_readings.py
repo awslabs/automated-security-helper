@@ -281,6 +281,26 @@ class TestSharedFindingIds:
         ids = shared_finding_ids(Model(), [_result()])
         assert ids == ["f-1"]
 
+    def test_a_row_whose_id_read_raises_vouches_for_no_position(self):
+        """The pairing runs inside the same fallback as the flattening: a row
+        whose ``id`` is a property that raises (``getattr`` with a default
+        swallows only AttributeError) gives None at every position instead of
+        an exception out of the reporter's report()."""
+
+        class Flat:
+            rule_id = "R1"
+            file_path = None
+
+            @property
+            def id(self) -> str:
+                raise RuntimeError("a lazy id that cannot be read")
+
+        class Model:
+            def to_flat_vulnerabilities(self) -> List[Any]:
+                return [Flat(), Flat()]
+
+        assert shared_finding_ids(Model(), [_result(), _result()]) == [None, None]
+
 
 class TestSharedFindingIdsLayering:
     """``shared_ids_by_position`` is a utility: it lives under ``utils`` and

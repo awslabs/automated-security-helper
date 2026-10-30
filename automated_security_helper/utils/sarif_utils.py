@@ -845,10 +845,13 @@ def shared_finding_ids(model: Any, all_results: List[Any]) -> List[str | None]:
     """
     try:
         flat = list(model.to_flat_vulnerabilities())
+        # The pairing is inside the try too: a flattened row whose ``id`` read
+        # raises (a property, a lazy proxy) is a fallback like a failed
+        # flattening, never an exception out of a reporter's report().
+        return shared_ids_by_position(flat, all_results)
     except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
         ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
         return [None] * len(all_results)
-    return shared_ids_by_position(flat, all_results)
 
 
 def _result_message_text(result: Any) -> str | None:
