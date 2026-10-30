@@ -35,7 +35,9 @@ def _refusal(path: str) -> SimpleNamespace:
         failed=False,
         accepted=False,
         scan_incomplete=True,
-        unlisted_members=(),
+        # None, as ConverterRefusal records it: the field is an Optional count of
+        # members, and the record model refuses a tuple.
+        unlisted_members=None,
     )
 
 
