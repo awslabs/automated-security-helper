@@ -1779,6 +1779,50 @@ def test_another_sandbox_mode_is_still_refused_without_tr(run_ash, bare_path):
     assert calls == []
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param([], id="default-stage"),
+        pytest.param(["--build-target", "ci"], id="lower-case-stage"),
+    ],
+)
+def test_a_lower_case_build_target_needs_no_tr(run_ash, bare_path, args):
+    """A stage name with no upper-case letter, the default non-root among them, is
+    its own lower-case: it is taken without tr on PATH, as `--sandbox off` is. Every
+    run lower-cased the stage through tr, so a run without tr was refused for a
+    stage it never had to change."""
+    (bare_path / "tr").unlink()
+    result, calls = run_ash(
+        "--no-build",
+        "--source-dir",
+        "src",
+        *args,
+        OCI_RUNNER=str(bare_path / "recording-runner"),
+    )
+
+    assert result.returncode == 99, result.stdout + result.stderr
+    assert "lower-cased" not in result.stderr, result.stderr
+    assert calls, "the accepted call did not reach the runner"
+
+
+def test_an_upper_case_build_target_without_tr_is_refused(run_ash, bare_path):
+    """A stage with an upper-case letter needs tr to be lower-cased; without it the
+    stage to build is unknown, and the check fails closed with the reason."""
+    (bare_path / "tr").unlink()
+    result, calls = run_ash(
+        "--no-build",
+        "--source-dir",
+        "src",
+        "--build-target",
+        "NON-ROOT",
+        OCI_RUNNER=str(bare_path / "recording-runner"),
+    )
+
+    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    assert "could not be lower-cased" in result.stderr, result.stderr
+    assert calls == []
+
+
 def test_a_failed_build_keeps_its_own_status(run_ash, bare_path):
     """Not a refusal: the build ran and failed, so its status is what is returned."""
     result, calls = run_ash(

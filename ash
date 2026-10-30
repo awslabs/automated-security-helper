@@ -1202,14 +1202,23 @@ esac
 
 # The build reads stage names in any case, so --build-target NON-ROOT is non-root:
 # lower-cased once, here, so every check below and the image tag see that name. A
-# tr that fails or is missing leaves nothing, and an empty stage made the default
+# name with no upper-case letter, the default non-root among them, is its own
+# lower-case and needs no tool, as `--sandbox off` needs none (refuse_sandbox_unless_off):
+# lower-casing every run through tr made a run with tr off PATH a refusal for a
+# stage it never had to change. A name with an upper-case letter goes through tr;
+# a tr that fails or is missing leaves nothing, and an empty stage made the default
 # image name 'automated-security-helper:', which the name check let through; so an
-# empty result is a refusal.
-TARGET_STAGE_LOWER="$(printf '%s' "${TARGET_STAGE}" | tr '[:upper:]' '[:lower:]')"
-if [[ -z "${TARGET_STAGE_LOWER}" ]]; then
-  refuse "--build-target $(shown "${TARGET_STAGE}") could not be lower-cased: tr failed or is not on PATH, so the image stage to build is unknown. Install coreutils (tr) and run again."
-fi
-TARGET_STAGE="${TARGET_STAGE_LOWER}"
+# empty result is a refusal. The class is spelled out, as the check above spells
+# its own, so the match is the same in every locale.
+case "${TARGET_STAGE}" in
+  *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+    TARGET_STAGE_LOWER="$(printf '%s' "${TARGET_STAGE}" | tr '[:upper:]' '[:lower:]')"
+    if [[ -z "${TARGET_STAGE_LOWER}" ]]; then
+      refuse "--build-target $(shown "${TARGET_STAGE}") could not be lower-cased: tr failed or is not on PATH, so the image stage to build is unknown. Install coreutils (tr) and run again."
+    fi
+    TARGET_STAGE="${TARGET_STAGE_LOWER}"
+    ;;
+esac
 
 export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:${TARGET_STAGE}"}
 
