@@ -1,7 +1,6 @@
 """ScannerExecutor — owns scanner task lifecycle for ScanPhase."""
 
 import contextvars
-import sys
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -1109,6 +1108,14 @@ class ScannerExecutor:
                             # in a directory of the run's own, outside the scanned
                             # tree, which the sandbox lets the scanner read and
                             # which is removed when the run ends.
+                            # The exception leaving the scan, if any, recorded for
+                            # the sweep in the finally below, which must not
+                            # replace it. Recorded here rather than read from
+                            # sys.exc_info() in the finally: that call also
+                            # answers an exception an enclosing handler is busy
+                            # with, so a sweep failure after a clean scan would
+                            # have been dropped if this ran inside one.
+                            propagating: Optional[BaseException] = None
                             try:
                                 with (
                                     sandbox_scope(sandbox),
@@ -1213,6 +1220,9 @@ class ScannerExecutor:
                                         for record in records or []
                                         if getattr(record, "absent", False)
                                     ]
+                            except BaseException as exc:
+                                propagating = exc
+                                raise
                             finally:
                                 if sandbox is not None:
                                     # Again after the scan, for anything a process
@@ -1233,8 +1243,7 @@ class ScannerExecutor:
                                     # so a cancel would not end the scan and a failed
                                     # scan would name the sweep. The sweep's error is
                                     # logged, and raised only when nothing else is
-                                    # propagating.
-                                    propagating = sys.exc_info()[1]
+                                    # propagating (``propagating``, recorded above).
                                     try:
                                         sweep_writable(
                                             [sandbox.results_dir],
