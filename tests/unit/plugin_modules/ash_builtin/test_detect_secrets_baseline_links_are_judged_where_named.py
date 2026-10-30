@@ -15,7 +15,9 @@ Now the chosen baseline keeps the path as named (anchored to the source
 directory, no link resolved) beside the resolved path the file is read through.
 A baseline found in the tree whose target is outside the scanned directory is
 not read at all; a baseline the operator names is read and judged by the name
-the operator gave.
+the operator gave AND by the file it resolves to: a name outside the tree that
+is a link into it reads the repository's file, so its settings are the
+repository's too.
 """
 
 from __future__ import annotations
@@ -129,6 +131,69 @@ def test_an_operator_named_in_tree_link_is_judged_where_it_is_named(
     assert reason is not None and "inside the scanned directory" in reason, reason
 
 
+def test_an_outside_name_that_links_into_the_tree_is_judged_by_its_target(
+    tmp_path, monkeypatch
+):
+    """The mirror case: the operator names a path outside the tree, and that
+    path is a link to the tree's own ``.secrets.baseline``. The file read is
+    the repository's, so its settings are the repository's: the verification
+    filter it carries is not loaded. Judged by the name alone, the baseline
+    read as the operator's and the filter stayed."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    in_tree = context.source_dir / ".secrets.baseline"
+    in_tree.write_text(_baseline_text(), encoding="utf-8")
+    link = tmp_path / "ci" / "proj.baseline"
+    link.parent.mkdir(parents=True)
+    try:
+        link.symlink_to(in_tree)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlinks unavailable on this platform: {exc}")
+
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(link))
+        ),
+    )
+
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_named == link
+    assert scanner._baseline_real == Path(os.path.realpath(in_tree))
+    reason = scanner._untrusted_baseline_reason(None)
+    assert reason is not None and "inside the scanned directory" in reason, reason
+    assert not any(
+        item.path == VERIFICATION_FILTER
+        for item in scanner.config.options.scan_settings.filters_used
+    )
+
+
+def test_an_outside_baseline_that_is_no_link_is_the_operators(tmp_path, monkeypatch):
+    """Control for the test above: the same outside name, a regular file, is
+    the operator's, and its verification filter is loaded (offline mode would
+    drop it whatever the source, so it is off here)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    context = _context(tmp_path)
+    outside = tmp_path / "ci" / "proj.baseline"
+    outside.parent.mkdir(parents=True)
+    outside.write_text(_baseline_text(), encoding="utf-8")
+
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(outside))
+        ),
+    )
+
+    assert scanner._baseline_in_use()
+    assert scanner._untrusted_baseline_reason(None) is None
+    assert any(
+        item.path == VERIFICATION_FILTER
+        for item in scanner.config.options.scan_settings.filters_used
+    )
+
+
 def test_a_regular_in_tree_baseline_is_named_where_it_sits(tmp_path, monkeypatch):
     """Control: a baseline that is no link is used, and named by its own path."""
     monkeypatch.chdir(tmp_path)
@@ -145,6 +210,92 @@ def test_a_regular_in_tree_baseline_is_named_where_it_sits(tmp_path, monkeypatch
     ]
     reason = scanner._untrusted_baseline_reason(None)
     assert reason is not None and "inside the scanned directory" in reason, reason
+
+
+def test_an_in_tree_link_elsewhere_in_the_checkout_is_read(
+    tmp_path, monkeypatch, caplog
+):
+    """A monorepo: the scanned directory is ``repo/service``, and its
+    ``.secrets.baseline`` is a link to the checkout's own ``repo/.secrets.baseline``.
+    The target is the repository's file, inside the checkout that holds the
+    scanned directory, so it is read, and judged as the repository's. Tested
+    against the scanned directory alone, the link was refused as pointing
+    outside."""
+    monkeypatch.chdir(tmp_path)
+    checkout = tmp_path / "repo"
+    (checkout / ".git").mkdir(parents=True)
+    shared = checkout / ".secrets.baseline"
+    shared.write_text(_baseline_text(), encoding="utf-8")
+    context = PluginContext(
+        source_dir=checkout / "service",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=get_default_config(),
+    )
+    context.source_dir.mkdir(parents=True)
+    context.output_dir.mkdir(parents=True)
+    link = context.source_dir / ".secrets.baseline"
+    try:
+        link.symlink_to(Path("..") / ".secrets.baseline")
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlinks unavailable on this platform: {exc}")
+
+    with caplog.at_level(logging.WARNING):
+        scanner = DetectSecretsScanner(
+            context=context, config=DetectSecretsScannerConfig()
+        )
+
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_named == link
+    assert scanner._baseline_real == Path(os.path.realpath(shared))
+    assert not any(
+        "a link to a file outside" in record.message for record in caplog.records
+    ), [record.message for record in caplog.records]
+    reason = scanner._untrusted_baseline_reason(None)
+    assert reason is not None, reason
+    # The repository's settings: the link's verification filter is not loaded.
+    assert not any(
+        item.path == VERIFICATION_FILTER
+        for item in scanner.config.options.scan_settings.filters_used
+    )
+
+
+def test_the_named_path_is_absolute_and_normalized(tmp_path, monkeypatch):
+    """The named path is compared with other paths by the gate and the trust
+    rule, so it is made absolute and normalized (``..`` folded) with no link
+    resolved. A ``baseline_file`` spelled through a ``..`` part names the
+    in-tree file; a relative source directory, which a library caller can
+    pass, yields an absolute name."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    in_tree = context.source_dir / ".secrets.baseline"
+    in_tree.write_text(_baseline_text(), encoding="utf-8")
+
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(
+                baseline_file="sub/../.secrets.baseline"
+            )
+        ),
+    )
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_named == in_tree
+    assert ".." not in scanner._baseline_named.parts
+
+    relative = PluginContext(
+        source_dir=Path("src"),
+        output_dir=Path("out"),
+        work_dir=Path("out") / "converted",
+        config=get_default_config(),
+    )
+    scanner = DetectSecretsScanner(
+        context=relative, config=DetectSecretsScannerConfig()
+    )
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_named is not None
+    assert scanner._baseline_named.is_absolute()
+    assert scanner._baseline_named == Path.cwd() / "src" / ".secrets.baseline"
 
 
 def test_a_client_delivered_link_is_refused_by_its_name(tmp_path, monkeypatch):
