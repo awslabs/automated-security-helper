@@ -16,6 +16,7 @@
   target's record carried no end time.
 - A run the subprocess layer flagged was graded on its exit code and file.
 - ``errors`` and ``output`` were not reset per target.
+- A target refused before snyk started kept the previous target's end time.
 """
 
 from __future__ import annotations
@@ -170,6 +171,34 @@ def test_control_exit_three_with_every_file_copied_evaluated_nothing(context):
     assert result is True
     assert scanner.targets_attempted == 0
     assert scanner.targets_failed == 0
+
+
+# --- a refused target's end time -------------------------------------------------------
+
+
+def test_a_refused_target_records_its_own_end_time(context):
+    """The refusals ran ahead of the handler that resets end_time for a failed run,
+    so a converted target refused after the source target ran kept the source's
+    end time: an end before its start."""
+    scanner, _ = _scan(
+        context, {"stdout": "", "stderr": "", "returncode": 0}, SNYK_SARIF
+    )
+    after_the_source = scanner.end_time
+    assert after_the_source is not None
+
+    def refuse(self, target):
+        raise ScannerError("refused for the test")
+
+    with (
+        patch.object(
+            SnykCodeScanner, "_refuse_links_leaving", autospec=True, side_effect=refuse
+        ),
+        pytest.raises(ScannerError, match="refused for the test"),
+    ):
+        scanner.scan(target=context.work_dir, target_type="converted")
+
+    assert scanner.end_time is not None
+    assert scanner.end_time > after_the_source
 
 
 # --- the results file and the record --------------------------------------------------

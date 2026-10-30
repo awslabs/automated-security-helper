@@ -657,9 +657,18 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # target refused before the tool starts reports no exit code, not the 0
         # set above. The refusals below are the first such path.
         self.exit_code = None
-        self._refuse_output_dir_inside(Path(target))
-        self._refuse_links_leaving(Path(target))
-        self._refuse_ignored_files(Path(target), global_ignore_paths)
+        try:
+            self._refuse_output_dir_inside(Path(target))
+            self._refuse_links_leaving(Path(target))
+            self._refuse_ignored_files(Path(target), global_ignore_paths)
+        except ScannerError:
+            # The run is over for this target as much as for one that failed: the
+            # executor records end_time, and one left from the previous target
+            # would give this one an end before its start. These refusals ran
+            # ahead of the handler below that resets it, so a converted target
+            # refused after the source target ran kept the source's end time.
+            self.end_time = datetime.now(timezone.utc)
+            raise
 
         try:
             # Undone in the finally: the copy snyk tests for the source target, and
