@@ -386,6 +386,36 @@ def test_a_link_to_a_file_the_scan_set_holds_is_tested_under_that_name(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+def test_a_link_to_a_file_an_ignore_path_keeps_out_of_the_copy_is_unevaluated(
+    tmp_path, tested
+):
+    """The target is in the scan set, but the operator's ignore path keeps it out
+    of the copy, so the link's content is tested under no name: recorded, as a
+    link to a file outside the set is. Judged against what the copy holds, not
+    against the set."""
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    context = _context(tmp_path)
+    _write(context.source_dir, "app.js")
+    _write(context.source_dir, "vendor/lib.js")
+    (context.source_dir / "alias.js").symlink_to(
+        context.source_dir / "vendor" / "lib.js"
+    )
+    scanner = SnykCodeScanner(context=context, config=SnykCodeScannerConfig())
+
+    scanner.scan(
+        target=Path(context.source_dir),
+        target_type="source",
+        global_ignore_paths=[IgnorePathWithReason(path="vendor/lib.js", reason="t")],
+    )
+
+    assert tested["files"] == ["app.js"], tested
+    assert scanner.unevaluated_targets == ["alias.js"]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
 def test_a_run_with_an_in_tree_link_to_a_copied_file_is_graded_passed(tmp_path, tested):
     context = _context(tmp_path)
     _write(context.source_dir, "app.js")

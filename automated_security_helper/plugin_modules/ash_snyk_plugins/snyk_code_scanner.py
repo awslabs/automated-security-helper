@@ -1031,31 +1031,24 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         # the ignore files as the config says, and the workspace's output directory.
         # The switch is read from the config at the call, the shape every scan-set
         # consumer passes (tests/unit/utils/test_scan_set_ignore_file_switch.py).
-        # Read whole before the copy: a link to a file the set holds is tested
-        # under that file's own name (_aliased_in_scan_set), whichever comes first.
-        # Only the line ending a cached list leaves: "a.js " is its own file, and
-        # so is a name that ends in a newline (_scan_set_name).
-        names = [
-            Path(_scan_set_name(name))
-            for name in scan_set(
-                source=str(root),
-                output=str(self.context.output_dir),
-                honor_ignore_files=honors_ignore_files(
-                    getattr(self.context, "config", None)
-                ),
-                run_id=getattr(self.context, "run_id", None),
-                workspace_output_dir=getattr(
-                    self.context, "workspace_output_dir", None
-                ),
-            )
-        ]
-        in_scan_set: Set[str] = set()
-        for path in names:
-            try:
-                in_scan_set.add(path.relative_to(root).as_posix())
-            except ValueError:
-                continue
-        for path in names:
+        # A link open_in_scanned_tree refuses is judged after the loop, against the
+        # files the copy actually holds (copied_names): a link to a copied file is
+        # tested under that file's own name (_aliased_in_copy); a link to a file an
+        # ignore path or the .gitignore skip left out of the copy is not.
+        copied_names: Set[str] = set()
+        deferred_links: List[tuple[Path, Path, str]] = []
+        for name in scan_set(
+            source=str(root),
+            output=str(self.context.output_dir),
+            honor_ignore_files=honors_ignore_files(
+                getattr(self.context, "config", None)
+            ),
+            run_id=getattr(self.context, "run_id", None),
+            workspace_output_dir=getattr(self.context, "workspace_output_dir", None),
+        ):
+            # Only the line ending a cached list leaves: "a.js " is its own file,
+            # and so is a name that ends in a newline (_scan_set_name).
+            path = Path(_scan_set_name(name))
             try:
                 relative = path.relative_to(root)
             except ValueError:
@@ -1089,21 +1082,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             try:
                 source = open_in_scanned_tree(path, root)
             except TreeInputRefused as refusal:
-                tested_as = _aliased_in_scan_set(path, root, in_scan_set)
-                if tested_as is not None:
-                    # A link to a file the scan set holds: not copied (a link is
-                    # never followed into the copy), but snyk evaluates its content
-                    # under the target's own name, so it is not an unevaluated
-                    # target and does not count as refused.
-                    self._plugin_log(
-                        f"{relative.as_posix()} not copied for Snyk: "
-                        f"{refusal.reason}; it is tested as {tested_as}",
-                        target_type="source",
-                        level=logging.DEBUG,
-                    )
-                    continue
-                _not_copied(relative.as_posix(), refusal.reason)
-                refused += 1
+                # Judged after the loop: the file this may be a link to can come
+                # later in the set, and whether it was copied is what decides.
+                deferred_links.append((path, relative, refusal.reason))
                 continue
             except OSError as error:
                 _not_copied(relative.as_posix(), error)
@@ -1126,6 +1107,24 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 refused += 1
                 continue
             copied += 1
+            copied_names.add(relative.as_posix())
+
+        for path, relative, reason in deferred_links:
+            tested_as = _aliased_in_copy(path, root, copied_names)
+            if tested_as is not None:
+                # A link to a file the copy holds: not copied itself (a link is
+                # never followed into the copy), but snyk evaluates its content
+                # under the target's own name, so it is not an unevaluated target
+                # and does not count as refused.
+                self._plugin_log(
+                    f"{relative.as_posix()} not copied for Snyk: {reason}; it is "
+                    f"tested as {tested_as}",
+                    target_type="source",
+                    level=logging.DEBUG,
+                )
+                continue
+            _not_copied(relative.as_posix(), reason)
+            refused += 1
 
         refused_reasons = (
             "a symlink, a file with a second hard link, a path outside the scanned "
@@ -1174,17 +1173,18 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         return staged
 
 
-def _aliased_in_scan_set(path: Path, root: Path, in_scan_set: Set[str]) -> str | None:
-    """The scan-set name that *path*, a link in the tree, resolves to; else None.
+def _aliased_in_copy(path: Path, root: Path, copied: Set[str]) -> str | None:
+    """The copied file's name that *path*, a link in the tree, resolves to; else None.
 
-    *in_scan_set* holds the set's names relative to *root*. A file is an alias
-    only when a link on its path (the file itself, or a directory between it and
-    the root) resolves, as the filesystem resolves it (``os.path.realpath``), to a
-    regular file inside *root* whose name the set holds: snyk tests that content
-    under the target's name. A file refused for another reason (a second hard
-    link, not a regular file) resolves to its own name and is no alias; a link
-    whose target is outside the tree, or inside it under an ignore path, resolves
-    to a name the set does not hold and is no alias either.
+    *copied* holds the names, relative to *root*, of the files the copy holds. A
+    file is an alias only when a link on its path (the file itself, or a directory
+    between it and the root) resolves, as the filesystem resolves it
+    (``os.path.realpath``), to a regular file inside *root* that was copied: snyk
+    tests that content under the target's name. A file refused for another reason
+    (a second hard link, not a regular file) resolves to its own name and is no
+    alias; a link whose target is outside the tree, or inside it but left out of
+    the copy (not in the scan set, under an ignore path, the .gitignore the copy
+    leaves out), resolves to a name the copy does not hold and is no alias either.
     """
     try:
         own = path.relative_to(root)
@@ -1195,7 +1195,7 @@ def _aliased_in_scan_set(path: Path, root: Path, in_scan_set: Set[str]) -> str |
     if target == own:
         return None
     name = target.as_posix()
-    if name not in in_scan_set:
+    if name not in copied:
         return None
     try:
         if not resolved.is_file():
