@@ -172,12 +172,16 @@ class TestWindowsForms:
     def test_a_unc_rooted_candidate_is_never_resolved(self, monkeypatch):
         """``file://host/...`` reads as ``//host/...``; resolving that on Windows
         opens a handle on the host's share, so the fallback compares it as
-        spelled and stops. A local rooted candidate still reaches the resolve."""
+        spelled and stops. A local rooted candidate still reaches the resolve.
+
+        Receivers are recorded as POSIX text: on Windows ``str()`` of the path
+        the product hands to ``Path.resolve`` spells backslashes, which is the
+        path's own spelling, not the product's."""
         resolved: list[str] = []
         original = Path.resolve
 
         def recording_resolve(self, *args, **kwargs):
-            resolved.append(str(self))
+            resolved.append(self.as_posix())
             return original(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "resolve", recording_resolve)
@@ -194,7 +198,9 @@ class TestWindowsForms:
         original = Path.resolve
 
         def recording_resolve(self, *args, **kwargs):
-            resolved.append(str(self))
+            # POSIX text on every OS: a Windows UNC path would otherwise spell
+            # itself ``\\host\...`` and slip past the ``//`` check below.
+            resolved.append(self.as_posix())
             return original(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "resolve", recording_resolve)
