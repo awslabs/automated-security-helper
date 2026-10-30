@@ -409,6 +409,35 @@ def _is_file_link_leaving_the_tree(full_path: str, root: str) -> bool:
     return os.path.islink(full_path) and not resolves_inside(full_path, root)
 
 
+def _names_of_links_in(directory: str) -> Optional[Set[str]]:
+    """The names of the symlinks directly in *directory*, from one listing of it.
+
+    ``entry.is_symlink()`` answers from the listing itself, where
+    ``os.path.islink`` runs one ``lstat`` per file: a pruned ``node_modules`` holds
+    hundreds of thousands, on file systems where each call is slow. None when the
+    directory cannot be listed again, and the caller asks of each file instead.
+    """
+    try:
+        with os.scandir(directory) as entries:
+            return {entry.name for entry in entries if entry.is_symlink()}
+    except OSError:
+        return None
+
+
+def _file_link_leaves_the_tree(
+    directory: str, name: str, links: Optional[Set[str]], root: str
+) -> bool:
+    """:func:`_is_file_link_leaving_the_tree` for *name* in *directory*, given its *links*.
+
+    *links* is :func:`_names_of_links_in` for *directory*: a name not in it is not a
+    symlink and costs no system call; None asks of the file itself.
+    """
+    full_path = os.path.join(directory, name)
+    if links is None:
+        return _is_file_link_leaving_the_tree(full_path, root)
+    return name in links and not resolves_inside(full_path, root)
+
+
 def _left_out_as_a_link_leaving_the_tree(
     full_path: str, root: str, links_not_scanned: Optional[List[str]]
 ) -> bool:
@@ -744,11 +773,12 @@ def _count_files_ash_would_scan(
                 continue
             kept_dirs.append(d)
         dirs[:] = kept_dirs
+        links = _names_of_links_in(root)
         count += sum(
             1
             for name in files
             if not _excluded_by_ash_itself(os.path.join(root, name), parts + (name,))
-            and not _is_file_link_leaving_the_tree(os.path.join(root, name), source)
+            and not _file_link_leaves_the_tree(root, name, links, source)
         )
     return count
 

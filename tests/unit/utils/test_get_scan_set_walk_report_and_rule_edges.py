@@ -213,6 +213,27 @@ class TestOutputDirectoriesUnderAPrunedParent:
 
         assert pruned == {os.path.join(str(root), ".gitignore"): 2}, pruned
 
+    def test_a_regular_file_in_it_costs_no_call_to_islink(self, tmp_path):
+        """Whether a file is a link comes from the listing of its directory, so a
+        pruned ``node_modules`` of regular files costs no ``lstat`` per file."""
+        files = {f"build/f{number}.txt": "x\n" for number in range(5)}
+        root = _build(tmp_path / "src", {".gitignore": "build/\n", **files})
+        asked = []
+        real_islink = os.path.islink
+
+        def recording(path):
+            asked.append(os.fspath(path))
+            return real_islink(path)
+
+        pruned: Dict[str, int] = {}
+        with patch.object(os.path, "islink", recording):
+            gss._collect_ignorefiles_and_all_files(str(root), pruned_counts=pruned)
+
+        assert pruned == {os.path.join(str(root), ".gitignore"): 5}, pruned
+        assert not [path for path in asked if os.path.basename(path).startswith("f")], (
+            asked
+        )
+
 
 class TestCommittedFilesInASkippedOutputDirectory:
     def test_they_are_in_the_scan_set_and_not_counted_as_left_out(self, tmp_path):
