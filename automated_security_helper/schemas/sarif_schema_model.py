@@ -2970,17 +2970,32 @@ def _detach_run_scoped_references(
 
     aggregate_bases = aggregate.originalUriBaseIds or {}
 
+    def field_defaults(row: object) -> Dict[str, object]:
+        """Each optional field's default on the row's model, by field name."""
+        defaults: Dict[str, object] = {}
+        for name, info in type(row).model_fields.items():
+            if not info.is_required():
+                defaults[name] = info.get_default(call_default_factory=True)
+        return defaults
+
     def fill_from_table(entry: Dict, table: Sequence) -> None:
         """Merge the incoming run's cached row at ``entry["index"]`` under the
-        entry's own fields. The dumped entry carries every field, unset ones as
-        None, so a None is "not set" here; a row the index does not reach (the
-        scanner wrote a dangling index, or no table) adds nothing."""
+        entry's own fields. The dumped entry carries every field, an unset one
+        as its default: None for most, but a thread flow step's ``kinds`` and
+        ``taxa`` as ``[]``, its ``executionOrder`` as -1, its ``importance`` as
+        "important", an address's ``absoluteAddress`` as -1. A value equal to
+        the field's default is "not set" here and takes the row's; a row the
+        index does not reach (the scanner wrote a dangling index, or no table)
+        adds nothing."""
         index = entry.get("index")
         if not isinstance(index, int) or not 0 <= index < len(table):
             return
-        cached = table[index].model_dump(exclude_none=True, exclude={"index"})
+        row = table[index]
+        cached = row.model_dump(exclude_none=True, exclude={"index"})
+        defaults = field_defaults(row)
         for key, value in cached.items():
-            if entry.get(key) is None:
+            current = entry.get(key)
+            if current is None or (key in defaults and current == defaults[key]):
                 entry[key] = value
 
     def definition(bases: Dict, base_id: str) -> Optional[Dict]:

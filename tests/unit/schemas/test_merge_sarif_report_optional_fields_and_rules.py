@@ -544,6 +544,7 @@ def _run_with_tables(
     steps=None,
     extensions=None,
     web_requests=None,
+    addresses=None,
 ) -> Run:
     """A run whose own tables the folded results used to point into."""
     fields: dict = {"tool": {"driver": {"name": driver}}, "results": results}
@@ -557,6 +558,8 @@ def _run_with_tables(
         fields["threadFlowLocations"] = steps
     if web_requests is not None:
         fields["webRequests"] = web_requests
+    if addresses is not None:
+        fields["addresses"] = addresses
     if bases is not None:
         # A plain string is the base's uri; a dict is the whole definition, for
         # a base that sits on another (``{"uri": "src/", "uriBaseId": "REPOROOT"}``).
@@ -941,6 +944,120 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         artifact = step.location.physicalLocation.root.artifactLocation
         assert (artifact.uri, step.module) == ("src/step.py", "m")
         assert step.index in (None, -1)
+
+    def test_an_index_only_step_takes_the_rows_defaulted_fields_too(self):
+        """A step's ``kinds`` and ``taxa`` default to ``[]``, its ``executionOrder``
+        to -1 and its ``importance`` to "important", and the dumped step carries
+        those defaults as values, not None; a fill that read only None as unset
+        left the row's kinds, taxa, order and importance behind."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            codeFlows=[
+                                {"threadFlows": [{"locations": [{"index": 0}]}]}
+                            ],
+                        )
+                    ],
+                    steps=[
+                        {
+                            "module": "m",
+                            "kinds": ["call", "taint"],
+                            "taxa": [{"id": "T-9"}],
+                            "executionOrder": 3,
+                            "importance": "essential",
+                        }
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        step = aggregated.runs[0].results[0].codeFlows[0].threadFlows[0].locations[0]
+        assert step.module == "m"
+        assert step.kinds == ["call", "taint"]
+        assert [taxon.root.id for taxon in step.taxa] == ["T-9"]
+        assert step.executionOrder == 3
+        assert step.importance == "essential"
+
+    def test_an_inline_steps_own_values_win_over_the_row(self):
+        """The control: a value the step states itself is kept, default or not
+        in shape, and only the fields it leaves at their defaults take the row's."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            codeFlows=[
+                                {
+                                    "threadFlows": [
+                                        {
+                                            "locations": [
+                                                {
+                                                    "index": 0,
+                                                    "kinds": ["return"],
+                                                    "executionOrder": 5,
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ],
+                        )
+                    ],
+                    steps=[
+                        {
+                            "module": "m",
+                            "kinds": ["call"],
+                            "executionOrder": 3,
+                            "importance": "unimportant",
+                        }
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        step = aggregated.runs[0].results[0].codeFlows[0].threadFlows[0].locations[0]
+        assert (step.kinds, step.executionOrder) == (["return"], 5)
+        assert (step.module, step.importance) == ("m", "unimportant")
+
+    def test_an_index_only_address_takes_the_rows_absolute_address(self):
+        """``absoluteAddress`` defaults to -1, so the dumped address carried -1 as
+        a value and a None-only fill left the row's offset behind while taking
+        its name."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            locations=[{"physicalLocation": {"address": {"index": 0}}}],
+                        )
+                    ],
+                    addresses=[{"absoluteAddress": 4096, "name": ".text"}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        address = (
+            aggregated.runs[0].results[0].locations[0].physicalLocation.root.address
+        )
+        assert (address.absoluteAddress, address.name) == (4096, ".text")
+        assert address.index in (None, -1)
 
     def test_a_cached_steps_artifact_index_is_resolved_too(self):
         """The row read in can itself name its file by index into run.artifacts;
