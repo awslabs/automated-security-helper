@@ -304,7 +304,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
     # Whether the chosen baseline came from the baseline_file option rather than
     # from the tree's own ``.secrets.baseline`` locations. One of the two facts
-    # that decide whether the baseline's entries may leave the report
+    # that decide whose record of known candidates the baseline is
     # (_baseline_entries_trusted).
     _baseline_from_option: bool = PrivateAttr(default=False)
 
@@ -531,14 +531,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """Refuse a baseline that parses as JSON but is not a baseline.
 
         ``SecretsCollection.load_from_baseline`` reads ``document["results"]``
-        as a mapping of filename to a list of entries and raises KeyError or
-        TypeError on anything else, which would fail every scan with the
-        baseline in use. The message names the shape, never the content: a
-        baseline's entries can hold a secret.
+        as a mapping of filename to a list of entries, each an object with a
+        string ``type`` and ``hashed_secret`` (``PotentialSecret.load_secret_from_dict``
+        reads both by key), and raises KeyError or TypeError on anything else,
+        which would fail every scan with the baseline in use. The scanner's own
+        reading of the entries (``_baseline_known``) needs the same two fields.
+        The message names the shape, never the content: a baseline's entries
+        can hold a secret.
 
         Raises:
-            ValueError: the document is not an object, or its ``results`` is
-                not a mapping of lists.
+            ValueError: the document is not an object, its ``results`` is not a
+                mapping of lists, or an entry is not an object with a string
+                ``type`` and ``hashed_secret``.
         """
         if not isinstance(document, dict):
             raise ValueError("the baseline is not a JSON object")
@@ -548,6 +552,19 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         for entries in results.values():
             if not isinstance(entries, list):
                 raise ValueError("a 'results' entry of the baseline is not a list")
+            for item in entries:
+                if not isinstance(item, dict):
+                    raise ValueError(
+                        "a 'results' entry of the baseline holds an item that is "
+                        "not a JSON object"
+                    )
+                if not isinstance(item.get("type"), str) or not isinstance(
+                    item.get("hashed_secret"), str
+                ):
+                    raise ValueError(
+                        "a 'results' entry of the baseline holds an item without "
+                        "a string 'type' and 'hashed_secret'"
+                    )
 
     def _process_config_options(self):
         # Check detect-secrets baseline path. The second element of each pair
@@ -594,11 +611,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             refused_derived_product,
             resolved_path,
         )
-        from automated_security_helper.config.sandbox_grants import is_within
 
         context_config = getattr(self.context, "config", None)
         source_dir = Path(getattr(self.context, "source_dir", None) or ".")
-        source_real = Path(os.path.realpath(source_dir))
+        # The checkout the scanned directory sits in (the workspace root in
+        # workspace mode), the root the settings-trust rule judges by
+        # (_untrusted_baseline_reason); the scanned directory itself when the
+        # config records none.
+        checkout_root = getattr(context_config, "_scanned_root", None) or source_dir
 
         # Look through each baseline file path to see if it exists and configure
         # the scan settings according to the first baseline file found. Each
@@ -610,8 +630,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # (``named``): a ``.secrets.baseline`` in the tree that is a link to a
         # file outside it was judged by its target's location, which made the
         # repository's settings, its verification filter included, read as the
-        # operator's. The as-given spelling is kept for the redacted text and
-        # for the operator-written comparison.
+        # operator's. ``named`` is made absolute and normalized (``..`` parts
+        # folded, still no link resolved): a library caller can pass a relative
+        # source directory, and the gate and the trust rule compare paths, so a
+        # relative or ``..``-bearing name compared as text and judged wrong. The
+        # as-given spelling is kept for the redacted text and for the
+        # operator-written comparison.
         chosen = None
         chosen_named = None
         chosen_from_option = False
@@ -622,6 +646,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             named = Path(os.path.expanduser(str(baseline_path)))
             if not named.is_absolute():
                 named = source_dir / named
+            named = Path(os.path.normpath(os.path.abspath(named)))
             ASH_LOGGER.debug(
                 text_without_values(
                     f"Checking for detect-secrets config @ {baseline_path}",
@@ -629,19 +654,27 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
             )
             if resolved_baseline.exists():
-                if not from_option and not is_within(resolved_baseline, source_real):
+                if (
+                    not from_option
+                    and scanned_checkout_reason(resolved_baseline, checkout_root)
+                    is None
+                ):
                     # A baseline found in the tree is the repository's file,
                     # and the repository cannot need it to point outside its
                     # own checkout. Reading the target would read a file the
                     # repository chose anywhere on the scanning host, under
                     # the repository's own settings. The operator names such
-                    # a file with baseline_file.
+                    # a file with baseline_file. A target elsewhere in the
+                    # checkout that holds the scanned directory (a monorepo's
+                    # ``service/.secrets.baseline -> ../.secrets.baseline``) is
+                    # read: it is the repository's own file, and the trust rule
+                    # judges it as such, so reading it grants nothing.
                     ASH_LOGGER.warning(
                         text_without_values(
                             f"Not reading the detect-secrets baseline "
                             f"{named.as_posix()} found in the scanned tree: it is "
-                            "a link to a file outside the scanned directory. "
-                            "Name the file with "
+                            "a link to a file outside the scanned directory and "
+                            "the git checkout that holds it. Name the file with "
                             "scanners.detect-secrets.options.baseline_file to "
                             "use it.",
                             values,
@@ -1023,14 +1056,20 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if not self._baseline_in_use():
             return None
         baseline = self._baseline_file_path()
-        # Judged where it was named, not where it points: an in-tree
-        # ``.secrets.baseline`` that is a link out of the tree is the
-        # repository's (_baseline_named). The resolved path is the fallback
-        # for a baseline no selection pass recorded.
+        # Judged by both the path as named and the file it resolves to; either
+        # inside the checkout makes the baseline the repository's. An in-tree
+        # ``.secrets.baseline`` that is a link out of the tree is named inside
+        # it (_baseline_named); a path the operator names outside the tree
+        # that is a link INTO it resolves inside it, and the file read is the
+        # repository's whatever the name. The named path alone judged only the
+        # first case, so the second read the repository's settings, its
+        # verification filter included, as the operator's.
         judged = self._baseline_named if self._baseline_named is not None else baseline
         config = getattr(self.context, "config", None)
         root = getattr(config, "_scanned_root", None) or self.context.source_dir
         why = scanned_checkout_reason(Path(judged), root)
+        if why is None and Path(judged) != Path(baseline):
+            why = scanned_checkout_reason(Path(baseline), root)
         if why is not None:
             return f"the baseline {Path(baseline).as_posix()} is used, and {why}"
         if record is None or same_baseline(
@@ -1043,21 +1082,23 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         )
 
     def _baseline_entries_trusted(self) -> bool:
-        """Whether the baseline in use may take the candidates it lists out of the report.
+        """Whether the baseline in use is the operator's as a record of known candidates.
 
         A baseline's ``results`` are a suppression surface: every candidate it
-        lists by file, hash and type is one the report will not show. That is
-        the operator's call to make, so the entries are honored as removals only
-        when the operator named the file (``baseline_file`` written by the
-        operator's own settings, ``--config-overrides`` included) or when the
-        file lies outside the scanned tree and the settings-trust rule
-        (``_untrusted_baseline_reason``) finds it the operator's. A baseline the
-        scanned repository controls, its own in-tree ``.secrets.baseline`` or a
-        ``baseline_file`` that a config the operator did not write names, is not
-        trusted for that: a repository could otherwise hide a secret still in
-        its files by listing the hash in a file it commits. Its known entries
-        stay in the report, each marked suppressed with the baseline named as
-        the reason, so the count is visible and the finding can be audited.
+        lists by file, hash and type is one the report marks suppressed. The
+        suppression names whose file made the call: the operator's when the
+        operator named the file (``baseline_file`` written by the operator's own
+        settings, ``--config-overrides`` included) or when the file lies outside
+        the scanned tree and the settings-trust rule
+        (``_untrusted_baseline_reason``) finds it the operator's; otherwise a
+        file the scanned repository controls, its own in-tree
+        ``.secrets.baseline`` or a ``baseline_file`` that a config the operator
+        did not write names. Either way the known candidates stay in the report
+        as suppressed findings, so the count is visible and each can be
+        audited, and an entry the baseline audits as a real secret is reported
+        as an ordinary finding (see ``scan``): a repository cannot hide a secret
+        still in its files by listing the hash in a file it commits, and a
+        confirmed secret is not cleared by the record of it.
         """
         if not self._baseline_in_use():
             return False
@@ -1675,22 +1716,21 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
     def _baseline_known(
         self, baseline: Optional[Dict[str, Any]], scan_root: Path
-    ) -> Set[Tuple[str, Any, Any]]:
-        """The candidates the baseline marks known: (URI, hashed secret, type).
+    ) -> Dict[Tuple[str, Any, Any], bool]:
+        """The candidates the baseline marks known, each with its audit result.
 
-        A baseline is the record of the findings its author has seen: the ones
-        audited as real and kept, the ones audited as false positives, and the
-        ones whose secret has since left the file. ``detect-secrets`` reports
-        against a baseline only what the baseline does not hold, by filename,
-        hash and type (``PotentialSecret.fields_to_compare``; line numbers
-        change and are not compared). The worker's collection starts from the
-        baseline's entries and adds what the scan found, so what comes back
-        holds every baseline entry under the baseline's spelling of its file
-        and every scanned secret under the scan's, which reported each entry
-        once as itself and a secret still in its file a second time. Each key
-        is the URI ``_finding_uri`` gives the file, so the two spellings meet.
+        Keyed by (URI, hashed secret, type), the fields ``detect-secrets``
+        compares a scanned candidate against a baseline by
+        (``PotentialSecret.fields_to_compare``; line numbers change and are not
+        compared). The value is whether the baseline's author audited the entry
+        as a real secret (``is_secret: true``); False for one audited as a false
+        positive or not audited. A baseline is the record of the findings its
+        author has seen, so what "known" does to a reported candidate depends on
+        that audit and on whose baseline it is (see ``scan``). Each key is the
+        URI ``_finding_uri`` gives the file, so the baseline's spelling of a
+        path and the scan's meet.
         """
-        known: Set[Tuple[str, Any, Any]] = set()
+        known: Dict[Tuple[str, Any, Any], bool] = {}
         results = (baseline or {}).get("results")
         if not isinstance(results, dict):
             return known
@@ -1699,8 +1739,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 continue
             uri = self._finding_uri(str(filename).replace("\\", "/"), scan_root)
             for entry in entries:
-                if isinstance(entry, dict):
-                    known.add((uri, entry.get("hashed_secret"), entry.get("type")))
+                if not isinstance(entry, dict):
+                    continue
+                key = (uri, entry.get("hashed_secret"), entry.get("type"))
+                # Two entries for one key (one audited real, one not) read as
+                # audited real: the stricter reading is the one to report.
+                known[key] = known.get(key, False) or entry.get("is_secret") is True
         return known
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
@@ -1846,32 +1890,30 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             results_file.parent.mkdir(exist_ok=True, parents=True)
             self._resolve_arguments(target=target, results_file=target_results_dir)
 
-            # The baseline is read here and handed to the worker as data rather than
-            # as a path: the worker may run in a sandbox that cannot see a baseline
-            # outside the source tree. It is also loaded here, which only parses it.
-            # A scan killed at its timeout does not fall back to these entries: it
-            # raises.
+            # The baseline is the copy _process_config_options parsed from the
+            # checked path (_read_baseline); the file is never reopened, so a
+            # path swapped for a link after the check is not followed. It is read
+            # here, not by the worker, which may run in a sandbox that cannot see
+            # a baseline outside the source tree.
             baseline_document = None
             if (
                 target_type == "source"
                 and self._baseline_in_use()
                 and self._baseline_document is not None
             ):
-                # The copy _process_config_options parsed from the checked path
-                # (_read_baseline); the file is never reopened, so a path swapped
-                # for a link after the check is not followed.
                 baseline_document = self._baseline_document
-                self._secrets_collection = secrets_collection_cls.load_from_baseline(
-                    baseline=baseline_document,
-                )
-            # Whether the baseline's listed candidates may leave the report
-            # (_baseline_entries_trusted). When they may not, the worker's
-            # collection is not seeded with them: an entry whose secret has since
-            # left its file is then not reported at a stale line, and an entry
-            # whose secret the scan still finds is reported once, at the scan's
-            # own line, marked suppressed below.
+            # The worker's collection is never seeded with the baseline's
+            # entries. Seeded, it came back holding every entry under the
+            # baseline's spelling of its file beside every scanned secret under
+            # the scan's, so a secret still in its file was reported twice and
+            # an entry whose secret had left the file was reported at a stale
+            # line (at line 0 for a --slim baseline's entry, which the SARIF
+            # model refuses). The scan's own findings are the one copy; what the
+            # baseline knows about each is applied to it below (_baseline_known).
+            # Whose baseline it is (_baseline_entries_trusted) decides the
+            # wording of the suppression a known candidate carries.
             known_entries_trusted = self._baseline_entries_trusted()
-            worker_baseline = baseline_document if known_entries_trusted else None
+            worker_baseline = None
 
             # ``root`` has to be set for every scan, not only for the baseline
             # case above. SecretsCollection.scan_files() has two branches: a
@@ -1951,8 +1993,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # and the file is the record of the findings, not a finding. The
             # scan set holds an in-tree baseline like any other file, so it is
             # removed here, under the name it was chosen by and the name it
-            # resolves to.
-            if target_type == "source" and self._baseline_in_use():
+            # resolves to. Only a baseline the scan has (the parsed document):
+            # a chosen file that turned out malformed is not in use
+            # (_process_config_options fell back to the default settings), so
+            # it is scanned like any other file. Gated on the baseline being
+            # chosen, a repository could put anything in a file of that name
+            # and detect-secrets never read it.
+            if target_type == "source" and self._baseline_document is not None:
                 baseline_names = {
                     self._root_relative(str(path), scan_root)
                     for path in (self._baseline_named, self._baseline_real)
@@ -2159,47 +2206,69 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 target_type=target_type,
             )
 
-            # Populate the Results list with findings from the scan. A candidate
-            # the baseline holds is known (_baseline_known). When the baseline is
-            # the operator's (_baseline_entries_trusted) a known candidate leaves
-            # the report: the baseline's own entries, which the collection
-            # carries, and a secret still in the file the baseline recorded it
-            # in. Nothing is reported at a line the baseline alone names: an
-            # entry without a line number (a --slim baseline's) has none, and a
-            # SARIF region starts at line 1 or later. When the baseline is the
-            # scanned repository's, a known candidate the scan found stays in
-            # the report marked suppressed, with the baseline as the reason, so
-            # a repository cannot hide a secret still in its files by listing it.
+            # Populate the Results list with findings from the scan. Every
+            # candidate the scan found is reported once, at the scan's own line;
+            # nothing is reported at a line the baseline alone names. A
+            # candidate the baseline holds is known (_baseline_known), and what
+            # that does depends on the baseline's own audit of it:
+            #
+            # * an entry audited as a real secret (is_secret: true) is a
+            #   confirmed secret still in the file, so it is reported as an
+            #   ordinary finding, whoever's baseline lists it: a baseline
+            #   records such a finding, it does not clear it;
+            # * any other known candidate stays in the report marked
+            #   suppressed, with the baseline as the reason, so it is counted
+            #   and can be audited rather than removed from the report. The
+            #   wording says whose baseline it is: the operator's
+            #   (_baseline_entries_trusted), or a file the scanned repository
+            #   controls, which cannot hide a secret still in its files by
+            #   listing the hash. Tune findings with ASH suppressions, which are
+            #   reported and counted, as the gitleaks scanner says of the
+            #   tree's own ignore file.
             known = self._baseline_known(baseline_document, scan_root)
             baseline_suppression: Optional[Suppression] = None
-            if known and not known_entries_trusted:
+            if known:
                 listed_in = (
                     self._baseline_named
                     if self._baseline_named is not None
                     else self._baseline_file_path()
                 )
-                baseline_suppression = Suppression(
-                    kind=Kind1.external,
-                    justification=text_without_values(
+                if known_entries_trusted:
+                    justification = (
+                        "(ASH) Listed in the detect-secrets baseline "
+                        f"{Path(listed_in).as_posix()}, which the operator's "
+                        "configuration names; kept in the report as suppressed "
+                        "rather than removed, so it is counted. An entry the "
+                        "baseline audits as a real secret is reported as a "
+                        "finding."
+                    )
+                else:
+                    justification = (
                         "(ASH) Listed in the detect-secrets baseline "
                         f"{Path(listed_in).as_posix()}, a file the scanned "
                         "repository controls; kept in the report as suppressed "
-                        "rather than removed. Name the baseline with "
-                        "scanners.detect-secrets.options.baseline_file in the "
-                        "operator's own config to have its entries removed.",
-                        values,
-                    ),
+                        "rather than removed, so it is counted. An entry the "
+                        "baseline audits as a real secret is reported as a "
+                        "finding."
+                    )
+                baseline_suppression = Suppression(
+                    kind=Kind1.external,
+                    justification=text_without_values(justification, values),
                 )
             kept_known = 0
+            audited_real = 0
             results: List[Result] = []
             for filename, detections in self._secrets_collection.data.items():
                 uri = self._finding_uri(filename, scan_root)
                 for finding in detections:
-                    is_known = (uri, finding.secret_hash, finding.type) in known
-                    if is_known and known_entries_trusted:
-                        continue
-                    if is_known:
+                    key = (uri, finding.secret_hash, finding.type)
+                    is_known = key in known
+                    is_real = bool(known.get(key))
+                    suppressed = is_known and not is_real
+                    if suppressed:
                         kept_known += 1
+                    elif is_known:
+                        audited_real += 1
                     rule_id = re.sub(
                         pattern=r"\W+", repl="-", string=finding.type
                     ).upper()
@@ -2211,7 +2280,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             ruleId=f"SECRET-{rule_id}",
                             suppressions=(
                                 [baseline_suppression]
-                                if is_known and baseline_suppression is not None
+                                if suppressed and baseline_suppression is not None
                                 else None
                             ),
                             properties=PropertyBag(
@@ -2258,11 +2327,24 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         )
                     )
             if kept_known:
+                whose = (
+                    "the operator's detect-secrets baseline"
+                    if known_entries_trusted
+                    else "the scanned repository's own detect-secrets baseline"
+                )
                 self._plugin_log(
-                    f"{kept_known} candidate(s) listed in the scanned repository's "
-                    "own detect-secrets baseline are reported as suppressed, not "
-                    "removed: only a baseline the operator names may remove them.",
+                    f"{kept_known} candidate(s) listed in {whose} are reported as "
+                    "suppressed, not removed, so they are counted.",
                     level=logging.INFO,
+                    target_type=target_type,
+                )
+            if audited_real:
+                self._plugin_log(
+                    f"{audited_real} candidate(s) the detect-secrets baseline audits "
+                    "as real secrets (is_secret: true) are still in the scanned "
+                    "files and are reported as findings: a baseline records a "
+                    "confirmed secret, it does not clear it.",
+                    level=logging.WARNING,
                     target_type=target_type,
                 )
             sarif_tool: Tool = Tool(
