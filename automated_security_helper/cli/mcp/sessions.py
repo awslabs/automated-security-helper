@@ -1520,6 +1520,54 @@ class StdioServerPresence:
 SCAN_PRESENCE_DIR = ".ash-mcp-scans"
 _SCAN_PRESENCE_LOCK = PRESENCE_LOCK_NAME
 
+#: How long a TTL sweep waits for the scan presence lock another server holds,
+#: in seconds: "about a second", as the MCP page puts it. A sweep that cannot
+#: take the lock within it removes nothing more and leaves the remaining
+#: sessions to its next sweep, so another server cannot hold up the request
+#: that set the sweep off, or an interrupt, for as long as it keeps the lock.
+#: Registering a scan still waits for as long as it takes (``_lock_blocking``):
+#: a scan that ran unregistered could have its tree removed under it.
+_SWEEP_LOCK_WAIT_SECONDS = 1.0
+
+#: How often a bounded wait asks for the lock again.
+_LOCK_POLL_SECONDS = 0.05
+
+
+class _PresenceLockHeld(Exception):
+    """Another process held the scan presence lock for the whole bounded wait."""
+
+
+def _is_lock_held_refusal(exc: OSError) -> bool:
+    """True if ``exc`` is a non-blocking lock call's "someone else holds it"."""
+    import errno
+
+    names = ("EACCES", "EAGAIN", "EWOULDBLOCK", "EDEADLK")
+    codes = {getattr(errno, name, None) for name in names}
+    return exc.errno is not None and exc.errno in codes
+
+
+def _lock_within(handle: Any, seconds: float) -> None:
+    """Take an exclusive lock on ``handle``, asking for up to ``seconds``.
+
+    The lock is asked for without waiting (``_try_lock``) every
+    ``_LOCK_POLL_SECONDS`` until it is granted or the time is up, which raises
+    :class:`_PresenceLockHeld`. A refusal that is not "another holder has it"
+    (a filesystem without locks, a closed handle) is raised as the ``OSError``
+    it is, so the caller reports it as the guard refusals are reported.
+    """
+    import time
+
+    deadline = time.monotonic() + seconds
+    while True:
+        error = _try_lock(handle).error
+        if error is None:
+            return
+        if not _is_lock_held_refusal(error):
+            raise error
+        if time.monotonic() >= deadline:
+            raise _PresenceLockHeld
+        time.sleep(_LOCK_POLL_SECONDS)
+
 
 def _workspace_root() -> Path:
     from automated_security_helper.cli.mcp.source_delivery import (
@@ -1530,14 +1578,35 @@ def _workspace_root() -> Path:
 
 
 @contextlib.contextmanager
-def _scan_presence_guard(root: Path) -> Iterator[None]:
-    """Hold the lock that registering a scan and the sweep's check-and-remove share."""
+def _scan_presence_guard(root: Path, *, wait: Optional[float] = None) -> Iterator[None]:
+    """Hold the lock that registering a scan and the sweep's check-and-remove share.
+
+    ``wait`` is None to wait for as long as it takes (registering a scan), or the
+    seconds to ask for the lock before giving up with :class:`_PresenceLockHeld`
+    (the TTL sweep, ``_SWEEP_LOCK_WAIT_SECONDS``).
+    """
     registry = root / SCAN_PRESENCE_DIR
     registry.mkdir(exist_ok=True)
     with open(registry / _SCAN_PRESENCE_LOCK, "a+b") as guard:
-        _lock_blocking(guard)
+        if wait is None:
+            _lock_blocking(guard)
+        else:
+            _lock_within(guard, wait)
         _forget_guard_refusal_warning()
         yield
+
+
+def _note_sweep_left_the_lock(root: Path) -> None:
+    """Say, at info level, that a sweep gave the lock up to another server."""
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    ASH_LOGGER.info(
+        "The TTL sweep could not take the scan presence lock %s within %.0f s "
+        "because another server holds it; it removed nothing more this pass and "
+        "leaves the remaining sessions to its next sweep.",
+        root / SCAN_PRESENCE_DIR / _SCAN_PRESENCE_LOCK,
+        _SWEEP_LOCK_WAIT_SECONDS,
+    )
 
 
 class ScanPresence:
@@ -1904,7 +1973,12 @@ def sweep_stale_workspaces(
     (:func:`_warn_guard_refused_once`) and returns ``[]`` without opening
     a registry entry for any workspace. A per-workspace lookup would create the
     entry that :func:`end_session` forgot, and refresh its idle time on every
-    pass.
+    pass. The guard is asked for for about a second (``_SWEEP_LOCK_WAIT_SECONDS``),
+    here and again before each removal: a sweep that cannot take it, because
+    another server sharing the root holds it, removes nothing more and leaves
+    the remaining sessions to its next sweep (:func:`_note_sweep_left_the_lock`),
+    so another server cannot hold up the request that set the sweep off, or an
+    interrupt, for as long as it keeps the lock.
 
     Returns:
         The session ids whose workspaces were removed.
@@ -1945,8 +2019,13 @@ def sweep_stale_workspaces(
     if not stale:
         return []
     try:
-        with _scan_presence_guard(root):
+        with _scan_presence_guard(root, wait=_SWEEP_LOCK_WAIT_SECONDS):
             pass
+    except _PresenceLockHeld:
+        # Another server holds the lock: this pass removes nothing and the
+        # request that set it off is answered; the next sweep tries again.
+        _note_sweep_left_the_lock(root)
+        return []
     except OSError as exc:
         _warn_guard_refused_once(root, exc, "running the TTL sweep")
         return []
@@ -1955,6 +2034,12 @@ def sweep_stale_workspaces(
         try:
             if _remove_if_still_stale(root, entry.name, entry, cutoff):
                 removed.append(entry.name)
+        except _PresenceLockHeld:
+            # The lock was taken by another server between two workspaces:
+            # nothing more is removed this pass (the page's promise), and the
+            # remaining stale workspaces are left to the next sweep.
+            _note_sweep_left_the_lock(root)
+            break
         except (OSError, RuntimeError, ValueError) as exc:
             # One workspace's failure (a registry refusal, a removal that
             # raised past its own handling) is that workspace's: it is named
@@ -2177,7 +2262,9 @@ def _remove_if_still_stale(
     :func:`sweep_stale_workspaces` has already taken the presence guard once for
     the pass. A guard the filesystem refuses after that (a lock that fails
     between two workspaces) skips this removal and is reported through the
-    process-wide latch (:func:`_warn_guard_refused_once`).
+    process-wide latch (:func:`_warn_guard_refused_once`). A guard another server
+    holds for the whole bounded wait raises :class:`_PresenceLockHeld`, which the
+    sweep takes as the end of its pass.
     """
 
     if _remove_stale_session_state(root, session_id, sandbox, cutoff):
@@ -2204,7 +2291,9 @@ def _remove_stale_session_state(
                 return False
             with contextlib.ExitStack() as stack:
                 try:
-                    stack.enter_context(_scan_presence_guard(root))
+                    stack.enter_context(
+                        _scan_presence_guard(root, wait=_SWEEP_LOCK_WAIT_SECONDS)
+                    )
                 except OSError as exc:
                     _warn_guard_refused_once(root, exc, "running the TTL sweep")
                     return False
