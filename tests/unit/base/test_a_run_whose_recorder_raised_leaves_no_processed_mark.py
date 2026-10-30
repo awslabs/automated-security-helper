@@ -71,3 +71,22 @@ def test_a_direct_run_whose_first_recording_raised_leaves_no_mark(
 
     assert response["post_run_error"] is True, response
     assert scanner._processed_responses == [], scanner._processed_responses
+
+
+def test_a_run_refused_by_an_unusable_values_hook_leaves_no_mark(
+    plugin_context, tmp_path, monkeypatch
+):
+    """The refused-run path: the hook answers None, the run is refused before the
+    tool starts, and no response is left held on the plugin."""
+    scanner = _scanner(plugin_context)
+    scanner.use_uv_tool = False
+    monkeypatch.setattr(type(scanner), "_values_to_redact", lambda self: None)
+
+    with patch(_RUNNER) as runner:
+        response = scanner._run_subprocess(
+            ["stub-tool", "scan"], results_dir=str(tmp_path / "results")
+        )
+
+    runner.assert_not_called()
+    assert response["spawn_failed"] is True, response
+    assert scanner._processed_responses == [], scanner._processed_responses
