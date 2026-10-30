@@ -251,7 +251,9 @@ class VersionBumper:
         Three things are compared, none of them with the installed distribution:
         ``[project] version`` with ``[tool.commitizen] version`` in the
         pyproject.toml at the project root, and each generated page with its
-        template rendered for that version (what ``set`` would write now).
+        template rendered for that version (what ``set`` would write now). While
+        the two tables disagree no page is compared, because there is no one
+        version to render for.
 
         Returns:
             True if all versions are consistent
@@ -271,17 +273,26 @@ class VersionBumper:
         print(f"Current version from pyproject.toml: {current_version}")
 
         consistent = True
+        tables_agree = True
 
         try:
             released = self.template_manager.packaged_release()
         except KeyError:
             released = None  # no [tool.commitizen] version to compare
         if released is not None and released != current_version:
+            # The pages are rendered for one of the two numbers, and which one is
+            # right is exactly what disagrees. Comparing them with either would
+            # report every page as stale and advise the wrong side, so only this
+            # line is reported; `set` writes both tables and the pages from the
+            # release version, and the pages are compared once the tables agree.
             print(
                 f"Error: [tool.commitizen] version is {released} but "
-                f"[project] version is {current_version}"
+                f"[project] version is {current_version}; run 'set {released}' to "
+                "write both from the release version. The pages are not compared "
+                "until the two agree."
             )
             consistent = False
+            tables_agree = False
 
         templates = self.template_manager.list_templates()
         if not templates:
@@ -291,15 +302,17 @@ class VersionBumper:
         suffix = self.template_manager.template_suffix
         for template in templates:
             target = template.parent / template.name[: -len(suffix)]
-            expected = self.template_manager.render(
-                template.read_text(encoding="utf-8"), current_version
-            )
             try:
                 actual = target.read_text(encoding="utf-8")
             except FileNotFoundError:
                 print(f"Error: {target} does not exist; generate it from {template}")
                 consistent = False
                 continue
+            if not tables_agree:
+                continue
+            expected = self.template_manager.render(
+                template.read_text(encoding="utf-8"), current_version
+            )
             if actual != expected:
                 print(
                     f"Error: {target} is not its template rendered for "

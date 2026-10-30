@@ -18,6 +18,10 @@ What is asserted
 * The command fails, naming what differs, when the two version tables disagree,
   when a generated page is not its template rendered for the current version, and
   when a template has no generated page.
+* When the two tables disagree it reports that one line, with the 'set' command
+  that writes both from [tool.commitizen] version, and does not compare the pages:
+  rendered with either number they would all read as stale, and the advice would
+  name whichever side was hand-edited. A page that does not exist is still reported.
 * It passes on a tree where all of them agree.
 * The version it prints comes from the pyproject.toml at the project root; with no
   such file it fails and prints no version that came from somewhere else.
@@ -152,13 +156,56 @@ class TestADisagreementFailsTheValidation:
     def test_every_disagreement_is_reported_not_only_the_first(
         self, project, monkeypatch, capsys
     ):
+        # A page that does not exist is reported whatever the tables say: that
+        # needs no version.
+        _write_pyproject(project, "1.2.3", "1.2.2")
+        project.joinpath("README.md").unlink()
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "[tool.commitizen] version is 1.2.2" in out
+        assert "README.md does not exist" in out
+
+
+class TestDisagreeingTablesAreReportedOnceNotAsEveryPageStale:
+    def test_a_hand_edited_project_version_reports_only_the_tables(
+        self, project, monkeypatch, capsys
+    ):
+        # Red before: the pages were rendered with [project] version (1.2.4), so
+        # README.md, which matches [tool.commitizen] (1.2.3), was reported as
+        # stale and the advice was to run 'set 1.2.4', the hand edit.
+        _write_pyproject(project, "1.2.4", "1.2.3")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "[tool.commitizen] version is 1.2.3" in out
+        assert "[project] version is 1.2.4" in out
+        assert "not its template rendered" not in out
+        assert "set 1.2.4" not in out
+        assert "run 'set 1.2.3'" in out
+        assert "validation failed" in out
+
+    def test_a_stale_page_is_not_claimed_while_the_tables_disagree(
+        self, project, monkeypatch, capsys
+    ):
         _write_pyproject(project, "1.2.3", "1.2.2")
         project.joinpath("README.md").write_text("stale\n", encoding="utf-8")
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
-        assert "[tool.commitizen] version is 1.2.2" in out
-        assert "README.md is not its template rendered for 1.2.3" in out
+        assert "not its template rendered" not in out
+        assert "The pages are not compared until the two agree" in out
+
+    def test_the_pages_are_compared_again_once_the_tables_agree(
+        self, project, monkeypatch, capsys
+    ):
+        _write_pyproject(project, "1.2.3", "1.2.3")
+        project.joinpath("README.md").write_text("stale\n", encoding="utf-8")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        assert "README.md is not its template rendered for 1.2.3" in (
+            capsys.readouterr().out
+        )
 
 
 class TestTheLabeledVersionComesFromThePyproject:
