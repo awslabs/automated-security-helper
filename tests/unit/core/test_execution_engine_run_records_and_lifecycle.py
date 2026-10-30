@@ -181,7 +181,7 @@ def test_get_scanner_finds_a_scanner_by_its_declared_name(tmp_path):
     engine.plugins["scanner"] = [_FakeScanner]
 
     assert isinstance(engine.get_scanner("fake-scan"), _FakeScanner)
-    assert isinstance(engine.get_scanner("FakeScanner"), _FakeScanner)
+    assert isinstance(engine.get_scanner("_FakeScanner"), _FakeScanner)
 
 
 def test_get_scanner_refuses_an_excluded_scanner_when_check_enabled(tmp_path):
@@ -191,10 +191,10 @@ def test_get_scanner_refuses_an_excluded_scanner_when_check_enabled(tmp_path):
     engine.plugins["scanner"] = [_FakeScanner]
 
     with pytest.raises(ValueError, match="not enabled"):
-        engine.get_scanner("FakeScanner")
+        engine.get_scanner("_FakeScanner")
     # The documented opt-out still builds it.
     assert isinstance(
-        engine.get_scanner("FakeScanner", check_enabled=False), _FakeScanner
+        engine.get_scanner("_FakeScanner", check_enabled=False), _FakeScanner
     )
 
 

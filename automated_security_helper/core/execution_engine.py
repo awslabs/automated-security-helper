@@ -2,9 +2,10 @@
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import platform
+import time
 from typing import List, Literal, Mapping, Optional, Set
 
 
@@ -871,8 +872,13 @@ class ScanExecutionEngine:
         ASH_LOGGER.info("===== ASH Security Scan Starting =====")
         ASH_LOGGER.info(f"Executing phases: {', '.join(ordered_phases)}")
 
-        # Record the start time for calculating scan duration
+        # Record the start time for calculating scan duration. The monotonic
+        # mark beside it gives the pre-report stamp its elapsed time without a
+        # second wall-clock read: the run's clock is read exactly twice, at the
+        # start and in the finally block, which is the contract the duration
+        # tests pin with a two-value clock.
         scan_start_time = datetime.now(timezone.utc)
+        scan_start_mark = time.monotonic()
         # Initialize duration variables so the finally block can reference
         # them even when the try block raises before computing them.
         hours = minutes = seconds = 0
@@ -1043,9 +1049,14 @@ class ScanExecutionEngine:
                         self._apply_final_suppressions()
                         # And the timing so far, so the reports the phase writes
                         # carry a start and a duration instead of None and 0.0;
-                        # the finally block stamps the final values.
+                        # the finally block stamps the final values. The end so
+                        # far is the start plus the monotonic elapsed time, not a
+                        # second wall-clock read (see scan_start_mark).
                         self._stamp_scan_timing(
-                            scan_start_time, datetime.now(timezone.utc), ordered_phases
+                            scan_start_time,
+                            scan_start_time
+                            + timedelta(seconds=time.monotonic() - scan_start_mark),
+                            ordered_phases,
                         )
 
                         # Create and execute the Report phase
