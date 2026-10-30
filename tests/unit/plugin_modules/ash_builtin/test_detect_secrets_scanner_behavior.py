@@ -238,8 +238,20 @@ def test_missing_library_reason_names_installs_that_resolve_to_ash(
     commands = re.findall(r"`([^`]*)`", reason)
     assert len(commands) == 2, reason
     # Both run uv through the interpreter that runs ASH: a bare `pip` in a uv-made
-    # environment is some other Python's pip.
-    uv_pip = [sys.executable, "-m", "uv", "pip", "install", "--python", sys.executable]
+    # environment is some other Python's pip. With -P (3.11 and later) so the
+    # cwd's modules do not shadow uv, and --no-config so a uv.toml in the cwd
+    # (the scanned repository) does not steer the install (ash_install's hint).
+    uv_pip = [
+        sys.executable,
+        *(["-P"] if sys.version_info >= (3, 11) else []),
+        "-m",
+        "uv",
+        "pip",
+        "install",
+        "--no-config",
+        "--python",
+        sys.executable,
+    ]
     expected = [
         *uv_pip,
         "--reinstall-package",

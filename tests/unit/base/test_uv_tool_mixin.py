@@ -524,8 +524,14 @@ class TestTryUvToolExecution:
     @pytest.mark.parametrize(
         "raised,marker",
         [
+            # An ImportError raised with no module name is not the runner's
+            # own import failing, so the arm words it as an import that failed
+            # while preparing the run (the runner wording is reserved for an
+            # ImportError whose name is the runner module).
             pytest.param(
-                ImportError, "UV tool runner module not available", id="import-error"
+                ImportError,
+                "Import failed while preparing the uv run",
+                id="import-error",
             ),
             pytest.param(
                 RuntimeError,
