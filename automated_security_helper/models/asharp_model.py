@@ -1537,15 +1537,18 @@ class AshAggregatedResults(RecordModel):
         return flat_vulns
 
     def _apply_suppression_side_effects(
-        self, scanner: Optional[str], count: int
+        self, scanner: Optional[str], count: Optional[int] = None
     ) -> None:
-        """Set the matching scanner_results entry's suppressed count to ``count``.
+        """Record suppressed findings on the matching scanner_results entry.
 
         Extracted from the inline SARIF processing in to_flat_vulnerabilities()
-        so the conversion factory can stay side-effect free. The count is SET,
-        not added: the unified metrics already count every suppressed finding
-        into the row, so an increment per finding doubled it in the saved
-        results. The summary's own count is set by the caller.
+        so the conversion factory can stay side-effect free. With ``count`` the
+        entry's suppressed count is SET to it, not added to: the unified metrics
+        already count every suppressed finding into the row, so an increment per
+        finding doubled it in the saved results; to_flat_vulnerabilities passes
+        the whole count once and sets the summary's own count itself. Without
+        ``count`` (the original one-argument call) the entry is bumped by one,
+        for a caller that records findings one at a time.
         """
         if not scanner:
             return
@@ -1590,10 +1593,14 @@ class AshAggregatedResults(RecordModel):
             target_info = ScannerTargetStatusInfo.model_validate(target_info)
             self.scanner_results[key] = target_info
 
-        target_info.suppressed_finding_count = count
         # ScannerSeverityCount declares `suppressed: int = 0`, so the attribute
-        # always exists; it is set, like the count above, never incremented.
-        target_info.severity_counts.suppressed = count
+        # always exists and moves with the count above.
+        if count is None:
+            target_info.suppressed_finding_count += 1
+            target_info.severity_counts.suppressed += 1
+        else:
+            target_info.suppressed_finding_count = count
+            target_info.severity_counts.suppressed = count
 
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "AshAggregatedResults":

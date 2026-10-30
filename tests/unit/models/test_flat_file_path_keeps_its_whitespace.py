@@ -18,15 +18,15 @@ pytestmark = pytest.mark.unit
 
 
 def _finding(**fields) -> FlatVulnerability:
-    return FlatVulnerability(
-        id="f1",
-        title="t",
-        description="d",
-        severity="HIGH",
-        scanner="bandit",
-        scanner_type="SAST",
-        **fields,
-    )
+    base = {
+        "id": "f1",
+        "title": "t",
+        "description": "d",
+        "severity": "HIGH",
+        "scanner": "bandit",
+        "scanner_type": "SAST",
+    }
+    return FlatVulnerability(**{**base, **fields})
 
 
 def test_a_trailing_space_in_the_path_is_kept():

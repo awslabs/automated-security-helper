@@ -168,8 +168,9 @@ def test_ash_aggregated_results_load_model(mock_exists, mock_json_load, mock_ope
     assert result.description == "Test Description"
     assert result.metadata.project_name == "Test Project"
 
-    # Verify that the file was opened
-    mock_open.assert_called_once_with(json_path)
+    # Verify that the file was opened, as UTF-8 (the encoding every writer of
+    # the file uses; the platform default misread it on Windows).
+    mock_open.assert_called_once_with(json_path, encoding="utf-8")
 
 
 @patch("pathlib.Path.exists", return_value=False)

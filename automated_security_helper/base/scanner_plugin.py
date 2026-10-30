@@ -1866,16 +1866,22 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # can.
                 detail += f". Stderr could not be shown; see {log_path.as_posix()}"
                 return detail
+            # The excerpt helper keeps the first `keep` characters, so a keep of
+            # the excerpt limit here was a head-only cut BEFORE the head-and-tail
+            # cut below, and the tool's last lines were gone before the cut that
+            # was meant to keep them. The helper is given the whole bounded read
+            # to redact and mark; head_and_tail makes the one cut, at the end.
+            read_bound = _STDERR_EXCERPT_LIMIT * 32
             try:
                 raw_log, read_cut = read_log_bounded(
-                    log_path, _STDERR_EXCERPT_LIMIT * 32, values, trim_inputs
+                    log_path, read_bound, values, trim_inputs
                 )
             except Exception:  # noqa: BLE001 -- reading the log is best-effort
                 raw_log, read_cut = "", False
             if raw_log or read_cut:
                 try:
                     stderr_text = shown_excerpt(
-                        raw_log, read_cut, log_path, _STDERR_EXCERPT_LIMIT, _show
+                        raw_log, read_cut, log_path, read_bound, _show
                     )
                 except Exception:  # noqa: BLE001 -- see the comment above
                     detail += (

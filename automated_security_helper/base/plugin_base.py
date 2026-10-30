@@ -1121,14 +1121,26 @@ class PluginBase(UVToolMixin, BaseModel):
         state set around the call let two concurrent responses on one
         instance erase each other's inputs mid-call.
         """
-        self._mark_processed(response)
+        # The helpers below are read through getattr, like the uv inputs hook:
+        # this method is bound onto hosts that carry only the accumulator fields
+        # (a mixin test drives the real accumulator through a stub plugin), and
+        # a host without them records as before.
+        mark = getattr(self, "_mark_processed", None)
+        if callable(mark):
+            mark(response)
         plugin_inputs: Tuple[str, ...] = ()
         if getattr(self, "use_uv_tool", False):
             inputs_getter = getattr(self, "_uv_run_inputs_for_records", None)
             if callable(inputs_getter):
                 plugin_inputs = tuple(inputs_getter() or ())
-        stdout_text = self._tool_text_for_records(response.get("stdout"), "stdout")
-        stderr_text = self._tool_text_for_records(response.get("stderr"), "stderr")
+        shape = getattr(self, "_tool_text_for_records", None)
+        if not callable(shape):
+
+            def shape(text: Any, _stream: str) -> Any:
+                return text
+
+        stdout_text = shape(response.get("stdout"), "stdout")
+        stderr_text = shape(response.get("stderr"), "stderr")
         # _values_to_redact is an overridable hook, called once for both
         # streams and guarded: without the values nothing can be redacted,
         # so a raising hook loses the lines (a value-free note takes their

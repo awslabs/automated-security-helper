@@ -35,15 +35,23 @@ pytestmark = pytest.mark.unit
 
 
 def _sarif_with_two_findings() -> SarifReport:
+    # Each result names its scanner in its properties, as ASH's SARIF writers
+    # do: the unified metrics attribute a finding to a scanner by that
+    # property (or by scanner_details / tags), not by the run's tool name.
+    def _result(rule_id: str, text: str) -> Result:
+        return Result(
+            ruleId=rule_id,
+            level="error",
+            message=Message(text=text),
+            properties=PropertyBag(scanner_name="bandit"),
+        )
+
     return SarifReport(
         version="2.1.0",
         runs=[
             Run(
                 tool=Tool(driver=ToolComponent(name="bandit", version="1.0.0")),
-                results=[
-                    Result(ruleId="B101", level="error", message=Message(text="one")),
-                    Result(ruleId="B102", level="error", message=Message(text="two")),
-                ],
+                results=[_result("B101", "one"), _result("B102", "two")],
                 properties=PropertyBag(),
             )
         ],

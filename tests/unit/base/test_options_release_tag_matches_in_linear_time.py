@@ -23,13 +23,17 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.parametrize(
     "tag",
-    ["v1.15.1", "1.2.0-rc1", "1.2.0-rc1.beta", "1", "v1", "1.a", "1-a", "1.2-rc_1"],
+    ["v1.15.1", "1.2.0-rc1", "1.2.0-rc1.beta", "1", "v1", "1.a", "1-a", "1.2-rc.1"],
 )
 def test_a_release_tag_still_matches(tag):
     assert _RELEASE_TAG.fullmatch(tag) is not None, tag
 
 
-@pytest.mark.parametrize("value", ["1..2", "1.2/x", "1.2-", "a1", "", "v", "1.2 "])
+# "1.2-rc_1" is refused by the original pattern too: its part class is
+# [0-9A-Za-z], with no underscore, and the one-group pattern keeps that class.
+@pytest.mark.parametrize(
+    "value", ["1..2", "1.2/x", "1.2-", "a1", "", "v", "1.2 ", "1.2-rc_1"]
+)
 def test_a_non_tag_is_still_refused(value):
     assert _RELEASE_TAG.fullmatch(value) is None, repr(value)
 
