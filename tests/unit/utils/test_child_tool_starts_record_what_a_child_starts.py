@@ -215,6 +215,30 @@ def test_a_cwd_popen_then_a_direct_spawn_of_the_same_tool_records_two(tmp_path):
 
 
 @pytest.mark.integration
+def test_a_popen_that_spawns_with_close_fds_off_is_recorded_once(tmp_path):
+    """Before Python 3.13 subprocess takes the posix_spawn path only with close_fds
+    off (a directory in the executable, no cwd and no pipes besides): its second
+    report of that one start, os.posix_spawn from Popen._posix_spawn, is the echo
+    the frame reader drops, and this is the real child that reaches that reader.
+    From 3.13 the path is taken with close_fds on as well, and the record reads
+    the same either way: one Popen line, no posix_spawn line."""
+    started = ChildToolStarts(tmp_path)
+    quiet = _program_named(tmp_path / "beside-the-interpreter", "uv")
+
+    done = _run_child(
+        tmp_path,
+        started,
+        "import subprocess\n"
+        f"subprocess.run([{str(quiet)!r}, '--version'], close_fds=False)\n",
+    )
+
+    assert done.returncode == 0, done.stderr
+    recorded = started.starts()
+    assert len(recorded) == 1, recorded
+    assert recorded[0].startswith("subprocess.Popen uv "), recorded
+
+
+@pytest.mark.integration
 def test_a_module_run_with_a_valued_x_option_is_recorded(tmp_path):
     """-X takes a value, so the module walk must step over the value to reach
     -m: the option's value is not where the options end."""
