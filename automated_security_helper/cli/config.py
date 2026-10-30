@@ -1870,10 +1870,14 @@ def lint(
     # read fewer issues only because it does not look for unused suppressions.
     remaining = lint_result
     if applied:
+        # Without the unused-suppression check: the unused report in the output
+        # directory predates the fix and still lists the suppressions the fix
+        # just commented out, so re-reading it reports them as unused again;
+        # the next scan rewrites it. The re-lint reads the file as it is now.
         remaining = ConfigLinter.lint(
             config_path=config_path,
             output_dir=output_dir_path,
-            check_unused=fix_unused,
+            check_unused=False,
             source_dir=scan_root,
         )
         if remaining.issues and remaining.issues != lint_result.issues:
