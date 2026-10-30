@@ -25,10 +25,15 @@ runs module bodies that can construct one of these models on the same thread.
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Callable, Generic, TypeVar
 
 T = TypeVar("T")
+
+# The standard library logger, not ASH_LOGGER: this module sits at the bottom of
+# the import cycle described above, so it imports nothing from the package.
+_LOGGER = logging.getLogger(__name__)
 
 
 class OnceOnlyResolver(Generic[T]):
@@ -52,7 +57,11 @@ class OnceOnlyResolver(Generic[T]):
         # Outside the lock: see the module docstring.
         try:
             target = import_target()
-        except ImportError:
+        except ImportError as error:
+            # Any ImportError reads as "not importable yet", so a real one, such
+            # as a missing dependency of the target, is told apart only by this
+            # line.
+            _LOGGER.debug("forward reference not resolved yet: %s", error)
             return
         with self._lock:
             if self.resolved:
