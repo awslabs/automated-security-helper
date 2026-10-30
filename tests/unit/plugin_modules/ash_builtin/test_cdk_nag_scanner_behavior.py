@@ -1283,6 +1283,31 @@ def test_a_worker_child_that_died_leaves_its_exit_code_on_the_plugin(
     assert scanner.scan_could_not_stop is None
 
 
+def test_the_batchs_records_are_read_directly_so_a_renamed_field_cannot_pass_in_silence(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, monkeypatch
+):
+    """A batch without the two record fields is a contract break, not an empty record.
+
+    A ``getattr`` default here would read a renamed ``could_not_stop_response`` as
+    "nothing to record" and switch the run-level could-not-stop gate off without a
+    word; the direct read raises instead, the way the scanner's ``ignore_suppressions``
+    read does. Before this read the two fields were read through defaults to suit a
+    test double that yielded None."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def batch_without_the_records(*args, **kwargs):
+        yield object()
+
+    monkeypatch.setattr(
+        cdk_nag_scanner, "cdk_nag_worker_batch", batch_without_the_records
+    )
+    wrapper_double.return_value = CdkNagWrapperResponse(results={}, failure=None)
+
+    with pytest.raises(AttributeError, match="failed_child_responses"):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+
 # ---------------------------------------------------------------------------
 # A partial failure keeps the findings of the packs that ran
 # ---------------------------------------------------------------------------

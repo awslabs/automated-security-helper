@@ -1702,13 +1702,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # state the run-level gate reads (which fail_on_incomplete_scanners does not
         # relax). Until this was recorded, a worker child ASH could not stop reached the
         # results as per-template text only, and the gate never fired for cdk-nag.
-        # Read with defaults: a test that stands the batch in with a bare context
-        # manager yields None, and the recorders then have nothing to record.
-        for child_response in getattr(worker_batch, "failed_child_responses", ()) or ():
+        # Read directly, not through getattr defaults, for the reason the
+        # ``ignore_suppressions`` read above gives: a default would resolve a renamed
+        # field to the lenient direction and switch the could-not-stop gate off in
+        # silence. A stand-in batch has to carry both fields.
+        for child_response in worker_batch.failed_child_responses:
             self._record_target_exit_code(child_response)
-        could_not_stop = getattr(worker_batch, "could_not_stop_response", None)
-        if could_not_stop is not None:
-            self._record_could_not_stop(could_not_stop)
+        if worker_batch.could_not_stop_response is not None:
+            self._record_could_not_stop(worker_batch.could_not_stop_response)
 
         # A target that attempted nothing while candidates were refused by the
         # scanned-tree rule says so in its SKIPPED reason. Each refusal is already in

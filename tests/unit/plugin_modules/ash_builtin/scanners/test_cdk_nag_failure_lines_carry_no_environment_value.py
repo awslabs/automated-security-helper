@@ -88,7 +88,14 @@ def _scan(scanner, target, template, per_template):
             f"{_MOD}.cloudformation_candidate_files",
             return_value=[str(template)],
         ),
-        patch(f"{_MOD}.cdk_nag_worker_batch", return_value=nullcontext()),
+        # The batch's two records, empty: the scanner reads them directly after the
+        # loop, and a bare ``nullcontext()`` yields None.
+        patch(
+            f"{_MOD}.cdk_nag_worker_batch",
+            return_value=nullcontext(
+                SimpleNamespace(failed_child_responses=[], could_not_stop_response=None)
+            ),
+        ),
         patch(f"{_MOD}.run_cdk_nag_against_cfn_template", **per_template),
     ):
         scanner.scan(target=target, target_type="source")
