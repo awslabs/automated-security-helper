@@ -354,11 +354,17 @@ def _located(uri=None, index=None, uri_base_id=None, **extra) -> dict:
     return _finding("T-1", locations=[location])
 
 
-def _run_with_tables(driver: str, results, artifacts=None, bases=None) -> Run:
+def _run_with_tables(
+    driver: str, results, artifacts=None, bases=None, logical=None, steps=None
+) -> Run:
     """A run whose own tables the folded results used to point into."""
     fields: dict = {"tool": {"driver": {"name": driver}}, "results": results}
     if artifacts is not None:
         fields["artifacts"] = [{"location": {"uri": uri}} for uri in artifacts]
+    if logical is not None:
+        fields["logicalLocations"] = logical
+    if steps is not None:
+        fields["threadFlowLocations"] = steps
     if bases is not None:
         # A plain string is the base's uri; a dict is the whole definition, for
         # a base that sits on another (``{"uri": "src/", "uriBaseId": "REPOROOT"}``).
@@ -588,6 +594,135 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         logical = aggregated.runs[0].results[0].locations[0].logicalLocations[0]
         assert logical.name == "handler"
         assert logical.index in (None, -1)
+
+    def test_an_index_only_logical_location_takes_its_row_from_the_runs_table(self):
+        """SARIF 3.33.3: an index alone means the run's cached row. Dropping the
+        index without reading the row left a logical location with no name."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="src/x.py", logicalLocations=[{"index": 1}])],
+                    logical=[
+                        {"name": "other"},
+                        {
+                            "name": "handler",
+                            "fullyQualifiedName": "pkg.handler",
+                            "kind": "function",
+                            "parentIndex": 0,
+                        },
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        logical = aggregated.runs[0].results[0].locations[0].logicalLocations[0]
+        assert (logical.name, logical.fullyQualifiedName, logical.kind) == (
+            "handler",
+            "pkg.handler",
+            "function",
+        )
+        assert logical.index in (None, -1)
+        assert logical.parentIndex in (None, -1)
+
+    def test_an_inline_logical_name_wins_and_the_row_fills_the_rest(self):
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _located(
+                            uri="src/x.py",
+                            logicalLocations=[{"name": "inline", "index": 0}],
+                        )
+                    ],
+                    logical=[{"name": "cached", "kind": "function"}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        logical = aggregated.runs[0].results[0].locations[0].logicalLocations[0]
+        assert (logical.name, logical.kind) == ("inline", "function")
+
+    def test_an_index_only_thread_flow_step_takes_its_row_from_the_runs_table(self):
+        """SARIF 3.38.2, the same shape: a code flow written as indices alone
+        became a list of steps with no location."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            codeFlows=[
+                                {"threadFlows": [{"locations": [{"index": 0}]}]}
+                            ],
+                        )
+                    ],
+                    steps=[
+                        {
+                            "location": {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": "src/step.py"}
+                                }
+                            },
+                            "module": "m",
+                        }
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        step = aggregated.runs[0].results[0].codeFlows[0].threadFlows[0].locations[0]
+        artifact = step.location.physicalLocation.root.artifactLocation
+        assert (artifact.uri, step.module) == ("src/step.py", "m")
+        assert step.index in (None, -1)
+
+    def test_a_cached_steps_artifact_index_is_resolved_too(self):
+        """The row read in can itself name its file by index into run.artifacts;
+        the detach that follows resolves it as it does an inline location."""
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            codeFlows=[
+                                {"threadFlows": [{"locations": [{"index": 0}]}]}
+                            ],
+                        )
+                    ],
+                    artifacts=["second/step.py"],
+                    steps=[
+                        {
+                            "location": {
+                                "physicalLocation": {"artifactLocation": {"index": 0}}
+                            }
+                        }
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        step = aggregated.runs[0].results[0].codeFlows[0].threadFlows[0].locations[0]
+        artifact = step.location.physicalLocation.root.artifactLocation
+        assert artifact.uri == "second/step.py"
+        assert artifact.index in (None, -1)
 
     def test_the_first_run_adopted_whole_keeps_its_own_indices(self):
         """The control: an adopted run carries its tables, so nothing is detached."""

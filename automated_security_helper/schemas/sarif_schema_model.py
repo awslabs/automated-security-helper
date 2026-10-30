@@ -73,7 +73,7 @@ from datetime import datetime
 from enum import Enum
 import json
 from pathlib import Path, PurePath, PurePosixPath
-from typing import Dict, List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Sequence, Union
 from urllib.parse import unquote
 
 from pydantic import AnyUrl, ConfigDict, Field, RootModel
@@ -2908,7 +2908,13 @@ def _detach_run_scoped_references(
     An artifact index is resolved first: a location with no ``uri`` takes the
     ``uri`` (and ``uriBaseId``) of ``incoming.artifacts[index].location``, then
     the index is dropped; a location that already names its file loses the index
-    only. Logical-location and thread-flow indices are dropped; the names stay.
+    only. A logical location or a thread-flow step that carries an index takes
+    the fields of the incoming run's cached row at that index that it does not
+    set itself (SARIF 3.33.3 and 3.38.2: the row is merged in and the entry's
+    own properties win), and then the index is dropped; before the row was read,
+    an entry written as an index alone was left empty, a step with no location
+    or a logical location with no name. A logical location's ``parentIndex``
+    points into the same table and is dropped with the index.
     A ``uriBaseId`` is kept only when the aggregate defines the same base the
     same way along its whole chain (each link's definition equal, down to a base
     with no ``uriBaseId`` of its own); otherwise it is expanded into the ``uri``
@@ -2924,8 +2930,23 @@ def _detach_run_scoped_references(
     """
     incoming_bases = incoming.originalUriBaseIds or {}
     artifacts = incoming.artifacts or []
+    logical_table = incoming.logicalLocations or []
+    thread_table = incoming.threadFlowLocations or []
 
     aggregate_bases = aggregate.originalUriBaseIds or {}
+
+    def fill_from_table(entry: Dict, table: Sequence) -> None:
+        """Merge the incoming run's cached row at ``entry["index"]`` under the
+        entry's own fields. The dumped entry carries every field, unset ones as
+        None, so a None is "not set" here; a row the index does not reach (the
+        scanner wrote a dangling index, or no table) adds nothing."""
+        index = entry.get("index")
+        if not isinstance(index, int) or not 0 <= index < len(table):
+            return
+        cached = table[index].model_dump(exclude_none=True, exclude={"index"})
+        for key, value in cached.items():
+            if entry.get(key) is None:
+                entry[key] = value
 
     def definition(bases: Dict, base_id: str) -> Optional[Dict]:
         base = bases.get(base_id)
@@ -3004,7 +3025,9 @@ def _detach_run_scoped_references(
             detach_artifact_location(physical.get("artifactLocation"))
         for logical in location.get("logicalLocations") or []:
             if isinstance(logical, dict):
+                fill_from_table(logical, logical_table)
                 logical.pop("index", None)
+                logical.pop("parentIndex", None)
 
     detach_artifact_location(dumped.get("analysisTarget"))
     for location in dumped.get("locations") or []:
@@ -3019,6 +3042,9 @@ def _detach_run_scoped_references(
                 continue
             for step in thread.get("locations") or []:
                 if isinstance(step, dict):
+                    # The cached row first: its location can itself name its
+                    # artifact by index, which the detach below then resolves.
+                    fill_from_table(step, thread_table)
                     step.pop("index", None)
                     detach_location(step.get("location"))
 
