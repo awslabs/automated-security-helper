@@ -88,19 +88,34 @@ def plugin_context(tmp_path):
     )
 
 
-def _run(plugin_context, tmp_path, failing_target: str | None):
+def _run(
+    plugin_context,
+    tmp_path,
+    failing_target: str | None,
+    parallel: bool = False,
+    before_raise=None,
+):
     """Run one scanner over source and converted; the processor raises on one target.
 
     The processor raises on EVERY container for ``failing_target``, the failure
     record filed for it included, so ``seen`` shows the record's target.
+    ``before_raise`` is called with the container before each raise. The events
+    the executor sends are collected on ``executor.events`` as
+    ``(event_type, kwargs)`` pairs.
     """
     seen: list = []
+    events: list = []
 
     def process(container, aggregated):
         seen.append(container)
         if container.target_type == failing_target:
+            if before_raise is not None:
+                before_raise(container)
             raise RuntimeError("the report could not be read")
         return aggregated
+
+    def notify(event_type, **kwargs):
+        events.append((event_type, kwargs))
 
     scanner = CleanScanner(config=_Config(), context=plugin_context)
     targets = [
@@ -112,9 +127,22 @@ def _run(plugin_context, tmp_path, failing_target: str | None):
         progress_display=MagicMock(),
         scanner_tasks=[("shape-tool", scanner, targets)],
         process_results_fn=process,
+        notify_fn=notify,
     )
-    executor.run_sequential(AshAggregatedResults())
+    if parallel:
+        executor.run_parallel(AshAggregatedResults())
+    else:
+        executor.run_sequential(AshAggregatedResults())
+    executor.events = events
     return seen, executor
+
+
+def _scan_complete_events(executor) -> list:
+    return [
+        kwargs
+        for event_type, kwargs in executor.events
+        if getattr(event_type, "name", event_type) == "SCAN_COMPLETE"
+    ]
 
 
 def test_the_other_targets_are_still_merged(plugin_context, tmp_path):
@@ -147,3 +175,42 @@ def test_every_target_merged_completes_the_scanner(plugin_context, tmp_path):
 
     assert [c.target_type for c in seen] == ["source", "converted"], seen
     assert len(executor.completed_scanners) == 1
+
+
+class TestAProcessingFailureStillClosesTheScannerOut:
+    """The scanner returned; one target's results could not be merged. The failure
+    is filed on that target's row, and the scanner's completion bookkeeping still
+    runs: it leaves ``remaining_scanners`` and SCAN_COMPLETE is sent, as it was
+    when the raise was swallowed inside the merge loop. Without it subscribers saw
+    a SCAN_START with no end event and every later SCAN_COMPLETE still listed the
+    scanner as remaining. It still stays out of ``completed_scanners``, so the
+    completeness check records it."""
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_scan_complete_is_sent_and_the_scanner_leaves_remaining(
+        self, plugin_context, tmp_path, parallel
+    ):
+        _, executor = _run(
+            plugin_context, tmp_path, failing_target="converted", parallel=parallel
+        )
+
+        (complete,) = _scan_complete_events(executor)
+        assert complete["scanner"] == "shape-tool"
+        assert complete["remaining_scanners"] == []
+        assert complete["remaining_count"] == 0
+        assert complete["completed_count"] == 1
+        assert complete["total_count"] == 1
+        assert executor.completed_scanners == []
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_a_clean_scanner_sends_one_scan_complete(
+        self, plugin_context, tmp_path, parallel
+    ):
+        """Control: the bookkeeping runs once, not once per path."""
+        _, executor = _run(
+            plugin_context, tmp_path, failing_target=None, parallel=parallel
+        )
+
+        (complete,) = _scan_complete_events(executor)
+        assert complete["remaining_scanners"] == []
+        assert len(executor.completed_scanners) == 1
