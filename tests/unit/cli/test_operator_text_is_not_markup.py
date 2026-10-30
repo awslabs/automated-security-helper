@@ -258,8 +258,11 @@ def test_an_exception_holding_markup_is_logged_and_printed_as_given(
 _ANSI_STYLE = re.compile(r"\x1b\[[0-9;]*m")
 
 #: A workspace folder whose name is a Rich link tag, and a project key holding a
-#: closing tag.
-_LINK_FOLDER = "[link=http://e.example]L[/link]"
+#: closing tag. The link target carries no scheme: a colon is not allowed in a
+#: Windows file name, so the folder named `[link=http://e.example]L[/link]` could
+#: not be made there and the test failed in its own setup. Rich renders the tag
+#: as a hyperlink whatever the target spells, so the OSC 8 check keeps its point.
+_LINK_FOLDER = "[link=e.example]L[/link]"
 _TAG_FOLDER = "api[/x]"
 
 
