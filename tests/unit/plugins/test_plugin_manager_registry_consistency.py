@@ -11,7 +11,10 @@ releasing it, so a concurrent ``plugins_loaded_by`` could read the registration
 without its attribution and keep a class the scan should not be offered. And
 ``plugin_modules`` memoised a resolution in which a registered module failed to
 import, keyed by the registrations alone, so the module's classes stayed missing
-after it became importable.
+after it became importable. The first cut of that fix skipped the memo on any
+failure, so a module that kept failing was re-imported (its top-level code and
+decorators re-run) and re-warned on every read; the memo now carries the failed
+paths and is reused until one of them is in ``sys.modules``.
 
 The two races are modelled deterministically: a dict whose membership and index
 disagree, and a registry lock that records what the attribution table held the
@@ -110,6 +113,45 @@ def test_a_module_that_becomes_importable_is_resolved_on_the_next_call(monkeypat
     monkeypatch.setitem(sys.modules, name, module)
 
     assert manager.plugin_modules("scanner") == [module.LaterScanner]
+
+
+class _CountingFinder:
+    """A meta path finder that counts the import attempts of one name and finds nothing."""
+
+    def __init__(self, name):
+        self.name = name
+        self.attempts = 0
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == self.name:
+            self.attempts += 1
+        return None
+
+
+def test_a_module_that_keeps_failing_is_imported_once_until_something_imports_it(
+    monkeypatch,
+):
+    """Red before the fix: every read re-imported the still-failing module."""
+    manager = _manager()
+    name = "zz_keeps_failing_ash_plugins"
+    monkeypatch.delitem(sys.modules, name, raising=False)
+    finder = _CountingFinder(name)
+    monkeypatch.setattr(sys, "meta_path", [finder, *sys.meta_path])
+    manager.register_plugin_module("scanner", "NeverScanner", name)
+
+    assert manager.plugin_modules("scanner") == []
+    assert manager.plugin_modules("scanner") == []
+    assert finder.attempts == 1, (
+        f"the failing module was imported {finder.attempts} times over two reads"
+    )
+
+    module = types.ModuleType(name)
+    module.NeverScanner = type(
+        "NeverScanner", (), {"__module__": name, "ash_plugin_type": "scanner"}
+    )
+    monkeypatch.setitem(sys.modules, name, module)
+
+    assert manager.plugin_modules("scanner") == [module.NeverScanner]
 
 
 def test_a_clean_resolution_is_still_memoised(monkeypatch):

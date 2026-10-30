@@ -92,6 +92,42 @@ def test_an_unconstructed_scanner_reports_the_operators_enabled_value():
     assert default_config.asked == [("scanner", entry["name"])]
 
 
+class _UnbuildableScannerConfig:
+    enabled = True
+
+    def __init__(self):
+        raise RuntimeError("config class refuses to be built")
+
+
+class _UnbuildableConfigField:
+    annotation = type("U", (), {"__args__": (_UnbuildableScannerConfig, type(None))})
+
+
+class _ScannerWithUnbuildableConfig(_UnconstructableScanner):
+    model_fields = {"config": _UnbuildableConfigField()}
+
+
+class _ScannerDeclaringNoConfig(_UnconstructableScanner):
+    model_fields: dict = {}
+
+
+@pytest.mark.parametrize(
+    "scanner_class", [_ScannerWithUnbuildableConfig, _ScannerDeclaringNoConfig]
+)
+def test_an_unconstructed_scanner_whose_declaration_cannot_be_read_still_honors_the_operator(
+    scanner_class,
+):
+    """Red before the fix: both paths returned the optimistic True untouched."""
+    default_config = _DefaultConfig(enabled=False)
+
+    entry = describe_scanner(
+        scanner_class, context=object(), default_config=default_config
+    )
+
+    assert entry["enabled"] is False
+    assert default_config.asked == [("scanner", entry["name"])]
+
+
 def test_an_unconstructed_scanner_with_no_operator_section_keeps_the_declared_value():
     """Control: no operator section, the class's declaration stands."""
 

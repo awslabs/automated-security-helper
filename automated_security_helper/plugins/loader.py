@@ -476,16 +476,34 @@ def scan_handler_filter(
     that module wherever its function was defined, so one defined in a helper
     library outside the namespace is notified only by a scan naming the
     declaring module, never as the program's.
+
+    Handlers, unlike plugin classes, are also admitted from a module BELOW a
+    named module: a package whose ``__init__`` imports a submodule that
+    subscribes its handlers with the ``event_subscriber`` decorator declares
+    nothing and binds nothing by name, and the engine's phases notified such
+    handlers through ``plugins_of`` before they took this filter. A class
+    defined only in a submodule stays unselected (:func:`scan_plugin_filter`):
+    whether it is registered depends on what else the process imported, which
+    is not true of a handler the package's own import subscribed.
     """
-    plugins = scan_plugin_filter(plugin_modules)
+    names = frozenset(name for name in plugin_modules if name)
+    plugins = scan_plugin_filter(names)
     registry = manager if manager is not None else ash_plugin_manager
 
     def admits(callback: Any) -> bool:
         if plugins(callback):
             return True
-        if registry.handler_declared_by(callback) is not None:
-            return False
         module = callable_module(callback)
+        if module is not None and any(
+            module == name or module.startswith(name + ".") for name in names
+        ):
+            return True
+        declared_by = registry.handler_declared_by(callback)
+        if declared_by is not None:
+            # A declared handler belongs to its declaring module even when the
+            # declaration itself can no longer be re-read (a one-shot iterator
+            # the loader consumed), so the record decides, not the re-read.
+            return declared_by in names
         if module is None:
             return False
         return not _is_allowed_module_path(module)
@@ -1823,21 +1841,31 @@ def plugins_of(plugin_modules: Iterable[object]) -> Callable[[Any], bool]:
     )
 
     roots = (INTERNAL_PLUGIN_PACKAGE, *split_plugin_modules(plugin_modules))
-    exported = {
-        id(value)
-        for root in roots
-        if (module := sys.modules.get(root)) is not None
-        for value in vars(module).values()
-        if isinstance(value, (type, types.FunctionType))
-    }
-    exported.update(id(value) for root in roots for value in _declared_by(root))
+    # Keyed by id for identity matching; the values keep each object alive
+    # while the filter exists, so no key can be reused by another object (the
+    # shape scan_plugin_filter uses): a listed entry a custom iterable built
+    # could otherwise be freed and its id handed to an unrelated callable.
+    exported: Dict[int, Any] = {}
+    for root in roots:
+        module = sys.modules.get(root)
+        if module is not None:
+            for value in vars(module).values():
+                if isinstance(value, (type, types.FunctionType)):
+                    exported[id(value)] = value
+        for value in _declared_by(root):
+            exported[id(value)] = value
 
     def belongs(plugin: Any) -> bool:
+        # The object as listed or exported first, a functools.partial included:
+        # a declared partial is the listed object itself, and unwrapping it
+        # before the identity check would compare its function instead.
+        if exported.get(id(plugin)) is plugin:
+            return True
         # A functools.partial reports functools as its module; its function is
         # what was defined somewhere.
         while isinstance(plugin, functools.partial):
             plugin = plugin.func
-        if id(plugin) in exported:
+        if exported.get(id(plugin)) is plugin:
             return True
         # callable_module is never-raising, like callback_display_name: the
         # loader accepts callables whose attribute reads raise or hold odd

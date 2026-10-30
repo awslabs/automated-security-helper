@@ -318,3 +318,50 @@ def test_the_row_uses_the_configured_name_when_one_resolved(tmp_path, config_nam
     expected = config_name if config_name is not None else "cdknagscanner"
     assert expected in results.scanner_results, results.scanner_results
     assert results.scanner_results[expected].status == ScannerStatus.ERROR
+
+
+def test_a_configured_name_ending_in_scanner_still_gets_its_failure_row(tmp_path):
+    """Red before the fix: the tracker refused ``MyScanner`` as a class name.
+
+    The construction-failure row is written before ``validate_registered_scanners``
+    has seen the class, and it was written without the class, so a configured
+    name that happens to end in ``Scanner`` raised inside the except handler and
+    ended the phase with no row for any scanner. With the class, the tracker can
+    tell a configured name from the class's own and accepts it with a warning.
+    """
+    cls = _unconstructable_scanner("explodes")
+    context_config = get_default_config()
+    stub = MagicMock()
+    stub.name = "MyScanner"
+
+    for sub in ("src", "out", "work"):
+        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+    context = PluginContext(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "work",
+        config=context_config,
+    )
+    aggregated = AshAggregatedResults()
+    phase = ScanPhase(
+        plugin_context=context,
+        plugins=[cls],
+        progress_display=MagicMock(),
+        asharp_model=aggregated,
+    )
+    double = MagicMock()
+    double.completed_scanners = []
+    double.run_parallel.side_effect = lambda model: model
+    double.run_sequential.side_effect = lambda model: model
+
+    with patch.object(type(context_config), "get_plugin_config", return_value=stub):
+        with patch(
+            "automated_security_helper.core.phases.scan_phase.ScannerExecutor"
+        ) as executor:
+            executor.return_value = double
+            results = phase._execute_phase(aggregated_results=aggregated)
+
+    assert "MyScanner" in results.scanner_results, results.scanner_results
+    assert results.scanner_results["MyScanner"].status == ScannerStatus.ERROR
+    state = phase.validation_manager.get_scanner_state("MyScanner")
+    assert state is not None and state.failure_reason

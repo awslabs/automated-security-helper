@@ -248,6 +248,13 @@ class _Resolution(NamedTuple):
     #: (name, module path, enabled) of each registration, in registry order.
     registrations: Tuple[Tuple[str, str, bool], ...]
     classes: List[type]
+    #: Module paths whose import failed in this resolution. The memo is reused
+    #: until one of them is in ``sys.modules``: something imported it since
+    #: (a later scan naming it, a dependency installed), the explicit signal to
+    #: resolve again. Re-importing on every read would re-run a failing
+    #: module's top-level code (its decorators subscribing a fresh function
+    #: object each time) and re-log the warning on every resolve.
+    failed: Tuple[str, ...] = ()
 
 
 class AshPluginManager(BaseModel):
@@ -340,10 +347,14 @@ class AshPluginManager(BaseModel):
         Still returns the callback so decorator usage is unchanged.
         """
         with self._event_lock:
-            if isinstance(declared_by, str) and declared_by:
-                self._declared_handler_modules.setdefault(
-                    id(callback), (declared_by, callback)
-                )
+            # The first subscriber owns the callback: a program's own subscribe
+            # (no declarer) records None, so a plugin module that lists the same
+            # callback later does not take it over and silence it in scans that
+            # do not name that module. A declared subscribe records its module.
+            owner = (
+                declared_by if isinstance(declared_by, str) and declared_by else None
+            )
+            self._declared_handler_modules.setdefault(id(callback), (owner, callback))
             handlers = self.plugin_library.event_handlers.setdefault(event_type, [])
             if callback in handlers:
                 ASH_LOGGER.debug(
@@ -913,13 +924,24 @@ class AshPluginManager(BaseModel):
             for name, registration in registered
         )
         cached = self._resolved_plugins.get(cache_key)
-        if cached is not None and cached.registrations == resolved_from:
+        if (
+            cached is not None
+            and cached.registrations == resolved_from
+            and not any(path in sys.modules for path in cached.failed)
+        ):
+            # A failed path now present in sys.modules is the one signal to
+            # resolve again: something imported it since (a scan naming it, a
+            # dependency installed). Until then the memo stands, failures
+            # included, so a module that keeps failing is neither re-imported
+            # (its top-level code and decorators re-run, a decorator
+            # subscribing a fresh function object each time) nor re-warned on
+            # every resolve.
             return self.filter_plugin_modules(
                 cached.classes, filter_callback, *args, **kwargs
             )
 
         plugins: List[type] = []
-        import_failed = False
+        failed: List[str] = []
         for _name, registration in registered:
             if not registration.enabled:
                 continue
@@ -940,21 +962,19 @@ class AshPluginManager(BaseModel):
                     ):
                         plugins.append(attr)
             except ImportError as e:
-                import_failed = True
+                failed.append(registration.plugin_module_path)
                 ASH_LOGGER.warning(
                     registration.hide_masked_modules(
                         f"Failed to import plugin module {registration.plugin_module_path}: {e}"
                     )
                 )
 
-        # Memoise the unfiltered result, keyed by the registrations it came from,
-        # so repeat calls skip the import work until something new registers.
-        # Not when an import failed: the key is the registrations, which do not
-        # change when the module becomes importable (a dependency installed, a
-        # file fixed in a long-lived server), so a memoised partial list would
-        # keep leaving that module's classes out of every later scan.
-        if not import_failed:
-            self._resolved_plugins[cache_key] = _Resolution(resolved_from, plugins)
+        # Memoise the unfiltered result, keyed by the registrations it came from
+        # and carrying the paths that failed, so repeat calls skip the import
+        # work until something new registers or a failed module is imported.
+        self._resolved_plugins[cache_key] = _Resolution(
+            resolved_from, plugins, tuple(failed)
+        )
 
         # Apply filter callback
         return self.filter_plugin_modules(plugins, filter_callback, *args, **kwargs)

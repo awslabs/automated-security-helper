@@ -11,7 +11,8 @@ its selectable name only as ``config.name`` on an instance the phase constructs,
 so the engine keyed it by its lowercased class name and refused the configured
 name the phase accepts, making the scanner unselectable. And a request naming a
 community scanner whose module this run did not load was refused as a spelling
-error, pre-empting the phase's message naming the module to add.
+error; it is still refused here, before anything is cleared, but with the
+phase's own text naming the module to add.
 
 The last test pins the other engine-level fix in this file's subject: a report
 over existing results keeps the stored scan's timing.
@@ -98,13 +99,27 @@ def test_an_unnamed_scanner_in_scope_defers_the_refusal_to_the_phase(tmp_path):
     assert engine._initialized is True
 
 
-def test_a_community_scanner_whose_module_is_not_loaded_is_left_to_the_phase(
+def test_a_community_scanner_whose_module_is_not_loaded_is_refused_naming_the_module(
     tmp_path,
 ):
-    """Red before the fix: refused as a spelling error, with no module hint."""
+    """Red before the fix: refused as a spelling error, with no module hint
+    (and, for one cut, not refused at all until the phase)."""
     engine = _engine(tmp_path)
 
-    _reinitialize(engine, ["snyk-code"], [_NamedScanner])
+    with pytest.raises(ScannerSelectionError, match="ash_snyk_plugins") as refused:
+        _reinitialize(engine, ["snyk-code"], [_NamedScanner])
+
+    assert "community scanner" in str(refused.value)
+    assert "--ash-plugin-modules" in str(refused.value)
+
+
+def test_a_declared_name_beside_an_unloaded_community_scanner_is_not_refused(
+    tmp_path,
+):
+    """Control: the request resolves to something; the phase warns about the rest."""
+    engine = _engine(tmp_path)
+
+    _reinitialize(engine, ["bandit", "snyk-code"], [_NamedScanner])
 
     assert engine._initialized is True
 

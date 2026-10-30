@@ -19,6 +19,7 @@ from automated_security_helper.core.cancellation import (
     raise_if_cancelled,
 )
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
+from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     refuse_selection_matching_no_scanner,
     selection_after_exclusions,
@@ -596,24 +597,28 @@ class ScanExecutionEngine:
             # the ones each class declares (declared_plugin_name), which ScanPhase
             # matches as config.name on the instance.
             #
-            # Deferred to ScanPhase in the two shapes only the phase can judge.
-            # When any scanner class in scope declares no name, its selectable
+            # Deferred to ScanPhase in the one shape only the phase can judge:
+            # when any scanner class in scope declares no name, its selectable
             # name is config.name on an instance the phase alone constructs, so a
             # check keyed on the lowercased class name would refuse the configured
             # name the phase accepts; the workspace pre-check
             # (workspace.execution.refuse_unresolvable_scanner_selection) defers
-            # the same way. And when a requested name is a community scanner
-            # whose module this run did not load, the phase refuses with the
-            # module to add, where this check could only call it a misspelling.
+            # the same way. A request naming a community scanner whose module
+            # this run did not load is refused HERE, before anything is cleared,
+            # with the module to add rather than spelling advice: the hint
+            # ScanPhase builds for the same shape, from the same classes.
             if self._init_enabled_scanners:
                 scanner_classes = list(self.plugins.get("scanner", []))
                 declared_names = [
                     declared_plugin_name(plugin_class)
                     for plugin_class in scanner_classes
                 ]
-                if all(
-                    name is not None for name in declared_names
-                ) and not self._names_an_unloaded_community_scanner(scanner_classes):
+                if all(name is not None for name in declared_names):
+                    hint = self._unloaded_community_scanner_hint(
+                        scanner_classes, declared_names
+                    )
+                    if hint:
+                        raise ScannerSelectionError(hint)
                     refuse_selection_matching_no_scanner(
                         self._init_enabled_scanners,
                         declared_names,
@@ -623,32 +628,53 @@ class ScanExecutionEngine:
             # Mark initialization complete
             self._initialized = True
 
-    def _names_an_unloaded_community_scanner(self, scanner_classes) -> bool:
-        """Whether the allowlist names a community scanner no class in scope provides.
+    def _unloaded_community_scanner_hint(self, scanner_classes, declared_names) -> str:
+        """The refusal text when the allowlist resolves to nothing but names a community scanner this run did not load, else "".
 
         ``core.community_scanners`` maps each in-tree community scanner's name to
         its plugin module without importing it. A requested name that maps to a
         module none of *scanner_classes* comes from is a scanner ASH ships but
-        this run did not load; ScanPhase refuses that shape naming the module to
-        add, so the construction-time refusal, which can only call the name a
-        misspelling, leaves it to the phase.
+        this run did not load. When no requested name matches a declared name
+        and at least one unmatched name is such a scanner, the text names the
+        module to add, in the words ScanPhase uses for the same shape, so a
+        refusal here (before the orchestrator asks git anything or clears the
+        output directory) reads as the phase's would. A request that matches
+        some declared name is not refused: the phase warns about the rest.
         """
         from automated_security_helper.core.community_scanners import (
             community_module_for,
         )
 
+        declared = {name.lower().strip() for name in declared_names}
+        requested = [
+            (name, name.lower().strip()) for name in self._init_enabled_scanners
+        ]
+        if any(key in declared for _, key in requested):
+            return ""
         loaded_modules = {
             str(getattr(plugin_class, "__module__", ""))
             for plugin_class in scanner_classes
         }
-        for name in self._init_enabled_scanners:
+        unloaded: dict = {}
+        for name, _ in requested:
             module = community_module_for(name)
             if module and not any(
                 loaded == module or loaded.startswith(module + ".")
                 for loaded in loaded_modules
             ):
-                return True
-        return False
+                unloaded[name] = module
+        if not unloaded:
+            return ""
+        modules = sorted(set(unloaded.values()))
+        return (
+            f"{', '.join(sorted(unloaded))} "
+            f"{'is a community scanner' if len(unloaded) == 1 else 'are community scanners'}"
+            " whose plugin module is not loaded. Add "
+            f"{', '.join(modules)} to ash_plugin_modules in the ASH "
+            "config, or pass "
+            + " ".join(f"--ash-plugin-modules {m}" for m in modules)
+            + "."
+        )
 
     def restrict_to_changed_files(self, changed_files: Optional[Set[Path]]) -> None:
         """Set the changed-file filter after construction; ``None`` means none.

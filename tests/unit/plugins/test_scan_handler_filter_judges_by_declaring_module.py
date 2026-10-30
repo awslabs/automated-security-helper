@@ -11,6 +11,13 @@ every later scan; a handler a plugin module lists but whose function lives in a
 helper library outside the namespace was read as the program's own; and a
 callback whose ``__module__`` read raises broke the notify of every subscriber
 of its event.
+
+Three more, found by review of the first cut. A handler a plugin package's own
+import subscribed from a submodule (the ``event_subscriber`` decorator declares
+nothing) was left out of the scan that named the package. A callback the program
+subscribed first and a plugin module listed later was taken over by the module and
+silenced in scans not naming it. And a declared handler whose declaration could no
+longer be re-read was refused even by the scan naming its module.
 """
 
 from __future__ import annotations
@@ -116,6 +123,69 @@ def test_a_handler_the_program_subscribed_itself_is_still_notified():
 
     assert manager.handler_declared_by(program) is None
     assert scan_handler_filter([], manager=manager)(program)
+
+
+def test_a_handler_a_named_package_subscribed_from_a_submodule_is_admitted():
+    """Red before the fix: in the namespace, below the named module, declared
+    by nothing, so neither the plugin filter nor the program rule admitted it."""
+    below = _handler_in("zz_deep_ash_plugins.events")
+    manager = _manager()
+    manager.subscribe(AshEventType.SCAN_COMPLETE, below)
+
+    assert scan_handler_filter(["zz_deep_ash_plugins"], manager=manager)(below)
+    assert not scan_handler_filter([], manager=manager)(below), (
+        "control: a scan not naming the package was notified"
+    )
+    assert not scan_handler_filter(["zz_deep_ash_plugins_other"], manager=manager)(
+        below
+    ), "a sibling package with the named one as a prefix admitted it"
+
+
+def test_the_program_keeps_a_callback_a_plugin_module_lists_later():
+    """Red before the fix: the later declared subscribe took the callback over."""
+    shared = _handler_in("zz_program.hooks")
+    manager = _manager()
+    manager.subscribe(AshEventType.SCAN_COMPLETE, shared)
+    manager.subscribe(
+        AshEventType.SCAN_START, shared, declared_by="zz_claims_ash_plugins"
+    )
+
+    assert manager.handler_declared_by(shared) is None
+    assert scan_handler_filter([], manager=manager)(shared)
+
+
+def test_a_declared_record_admits_the_handler_when_its_module_is_named(
+    monkeypatch,
+):
+    """Red before the fix: the record refused unless the declaration re-read.
+
+    The declaring module is not in ``sys.modules`` (a one-shot iterable the
+    loader consumed is the live shape), so only the record says who declared
+    the handler.
+    """
+    monkeypatch.delitem(sys.modules, "zz_gone_ash_plugins", raising=False)
+    helper = _handler_in("zz_helper_lib.callbacks")
+    manager = _manager()
+    manager.subscribe(
+        AshEventType.SCAN_COMPLETE, helper, declared_by="zz_gone_ash_plugins"
+    )
+
+    assert scan_handler_filter(["zz_gone_ash_plugins"], manager=manager)(helper)
+    assert not scan_handler_filter([], manager=manager)(helper), (
+        "control: a scan not naming the declaring module was notified"
+    )
+
+
+def test_plugins_of_keeps_a_declared_partial_as_the_listed_object(monkeypatch):
+    """Red before the fix: the partial was unwrapped before the identity check,
+    and its function, defined elsewhere, matched nothing."""
+    listed = functools.partial(_handler_in("zz_elsewhere.hooks"), 1)
+    module = types.ModuleType("zz_partial_ash_plugins")
+    module.ASH_EVENT_HANDLERS = {AshEventType.SCAN_COMPLETE: [listed]}
+    monkeypatch.setitem(sys.modules, "zz_partial_ash_plugins", module)
+
+    assert plugins_of(["zz_partial_ash_plugins"])(listed)
+    assert not plugins_of([])(listed), "control: unnamed, unselected"
 
 
 def test_an_undo_drops_the_declared_record_with_the_handler():

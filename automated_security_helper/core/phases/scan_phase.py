@@ -46,7 +46,10 @@ from automated_security_helper.utils.sandbox.scope import (
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
-from automated_security_helper.models.scanner_validation import ScannerValidationManager
+from automated_security_helper.models.scanner_validation import (
+    ScannerValidationManager,
+    scanner_display_name,
+)
 from automated_security_helper.core.phases.scanner_selection import operator_selection
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.core.phases.scan_result_processor import (
@@ -180,17 +183,15 @@ def _nothing_to_scan_reason(plugin_instance, values: Iterable[str] = ()) -> str 
 def _scanner_display_name(plugin_instance) -> str:
     """Return the name a scanner is identified by everywhere in this phase.
 
-    Extracted because this expression appeared three times inline, and it has to
-    agree exactly with the name ``--exclude-scanners`` is matched against. Shard
-    selection is implemented as an exclusion, so a copy of this rule that drifted
-    would assign a shard a name the exclusion check never matches -- the scanner
-    would run on every shard, and its findings would be counted once per shard.
+    One rule, shared with the validation tracker through
+    ``scanner_display_name``: it has to agree exactly with the name
+    ``--exclude-scanners`` is matched against and with the name the tracker
+    registers the instance under. Shard selection is implemented as an
+    exclusion, so a copy of this rule that drifted would assign a shard a name
+    the exclusion check never matches -- the scanner would run on every shard,
+    and its findings would be counted once per shard.
     """
-    config = getattr(plugin_instance, "config", None)
-    name = getattr(config, "name", None) if config is not None else None
-    if name:
-        return name
-    return plugin_instance.__class__.__name__.lower()
+    return scanner_display_name(plugin_instance)
 
 
 def _regular_files_under(directory: Any) -> Iterable[str]:
@@ -729,9 +730,17 @@ class ScanPhase(EnginePhase):
                                 excluded=False,
                             )
                         )
+                        # With the class: the tracker accepts a configured name
+                        # ending in "Scanner" only when it can compare the name
+                        # with the class's own, and this row is written before
+                        # validate_registered_scanners has done so. Without the
+                        # class the tracker refuses such a name; the wrapper
+                        # keeps the refusal from aborting the phase, but the
+                        # scanner's state would then go untracked.
                         self._track_scanner_state(
                             failed_name,
                             registration_status="registered",
+                            plugin_class=plugin_class,
                             queued_for_execution=False,
                             execution_completed=False,
                             failure_reason=construction_error,

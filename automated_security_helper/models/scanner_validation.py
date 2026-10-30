@@ -145,13 +145,17 @@ def _is_class_name(name: str) -> bool:
     return name.endswith(_SCANNER_CLASS_SUFFIX)
 
 
-def _scanner_instance_name(scanner_instance: Any) -> str:
-    """The name a scanner instance is tracked under.
+def scanner_display_name(scanner_instance: Any) -> str:
+    """The one name a scanner instance is known by: tracked, displayed, excluded.
 
-    Its ``config.name``, else the lowercased class name: the fallback ScanPhase
-    uses for the display name it records results and exclusions under, so a
-    scanner whose config carries no name is tracked under the name its rows use
-    instead of being refused as an empty name.
+    Its ``config.name`` when that is a non-empty string, else the lowercased
+    class name. ScanPhase records results and exclusions under this name and
+    matches ``--exclude-scanners`` against it, and the tracker registers the
+    instance under it, so the rule lives here once: a tracker copy that drifted
+    would register a scanner under a name its rows never use, and a phase copy
+    that drifted would give a shard a name the exclusion check never matches.
+    A ``name`` that is not a string (a stub config) takes the class-name arm,
+    because the tracker needs a string to validate.
     """
     config = getattr(scanner_instance, "config", None)
     name = getattr(config, "name", None) if config is not None else None
@@ -482,7 +486,7 @@ class ValidationCheckpointer:
 
         scanner_names = []
         for scanner_instance in scanner_instances:
-            scanner_name = _scanner_instance_name(scanner_instance)
+            scanner_name = scanner_display_name(scanner_instance)
             scanner_names.append(scanner_name)
             self._tracker.update_scanner_state(
                 scanner_name,
@@ -690,11 +694,14 @@ class ValidationCheckpointer:
         manager facade -- and moving it would change a call site this commit is
         restoring rather than redesigning.
 
-        Note that ``has_discrepancies`` mirrors ``checkpoint.has_issues()``,
-        which reports recorded discrepancies and errors. A missing scanner does
-        NOT by itself set that flag, so ``has_discrepancies`` can be False while
-        ``missing_count`` is non-zero. That asymmetry predates this restoration
-        and is preserved deliberately: the counts are the field to test.
+        ``has_discrepancies`` mirrors ``checkpoint.has_issues()``, which reads
+        the recorded discrepancies and errors. :meth:`validate_execution_completion`
+        records one discrepancy per scanner that was queued and did not
+        complete, so a non-zero ``missing_count`` now comes with
+        ``has_discrepancies`` True. Before that change a missing scanner set the
+        count alone and the flag stayed False; a consumer of
+        ``metadata.execution_discrepancy_report`` that read the flag as "nothing
+        went wrong" sees True for such a scan from this version on.
 
         Args:
             execution_checkpoint: The checkpoint from

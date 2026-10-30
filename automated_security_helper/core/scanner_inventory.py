@@ -534,22 +534,25 @@ def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
         # The instance is gone, but the class still declares its config, and that declaration
         # is the only remaining source for `enabled`. Skipping this leaves the optimistic
         # default in place and reports a disabled scanner as enabled.
+        # The class's declared default when it can be read; the optimistic
+        # default when the class declares no config or its config class cannot
+        # be built. Either way the operator's default configuration is read
+        # over it, as for a constructed scanner below: the entry answers whether
+        # this deployment has the scanner on, and a scanner the operator
+        # switched off read as enabled whenever its construction failed and its
+        # declaration could not be read.
+        declared_default: Any = True
         declared_cls = _declared_config_class(cls)
         if declared_cls is not None:
             try:
-                declared = declared_cls()
+                declared_default = getattr(declared_cls(), "enabled", True)
             except Exception:
-                # A config class that cannot be built either tells us nothing, so the
-                # optimistic default stands rather than being replaced by a guess.
-                return entry
-            # The operator's default configuration overrides the class's declared
-            # default here as it does for a constructed scanner below: the entry
-            # answers whether this deployment has the scanner on, and a scanner
-            # the operator switched off read as enabled when its construction
-            # failed.
-            entry["enabled"] = _configured_enabled(
-                default_config, entry["name"], getattr(declared, "enabled", True)
-            )
+                # A config class that cannot be built tells us nothing about the
+                # class's own default; the operator's section still decides.
+                pass
+        entry["enabled"] = _configured_enabled(
+            default_config, entry["name"], declared_default
+        )
         return entry
 
     config = getattr(plugin, "config", None)
