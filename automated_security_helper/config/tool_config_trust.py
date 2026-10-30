@@ -199,8 +199,8 @@ def replay_overrides_onto(
     changes nothing on that base. Applied as one set, such an override refused
     the whole set and aborted the resolution. They are applied together first,
     and when that is refused each is applied on its own: the ones the trusted
-    base refuses are left out, with one warning naming their keys and never
-    their values. A respelled section (``ASHRespelledOverrideError``) is still
+    base refuses are left out, each with one warning naming its key and never
+    its value. A respelled section (``ASHRespelledOverrideError``) is still
     refused, as the reporters replay refuses it: the scan does not resolve
     under a spelling the operator did not type
     (tests/unit/config/test_a_respelled_reporter_override_fails_the_scan.py).
@@ -237,13 +237,14 @@ def replay_overrides_onto(
         from automated_security_helper.utils.log import NO_MARKUP
 
         values = config_environment_values(trusted_config)
-        keys = ", ".join(redact_values(key, values) for key in skipped)
-        ASH_LOGGER.warning(
-            f"The overrides at {keys} do not apply to the trusted "
-            "configuration, so they are not replayed onto it; the other overrides "
-            "are. Each applied to the resolved configuration already.",
-            extra=NO_MARKUP,
-        )
+        for key in skipped:
+            ASH_LOGGER.warning(
+                f"The override at {redact_values(key, values)} is one the trusted "
+                "configuration cannot take, so it is not replayed onto it; the "
+                "other overrides are. It applied to the resolved configuration "
+                "already.",
+                extra=NO_MARKUP,
+            )
     return replayed
 
 

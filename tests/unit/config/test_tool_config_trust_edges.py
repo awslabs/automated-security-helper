@@ -280,6 +280,26 @@ def test_an_override_only_the_trusted_base_refuses_does_not_abort_the_scan_confi
     assert not _warnings_naming(ash_log, "hidden-value")
 
 
+def test_each_override_the_trusted_base_refuses_gets_its_own_warning(
+    tmp_path, ash_log, trusted_base_refuses_one_section
+):
+    config = AshConfig.model_validate({"project_name": "repo"})
+    trusted = AshConfig.model_validate({"project_name": "op"})
+    overrides = [
+        "scanners.refused-section.options.x=hidden-value",
+        "scanners.refused-section.options.y=hidden-value",
+        "scanners.opengrep.options.config=p/custom",
+    ]
+
+    confine_scanner_config_files(config, trusted, overrides, [tmp_path / ".ash.yaml"])
+
+    assert config.scanners.opengrep.options.config == "p/custom"
+    named = _warnings_naming(ash_log, "scanners.refused-section.")
+    assert len(named) == 2, named
+    assert sorted("options.x" in message for message in named) == [False, True]
+    assert not _warnings_naming(ash_log, "hidden-value")
+
+
 def test_an_override_only_the_trusted_base_refuses_does_not_abort_the_versions(
     tmp_path, ash_log, trusted_base_refuses_one_section
 ):
