@@ -194,22 +194,45 @@ def _selection_key(name: str) -> str:
     return name.lower().strip()
 
 
+class AmbiguousToolName(ValueError):
+    """A ``--tool`` name selects more than one plugin by the scan's key and none
+    by its exact spelling: ``--tool SEMGREP`` with plugins ``Semgrep`` and
+    ``semgrep``. Neither is the caller's choice, so the caller refuses it,
+    naming both (:func:`_canonical_tool_names`)."""
+
+    def __init__(self, name: str, matches: List[str]):
+        self.name = name
+        self.matches = list(matches)
+        super().__init__(
+            f"--tool {name} names more than one plugin: {', '.join(self.matches)}"
+        )
+
+
 def _canonical_tool_name(resolved_name: str, available: Iterable[str]) -> str:
     """The name in ``available`` that ``resolved_name`` selects.
 
     The name itself when it is there as typed, so a plugin whose name differs
     from another's only in case or blanks is still selected by its exact
-    spelling; else the first name with the same selection key
+    spelling; else the one name with the same selection key
     (:func:`_selection_key`), the scan's match; else ``resolved_name`` as it is,
     for the caller to refuse as unknown.
+
+    Two names with that key and neither spelled as typed raise
+    :class:`AmbiguousToolName` rather than picking one. The scan picks neither
+    either: two scanners whose names differ only in case share one selection
+    key, and it runs the first and refuses the second as a name already carried
+    (core.phases.scan_phase, ``_record_duplicate_scanner_name``), so which plugin
+    an installer picked would be an accident of registry order.
     """
     names = list(available)
     if resolved_name in names:
         return resolved_name
     key = _selection_key(resolved_name)
-    for name in names:
-        if _selection_key(name) == key:
-            return name
+    matches = [name for name in names if _selection_key(name) == key]
+    if len(matches) > 1:
+        raise AmbiguousToolName(resolved_name, matches)
+    if matches:
+        return matches[0]
     return resolved_name
 
 
@@ -275,11 +298,49 @@ def _canonical_tool_names(
     (:func:`_canonical_tool_name`: as typed first, then by the scan's selection
     key). A name no plugin has stays as resolved, so the caller still refuses it.
     Compared as typed, `--tool Grype` was refused as unknown, and with
-    ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip it skipped a tool the scan then ran."""
+    ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip it skipped a tool the scan then ran.
+
+    A name that selects two plugins by key and neither exactly is refused here,
+    exit 2, naming both and the spelling that would select one: the scan refuses
+    such a pair too (:func:`_canonical_tool_name`), and installing for the first
+    the registry happened to list would be a silent choice."""
     names = list(known)
+    try:
+        return {
+            typed: _canonical_tool_name(resolved_name, names)
+            for typed, resolved_name in tool_resolution.items()
+        }
+    except AmbiguousToolName as e:
+        console.print(
+            Panel(
+                f"[bold red]Ambiguous tool: {escape(e.name)}[/bold red]\n"
+                f"[cyan]Names more than one plugin:[/cyan] "
+                f"{escape(', '.join(e.matches))}\n"
+                "Their names differ only in case or blanks, which the scan refuses "
+                "too (two scanners cannot share one name). Select one by its exact "
+                "spelling.",
+                title="Nothing installed",
+                expand=False,
+            )
+        )
+        raise typer.Exit(EXIT_BAD_SELECTION)
+
+
+def _requested_classes(candidates: Iterable[tuple], requested_names: List[str]) -> set:
+    """The plugin classes a ``--tool`` run builds, for the option check: each
+    candidate whose declared name is one of the resolved names, exactly, and each
+    whose name is known only by building it (declared ``None``).
+
+    Exactly, not by selection key: the names were resolved to the plugins' own
+    spellings already (:func:`_canonical_tool_names`), so matching by key here
+    put a plugin that differs from a requested one only in case back into the
+    check, and ``--tool semgrep`` exited 3 over a bad option in the ``Semgrep``
+    section of a plugin this run never builds.
+    """
     return {
-        typed: _canonical_tool_name(resolved_name, names)
-        for typed, resolved_name in tool_resolution.items()
+        candidate[2]
+        for candidate in candidates
+        if candidate[3] is None or candidate[3] in requested_names
     }
 
 
@@ -1162,12 +1223,7 @@ def install_dependencies(
     # it. Another plugin's problem is reported at info, as an unrelated plugin is
     # here.
     built_kinds = {candidate[1] for candidate in candidates}
-    requested_keys = {_selection_key(name) for name in requested_names}
-    requested_classes = {
-        candidate[2]
-        for candidate in candidates
-        if candidate[3] is None or _selection_key(candidate[3]) in requested_keys
-    }
+    requested_classes = _requested_classes(candidates, requested_names)
 
     def builds(plugin_module_input: str, plugin_class: type) -> bool:
         if plugin_module_input not in built_kinds:
@@ -1272,11 +1328,9 @@ def install_dependencies(
         # case, or with blanks around it, selects the plugin it names and is
         # installed under the plugin's own spelling, while a plugin whose name
         # differs from another's only in case is still selected by its exact
-        # spelling. An unknown name is still reported as the caller typed it.
-        tool_resolution = {
-            typed: _canonical_tool_name(resolved_name, available)
-            for typed, resolved_name in tool_resolution.items()
-        }
+        # spelling, and a name that selects two plugins by key is refused. An
+        # unknown name is still reported as the caller typed it.
+        tool_resolution = _canonical_tool_names(tool_resolution, available)
         requested_names = list(dict.fromkeys(tool_resolution.values()))
         unknown = [
             typed

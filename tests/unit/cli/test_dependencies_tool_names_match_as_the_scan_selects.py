@@ -16,6 +16,7 @@ has is still refused in the spelling the caller typed.
 import io
 
 import pytest
+import typer
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -136,3 +137,83 @@ class TestCanonicalToolName:
             dependencies_module._canonical_tool_name("Not-A-Tool", self.AVAILABLE)
             == "Not-A-Tool"
         )
+
+    def test_a_third_spelling_of_two_case_twins_is_ambiguous(self):
+        """`SEMGREP` names Semgrep and semgrep alike. The first by registry order
+        was picked, silently, and which one that was changed with the ordering."""
+        with pytest.raises(dependencies_module.AmbiguousToolName) as raised:
+            dependencies_module._canonical_tool_name("SEMGREP", self.AVAILABLE)
+
+        assert raised.value.name == "SEMGREP"
+        assert raised.value.matches == ["Semgrep", "semgrep"]
+
+
+class TestAmbiguousNamesAreRefused:
+    """The scan runs the first of two scanners whose names differ only in case
+    and refuses the second as a name already carried (scan_phase,
+    _record_duplicate_scanner_name); the installer refuses to pick for the caller
+    and names both."""
+
+    AVAILABLE = ["Semgrep", "bandit", "semgrep"]
+
+    @pytest.fixture
+    def panels(self, monkeypatch):
+        captured = io.StringIO()
+        monkeypatch.setattr(
+            dependencies_module,
+            "console",
+            Console(file=captured, width=200, no_color=True),
+        )
+        return captured
+
+    def test_the_resolution_exits_2_naming_both_plugins(self, panels):
+        with pytest.raises(typer.Exit) as raised:
+            dependencies_module._canonical_tool_names(
+                {"SEMGREP": "SEMGREP"}, self.AVAILABLE
+            )
+
+        assert raised.value.exit_code == EXIT_BAD_SELECTION
+        output = panels.getvalue()
+        assert "Ambiguous tool: SEMGREP" in output, output
+        assert "Semgrep, semgrep" in output, output
+        assert "exact spelling" in output, output
+
+    def test_an_exact_spelling_beside_the_twins_is_not_ambiguous(self, panels):
+        resolution = dependencies_module._canonical_tool_names(
+            {"semgrep": "semgrep", "Bandit": "Bandit"}, self.AVAILABLE
+        )
+
+        assert resolution == {"semgrep": "semgrep", "Bandit": "bandit"}
+        assert panels.getvalue() == ""
+
+
+class TestRequestedClassesFollowTheResolvedNames:
+    """The option check covers the plugins this run builds. Matched by selection
+    key, `--tool semgrep` put the Semgrep class back in, and a bad option in the
+    Semgrep section exited 3 for a plugin this run never builds."""
+
+    class Semgrep:
+        pass
+
+    class semgrep:
+        pass
+
+    class unnamed:
+        pass
+
+    CANDIDATES = [
+        ("scanner", "scanner", Semgrep, "Semgrep"),
+        ("scanner", "scanner", semgrep, "semgrep"),
+        ("scanner", "scanner", unnamed, None),
+    ]
+
+    def test_only_the_exactly_named_plugin_is_checked(self):
+        assert dependencies_module._requested_classes(self.CANDIDATES, ["semgrep"]) == {
+            self.semgrep,
+            self.unnamed,
+        }
+
+    def test_a_plugin_known_only_by_building_is_always_checked(self):
+        assert dependencies_module._requested_classes(self.CANDIDATES, []) == {
+            self.unnamed
+        }
