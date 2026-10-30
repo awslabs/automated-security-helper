@@ -1699,8 +1699,18 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         if Path(path).is_dir():
             ASH_LOGGER.debug(f"Skipping directory: {path}")
             return True
-        for ignore_path in self._ignore_paths_skipping_scanning():
+        ignore_paths = self._ignore_paths_skipping_scanning()
+        if not ignore_paths:
+            return False
+        try:
             rel_path = Path(path).relative_to(self.context.source_dir).as_posix()
+        except ValueError:
+            # Not lexically under the tree (reached through a link, or spelled
+            # another way): an ignore path is written relative to the tree and
+            # names no such path. Raising here made the archive a failed input
+            # of the run's kind with nothing wrong with the archive.
+            return False
+        for ignore_path in ignore_paths:
             if ignore_path_matches(rel_path, ignore_path.path):
                 ASH_LOGGER.debug(
                     f"Skipping conversion of ignored path: {path} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"

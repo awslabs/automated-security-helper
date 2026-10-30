@@ -246,6 +246,29 @@ def test_what_the_archive_itself_makes_unextractable_is_an_input_error(
     assert waives_gate(failed)
 
 
+def test_a_scan_set_path_outside_the_tree_is_not_skipped_and_does_not_raise(
+    test_plugin_context, monkeypatch
+):
+    """With ignore paths set, the archive converter resolved every scan-set path
+    against the source directory before matching, so a path not lexically under
+    the tree raised ValueError into the conversion and the sound archive was
+    recorded as a failure of the run's kind. No ignore path, written relative to
+    the tree, names such a path."""
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    test_plugin_context.config.global_settings.ignore_paths = [
+        IgnorePathWithReason(path="vendor/*", reason="third-party")
+    ]
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+
+    assert converter._skipped("/elsewhere/vendor/a.zip") is False
+    # The control: a path under the tree that the entry names is skipped.
+    inside = Path(test_plugin_context.source_dir) / "vendor" / "a.zip"
+    assert converter._skipped(str(inside)) is True
+
+
 def test_the_record_names_the_archive_by_its_path_in_the_tree_wherever_ash_runs(
     test_plugin_context, monkeypatch
 ):
