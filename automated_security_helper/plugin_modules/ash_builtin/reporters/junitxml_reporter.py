@@ -46,13 +46,13 @@ import warnings
 # the level cascade; `open` and `review` reach the arm below.
 _FINDING_KINDS = frozenset({"fail", "open", "review"})
 
-# SARIF `kind` values that assert the opposite -- the rule ran and there is
-# nothing to report. cdk-nag uses `informational` for a COMPLIANT check
-# (cdk_nag_wrapper._level_and_kind), so rendering these as anything but a
-# passing test case would report a passed control as a problem. `notApplicable`
-# is neither: the rule was NOT evaluated, so it renders as skipped (see the
-# emit cascade in `report`).
-_NON_FINDING_KINDS = frozenset({"pass", "informational"})
+# The other kinds (`pass`, `informational`) do not assert a finding. cdk-nag uses
+# `informational` for a COMPLIANT check (cdk_nag_wrapper._level_and_kind). They
+# are graded by level like any result, so that the report agrees with the exit
+# code: an actionable one with no `error` or `warning` level is a passing test
+# case, and one below the threshold is a skip. `notApplicable` is neither: the
+# rule was NOT evaluated, so it renders as skipped (see the emit cascade in
+# `report`).
 
 #: The ``type`` attribute on a skipped project's ``<skipped>`` element. Distinct
 #: from the existing ``suppression`` and ``threshold`` types, which are both about
@@ -679,14 +679,12 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                             test_case.result = [
                                 Error(message=message_text, type_=error_type)
                             ]
-                    elif result.kind in _NON_FINDING_KINDS:
-                        # A check that passed (`pass`, or cdk-nag's `informational`
-                        # for a COMPLIANT rule) has no finding to be below any
-                        # threshold: it keeps its bare, passing test case rather
-                        # than a skip saying a finding was set aside.
-                        pass
                     else:
-                        # Mark as skipped if below threshold
+                        # Mark as skipped if below threshold. Whatever its kind:
+                        # the exit code reads the level against the threshold
+                        # and ignores the kind, so a `pass` or `informational`
+                        # result that is not actionable is a skip here too, and
+                        # the report agrees with the exit code.
                         test_case.result = [
                             Skipped(
                                 message="Finding is below configured severity threshold",

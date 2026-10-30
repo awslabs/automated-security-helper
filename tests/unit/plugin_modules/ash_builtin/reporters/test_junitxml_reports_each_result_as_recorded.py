@@ -12,8 +12,10 @@
 * ``issue_severity`` with surrounding blanks was not recognized.
 * The ``type`` of an ``<error>`` follows the level, so a ``note`` finding is not
   typed ``error`` because its kind is the default ``fail``.
-* A check that passed (kind ``pass`` or ``informational``) below the threshold is
-  a passing test, not a skip that says a finding was set aside.
+* A result of kind ``pass`` or ``informational`` is graded by its level like any
+  other, so the report agrees with the exit code: below the threshold it is a
+  skip, and an actionable one with no ``error`` or ``warning`` level is a passing
+  test.
 """
 
 import xml.etree.ElementTree as ET  # nosec B405
@@ -155,16 +157,31 @@ class TestTheTypeFollowsTheLevel:
         assert case.find("error").get("type") == "note"
 
 
-class TestACheckThatPassedIsAPassingTest:
+class TestAResultThatIsNotAFindingIsGradedByItsLevel:
+    """The exit code reads the level against the threshold and ignores the kind,
+    so the report does the same."""
+
     @pytest.mark.parametrize("kind", ["pass", "informational"])
-    def test_it_below_the_threshold_is_not_a_skip(self, tmp_path, kind):
+    def test_one_below_the_threshold_is_a_skip(self, tmp_path, kind):
         result = _result(level="note")
         result.kind = kind
         case = _render(tmp_path, result)
+        skipped = case.find("skipped")
+        assert skipped is not None
+        assert skipped.get("type") == "threshold"
+        assert case.find("error") is None
+
+    @pytest.mark.parametrize("kind", ["pass", "informational"])
+    def test_one_that_is_actionable_without_an_error_level_is_a_passing_test(
+        self, tmp_path, kind
+    ):
+        result = _result(level="none")
+        result.kind = kind
+        case = _render(tmp_path, result, threshold="ALL")
         assert case.find("skipped") is None
         assert case.find("error") is None
 
-    def test_a_finding_below_the_threshold_is_still_a_skip(self, tmp_path):
-        # The control: only the passing kinds changed.
+    def test_a_finding_below_the_threshold_is_a_skip_too(self, tmp_path):
+        # The control: the kind makes no difference to the skip.
         case = _render(tmp_path, _result(level="note"))
         assert case.find("skipped") is not None
