@@ -29,17 +29,20 @@ def vanishing_database(monkeypatch, tmp_path):
     """A cache whose one database file is listed, then gone at its stat."""
     cache = tmp_path / "cache"
     cache.mkdir()
-    (cache / "vulnerability.db").write_bytes(b"\x00")
+    # One database file of each tool's name, so the fixture serves both validators.
+    databases = {"vulnerability.db", "trivy.db"}
+    for name in databases:
+        (cache / name).write_bytes(b"\x00")
     real_is_file = Path.is_file
     real_stat = Path.stat
 
     def _is_file(self, *args, **kwargs):
-        if self.name == "vulnerability.db":
+        if self.name in databases:
             return True
         return real_is_file(self, *args, **kwargs)
 
     def _stat(self, *args, **kwargs):
-        if self.name == "vulnerability.db":
+        if self.name in databases:
             raise FileNotFoundError(2, "No such file or directory", str(self))
         return real_stat(self, *args, **kwargs)
 
