@@ -22,11 +22,14 @@ import pytest
 from automated_security_helper.core import committed_output as committed_output_module
 from automated_security_helper.core.committed_output import (
     WORKSPACE_PROJECTS_DIR_NAME,
-    _GitFailures,
     _found_in_the_way,
+    _GitFailures,
     committed_entries_in_a_workspace_output,
 )
-from automated_security_helper.utils.scan_output_dirs import GitIndexAnswer
+from automated_security_helper.utils.scan_output_dirs import (
+    GitIndexAnswer,
+    GitIndexUnavailable,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -97,3 +100,38 @@ def test_a_kept_listing_answers_the_results_paths_check(tmp_path, monkeypatch):
     assert asked == [output]
     assert found.committed == [output / "ash_aggregated_results.json"]
     assert found.answer is None
+
+
+def test_a_kept_listing_whose_superproject_question_fails_is_unanswered(
+    tmp_path, monkeypatch
+):
+    """The kept-listing branch asks the enclosing repository whether it tracks the
+    directory, the same question committed_files_at_results_paths asks inside the
+    try below it. That question raises GitIndexUnavailable when the enclosing
+    repository gives no listing; asked outside the try, it escaped the check raw
+    where every other git failure is folded into an unanswered directory."""
+    output = (tmp_path / "out").resolve()
+    output.mkdir()
+    failures = _GitFailures()
+    _counting_git(monkeypatch, output, {output: ["reports/x.sarif"]})
+    committed_output_module._index_below(output, failures)
+    failed = GitIndexAnswer(
+        output,
+        repository=output.parent,
+        error="index file corrupt",
+        could_not_run=False,
+    )
+
+    def no_listing(answer):
+        raise GitIndexUnavailable(failed)
+
+    monkeypatch.setattr(
+        committed_output_module, "_an_enclosing_repository_tracks_the_root", no_listing
+    )
+
+    found = _found_in_the_way(output, None, None, (), failures)
+
+    assert found.committed == []
+    assert found.answer is failed
+    assert failures.known_for(output) is not None
+    assert failures.known_for(output).names is None
