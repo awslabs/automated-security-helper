@@ -381,6 +381,33 @@ def test_the_receipt_store_is_not_written_through_a_link(receipt_home, tmp_path)
 
 
 @POSIX_ONLY
+def test_a_link_swapped_into_the_receipt_store_after_the_check_is_not_chmodded(
+    receipt_home, tmp_path, monkeypatch
+):
+    """The mode is set on a descriptor opened with O_NOFOLLOW, so a link swapped
+    in between the ``is_symlink`` check and the chmod is refused, not followed: by
+    name, the chmod made the link's target 0o700."""
+    root = du.receipt_root()
+    root.parent.mkdir(parents=True, exist_ok=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o755)
+    real_is_symlink = Path.is_symlink
+
+    def swap_then_answer(self):
+        answer = real_is_symlink(self)
+        if self == root and not answer:
+            self.rmdir()
+            self.symlink_to(elsewhere)
+            return False
+        return answer
+
+    monkeypatch.setattr(Path, "is_symlink", swap_then_answer)
+    with pytest.raises(OSError):
+        du._private_dir(root / "key")
+    assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o755
+
+
+@POSIX_ONLY
 def test_a_receipt_that_is_a_link_is_not_read(receipt_home, tmp_path):
     destination = tmp_path / "bin"
     destination.mkdir()

@@ -936,14 +936,37 @@ def _private_dir(path: Path) -> None:
             # level in a loose ~/.ash had its target made 0o700 and took the
             # receipt writes. Refused as an OSError, which write_receipt reports
             # as a receipt it could not write.
-            raise OSError(
-                errno.ELOOP,
-                f"{level} is a symbolic link; the receipt store is not written "
-                "through a link",
-                str(level),
-            )
+            raise _receipt_level_is_a_link(level)
         if platform.system() != "Windows":
-            os.chmod(level, 0o700)
+            # The mode is set on a descriptor opened without following a link
+            # (O_NOFOLLOW) and only on a directory (O_DIRECTORY): the check
+            # above alone left the window make_executable's docstring names, in
+            # which a link swapped in after it was followed by the chmod and
+            # its target made 0o700.
+            try:
+                fd = os.open(level, os.O_RDONLY | os.O_DIRECTORY | _O_NOFOLLOW)
+            except OSError as error:
+                # EMLINK is what some BSDs give an O_NOFOLLOW open of a link;
+                # ENOTDIR is a link to a file, or a file, at the level's name.
+                if error.errno in (
+                    errno.ELOOP,
+                    getattr(errno, "EMLINK", errno.ELOOP),
+                    errno.ENOTDIR,
+                ):
+                    raise _receipt_level_is_a_link(level) from error
+                raise
+            try:
+                os.fchmod(fd, 0o700)
+            finally:
+                os.close(fd)
+
+
+def _receipt_level_is_a_link(level: Path) -> OSError:
+    return OSError(
+        errno.ELOOP,
+        f"{level} is a symbolic link; the receipt store is not written through a link",
+        str(level),
+    )
 
 
 def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
