@@ -21,9 +21,10 @@ import string
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.schemas.sarif_schema_model import Region, SarifReport
 from automated_security_helper.utils.secret_masking import (
     MASKED_LINE,
+    _has_columns,
     mask_secrets_in_results,
     source_snippet_masker,
 )
@@ -513,3 +514,46 @@ class TestAKeyFindingWithTwoLocations:
 
         assert (MASKED_LINE + "\n") * 6 in _context(model, 1)
         assert (MASKED_LINE + "\n") * 4 in _context(model, 2)
+
+
+class TestAPlaceholderColumn:
+    """A start column of 1 with no end column names no span of the line.
+
+    npm-audit places every finding at line 1, column 1 of a package file; that
+    column bounded a resource-level finding to its first line.
+    """
+
+    @pytest.mark.parametrize(
+        ("region", "expected"),
+        [
+            (Region(startLine=1, startColumn=1), False),
+            (Region(startLine=1), False),
+            (Region(startLine=1, startColumn=1, endColumn=4), True),
+            (Region(startLine=1, startColumn=3), True),
+            (Region(startLine=1, endColumn=4), True),
+        ],
+    )
+    def test_whether_a_region_reports_a_column(self, region, expected):
+        assert _has_columns(region) is expected
+
+    def test_a_resource_finding_at_column_one_runs_to_the_end_of_the_file(self):
+        """The finding describes a hard-coded credential without quoting it and
+        reports column 1 with no end column: the later lines of its file are
+        masked, as for a finding that reports no column."""
+        placed_at_column_one = _result(
+            "ADVISORY-1",
+            "pkg/package.json",
+            1,
+            "Hard-coded credentials in configuration",
+            "npm-audit",
+            end=1,
+            column=1,
+        )
+        model = _results(
+            placed_at_column_one,
+            _neighbor("pkg/package.json", 40, 40, [FAR_LINE]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == MASKED_LINE + "\n"

@@ -755,11 +755,14 @@ def _has_columns(region: Any) -> bool:
     """Whether a region reports a column: a span of its line, not a whole resource.
 
     cfn-nag, cdk-nag and checkov report lines alone; bandit and semgrep report
-    the column their match starts at.
+    the column their match starts at. A start column of 1 with no end column is
+    a placeholder, not a span: npm-audit writes ``startColumn=1`` on every
+    finding it places at line 1 of a package file, naming no match.
     """
-    return isinstance(getattr(region, "startColumn", None), int) or isinstance(
-        getattr(region, "endColumn", None), int
-    )
+    if isinstance(getattr(region, "endColumn", None), int):
+        return True
+    start = getattr(region, "startColumn", None)
+    return isinstance(start, int) and start != 1
 
 
 def _rule_ids_described(sarif_report: Any) -> Set[str]:
