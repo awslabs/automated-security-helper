@@ -322,32 +322,24 @@ class TestOfflineShrinkwrap:
 
 
 class TestWorkspaceOutputDirectory:
-    def test_the_workspace_output_directory_is_passed_to_the_scan_set(
+    def test_the_workspace_output_directory_is_left_out_of_the_selection(
         self, online, tmp_path
     ):
         """In a workspace scan the scan set is read with the workspace's output
         directory, so it is left out of the walk like the project's own and every
-        reader of the scan set agrees on the set."""
-        workspace_output = tmp_path / "workspace-out"
-        workspace_output.mkdir()
+        reader of the scan set agrees on the set: a package another project's
+        converted tree left there is not audited as this project's. The
+        directory sits under the scanned tree, where ignoring the argument would
+        change the selection."""
+        workspace_output = tmp_path / "repo" / "workspace-out"
         context = _context(tmp_path, workspace_output_dir=workspace_output)
         _package(context.source_dir / "app")
-        _audited(online)
-        calls = []
-        real = npm_audit_scanner.scan_set
-
-        def recorder(*args, **kwargs):
-            calls.append(kwargs)
-            return real(*args, **kwargs)
-
-        online.setattr(npm_audit_scanner, "scan_set", recorder)
+        _package(workspace_output / "other" / "converted" / "lib")
+        started = _audited(online)
 
         _scanner(context).scan(target=context.source_dir, target_type="source")
 
-        assert calls, "scan_set was not called"
-        assert all(
-            call.get("workspace_output_dir") == str(workspace_output) for call in calls
-        ), calls
+        assert _names(started) == ["app"]
 
     def test_the_workspace_output_directory_is_skipped_by_the_package_manager_walk(
         self, tmp_path
@@ -374,19 +366,14 @@ class TestWorkspaceOutputDirectory:
 
         assert options["skip"] == [Path(context.output_dir)]
 
-    def test_no_workspace_passes_none(self, online, tmp_path):
+    def test_without_a_workspace_the_same_directory_is_audited(self, online, tmp_path):
+        """Control: outside a workspace scan nothing names that directory, so a
+        package under it is audited like any other."""
         context = _context(tmp_path)
         _package(context.source_dir / "app")
-        _audited(online)
-        calls = []
-        real = npm_audit_scanner.scan_set
-
-        def recorder(*args, **kwargs):
-            calls.append(kwargs)
-            return real(*args, **kwargs)
-
-        online.setattr(npm_audit_scanner, "scan_set", recorder)
+        _package(context.source_dir / "workspace-out" / "other" / "converted" / "lib")
+        started = _audited(online)
 
         _scanner(context).scan(target=context.source_dir, target_type="source")
 
-        assert calls and all(call.get("workspace_output_dir") is None for call in calls)
+        assert _names(started) == ["app", "lib"]
