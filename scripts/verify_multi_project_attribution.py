@@ -808,8 +808,13 @@ def collect_scanner_statuses(results: Mapping[str, Any]) -> Dict[str, str]:
     this one read the status alone, so an excluded checkov reporting PASSED
     passed the did-it-run check.
     """
+    return _statuses_of(_scanner_results_of(results))
+
+
+def _statuses_of(scanner_results: Mapping[str, Any]) -> Dict[str, str]:
+    """One normalized status per entry of a ``scanner_results`` object."""
     statuses: Dict[str, str] = {}
-    for name, entry in _scanner_results_of(results).items():
+    for name, entry in scanner_results.items():
         record: Mapping[str, Any] = entry if isinstance(entry, Mapping) else {}
         if record.get("excluded"):
             statuses[str(name)] = STATUS_EXCLUDED
@@ -1689,6 +1694,88 @@ def _is_under(parent: Path, path: Path) -> bool:
         return False
 
 
+def _own_scanner_results(
+    projects: Sequence[ProjectOutcome], output_dir: Path
+) -> Iterable[Tuple[ProjectOutcome, Mapping[str, Any]]]:
+    """Each completed project's own ``scanner_results``, read from its subtree.
+
+    A project whose own results file is missing, unreadable or not an object is
+    left out; check_per_project_subtrees reports the missing file.
+    """
+    for project in projects:
+        if project.status != "completed" or not project.output_path:
+            continue
+        own = output_dir / project.output_path / RESULTS_FILENAME
+        try:
+            own_results = json.loads(own.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(own_results, Mapping):
+            continue
+        yield project, _scanner_results_of(own_results)
+
+
+def check_gate_scanners_ran_in_every_project(
+    projects: Sequence[ProjectOutcome], output_dir: Path
+) -> List[str]:
+    """Both selected scanners must have run, and found something, in every project.
+
+    check_gate_scanners_ran and check_gate_scanners_found_something read the
+    workspace rollup, and the rollup cannot show one project: its status is the
+    worst across the projects (FAILED outranks MISSING and SKIPPED in the
+    aggregator's order) and its finding_count is their sum. So checkov SKIPPED
+    in one project, its Terraform file lost, hid behind three projects' FAILED
+    status and non-zero counts, and the gate passed while its own violation text
+    claimed the scanner tripped its own file in every project. Each project's own
+    results file carries its own ``scanner_results``, so the claim is checked
+    there. ERROR is left to check_no_scanner_errors: it outranks every other
+    status, so the rollup shows it. Names are compared stripped and lowered,
+    the fold the aggregator joins the projects' rows by, since one results file
+    can spell a scanner ``Bandit`` where another spells it ``bandit``.
+    """
+    violations: List[str] = []
+    for project, raw_own in _own_scanner_results(projects, output_dir):
+        own = {str(name).strip().lower(): entry for name, entry in raw_own.items()}
+        statuses = _statuses_of(own)
+        for scanner in GATE_SCANNERS:
+            status = statuses.get(scanner)
+            if status is None:
+                violations.append(
+                    f"project '{project.key}' records no scanner_results entry for "
+                    f"'{scanner}' in its own results file, so the scanner did not "
+                    f"run there; present: {sorted(statuses) or 'none'}"
+                )
+            elif (
+                status in (STATUS_MISSING, STATUS_SKIPPED, STATUS_EXCLUDED)
+                or not status
+            ):
+                violations.append(
+                    f"project '{project.key}' reports scanner '{scanner}' as "
+                    f"{status or 'no status'} in its own results file. The "
+                    f"workspace rollup shows the worst status across the projects "
+                    f"and the sum of their counts, so a project in which a selected "
+                    f"scanner did not run hides behind the others there"
+                )
+            elif status == STATUS_ERROR:
+                continue
+            else:
+                entry = own.get(scanner)
+                count = (
+                    _as_int(entry.get("finding_count"))
+                    if isinstance(entry, Mapping)
+                    else 0
+                )
+                if count <= 0:
+                    violations.append(
+                        f"project '{project.key}' reports scanner '{scanner}' with "
+                        f"status {status} and {count} finding(s) in its own results "
+                        f"file. The fixture gives the scanner its own file to trip in "
+                        f"every project, so zero means it did not read this one's, "
+                        f"whatever the rollup's sum says"
+                    )
+    return violations
+
+
 def check_scanner_rollup_per_scanner(
     projects: Sequence[ProjectOutcome], output_dir: Path
 ) -> List[str]:
@@ -1708,17 +1795,8 @@ def check_scanner_rollup_per_scanner(
     except (OSError, ValueError):
         return []
     per_scanner: Dict[str, int] = {}
-    for project in projects:
-        if project.status != "completed" or not project.output_path:
-            continue
-        own = output_dir / project.output_path / RESULTS_FILENAME
-        try:
-            own_results = json.loads(own.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(own_results, Mapping):
-            continue
-        for name, entry in _scanner_results_of(own_results).items():
+    for _project, own in _own_scanner_results(projects, output_dir):
+        for name, entry in own.items():
             if isinstance(entry, Mapping):
                 per_scanner[str(name)] = per_scanner.get(str(name), 0) + _as_int(
                     entry.get("finding_count")
@@ -2075,6 +2153,12 @@ def evaluate_results(
     outcome.violations.extend(check_no_finding_lost_its_workspace_path(results, runs))
     outcome.violations.extend(check_per_project_subtrees(projects, output_dir))
     outcome.violations.extend(check_scanner_rollup_per_scanner(projects, output_dir))
+    # The rollup's worst-status and summed-count view cannot show one project in
+    # which a selected scanner did not run; like a rollup-level gap, that explains
+    # the downstream silence in the project's run.
+    project_gaps = check_gate_scanners_ran_in_every_project(projects, output_dir)
+    outcome.violations.extend(project_gaps)
+    outcome.root_violations.extend(project_gaps)
     if exit_code is not None:
         outcome.violations.extend(check_workspace_status(results, exit_code))
         outcome.violations.extend(check_exit_code(exit_code, projects))

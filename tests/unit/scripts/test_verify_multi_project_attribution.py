@@ -7,7 +7,9 @@
   none does;
 * every project's reported threshold must be the one its own config sets, not
   only the two of the threshold pair;
-* both selected scanners must have run in the rollup;
+* both selected scanners must have run in the rollup, and have run and found
+  something in every project's own results file, which the rollup's worst
+  status and summed count cannot show;
 * a run's declared root must be its own project's directory, not a sibling's
   with the same relative paths;
 * a ``file://`` root is percent-decoded before it is resolved;
@@ -876,6 +878,172 @@ class TestRollupPerScanner:
             ),
         ]
         assert gate.check_scanner_rollup_per_scanner(projects, tmp_path) == []
+
+
+def _write_own_results(path: Path, scanner_results) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"scanner_results": scanner_results}), encoding="utf-8")
+
+
+def _ran(count=3):
+    return {"status": "FAILED", "finding_count": count}
+
+
+class TestGateScannersRanInEveryProject:
+    """At the base only the rollup was read, whose status is the worst across the
+    projects and whose count is their sum, so one project in which a selected
+    scanner did not run hid behind the others."""
+
+    def _projects(self, gate):
+        return [
+            gate.ProjectOutcome(
+                **{**_project(gate, "project-a").__dict__, "output_path": "a"}
+            ),
+            gate.ProjectOutcome(
+                **{**_project(gate, "project-b").__dict__, "output_path": "b"}
+            ),
+        ]
+
+    def test_both_scanners_run_and_tripped_in_every_project_is_clean(
+        self, gate, tmp_path
+    ):
+        for key in ("a", "b"):
+            _write_own_results(
+                tmp_path / key / gate.RESULTS_FILENAME,
+                {"bandit": _ran(), "checkov": _ran(1)},
+            )
+        assert (
+            gate.check_gate_scanners_ran_in_every_project(
+                self._projects(gate), tmp_path
+            )
+            == []
+        )
+
+    def test_a_scanner_spelled_differently_in_a_projects_file_is_the_same_scanner(
+        self, gate, tmp_path
+    ):
+        """The aggregator joins 'Bandit' and 'bandit' into one row; so does this."""
+        for key in ("a", "b"):
+            _write_own_results(
+                tmp_path / key / gate.RESULTS_FILENAME,
+                {"Bandit": _ran(), " checkov ": _ran(1)},
+            )
+        assert (
+            gate.check_gate_scanners_ran_in_every_project(
+                self._projects(gate), tmp_path
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize("status", ["MISSING", "SKIPPED", "skipped", ""])
+    def test_a_scanner_that_did_not_run_in_one_project_is_named(
+        self, gate, tmp_path, status
+    ):
+        _write_own_results(
+            tmp_path / "a" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": _ran(1)},
+        )
+        _write_own_results(
+            tmp_path / "b" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": {"status": status, "finding_count": 0}},
+        )
+        violations = gate.check_gate_scanners_ran_in_every_project(
+            self._projects(gate), tmp_path
+        )
+        assert len(violations) == 1
+        assert "'project-b'" in violations[0] and "'checkov'" in violations[0]
+        assert (status.upper() or "no status") in violations[0]
+
+    def test_an_excluded_scanner_did_not_run_whatever_its_status_says(
+        self, gate, tmp_path
+    ):
+        _write_own_results(
+            tmp_path / "a" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": {**_ran(1), "excluded": True}},
+        )
+        _write_own_results(
+            tmp_path / "b" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": _ran(1)},
+        )
+        violations = gate.check_gate_scanners_ran_in_every_project(
+            self._projects(gate), tmp_path
+        )
+        assert len(violations) == 1
+        assert "'project-a'" in violations[0] and "EXCLUDED" in violations[0]
+
+    def test_a_scanner_absent_from_one_projects_file_is_named(self, gate, tmp_path):
+        _write_own_results(tmp_path / "a" / gate.RESULTS_FILENAME, {"bandit": _ran()})
+        _write_own_results(
+            tmp_path / "b" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": _ran(1)},
+        )
+        violations = gate.check_gate_scanners_ran_in_every_project(
+            self._projects(gate), tmp_path
+        )
+        assert len(violations) == 1
+        assert "'project-a'" in violations[0]
+        assert "no scanner_results entry for 'checkov'" in violations[0]
+        assert "present: ['bandit']" in violations[0]
+
+    def test_a_scanner_that_ran_and_found_nothing_in_one_project_is_named(
+        self, gate, tmp_path
+    ):
+        """The rollup sum is non-zero here; only the project's own file shows it."""
+        _write_own_results(
+            tmp_path / "a" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": {"status": "PASSED", "finding_count": 0}},
+        )
+        _write_own_results(
+            tmp_path / "b" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": _ran(5)},
+        )
+        violations = gate.check_gate_scanners_ran_in_every_project(
+            self._projects(gate), tmp_path
+        )
+        assert len(violations) == 1
+        assert "'project-a'" in violations[0] and "'checkov'" in violations[0]
+        assert "status PASSED and 0 finding(s)" in violations[0]
+
+    def test_an_error_is_left_to_the_rollup_check(self, gate, tmp_path):
+        """ERROR outranks every other status, so the rollup shows it."""
+        _write_own_results(
+            tmp_path / "a" / gate.RESULTS_FILENAME,
+            {"bandit": {"status": "ERROR", "finding_count": 0}, "checkov": _ran(1)},
+        )
+        _write_own_results(
+            tmp_path / "b" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": _ran(1)},
+        )
+        assert (
+            gate.check_gate_scanners_ran_in_every_project(
+                self._projects(gate), tmp_path
+            )
+            == []
+        )
+
+    def test_a_project_without_its_own_file_is_left_to_the_subtree_check(
+        self, gate, tmp_path
+    ):
+        _write_own_results(
+            tmp_path / "a" / gate.RESULTS_FILENAME,
+            {"bandit": _ran(), "checkov": _ran(1)},
+        )
+        assert (
+            gate.check_gate_scanners_ran_in_every_project(
+                self._projects(gate), tmp_path
+            )
+            == []
+        )
+
+    def test_an_incomplete_project_is_not_read(self, gate, tmp_path):
+        _write_own_results(tmp_path / "a" / gate.RESULTS_FILENAME, {})
+        project = gate.ProjectOutcome(
+            **{
+                **_project(gate, "project-a", status="failed").__dict__,
+                "output_path": "a",
+            }
+        )
+        assert gate.check_gate_scanners_ran_in_every_project([project], tmp_path) == []
 
 
 class TestWorkspaceStatus:

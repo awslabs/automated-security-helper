@@ -123,12 +123,28 @@ def workspace_root(tmp_path):
 
 @pytest.fixture
 def output_dir(tmp_path, workspace_root):
-    """A per-project output tree of the shape the executor writes."""
+    """A per-project output tree of the shape the executor writes.
+
+    Each project's own results file carries its own ``scanner_results``, with
+    both selected scanners run and tripped, because the gate reads them: the
+    rollup's worst-status and summed-count view cannot show one project in which
+    a selected scanner did not run, so that is asserted per project.
+    """
     out = tmp_path / "output"
     for project in gate.FIXTURE_PROJECTS:
         subtree = out / "projects" / project.key
         (subtree / "scanners" / "bandit" / "source").mkdir(parents=True)
-        (subtree / gate.RESULTS_FILENAME).write_text("{}", encoding="utf-8")
+        (subtree / gate.RESULTS_FILENAME).write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        scanner: {"status": "FAILED", "finding_count": 1}
+                        for scanner in gate.GATE_SCANNERS
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
     return out
 
 
@@ -927,6 +943,58 @@ class TestOutputSubtreeRegression:
         shutil.rmtree(output_dir / "projects" / "project-b" / "scanners")
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("no 'scanners' directory" in v for v in outcome.violations)
+
+
+class TestASelectedScannerSkippedInOneProject:
+    """The rollup hides one project; the project's own results file does not.
+
+    The rollup status is the worst across the projects and its count is their
+    sum, so checkov SKIPPED in one project (its Terraform file lost) sat behind
+    three FAILED projects with non-zero counts, and the rollup-level checks
+    passed. The healthy rollup is left exactly as it is here, so the only thing
+    that can report the gap is the per-project read.
+    """
+
+    def _rewrite_own(self, output_dir, key, scanner_results):
+        (output_dir / "projects" / key / gate.RESULTS_FILENAME).write_text(
+            json.dumps({"scanner_results": scanner_results}), encoding="utf-8"
+        )
+
+    def test_a_skipped_scanner_in_one_project_fails_behind_a_healthy_rollup(
+        self, healthy, output_dir
+    ):
+        self._rewrite_own(
+            output_dir,
+            "project-b",
+            {
+                "bandit": {"status": "FAILED", "finding_count": 3},
+                "checkov": {"status": "SKIPPED", "finding_count": 0},
+            },
+        )
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        gaps = [
+            v
+            for v in outcome.violations
+            if "'project-b'" in v and "'checkov'" in v and "SKIPPED" in v
+        ]
+        assert gaps, outcome.violations
+        # Named as a root cause, like a rollup-level gap, and the rollup checks
+        # themselves stayed quiet: the rollup is the healthy fixture's.
+        assert gaps[0] in outcome.root_violations
+        assert not any("absent from scanner_results" in v for v in outcome.violations)
+        assert not any("in the rollup" in v for v in outcome.violations)
+
+    def test_a_scanner_absent_from_one_projects_own_file_fails(
+        self, healthy, output_dir
+    ):
+        self._rewrite_own(
+            output_dir, "src", {"bandit": {"status": "FAILED", "finding_count": 3}}
+        )
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "'src'" in v and "no scanner_results entry for 'checkov'" in v
+            for v in outcome.violations
+        ), outcome.violations
 
 
 # ---------------------------------------------------------------------------
