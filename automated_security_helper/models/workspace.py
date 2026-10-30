@@ -454,8 +454,12 @@ class WorkspaceProjectResult(RecordModel):
                 "severity_threshold. The unified results carry no ash_config, so "
                 "a reader that regrades a finding (the merged reporters, the MCP "
                 "result filters) has no other source for the scanner's gate and "
-                "judged every project at ASH's default. Empty in a workspace file "
-                "written before the field existed."
+                "judged every project at ASH's default. A scanner whose own "
+                "threshold the scan read from an environment variable is not "
+                "listed either: the environment's value is not published here, "
+                "as no report surface prints it, so a reader grades that scanner "
+                "by severity_threshold. Empty in a workspace file written before "
+                "the field existed."
             ),
         ),
     ]

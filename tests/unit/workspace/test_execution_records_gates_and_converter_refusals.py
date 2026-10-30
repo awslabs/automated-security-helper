@@ -116,15 +116,17 @@ class TestThePolicyGateIsRecorded:
 class TestEachScannersOwnThresholdIsRecorded:
     @pytest.fixture
     def _bandit_at_critical(self, monkeypatch):
-        def threshold_info(_results, scanner_name):
+        # (grading value, shown form, source, from env): the resolution the
+        # executor reads through get_scanner_threshold_details.
+        def threshold_details(_results, scanner_name):
             if scanner_name == "bandit":
-                return "CRITICAL", "config"
-            return "MEDIUM", "global"
+                return "CRITICAL", None, "config", False
+            return "MEDIUM", None, "global", False
 
         monkeypatch.setattr(
             ScannerStatisticsCalculator,
-            "get_scanner_threshold_info",
-            staticmethod(threshold_info),
+            "get_scanner_threshold_details",
+            staticmethod(threshold_details),
         )
 
     def test_a_scanner_with_its_own_threshold_is_in_the_map(

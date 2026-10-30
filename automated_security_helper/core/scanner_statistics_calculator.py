@@ -737,6 +737,23 @@ class ScannerStatisticsCalculator:
         return threshold, source
 
     @staticmethod
+    def get_scanner_threshold_details(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> Tuple[str, str, str, bool]:
+        """``get_scanner_threshold_info`` plus the shown form and the provenance.
+
+        ``(grading value, shown form, source, from env)``, as
+        :meth:`_threshold_resolution` answers them. For a caller that publishes
+        a scanner's threshold outside the report surfaces (the workspace's
+        unified results record each scanner's own grading threshold): ``from env``
+        True says the grading value is the environment's, which the report rows
+        never print, so such a caller leaves it out or records the shown form.
+        """
+        return ScannerStatisticsCalculator._threshold_resolution(
+            asharp_model, scanner_name
+        )
+
+    @staticmethod
     def _threshold_resolution(
         asharp_model: AshAggregatedResults, scanner_name: str
     ) -> Tuple[str, str, str, bool]:

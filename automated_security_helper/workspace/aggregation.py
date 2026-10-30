@@ -618,6 +618,13 @@ def rebase_run_for_project(
 #: Resolves the threshold governing one scanner's findings from the scanner's
 #: name as ``properties.scanner_name`` records it (``None`` for a finding that
 #: names none). An answer of ``None`` means "the project-wide threshold".
+#:
+#: The same call shape as ``severity_ladder.ScannerThresholdResolver`` with the
+#: opposite meaning for a falsy answer: there a falsy answer turns the gate OFF
+#: for that scanner. A resolver of this type is never handed to the ladder's
+#: ``result_fails_scanner_threshold`` as it is; :func:`effective_threshold_resolver`
+#: wraps it first, filling the project-wide threshold in for ``None``, and that
+#: wrapped resolver is the one the counters below pass down.
 ThresholdResolver = Callable[[Optional[str]], Optional[str]]
 
 #: The scanner a finding with no ``properties.scanner_name`` is credited to, in

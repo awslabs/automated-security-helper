@@ -14,19 +14,28 @@ The per-scanner rollup in the unified file re-derived its counts the same way,
 and over every finding of the run, so it also counted policy-origin findings the
 project's own verdict excludes and exceeded the per-project totals it sums.
 
+Naming, because the file once called one setting both things: a scanner's own
+threshold ABOVE the project's (bandit CRITICAL over project MEDIUM) is LOOSER, it
+lets more through; one BELOW (bandit LOW over project HIGH) is STRICTER.
+
 The contract these cases pin:
 
 - the counter grades a finding by the threshold its scanner's name resolves to,
   falling back to the project-wide threshold for a scanner that has none;
-- a project whose config gives one scanner a stricter threshold is judged by it
-  inside a workspace;
+- a project whose config gives one scanner a looser threshold is judged by it
+  inside a workspace, and so is one whose config gives a scanner a stricter one;
 - the unified ``scanner_results`` actionable counts sum what the projects'
   verdicts counted: a non-gating policy scanner's findings count zero there;
 - read from a real recorded config (no monkeypatch), a scanner's own looser
   option stands when the workspace declares no ceiling, and is capped by the
   ceiling whenever one exists, whether or not the ceiling moved the project-wide
   threshold: a ceiling MEDIUM over a project declaring MEDIUM tightened nothing
-  and still grades a bandit option of CRITICAL at MEDIUM.
+  and still grades a bandit option of CRITICAL at MEDIUM; a scanner's own option
+  BELOW the ceiling keeps its own value, the ceiling never loosens;
+- a scanner whose own threshold the scan read from an environment variable is
+  graded by it and left out of the published ``scanner_thresholds``: the report
+  surfaces print the written reference, never the environment's value, and the
+  unified results and the MCP payloads must not be the one place that does.
 """
 
 from __future__ import annotations
@@ -87,6 +96,18 @@ def _sarif_of(*findings: dict) -> dict:
     }
 
 
+def _threshold_details(own: dict, *, from_env: frozenset = frozenset()):
+    """A stand-in for the calculator's resolution: *own* maps scanner to its own
+    threshold (source ``config``); every other scanner reads the global MEDIUM."""
+
+    def details(_results, scanner_name):
+        if scanner_name in own:
+            return own[scanner_name], None, "config", scanner_name in from_env
+        return "MEDIUM", None, "global", False
+
+    return staticmethod(details)
+
+
 def test_the_counter_grades_each_finding_by_its_scanners_threshold():
     findings = [_finding("bandit"), _finding("semgrep"), _finding("semgrep")]
 
@@ -107,20 +128,12 @@ def test_the_counter_grades_each_finding_by_its_scanners_threshold():
     assert count_actionable_results(findings, "MEDIUM") == 3
 
 
-def test_a_scanner_with_its_own_stricter_threshold_is_judged_by_it(
-    tmp_path, monkeypatch
-):
+def test_a_scanner_with_its_own_looser_threshold_is_judged_by_it(tmp_path, monkeypatch):
     """`ash --source-dir P` with bandit at CRITICAL exits 0 on a HIGH; so must P here."""
-
-    def threshold_info(_results, scanner_name):
-        if scanner_name == "bandit":
-            return "CRITICAL", "config"
-        return "MEDIUM", "global"
-
     monkeypatch.setattr(
         ScannerStatisticsCalculator,
-        "get_scanner_threshold_info",
-        staticmethod(threshold_info),
+        "get_scanner_threshold_details",
+        _threshold_details({"bandit": "CRITICAL"}),
     )
     _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
     FakeOrchestrator.behaviour["api"] = {
@@ -138,11 +151,82 @@ def test_a_scanner_with_its_own_stricter_threshold_is_judged_by_it(
     # is below the CRITICAL its own options set.
     assert entry.finding_count == 2
     assert entry.actionable_finding_count == 1
+    assert entry.scanner_thresholds == {"bandit": "CRITICAL"}
     assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
 
     rollup = json.loads(outcome.results_path.read_text("utf-8"))["scanner_results"]
     assert rollup["bandit"]["actionable_finding_count"] == 0
     assert rollup["semgrep"]["actionable_finding_count"] == 1
+
+
+def test_a_scanner_with_its_own_stricter_threshold_is_judged_by_it(
+    tmp_path, monkeypatch
+):
+    """The other direction: bandit LOW under project HIGH makes a MEDIUM actionable.
+
+    An implementation that only ever tightened to the project threshold, or
+    graded every finding at it, passes the looser case above and fails here.
+    """
+    monkeypatch.setattr(
+        ScannerStatisticsCalculator,
+        "get_scanner_threshold_details",
+        _threshold_details({"bandit": "LOW"}),
+    )
+    _, plan = _make_workspace(tmp_path, ("api", "HIGH"))
+    FakeOrchestrator.behaviour["api"] = {
+        "sarif": _sarif_of(_finding("bandit", "MEDIUM"), _finding("semgrep", "MEDIUM")),
+        "scanner_results": {
+            "bandit": _scanner("PASSED"),
+            "semgrep": _scanner("PASSED"),
+        },
+    }
+
+    outcome = _run(tmp_path, plan)
+    entry = outcome.payload.projects[0]
+
+    # bandit's MEDIUM is at or above its own LOW; semgrep's MEDIUM is below the
+    # project's HIGH.
+    assert entry.finding_count == 2
+    assert entry.actionable_finding_count == 1
+    assert entry.scanner_thresholds == {"bandit": "LOW"}
+    assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+
+    rollup = json.loads(outcome.results_path.read_text("utf-8"))["scanner_results"]
+    assert rollup["bandit"]["actionable_finding_count"] == 1
+    assert rollup["semgrep"]["actionable_finding_count"] == 0
+
+
+def test_a_threshold_read_from_the_environment_grades_and_is_not_published(
+    tmp_path, monkeypatch
+):
+    """bandit's CRITICAL came from ``${VAR}``: it grades, and the map leaves it out.
+
+    The statistics calculator prints the written reference for such a threshold
+    and never the value; the unified results and the MCP payloads carry
+    ``scanner_thresholds``, so the value would be published there alone.
+    """
+    monkeypatch.setattr(
+        ScannerStatisticsCalculator,
+        "get_scanner_threshold_details",
+        _threshold_details({"bandit": "CRITICAL"}, from_env=frozenset({"bandit"})),
+    )
+    _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+    FakeOrchestrator.behaviour["api"] = {
+        "sarif": _sarif_of(_finding("bandit"), _finding("semgrep")),
+        "scanner_results": {
+            "bandit": _scanner("PASSED"),
+            "semgrep": _scanner("PASSED"),
+        },
+    }
+
+    outcome = _run(tmp_path, plan)
+    entry = outcome.payload.projects[0]
+
+    # Graded as the scan graded it: bandit's HIGH is below its CRITICAL.
+    assert entry.actionable_finding_count == 1
+    # Not published: no entry for bandit, so a reader grades it by the project's.
+    assert entry.scanner_thresholds == {}
+    assert "CRITICAL" not in outcome.results_path.read_text("utf-8")
 
 
 def _config_with_bandit_at(threshold: str):
@@ -203,6 +287,34 @@ def test_a_ceiling_binds_a_scanners_own_looser_option_even_when_it_moved_nothing
 
     assert entry.finding_count == 1
     assert entry.actionable_finding_count == 1
+    assert entry.scanner_thresholds == {"bandit": "MEDIUM"}
+    assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+
+
+def test_a_ceiling_does_not_loosen_a_scanners_own_stricter_option(tmp_path):
+    """Ceiling MEDIUM, project MEDIUM, bandit LOW: bandit stays at LOW.
+
+    The mirror of ``test_a_ceiling_does_not_loosen_a_stricter_project`` for a
+    scanner's own option. An implementation that replaced the option with the
+    ceiling whenever one exists passes the case above and grades bandit's LOW
+    finding as not actionable here.
+    """
+    _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+    plan.projects[0] = plan.projects[0].model_copy(
+        update={"severity_ceiling": "MEDIUM"}
+    )
+    FakeOrchestrator.behaviour["api"] = {
+        "ash_config": _config_with_bandit_at("LOW"),
+        "sarif": _sarif_of(_finding("bandit", "LOW")),
+        "scanner_results": {"bandit": _scanner("PASSED")},
+    }
+
+    outcome = _run(tmp_path, plan)
+    entry = outcome.payload.projects[0]
+
+    assert entry.finding_count == 1
+    assert entry.actionable_finding_count == 1
+    assert entry.scanner_thresholds == {"bandit": "LOW"}
     assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
 
 

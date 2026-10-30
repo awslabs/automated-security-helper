@@ -312,6 +312,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Collection,
     Dict,
     Iterable,
     List,
@@ -1091,7 +1092,9 @@ def changed_file_set(
 
 
 def _scanner_threshold_resolver(
-    results: Any, project: ProjectPlan
+    results: Any,
+    project: ProjectPlan,
+    environment_read: Optional[Set[str]] = None,
 ) -> ThresholdResolver:
     """The threshold governing each of this project's scanners, by scanner name.
 
@@ -1108,6 +1111,13 @@ def _scanner_threshold_resolver(
     ceiling that could be stepped under by one scanner's looser option would not
     be a ceiling. ``stricter_of`` is the same combination the resolver used for
     the project-wide threshold.
+
+    *environment_read*, when given, collects the names of the scanners whose own
+    threshold the scan read from an environment variable (``${VAR}`` in an
+    external section): the value grades the findings as it did in the scan, and
+    the caller that publishes thresholds (:func:`_recorded_scanner_thresholds`)
+    leaves those scanners out, as the report rows print the reference and never
+    the environment's value.
 
     Memoised per name because the resolver dumps the scanners config on every
     call and a project's run carries one result per finding. Imported inside the
@@ -1126,11 +1136,13 @@ def _scanner_threshold_resolver(
         if scanner_name not in cache:
             own: Optional[str] = None
             try:
-                value, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
-                    results, scanner_name
+                value, _shown, source, from_env = (
+                    ScannerStatisticsCalculator.get_scanner_threshold_details(
+                        results, scanner_name
+                    )
                 )
             except Exception as error:  # noqa: BLE001 -- an unreadable config grades as the project does
-                value, source = None, "unavailable"
+                value, source, from_env = None, "unavailable", False
                 ASH_LOGGER.debug(
                     f"Project '{project.key}': the threshold of scanner "
                     f"'{scanner_name}' could not be read from the recorded "
@@ -1142,6 +1154,8 @@ def _scanner_threshold_resolver(
                 own = value.upper()
                 if project.severity_ceiling:
                     own = stricter_of(own, project.severity_ceiling)
+                if from_env and environment_read is not None:
+                    environment_read.add(scanner_name)
             cache[scanner_name] = own
         return cache[scanner_name]
 
@@ -1152,6 +1166,7 @@ def _recorded_scanner_thresholds(
     resolve: ThresholdResolver,
     statuses: Mapping[str, str],
     results: Sequence[Mapping[str, Any]],
+    environment_read: Collection[str] = frozenset(),
 ) -> Dict[str, str]:
     """Per scanner, the threshold the verdict graded it by when it is the scanner's own.
 
@@ -1163,6 +1178,14 @@ def _recorded_scanner_thresholds(
     has the workspace ceiling folded in; its ``None`` means "the project's
     threshold", which ``severity_threshold`` already records, so that scanner is
     left out of the map.
+
+    A scanner in *environment_read* (its threshold was read from an environment
+    variable) is left out too, after it has been resolved: the unified results
+    and the MCP payloads this map reaches would otherwise publish the
+    environment's value, which every report surface withholds (the statistics
+    calculator prints the written ``${VAR}`` reference in its place). A reader
+    then grades that scanner by ``severity_threshold``, the one divergence from
+    the verdict this field accepts, and the field's description says so.
     """
     names = set(statuses)
     for result in results:
@@ -1177,7 +1200,7 @@ def _recorded_scanner_thresholds(
     recorded: Dict[str, str] = {}
     for name in sorted(names):
         own = resolve(name)
-        if own:
+        if own and name not in environment_read:
             recorded[name] = own
     return recorded
 
@@ -1450,7 +1473,8 @@ def _scan_one_project(
     # the project's threshold. Judging every finding against the one project
     # threshold gave a project a workspace verdict that differed from
     # `ash --source-dir P` the moment its config tightened or relaxed one scanner.
-    scanner_threshold = _scanner_threshold_resolver(results, project)
+    environment_read: Set[str] = set()
+    scanner_threshold = _scanner_threshold_resolver(results, project, environment_read)
     actionable_by_scanner = actionable_results_by_scanner(
         gating_results,
         threshold,
@@ -1602,7 +1626,7 @@ def _scan_one_project(
         # result filters graded every project at ASH's default and reported a
         # non-gating policy finding as a failure.
         scanner_thresholds=_recorded_scanner_thresholds(
-            scanner_threshold, statuses, results_list
+            scanner_threshold, statuses, results_list, environment_read
         ),
         finding_count=len(unsuppressed),
         actionable_finding_count=actionable,
