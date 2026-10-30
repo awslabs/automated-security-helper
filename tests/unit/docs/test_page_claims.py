@@ -6928,7 +6928,10 @@ def test_ash_offline_turns_offline_mode_on_for_yes_true_and_1(
     assert is_offline_mode() is offline
 
 
-_OFFLINE_GRYPE_WARNING = "Grype offline mode: GRYPE_DB_CACHE_DIR not set"
+#: The start of grype's offline warning when the cache it would read is missing;
+#: the rest names the directory (plugin_modules/ash_builtin/scanners/grype_scanner.py,
+#: ``_check_offline_cache``).
+_OFFLINE_GRYPE_WARNING = "Grype offline mode: the database directory"
 
 
 @pytest.mark.parametrize(
@@ -6952,23 +6955,30 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
 
     A repository with a hardcoded password is scanned with the page's ``ash scan
     --offline --scanners detect-secrets``, and with ``ASH_OFFLINE`` set to ``TRUE`` or
-    ``1`` instead of the flag, with no grype cache configured. Each must exit 2 and log
-    grype's offline warning in ash.log. The control is an online scan, which exits 2
-    and logs no such warning.
+    ``1`` instead of the flag, with no grype cache configured: ``GRYPE_DB_CACHE_DIR``
+    is unset and the run's private home (``_ash_environment``; ``LOCALAPPDATA`` is
+    pointed under it too, the Windows default) holds no grype database, so the cache
+    grype would read does not exist. Each must exit 2 and log grype's offline warning
+    in ash.log. The control is an online scan, which exits 2 and logs no such warning.
     """
     assert_on_page(
         _OFFLINE_PAGE,
         "This scan runs offline as usual; in a repository with a hardcoded password it "
         "exits 2. The log also shows a warning for each scanner whose offline cache is not "
-        "set up, such as `Grype offline mode: GRYPE_DB_CACHE_DIR not set`.",
+        "set up, such as `Grype offline mode: the database directory <path> does not "
+        "exist`, naming the cache grype would read (`GRYPE_DB_CACHE_DIR`, else grype's "
+        "default cache directory).",
     )
     assert_on_page(_OFFLINE_PAGE, "ash scan --offline --scanners detect-secrets")
     monkeypatch.delenv("GRYPE_DB_CACHE_DIR", raising=False)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     tree = _config_scan_tree(tmp_path, {"app.py": _CONFIG_SECRET})
     args = [*_CONFIG_SCAN, "--source-dir", str(tree), *(["--offline"] if flag else [])]
+    env = {"LOCALAPPDATA": str(tmp_path / "home" / "AppData" / "Local")}
+    if value:
+        env["ASH_OFFLINE"] = value
 
-    result = _ash(args, cwd=tmp_path, **({"ASH_OFFLINE": value} if value else {}))
+    result = _ash(args, cwd=tmp_path, **env)
     assert result.returncode == 2, (
         f"exit {result.returncode}, expected 2:\n{_output_tail(result)}"
     )

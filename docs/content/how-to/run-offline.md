@@ -20,7 +20,8 @@ ash scan --offline --scanners detect-secrets
 
 This scan runs offline as usual; in a repository with a hardcoded password it exits 2.
 The log also shows a warning for each scanner whose offline cache is not set up, such as
-`Grype offline mode: GRYPE_DB_CACHE_DIR not set`.
+`Grype offline mode: the database directory <path> does not exist`, naming the cache
+grype would read (`GRYPE_DB_CACHE_DIR`, else grype's default cache directory).
 
 The other ways to turn it on:
 
