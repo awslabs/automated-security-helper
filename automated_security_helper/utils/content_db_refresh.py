@@ -569,12 +569,28 @@ def prepare_content_db(
     )
     skipped = {what: setting for what, setting in opt_outs.items() if what in wanted}
     for what, setting in skipped.items():
-        ASH_LOGGER.warning(
+        line = (
             f"ASH did not update {tool}'s {what} in {cache.as_posix()} before the "
             f"scan: the operator's {setting} turns {tool}'s own update off, and ASH "
             f"honors it. {tool} reads what is already in the cache; the scan-time "
             f"staleness check still holds {tool}'s vulnerability database to its bound."
         )
+        if tool == "grype":
+            # trivy's skip settings make `--download-db-only` fail, so they have to
+            # be honored. grype's setting only turns off grype's own update during
+            # a scan; reading it as an opt-out of ASH's refresh is ASH's own
+            # policy, and a CI image or team env file that sets it globally to
+            # skip an update check per scan now gets no refresh at all, so once the
+            # cached database passes its bound the default `fail` policy refuses
+            # the scan. Said at the level of that failure, with the way out, not
+            # as a warning among the scan's others.
+            ASH_LOGGER.error(
+                f"{line} With GRYPE_DB_AUTO_UPDATE=false (or db.auto-update: false) "
+                "set, nothing refreshes grype's database for ASH: unset it for the "
+                "scan, or run `grype db update` yourself before the bound is passed."
+            )
+        else:
+            ASH_LOGGER.warning(line)
     if any(what not in skipped for what in wanted):
         program = executable or find_executable(tool)
         if not program:

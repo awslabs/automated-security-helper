@@ -14,8 +14,10 @@ Five properties of utils/content_db_refresh.py, each pinned by one test:
   accounts, or a refresh from before an upgrade and one from after, take turns;
 - the grype refresh runs with the operator's grype config when the caller gives
   one, so a database mirror or CA it names applies to the update as to the scan;
-- ``GRYPE_DB_AUTO_UPDATE=false`` turns ASH's grype update off with a warning, as
-  trivy's skip settings turn trivy's off;
+- ``GRYPE_DB_AUTO_UPDATE=false`` turns ASH's grype update off, as trivy's skip
+  settings turn trivy's off, with an ERROR line naming the way out: the policy is
+  ASH's own, and its consequence is a refused scan once the database passes its
+  bound;
 - the checks-bundle fetch (``trivy config`` of an empty directory) pins its report
   format and output file, so the operator's TRIVY_OUTPUT or ``output:`` setting
   cannot make it overwrite a report file.
@@ -190,16 +192,22 @@ def test_the_grype_refresh_runs_with_the_operators_config(tmp_path, captured):
     assert env["GRYPE_DB_CACHE_DIR"] == cache.as_posix()
 
 
-def test_grype_db_auto_update_false_leaves_the_update_out_with_a_warning(
+def test_grype_db_auto_update_false_leaves_the_update_out_with_an_error_line(
     tmp_path, captured, monkeypatch, caplog
 ):
+    """grype's setting turns off only grype's own in-scan update; honoring it as an
+    opt-out of ASH's refresh is ASH's policy, and once the cached database passes its
+    bound the default `fail` policy refuses the scan. So the line is an ERROR naming
+    the way out, not a warning among the scan's others."""
     monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "false")
     with caplog.at_level(logging.WARNING):
         _prepare("grype", tmp_path / "grype-db", tmp_path)
     assert captured == []
-    assert any(
-        "GRYPE_DB_AUTO_UPDATE=false" in record.getMessage() for record in caplog.records
-    )
+    lines = [
+        r for r in caplog.records if "GRYPE_DB_AUTO_UPDATE=false" in r.getMessage()
+    ]
+    assert [r.levelno for r in lines] == [logging.ERROR]
+    assert "grype db update" in lines[0].getMessage()
 
 
 def test_a_grype_config_turning_auto_update_off_leaves_the_update_out(
