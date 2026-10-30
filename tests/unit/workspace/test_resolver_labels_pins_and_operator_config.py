@@ -145,6 +145,51 @@ class TestTheOperatorsConfig:
         assert project.operator_config is None
         assert project.operator_config_digest == operator_config_digest(operator)
 
+    def test_the_digest_field_says_whose_file_it_digests(self):
+        """Under an MCP session whose client patched the profile, a project with
+        no config of its own resolves the session's copy (config_source) while
+        the digest is the registered profile's; the description said the digest
+        was of config_source's file for every such project."""
+        description = ProjectPlan.model_fields["operator_config_digest"].description
+
+        assert "registered profile" in description
+        assert "session's copy" in description
+        assert "is this project's config_source" not in description
+
+    def test_the_digests_file_is_the_registered_profile_not_the_sessions_copy(
+        self, tmp_path, monkeypatch
+    ):
+        """The digest is taken from ``_operator_config``'s answer, the registered
+        profile when there is one; a project with no own config still resolves
+        the session's copy, so the two paths differ for it."""
+        registered = tmp_path / "registered.yaml"
+        registered.write_text("project_name: registered\n", encoding="utf-8")
+        copy = tmp_path / "copy.yaml"
+        copy.write_text("project_name: copy\n", encoding="utf-8")
+        project_dir = tmp_path / "api"
+        project_dir.mkdir()
+        monkeypatch.setattr(
+            resolver, "find_config_file", lambda directory, permit=None: None
+        )
+        captured = {}
+
+        def fake_resolve_config(**kwargs):
+            captured.update(kwargs)
+            return AshConfig()
+
+        monkeypatch.setattr(resolver, "resolve_config", fake_resolve_config)
+        candidate = resolver._Candidate("api", project_dir, Path("api"), "api")
+
+        _, config_path, overlay = _resolve_project_config(
+            candidate, default_config=copy, trusted_config=registered
+        )
+
+        assert config_path == copy
+        assert overlay is None
+        assert captured["trusted_config_path"] == registered
+        assert resolver._operator_config(copy, registered) == registered
+        assert operator_config_digest(registered) != operator_config_digest(copy)
+
     def test_a_config_that_is_the_operators_file_is_not_layered_over_itself(
         self, tmp_path, monkeypatch
     ):

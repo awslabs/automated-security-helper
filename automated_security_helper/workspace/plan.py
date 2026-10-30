@@ -174,11 +174,16 @@ class ProjectPlan(BaseModel):
             None,
             description=(
                 "Digest of the bytes of every file the operator's config is built "
-                "from, when the plan was resolved: the file layered over this "
-                "project's own config (operator_config), or the file that is "
-                "this project's config_source because it declares none. Recorded "
-                "for every scanned project the operator's file governs, so the "
-                "scan can refuse a project when that file no longer matches."
+                "from, when the plan was resolved. The operator's config is the "
+                "registered profile under the MCP server, otherwise the --config "
+                "file: the file layered over this project's own config "
+                "(operator_config), or the file this project resolves because it "
+                "declares none. For such a project it is config_source on the "
+                "CLI; under an MCP session whose client patched the profile, "
+                "config_source is the session's copy and the digest is still the "
+                "registered profile's. Recorded for every scanned project when "
+                "the operator named a config, null otherwise, so a rewrite of "
+                "that file between plan and scan can be told from the plan."
             ),
         ),
     ] = None
