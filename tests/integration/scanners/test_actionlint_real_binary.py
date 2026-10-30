@@ -71,6 +71,16 @@ def _require_actionlint() -> str:
 def repo(tmp_path) -> Path:
     target = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, target)
+    # A git root: actionlint discovers a project only at an ancestor that holds
+    # both .github/workflows and .git, and the fixture tree is committed without
+    # one. Without it actionlint never finds the repository, so it never reads
+    # the repository's own actionlint.yaml and the config cases below would pass
+    # whatever -config-file did.
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    subprocess.run(  # nosec B603 B607 - initializes the copied fixture, fixed argv
+        ["git", "init", "-q", str(target)], check=True, capture_output=True
+    )
     return target
 
 
@@ -164,10 +174,11 @@ def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
     assert rows == EXPECTED
     assert scanner.exit_code == 1
     stderr_log = Path(scanner.results_dir) / "source" / "ActionlintScanner.stderr.log"
-    if stderr_log.exists():
-        assert "OUTSIDE-MARKER-LABEL" not in stderr_log.read_text(
-            encoding="utf-8", errors="replace"
-        )
+    # The log is written on every run; a wrong path here must fail, not pass.
+    assert stderr_log.exists()
+    assert "OUTSIDE-MARKER-LABEL" not in stderr_log.read_text(
+        encoding="utf-8", errors="replace"
+    )
 
 
 def test_a_full_scan_with_actionlint_selected(repo, tmp_path):
