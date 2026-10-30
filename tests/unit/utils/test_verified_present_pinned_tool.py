@@ -395,6 +395,10 @@ class TestADifferentBinaryIsStillInstalled:
         assert installed == bin_dir / "grype"
         assert not installed.is_symlink()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="O_NOFOLLOW is 0 on Windows, so the open follows the link there",
+    )
     def test_a_link_swapped_in_after_the_by_name_check_is_refused(
         self, tmp_path, pins, on_path, monkeypatch
     ):
