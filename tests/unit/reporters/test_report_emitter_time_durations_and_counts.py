@@ -306,6 +306,78 @@ class TestFindingsAnAdditionalReportListsAreCounted:
         assert summary["counts"]["high"] == 1, summary
         assert summary["title"] == "Review required", summary
 
+    def test_a_finding_of_an_unrecognised_severity_is_counted_in_its_own_bucket(self):
+        """A listed finding whose severity is none of the five levels.
+
+        The gate fails closed on it, so it is actionable; it went into no
+        severity bucket, so the actionable count exceeded the active count and
+        the below-threshold figure was clamped to zero. It is counted under
+        "unknown", and the figures add up again.
+        """
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {
+                        "title": "Hard-coded endpoint",
+                        "description": "A plugin's own finding.",
+                        "severity": "HIGH",
+                        "file_path": "app.py",
+                        "line_start": 3,
+                    },
+                    {
+                        "title": "An odd rating",
+                        "description": "A plugin's own finding, rated outside ASH's levels.",
+                        "severity": "UNRATED",
+                        "file_path": "app.py",
+                        "line_start": 9,
+                    },
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        assert all(
+            emitter.is_finding_actionable(vuln) for vuln in emitter.flat_vulns
+        ), "the gate fails closed on the unrecognised severity"
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["actionable"] == 2, summary
+        assert summary["counts"]["high"] == 1, summary
+        assert summary["counts"]["unknown"] == 1, summary
+        assert summary["active"] == 2, summary
+        assert summary["below_threshold"] == 0, summary
+
+    def test_the_buckets_are_the_five_levels_when_every_severity_is_known(self):
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {
+                        "title": "Hard-coded endpoint",
+                        "description": "A plugin's own finding.",
+                        "severity": "HIGH",
+                        "file_path": "app.py",
+                        "line_start": 3,
+                    }
+                ],
+            }
+        )
+        summary = ReportContentEmitter(model).get_scan_summary()
+        assert set(summary["counts"]) == {"critical", "high", "medium", "low", "info"}
+
 
 class TestACoverageGapBesideFindingsIsADanger:
     @staticmethod
