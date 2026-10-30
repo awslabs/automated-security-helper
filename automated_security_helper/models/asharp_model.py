@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import uuid
 from pydantic import (
     AnyUrl,
@@ -57,7 +58,7 @@ from automated_security_helper.utils.undecodable_text import (
     undecodables_of_texts,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.secret_masking import (
     SecretValueShape,
     mask_secrets_in_results,
@@ -104,11 +105,15 @@ class ScannerSeverityCount(StrippedRecordModel):
     def actionable_count(self, threshold: str) -> int:
         """Count findings at or above the given severity threshold.
 
-        threshold is case-insensitive. Valid values: critical, high, medium, low, info.
+        threshold is case-insensitive. Valid values: critical, high, medium, low,
+        info, and all, the configuration's "ALL" threshold, which counts every
+        severity.
         """
         if not isinstance(threshold, str):
             raise ValueError(f"Invalid severity threshold: {threshold!r}")
         key = threshold.lower()
+        if key == "all":
+            key = _SEVERITY_ORDER[-1]
         if key not in _SEVERITY_ORDER:
             raise ValueError(f"Invalid severity threshold: {threshold!r}")
         idx = _SEVERITY_ORDER.index(key)
@@ -186,22 +191,27 @@ class SummaryStats(StrippedRecordModel):
         """Accept flat severity kwargs and route them into severity_counts."""
         if not isinstance(data, dict):
             return data
-        flat = {k: data.pop(k) for k in list(data) if k in _SUMMARY_SEVERITY_FIELDS}
-        if flat:
-            existing = data.get("severity_counts")
-            if existing is None:
-                data["severity_counts"] = flat
-            elif isinstance(existing, dict):
-                existing.update(flat)
-            else:
-                for field_name, val in flat.items():
-                    setattr(existing, field_name, val)
-        return data
+        flat = {k: v for k, v in data.items() if k in _SUMMARY_SEVERITY_FIELDS}
+        if not flat:
+            return data
+        # Routed into a copy: the caller's dict, and the severity_counts it holds,
+        # stay as they were given.
+        routed = {k: v for k, v in data.items() if k not in _SUMMARY_SEVERITY_FIELDS}
+        existing = routed.get("severity_counts")
+        if existing is None:
+            routed["severity_counts"] = flat
+        elif isinstance(existing, dict):
+            routed["severity_counts"] = {**existing, **flat}
+        elif isinstance(existing, ScannerSeverityCount):
+            routed["severity_counts"] = {**existing.model_dump(), **flat}
+        # Any other severity_counts is left as given for the field's own
+        # validation to refuse.
+        return routed
 
     @model_validator(mode="after")
     def _derive_total_from_severity_counts(self) -> "SummaryStats":
         """When total was not explicitly provided, compute it from severity_counts."""
-        if self.total == 0:
+        if "total" not in self.model_fields_set:
             computed = self.severity_counts.total
             if computed != 0:
                 self.total = computed
@@ -428,6 +438,22 @@ class InputNotScanned(RecordModel):
 _DROPPED_RECORD_KEYS = "dropped_refused_input_keys"
 
 
+def _count_dropped_record_keys(
+    model: type[BaseModel], data: Any, info: ValidationInfo
+) -> None:
+    """Add the keys *data* holds that *model* does not define to the count the
+    validation context carries, when the read asked for one."""
+    context = info.context
+    if (
+        isinstance(data, dict)
+        and isinstance(context, dict)
+        and _DROPPED_RECORD_KEYS in context
+    ):
+        context[_DROPPED_RECORD_KEYS] += sum(
+            1 for key in data if key not in model.model_fields
+        )
+
+
 class RefusedInputInfo(StrippedRecordModel):
     """One input a converter declined to read, and why."""
 
@@ -435,23 +461,15 @@ class RefusedInputInfo(StrippedRecordModel):
     # key in a record, and every record and report written from it carried that
     # key; no ASH writer sets one. Such a key is dropped, not refused, so a record
     # an earlier ASH wrote still loads.
+    # No whitespace is stripped: the path, member and reason are the names and
+    # words of the tree, kept as the converter gave them.
     # Read from a results file, whose values an error does not quote.
-    model_config = ConfigDict(
-        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
-    )
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
 
     @model_validator(mode="before")
     @classmethod
     def _count_the_keys_it_drops(cls, data: Any, info: ValidationInfo) -> Any:
-        context = info.context
-        if (
-            isinstance(data, dict)
-            and isinstance(context, dict)
-            and _DROPPED_RECORD_KEYS in context
-        ):
-            context[_DROPPED_RECORD_KEYS] += sum(
-                1 for key in data if key not in cls.model_fields
-            )
+        _count_dropped_record_keys(cls, data, info)
         return data
 
     path: Annotated[
@@ -521,10 +539,15 @@ class FailedInputInfo(StrippedRecordModel):
 
     # Only these fields are kept, as for RefusedInputInfo: a results file ASH reads
     # back can hold any other key in a record, and no ASH writer sets one. Values
-    # come from a results file, so an error does not quote them.
-    model_config = ConfigDict(
-        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
-    )
+    # come from a results file, so an error does not quote them. Whitespace is
+    # kept, as there.
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _count_the_keys_it_drops(cls, data: Any, info: ValidationInfo) -> Any:
+        _count_dropped_record_keys(cls, data, info)
+        return data
 
     path: Annotated[
         str,
@@ -815,6 +838,24 @@ def _kept_unknown_keys(config: BaseModel) -> List[str]:
     return found
 
 
+_ISO_FRACTION = re.compile(r"\.(\d+)")
+
+
+def _instant_of(text: str) -> datetime:
+    """*text*, an ISO 8601 date and time, as a datetime on every supported Python.
+
+    ``datetime.fromisoformat`` before 3.11 refuses a trailing ``Z`` and a
+    fraction of seconds that is not 3 or 6 digits; 3.11 and later take both.
+    The two are written the way 3.10 takes them first, so a results file reads
+    the same on each. Raises ValueError for text that is not a date and time.
+    """
+    text = text.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    text = _ISO_FRACTION.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), text, 1)
+    return datetime.fromisoformat(text)
+
+
 def new_report_id(
     now: Optional[datetime] = None,
     token: Optional[str] = None,
@@ -1014,7 +1055,7 @@ class ReportMetadata(StrippedRecordModel):
             v = datetime.now(timezone.utc)
         if isinstance(v, str):
             try:
-                v = datetime.fromisoformat(v.strip())
+                v = _instant_of(v)
             except ValueError:
                 # fromisoformat's own message quotes the value, which is read
                 # from a results file; the rule is named instead.
@@ -1157,8 +1198,12 @@ class AshAggregatedResults(RecordModel):
     # Private cache for to_flat_vulnerabilities() — the method mutates
     # summary_stats.suppressed and scanner_results as a side effect, so
     # we memoize the result to keep the method idempotent when reporters
-    # call it multiple times during rendering.
+    # call it multiple times during rendering. It holds for as long as the
+    # findings it was made from stand: _flat_cache_source says which (see
+    # _flat_source), so a copy made with another sarif, or a sarif or
+    # additional_reports replaced or added to since, is flattened again.
     _flat_cache: Optional[List[FlatVulnerability]] = PrivateAttr(default=None)
+    _flat_cache_source: Optional[tuple] = PrivateAttr(default=None)
 
     # The raw values the masking of these results found (utils/secret_masking.py),
     # never serialized. A workspace masks each project's outputs with the values
@@ -1337,6 +1382,12 @@ class AshAggregatedResults(RecordModel):
         config._unreadable_references = unreadable
         return config
 
+    @field_serializer("used_suppressions", when_used="json")
+    def _used_suppressions_in_order(self, value: set) -> List[str]:
+        """The ids in order, so identical scans and merges write one file: a set
+        iterates in the order of the process's string hashes."""
+        return sorted(value)
+
     @field_serializer("ash_config", mode="wrap")
     def _record_ash_config(self, value: Any, handler: Any) -> Any:
         """The configuration as its record: each value and key its files read
@@ -1380,6 +1431,28 @@ class AshAggregatedResults(RecordModel):
         mask_secrets_in_results(self)
         return super().model_post_init(context)
 
+    def _recorded_metadata(self, mode: str = "python") -> Any:
+        """The metadata as the results' off-host sends carry it: the fields that
+        were set, with the project name and the scanner names as the
+        configuration's record has them (config_validator record_of_metadata).
+
+        ``validation_summary`` is filled by mutating the dict the metadata
+        started with, which never marks the field as set, so a dump of the set
+        fields alone left it out of a live scan's send while the same results
+        read back from a file carried it. It is added whenever it holds
+        something.
+        """
+        from automated_security_helper.config.config_validator import (
+            record_of_metadata,
+        )
+
+        dumped = self.metadata.model_dump(by_alias=True, exclude_unset=True, mode=mode)
+        if self.metadata.validation_summary and "validation_summary" not in dumped:
+            dumped["validation_summary"] = self.metadata.model_dump(
+                by_alias=True, include={"validation_summary"}, mode=mode
+            )["validation_summary"]
+        return record_of_metadata(self.ash_config, dumped)
+
     def metadata_only(self) -> dict:
         """Produces a simplified version of the aggregated results without the
             sarif or cyclonedx properties.
@@ -1387,12 +1460,7 @@ class AshAggregatedResults(RecordModel):
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
-        return self.metadata.model_dump(
-            by_alias=True,
-            exclude=["sarif", "cyclonedx"],
-            exclude_unset=True,
-            mode="json",
-        )
+        return self._recorded_metadata(mode="json")
 
     def to_simple_dict(self) -> dict:
         """Convert the AshAggregatedResults to a simple dictionary representation.
@@ -1406,7 +1474,6 @@ class AshAggregatedResults(RecordModel):
         """
         from automated_security_helper.config.config_validator import (
             record_of_config,
-            record_of_metadata,
         )
 
         conf: dict | None = None
@@ -1426,10 +1493,7 @@ class AshAggregatedResults(RecordModel):
         simple_dict = {
             "name": self.name,
             "description": self.description,
-            "metadata": record_of_metadata(
-                self.ash_config,
-                self.metadata.model_dump(by_alias=True, exclude_unset=True),
-            ),
+            "metadata": self._recorded_metadata(),
             "converter_results": {
                 k: v.model_dump(by_alias=True, exclude_unset=True)
                 for k, v in sorted(self.converter_results.items())
@@ -1448,13 +1512,17 @@ class AshAggregatedResults(RecordModel):
         The first call materializes the list and applies legacy side effects
         (bumping summary_stats.suppressed, updating scanner_results). Subsequent
         calls return the memoized list so the method is safe to call from
-        reporters multiple times per run.
+        reporters multiple times per run, for as long as the sarif and the
+        additional_reports it was made from stand (see _flat_source).
 
         Returns:
             List[FlatVulnerability]: A list of flattened vulnerability objects
         """
-        if self._flat_cache is not None:
-            return self._flat_cache
+        source = self._flat_source()
+        if self._flat_cache is not None and self._flat_cache_source is not None:
+            held = self._flat_cache_source
+            if held[0] is source[0] and held[1] is source[1] and held[2:] == source[2:]:
+                return self._flat_cache
 
         flat_vulns: List[FlatVulnerability] = []
 
@@ -1534,7 +1602,26 @@ class AshAggregatedResults(RecordModel):
             else None,
         )
         self._flat_cache = flat_vulns
+        self._flat_cache_source = source
         return flat_vulns
+
+    def _flat_source(self) -> tuple:
+        """What to_flat_vulnerabilities flattens, as it stands now: the sarif and
+        the additional_reports objects themselves (held, so that one replaced by
+        another is told by identity and never by a reused id), and how many
+        results and report entries they hold, which an append changes."""
+        sarif = self.sarif
+        results = (
+            sum(len(run.results or []) for run in sarif.runs)
+            if sarif is not None and sarif.runs
+            else 0
+        )
+        entries = sum(
+            len(value)
+            for value in self.additional_reports.values()
+            if isinstance(value, list)
+        )
+        return (sarif, self.additional_reports, results, entries)
 
     def _apply_suppression_side_effects(
         self, scanner: Optional[str], count: Optional[int] = None
@@ -1554,7 +1641,18 @@ class AshAggregatedResults(RecordModel):
             return
         key = scanner.lower()
         if key not in self.scanner_results:
-            return
+            # The rows are keyed by the scanner's recorded name, in the case the
+            # configuration spells it; the caller lowercased the finding's.
+            key = next(
+                (
+                    name
+                    for name in self.scanner_results
+                    if isinstance(name, str) and name.lower() == key
+                ),
+                None,
+            )
+            if key is None:
+                return
 
         target_info = self.scanner_results[key]
         if target_info is None:
@@ -1698,10 +1796,23 @@ class AshAggregatedResults(RecordModel):
             )
 
         except Exception as e:
-            ASH_LOGGER.error(f"Error populating final metrics: {str(e)}")
-            import traceback
+            from automated_security_helper.utils.error_text import (
+                config_environment_values,
+                error_text,
+                traceback_text,
+            )
 
-            ASH_LOGGER.error(f"Stack trace: {traceback.format_exc()}")
+            # Shown as every unexpected error is: with no input a
+            # ValidationError quotes and no value the stored configuration read
+            # from the environment.
+            values = config_environment_values(self.ash_config)
+            ASH_LOGGER.error(
+                f"Error populating final metrics: {error_text(e, values)}",
+                extra=NO_MARKUP,
+            )
+            ASH_LOGGER.error(
+                f"Stack trace: {traceback_text(e, values)}", extra=NO_MARKUP
+            )
             # Don't raise to avoid breaking the save operation
 
     @classmethod
@@ -1715,7 +1826,12 @@ class AshAggregatedResults(RecordModel):
         with open(json_path, encoding="utf-8") as f:
             json_data = json.load(f)
 
-        return cls.from_json(json_data)
+        # As ash report, ash merge and --use-existing read a results file: one
+        # warning says how many keys the records dropped, and from which file.
+        with warning_of_dropped_keys(json_path) as context:
+            if isinstance(json_data, str):
+                return cls.model_validate_json(json_data, context=context)
+            return cls.model_validate(json_data, context=context)
 
 
 # Resolve the AshConfig forward reference so deserialization works regardless of
@@ -1819,9 +1935,10 @@ def warning_of_dropped_keys(source: str | Path) -> Iterator[Dict[str, int]]:
     and --use-existing do:
     ``AshAggregatedResults.model_validate_json(text, context=context)``.
 
-    A refused-input record keeps only the keys it defines. When the file's records
-    held others, one warning after the read says how many were dropped and from
-    which file. It names neither a key nor its value, which come from the file.
+    A refused-input record and a failed-input record keep only the keys they
+    define. When the file's records held others, one warning after the read says
+    how many were dropped and from which file. It names neither a key nor its
+    value, which come from the file.
     """
     context: Dict[str, int] = {_DROPPED_RECORD_KEYS: 0}
     yield context
@@ -1830,8 +1947,8 @@ def warning_of_dropped_keys(source: str | Path) -> Iterator[Dict[str, int]]:
         noun = "key" if dropped == 1 else "keys"
         ASH_LOGGER.warning(
             shown_on_one_line(
-                f"Dropped {dropped} {noun} that a refused-input record does not "
-                f"define from '{source}'"
+                f"Dropped {dropped} {noun} that a refused-input record or a "
+                f"failed-input record does not define from '{source}'"
             )
         )
 
