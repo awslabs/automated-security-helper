@@ -330,19 +330,25 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
     not ``<root>/<relative>`` (an absolute URI the SARIF step could not make
     relative to the source directory) names no root, so nothing is hidden: that
     finding is reported, never suppressed on a guess.
+
+    A backslash in either path is read as a separator only where the platform
+    reads it so (``_slashed``). On POSIX it is a character of the file's name:
+    rewritten to ``/`` here before, the file ``vendor\\x.py`` was matched as
+    ``vendor/x.py``, so an entry naming the latter hid a finding bandit had
+    reported, since bandit matched its globs against the name as it is.
     """
     from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         bandit_excluded_path_globs,
     )
 
-    below = relative.replace("\\", "/")
+    below = _slashed(relative)
     while below.startswith("./"):
         below = below[2:]
     if not below or below.startswith("/") or _has_a_drive(below):
         # An absolute "relative" path is the SARIF step's sign that it could
         # not place the finding under the source directory: no root is known.
         return False
-    path = absolute.replace("\\", "/")
+    path = _slashed(absolute)
     if not path.endswith("/" + below):
         return False
     root = path[: -(len(below) + 1)]
@@ -475,8 +481,8 @@ def _slashed(text: str) -> str:
     so a finding's path arrives with it. Rewritten to ``/`` here before, the
     POSIX file ``a\\b.py`` was matched as ``a/b.py``: a client ``b.py`` entry
     hid it, though its scanner had read the whole name. ``bandit_would_skip``
-    keeps its own rewrite: bandit's glob builder does the same to the pattern
-    (``bandit_scanner.bandit_excluded_path_globs``), so the two agree.
+    reads the finding's paths through this too, so it matches bandit's globs
+    against the name bandit walked.
     """
     return text.replace("\\", "/") if os.sep == "\\" else text
 

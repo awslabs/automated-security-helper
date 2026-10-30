@@ -17,6 +17,7 @@ does: ``fnmatch`` or a plain substring.
 from __future__ import annotations
 
 import fnmatch
+import os
 
 import pytest
 
@@ -117,10 +118,30 @@ def test_a_finding_whose_root_cannot_be_read_is_not_hidden():
     )
 
 
+@pytest.mark.skipif(os.sep != "\\", reason="a backslash separates segments on Windows")
 def test_a_windows_spelled_relative_path_is_read():
     assert (
         bandit_would_skip(
             "vendor", relative="src\\vendor\\a.py", absolute=f"{ROOT}/src/vendor/a.py"
+        )
+        is True
+    )
+
+
+@pytest.mark.skipif(os.sep != "/", reason="a backslash is a separator on Windows")
+def test_a_posix_backslash_is_part_of_the_file_name():
+    """bandit matched its globs against ``vendor\\x.py`` as walked, and did not
+    skip it for an entry naming ``vendor/x.py``; the matcher rewrote the
+    backslash to ``/`` on every platform and hid the finding."""
+    assert (
+        bandit_would_skip(
+            "vendor/x.py", relative="vendor\\x.py", absolute=f"{ROOT}/vendor\\x.py"
+        )
+        is False
+    )
+    assert (
+        bandit_would_skip(
+            "vendor/x.py", relative="vendor/x.py", absolute=f"{ROOT}/vendor/x.py"
         )
         is True
     )
