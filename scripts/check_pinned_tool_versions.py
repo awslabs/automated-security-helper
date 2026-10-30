@@ -84,7 +84,10 @@ Known limitations
   the report and does not fail. The apt pin gives only major.minor, so the image's
   Ruby is compared as major.minor.0, and a release needing a later patch of the same
   minor is not counted. A Ruby pin or a required Ruby version this script cannot read
-  is refused (exit 2), not guessed at.
+  is refused (exit 2), not guessed at. A release's required RubyGems version is not
+  read: the image's RubyGems is whatever its Ruby package bundles, and nothing in the
+  repository pins it, so a release the image's Ruby admits but its RubyGems does not is
+  reported as installable.
 * A pin newer than upstream's latest is reported as ``ahead`` and does not fail.
   That happens when a release is yanked or demoted after it was pinned, and it is a
   reason to look, not something this script can decide.
@@ -276,6 +279,19 @@ def _github_project(url: str, where: str) -> str:
     return f"{parts[0]}/{parts[1]}"
 
 
+def _license_project(tool: str, entry: Any) -> str:
+    """``owner/repo`` of a license entry's repository, or a refusal naming the entry.
+
+    The bump steps name a ``gh api repos/<owner>/<repo>/commits/<tag>`` lookup for
+    every pin that has a license entry, so a repository on another host has to be
+    refused when the pins are read, not when the report is rendered the week the tool
+    falls behind.
+    """
+    return _github_project(
+        entry.repository, f"THIRD_PARTY_LICENSES[{tool!r}].repository"
+    )
+
+
 def enumerate_pins(pins: Any) -> list[Pin]:
     """Every pin ``pins`` carries, one per tool, sorted by tool name.
 
@@ -289,6 +305,8 @@ def enumerate_pins(pins: Any) -> list[Pin]:
     licenses: dict[str, Any] = pins.THIRD_PARTY_LICENSES
     bundles: dict[str, Any] = getattr(pins, "RULES_BUNDLES", {})
     release_urls: dict[str, str] = getattr(pins, "_RELEASE_BASE_URLS", {})
+    # A gem's license entry is read with its gem pin, below, not as a download pin.
+    gems = frozenset(GEM_PINS)
 
     result: list[Pin] = []
     for tool in sorted(set(tool_versions) | set(licenses) | set(bundles)):
@@ -309,6 +327,7 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                     f"{tool} is both a download pin in {downloads[0]} and a uv-tool "
                     f"pin (distribution {entry.distribution!r}); pick one."
                 )
+            _license_project(tool, entry)
             result.append(
                 Pin(
                     tool=tool,
@@ -360,6 +379,8 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                 )
             )
             continue
+        elif tool in gems:
+            continue
         else:
             # Only a license entry names it, so the version a bump changes is kept
             # somewhere this script does not read, and its steps would leave it out.
@@ -378,6 +399,7 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                     f"{tool} is {version} in {pinned_in[0]} and {entry.version} in "
                     f"THIRD_PARTY_LICENSES; a version bump is half-applied."
                 )
+            _license_project(tool, entry)
 
         result.append(
             Pin(
@@ -392,17 +414,31 @@ def enumerate_pins(pins: Any) -> list[Pin]:
 
     for gem, name in GEM_PINS.items():
         gem_version = getattr(pins, name, None)
-        if gem_version is not None:
-            result.append(
-                Pin(
-                    tool=gem,
-                    version=gem_version,
-                    ecosystem=RUBYGEMS,
-                    project=gem,
-                    pinned_in=(name,),
-                    kind=GEM,
-                )
+        if not isinstance(gem_version, str) or not gem_version:
+            raise PinEnumerationError(
+                f"{PINS_FILE} has no version string named {name}, so the {gem} gem "
+                "pin would go unchecked. Teach GEM_PINS the new name, or restore it."
             )
+        gem_pinned_in = [name]
+        gem_entry = licenses.get(gem)
+        if gem_entry is not None:
+            _license_project(gem, gem_entry)
+            if gem_entry.version.removeprefix("v") != gem_version.removeprefix("v"):
+                raise PinEnumerationError(
+                    f"{gem} is {gem_version} in {name} and {gem_entry.version} in "
+                    f"THIRD_PARTY_LICENSES; a version bump is half-applied."
+                )
+            gem_pinned_in.append("THIRD_PARTY_LICENSES")
+        result.append(
+            Pin(
+                tool=gem,
+                version=gem_version,
+                ecosystem=RUBYGEMS,
+                project=gem,
+                pinned_in=tuple(gem_pinned_in),
+                kind=GEM,
+            )
+        )
 
     return sorted(result, key=lambda p: p.tool)
 
@@ -413,7 +449,13 @@ def enumerate_pins(pins: Any) -> list[Pin]:
 
 # An optional "<project>-" prefix: libssh2 and OpenSSL tag their releases
 # "libssh2-1.11.1" and "openssl-3.3.3", and their license entries record the tag.
-_VERSION_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9]*-)?v?(\d+(?:\.\d+)*)(.*)$")
+# What follows the numbers is limited to the characters release versions are spelled
+# with. A latest release is copied into the bump steps, which a person pastes into a
+# shell and the job summary renders, so a tag that carries anything else (a quote, a
+# ``$(...)``, a space, markup) is refused as not a version, not accepted as a suffix.
+_VERSION_RE = re.compile(
+    r"^(?:[A-Za-z][A-Za-z0-9]*-)?v?(\d+(?:\.\d+)*)([A-Za-z0-9._+-]*)$"
+)
 
 
 def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
@@ -427,7 +469,8 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
     ``outdated``. Build metadata after ``+`` is ignored, as SemVer says it must be.
 
     Raises:
-        ValueError: for a string with no leading numeric version.
+        ValueError: for a string with no leading numeric version, or with a
+            character after it that no release version is spelled with.
     """
     match = _VERSION_RE.match(text.strip())
     if match is None:
@@ -839,7 +882,7 @@ def _license_steps(pins: Any, tool: str, latest: str) -> list[str]:
     entry = pins.THIRD_PARTY_LICENSES.get(tool)
     if entry is None:
         return []
-    project = _github_project(entry.repository, f"THIRD_PARTY_LICENSES[{tool!r}]")
+    project = _license_project(tool, entry)
     latest = _spelled_like(entry.version, latest)
     steps = [
         f'THIRD_PARTY_LICENSES["{tool}"].version -> {latest}',
@@ -871,18 +914,45 @@ def _global_name(pins: Any, value: Any) -> str | None:
     )
 
 
+def _major(bare_version: str) -> str | None:
+    """The leading number of a version without its ``v``, or None if it has none."""
+    match = re.match(r"\d+", bare_version)
+    return match.group(0) if match else None
+
+
 def _release_binary_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     tool = pin.tool
     old_bare = pin.version.lstrip("v")
     table = pins._ASSET_TABLES.get(tool, {})
     filenames = list(table.values())
     steps = [f'TOOL_VERSIONS["{tool}"] -> {latest}']
-    if filenames and all(old_bare in name for name in filenames):
+    table_name = _global_name(pins, table) or "asset filenames"
+    new_bare = latest.lstrip("v")
+    # Each name is judged on its own: one that carries no version (an unversioned
+    # binary beside versioned archives) must not drop the step for the others.
+    versioned = [name for name in filenames if old_bare in name]
+    if versioned:
+        which = "" if len(versioned) == len(filenames) else " that carry the version"
         steps.append(
-            f"{_global_name(pins, table) or 'asset filenames'}: the {len(filenames)} "
-            f"asset file names of {tool}, {old_bare} -> {latest.lstrip('v')}; check "
-            "each still exists upstream"
+            f"{table_name}: the {len(versioned)} asset file names of {tool}{which}, "
+            f"{old_bare} -> {new_bare}; check each still exists upstream"
         )
+    # A name that carries only the major version (cfn-guard's ``cfn-guard-v3-...``)
+    # changes when the major does, and not on any other bump.
+    old_major, new_major = _major(old_bare), _major(new_bare)
+    if old_major is not None and new_major not in (None, old_major):
+        major_only = [
+            name
+            for name in filenames
+            if name not in versioned
+            and re.search(rf"(?<![0-9A-Za-z])v{old_major}(?![0-9])", name)
+        ]
+        if major_only:
+            steps.append(
+                f"{table_name}: the {len(major_only)} asset file names of {tool} that "
+                f"carry only the major version, v{old_major} -> v{new_major}; check "
+                "each still exists upstream"
+            )
     taken_at = getattr(pins, "_DIGESTS_TAKEN_AT", {})
     if tool in taken_at:
         steps.append(f'_DIGESTS_TAKEN_AT["{tool}"] -> {latest}')
@@ -980,14 +1050,16 @@ def _gem_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
         # Bundler is not in the Gemfile; the lockfile records the Bundler that wrote
         # it, and the image installs that one (the Dockerfile ARG step follows).
         steps.append(f"{GEMFILE}.lock: its BUNDLED WITH line -> {latest}")
-        return steps
-    return steps + [
-        f'{GEMFILE}: gem "{pin.tool}", "{latest}"',
-        (
-            f"{GEMFILE}.lock: regenerate with "
-            f"`bundle lock --update {pin.tool}` in that directory"
-        ),
-    ]
+    else:
+        steps += [
+            f'{GEMFILE}: gem "{pin.tool}", "{latest}"',
+            (
+                f"{GEMFILE}.lock: regenerate with "
+                f"`bundle lock --update {pin.tool}` in that directory"
+            ),
+        ]
+    # A gem with a license entry has that entry's values to move as well.
+    return steps + _license_steps(pins, pin.tool, latest)
 
 
 # One function per kind in PIN_KINDS; a test keeps the two in step.
@@ -1020,6 +1092,12 @@ def _pinned_digests(pins: Any, pin: Pin) -> list[str]:
     return list(dict.fromkeys(v.lower() for v in values if v))
 
 
+# One line of ``git grep -n -z``: the path, the line number and the matched text, the
+# first two ended by a NUL and the third by the newline. A path may hold a newline, so
+# the record is read as a whole rather than split into lines first.
+_GREP_RECORD = re.compile(rb"([^\0]+)\0(\d+)\0[^\n]*(?:\n|$)")
+
+
 def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
     """One step per tracked file outside the pins module that repeats a pinned digest.
 
@@ -1036,15 +1114,24 @@ def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
             spellings.append(f"sha256-{sri}")
     if not spellings:
         return []
-    argv = ["git", "-C", str(repo_root), "grep", "-n", "-I", "-F"]
+    # -z prints each path verbatim and ends the path and the line number with a NUL,
+    # so a path that holds a colon, a non-ASCII character or a quote is read back as
+    # it is. --no-color keeps a user's color.grep=always out of the paths. The output is
+    # read as bytes: a matched line in an encoding this locale cannot decode must not
+    # stop the report.
+    argv = ["git", "-C", str(repo_root), "grep", "-n", "-z", "--no-color", "-I", "-F"]
     for spelling in spellings:
         argv += ["-e", spelling]
     argv += ["--", ".", f":(exclude){PINS_FILE}"]
     try:
         found = subprocess.run(  # nosec B603 B607 - git, fixed arguments, this checkout
-            argv, capture_output=True, text=True, timeout=60, check=False
+            argv, capture_output=True, timeout=60, check=False
         )
-        failure = None if found.returncode in (0, 1) else found.stderr.strip()[:200]
+        failure = (
+            None
+            if found.returncode in (0, 1)
+            else found.stderr.decode("utf-8", "replace").strip()[:200]
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         failure = str(exc)
     if failure is not None:
@@ -1054,9 +1141,9 @@ def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
             + ", ".join(spellings)
         ]
     lines: dict[str, list[str]] = {}
-    for line in found.stdout.splitlines():
-        path, number, _ = line.split(":", 2)
-        lines.setdefault(path, []).append(number)
+    for record in _GREP_RECORD.finditer(found.stdout):
+        path = record.group(1).decode("utf-8", "replace")
+        lines.setdefault(path, []).append(record.group(2).decode("ascii"))
     return [
         f"{path}:{','.join(numbers)}: a copy of a digest {pin.tool} pins; replace it "
         "with the new value"
