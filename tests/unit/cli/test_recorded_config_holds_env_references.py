@@ -270,12 +270,11 @@ def test_the_shard_records_each_reference_as_written(runs):
     assert options["language_override"] == "!ENV ${ASH_PROBE_CANARY}"
     assert options["package_manager_override"] == "${ASH_PROBE_CANARY:fallback}"
     assert "${ASH_PROBE_CANARY}" in config["scanners"]
-    # The section is disabled, so it names no expected scanner under either
-    # spelling: a disabled extras section's module is never loaded, and counting
-    # it reported a scanner nobody asked for as missing. The record above still
-    # holds the key as the file wrote it.
+    # The section is disabled and still listed: the roster is what the
+    # configuration declares, and the record holds the key as the file wrote it,
+    # not as the environment resolved it.
     expected = data["metadata"]["expected_scanners"]
-    assert "${ASH_PROBE_CANARY}" not in expected
+    assert "${ASH_PROBE_CANARY}" in expected
     assert CANARY not in expected
 
 
