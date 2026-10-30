@@ -175,7 +175,10 @@ class TestAMissingActionableCountIsUnknownNotZero:
         assert filtered["actionable_findings"] is None
         assert filtered["summary_stats"]["total"] == 3
 
-    def test_a_count_some_scanners_carry_is_summed_over_those(self):
+    def test_a_count_a_scanner_that_ran_lacks_is_unknown_not_a_lower_bound(self):
+        """semgrep carries 2 and bandit, which ran, carries nothing: the sum over
+        the entries that carry it (2) is a lower bound, and used to be reported
+        as the count."""
         results = self._without_actionable_counts(False)
         results["raw_results"]["scanner_results"]["semgrep"][
             "actionable_finding_count"
@@ -183,7 +186,39 @@ class TestAMissingActionableCountIsUnknownNotZero:
 
         by_severity = filter_summary(results)["findings_summary"]["by_severity"]
 
-        assert by_severity["actionable"] == 2
+        assert by_severity["actionable"] is None
+
+    def test_a_count_only_scanners_that_did_not_run_lack_is_summed(self):
+        results = _results(with_summary_stats=False)
+        del results["raw_results"]["scanner_results"]["grype"][
+            "actionable_finding_count"
+        ]
+
+        by_severity = filter_summary(results)["findings_summary"]["by_severity"]
+
+        assert by_severity["actionable"] == 3
+
+
+class TestACounterTheSummaryDoesNotCarryIsNone:
+    """filter_summary's docstring says None means the document records no such
+    count; a counter missing from a recorded summary_stats read 0."""
+
+    def test_a_missing_outcome_counter_is_none(self):
+        results = _results()
+        del results["summary_stats"]["error"]
+
+        scan_stats = filter_summary(results)["findings_summary"]["scan_stats"]
+
+        assert scan_stats["error"] is None
+        assert scan_stats["passed"] == 1
+
+    def test_a_missing_bucket_of_a_recorded_summary_still_reads_zero(self):
+        results = _results()
+        del results["summary_stats"]["severity_counts"]["info"]
+
+        by_severity = filter_summary(results)["findings_summary"]["by_severity"]
+
+        assert by_severity["info"] == 0
 
 
 class TestActionableOnlyRefusesAnUnlistableCount:

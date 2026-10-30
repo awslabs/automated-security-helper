@@ -81,10 +81,14 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     ``finding_count``: a per-target file written before the metrics pass can
     carry a finding_count that counted suppressed findings too.
 
-    ``actionable`` is None, not 0, when no scanner records an
-    ``actionable_finding_count``: a count the entries do not carry is unknown,
-    and a zero here read as "nothing actionable" for a workspace file whose
-    scanner entries never had the field.
+    ``actionable`` is None, not 0, when a scanner that ran (PASSED or FAILED)
+    records no ``actionable_finding_count``: a count the entries do not carry is
+    unknown, and a zero here read as "nothing actionable" for a workspace file
+    whose scanner entries never had the field. It used to be summed over the
+    entries that carried it, so with a mix the sum was a lower bound shown as an
+    exact number. A scanner that did not run (MISSING, SKIPPED, ERROR) has no
+    actionable findings to count and may lack the field without making the sum
+    unknown.
     """
     counts = dict.fromkeys(_SEVERITY_KEYS, 0)
     stats: Dict[str, Any] = {
@@ -92,6 +96,7 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
         "actionable": None,
         **dict.fromkeys(_OUTCOME_COUNTERS.values(), 0),
     }
+    actionable_unknown = False
     for data in scanner_results.values():
         if not isinstance(data, dict):
             continue
@@ -106,12 +111,16 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
             stats["total"] += _total_of(own_counts)
         else:
             stats["total"] += _count(data.get("finding_count"))
-        actionable = data.get("actionable_finding_count")
-        if isinstance(actionable, int) and not isinstance(actionable, bool):
-            stats["actionable"] = (stats["actionable"] or 0) + actionable
         counter = _OUTCOME_COUNTERS.get(str(data.get("status") or "").upper())
         if counter is not None:
             stats[counter] += 1
+        actionable = data.get("actionable_finding_count")
+        if isinstance(actionable, int) and not isinstance(actionable, bool):
+            stats["actionable"] = (stats["actionable"] or 0) + actionable
+        elif counter in ("passed", "failed"):
+            actionable_unknown = True
+    if actionable_unknown:
+        stats["actionable"] = None
     stats["severity_counts"] = counts
     return stats
 
@@ -125,9 +134,13 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 
     Every count under ``findings_summary.by_severity`` and ``scan_stats`` is an
     int or None. None means the document records no such count (a results file
-    with no ``summary_stats`` and no scanner entries to derive one from, or
-    scanner entries that carry no ``actionable_finding_count``); it is never a
-    stand-in for 0, and a client that compares or adds these reads None first.
+    with no ``summary_stats`` and no scanner entries to derive one from, a
+    ``summary_stats`` without the counter, as one written before the ``error``
+    counter existed, or scanner entries that carry no
+    ``actionable_finding_count``); it is never a stand-in for 0, and a client
+    that compares or adds these reads None first. The per-severity buckets of a
+    recorded summary are the one exception: SummaryStats writes all six, so a
+    bucket missing from one reads 0.
     """
     summary: Dict[str, Any] = {
         "success": True,
@@ -172,9 +185,12 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     severity_counts = summary_stats.get("severity_counts") or {}
 
     def _stat(name: str) -> Optional[int]:
-        # None, not 0, when the document records nothing at all: a count the
+        # None, not 0, when the document records no such count: a count the
         # results do not carry is unknown, and a zero here reads as "none found".
-        return summary_stats.get(name, 0) if summary_stats else None
+        # That held for an absent summary and not for a counter absent from a
+        # recorded one, so a summary written before the `error` counter existed
+        # reported `error: 0`.
+        return summary_stats.get(name) if summary_stats else None
 
     def _severity(name: str) -> Optional[int]:
         if not summary_stats:
