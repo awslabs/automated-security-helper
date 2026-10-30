@@ -11,9 +11,12 @@ session's own copy of the profile, which ``select_profile`` materialized in the
 session's ``config/`` directory and already returned as ``config_path``; it is
 never the file the operator registered with ``--profile``.
 
-A copy that is gone is not an error: ``resolve_session_config_path`` reports no
-binding, and the delivered config resolves against the defaults, as for an
-unbound session.
+A copy that is gone is not an error, and not the end of the binding either:
+``resolve_session_config_path`` writes the bound profile's file again from the
+registered profile, and the delivered config resolves against that base, as it
+did before the copy went. (A profile that is no longer registered, or a
+workspace that cannot be written, is the session's own refusal; the tests at
+the end pin those.)
 """
 
 from __future__ import annotations
@@ -58,7 +61,13 @@ def bound(tmp_path):
     operator_dir = tmp_path / "operator-profiles"
     operator_dir.mkdir()
     profile = operator_dir / "strict.ash.yaml"
-    profile.write_text("project_name: strict-profile\n", encoding="utf-8")
+    # A field the delivered config does not set, so a result that carries it
+    # was resolved against the profile (written again when its copy is gone),
+    # not against the defaults.
+    profile.write_text(
+        "project_name: strict-profile\nglobal_settings:\n  severity_threshold: CRITICAL\n",
+        encoding="utf-8",
+    )
     set_profile_registry(register_profiles([f"strict={profile}"]))
 
     selected = mcp_select_profile("strict", session_id=SESSION)
@@ -107,13 +116,19 @@ def test_an_unloadable_bound_profile_names_only_the_session_copy(bound):
     assert profile.parent.name not in text
 
 
-def test_a_bound_profile_copy_that_is_gone_is_no_binding(bound):
+def test_a_bound_profile_copy_that_is_gone_is_written_again(bound):
+    """The copy is gone while the profile stays registered: the call writes it
+    again and resolves the delivered config against it. ``project_name`` alone
+    could not tell a rewritten base from the defaults (the delivered file sets
+    it either way); the profile's threshold can."""
     _, session_copy, delivered = bound
     session_copy.unlink()
 
     result = _get_config(delivered)
 
     assert result.get("project_name") == "delivered", result
+    assert session_copy.is_file(), "the bound profile's copy was not written again"
+    assert result["global_settings"]["severity_threshold"] == "CRITICAL", result
 
 
 def test_a_bound_profile_that_cannot_be_written_again_is_the_sessions_refusal(
