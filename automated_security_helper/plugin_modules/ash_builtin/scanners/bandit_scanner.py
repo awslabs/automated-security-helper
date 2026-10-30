@@ -216,16 +216,24 @@ def _entries_no_path_holds_as_text(
     return kept
 
 
-def _spelled_path(text: str) -> str:
-    """A bandit metrics key or notification URI as one comparable path.
+def _spelled_path(text: str, *, uri: bool) -> str:
+    """A bandit metrics key (``uri=False``) or notification URI (``uri=True``) as one comparable path.
 
     bandit's SARIF names a skipped file as ``to_uri(fname)``: a ``file://`` URI
     for an absolute path, a percent-encoded POSIX path otherwise; its metrics
-    key the same ``fname`` as walked. Both are reduced to the decoded POSIX path.
+    key is the same ``fname`` as walked, not encoded. Only the URI is unquoted,
+    with ``surrogateescape`` so a non-UTF-8 name (which ``to_uri`` writes as
+    ``%FF``) decodes to the surrogate-escaped text the walked key holds.
+    Unquoting the key too read a file named ``x%41.py`` as ``xA.py``, so a
+    skipped file with a ``%`` in its name was counted as scanned and two
+    different files could collide.
     """
     from urllib.parse import unquote
 
-    spelled = unquote(text).replace("\\", "/").removeprefix("file://")
+    spelled = text
+    if uri:
+        spelled = unquote(spelled, errors="surrogateescape").removeprefix("file://")
+    spelled = spelled.replace("\\", "/")
     while spelled.startswith("./"):
         spelled = spelled[2:]
     return spelled
@@ -247,7 +255,7 @@ def _skipped_file_paths(run: Any) -> set:
                 artifact = getattr(physical, "artifactLocation", None)
                 uri = getattr(artifact, "uri", None)
                 if isinstance(uri, str) and uri:
-                    skipped.add(_spelled_path(uri))
+                    skipped.add(_spelled_path(uri, uri=True))
     return skipped
 
 
@@ -1509,7 +1517,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 scanned = (scanned or 0) + sum(
                     1
                     for key in metrics
-                    if key != "_totals" and _spelled_path(str(key)) not in skipped
+                    if key != "_totals"
+                    and _spelled_path(str(key), uri=False) not in skipped
                 )
         if scanned is None:
             return

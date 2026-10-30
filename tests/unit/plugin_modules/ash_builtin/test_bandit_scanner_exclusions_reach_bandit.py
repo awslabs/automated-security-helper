@@ -410,6 +410,20 @@ def test_a_target_whose_every_file_failed_to_parse_is_not_passed(tmp_path):
         scanner._record_scanned_files(_report(source, [], ["a.py"]), [], source)
 
 
+def test_a_skipped_file_with_a_percent_in_its_name_is_told_from_its_decoded_twin(
+    tmp_path,
+):
+    """Only the notification URI is percent-encoded. Decoding the metrics key
+    too read ``x%41.py`` as ``xA.py``: the skipped file was counted as scanned
+    and collided with a real ``xA.py``."""
+    source = _tree(tmp_path, ["xA.py", "x%41.py"])
+    scanner = _scanner(source, tmp_path)
+
+    scanner._record_scanned_files(_report(source, ["xA.py"], ["x%41.py"]), [], source)
+
+    assert scanner.targets_attempted == 1
+
+
 def test_a_parsed_file_is_still_counted(tmp_path):
     source = _tree(tmp_path, ["a.py"])
     scanner = _scanner(source, tmp_path)
