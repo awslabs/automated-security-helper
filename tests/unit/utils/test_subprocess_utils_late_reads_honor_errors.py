@@ -39,24 +39,46 @@ def test_a_strict_partial_read_falls_back_to_replacement_so_it_cannot_raise():
     assert subprocess_utils._late_decoded(UNDECODABLE, "utf-8", "strict") == "caf�\n"
 
 
+ENTRY_POINTS = ["run_command", "run_command_with_output_handling"]
+
+
+def _timed_out_through(entry_point: str, **kwargs):
+    """The timed-out run's (stdout, stderr) through either public entry point.
+
+    Both take ``errors`` and hand it to the late read of the partial output;
+    the second appends its own timeout sentence to the stderr it returns."""
+    if entry_point == "run_command":
+        result = subprocess_utils.run_command(["tool"], timeout=5, text=True, **kwargs)
+        assert isinstance(result, subprocess_utils.TimedOutProcess)
+        return result.stdout, result.stderr
+    response = subprocess_utils.run_command_with_output_handling(
+        ["tool"],
+        stdout_preference="return",
+        stderr_preference="return",
+        timeout=5,
+        **kwargs,
+    )
+    assert response["timed_out"] is True
+    return response["stdout"], response["stderr"]
+
+
+@pytest.mark.parametrize("entry_point", ENTRY_POINTS)
 @patch(
     "automated_security_helper.utils.subprocess_utils.find_executable",
     return_value=None,
 )
 @patch("automated_security_helper.utils.subprocess_utils._run_plain")
-def test_run_command_with_a_strict_handler_still_returns_the_timeout_result(
-    mock_run, _mock_find
+def test_a_strict_handler_still_returns_the_timeout_result(
+    mock_run, _mock_find, entry_point
 ):
     mock_run.side_effect = subprocess.TimeoutExpired(
         cmd=["tool"], timeout=5, output=UNDECODABLE, stderr=UNDECODABLE
     )
 
-    result = subprocess_utils.run_command(
-        ["tool"], timeout=5, text=True, encoding="utf-8", errors="strict"
-    )
+    stdout, stderr = _timed_out_through(entry_point, encoding="utf-8", errors="strict")
 
-    assert isinstance(result, subprocess_utils.TimedOutProcess)
-    assert result.stdout == "caf�\n"
+    assert stdout == "caf�\n"
+    assert stderr.startswith("caf�\n")
 
 
 def test_the_failed_wait_read_uses_the_streams_handler():
@@ -77,21 +99,22 @@ def test_a_strict_stream_falls_back_to_replacement_so_the_late_read_cannot_raise
     assert subprocess_utils._decoded(UNDECODABLE, process) == "caf�\n"
 
 
+@pytest.mark.parametrize("entry_point", ENTRY_POINTS)
 @patch(
     "automated_security_helper.utils.subprocess_utils.find_executable",
     return_value=None,
 )
 @patch("automated_security_helper.utils.subprocess_utils._run_plain")
-def test_run_command_passes_its_errors_handler_to_the_timed_out_output(
-    mock_run, _mock_find
+def test_the_errors_handler_reaches_the_timed_out_output(
+    mock_run, _mock_find, entry_point
 ):
     mock_run.side_effect = subprocess.TimeoutExpired(
         cmd=["tool"], timeout=5, output=UNDECODABLE, stderr=UNDECODABLE
     )
 
-    result = subprocess_utils.run_command(
-        ["tool"], timeout=5, text=True, encoding="utf-8", errors="backslashreplace"
+    stdout, stderr = _timed_out_through(
+        entry_point, encoding="utf-8", errors="backslashreplace"
     )
 
-    assert result.stdout == "caf\\xe9\n"
-    assert result.stderr == "caf\\xe9\n"
+    assert stdout == "caf\\xe9\n"
+    assert stderr.startswith("caf\\xe9\n")
