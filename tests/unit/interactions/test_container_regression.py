@@ -79,17 +79,32 @@ class TestBug97TerminateWithoutWait:
 
     def test_terminate_has_wait_and_kill_escalation(self):
         """Since the interrupt is passed on rather than SIGTERMed, the stop lives in
-        _stop_after_interrupt; TestRunCmdDirectInterruption checks it by behavior."""
+        _stop_after_interrupt; TestRunCmdDirectInterruption checks it by behavior.
+
+        The kill itself lives in the helper that logs a refused kill instead of
+        letting the error replace the interrupt, and the reaping wait in the
+        bounded wait after a kill, so the chain is pinned link by link.
+        """
         from automated_security_helper.interactions.run_ash_container import (
             _stop_after_interrupt,
             run_cmd_direct,
         )
+        from automated_security_helper.utils import subprocess_utils
 
         assert "_stop_after_interrupt(process)" in inspect.getsource(run_cmd_direct)
         post_interrupt = inspect.getsource(_stop_after_interrupt)
-        assert "process.wait(" in post_interrupt or ".wait(" in post_interrupt, (
-            "After process.terminate(), must call process.wait()"
+        assert "_wait_out(process, grace)" in post_interrupt, (
+            "After the interrupt is passed on, the stop must wait the grace out"
         )
-        assert "process.kill()" in post_interrupt or ".kill()" in post_interrupt, (
-            "Must escalate to process.kill() if process doesn't exit"
+        assert "_kill_unless_refused(process)" in post_interrupt, (
+            "Must escalate to the kill helper if the process outlives the grace"
+        )
+        assert "_wait_after_kill(process)" in post_interrupt, (
+            "A killed process must be reaped through the bounded wait"
+        )
+        assert ".kill()" in inspect.getsource(subprocess_utils._kill_unless_refused), (
+            "The kill helper is the one that calls process.kill()"
+        )
+        assert ".wait(" in inspect.getsource(subprocess_utils._wait_after_kill), (
+            "The bounded wait is the one that calls process.wait()"
         )
