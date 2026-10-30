@@ -1368,12 +1368,16 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 # Zero processed: the response adds its two counts into a total,
                 # so passing the processed count as both doubled the total and
                 # stated a 50% success rate for a run in which nothing reached
-                # the file.
+                # the file. The failed count is every result the file lacks:
+                # the ones whose record failed to serialize and the ones the
+                # builder had already dropped. Counted from the serialization
+                # failures alone, three results of which one failed to build
+                # and two to serialize read "total 2, failed 2".
                 return self._create_error_response(
                     "All findings failed to serialize",
                     current_time_ms,
                     0,
-                    processed_results_count,
+                    processed_results_count + failed_results_count,
                 )
 
             # Appended AFTER the all-failed check, deliberately. The error response
@@ -1417,11 +1421,15 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
         except Exception as e:
             ASH_LOGGER.error(f"Failed to serialize OCSF findings array: {str(e)}")
+            # Nothing reached the file, so nothing was processed: every result,
+            # built or not, is a failure of this report. Passing the built
+            # count as processed stated a success rate for an array that was
+            # never written.
             return self._create_error_response(
                 f"Failed to create OCSF report: {str(e)}",
                 current_time_ms,
-                processed_results_count,
-                failed_results_count,
+                0,
+                processed_results_count + failed_results_count,
             )
 
     def _create_error_response(

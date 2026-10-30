@@ -23,6 +23,9 @@
 * The shortfall record's uid was one fixed string for every scan and
   repository, so a SIEM deduplicating on it merged unrelated projects' records;
   it is derived from the scanned project's name.
+* The error response's failed count left out the results the builder dropped
+  when every record failed to serialize, and the catch-all response counted
+  records that never reached the file as processed.
 """
 
 import json
@@ -342,6 +345,76 @@ class TestShortfalls:
         )
 
         (error,) = payload
+        stats = error["processing_statistics"]
+        assert stats["processed_results_count"] == 0
+        assert stats["failed_results_count"] == 2
+        assert stats["total_results_count"] == 2
+        assert stats["success_rate_percent"] == 0
+
+    def test_the_failed_count_covers_both_kinds_of_failure(self, reporter, monkeypatch):
+        """Three results: one fails in the builder, two fail to serialize.
+        The response said total 2, failed 2; every input is counted once."""
+        original = OcsfReporter._create_vulnerability_finding
+
+        def flaky(self, result, metadata, current_time_ms, shared_id=None):
+            if result.ruleId == "BROKEN":
+                raise RuntimeError("cannot build")
+            return original(self, result, metadata, current_time_ms, shared_id)
+
+        def boom(self, *args, **kwargs):
+            raise RuntimeError("cannot dump")
+
+        monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
+        monkeypatch.setattr(VulnerabilityFinding, "model_dump", boom)
+        payload = json.loads(
+            reporter.report(
+                _model(
+                    Result(
+                        ruleId="BROKEN", level=Level.error, message=Message(text="x")
+                    ),
+                    Result(ruleId="R2", level=Level.error, message=Message(text="y")),
+                    Result(ruleId="R3", level=Level.error, message=Message(text="z")),
+                )
+            )
+        )
+
+        (error,) = payload
+        assert error["error"] == "All findings failed to serialize"
+        stats = error["processing_statistics"]
+        assert stats["processed_results_count"] == 0
+        assert stats["failed_results_count"] == 3
+        assert stats["total_results_count"] == 3
+
+    def test_a_failure_assembling_the_array_counts_nothing_as_processed(
+        self, reporter, monkeypatch
+    ):
+        """When the array itself cannot be written, no finding reached the
+        file, so none is processed; the response said one of two was."""
+        original = OcsfReporter._create_vulnerability_finding
+
+        def flaky(self, result, metadata, current_time_ms, shared_id=None):
+            if result.ruleId == "BROKEN":
+                raise RuntimeError("cannot build")
+            return original(self, result, metadata, current_time_ms, shared_id)
+
+        def no_shortfall(self, *args, **kwargs):
+            raise RuntimeError("cannot build the shortfall record")
+
+        monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
+        monkeypatch.setattr(OcsfReporter, "_create_shortfall_finding", no_shortfall)
+        payload = json.loads(
+            reporter.report(
+                _model(
+                    Result(
+                        ruleId="BROKEN", level=Level.error, message=Message(text="x")
+                    ),
+                    Result(ruleId="FINE", level=Level.error, message=Message(text="y")),
+                )
+            )
+        )
+
+        (error,) = payload
+        assert error["error"].startswith("Failed to create OCSF report")
         stats = error["processing_statistics"]
         assert stats["processed_results_count"] == 0
         assert stats["failed_results_count"] == 2
