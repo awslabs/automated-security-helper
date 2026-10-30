@@ -16,7 +16,9 @@
   case-insensitive volume, was not refused as a scan target: the check matched
   ancestors by identity and the directory itself by text alone.
 * On Windows the gates resolved a client-named path before refusing it, which
-  opens a connection to the host a UNC path names.
+  opens a connection to the host a UNC path names. A link is now read, hop by
+  hop, and refused only when it leads to a share or cannot be read; a link to a
+  local name is judged as what it names, as on every other platform.
 """
 
 from __future__ import annotations
@@ -206,28 +208,124 @@ class TestWindowsRefusesBeforeResolving:
         assert "network share" in str(refusal)
         assert all("server" not in p for p in resolved), resolved
 
-    def test_a_link_at_the_name_is_refused_unresolved(self, tmp_path):
+    @pytest.mark.parametrize(
+        "spelling", ["\\\\server\\share\\tree", "//server/share/tree"]
+    )
+    def test_a_link_to_a_network_share_is_refused_unresolved(
+        self, monkeypatch, tmp_path, spelling
+    ):
+        """The link's name is read, never resolved: no resolve sees the server."""
+        link = tmp_path / "link"
+        link.symlink_to(spelling)
+        resolved = []
+        real_resolve = Path.resolve
+
+        def recording_resolve(self, strict=False):
+            resolved.append(str(self))
+            return real_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", recording_resolve)
+
+        refusal = validate_scan_target_in_sandbox(link, session_id=OWN)
+
+        assert refusal is not None
+        assert "is a link that leads to a network share" in str(refusal)
+        assert refusal.context["resolved_path"] == str(link)
+        assert all("server" not in p for p in resolved), resolved
+
+    def test_a_chain_of_links_ending_at_a_share_is_refused(self, tmp_path):
+        """Every hop is read: a local link to a link to a share is the share."""
+        last = tmp_path / "last"
+        last.symlink_to("\\\\server\\share\\tree")
+        middle = tmp_path / "middle"
+        middle.symlink_to("last")
+        first = tmp_path / "first"
+        first.symlink_to(middle)
+
+        refusal = validate_config_input(first, session_id=OWN)
+
+        assert refusal is not None
+        assert "is a link that leads to a network share" in str(refusal)
+
+    def test_a_link_to_a_local_directory_is_judged_resolved(self, tmp_path):
+        """A linked checkout is the checkout: the gates judge what it names.
+
+        At the base every link was refused unresolved on Windows, so a linked
+        scan target, a junction in a repository and a dangling link in a tree
+        were refused for being links rather than judged as what they name; thirteen
+        tests of the MCP tools that follow links read red on Windows.
+        """
         real = tmp_path / "real"
         real.mkdir()
         link = tmp_path / "link"
         link.symlink_to(real)
 
-        refusal = validate_scan_target_in_sandbox(link, session_id=OWN)
+        assert sandbox._refusal_before_resolving("Scan target", link) is None
 
-        assert refusal is not None
-        assert "is a link" in str(refusal)
-        assert refusal.context["resolved_path"] == str(link)
-
-    def test_a_config_input_that_is_a_link_is_refused_unresolved(self, tmp_path):
+    def test_a_config_input_that_is_a_local_link_is_judged_resolved(self, tmp_path):
         real = tmp_path / "real.yaml"
         real.write_text("{}")
         link = tmp_path / "link.yaml"
         link.symlink_to(real)
 
-        refusal = validate_config_input(link, session_id=OWN)
+        assert sandbox._refusal_before_resolving("Config input", link) is None
+
+    def test_a_link_to_nothing_local_is_judged_resolved(self, tmp_path):
+        """A dangling link names a local path: resolving it opens nothing remote."""
+        link = tmp_path / "link.yaml"
+        link.symlink_to(tmp_path / "gone.yaml")
+
+        assert sandbox._refusal_before_resolving("Config input", link) is None
+
+    def test_a_link_whose_name_cannot_be_read_is_refused(self, monkeypatch, tmp_path):
+        """A reparse point with no readable name could lead anywhere: refused."""
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+
+        def unreadable(path, *args, **kwargs):
+            raise OSError(22, "not a symbolic link or junction")
+
+        monkeypatch.setattr(os, "readlink", unreadable)
+
+        refusal = validate_scan_target_in_sandbox(link, session_id=OWN)
 
         assert refusal is not None
-        assert "is a link" in str(refusal)
+        assert "is a link whose target the MCP server cannot read" in str(refusal)
+
+    def test_a_chain_past_the_hop_bound_is_refused(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sandbox, "_LINK_HOPS", 2)
+        third = tmp_path / "third"
+        third.mkdir()
+        second = tmp_path / "second"
+        second.symlink_to(third)
+        first = tmp_path / "first"
+        first.symlink_to(second)
+        zero = tmp_path / "zero"
+        zero.symlink_to(first)
+
+        refusal = validate_scan_target_in_sandbox(zero, session_id=OWN)
+
+        assert refusal is not None
+        assert "cannot read" in str(refusal)
+
+    @pytest.mark.parametrize(
+        ("text", "share"),
+        [
+            ("\\\\server\\share\\tree", True),
+            ("//server/share/tree", True),
+            ("\\\\?\\UNC\\server\\share\\tree", True),
+            ("\\\\?\\unc\\server\\share", True),
+            ("\\\\?\\C:\\repo", False),
+            ("\\\\.\\C:\\repo", False),
+            ("C:\\repo", False),
+            ("/srv/repo", False),
+        ],
+    )
+    def test_the_share_spelling_reads_the_extended_form(self, text, share):
+        """``\\\\?\\C:\\...``, the form a junction's name takes, is a local volume."""
+        assert sandbox._names_a_windows_share(text) is share
 
     def test_a_plain_local_directory_is_judged_as_before(self, tmp_path):
         """Control: the Windows check refuses only what resolving would open."""

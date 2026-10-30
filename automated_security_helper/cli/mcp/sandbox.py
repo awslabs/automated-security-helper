@@ -844,10 +844,64 @@ def _running_on_windows() -> bool:
     return os.name == "nt"
 
 
+#: Links followed before a chain is given up on as unjudgeable, the bound
+#: ``os.path.realpath`` applies to a chain of links before it stops following.
+_LINK_HOPS = 40
+
+
 def _names_a_windows_share(path: object) -> bool:
-    """Whether the text of ``path`` is a UNC path, ``\\\\server\\share`` or ``//server/share``."""
+    """Whether the text of ``path`` is a UNC path, ``\\\\server\\share`` or ``//server/share``.
+
+    A path in the extended form, ``\\\\?\\...`` or ``\\\\.\\...``, names a share
+    only through its ``UNC`` device: ``\\\\?\\UNC\\server\\share`` does,
+    ``\\\\?\\C:\\repo`` is a local volume. ``os.readlink`` returns a junction's
+    target in that form (its substitute name, since Python 3.8), so the form is
+    read here rather than taken for a share by its two leading separators.
+    """
     text = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
+    if text[:4] in ("\\\\?\\", "\\\\.\\", "//?/", "//./"):
+        return text[4:8].upper() in ("UNC\\", "UNC/")
     return text.startswith(("\\\\", "//"))
+
+
+def _link_chain_names_a_windows_share(text: str) -> Optional[bool]:
+    """Whether the link at ``text``, or a link it leads to, names a network share.
+
+    Read with ``os.readlink`` one hop at a time: reading a reparse point's
+    substitute name opens the link's own entry, never what it names, so a chain
+    is judged without a connection to anything it leads to. A relative name is
+    taken from the link's directory, as resolving would take it. The walk ends
+    at the first name that is not a link, or that is not there: a local name is
+    then all that resolving would open, and the answer is False.
+
+    None when the chain cannot be judged: a reparse point whose name cannot be
+    read (one that is no symbolic link or junction), or a chain longer than
+    ``_LINK_HOPS``. The caller refuses then, as it refused every link before,
+    since what resolving would open cannot be told.
+    """
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
+
+    current = text
+    for _ in range(_LINK_HOPS):
+        try:
+            target = os.readlink(current)
+        except OSError:
+            return None
+        if _names_a_windows_share(target):
+            return True
+        if not os.path.isabs(target):
+            target = os.path.join(os.path.dirname(current), target)
+        target = os.path.normpath(target)
+        try:
+            is_link = _is_link_stat(os.lstat(target))
+        except OSError:
+            # Absent, or under a directory that cannot be searched: a local
+            # name either way, which is all that resolving would open.
+            return False
+        if not is_link:
+            return False
+        current = target
+    return None
 
 
 def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceError]:
@@ -858,9 +912,13 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
     ``config_sources`` refuses a linked source unresolved for that reason
     (``_permitted``); the gates here resolved the caller's path first, so a UNC
     path, or a link to one, had the server reach the host it named and then be
-    refused. A UNC spelling and a link at the name are refused as given, without
-    resolving. Nothing is refused on other platforms, where resolving opens
-    nothing.
+    refused. A UNC spelling is refused as given. A link is read, not resolved
+    (``_link_chain_names_a_windows_share``): one that leads to a share, or whose
+    target cannot be read, is refused unresolved; one that leads to a local name
+    goes on to the gates and is judged resolved, as on every other platform, so a
+    linked checkout, a junction in a repository and a link to nothing are judged
+    as the directory or file they name rather than refused for being links.
+    Nothing is refused on other platforms, where resolving opens nothing.
     """
     if not _running_on_windows():
         return None
@@ -881,13 +939,24 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
         return None
     if not is_link:
         return None
+    reaches_a_share = _link_chain_names_a_windows_share(text)
+    if reaches_a_share is False:
+        return None
+    if reaches_a_share:
+        return _refusal(
+            what,
+            path,
+            Path(text),
+            "It is a link that leads to a network share, which the MCP server does "
+            "not open. Name a directory on a local volume.",
+        )
     return _refusal(
         what,
         path,
         Path(text),
-        "It is a link, which the MCP server does not resolve on Windows because "
-        "resolving one can open a connection to the host its target names. Name "
-        "the directory itself.",
+        "It is a link whose target the MCP server cannot read, so it is not "
+        "resolved on Windows: resolving one can open a connection to the host "
+        "its target names. Name the directory itself.",
     )
 
 
