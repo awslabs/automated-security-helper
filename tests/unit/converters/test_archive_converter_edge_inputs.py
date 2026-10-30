@@ -260,6 +260,41 @@ def test_an_encrypted_or_unsupported_zip_member_is_refused_alone(
     assert "compression method (9)" in reasons["c.py"]
 
 
+def test_a_later_name_bound_for_a_taken_path_is_refused_when_members_are_names(
+    test_plugin_context, tmp_path
+):
+    """A listing of bare names has no member object to rename, so the later of two
+    names written to one path is refused, not admitted beside the first."""
+    converter = _converter(test_plugin_context)
+
+    kept = converter.inspect_members(
+        ["pkg/a.py", "pkg/a.py"], target_path=tmp_path, archive="a.tar"
+    )
+
+    assert kept == ["pkg/a.py"]
+    (refused,) = converter.refused_inputs
+    assert refused.member == "pkg/a.py"
+    assert "same path" in refused.reason
+
+
+def test_a_later_member_object_bound_for_a_taken_path_is_still_renamed(
+    test_plugin_context, tmp_path
+):
+    """The control: member objects keep the renaming shape, with no refusal."""
+    converter = _converter(test_plugin_context)
+    first = tarfile.TarInfo("pkg/a.py")
+    second = tarfile.TarInfo("pkg/a.py")
+
+    kept = converter.inspect_members(
+        [first, second], target_path=tmp_path, archive="a.tar"
+    )
+
+    assert kept == [first, second]
+    assert converter.refused_inputs == []
+    assert first.name == "pkg/a.py"
+    assert second.name != "pkg/a.py"
+
+
 # ---------------------------------------------------------------- windows names
 
 

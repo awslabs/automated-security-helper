@@ -1099,6 +1099,12 @@ _MEMBER_RENAMED = (
     "an earlier member of the archive is extracted to the same path, so this one "
     "is written as '{renamed}' and both are scanned"
 )
+#: The same case for a member given as a bare name: there is no member object to
+#: rename, so the later name is refused instead of being written over the earlier.
+_MEMBER_SAME_PATH = (
+    "an earlier member of the archive is extracted to the same path, and a member "
+    "given by name alone cannot be renamed beside it"
+)
 _NOT_EXTRACTED = (
     "it is an archive or compressed file of a format that is not extracted (the "
     "archive converter extracts .zip, .tar and .gz), so its contents are not scanned"
@@ -1845,7 +1851,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 problem = _MEMBER_NESTED_ARCHIVE
             if problem is None:
                 destination = _written_key(member_name, kind)
-                if destination in written and not isinstance(member, str):
+                if destination in written and isinstance(member, str):
+                    # A bare name has no member object whose name the extractor
+                    # would read, so it cannot be renamed beside the earlier
+                    # member; the later name is refused, as every duplicate was
+                    # before members were renamed.
+                    problem = _MEMBER_SAME_PATH
+                elif destination in written:
                     # Renamed on the member object itself: zipfile and tarfile
                     # write each member to the path its name holds, so the
                     # renamed member lands beside the earlier one and the scan
@@ -1867,7 +1879,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         member.filename = renamed
                     member_name = renamed
                     destination = _written_key(renamed, kind)
-                written[destination] = member_name
+                if problem is None:
+                    written[destination] = member_name
             if problem is not None:
                 if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:
                     listed[problem] = listed.get(problem, 0) + 1
