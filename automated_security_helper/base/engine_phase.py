@@ -7,7 +7,10 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
-from automated_security_helper.utils.error_text import error_text
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    error_text,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -264,8 +267,15 @@ class EnginePhase(ABC):
                     continue
                 result.append(instance)
             except Exception as e:
+                # The exception is plugin-sourced text: redacted of the values
+                # the config read from the environment, and of escape sequences,
+                # as every other place that shows an error it did not raise.
+                values = config_environment_values(
+                    getattr(plugin_context, "config", None)
+                )
+                described = f"{type(e).__name__}: {error_text(e, values)}"
                 if failures is not None:
-                    failures[id(instance)] = f"{type(e).__name__}: {error_text(e)}"
+                    failures[id(instance)] = described
                 # Swallowed deliberately: one plugin whose enabled/dependency
                 # check raises must not take down the whole phase, and every
                 # caller already treats an absent instance as "not enabled".
@@ -273,15 +283,16 @@ class EnginePhase(ABC):
                 # and is_python_only are plugin-supplied, so the exception set is
                 # open by design.
                 #
-                # Logged rather than silent because the plugin otherwise vanishes
-                # from the run with no trace anywhere:
+                # Logged as a warning, not at DEBUG, because the plugin otherwise
+                # vanishes from a default run with no trace: DEBUG reaches neither
+                # the console nor ash.log by default, and
                 # report_phase._excluded_reporter_reason attributes every leftover
                 # exclusion to unsatisfied dependencies, so a plugin that blew up
                 # here is reported to the operator as merely unsatisfied.
-                ASH_LOGGER.debug(
+                ASH_LOGGER.warning(
                     f"Excluding {type(instance).__name__} from the "
                     f"{self.phase_name} phase: its enabled/dependency check "
-                    f"raised {e!r}"
+                    f"raised {described}"
                 )
         return result
 
