@@ -201,9 +201,13 @@ def test_a_registered_class_no_module_of_the_run_brings_in_is_not_listed(tmp_pat
 def test_a_class_from_a_module_the_run_names_is_listed(tmp_path):
     """The other half of the selection rule: a listing that kept the built-ins
     alone, ignoring ash_plugin_modules, would pass the test above and drop every
-    plugin a configured module defines."""
+    plugin a configured module defines.
+
+    The class is defined in the named module itself. A class a submodule defines
+    is selected only when the package's namespace binds or lists it, which needs
+    the package imported (plugins.loader.scan_plugin_filter); nothing here is."""
     kept = _stub("KeptScanner", BUILTIN_MODULE, _name="kept")
-    stray = _stub("StrayScanner", "stray_ash_plugins.scanner", _name="stray")
+    stray = _stub("StrayScanner", "stray_ash_plugins", _name="stray")
     config = AshConfig.model_validate(
         {"project_name": "probe", "ash_plugin_modules": ["stray_ash_plugins"]}
     )
