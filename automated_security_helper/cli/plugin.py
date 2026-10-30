@@ -251,11 +251,18 @@ def list_plugins(
         # The CLI therefore delegates to that isolated path rather than re-probing
         # against Path.cwd() -- both surfaces now share one probe context, and the
         # parity test exercises this exact call. The inventory describes the
-        # classes it is given, one entry each in the order given, so each row's
-        # entry is the one at its class's position. A lookup by a name derived
-        # from the class name missed every scanner whose config name differs from
-        # it (the inventory keys its entries by the config name), and those rows
-        # read Version and Reachable Unknown with the probe's answer in hand.
+        # classes it is given, one entry each in the order given
+        # (core/scanner_inventory._describe_scanners keeps the provider's order
+        # on both of its paths), so each row's entry is the one at its class's
+        # position; the two-scanner test in test_plugin_list_agrees_with_a_scan
+        # pins that pairing. A lookup by a name derived from the class name
+        # missed every scanner whose config name differs from it (the inventory
+        # keys its entries by the config name), and those rows read Version and
+        # Reachable Unknown with the probe's answer in hand; keying by the
+        # entry's name would miss them again on the inventory's placeholder
+        # path, which names a scanner it could not describe after its class.
+        # An inventory of another length is not the one asked for: every row
+        # then reads Unknown, with the cause said once below.
         scanner_inventory_by_class: dict = {}
         if show_versions:
             from automated_security_helper.core.scanner_inventory import (
@@ -267,7 +274,7 @@ def list_plugins(
                 inventory = list_scanner_inventory(
                     scanner_classes_provider=lambda: scanner_classes
                 )
-                if len(inventory) != len(scanner_classes):  # pragma: no cover
+                if len(inventory) != len(scanner_classes):
                     raise ValueError(
                         f"{len(inventory)} entries for {len(scanner_classes)} scanners"
                     )

@@ -217,6 +217,68 @@ def test_show_versions_matches_the_inventory_by_class_not_by_a_derived_name(
     assert "Unknown" not in row, row
 
 
+def test_show_versions_pairs_each_row_with_its_own_scanners_entry(tmp_path):
+    """Two scanners with different answers: each row carries its own. One
+    scanner cannot tell a row paired with the wrong entry from a row paired
+    with the right one."""
+    alpha = _stub(
+        "AlphaScanner", BUILTIN_MODULE, _name="renamed-tool", _version="1.2.3"
+    )
+    beta = _stub(
+        "BetaScanner",
+        BUILTIN_MODULE,
+        _name="other-tool",
+        _version="9.8.7",
+        _satisfied=False,
+    )
+
+    result = _listing(
+        tmp_path, ["--show-versions", "--no-color"], scanners=[alpha, beta]
+    )
+
+    assert result.exit_code == 0, result.output
+    alpha_row = _row(result.output, "renamed-tool")
+    beta_row = _row(result.output, "other-tool")
+    assert "1.2.3" in alpha_row and "9.8.7" not in alpha_row, alpha_row
+    assert " Yes " in alpha_row and " No " not in alpha_row, alpha_row
+    assert "9.8.7" in beta_row and "1.2.3" not in beta_row, beta_row
+    assert " No " in beta_row and " Yes " not in beta_row, beta_row
+
+
+def test_show_versions_reads_unknown_when_the_inventory_is_not_the_one_asked_for(
+    tmp_path,
+):
+    """An inventory with another number of entries cannot be paired with the
+    scanners by position; every row then reads Unknown rather than another
+    scanner's answer."""
+    alpha = _stub("AlphaScanner", BUILTIN_MODULE, _name="alpha", _version="1.2.3")
+    beta = _stub("BetaScanner", BUILTIN_MODULE, _name="beta", _version="9.8.7")
+    one_entry = [
+        {
+            "name": "alpha",
+            "version": "1.2.3",
+            "dependencies_satisfied": True,
+            "offline_strategy": None,
+            "enabled": True,
+            "installs_on_first_scan": False,
+        }
+    ]
+
+    with patch(
+        "automated_security_helper.core.scanner_inventory.list_scanner_inventory",
+        return_value=one_entry,
+    ):
+        result = _listing(
+            tmp_path, ["--show-versions", "--no-color"], scanners=[alpha, beta]
+        )
+
+    assert result.exit_code == 0, result.output
+    for name in ("alpha", "beta"):
+        row = _row(result.output, name)
+        assert "1.2.3" not in row, row
+        assert row.count("Unknown") >= 2, row
+
+
 def test_an_opt_in_plugin_whose_section_omits_enabled_is_listed_off(tmp_path):
     config = AshConfig.model_validate(
         {
