@@ -733,11 +733,18 @@ def get_unified_scanner_metrics(
             # summary_stats said FAILED with 0 actionable while the exit code,
             # from the finding counts, passed. With nothing actionable the gate
             # passes, so FAILED here reads PASSED; what else the row says (a
-            # SKIPPED a shard recorded) is kept.
+            # SKIPPED a shard recorded) is kept. Only when the counts were
+            # recorded, though: a dict-result report written before the
+            # executor assigned a findings list's counts carries its findings
+            # in raw_results and no severity_counts, so 0 actionable there says
+            # nothing, and the row's FAILED is the only evidence the gate failed.
             status = (
                 "PASSED"
                 if getattr(recorded_status, "value", recorded_status)
                 == ScannerStatus.FAILED.value
+                and not ScannerStatisticsCalculator.dict_counts_unrecorded(
+                    asharp_model, scanner_name
+                )
                 else recorded_status
             )
 

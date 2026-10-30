@@ -546,6 +546,42 @@ class ScannerStatisticsCalculator:
         return total
 
     @staticmethod
+    def dict_counts_unrecorded(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> bool:
+        """True when a dict-result target report of *scanner_name* carries no
+        readable severity counts.
+
+        Such a report comes from a results file written before the executor
+        assigned a findings list's counts (incremented on the field's default,
+        they were never marked set and the processor dumped the row without
+        them), or carries counts that do not validate. Its findings sit in
+        ``raw_results`` uncounted, so the finding counts read from the file say
+        nothing about whether the gate failed; the recorded row's status is the
+        only evidence left, and a reading that overrides it must not run.
+        """
+        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
+        if not isinstance(reports, dict):
+            return False
+        for report in reports.values():
+            if (
+                not isinstance(report, dict)
+                or not ScannerStatisticsCalculator._same_scanner(
+                    report.get("scanner_name"), scanner_name
+                )
+                or not isinstance(report.get("raw_results"), dict)
+            ):
+                continue
+            counts = report.get("severity_counts")
+            if not isinstance(counts, dict):
+                return True
+            try:
+                ScannerSeverityCount.model_validate(counts)
+            except ValueError:
+                return True
+        return False
+
+    @staticmethod
     def _get_scanner_name_from_result(result: Any) -> Optional[str]:
         """Extract the scanner name from a SARIF result.
 

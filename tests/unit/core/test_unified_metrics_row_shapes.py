@@ -107,6 +107,58 @@ class TestARecordedFailedWithNothingActionableReadsPassed:
 
         assert metrics.status == "SKIPPED"
 
+    def test_a_dict_result_whose_counts_were_never_recorded_stays_failed(self):
+        """A results file written by a dict-result scanner before its counts were
+        assigned carries the findings in raw_results and no severity_counts, so
+        the rebuilt row's FAILED is the only evidence the gate failed; re-rendering
+        it must not say PASSED. The override runs only when the counts it rests on
+        were recorded."""
+        model = _model(
+            {
+                "source": _report(
+                    "source",
+                    status="FAILED",
+                    raw_results={"findings": [{"severity": "high"}]},
+                )
+            }
+        )
+        model.scanner_results[SCANNER] = ScannerTargetStatusInfo(
+            status=ScannerStatus.FAILED
+        )
+
+        (metrics,) = get_unified_scanner_metrics(model)
+
+        assert metrics.actionable == 0
+        assert metrics.status == "FAILED"
+
+    def test_a_dict_result_with_recorded_zero_counts_reads_passed(self):
+        """Control: the same shape with its counts recorded (all zero, a scan that
+        found nothing) is overridden."""
+        model = _model(
+            {
+                "source": _report(
+                    "source",
+                    status="FAILED",
+                    raw_results={"findings": []},
+                    severity_counts={
+                        "critical": 0,
+                        "high": 0,
+                        "medium": 0,
+                        "low": 0,
+                        "info": 0,
+                        "suppressed": 0,
+                    },
+                )
+            }
+        )
+        model.scanner_results[SCANNER] = ScannerTargetStatusInfo(
+            status=ScannerStatus.FAILED
+        )
+
+        (metrics,) = get_unified_scanner_metrics(model)
+
+        assert metrics.status == "PASSED"
+
 
 class TestAnErrorFiledUnderAnotherTargetIsTheScannersError:
     """A results-processing failure is filed on the failed target's own row with
