@@ -286,6 +286,22 @@ class TestTheStoredInstallCommand:
         plugin._setup_uv_tool_install_commands()
         assert plugin.uv_tool_install_commands == []
 
+    @pytest.mark.parametrize(
+        "dependency",
+        [
+            "sarif-om @ https://example.invalid/sarif_om.whl",
+            "sarif-om>=1.0; python_version < '3.12'",
+            "jupyter >= 1.0",
+        ],
+        ids=["url", "marker", "whitespace"],
+    )
+    def test_a_with_dependency_uv_must_not_see_stores_no_command(self, dependency):
+        """The scan-time install checks each --with dependency; the stored
+        command appended them raw, and a spaced one split into argv pieces."""
+        plugin = FakePlugin(command="bandit", with_dependencies=[dependency])
+        plugin._setup_uv_tool_install_commands()
+        assert plugin.uv_tool_install_commands == []
+
 
 class TestEveryProbeRunsInThePluginsEnvironment:
     def _runner(self):

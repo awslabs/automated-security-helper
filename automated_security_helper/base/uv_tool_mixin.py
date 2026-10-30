@@ -1826,11 +1826,12 @@ class UVToolMixin:
         # short pin and a glued extra in clear through the plain layer), and
         # with the tool's extra dependencies included, so every record of one
         # install numbers its hidden arguments from the same input set.
+        with_dependencies = list(self._get_tool_with_dependencies() or [])
         install_inputs = uv_install_inputs(
             tool_name,
             version_constraint=version_constraint,
             package_extras=package_extras,
-            with_dependencies=self._get_tool_with_dependencies(),
+            with_dependencies=with_dependencies,
         )
         tool_spec = install_inputs.spec
 
@@ -1840,6 +1841,22 @@ class UVToolMixin:
             # valid requirement for ANOTHER package, and `ash dependencies
             # install` would have installed it.
             checked_requirement(tool_spec, "the tool spec", package=tool_name)
+            # Each --with dependency, as the scan-time install checks them
+            # (UVToolRunner.install_tool_with_version): unchecked here, a URL,
+            # a path or a marker reached `ash dependencies install`. The stored
+            # command is one string that get_installation_commands splits on
+            # whitespace, so a dependency carrying any (PEP 508 allows
+            # "jupyter >= 1.0") would break into argv pieces there: refused
+            # rather than mis-split, with the whole command cleared as for a
+            # refused tool spec.
+            for position, dependency in enumerate(with_dependencies, start=1):
+                checked_requirement(dependency, f"--with dependency {position}")
+                if any(character.isspace() for character in dependency):
+                    raise UVToolRunnerError(
+                        f"Refusing to store --with dependency {position} in the "
+                        "install command: it carries whitespace, and the stored "
+                        "command is split on whitespace"
+                    )
         except UVToolRunnerError as error:
             self.uv_tool_install_commands = []
             # The refusal's text carries no part of the spec, and the tool is
@@ -1868,7 +1885,8 @@ class UVToolMixin:
         # The plugin's extra dependencies, as the scan-time install passes
         # them (UVToolRunner.install_tool_with_version): without them the
         # command `ash dependencies` runs built a different environment than
-        # the scan's.
+        # the scan's. Each was checked above and refused if it carried
+        # whitespace.
         for dependency in self._get_tool_with_dependencies() or []:
             install_cmd_parts.extend(["--with", _without_whitespace(dependency)])
         # The stored command is ONE string that get_installation_commands
