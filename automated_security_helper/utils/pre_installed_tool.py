@@ -131,6 +131,10 @@ _ANSI_ESCAPE = ANSI_ESCAPE
 # A makeWrapper script is a few kB; the addsitedir line of a large closure is
 # tens of kB. Neither file needs to be read past this.
 _WRAPPER_READ_LIMIT = 1 << 20
+# How many ``exec -a "$0"`` hops find_nix_python_environment follows before it
+# gives up: a wrapper of a wrapper of a wrapper is the deepest shape seen, and a
+# bound keeps two scripts that exec each other from being followed forever.
+_NIX_MAX_EXEC_HOPS = 4
 
 
 @dataclass(frozen=True)
@@ -163,9 +167,11 @@ class PreInstalledToolVerdict:
 #: inside this; a later scan in a long-lived process probes again.
 _VERDICT_MEMO_SECONDS = 600.0
 
-#: key -> (verdict, the monotonic time it was stored).
+#: key -> (verdict, the monotonic time it was stored). The key is the copy's
+#: resolved path and mtime, the requirement, the caller's values and the uv
+#: that judged (or "" when none did).
 _verdict_cache: Dict[
-    Tuple[str, int, str, Tuple[str, ...]], Tuple[PreInstalledToolVerdict, float]
+    Tuple[str, int, str, Tuple[str, ...], str], Tuple[PreInstalledToolVerdict, float]
 ] = {}
 _verdict_cache_lock = threading.Lock()
 
@@ -277,6 +283,26 @@ def find_tool_interpreter(executable: str) -> Optional[str]:
     return None
 
 
+def _in_user_site(executable: str) -> bool:
+    """Whether ``executable`` sits in the user scripts directory (``pip install
+    --user``), the one place a console script's shebang interpreter does not
+    describe the environment that provides it."""
+    import sysconfig
+
+    try:
+        scripts = sysconfig.get_path("scripts", f"{os.name}_user")
+    except (KeyError, ValueError):
+        return False
+    if not scripts:
+        return False
+    try:
+        return Path(os.path.realpath(executable)).parent == Path(
+            os.path.realpath(scripts)
+        )
+    except (OSError, ValueError):
+        return False
+
+
 def _read_head(path: Path) -> Optional[str]:
     try:
         with open(path, "rb") as handle:
@@ -309,13 +335,20 @@ def find_nix_python_environment(
     if text is None:
         return None
 
-    if _python_shebang(text) is None:
+    # A program can be wrapped more than once (a makeWrapper around a
+    # makeWrapper, as a flake that adds an environment variable to a packaged
+    # tool produces): each hop's script execs the next. Only one hop used to be
+    # followed, so a twice-wrapped tool was "unverifiable", and offline a Nix
+    # tool that cannot be verified is refused.
+    hops = 0
+    while _python_shebang(text) is None:
         match = _NIX_EXEC_LINE.search(text)
-        if match is None:
+        if match is None or hops >= _NIX_MAX_EXEC_HOPS:
             return None
         text = _read_head(Path(os.path.realpath(match.group(1))))
         if text is None:
             return None
+        hops += 1
 
     interpreter = _python_shebang(text)
     sitedirs = _NIX_SITEDIR_LIST.search(text)
@@ -328,22 +361,31 @@ def find_nix_python_environment(
 def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
     """Copy each distribution's METADATA from ``site_dirs`` into ``target``.
 
-    A ``.dist-info`` name seen earlier on the list is skipped, so ``sys.path``
-    order decides. Returns the number of distributions staged.
+    A distribution seen earlier on the list is skipped, so ``sys.path`` order
+    decides, as it does for the program's own imports. Seen means the same
+    distribution NAME (PEP 503 normalized): two versions of one distribution on
+    the list, or two spellings of its name, are one import, and staging both
+    gave uv two candidates for one requirement. Returns the number staged.
     """
+    from packaging.utils import canonicalize_name
+
     staged = 0
+    seen: set = set()
     for site_dir in site_dirs:
         try:
             entries = sorted(Path(site_dir).glob("*.dist-info"))
         except OSError:
             continue
         for dist_info in entries:
+            stem = dist_info.name[: -len(".dist-info")]
+            name = canonicalize_name(stem.split("-", 1)[0])
             metadata = dist_info / "METADATA"
             destination = target / dist_info.name
-            if destination.exists() or not metadata.is_file():
+            if name in seen or destination.exists() or not metadata.is_file():
                 continue
             destination.mkdir()
             shutil.copyfile(metadata, destination / "METADATA")
+            seen.add(name)
             staged += 1
     return staged
 
@@ -458,6 +500,12 @@ def _dry_run(
         "--offline",
         "--no-cache",
         "--no-config",
+        # A tool installed into a system interpreter marked EXTERNALLY-MANAGED
+        # (PEP 668: Debian's and Fedora's python3) is refused by uv before it
+        # resolves anything, so such a copy could never verify. The dry run
+        # changes nothing, so the refusal protects nothing here; the flag lets
+        # the resolve run, and the verdict still comes from what resolves.
+        "--break-system-packages",
         "--python",
         interpreter,
     ]
@@ -590,7 +638,7 @@ def verify_pre_installed_tool(
     # values while the probe excerpt was cached unredacted under it.
     values = tuple(values)
     try:
-        validate_version_constraint(version_constraint)
+        canonical = validate_version_constraint(version_constraint)
     except ValueError as error:
         # Never handed to the dry run below: uv resolves whatever the requirement
         # names, and a path or URL would be built to read its metadata.
@@ -601,6 +649,10 @@ def verify_pre_installed_tool(
             str(error),
             summary="the version constraint is not a valid PEP 440 specifier",
         )
+    # The validated form, not the raw value: the validator accepts a constraint
+    # it has to normalize (an empty clause from a trailing comma, spaces inside
+    # a clause), and the raw spelling then reached uv malformed.
+    version_constraint = canonical or None
     requirement = build_requirement(package, extras, version_constraint)
     resolved = os.path.realpath(executable)
     try:
@@ -614,7 +666,14 @@ def verify_pre_installed_tool(
             summary="the copy does not exist",
         )
 
-    key = (resolved, mtime, requirement, tuple(values))
+    # The uv that judges is part of the question: a verdict made with one uv
+    # (or with none, "unverifiable") was served to a caller passing another.
+    if uv_executable is None:
+        from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
+
+        uv_executable = find_uv_or_none()
+
+    key = (resolved, mtime, requirement, tuple(values), uv_executable or "")
     answered = _answer_without_a_probe(key)
     if answered is not None:
         return answered
@@ -658,6 +717,10 @@ def verify_pre_installed_tool(
                 executable,
                 requirement,
                 f"the scanner sandbox refused the check: {refusal}",
+                # The field contract reserves an empty summary for a satisfied
+                # verdict; a caller recording the summary (the jupyter
+                # converter's reason) named no cause for this one.
+                summary="the scanner sandbox refused the check",
             )
 
         with _verdict_cache_lock:
@@ -666,7 +729,7 @@ def verify_pre_installed_tool(
 
 
 def _answer_without_a_probe(
-    key: Tuple[str, int, str, Tuple[str, ...]],
+    key: Tuple[str, int, str, Tuple[str, ...], str],
 ) -> Optional[PreInstalledToolVerdict]:
     """The memoized verdict for ``key``, or None when the copy has to be probed:
     nothing remembered, or a verdict older than ``_VERDICT_MEMO_SECONDS``."""
@@ -828,6 +891,24 @@ def _verify(
             f"could not locate the Python environment that provides {executable}",
             version=version,
             summary="no Python environment could be located for the copy",
+        )
+
+    if _in_user_site(executable):
+        # ``pip install --user`` puts the script in the user scripts directory
+        # and its packages in the user site, which the interpreter's shebang
+        # does not name and uv's dry run does not inspect: it judges the
+        # interpreter's own environment, where the package is absent, so such a
+        # copy read as unsatisfied and, offline, was refused. It cannot be
+        # judged from here, which is what "unverifiable" says.
+        return PreInstalledToolVerdict(
+            "unverifiable",
+            executable,
+            requirement,
+            f"{executable} is installed in the user site (pip install --user), "
+            "whose packages uv's dry run of the interpreter's own environment "
+            "does not inspect",
+            version=version,
+            summary="the copy is installed in the user site, which cannot be inspected",
         )
 
     if uv is None:
