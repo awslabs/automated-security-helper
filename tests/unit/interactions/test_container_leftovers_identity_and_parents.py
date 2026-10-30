@@ -142,7 +142,7 @@ def test_the_same_daemon_differs_in_nothing(clean_daemon_environment):
 
 
 def test_an_older_record_without_the_new_keys_matches_an_unset_environment(
-    clean_daemon_environment,
+    clean_daemon_environment, monkeypatch
 ):
     """A record written before the keys existed is read as made under unset
     selectors: it still matches a run with none set, and differs from a run
@@ -160,6 +160,13 @@ def test_an_older_record_without_the_new_keys_matches_an_unset_environment(
     assert (
         container_leftovers._differs_from_this_run(record, ["/usr/bin/docker"])
         == "DOCKER_CONFIG"
+    )
+    # With no selector set (the test's own home holds no docker config either,
+    # so no context is selected), the keys the record never had read as unset on
+    # both sides: the half that keeps a pre-upgrade record sweepable.
+    monkeypatch.delenv("DOCKER_CONFIG", raising=False)
+    assert (
+        container_leftovers._differs_from_this_run(record, ["/usr/bin/docker"]) is None
     )
 
 

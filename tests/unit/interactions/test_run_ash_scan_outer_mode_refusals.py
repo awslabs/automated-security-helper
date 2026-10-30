@@ -124,7 +124,7 @@ def test_the_shared_printer_shows_a_markup_shaped_message_as_text(capsys):
 
 
 def test_a_denied_field_refusal_whose_text_reads_as_markup_still_exits(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ):
     """The third handler, in local mode: a client-delivered config's denied
     field names the field and a path; printed raw inside markup, a closing tag
@@ -132,7 +132,15 @@ def test_a_denied_field_refusal_whose_text_reads_as_markup_still_exits(
     from automated_security_helper.core import orchestrator
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
+    # Exit 3 is every config refusal's code, so the test shows the denied-field
+    # handler itself ran: the patched `create` was reached, and the refusal's text
+    # was printed as text. A config the environment names would be refused before
+    # `create` and share the exit code, so it is cleared.
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    reached = []
+
     def refuse(**kwargs):
+        reached.append(True)
         raise ASHConfigFieldDeniedError("field sandbox.[/x] is denied by the policy")
 
     monkeypatch.setattr(orchestrator.ASHScanOrchestrator, "create", refuse)
@@ -149,6 +157,9 @@ def test_a_denied_field_refusal_whose_text_reads_as_markup_still_exits(
         ras._run_local_mode(opts, MagicMock())
 
     assert exited.value.code == 3
+    assert reached == [True]
+    captured = capsys.readouterr()
+    assert "sandbox.[/x]" in captured.out + captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -271,10 +282,17 @@ def test_the_actionability_check_reads_the_scanners_own_threshold(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _results_with_the_file_apart_from_the_model(tmp_path, in_model, in_file):
+def _results_with_the_file_apart_from_the_model(
+    tmp_path, in_model, in_file, scanner_thresholds=None
+):
     """A results model holding *in_model* while the report this run wrote
     (reports/ash.sarif) holds *in_file*: the shape of a report phase over saved
-    results, and of a container's or a shell's inner run writing the file."""
+    results, and of a container's or a shell's inner run writing the file.
+
+    *scanner_thresholds* names each scanner's own ``severity_threshold``; the
+    default tightens bandit to CRITICAL and leaves semgrep at the global LOW."""
+    if scanner_thresholds is None:
+        scanner_thresholds = {"bandit": "CRITICAL"}
     from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.models.asharp_model import (
         AshAggregatedResults,
@@ -295,7 +313,10 @@ def _results_with_the_file_apart_from_the_model(tmp_path, in_model, in_file):
         {
             "project_name": "min-severity",
             "global_settings": {"severity_threshold": "LOW"},
-            "scanners": {"bandit": {"options": {"severity_threshold": "CRITICAL"}}},
+            "scanners": {
+                name: {"options": {"severity_threshold": level}}
+                for name, level in scanner_thresholds.items()
+            },
         }
     )
     results.sarif = SarifReport(
@@ -388,13 +409,16 @@ def test_the_minimum_is_read_on_the_written_report_too(tmp_path):
 
 
 def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypatch):
-    """One lookup is shared by the count over the written report and the
-    --min-severity filter over the model: get_scanner_threshold_info dumps the
-    whole scanners config on every call, and a filter that asked it once per
-    result ran that dump over every result at or above the minimum."""
+    """get_scanner_threshold_info dumps the whole scanners config on every call,
+    and a --min-severity filter that asked it once per result ran that dump over
+    every result at or above the minimum. One memoised lookup now serves one
+    exit-code read: the filter over the model's results asks each scanner once,
+    and when the count is taken from the written report, the count and the filter
+    share that lookup too."""
     from automated_security_helper.core.scanner_statistics_calculator import (
         ScannerStatisticsCalculator,
     )
+    from automated_security_helper.core.unified_metrics import ScannerMetrics
 
     findings = [
         _finding("bandit", "warning", "MEDIUM"),
@@ -416,16 +440,18 @@ def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypa
     monkeypatch.setattr(
         ScannerStatisticsCalculator, "get_scanner_threshold_info", counting
     )
-    # The count comes from the model (the written report is not this run's), so
-    # the filter judges the model's results: three bandit MEDIUMs at the minimum,
-    # each asking bandit's threshold; the two semgrep LOWs are below the minimum
-    # and never asked. One scanner, so one resolver call.
-    metric = MagicMock()
-    metric.scanner_name = "semgrep"
-    metric.status = "PASSED"
-    metric.actionable = 2
-    metric.targets_attempted = 1
-    metric.targets_failed = 0
+    # The written report is not this run's, so the count comes from the model's
+    # metrics (a real metrics row, not a mock whose every unset attribute reads
+    # as truthy) and the filter judges the model's results: three bandit MEDIUMs
+    # at the minimum, each asking bandit's threshold; the two semgrep LOWs are
+    # below the minimum and never asked. One scanner, so one resolver call.
+    metric = ScannerMetrics(
+        scanner_name="semgrep",
+        status="PASSED",
+        actionable=2,
+        targets_attempted=1,
+        targets_failed=0,
+    )
     # The product passes the model by keyword (asharp_model=...), so the stand-in
     # takes the call in either shape.
     monkeypatch.setattr(
@@ -439,17 +465,48 @@ def test_the_exit_code_read_asks_each_scanners_threshold_once(tmp_path, monkeypa
     assert exit_code == 0
     assert asked == ["bandit"], asked
 
+    # The written report is this run's: the count over its five results and the
+    # filter over them share the one lookup, so each of the two scanners is asked
+    # once. Nothing counted is at the minimum (bandit's MEDIUMs fail its CRITICAL
+    # threshold, semgrep's LOWs are below medium), so exit 0 again.
+    asked.clear()
 
-def test_the_count_and_the_filter_read_a_level_only_result_alike(tmp_path):
+    exit_code = ras._compute_exit_code(
+        results, _opts(tmp_path, "medium"), report_sarif_written_this_run=True
+    )
+
+    assert exit_code == 0
+    assert sorted(asked) == ["bandit", "semgrep"], asked
+
+
+@pytest.mark.parametrize(
+    ("level", "fails", "exit_code"),
+    [
+        # The ladder reads a level-only `error` as CRITICAL, which alone meets
+        # semgrep's CRITICAL threshold here: counted on the written report, read
+        # as qualifying by the --min-severity critical filter, exit 2.
+        pytest.param("error", True, 2, id="error-is-critical"),
+        # Control: `warning` is MEDIUM, below the same threshold on both sides, so
+        # a grading that read it any higher would count it and exit 2 instead.
+        pytest.param("warning", False, 0, id="warning-is-medium"),
+    ],
+)
+def test_the_count_and_the_filter_read_a_level_only_result_alike(
+    tmp_path, level, fails, exit_code
+):
     """A result with no issue_severity is graded by its SARIF level by both: the
-    one rule is utils.severity_ladder.result_severity, so a level-only `error`
-    (CRITICAL) fails a HIGH threshold on the written report and in the model."""
+    one rule is utils.severity_ladder.result_severity. The scanner's threshold
+    and --min-severity are both CRITICAL, so only the CRITICAL reading of
+    `error` passes on both sides, and a MEDIUM `warning` passes on neither."""
     from automated_security_helper.schemas.sarif_schema_model import Result
 
-    level_only = _finding("semgrep", "error", "")
+    level_only = _finding("semgrep", level, "")
     del level_only["properties"]["issue_severity"]
     results = _results_with_the_file_apart_from_the_model(
-        tmp_path, in_model=[level_only], in_file=[level_only]
+        tmp_path,
+        in_model=[level_only],
+        in_file=[level_only],
+        scanner_thresholds={"bandit": "CRITICAL", "semgrep": "CRITICAL"},
     )
     threshold_for = ras._scanner_threshold_lookup(results)
 
@@ -458,12 +515,12 @@ def test_the_count_and_the_filter_read_a_level_only_result_alike(tmp_path):
         Result.model_validate(level_only), threshold_for
     )
 
-    assert as_json is as_model is True
+    assert as_json is as_model is fails
     assert (
         ras._compute_exit_code(
-            results, _opts(tmp_path, "low"), report_sarif_written_this_run=True
+            results, _opts(tmp_path, "critical"), report_sarif_written_this_run=True
         )
-        == 2
+        == exit_code
     )
 
 

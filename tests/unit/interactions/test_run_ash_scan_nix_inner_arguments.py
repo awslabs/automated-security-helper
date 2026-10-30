@@ -134,6 +134,7 @@ def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
         phases=[ExecutionPhase.SCAN],
         strategy=ExecutionStrategy.SEQUENTIAL,
         offline=True,
+        offline_semgrep_rulesets="p/custom",
         progress=False,
         color=False,
         show_summary=False,
@@ -170,6 +171,7 @@ def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
     assert _after_flag(argv, "--phases") == [ExecutionPhase.SCAN.value]
     assert _after_flag(argv, "--strategy") == [ExecutionStrategy.SEQUENTIAL.value]
     assert _after_flag(argv, "--log-level") == [AshLogLevel.DEBUG.value]
+    assert _after_flag(argv, "--offline-semgrep-rulesets") == ["p/custom"]
     assert _after_flag(argv, "--min-severity") == ["high"]
     assert _after_flag(argv, "--base-ref") == ["origin/trunk"]
     assert _after_flag(argv, "--shard-index") == ["1"]
@@ -349,19 +351,37 @@ def test_a_results_file_that_is_not_the_output_directorys_own_is_refused(
     assert prior.exists(), "the previous run's report was cleared before the refusal"
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        pytest.param(
+            lambda out: str(out / "." / "ash_aggregated_results.json"), id="dot"
+        ),
+        # Relative to the working directory, as a command line names it.
+        pytest.param(lambda out: "out/ash_aggregated_results.json", id="relative"),
+        pytest.param(
+            lambda out: str(
+                out.parent / "elsewhere" / ".." / "out" / "ash_aggregated_results.json"
+            ),
+            id="dot-dot",
+        ),
+    ],
+)
 def test_the_output_directorys_own_results_file_is_forwarded_as_use_existing(
-    launched, tmp_path
+    launched, tmp_path, monkeypatch, spelling
 ):
-    """Control: the file --use-existing resolves to, named by the caller (here
-    through a spelling with a `.` component), is not refused and reaches the
+    """Control: the file --use-existing resolves to, named by the caller through
+    a `.` component, a path relative to the working directory, or a `..`
+    component, is not refused (both sides are compared resolved) and reaches the
     inner scan as the flag."""
+    monkeypatch.chdir(tmp_path)
     out = tmp_path / "out"
     out.mkdir()
     opts = ras.ScanOptions(
         source_dir=tmp_path / "src",
         output_dir=out,
         mode=RunMode.nix,
-        existing_results=str(out / "." / "ash_aggregated_results.json"),
+        existing_results=spelling(out),
         progress=False,
         show_summary=False,
     )
@@ -410,14 +430,17 @@ _FORWARDED = {
     "shard_index",
     "shard_count",
 }
+# Each refused field with a non-default value run_ash_scan is given below, so a
+# field filed here is also shown to be refused: a name alone would let a field be
+# listed as refused while the mode dropped it without a word.
 _REFUSED_FOR_THE_MODE = {
-    "config_base_gate",
-    "untrusted_config",
-    "client_config_policy",
-    "remote_client",
-    "severity_threshold_restriction",
-    "keep_previous_results",
-    "trusted_config_path",
+    "config_base_gate": lambda _path: True,
+    "untrusted_config": True,
+    "client_config_policy": object(),
+    "remote_client": True,
+    "severity_threshold_restriction": "HIGH",
+    "keep_previous_results": True,
+    "trusted_config_path": "/elsewhere/ash.yaml",
 }
 _NOT_FORWARDED_ON_PURPOSE = {
     "mode",
@@ -441,18 +464,20 @@ _NOT_FORWARDED_ON_PURPOSE = {
 
 def test_every_scan_option_is_forwarded_refused_or_excluded_by_name():
     fields = set(ras.ScanOptions.model_fields)
+    refused = set(_REFUSED_FOR_THE_MODE)
 
-    unplaced = fields - _FORWARDED - _REFUSED_FOR_THE_MODE - _NOT_FORWARDED_ON_PURPOSE
+    unplaced = fields - _FORWARDED - refused - _NOT_FORWARDED_ON_PURPOSE
     assert not unplaced, (
         f"ScanOptions gained {sorted(unplaced)}; decide whether the Nix inner "
         "scan is given it, refuses it or leaves it out, and list it"
     )
-    stale = (_FORWARDED | _REFUSED_FOR_THE_MODE | _NOT_FORWARDED_ON_PURPOSE) - fields
+    stale = (_FORWARDED | refused | _NOT_FORWARDED_ON_PURPOSE) - fields
     assert not stale, (
         f"the lists name fields ScanOptions no longer has: {sorted(stale)}"
     )
-    assert not (_FORWARDED & _REFUSED_FOR_THE_MODE)
+    assert not (_FORWARDED & refused)
     assert not (_FORWARDED & _NOT_FORWARDED_ON_PURPOSE)
+    assert not (refused & _NOT_FORWARDED_ON_PURPOSE)
 
 
 def test_the_builder_reads_every_forwarded_field(tmp_path):
@@ -460,25 +485,32 @@ def test_the_builder_reads_every_forwarded_field(tmp_path):
     the builder never reads would pass the placement test above and still be
     lost."""
     import inspect
+    import re
 
     source = inspect.getsource(ras._nix_inner_argv)
-    unread = sorted(name for name in _FORWARDED if f"opts.{name}" not in source)
+    # Whole-word reads: `opts.config` is not read because `opts.config_overrides`
+    # is, nor `opts.offline` because `opts.offline_semgrep_rulesets` is.
+    unread = sorted(
+        name
+        for name in _FORWARDED
+        if not re.search(rf"\bopts\.{re.escape(name)}\b", source)
+    )
     assert not unread, unread
 
 
 @pytest.mark.parametrize(
     "option",
     [
-        pytest.param({"severity_threshold_restriction": "HIGH"}, id="restriction"),
-        pytest.param({"keep_previous_results": True}, id="keep-previous-results"),
-        pytest.param({"trusted_config_path": "/elsewhere/ash.yaml"}, id="trusted"),
+        pytest.param({name: value}, id=name)
+        for name, value in _REFUSED_FOR_THE_MODE.items()
     ],
 )
 def test_an_option_the_shell_cannot_be_given_is_refused_for_nix_mode(tmp_path, option):
     """The scan CLI has no flag for these, so a run in Nix mode dropped them
     without a word: a restriction dropped loosens the gate, a kept-results
     request dropped deletes what the caller asked to keep, a trusted config path
-    dropped leaves its grants unread."""
+    dropped leaves its grants unread. Every field the placement test files as
+    refused is run here, so none can be filed as refused and dropped."""
     with pytest.raises(ValueError) as refused:
         ras.run_ash_scan(
             source_dir=str(tmp_path / "src"),
