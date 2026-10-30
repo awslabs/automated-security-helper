@@ -150,6 +150,15 @@ def _chosen_by_environment(path: Path, chosen: Collection[Path]) -> bool:
         # strict: a link loop raises on every Python version, where
         # Path.resolve() raises on some and returns the name unresolved on others.
         return Path(os.path.realpath(path, strict=True)) in chosen
+    except (FileNotFoundError, NotADirectoryError):
+        # A name with nothing at the end of it (the config_overrides stand-in,
+        # a file that is gone) is not a link loop. It is the file the
+        # environment chose only when the place it leads to is one of them.
+        try:
+            return Path(os.path.realpath(path)) in chosen
+        except OSError:
+            # A relative name with no working directory to join it to.
+            return True
     except (OSError, RuntimeError):
         # A name that does not resolve (a link loop) may name a file the
         # environment chose, so it is shown as `<value>`.
@@ -168,6 +177,18 @@ def is_within(path: Path, root: Path) -> bool:
     return False
 
 
+def _examination_error(path: Path) -> Optional[OSError]:
+    """The error ``lstat`` of *path* raises, or None when it can be examined or
+    is provably absent (the same two answers ``_link_state`` reads as "no")."""
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as error:
+        return error
+    return None
+
+
 def _git_shaped(entry: Path) -> bool:
     """Whether ``entry`` marks a checkout.
 
@@ -180,7 +201,10 @@ def _git_shaped(entry: Path) -> bool:
     whose ``HEAD`` lookup cannot
     be answered (one the scanning user cannot search), because failing open
     there would hand the repository's own files the operator's trust -- with
-    a logged warning naming the entry.
+    a logged warning naming the entry. An entry that cannot be examined at
+    all (``lstat`` fails for a reason other than the entry being absent, as
+    when the directory holding it cannot be searched) gets the same answer
+    and the same warning.
 
     Each of those shapes counts only when ``_left_by_a_trusted_user`` says
     so: in a directory that other users can write (the system temp
@@ -207,7 +231,14 @@ def _git_shaped(entry: Path) -> bool:
     if _names_another_path(entry) or os.path.isfile(entry):
         pass
     elif not os.path.isdir(entry):
-        return False
+        # isfile and isdir answer False for an entry that cannot be examined
+        # (a parent the scanning user cannot search, a name too long to look
+        # up) as they do for one that is not there. Only an entry that is
+        # absent bounds nothing; one nobody could examine is the same
+        # unverifiable boundary as a .git directory nobody could search.
+        unverifiable = _examination_error(entry)
+        if unverifiable is None:
+            return False
     else:
         try:
             os.lstat(os.path.join(entry, "HEAD"))
@@ -243,6 +274,11 @@ def _left_by_a_trusted_user(entry: Path) -> bool:
     The directory is read with ``stat``, not ``lstat``, so one reached
     through a symlink is judged by the directory it is, not by the link.
     A directory that cannot be stat'ed keeps the shape rule.
+
+    On Windows ``stat`` reports every owner as uid 0, so any entry reads as
+    root's and counts. That is the confining side: a ``.git`` another user
+    left in a shared writable directory moves the boundary there, as it
+    would for the entry of the scanning user.
 
     The accepted cost: in a group-writable shared checkout whose ``.git``
     belongs to a teammate who is neither the scanning user nor the
@@ -598,8 +634,12 @@ def checkout_judgment(path: Path) -> WalkJudgment:
     starts = [_as_named(path)]
     try:
         starts.append(Path(os.path.realpath(path)))
-    except OSError:
+    except OSError as error:
         decided = False
+        named = Path(path).absolute()
+        _warn_undecided_link_walk(
+            named, named, error.strerror or "it could not be resolved"
+        )
     starts.extend(link.parent for link in links)
     for start in starts:
         if any(_git_shaped(entry / ".git") for entry in (start, *start.parents)):
@@ -614,8 +654,13 @@ def as_named(path: Path) -> Path:
     sits. A ``..`` steps up from what the path before it resolves to: in
     ``link/..`` the kernel follows ``link`` first, which a plain textual fold of the
     path would not, and in ``src/../ops`` the result is no longer inside ``src``.
+    Where the platform removes each ``..`` before it looks at any link
+    (``_applies_parent_steps_lexically``) the path is folded textually instead,
+    as that platform opens it.
     """
     absolute = Path(path).absolute()
+    if _applies_parent_steps_lexically():
+        absolute = Path(os.path.normpath(absolute))
     named = Path(absolute.anchor)
     for part in absolute.parts[1:]:
         if part == "..":
@@ -752,6 +797,10 @@ def _walk_links(path: Path) -> Tuple[List[Path], bool]:
             )
             _warn_undecided_link_walk(absolute, candidate, reason)
             return links, False
+        if _applies_parent_steps_lexically():
+            # A target's own `..` is removed before any link in it is looked at,
+            # as the name's was above.
+            target = Path(os.path.normpath(target))
         if target.is_absolute():
             resolved = Path(target.anchor)
             rest = list(target.parts[1:]) + rest
@@ -765,9 +814,13 @@ def _as_named(path: Path) -> Path:
 
     Every other component stays as spelled, so a symlink is judged by where it
     sits. A ``..`` steps up from what the path before it resolves to: in
-    ``link/..`` the kernel follows ``link`` first.
+    ``link/..`` the kernel follows ``link`` first. Where the platform removes
+    each ``..`` before it looks at any link
+    (``_applies_parent_steps_lexically``) the path is folded textually instead.
     """
     absolute = Path(path).absolute()
+    if _applies_parent_steps_lexically():
+        absolute = Path(os.path.normpath(absolute))
     named = Path(absolute.anchor)
     for part in absolute.parts[1:]:
         if part == "..":
@@ -1034,7 +1087,7 @@ def scanned_trees(scan_root: Optional[Path]) -> List[Path]:
         return []
     trees = []
     for start in (
-        Path(os.path.abspath(scan_root)),
+        as_named(scan_root),
         Path(os.path.realpath(scan_root)),
         *_logical_paths(scan_root),
     ):
@@ -1284,11 +1337,14 @@ def confinement_membership(
     )
     if client_supplied:
         return joined_membership(head, "so that content wrote it")
-    if outside and not undecided:
+    if undecided:
+        # The walk found no location, so no one is said to have written it.
+        return joined_membership(head, "so that repository may have written it")
+    if outside:
         return joined_membership(
             head, "so someone other than the operator may have written it"
         )
-    if undecided or mixed or checkout_membership or given_root:
+    if mixed or checkout_membership or given_root:
         return joined_membership(head, "so that repository wrote it")
     return joined_membership(head, "so the repository being scanned wrote it")
 

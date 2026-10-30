@@ -88,9 +88,9 @@ class TestTheSentenceArms:
         without = membership_clause(checkout_membership=False, client_supplied=True)
         assert with_undecided == without
 
-    def test_the_confinement_sentence_keeps_the_attribution_tail(self):
+    def test_the_confinement_sentence_does_not_claim_who_wrote_the_file(self):
         sentence = confinement_membership(checkout_membership=False, undecided=True)
-        assert sentence.endswith(", so that repository wrote it"), sentence
+        assert sentence.endswith(", so that repository may have written it"), sentence
         assert _WALK_STOPPED in sentence, sentence
 
     def test_every_decided_sentence_is_unchanged(self):
