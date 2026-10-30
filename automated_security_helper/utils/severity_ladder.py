@@ -106,10 +106,21 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
-# ASH's logger by name, not through utils.log: that module imports the console,
-# the thread wrapper and the process environment, and this module is imported by
-# the models they build on, so the import would be a cycle.
-_LOGGER = logging.getLogger("ash")
+
+def _ash_logger() -> logging.Logger:
+    """ASH's logger, by name and at call time.
+
+    By name, not through utils.log: that module imports the console, the thread
+    wrapper and the process environment, and this module is imported by the
+    models they build on, so the import would be a cycle. At call time, not at
+    import: core.constants imports this module before utils.log has set ASHLogger
+    as the logger class, and a ``getLogger("ash")`` run then makes the "ash"
+    logger a plain ``logging.Logger`` for the whole process, which drops the
+    run-scoped handler walk ASHLogger adds. The first warning is logged long
+    after utils.log has run.
+    """
+    return logging.getLogger("ash")
+
 
 #: The off-table threshold values warned about so far, one warning per value per
 #: process: the gate runs once per finding, and a warning per finding would say
@@ -404,7 +415,7 @@ def _warn_off_table_threshold(threshold: str) -> None:
     if threshold in _WARNED_OFF_TABLE:
         return
     _WARNED_OFF_TABLE.add(threshold)
-    _LOGGER.warning(
+    _ash_logger().warning(
         f"Severity threshold {threshold!r} is not one of "
         f"{', '.join(SEVERITY_THRESHOLDS)} (case-sensitive); it gates like "
         "CRITICAL, so only critical findings fail against it"

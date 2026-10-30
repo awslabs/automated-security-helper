@@ -198,10 +198,28 @@ class TestOffTableThresholdIsSaidOnce:
 
         logger = logging.getLogger("test-severity-ladder")
         logger.propagate = True
-        monkeypatch.setattr(severity_ladder, "_LOGGER", logger)
+        monkeypatch.setattr(severity_ladder, "_ash_logger", lambda: logger)
         monkeypatch.setattr(severity_ladder, "_WARNED_OFF_TABLE", set())
         caplog.set_level(logging.WARNING, logger=logger.name)
         return caplog
+
+    def test_the_module_holds_no_logger_at_import(self):
+        """The "ash" logger is looked up when the warning is logged, never at
+        import. core.constants imports this module before utils.log sets ASHLogger
+        as the logger class, so a module-level getLogger("ash") made the CLI's
+        "ash" logger a plain logging.Logger for the whole process (the
+        test_log_class pin went red on every shard)."""
+        import logging
+
+        from automated_security_helper.utils import severity_ladder
+
+        module_loggers = [
+            name
+            for name, value in vars(severity_ladder).items()
+            if isinstance(value, logging.Logger)
+        ]
+        assert module_loggers == []
+        assert severity_ladder._ash_logger().name == "ash"
 
     def test_an_off_table_threshold_is_warned_about_and_gates_like_critical(
         self, ash_log
