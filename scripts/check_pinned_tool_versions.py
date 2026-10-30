@@ -1649,11 +1649,14 @@ def check_apt(
         for index in indexes:
             url = index.url.format(arch=arch)
             try:
-                listed = parse_packages_index(fetch(url))
-                if not listed:
-                    # A 200 answer that holds no package stanza is not an index. Read
-                    # as one, it would make every pin look retired.
-                    raise ValueError("the index lists no packages")
+                body = fetch(url)
+                listed = parse_packages_index(body)
+                if not listed and body.strip():
+                    # A 200 answer with text in it and no package stanza (an error
+                    # page) is not an index. Read as one, it would make every pin look
+                    # retired. An empty body is an index: Debian empties
+                    # <suite>-updates at a point release and may leave it empty.
+                    raise ValueError("the index has text but lists no packages")
             except Exception as exc:  # reported per pin, and it fails the run
                 failed.append(f"{index.label} ({url}): {type(exc).__name__}: {exc}")
                 continue
