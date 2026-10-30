@@ -368,8 +368,6 @@ def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
     the list, or two spellings of its name, are one import, and staging both
     gave uv two candidates for one requirement. Returns the number staged.
     """
-    from packaging.utils import canonicalize_name
-
     staged = 0
     seen: set = set()
     for site_dir in site_dirs:
@@ -378,17 +376,44 @@ def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
         except OSError:
             continue
         for dist_info in entries:
-            stem = dist_info.name[: -len(".dist-info")]
-            name = canonicalize_name(stem.split("-", 1)[0])
             metadata = dist_info / "METADATA"
             destination = target / dist_info.name
-            if name in seen or destination.exists() or not metadata.is_file():
+            if destination.exists() or not metadata.is_file():
+                continue
+            name = _distribution_name(dist_info, metadata)
+            if name in seen:
                 continue
             destination.mkdir()
             shutil.copyfile(metadata, destination / "METADATA")
             seen.add(name)
             staged += 1
     return staged
+
+
+def _distribution_name(dist_info: Path, metadata: Path) -> str:
+    """The PEP 503 name of the distribution ``dist_info`` describes.
+
+    Read from METADATA's ``Name`` header, where the name is spelled whole. The
+    directory's stem is the fallback for a METADATA with no such header: its
+    name part is cut from the version at the first ``-``, which misreads a
+    name that carries one itself (``foo-bar-2.0.dist-info`` read as ``foo``),
+    so a second version of a distribution under that spelling was staged as
+    another distribution beside the first.
+    """
+    from packaging.utils import canonicalize_name
+
+    try:
+        with metadata.open("rb") as handle:
+            for raw in handle:
+                line = raw.decode("utf-8", "replace")
+                if not line.strip():
+                    break
+                if line[:5].lower() == "name:":
+                    return canonicalize_name(line[5:].strip())
+    except OSError:
+        pass
+    stem = dist_info.name[: -len(".dist-info")]
+    return canonicalize_name(stem.split("-", 1)[0])
 
 
 @dataclass(frozen=True)
