@@ -1578,7 +1578,10 @@ def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
     So a rule is reported only when at least one of its not-evaluated results is
     unsuppressed. The results are what suppression applies to, and consulting them
     is what lets the existing mechanism reach a fact recorded somewhere it cannot
-    be attached.
+    be attached. Unsuppressed is read as every other consumer reads it
+    (``utils.sarif_utils.is_result_suppressed``): a suppression whose state is
+    ``rejected`` or ``underReview`` has not taken effect (SARIF 3.35.4) and does
+    not quiet the rule.
 
     ``kind`` is the filter rather than the cdk-nag property bag, so this stays
     generic to SARIF. Restricting to not-evaluated rows matters: one rule can throw
@@ -1612,7 +1615,11 @@ def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
                 continue
             rule_id = _result_rule_id(result)
             has_result.add(rule_id)
-            if not getattr(result, "suppressions", None):
+            # Suppressed means a suppression IN EFFECT, the one reading every
+            # consumer makes: a suppression whose state is rejected or
+            # underReview (SARIF 3.35.4) was never an approval, so the throw it
+            # sits on still reports the rule, the fail-closed side.
+            if not is_result_suppressed(result):
                 unsuppressed.add(rule_id)
 
         for invocation in getattr(run, "invocations", None) or []:
