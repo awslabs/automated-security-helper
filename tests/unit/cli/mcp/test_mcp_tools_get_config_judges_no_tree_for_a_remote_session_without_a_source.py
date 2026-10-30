@@ -61,7 +61,13 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Dict[str, Path]:
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     clear_profile_registry()
     clear_all_session_state()
+    # "Delivered nothing" is this module's premise, and the delivered-source
+    # record is process-wide: an earlier test that uploaded a tree for the same
+    # session id (another module's upload under its own tmp_path) left the
+    # record behind, and the judgment then read that tree as this session's.
+    source_delivery._drop_session_source_dir(REMOTE_SESSION)
     yield {"operator": operator, "named": operator / "ash.yaml"}
+    source_delivery._drop_session_source_dir(REMOTE_SESSION)
     clear_profile_registry()
     clear_all_session_state()
 

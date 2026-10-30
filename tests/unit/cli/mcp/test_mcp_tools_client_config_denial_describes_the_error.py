@@ -50,6 +50,14 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     yield
     clear_profile_registry()
     clear_all_session_state()
+    # The uploads below record a delivered source for the session id, and the
+    # record is process-wide: left behind, a later module that assumes the same
+    # session delivered nothing reads this test's tree as its own.
+    from automated_security_helper.cli.mcp.source_delivery import (
+        _drop_session_source_dir,
+    )
+
+    _drop_session_source_dir(REMOTE)
 
 
 def _upload(files: Dict[str, str]) -> Path:
