@@ -14,9 +14,10 @@ out the same findings.
 """
 
 import os
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Mapping, Optional, Set
-from urllib.parse import unquote, urlparse
+from typing import TYPE_CHECKING, List, Mapping, Optional, Set, Tuple
+from urllib.parse import unquote
 
 from automated_security_helper.utils.finding_identity import CONVERTED_PATH_PROPERTY
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -29,6 +30,27 @@ if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 
+def _split_file_uri(uri: str) -> Tuple[str, str]:
+    """The host segment and the path of a ``file://`` *uri*, split at the first ``/``.
+
+    By hand and not by a URL parser: a parser reads ``file://[locale]/page.tsx`` as
+    a malformed IPv6 host and raises, and one location raising out of the filter
+    fails the scan.
+    """
+    rest = uri[len("file://") :]
+    slash = rest.find("/")
+    if slash < 0:
+        return rest, ""
+    return rest[:slash], rest[slash:]
+
+
+def _without_drive_slash(path: str) -> str:
+    """*path* without the slash before a drive letter (``/C:/p`` is ``C:/p``)."""
+    if len(path) > 2 and path[0] == "/" and path[2] == ":":
+        return path[1:]
+    return path
+
+
 def _file_uri_path(uri: str) -> str:
     """The path a ``file://`` *uri* names, still percent-encoded.
 
@@ -38,12 +60,12 @@ def _file_uri_path(uri: str) -> str:
     (``file://host/p`` names ``/p``), and the slash before a drive letter is not
     either (``file:///C:/proj`` names ``C:/proj``). Slicing the scheme off left the
     host as a directory of the path and the slash on the drive, so such a URI
-    never matched the changed file it names. A test compares the two readers.
+    never matched the changed file it names. A query or fragment is not part of the
+    path either; :func:`_location_readings` also keeps the path with them in, for a
+    name that holds a ``#`` or a ``?``. A test compares the two readers.
     """
-    path = urlparse(uri).path
-    if len(path) > 2 and path[0] == "/" and path[2] == ":":
-        path = path[1:]
-    return path
+    _host, path = _split_file_uri(uri)
+    return _without_drive_slash(re.split(r"[?#]", path, maxsplit=1)[0])
 
 
 def _location_readings(uri: str) -> List[str]:
@@ -65,13 +87,18 @@ def _location_readings(uri: str) -> List[str]:
     """
     texts = [uri]
     if uri.startswith("file://"):
+        host, path = _split_file_uri(uri)
         texts = [_file_uri_path(uri)]
+        # An unencoded ``#`` or ``?`` can be part of a name (``My#Proj/a.cs``), and
+        # the reduction above cuts the path there; the whole path is read too.
+        whole = _without_drive_slash(path)
+        if whole not in texts:
+            texts.append(whole)
         # ``file://lib/helper.js`` is not a standard URI, but a scanner writes it for
         # a path relative to the scan root, and then "lib" is a directory, not a host.
         # Both are read, host and relative: the result is kept when either names a
         # changed file, so no tool's spelling is dropped for the other's.
-        authority = urlparse(uri).netloc
-        if authority:
+        if host:
             texts.append(uri[len("file://") :])
     readings: List[str] = []
     for text in texts:

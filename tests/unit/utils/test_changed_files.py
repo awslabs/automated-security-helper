@@ -808,6 +808,50 @@ class TestFileUriForms:
         assert len(kept.sarif.runs[0].results) == 1
         assert len(dropped.sarif.runs[0].results) == 0
 
+    @pytest.mark.parametrize("uri", ["file://[locale]/page.tsx", "file://a]b/x.py"])
+    def test_a_bracket_in_the_first_segment_is_not_a_malformed_host(
+        self, tmp_path, uri
+    ):
+        """A URL parser reads such a segment as an IPv6 host and raises, and one
+        location raising out of the filter fails the scan. The segment is split off
+        by hand, and read as a host and as a directory."""
+        from automated_security_helper.utils.changed_files import _location_readings
+
+        readings = _location_readings(uri)
+        assert uri[len("file://") :] in readings
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / uri[len("file://") :]).resolve()}
+
+        kept = filter_results_to_changed_files(
+            _make_results_with_sarif([_make_result(uri)]), changed, source_dir
+        )
+
+        assert len(kept.sarif.runs[0].results) == 1
+
+    @pytest.mark.parametrize("mark", ["#", "?"])
+    def test_a_hash_or_question_mark_in_a_name_is_not_cut_off(self, tmp_path, mark):
+        """A fragment or query is not part of the path, and the reduction cuts there;
+        but ``My#Proj/a.cs`` is a name, so the whole path is read as well."""
+        from automated_security_helper.utils.changed_files import _location_readings
+
+        source_dir = tmp_path / "repo"
+        target = source_dir / f"My{mark}Proj" / "a.cs"
+        target.parent.mkdir(parents=True)
+        target.write_text("x\n", encoding="utf-8")
+        uri = "file://" + str(target.resolve())
+
+        readings = _location_readings(uri)
+        kept = filter_results_to_changed_files(
+            _make_results_with_sarif([_make_result(uri)]),
+            {target.resolve()},
+            source_dir,
+        )
+
+        assert str(target.resolve()) in readings
+        assert str(target.resolve()).split(mark)[0] in readings
+        assert len(kept.sarif.runs[0].results) == 1
+
     @pytest.mark.parametrize(
         "uri",
         [
