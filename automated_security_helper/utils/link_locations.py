@@ -20,9 +20,11 @@ from typing import List
 
 from automated_security_helper.utils.scanned_tree import _is_link_stat
 
-#: The most symlinks ``link_locations`` follows for one path, as Linux's own
-#: lookup does.
-MAX_LINKS_FOLLOWED = 40
+#: The most symlinks ``link_locations`` follows for one path, as the platform's
+#: own lookup does: Linux follows 40, and Windows resolves up to 63 reparse points
+#: on one path. At Linux's cap on Windows the walk stopped reporting links on a
+#: path the OS still opened.
+MAX_LINKS_FOLLOWED = 63 if os.name == "nt" else 40
 
 #: The errors ``Path.is_symlink`` reads as "not a link": a component that is not
 #: there, or is below a file, or is a loop. The walk steps through such a component
