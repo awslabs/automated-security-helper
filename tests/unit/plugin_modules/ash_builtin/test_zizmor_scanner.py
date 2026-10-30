@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 import pytest
+from packaging.specifiers import SpecifierSet
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
@@ -212,10 +213,16 @@ def test_the_scanner_reads_the_tool_version_it_is_given(repo):
 
 
 def test_install_command_carries_the_version_constraint(repo):
-    scanner = _scanner(repo)
-    assert scanner.uv_tool_install_commands == [
-        f"uv tool install zizmor{ZIZMOR_DEFAULT_VERSION_CONSTRAINT}"
-    ]
+    """The stored command carries the default constraint. Its clauses are
+    compared as a specifier set: the command builder spells the requirement the
+    way packaging prints it, which orders the clauses, not as the constant does."""
+    (command,) = scanner_commands = _scanner(repo).uv_tool_install_commands
+    assert len(scanner_commands) == 1
+    prefix = "uv tool install zizmor"
+    assert command.startswith(prefix)
+    assert SpecifierSet(command[len(prefix) :]) == SpecifierSet(
+        ZIZMOR_DEFAULT_VERSION_CONSTRAINT
+    )
 
 
 # --------------------------------------------------------------------------- #
