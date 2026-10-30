@@ -338,12 +338,19 @@ class TestTheShardFilter:
         assert max(sizes) < 1.5 * (1000 / count), sizes
 
     def test_the_real_module_list_splits_about_evenly(self):
-        """The integration tier's shards are sized by ``owner`` over the real module
-        paths, and the job timeout assumes the split is about even; the synthetic
-        names above do not say how the real names fall. Measured on the tree of
-        2026-10-29 (2,176 modules, 4 shards): 544 / 588 / 512 / 532, the largest 1.08
-        times the mean and the smallest 0.94; the bound leaves room for growth and
-        still catches a split that would double one leg's wall."""
+        """The crc32 split is about even in module count over the real module paths.
+
+        ``owner`` assigns a module to a shard by a hash of its path, so evenness is a
+        property of the names and not of the design; the synthetic names above do not
+        say how the real names fall. This counts every ``test_*.py`` file under
+        tests/ with ``rglob``, so all tiers and every directory are in it, and
+        pytest's ``norecursedirs`` is not applied. That is wider than what one tier
+        run collects. The check is on module counts only. It does not measure how
+        long any shard runs, so it cannot catch a split that makes one integration
+        leg slower than the others; a check weighted by runtime would be a different
+        test. Measured on the tree of 2026-10-29 (2,176 modules, 4 shards):
+        544 / 588 / 512 / 532, the largest 1.08 times the mean and the smallest 0.94;
+        the bound leaves room for growth."""
         count = sharding.parse_shard(_shard_axis()[0])[1]
         patterns = _pytest_ini_patterns("python_files")
         modules = sorted(
