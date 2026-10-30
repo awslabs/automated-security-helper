@@ -90,7 +90,10 @@ def test_a_host_handler_on_a_console_that_cannot_encode_gets_the_record_shown(
     """Where the Windows-safe filter is active, a record the console cannot
     write is shown before any handler sees it, the plain formatter included:
     its text is ASCII, its control characters are escapes and its CI command
-    forms are broken."""
+    forms are broken. The filter here knows nothing of a console's code page
+    (it is made on this host and switched on), so every character outside ASCII
+    is its escape; with a code page that writes the "é" it would be kept
+    (test_windows_safe_filter_writes_what_the_code_page_writes.py)."""
     _windows_safe_filter_set(monkeypatch, active=True)
 
     written = _written_by_a_host_handler(

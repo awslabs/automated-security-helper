@@ -411,19 +411,38 @@ def test_the_filter_rewrites_emoji_when_an_encoding_issue_is_detected(on_windows
     assert record.msg == "[OK] done"
 
 
-def test_the_filter_writes_residual_non_ascii_as_escapes_after_substitution(
+def test_the_filter_escapes_a_character_the_console_cannot_write_and_drops_none(
     on_windows,
 ):
-    """A character with no mapping is written as its escape, so the console
-    write cannot raise and nothing of the text is lost (it used to be deleted,
-    and a path lost its accented letters)."""
+    """The rule, one for every test of the filter: a character is written as it
+    is where the console's streams both encode it, as its escape (``\\xNN``,
+    ``\\uNNNN``) where they do not, and where nothing is known of the console
+    (``_writes`` None: a CI runner, an unnamed encoding) every character
+    outside ASCII is its escape. Nothing is dropped, since a dropped character
+    could join the text on each side of it into an escape or a command.
+    """
     on_windows.setattr(sys, "stdout", FakeStream(encoding="cp1252"))
+    on_windows.setattr(sys, "stderr", FakeStream(encoding="cp1252"))
     log_filter = WindowsSafeFilter()
     record = logging.LogRecord("n", logging.INFO, "f", 1, "café ☃", None, None)
 
     log_filter.filter(record)
 
-    assert record.msg.encode("ascii") == b"caf\\xe9 \\u2603"
+    # cp1252 writes the "é", and has no snowman.
+    assert record.msg == "café \\u2603"
+
+
+def test_the_filter_with_no_console_knowledge_escapes_every_such_character(
+    on_windows,
+):
+    on_windows.setattr(sys, "stdout", FakeStream(encoding="cp1252"))
+    log_filter = WindowsSafeFilter()
+    log_filter._writes = None
+    record = logging.LogRecord("n", logging.INFO, "f", 1, "café ☃", None, None)
+
+    log_filter.filter(record)
+
+    assert record.msg == "caf\\xe9 \\u2603"
 
 
 # ---------------------------------------------------------------------------
