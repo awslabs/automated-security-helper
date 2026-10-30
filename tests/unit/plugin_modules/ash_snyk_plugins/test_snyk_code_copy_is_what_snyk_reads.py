@@ -423,6 +423,25 @@ def test_a_link_to_a_file_an_ignore_path_keeps_out_of_the_copy_is_unevaluated(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+def test_a_link_to_the_gitignore_the_copy_leaves_out_is_unevaluated(tmp_path, tested):
+    """With ``honor_ignore_files: false`` the ``.gitignore`` is in the scan set but
+    left out of the copy (the first test of this module). A link to it is then
+    tested under no name, and unlike an ignore path this route needs no guard set
+    aside: scan() refuses nothing here, so it is the shape a real run can reach."""
+    context = _context(tmp_path, honor_ignore_files=False)
+    _write(context.source_dir, "app.js")
+    _write(context.source_dir, ".gitignore", "node_modules\n")
+    (context.source_dir / "rules.txt").symlink_to(context.source_dir / ".gitignore")
+
+    scanner, _ = _scan(context)
+
+    assert tested["files"] == ["app.js"], tested
+    assert scanner.unevaluated_targets == ["rules.txt"]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
 def test_a_run_with_an_in_tree_link_to_a_copied_file_is_graded_passed(tmp_path, tested):
     context = _context(tmp_path)
     _write(context.source_dir, "app.js")
