@@ -308,13 +308,20 @@ class TestOfflineShrinkwrap:
         app = _package(context.source_dir / "app", "npm-shrinkwrap.json")
         (app / "package-lock.json").write_text("{}\n", encoding="utf-8")
         scanner = _scanner(context)
+        # As in the test above: the tool lookup is stood in for, so the
+        # answer does not depend on whether npm is installed where this runs,
+        # and an audit that ran anyway is caught.
+        monkeypatch.setattr(
+            npm_audit_scanner, "find_executable", lambda name: f"/usr/local/bin/{name}"
+        )
 
         with (
             patch.object(scanner, "_pre_scan", return_value=True),
-            patch.object(NpmAuditScanner, "_run_subprocess", autospec=True),
+            patch.object(NpmAuditScanner, "_run_subprocess", autospec=True) as run,
         ):
             result = scanner.scan(target=context.source_dir, target_type="source")
 
+        assert run.call_count == 0
         assert result is False
         assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
             "app/npm-shrinkwrap.json"
