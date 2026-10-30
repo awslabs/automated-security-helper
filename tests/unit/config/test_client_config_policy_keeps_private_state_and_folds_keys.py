@@ -14,7 +14,10 @@
   load.
 * ``trusted_default_config`` reads ``ASH_CONFIG`` once, through
   ``get_default_config`` and its ``views`` carry, and takes the built-in
-  defaults when that chain names a file under the MCP workspace root.
+  defaults when that chain names a file under the MCP workspace root. It judges
+  the file ``ASH_CONFIG`` names before it loads it, so a delivered file that
+  does not parse is never read, and takes the defaults too when the load
+  reports no chain for a named file.
 * ``_writes_plugin_default`` forgives a denial only where the trusted base has
   no value for the option. A plugin scanner's section is a plain dict, so the
   trusted base can spell the option ``ignore-file``; the lookup reads either
@@ -45,6 +48,7 @@ from automated_security_helper.config.client_config_policy import (
     apply_client_config_rules,
     trusted_default_config,
 )
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 
 pytestmark = pytest.mark.unit
 
@@ -201,6 +205,72 @@ def test_an_ash_config_a_client_delivered_is_not_the_trusted_config(
     trusted = trusted_default_config()
 
     assert trusted.project_name != "client"
+    assert trusted.project_name == AshConfig().project_name
+
+
+def test_an_ash_config_a_client_delivered_is_judged_before_it_is_parsed(
+    tmp_path: Path, monkeypatch
+):
+    """The file ASH_CONFIG names is under the MCP workspace root, a client's, and
+    holds text that does not parse. The built-in defaults are the trusted config
+    without the file being read: the load is never attempted, so the client's
+    text cannot make the server's own config unloadable."""
+    root = tmp_path / "ash-mcp"
+    delivered = root / "session-a" / "source" / "ash.yaml"
+    delivered.parent.mkdir(parents=True)
+    delivered.write_text("project_name: [unclosed\n", encoding="utf-8")
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+    monkeypatch.setenv("ASH_CONFIG", str(delivered))
+    loads = []
+    real_read = default_config.get_default_config
+
+    def counted_read(*args, **kwargs):
+        loads.append(1)
+        return real_read(*args, **kwargs)
+
+    monkeypatch.setattr(default_config, "get_default_config", counted_read)
+
+    trusted = trusted_default_config()
+
+    assert loads == [], "the delivered ASH_CONFIG file was loaded"
+    assert trusted.project_name == AshConfig().project_name
+
+
+def test_an_ash_config_the_operator_owns_that_does_not_parse_still_raises(
+    tmp_path: Path, monkeypatch
+):
+    """The control for the delivered case: a file outside the MCP workspace root
+    is the operator's, and one that does not parse is still refused by the
+    load, as before."""
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text("project_name: [unclosed\n", encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+
+    with pytest.raises(ASHConfigValidationError):
+        trusted_default_config()
+
+
+def test_an_ash_config_whose_chain_the_load_did_not_report_is_not_trusted(
+    tmp_path: Path, monkeypatch
+):
+    """ASH_CONFIG names a file, and the load hands back a config without the
+    chain it read (``views`` left empty). Nothing was judged, so the built-in
+    defaults are the trusted config, not what the load returned."""
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(yaml.safe_dump({"project_name": "op"}), encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+
+    def unreported_read(*args, **kwargs):
+        return AshConfig.model_validate({"project_name": "unjudged"})
+
+    monkeypatch.setattr(default_config, "get_default_config", unreported_read)
+
+    trusted = trusted_default_config()
+
     assert trusted.project_name == AshConfig().project_name
 
 

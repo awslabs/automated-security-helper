@@ -1489,7 +1489,11 @@ def trusted_default_config(
     ``get_default_config`` reads ``ASH_CONFIG``. A file under the MCP workspace
     root is a client's wherever it is named from (``config_is_client_supplied``),
     so when ``ASH_CONFIG`` or a base it extends is one, the built-in defaults are
-    the trusted config instead, and the policy is not read from it.
+    the trusted config instead, and the policy is not read from it. The file
+    ``ASH_CONFIG`` names is judged before it is loaded, so a client's file is
+    not parsed here; its bases are judged from the chain the load reports. A
+    named file whose load reports no chain was not judged, and the built-in
+    defaults are the trusted config for it too.
 
     ``repository`` is the settings the caller's own load of the same chain uses
     (``operator_only_options.repository_settings_for_root``). With them the file
@@ -1500,9 +1504,31 @@ def trusted_default_config(
     although the load itself ignores that value.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
-    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.config.default_config import (
+        _ash_config_file,
+        get_default_config,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
     from automated_security_helper.utils.log import ASH_LOGGER
 
+    def built_in_defaults() -> AshConfig:
+        ASH_LOGGER.warning(
+            "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
+            "client delivered, so ASH's built-in defaults are the trusted config "
+            "instead. Keep the server's config outside the MCP workspace root."
+        )
+        return AshConfig()
+
+    # The file ASH_CONFIG names is judged before it is loaded: a client's file
+    # is never parsed here, so text in it that does not parse cannot make this
+    # config unloadable. A name ``_ash_config_file`` refuses is left to the
+    # load below, which refuses it the same way and tags the refusal.
+    try:
+        named_file = _ash_config_file()
+    except ASHConfigValidationError:
+        named_file = None
+    if named_file is not None and config_is_client_supplied(named_file):
+        return built_in_defaults()
     # One read: the chain is judged from the files the load itself read
     # (``views``, the carry get_default_config fills from the same read), not
     # from a second resolution of ASH_CONFIG that a file changed in between
@@ -1516,12 +1542,10 @@ def trusted_default_config(
             views=views,
             repository_file=repository.is_repository_file,
         )
+    # A file named and a load that reports no chain: nothing was judged.
+    if named_file is not None and not views:
+        return built_in_defaults()
     for chain, named, _environment_paths in views:
         if any(config_is_client_supplied(path) for path in (*chain, *named)):
-            ASH_LOGGER.warning(
-                "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
-                "client delivered, so ASH's built-in defaults are the trusted config "
-                "instead. Keep the server's config outside the MCP workspace root."
-            )
-            return AshConfig()
+            return built_in_defaults()
     return config
