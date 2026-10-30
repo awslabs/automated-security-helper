@@ -1054,12 +1054,19 @@ class TestSkipifLegsAndWarnModeInARealPytest:
         assert done.returncode == 0, done.stdout + done.stderr
         assert self.ADMITTED in done.stdout, done.stdout
 
-    def test_a_skipif_wins_over_the_gate_on_the_same_test(self, tmp_path):
-        """pytest evaluates ``skipif`` before ``skip``, so the gate text is not the reason."""
+    def test_a_skipif_beside_the_gate_skip_mark_is_not_admitted(self, tmp_path):
+        """With the gate closed, the tests carry a held ``skipif`` and the gate's ``skip``.
+
+        pytest evaluates ``skipif`` first, so the reason is the ``skipif``'s, but the
+        report's keywords also hold ``skip`` and a report cannot say which mark fired.
+        The leg fails, which is the safe direction; in CI the gate is open and the
+        admitted case above applies.
+        """
         self._plant(tmp_path, skipif=2)
         done = self._run(tmp_path, gate_open=False)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert self.ADMITTED in done.stdout, done.stdout
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "2 collected, 2 skipped, 0 executed" in done.stdout, done.stdout
+        assert "admitted, because" not in done.stdout, done.stdout
 
     def test_a_leg_the_conftest_gate_skipped_fails(self, tmp_path):
         self._plant(tmp_path, gated=2)
@@ -1656,6 +1663,11 @@ class TestATierRunThatExecutedNoTestFails:
                 _skip.__func__(keywords=("integration", "skip")),
                 None,
                 id="a-skip-mark-is-not-a-skipif",
+            ),
+            pytest.param(
+                _skip.__func__("broken, see the tracker", keywords=("skipif", "skip")),
+                None,
+                id="a-skip-mark-beside-a-non-firing-skipif",
             ),
             pytest.param(
                 _skip.__func__(when="call", prefix="Skipped: "),

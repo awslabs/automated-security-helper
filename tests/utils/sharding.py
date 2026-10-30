@@ -90,17 +90,26 @@ root conftest's ``--run-integration`` and ``--run-slow`` gates, a ``pytest.skip`
 test or a fixture (a missing tool), an unconditional ``skip`` mark.
 :func:`skipif_reason` tells the two apart from what a report carries, because an xdist
 controller receives reports and no items: the skip happened in setup, ``skipif`` is
-among ``report.keywords``, the report points at the item's own line (a mark skips at the
-item; a skip raised in a fixture or a test body points at the line that raised it), and
-the reason is not one of the gate texts that :data:`GATE_SKIP_REASONS` copies from
-tests/conftest.py (a unit test fails if the two drift apart). The alternative not taken
+among ``report.keywords`` and ``skip`` is not, the report points at the item's own line
+(a mark skips at the item; a skip raised in a fixture or a test body points at the line
+that raised it), and the reason is not one of the gate texts that
+:data:`GATE_SKIP_REASONS` copies from tests/conftest.py (a unit test fails if the two
+drift apart). The ``skip`` keyword is excluded because pytest checks every ``skipif``
+first and then falls through to the ``skip`` marks, and both report the item's own line:
+an item that carries a ``skipif`` whose condition did not hold and also a ``skip`` mark
+would otherwise read as a held ``skipif``. A ``skipif`` with no condition is an
+unconditional skip as well, but it carries no ``skip`` keyword, so it is still admitted
+(a limit of reading reports and not items). The alternative not taken
 is to tag each skip where the item exists, with a ``pytest_runtest_makereport``
 hookwrapper that re-evaluates the item's ``skipif`` marks
 (``_pytest.skipping.evaluate_skip_marks``, a private function) or adds a user property
 to the report. The property would be published in the JUnit XML, for the reason given at
 ``LEG_ASSERTION_MARKER``, and the private call can change between pytest releases. Known
 limits: a test that carries a ``skipif`` whose condition did not hold and is skipped by a
-gate shows the gate's text and is not admitted, which is the safe direction; and a
+gate shows the gate's text and is not admitted, which is the safe direction; a test that
+carries a held ``skipif`` and is also gated (a developer's run without
+``--run-integration``) is not admitted either, because the gate's ``skip`` mark is among
+its keywords; and a
 ``skipif`` whose condition is a missing tool (``skipif(shutil.which("x") is None)``) is
 admitted like any other, because it is declared, where a ``pytest.skip`` found at run
 time is not.
@@ -361,12 +370,21 @@ def skipif_reason(report: Any) -> Optional[str]:
     prefix is removed, is not one of :data:`GATE_SKIP_REASONS`. Anything else, such as a
     gate skip, an unconditional ``skip`` mark, a ``pytest.skip`` in a fixture or in the
     test body, is None.
+
+    ``skip`` must not be among ``report.keywords`` either. pytest's
+    ``evaluate_skip_marks`` checks every ``skipif`` and then falls through to the
+    ``skip`` marks, and a skip from either reports the item's own line, so an item with
+    a ``skipif`` that did not fire and a ``skip`` mark would otherwise read as a held
+    ``skipif``. A ``skipif`` with no condition is an unconditional skip too, but it
+    carries no ``skip`` keyword and its report reads exactly like a held ``skipif``, so
+    it is still admitted: a limit of reading reports, not items.
     """
     if getattr(report, "when", None) != "setup":
         return None
     if not getattr(report, "skipped", False) or hasattr(report, "wasxfail"):
         return None
-    if "skipif" not in (getattr(report, "keywords", None) or {}):
+    keywords = getattr(report, "keywords", None) or {}
+    if "skipif" not in keywords or "skip" in keywords:
         return None
     longrepr = getattr(report, "longrepr", None)
     if not isinstance(longrepr, (tuple, list)) or len(longrepr) != 3:
