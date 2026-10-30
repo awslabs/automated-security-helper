@@ -754,15 +754,16 @@ def get_scanner_progress(
                     continue
                 findings = _findings_of_document(document)
                 scanner_progress[scanner_name]["findings"].extend(findings)
-                recorded_count, recorded_counts = (
-                    (None, None) if findings else _counts_of_document(document)
-                )
-                count = len(findings) if findings else (recorded_count or 0)
+                # The one rule of every progress path: the counts the scanner
+                # recorded win, and a findings array fills in only when the
+                # document carries no counts (see create_scan_progress_from_files).
+                recorded_count, recorded_counts = _counts_of_document(document)
+                count = recorded_count if recorded_count is not None else len(findings)
                 scanner_progress[scanner_name]["finding_count"] += count
                 counts = (
-                    extract_findings_summary(findings)
-                    if findings
-                    else (recorded_counts or {})
+                    recorded_counts
+                    if recorded_counts is not None
+                    else extract_findings_summary(findings)
                 )
                 totals = scanner_progress[scanner_name]["severity_counts"]
                 for severity, value in counts.items():
@@ -1375,11 +1376,16 @@ def create_scan_progress_from_files(
                     # finished is in the file's own status, which every scanner
                     # writes; one without it is counted as passed.
                     #
-                    # What it found is in the file's own counts when it carries
-                    # no findings array, which is the file ASH writes: its
-                    # finding_count and severity_counts are the record until the
-                    # aggregated file exists. Counted from the array alone, every
-                    # finished scanner read as 0 findings while the scan ran.
+                    # What it found is in the file's own counts, which is the
+                    # record ASH writes (finding_count and severity_counts, no
+                    # findings array) until the aggregated file exists. The
+                    # counts win when the document carries them and a findings
+                    # array fills in only when it does not: the one rule both
+                    # progress paths follow (_add_aggregated_scanner_progress
+                    # reads the aggregated document's counts the same way), so
+                    # a scanner reports one total mid-scan and after
+                    # aggregation. Counted from the array alone, every finished
+                    # scanner read as 0 findings while the scan ran.
                     recorded_count, recorded_counts = _counts_of_document(document)
                     scanner_progress = ScannerProgress(
                         scanner_name=scanner_name,
@@ -1388,13 +1394,13 @@ def create_scan_progress_from_files(
                         finding_count=len(findings),
                     )
                     scanner_progress.update_findings(findings)
-                    if not findings and recorded_count is not None:
+                    if recorded_count is not None:
                         scanner_progress.finding_count = recorded_count
-                        if recorded_counts is not None:
-                            scanner_progress.severity_counts = {
-                                **scanner_progress.severity_counts,
-                                **recorded_counts,
-                            }
+                    if recorded_counts is not None:
+                        scanner_progress.severity_counts = {
+                            **empty_severity_counts(),
+                            **recorded_counts,
+                        }
                     scanner_progress.mark_completed()
                     recorded = _status_of_document(document)
                     if recorded is not None:

@@ -257,7 +257,12 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
         assert progress.severity_counts["high"] == 2
         assert scanner.status.value == "failed"
 
-    def test_a_findings_array_still_decides_when_present(self, tmp_path):
+    def test_recorded_counts_win_over_a_findings_array(self, tmp_path):
+        """One rule for both progress paths: the aggregated path reads the
+        document's counts and uses findings only when the counts are missing
+        (test_scan_tracking_results.py); the per-target path used to do the
+        opposite, so one scanner showed different totals mid-scan and after
+        aggregation."""
         out = tmp_path / "ash_output"
         _write_result(
             out,
@@ -272,9 +277,20 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
 
         progress = create_scan_progress_from_files("scan-1", out)
 
+        assert progress.total_findings == 9
+        assert progress.severity_counts["high"] == 9
+        assert progress.severity_counts["low"] == 0
+        assert get_scanner_progress(out)["bandit"]["finding_count"] == 9
+
+    def test_a_findings_array_fills_in_when_the_document_has_no_counts(self, tmp_path):
+        out = tmp_path / "ash_output"
+        _write_result(out, "bandit", "source", {"findings": [{"severity": "LOW"}]})
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
         assert progress.total_findings == 1
         assert progress.severity_counts["low"] == 1
-        assert progress.severity_counts["high"] == 0
+        assert get_scanner_progress(out)["bandit"]["finding_count"] == 1
 
     def test_a_file_with_neither_counts_nor_findings_reads_as_zero(self, tmp_path):
         out = tmp_path / "ash_output"
