@@ -2221,6 +2221,19 @@ def _git_executable() -> Optional[str]:
 #: Variables that point git at a repository whatever its working directory is.
 _GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
 
+#: Variables that replace a repository's own state: the index the diff reads the
+#: working tree through, and the object stores. ``git diff --name-only <commit>``
+#: lists the index's entries, not the directory's files, so a foreign
+#: GIT_INDEX_FILE (a pre-commit hook's temporary index, a stale export, a path
+#: that is gone) made the diff name another set of files, or none at all and at
+#: exit 0, and the scan then kept or discarded findings by that set. A foreign
+#: GIT_OBJECT_DIRECTORY makes the named revision unreadable ("bad revision").
+_GIT_STATE_ENV = (
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+)
+
 
 def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
     """The environment every git command in this module is started with.
@@ -2229,8 +2242,10 @@ def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
     entries, so a program git starts by name, a credential helper or a textconv
     driver, cannot be found through the working directory), less GIT_DIR and its
     siblings (:data:`_GIT_LOCATION_ENV`), so that git discovers the repository
-    from the directory it is started in and answers about that one. *without*
-    names more variables to leave out.
+    from the directory it is started in and answers about that one, and less the
+    index and object-store overrides (:data:`_GIT_STATE_ENV`), so that it reads
+    that repository's own index and objects. *without* names more variables to
+    leave out.
 
     The repository-root lookup and the diff drop them too. A git hook exports
     GIT_DIR and not GIT_WORK_TREE, and with that pair git takes its working
@@ -2243,7 +2258,7 @@ def _git_environ(*, without: Iterable[str] = ()) -> Dict[str, str]:
     way. With discovery the root is the real one for the hook's own tree and for a
     subdirectory alike, and the nesting check reads the same root.
     """
-    dropped = set(_GIT_LOCATION_ENV).union(without)
+    dropped = set(_GIT_LOCATION_ENV).union(_GIT_STATE_ENV, without)
     return {key: value for key, value in child_environ().items() if key not in dropped}
 
 
@@ -2342,8 +2357,19 @@ def _layout_environ(cwd: "str | os.PathLike[str] | None") -> Dict[str, str]:
     the diff's paths onto a path that does not exist. A location variable
     exported with an empty value is read as unset (and left out of the copy):
     git itself refuses the empty string as a path.
+
+    A kept copy never carries GIT_INDEX_FILE: the diff lists the index's entries,
+    and the index of the layout the caller names is the named repository's own,
+    never one exported for another purpose (a pre-commit hook's temporary index
+    names the files being committed, not the tree). The object-store overrides
+    (GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES) are kept with a kept
+    layout: a pre-receive hook's quarantine puts the pushed objects in a directory
+    only those two variables name, and dropping them there made the named
+    revision unreadable; when the variables are dropped to discovery instead,
+    :func:`_git_environ` drops these too.
     """
     environ = child_environ()
+    environ.pop("GIT_INDEX_FILE", None)
     # os.path.abspath reads a relative value against this process's directory, the
     # exporter's, and keeps an absolute one as it is; git started in *cwd* then
     # reads the same directory the exporter meant. A variable exported EMPTY is

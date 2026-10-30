@@ -46,6 +46,12 @@ RESOLVED = "/opt/resolved/bin/git"
 
 LOCATION_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
 
+STATE_VARIABLES = (
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+)
+
 #: Each helper that starts git, with how it is asked about a directory.
 HELPERS = [
     pytest.param(lambda d: gss.git_repository_root(d), id="rev-parse --show-toplevel"),
@@ -190,6 +196,51 @@ def test_the_core_worktree_read_for_git_dir_alone_is_anchored_too(
     assert not set(probe_kwargs["env"]) & set(LOCATION_VARIABLES)
     _lookup_argv, lookup_kwargs = recorded[1]
     assert not set(lookup_kwargs["env"]) & set(LOCATION_VARIABLES)
+
+
+@pytest.mark.parametrize("ask", HELPERS)
+def test_each_helper_leaves_the_index_and_object_store_overrides_out(
+    tmp_path, monkeypatch, recorded, ask
+):
+    """GIT_INDEX_FILE replaces the index the diff reads the working tree through,
+    and the object-store variables replace where revisions are read from; with
+    no layout named, every helper reads the discovered repository's own."""
+    for name in STATE_VARIABLES:
+        monkeypatch.setenv(name, str(tmp_path / "elsewhere" / name.lower()))
+    for name in LOCATION_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+
+    ask(tmp_path)
+
+    assert recorded, "git was not started"
+    for _argv, kwargs in recorded:
+        assert not set(kwargs["env"]) & set(STATE_VARIABLES), sorted(kwargs["env"])
+
+
+@pytest.mark.parametrize("ask", LAYOUT_HELPERS)
+def test_a_kept_layout_drops_the_index_override_and_keeps_the_object_stores(
+    tmp_path, monkeypatch, recorded, ask
+):
+    """With a layout the caller names (GIT_DIR and an existing GIT_WORK_TREE), the
+    copy git is started with keeps the object-store variables (a pre-receive
+    hook's quarantine is readable only through them) and never GIT_INDEX_FILE:
+    the diff's working-tree side is read through the named repository's own
+    index."""
+    bare, tree = _name_a_deployed_tree(tmp_path, monkeypatch)
+    objects = str(tmp_path / "quarantine")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "foreign.index"))
+    monkeypatch.setenv("GIT_OBJECT_DIRECTORY", objects)
+    monkeypatch.setenv("GIT_ALTERNATE_OBJECT_DIRECTORIES", bare + "/objects")
+
+    ask(Path(tree))
+
+    assert recorded, "git was not started"
+    for _argv, kwargs in recorded:
+        env = kwargs["env"]
+        assert (env.get("GIT_DIR"), env.get("GIT_WORK_TREE")) == (bare, tree)
+        assert "GIT_INDEX_FILE" not in env
+        assert env["GIT_OBJECT_DIRECTORY"] == objects
+        assert env["GIT_ALTERNATE_OBJECT_DIRECTORIES"] == bare + "/objects"
 
 
 @pytest.mark.parametrize("ask", NESTING_HELPERS)
