@@ -2872,8 +2872,10 @@ def test_an_ancestor_whose_stat_is_refused_does_not_fail_the_reference_check(
     workflow.write_text(_step_uses("./.github/actions/local"))
     denied = tmp_path / ".github" / "workflows"
     original = Path.is_dir
+    probed: list = []
 
     def is_dir(self, *args, **kwargs):
+        probed.append(self)
         if self == denied:
             raise PermissionError(13, "Permission denied", str(self))
         return original(self, *args, **kwargs)
@@ -2882,3 +2884,6 @@ def test_an_ancestor_whose_stat_is_refused_does_not_fail_the_reference_check(
     scanner = _scanner(repo)
 
     assert scanner._reference_outside_the_tree(workflow, repo.resolve()) is None
+    # The refusal fired: the check asked about the denied ancestor through the
+    # patched method, so the answer above was reached past it, not around it.
+    assert denied in probed
