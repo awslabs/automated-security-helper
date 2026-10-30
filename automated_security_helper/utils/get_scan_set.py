@@ -1346,9 +1346,11 @@ def get_ash_ignorespec_lines(
                 ) as f:
                     content = ignore_file_lines(f)
             except FileNotFoundError:
-                # Gone between the check above and the open, as for a file found in
-                # the tree below. A file that is there and cannot be read still
-                # raises, for both: an unreadable ignore file is an error.
+                # Gone between the check above and the open. Said, with a warning and
+                # a SKIPPED line, because the operator named it; a file found in the
+                # tree below that is gone by its open is skipped without a word.
+                # A file that is there and cannot be read still raises, for both: an
+                # unreadable ignore file is an error.
                 _skip_ignore_file(lines, clean, "it does not exist")
                 continue
         else:

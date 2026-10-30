@@ -497,12 +497,12 @@ class TestARuleIgittigittCannotCompile:
 
 
 class TestAnIgnoreFileTheCallerNamesThatGoesBeforeItIsOpened:
-    def test_it_is_skipped_with_a_word_as_a_file_found_in_the_tree_is(
-        self, tmp_path, monkeypatch
-    ):
+    def test_it_is_skipped_with_a_word(self, tmp_path, monkeypatch):
         """The file passed the regular-file check and was gone at the open, which
-        raised out of the scan set; the same loss for a file found in the tree was
-        already a skip."""
+        raised out of the scan set. It is now a skip with a warning and a SKIPPED
+        line, because the operator typed the name. A file found in the tree and gone
+        by the open is skipped without a word (it was never named by anyone), so the
+        two differ on purpose."""
         root = _build(tmp_path / "src", {"a.py": "x\n"})
         missing = str(tmp_path / "gone.ignore")
         real_isfile = os.path.isfile
