@@ -276,6 +276,42 @@ class TestSharedFindingIds:
         assert ids == ["f-1"]
 
 
+class TestSharedFindingIdsLayering:
+    """``shared_ids_by_position`` is a utility: it lives under ``utils`` and
+    ``sarif_utils`` binds it at load time, so a utility module no longer reaches
+    into the reporters package (a utils -> plugin_modules edge, deferred to call
+    time to dodge the load-time cycle). The reporters' import spelling is kept
+    by a re-export at the old path. The imports sit inside the tests so that,
+    before the move, only these three read red and the rest of the file stays
+    a measurement."""
+
+    def test_the_helper_lives_under_utils(self):
+        from pathlib import Path
+
+        from automated_security_helper.utils import shared_finding_ids as helper
+
+        assert Path(helper.__file__).parent.name == "utils"
+        assert callable(helper.shared_ids_by_position)
+        assert callable(helper.flat_describes_result)
+
+    def test_the_reporters_path_re_exports_the_same_objects(self):
+        from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+            shared_finding_ids as reporters_path,
+        )
+        from automated_security_helper.utils import shared_finding_ids as helper
+
+        assert reporters_path.shared_ids_by_position is helper.shared_ids_by_position
+        assert reporters_path.flat_describes_result is helper.flat_describes_result
+        assert set(reporters_path.__all__) == set(helper.__all__)
+
+    def test_sarif_utils_binds_the_helper_at_load_time(self):
+        from automated_security_helper.utils import sarif_utils
+        from automated_security_helper.utils import shared_finding_ids as helper
+
+        # A module attribute, not a name resolved inside the function body.
+        assert sarif_utils.shared_ids_by_position is helper.shared_ids_by_position
+
+
 class TestTheSeverityNormalizationKeepsItsKinds:
     def test_an_open_result_is_still_not_graded(self):
         """The normalization skips every result whose kind is not ``fail``;

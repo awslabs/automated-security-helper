@@ -57,6 +57,7 @@ from automated_security_helper.utils.package_identity import (
 )
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
+from automated_security_helper.utils.shared_finding_ids import shared_ids_by_position
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 from automated_security_helper.utils.undecodable_text import (
@@ -837,11 +838,6 @@ def shared_finding_ids(model: Any, all_results: List[Any]) -> List[str | None]:
     the reporter's own fallback instead of another finding's id
     (``shared_ids_by_position``).
     """
-    # Imported here: the reporters package imports this module at load time.
-    from automated_security_helper.plugin_modules.ash_builtin.reporters.shared_finding_ids import (  # noqa: E501
-        shared_ids_by_position,
-    )
-
     try:
         flat = list(model.to_flat_vulnerabilities())
     except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
