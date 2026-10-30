@@ -27,6 +27,7 @@ Each test here was red at the base it was written against:
 """
 
 import logging
+from datetime import datetime, timezone
 from unittest.mock import create_autospec, patch
 
 import pytest
@@ -317,6 +318,38 @@ def test_a_missing_distribution_is_the_presence_probes_finding_not_this_ones():
     )
 
 
+def test_a_requirement_whose_marker_reads_false_is_not_compared():
+    """The metadata reader keeps the interpreter half of a marker. At the base the
+    marker was never evaluated, so a requirement this interpreter is not held to was
+    held against its installed version anyway."""
+    assert (
+        _unsatisfied_cdk_requirements(
+            ['cdk-nag>=3.0; python_version < "3.0"'],
+            installed_version=lambda name: "2.9.0",
+        )
+        == []
+    )
+
+
+def test_a_requirement_whose_marker_reads_true_is_compared():
+    """The control: a marker that applies leaves the comparison in place."""
+    unsatisfied = _unsatisfied_cdk_requirements(
+        ['cdk-nag>=3.0; python_version >= "3.0"'],
+        installed_version=lambda name: "2.9.0",
+    )
+
+    assert len(unsatisfied) == 1
+    assert unsatisfied[0].startswith("cdk-nag 2.9.0 (the cdk extra needs ")
+
+
+def test_an_installed_version_packaging_cannot_read_is_unsatisfied():
+    """Fail closed, as the docstring now says: a version that cannot be compared cannot
+    be shown inside the bound, and the install this check gates replaces it."""
+    assert _unsatisfied_cdk_requirements(
+        ["cdk-nag>=3.0"], installed_version=lambda name: "not-a-version"
+    ) == ["cdk-nag not-a-version (the cdk extra needs >=3.0)"]
+
+
 def test_an_out_of_bounds_install_fails_the_check_and_offers_the_install(
     scanner, cdk_available, monkeypatch
 ):
@@ -373,6 +406,20 @@ def test_an_empty_target_sets_the_end_time(scanner, cdk_available, wrapper_doubl
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert scanner.end_time is not None
+
+
+def test_an_empty_target_is_timed_from_its_own_return(
+    scanner, cdk_available, wrapper_double
+):
+    """One instance scans source and then converted. At the base a start_time left by
+    the previous target's _pre_scan stood, and the empty tree's duration ran from it."""
+    scanner.start_time = datetime(2001, 1, 1, tzinfo=timezone.utc)
+    scanner.end_time = None
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.end_time is not None
+    assert scanner.start_time == scanner.end_time
 
 
 def test_a_failed_pre_scan_sets_the_end_time(scanner, cdk_available, wrapper_double):

@@ -768,11 +768,15 @@ def _unsatisfied_cdk_requirements(
 
     ``requirements`` default to the extra as the installed metadata declares it, else the
     pinned fallback (``_cdk_extra_requirements``). A distribution that is not installed
-    is the presence probe's finding and is left out here; a requirement string or an
-    installed version ``packaging`` cannot parse is left out too, since the comparison
-    cannot be made. ``installed_version`` is the lookup, ``importlib.metadata.version`` by
-    default; a test passes its own.
+    is the presence probe's finding and is left out here, as is a requirement string
+    ``packaging`` cannot parse, or one whose marker reads false for this interpreter:
+    the comparison does not apply. An installed version ``packaging`` cannot compare
+    against the specifier is UNSATISFIED, not left out: the bound cannot be shown to
+    hold, and the install this check gates is what puts a readable version in place.
+    ``installed_version`` is the lookup, ``importlib.metadata.version`` by default; a
+    test passes its own.
     """
+    from packaging.markers import UndefinedComparison, UndefinedEnvironmentName
     from packaging.requirements import InvalidRequirement, Requirement
     from packaging.version import InvalidVersion
 
@@ -787,6 +791,19 @@ def _unsatisfied_cdk_requirements(
             continue
         if not str(requirement.specifier):
             continue
+        if requirement.marker is not None:
+            # The metadata reader strips the extra's own clause and keeps the rest of
+            # the marker, which gates the requirement on the interpreter or platform
+            # (``python_version < "3.11"``). A marker that reads false names a
+            # requirement this environment is not held to, so its installed version
+            # is not compared; one that cannot be evaluated here is left out like a
+            # requirement string that cannot be parsed.
+            try:
+                applies = requirement.marker.evaluate()
+            except (UndefinedComparison, UndefinedEnvironmentName):
+                continue
+            if not applies:
+                continue
         try:
             installed = installed_version(requirement.name)
         except Exception:
@@ -1309,6 +1326,12 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         self.targets_partly_evaluated = 0
         self._reset_errors()
         self.exit_code = 0
+        # The timing too, as ScannerPluginBase.scan() resets it. ``_post_scan`` sets
+        # ``start_time`` only when it is unset, so without this an early return on the
+        # second target (an empty tree, a refused ``_pre_scan``) was timed from the
+        # previous target's ``_pre_scan``. Reset, it is timed from its own ``_post_scan``.
+        self.start_time = None
+        self.end_time = None
         self._nothing_scanned_reason = None
 
         # The results' "cdk-nag" component carries cdk-nag's version, not ASH's:
