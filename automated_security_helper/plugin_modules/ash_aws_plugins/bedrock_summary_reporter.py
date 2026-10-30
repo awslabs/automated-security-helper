@@ -21,6 +21,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Set,
     Tuple,
     TYPE_CHECKING,
 )
@@ -79,6 +80,7 @@ from automated_security_helper.utils.terminal_text import (
     shown_on_one_line,
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    AWS_REGION_PATTERN,
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
     UNEXPECTED_LISTING_ERROR,
@@ -151,6 +153,10 @@ _ASCII_PUNCTUATION = frozenset(string.punctuation)
 #: A "<" that starts a line inside a code span, after any indentation or
 #: block-quote markers: the line could open an HTML block before the span is read.
 _SPAN_LINE_START_TAG = re.compile(r"(\n[ \t>]*)<")
+#: A pipe no backslash escapes: the character a GitHub viewer splits a table
+#: row at. Inside a code span the backslash is literal to CommonMark, but the
+#: GFM table extension reads "\|" as a pipe kept inside its column, spans included.
+_UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
 
 #: A line put after an answer while closing its fences: report text follows every
 #: answer, so text here shows whether the answer left a fence open.
@@ -221,22 +227,46 @@ def _code_span_ranges(source: str) -> List[Tuple[int, int]]:
     return spans
 
 
+def _table_row_lines(source: str, spans: List[Tuple[int, int]]) -> List[bool]:
+    """Which lines of *source* a GitHub viewer can read as table rows: the lines
+    holding an unescaped pipe outside their code spans. A viewer splits such a
+    row into columns at every pipe before it reads the spans, the spans' own pipes
+    included, which is the only reading in which a span's content can end up
+    outside a span."""
+    blanked = list(source)
+    for start, end in spans:
+        for index in range(start, end):
+            if blanked[index] != "\n":
+                blanked[index] = " "
+    return [
+        _UNESCAPED_PIPE.search(line) is not None
+        for line in "".join(blanked).split("\n")
+    ]
+
+
 def _inline_as_written(source: str) -> str:
     """One block's inline text with HTML outside its code spans written as text
     and each span as the model wrote it, but for a "<" starting a line inside a
     span, which stays text (_SPAN_LINE_START_TAG), and for a span that holds a
-    pipe, whose "<" are all written as text: the report is read by GitHub
+    pipe on a table row (_table_row_lines): the report is read by GitHub
     Markdown viewers, which split a table row into columns at every pipe before
-    reading the spans, so a span that crosses a column boundary ends there and
-    the HTML after the pipe is outside any span. The cost is in raw Markdown
-    only."""
+    reading the spans, so a span that crosses a column boundary ends there and the
+    HTML after the pipe is outside any span. There the span's pipes are written
+    as "\\|", which GFM keeps inside the column and inside the span, and its "<" as
+    text, so the HTML stays inert in a viewer that does not read the escape. A
+    span holding a pipe on any other line is code to every viewer and is left
+    as written: entities are not decoded inside a code span, so a "&lt;" written
+    there would show as the entity. The cost is confined to table rows."""
+    spans = _code_span_ranges(source)
+    table_rows = _table_row_lines(source, spans)
     pieces = []
     position = 0
-    for start, end in _code_span_ranges(source):
+    for start, end in spans:
         pieces.append(_html_as_text(source[position:start]))
         span = source[start:end]
-        if "|" in span:
-            pieces.append(span.replace("<", "&lt;"))
+        on_table_row = table_rows[source.count("\n", 0, start)]
+        if "|" in span and on_table_row:
+            pieces.append(_UNESCAPED_PIPE.sub(r"\\|", span).replace("<", "&lt;"))
         else:
             pieces.append(_SPAN_LINE_START_TAG.sub(r"\1&lt;", span))
         position = end
@@ -595,8 +625,9 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
             # Every region name AWS publishes: the two-letter areas plus mx and
             # the eusc, us-isof and eu-isoe partitions, with an optional
             # country segment (eusc-de-east-1). A value refused here is refused
-            # as a configuration error (exit 3), so the pattern errs wide.
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}",
+            # as a configuration error (exit 3), so the pattern errs wide. One
+            # pattern for the three AWS reporters (aws_utils).
+            pattern=AWS_REGION_PATTERN,
             description="AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests.",
         ),
     ]
@@ -1186,9 +1217,15 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 )
                 return self.dependencies_satisfied
 
-            # Validate the configured model
+            # Validate the configured model. One listing serves it and every
+            # fallback candidate (ListingsOnce), as in the run's walk: wrapping
+            # only the fallback walk asked the control plane for every page
+            # again, possibly while it was already throttling, and logged a
+            # failed profile listing a second time at WARNING, because the walk's
+            # first call through a fresh wrapper raised the original error.
             model_id = self.config.options.model_id
             label = self._model_label(model_id)
+            bedrock_client = ListingsOnce(bedrock_client)
             check = validate_bedrock_model(
                 bedrock_client, model_id, values=values, label=label
             )
@@ -1213,18 +1250,18 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 # Check if fallback models are available. The run walks the
                 # whole chain (_walk_fallbacks), so the check walks it too:
                 # checking the first fallback alone disabled the reporter when
-                # only a later one was usable. One listing serves every
-                # candidate (ListingsOnce), as in the run's walk.
+                # only a later one was usable. The listing the configured
+                # model's check made serves every candidate (the wrapper above).
                 if self.config.options.enable_fallback_models:
-                    listings = ListingsOnce(bedrock_client)
                     visited = {model_id}
                     fallback_model = get_fallback_model(model_id)
                     while fallback_model and fallback_model not in visited:
                         visited.add(fallback_model)
                         # Each candidate under every spelling this region may
-                        # list, as the run's walk checks it.
+                        # list, as the run's walk checks it, against the one
+                        # listing the configured model's check made.
                         check, spelling = self._check_candidate(
-                            listings, fallback_model, values
+                            bedrock_client, fallback_model, values
                         )
                         if check[0]:
                             self._plugin_log(
@@ -1675,7 +1712,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             if not prompt:
                 # Nothing to analyze: the section says so itself. A builder's
                 # empty answer is never sent to the model as a prompt.
-                return self._nothing_to_analyze()
+                return self._nothing_to_analyze(included)
             prepared = builder.prepare_prompt(
                 prompt,
                 custom_prompt=opts.custom_prompt,
@@ -1706,7 +1743,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             else:
                 report += (
                     self._render_flat_findings(
-                        bedrock_runtime, model, findings, builder, client, opts
+                        bedrock_runtime,
+                        model,
+                        findings,
+                        builder,
+                        client,
+                        opts,
+                        included,
                     )
                     + "\n\n"
                 )
@@ -1774,13 +1817,21 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         return report
 
-    def _nothing_to_analyze(self) -> str:
+    def _nothing_to_analyze(self, included: Optional[Set[str]] = None) -> str:
         """What a section says when its builder had nothing to analyze: fixed
         report text, not a model's reply to a placeholder prompt. Names the
-        secret findings when the run has them, so a secrets-only scan's risk
-        and technical sections point at where its findings are."""
+        secret findings when the run has them AND the report being written
+        holds their section (``included`` is the main report's section set and
+        names ``secret_findings``), so a secrets-only scan's risk and technical
+        sections point at where its findings are. A section the operator left
+        out, or the separate technical-analysis file, has no secrets section to
+        point at, so the sentence is not written there."""
         text = "No actionable findings to analyze for this section."
-        if self._secret_findings_exist:
+        if (
+            self._secret_findings_exist
+            and included is not None
+            and "secret_findings" in included
+        ):
             text += " The secret findings are reported in their own section."
         return text
 
@@ -1828,6 +1879,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         builder: BedrockPromptBuilder,
         client: BedrockModelClient,
         opts: Any,
+        included: Optional[Set[str]] = None,
     ) -> str:
         if opts.batch_processing and len(findings) > opts.max_findings_to_analyze:
             return self._process_findings_by_batch(bedrock_runtime, model, findings)
@@ -1836,7 +1888,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             builder.most_severe_first(findings)[: opts.max_findings_to_analyze]
         )
         if not summary_prompt:
-            return self._nothing_to_analyze()
+            return self._nothing_to_analyze(included)
         prompt = builder.prepare_prompt(
             summary_prompt,
             custom_prompt=opts.custom_prompt,

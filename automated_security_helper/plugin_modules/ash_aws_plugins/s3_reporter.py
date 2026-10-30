@@ -23,6 +23,7 @@ from automated_security_helper.utils.error_text import error_text, text_without_
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_yaml import report_yaml
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    AWS_REGION_PATTERN,
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
     check_retry_delays,
@@ -47,11 +48,9 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
                 or os.environ.get("AWS_DEFAULT_REGION")
                 or None
             ),
-            # Every region name AWS publishes: the two-letter areas plus mx and
-            # the eusc, us-isof and eu-isoe partitions, with an optional
-            # country segment (eusc-de-east-1). A value refused here is refused
-            # as a configuration error (exit 3), so the pattern errs wide.
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}",
+            # The three AWS reporters share one pattern (aws_utils), so a region
+            # one accepts is never a configuration error for another.
+            pattern=AWS_REGION_PATTERN,
             description="AWS region to use for S3 operations",
         ),
     ]

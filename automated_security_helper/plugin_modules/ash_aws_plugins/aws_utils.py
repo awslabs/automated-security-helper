@@ -88,6 +88,18 @@ def report_missing_setting(
 MAX_RETRIES = 10
 MAX_RETRY_DELAY_SECONDS = 60
 
+#: Every region name AWS publishes, for the ``aws_region`` option of each AWS
+#: reporter: the two-letter areas plus mx and the eusc, us-isof and eu-isoe
+#: partitions, with an optional country segment (eusc-de-east-1). One pattern
+#: for the three reporters, so a region one accepts is never a configuration
+#: error (exit 3) for another. A value refused here is refused as a
+#: configuration error, so the pattern errs wide.
+AWS_REGION_PATTERN = (
+    r"(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)"
+    r"(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)"
+    r"-\d{1,2}"
+)
+
 
 def check_retry_delays(options: Any) -> Any:
     """``options``, refused when its ``base_delay`` exceeds its ``max_delay``.

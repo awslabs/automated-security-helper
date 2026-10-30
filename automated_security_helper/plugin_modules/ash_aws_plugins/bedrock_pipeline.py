@@ -142,6 +142,12 @@ _MODEL_SPECIFIC_ERRORS = frozenset(
     }
 )
 
+#: How many of a finding's locations a prompt lists before "and N more"
+#: (``BedrockPromptBuilder._extract_locations``). A summarized finding carries
+#: every instance's location, and a prompt that lists thousands of paths is
+#: refused by the model as too long.
+MAX_LOCATIONS_LISTED = 10
+
 #: The client-side failures that come after the request reached the service:
 #: botocore's HTTPClientError for a read that timed out and for a connection
 #: closed before the answer. Its ConnectionError (an endpoint not reached, a
@@ -909,6 +915,14 @@ class BedrockPromptBuilder:
 
     @staticmethod
     def _extract_locations(finding: Dict[str, Any]) -> List[str]:
+        """The finding's location URIs as a prompt lists them: the first
+        ``MAX_LOCATIONS_LISTED`` and then one entry counting the rest.
+
+        A summarized finding carries every instance's location, so one rule hit
+        across a repository could put thousands of paths into one FINDING block;
+        the request then came back as a ValidationException, which the fallback
+        walk reads as a model's refusal and repeats on every chain member.
+        ``max_findings_to_analyze`` bounds the findings, this bounds each one."""
         uris = []
         for loc in finding.get("locations", []):
             phys = loc.get("physicalLocation", {})
@@ -916,6 +930,9 @@ class BedrockPromptBuilder:
             uri = artifact.get("uri")
             if uri:
                 uris.append(uri)
+        if len(uris) > MAX_LOCATIONS_LISTED:
+            omitted = len(uris) - MAX_LOCATIONS_LISTED
+            uris = uris[:MAX_LOCATIONS_LISTED] + [f"and {omitted} more"]
         return uris
 
     @staticmethod

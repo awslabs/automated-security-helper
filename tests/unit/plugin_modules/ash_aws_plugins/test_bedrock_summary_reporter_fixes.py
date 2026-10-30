@@ -259,8 +259,9 @@ def test_the_dependency_check_accepts_a_later_fallback(context, monkeypatch):  #
     reporter = make_reporter(context, enable_fallback_models=True)
 
     assert reporter.validate_plugin_dependencies() is True, reporter.errors
-    # The configured model's check lists once, and the chain's walk once more.
-    assert control.list_inference_profiles.call_count == 2
+    # One listing serves the configured model's check and the chain's walk
+    # (ListingsOnce wraps the client before the first check).
+    assert control.list_inference_profiles.call_count == 1
 
 
 # ---------------------------------------------------------------------------
