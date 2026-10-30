@@ -822,7 +822,13 @@ class PluginBase(UVToolMixin, BaseModel):
     # path hands some of its responses to it and not others (a failure after
     # the child started, a response whose building raised), so _run_subprocess
     # reads this to process a returned response exactly once.
-    _processed_response_ids: set = PrivateAttr(default_factory=set)
+    #: The responses ``_process_command_response`` has folded and no recorder
+    #: has yet retired. Held as the objects themselves, never their ``id()``:
+    #: a mark keyed on an address outlived its dict on the paths that never
+    #: discarded it, and a later response allocated at that address would have
+    #: read as "already processed" and never reached exit_code and errors. A
+    #: held reference keeps the address taken for as long as the mark stands.
+    _processed_responses: list = PrivateAttr(default_factory=list)
 
     # Whether this plugin's configuration was read from its context's resolved
     # configuration (a section ``AshConfig.get_plugin_config`` answered, as a
@@ -1086,6 +1092,21 @@ class PluginBase(UVToolMixin, BaseModel):
         """
         return text
 
+    def _mark_processed(self, response: Any) -> None:
+        """Remember that *response* has been folded into exit_code and errors."""
+        if not self._was_processed(response):
+            self._processed_responses.append(response)
+
+    def _was_processed(self, response: Any) -> bool:
+        """Whether *response* (this object, by identity) is marked processed."""
+        return any(seen is response for seen in self._processed_responses)
+
+    def _forget_processed(self, response: Any) -> None:
+        """Retire *response*'s mark; the recorders call this, so every path does."""
+        self._processed_responses[:] = [
+            seen for seen in self._processed_responses if seen is not response
+        ]
+
     def _process_command_response(self, response: dict) -> None:
         """Accumulate stdout, stderr, and exit code from a subprocess response.
 
@@ -1100,7 +1121,7 @@ class PluginBase(UVToolMixin, BaseModel):
         state set around the call let two concurrent responses on one
         instance erase each other's inputs mid-call.
         """
-        self._processed_response_ids.add(id(response))
+        self._mark_processed(response)
         plugin_inputs: Tuple[str, ...] = ()
         if getattr(self, "use_uv_tool", False):
             inputs_getter = getattr(self, "_uv_run_inputs_for_records", None)
@@ -1316,6 +1337,9 @@ class PluginBase(UVToolMixin, BaseModel):
         )
 
     def _record_spawn_failure(self, response: Dict) -> None:
+        # Recording retires the processed mark (the handler calls this one
+        # directly, outside _record_response).
+        self._forget_processed(response)
         # State before the log, so the grade lands even when the log raises.
         if not isinstance(response, dict) or response.get("spawn_failed") is not True:
             return
@@ -1503,7 +1527,11 @@ class PluginBase(UVToolMixin, BaseModel):
         handler through its second call. Under ``guard``, for the handler, a
         recorder that raises stays inside this call, with its error added to the
         response's reason once.
+
+        Recording a response retires its processed mark: once recorded, the
+        response is done with, and the mark must not outlive it.
         """
+        self._forget_processed(response)
         for name, record in (
             ("timeout", lambda: self._record_timeout(response, timeout)),
             ("spawn_failure", lambda: self._record_spawn_failure(response)),
@@ -1771,9 +1799,8 @@ class PluginBase(UVToolMixin, BaseModel):
                         # exit code and stderr then never reached exit_code and
                         # errors, so a scanner reading those judged such a run
                         # accepted and reported none of the tool's text.
-                        if id(uv_result) not in self._processed_response_ids:
+                        if not self._was_processed(uv_result):
                             self._process_command_response(uv_result)
-                        self._processed_response_ids.discard(id(uv_result))
                         self._record_response(uv_result, timeout, invoked)
                         return uv_result
                     # uv could not run it, and nothing runs in its place: the tool
@@ -1816,7 +1843,6 @@ class PluginBase(UVToolMixin, BaseModel):
             )
 
             self._process_command_response(response)
-            self._processed_response_ids.discard(id(response))
             self._record_response(response, timeout, invoked)
 
             return response
