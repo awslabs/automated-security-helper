@@ -116,6 +116,48 @@ def test_validate_does_not_warn_when_the_operator_supplies_the_option(
     )
 
 
+@pytest.mark.parametrize(
+    "overrides, named",
+    [
+        # Overrides apply in order: the last one naming the place is the value
+        # a scan sees. Last equal to the file's: nothing to warn about.
+        (
+            (
+                "reporters.aws-security-hub.options.max_retries=9",
+                "reporters.aws-security-hub.options.max_retries=3",
+            ),
+            False,
+        ),
+        # Last different from the file's: the file's value is not kept.
+        (
+            (
+                "reporters.aws-security-hub.options.max_retries=3",
+                "reporters.aws-security-hub.options.max_retries=9",
+            ),
+            True,
+        ),
+    ],
+    ids=["last-equal", "last-differs"],
+)
+def test_the_last_override_naming_a_place_decides(
+    tmp_path, monkeypatch, overrides, named
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    config = _repository_config(project, RETRY_IN_THE_FILE)
+    arguments = []
+    for override in overrides:
+        arguments += ["--config-overrides", override]
+
+    result = _run("validate", config, *arguments)
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    assert ("options.max_retries is set in a config file" in flat) is named, flat
+
+
 @pytest.mark.parametrize("command", ["lint", "validate"])
 def test_a_file_outside_the_tree_is_the_operators_and_warns_nothing(
     tmp_path, monkeypatch, command
