@@ -70,6 +70,22 @@ case $max in
     exit 2
     ;;
 esac
+# All digits is not the same as in range for the attempt count either. `test`
+# reads its integer operands as 64-bit values and answers anything larger with
+# "integer expression expected" and status 2. The `[ "$max" -lt 1 ]` guard below
+# is an `if` condition, so that status reads as false and the guard passes; the
+# `while` condition then fails the same way and the loop body never runs. The
+# script printed "All N attempts failed" and exited 1 without having run the
+# command once -- the never-ran-but-reported hazard that guard exists to stop.
+#
+# Count the digits after stripping padding, on a copy, so the later messages
+# still show the value the caller set. Eighteen digits always fit in 63 bits.
+digits=$max
+while [ "${#digits}" -gt 1 ] && [ "${digits#0}" != "$digits" ]; do digits=${digits#0}; done
+if [ "${#digits}" -gt 18 ]; then
+  echo "with-retry: WITH_RETRY_MAX_ATTEMPTS must be at most 18 digits, got '$max'" >&2
+  exit 2
+fi
 case $delay in
   '' | *[!0-9]*)
     echo "with-retry: WITH_RETRY_DELAY must be a whole number of seconds, got '$delay'" >&2
@@ -153,6 +169,13 @@ fi
 # variable still passes one argument, so `$#` is 1 while `$*` is empty, and that
 # is the likelier of the two shapes. `case` for the same reason as above -- this
 # runs in the container build stage before most of the toolchain exists.
+#
+# The arguments are joined with single spaces into one command string, the way
+# `eval` joins its own, and that string is what `bash -c` parses. That is the
+# contract: callers pass one quoted command (the usage at the top of this file),
+# and any further arguments are more words of the same command line. An argument
+# that carries spaces or shell metacharacters is therefore not kept as one word;
+# quote it inside the command string.
 case "$*" in
   *[![:space:]]*) ;;
   *)
@@ -199,7 +222,16 @@ while [ $attempt -le $max ]; do
   # a silent 20-second pause, or a promised retry that never comes.
   if [ "$attempt" -lt "$max" ]; then
     echo "Attempt $attempt/$max failed, retrying in ${delay}s..." >&2
-    sleep $delay; delay=$((delay * 2))
+    sleep $delay
+    # The 86400 ceiling checked above covers the first interval only. Doubling it
+    # on every attempt walks past a day within a few attempts and, with a large
+    # attempt count, past 2^63, where `$(( ))` wraps silently to a negative
+    # number: GNU sleep rejects that, nothing checks its status, and the
+    # remaining attempts run back to back. Cap every interval at the same
+    # ceiling. The doubled value is at most twice the ceiling before it is
+    # capped, so the arithmetic cannot wrap.
+    delay=$((delay * 2))
+    if [ "$delay" -gt 86400 ]; then delay=86400; fi
   fi
   attempt=$((attempt + 1))
 done
