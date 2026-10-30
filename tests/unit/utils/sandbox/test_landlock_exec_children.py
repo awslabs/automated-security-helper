@@ -23,7 +23,7 @@ import os
 import signal
 import sys
 import types
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import pytest
 
@@ -446,21 +446,78 @@ def child_run(monkeypatch):
 
     Returns the recorded calls: the setup's restrict, ``os.execve`` and
     ``os._exit`` in the order the child made them. ``parent`` is the wrapper's pid
-    as the child would have read it before the fork.
+    as the child would have read it before the fork. ``setup`` runs inside the
+    stood-in setup and ``execve`` inside the stood-in exec, each after its call is
+    recorded, so a test can make either raise.
     """
 
-    def run(parent: Optional[int]) -> List[Tuple[str, tuple]]:
+    def run(
+        parent: Optional[int],
+        setup: Optional[Callable[[], None]] = None,
+        execve: Optional[Callable[[], None]] = None,
+    ) -> List[Tuple[str, tuple]]:
         calls: List[Tuple[str, tuple]] = []
-        monkeypatch.setattr(
-            landlock_exec, "_child_setup", lambda restrict: calls.append(("setup", ()))
-        )
-        monkeypatch.setattr(
-            landlock_exec, "os", _Recording(os, {"execve", "_exit"}, calls)
-        )
+
+        def stood_in_setup(restrict) -> None:
+            calls.append(("setup", ()))
+            if setup is not None:
+                setup()
+
+        monkeypatch.setattr(landlock_exec, "_child_setup", stood_in_setup)
+        fake_os = _Recording(os, {"execve", "_exit"}, calls)
+        if execve is not None:
+
+            def stood_in_execve(*args) -> None:
+                calls.append(("execve", args))
+                execve()
+
+            fake_os.execve = stood_in_execve
+        monkeypatch.setattr(landlock_exec, "os", fake_os)
         landlock_exec._run_child(["/bin/true"], lambda: None, parent)
         return calls
 
     return run
+
+
+def _raise(exc: BaseException) -> Callable[[], None]:
+    def raiser() -> None:
+        raise exc
+
+    return raiser
+
+
+def test_an_exec_refused_for_its_environment_still_exits_126(child_run, capsys):
+    """os.execve raises ValueError, not OSError, for an environment with an empty
+    variable name (ASH's env dict holding ""): the child reports the failed exec
+    with the scanner's path and exits 126, never with the interpreter's
+    traceback and exit 1, which scanners use for "findings found"."""
+    calls = child_run(
+        parent=os.getppid(),
+        execve=_raise(ValueError("illegal environment variable name")),
+    )
+
+    assert calls[-1] == ("_exit", (126,))
+    noted = capsys.readouterr().err
+    assert "ash-landlock: exec /bin/true: illegal environment variable name" in noted
+
+
+def test_a_stop_that_lands_during_the_setup_is_reported_as_a_stop(child_run, capsys):
+    """A stop signal forwarded to the child before its exec raises
+    KeyboardInterrupt there: a stop, not a restriction that failed."""
+    calls = child_run(parent=os.getppid(), setup=_raise(KeyboardInterrupt()))
+
+    assert calls[-1] == ("_exit", (126,))
+    noted = capsys.readouterr().err
+    assert "stopped before the scanner started" in noted
+    assert "restricting the scanner" not in noted
+
+
+def test_a_stop_that_lands_before_the_exec_still_exits_126(child_run, capsys):
+    """The same stop landing between the setup and the exec: reported, exit 126."""
+    calls = child_run(parent=os.getppid(), execve=_raise(KeyboardInterrupt()))
+
+    assert calls[-1] == ("_exit", (126,))
+    assert "stopped before the scanner started" in capsys.readouterr().err
 
 
 def test_a_child_whose_wrapper_died_before_the_prctl_exits(child_run, capsys):

@@ -713,6 +713,11 @@ def _child_setup(restrict: Callable[[], None]) -> None:
     restrict()
 
 
+def _note(text: str) -> None:
+    """One ``ash-landlock:`` line on stderr, shown and not obeyed."""
+    sys.stderr.write(_shown(f"ash-landlock: {text}") + "\n")
+
+
 def _run_child(
     command: List[str], restrict: Callable[[], None], parent: Optional[int] = None
 ) -> NoReturn:
@@ -720,39 +725,45 @@ def _run_child(
 
     A failure is reported for what it is: a restriction step that raised an
     OSError says so (it used to be written as a failed exec of the scanner, which
-    had not been attempted), ``fail()``'s SystemExit has written its own line, and
-    any other exception is written with its type and text rather than exiting in
-    silence. ``parent`` is the wrapper's pid as it read it before the fork: the
-    kernel sends the parent-death signal ``_child_setup`` asks for only for a
-    parent that exits after that call, so a child whose parent is no longer
-    ``parent`` once the setup is done was orphaned in the window before it, and
-    would run the scanner with no one to reap what it leaves; it exits instead.
-    (None, for a caller that drives the child's reporting alone, skips the check.)
-    Whatever happened, the child never returns into the wrapper's code; a
-    restriction that failed leaves it here, unrestricted, so it exits 126.
+    had not been attempted), ``fail()``'s SystemExit has written its own line, a
+    stop signal that reached the child before its exec (a forwarded SIGINT, which
+    the child still takes as KeyboardInterrupt) is written as a stop, an exec the
+    kernel or the interpreter refused is written with the scanner's path (OSError,
+    or ValueError for an environment with an empty variable name), and any other
+    exception is written with its type and text rather than exiting in silence.
+    ``parent`` is the wrapper's pid as it read it before the fork: the kernel
+    sends the parent-death signal ``_child_setup`` asks for only for a parent that
+    exits after that call, so a child whose parent is no longer ``parent`` once
+    the setup is done was orphaned in the window before it, and would run the
+    scanner with no one to reap what it leaves; it exits instead. (None, for a
+    caller that drives the child's reporting alone, skips the check.) Whatever
+    happened, the child never returns into the wrapper's code and never exits
+    with the interpreter's traceback and 1 (which scanners use for "findings"):
+    the exit sits in a ``finally``, so an exception none of the clauses caught,
+    the reporting itself failing included, still ends in 126.
     """
     try:
-        _child_setup(restrict)
-    except SystemExit:
-        pass
-    except BaseException as e:  # noqa: BLE001 - the child reports and exits
-        sys.stderr.write(
-            _shown(f"ash-landlock: restricting the scanner: {type(e).__name__}: {e}")
-            + "\n"
-        )
-    else:
-        if parent is not None and os.getppid() != parent:
-            sys.stderr.write(
-                _shown("ash-landlock: the wrapper exited before the scanner started")
-                + "\n"
-            )
+        try:
+            _child_setup(restrict)
+        except SystemExit:
+            pass
+        except KeyboardInterrupt:
+            _note("stopped before the scanner started")
+        except BaseException as e:  # noqa: BLE001 - the child reports and exits
+            _note(f"restricting the scanner: {type(e).__name__}: {e}")
         else:
-            try:
-                os.execve(command[0], command, os.environ)
-            except OSError as e:
-                # The scanner's path, and the error that quotes it.
-                sys.stderr.write(_shown(f"ash-landlock: exec {command[0]}: {e}") + "\n")
-    os._exit(126)
+            if parent is not None and os.getppid() != parent:
+                _note("the wrapper exited before the scanner started")
+            else:
+                try:
+                    os.execve(command[0], command, os.environ)
+                except KeyboardInterrupt:
+                    _note("stopped before the scanner started")
+                except Exception as e:  # noqa: BLE001 - reported, then exit 126
+                    # The scanner's path, and the error that quotes it.
+                    _note(f"exec {command[0]}: {e}")
+    finally:
+        os._exit(126)
 
 
 def _forward_stop(pid: int, signum: int, still_running: Callable[[], bool]) -> None:
