@@ -494,7 +494,10 @@ def test_the_scanner_starts_the_worker_with_the_refusal_unless_it_may_verify(
     env = seen["env"]
     assert isinstance(env, dict), env
     # Always stated, never absent: "0" is the one value the worker reads as
-    # "this scan may verify"; anything else, a missing variable included, refuses.
+    # "this scan may verify", and "1" is the refusal. This test pins only what
+    # the scanner states; how the worker reads the value, and what it does when
+    # the variable is absent, is tested beside the worker (the spawned-pool
+    # controls above drive the real worker under each shape).
     assert env.get(REFUSE_HTTP_ENV) == ("0" if verify else "1"), env.get(
         REFUSE_HTTP_ENV
     )
