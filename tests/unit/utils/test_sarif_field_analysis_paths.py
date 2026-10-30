@@ -111,6 +111,53 @@ def test_an_ancestor_named_scanners_does_not_rename_every_file(tmp_path, monkeyp
     assert set(fields["runs[].results[].kind"]) == {"bandit"}
 
 
+def test_a_scanners_directory_inside_a_scanners_output_does_not_rename_it(
+    tmp_path, monkeypatch
+):
+    """Below the searched directory the scanner is the child of the FIRST
+    ``scanners`` component; a deeper one belongs to that scanner's own output.
+    The last-component rule attributed this file to ``mirror``."""
+    monkeypatch.setenv("COLUMNS", "200")
+    sarif_dir = tmp_path / "ash_output"
+    (sarif_dir / "reports").mkdir(parents=True)
+    nested = sarif_dir / "scanners" / "bandit" / "scanners" / "mirror"
+    nested.mkdir(parents=True)
+    (sarif_dir / "reports" / "ash.sarif").write_text(_sarif(), encoding="utf-8")
+    (nested / "r.sarif").write_text(_sarif(kind="fail"), encoding="utf-8")
+
+    fields = _run(sarif_dir, tmp_path / "out")
+
+    assert set(fields["runs[].results[].kind"]) == {"bandit"}
+
+
+def test_both_failure_reasons_are_printed_before_the_one_exit(
+    tmp_path, monkeypatch, capsys
+):
+    """A run with a field missing from the aggregate AND a file it could not read
+    exited on the first warning and never said that part of its input was not
+    analyzed at all."""
+    monkeypatch.setenv("COLUMNS", "200")
+    sarif_dir = tmp_path / "ash_output"
+    (sarif_dir / "reports").mkdir(parents=True)
+    (sarif_dir / "scanners" / "bandit").mkdir(parents=True)
+    (sarif_dir / "scanners" / "semgrep").mkdir(parents=True)
+    (sarif_dir / "reports" / "ash.sarif").write_text(_sarif(), encoding="utf-8")
+    (sarif_dir / "scanners" / "bandit" / "bandit.sarif").write_text(
+        _sarif(kind="fail"), encoding="utf-8"
+    )
+    (sarif_dir / "scanners" / "semgrep" / "semgrep.sarif").write_text(
+        "{not json", encoding="utf-8"
+    )
+
+    with pytest.raises(typer.Exit) as raised:
+        analyze_sarif_fields(sarif_dir=str(sarif_dir), output_dir=str(tmp_path / "out"))
+
+    out = capsys.readouterr().out
+    assert raised.value.exit_code == 1
+    assert "unexpectedly missing from the aggregate report" in out
+    assert "1 of 3 SARIF file(s) could not be read" in out
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges there")
 def test_a_sarif_file_that_is_a_link_is_not_followed(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("COLUMNS", "200")

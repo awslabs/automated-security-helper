@@ -290,10 +290,16 @@ def analyze_sarif_fields(
         for file_path in sarif_files:
             console.print(f"Analyzing [cyan]{escape_markup(file_path)}[/cyan]")
 
-            # Get scanner name from the file's path below the searched directory
-            scanner_name = get_scanner_name_from_path(
-                os.path.join(*_relative_parts(file_path))
-            )
+            # Get scanner name from the file's path below the searched directory.
+            # Below that directory ASH's layout is scanners/<scanner>/..., so the
+            # scanner is the component right after the FIRST "scanners": anything
+            # deeper is the scanner's own output, and a "scanners" directory in
+            # it (a scanner that mirrors a scanned tree) must not rename the file.
+            relative_parts = _relative_parts(file_path)
+            if len(relative_parts) > 1 and relative_parts[0] == "scanners":
+                scanner_name = relative_parts[1]
+            else:
+                scanner_name = get_scanner_name_from_path(os.path.join(*relative_parts))
 
             try:
                 # Load the SARIF file. Read under the guard, as every read of a
@@ -607,12 +613,13 @@ def analyze_sarif_fields(
             "analyzed, so no field was checked against the aggregate[/bold yellow]"
         )
 
-    # Exit with non-zero code if there are unexpected missing fields
+    # Both reasons to fail are printed before the one exit: a run with missing
+    # fields AND unreadable files used to exit on the first and never say that
+    # part of its input was not read at all.
     if has_unexpected_missing_fields:
         console.print(
             "[bold red]WARNING: Some fields are unexpectedly missing from the aggregate report[/bold red]"
         )
-        raise typer.Exit(code=1)
 
     # A file that could not be read is not part of the analysis above, so its
     # fields are neither counted nor compared; the outputs are written, and the
@@ -622,6 +629,8 @@ def analyze_sarif_fields(
             f"[bold red]WARNING: {len(failed_files)} of {len(sarif_files)} SARIF "
             "file(s) could not be read and are not part of this analysis[/bold red]"
         )
+
+    if has_unexpected_missing_fields or failed_files:
         raise typer.Exit(code=1)
 
     return results_dict
