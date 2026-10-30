@@ -135,8 +135,14 @@ class TestAnIncompleteBaselineRemovesOnlyWhatThePhaseWrote:
         directory.mkdir()
         (directory / "a.txt").write_text("a")
 
+        original_rglob = Path.rglob
+
         def rglob_raising(self: Path, pattern, *args, **kwargs):
-            raise OSError(5, "Input/output error", str(self))
+            # Only the directory under test: the test runner's own fixtures
+            # walk other directories with rglob at teardown.
+            if self == directory:
+                raise OSError(5, "Input/output error", str(self))
+            return original_rglob(self, pattern, *args, **kwargs)
 
         monkeypatch.setattr(Path, "rglob", rglob_raising)
 

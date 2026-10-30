@@ -281,8 +281,11 @@ class TestMetadataAndThresholds:
         )
         orchestrator = ASHScanOrchestrator(source_dir=source, output_dir=output)
 
-        orchestrator._restrict_severity_threshold(config, "HIGH")
+        # LOW gates more findings than the default global MEDIUM, so it is the
+        # stricter one and becomes the run's effective threshold; a request of
+        # HIGH would be looser and leave the configured MEDIUM standing.
+        orchestrator._restrict_severity_threshold(config, "LOW")
 
         options = (config.scanners.model_extra or {})["custom-scanner"]["options"]
         # Red at the base: the empty string was skipped as unset and stayed.
-        assert options["severity_threshold"] == "HIGH"
+        assert options["severity_threshold"] == "LOW"

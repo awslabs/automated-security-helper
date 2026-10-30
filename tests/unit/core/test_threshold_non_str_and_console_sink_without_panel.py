@@ -54,24 +54,30 @@ class TestANonStringScannerThresholdIsLeftAlone:
         )
         orchestrator = ASHScanOrchestrator(source_dir=source, output_dir=output)
 
-        # Red at the previous tip: the value reached stricter_of.
-        orchestrator._restrict_severity_threshold(config, "HIGH")
+        # Red at the previous tip: the value reached stricter_of. LOW is
+        # stricter than the default global MEDIUM, so a string threshold here
+        # would be tightened (the control below); this one is left alone.
+        orchestrator._restrict_severity_threshold(config, "LOW")
 
         options = (config.scanners.model_extra or {})["custom-scanner"]["options"]
         assert options["severity_threshold"] == own
 
     def test_a_string_threshold_is_still_tightened(self, tmp_path):
-        """The control: a ladder value below the request is raised to it."""
+        """The control: a looser ladder value is tightened to the request.
+
+        On the ladder a LOWER threshold gates MORE findings, so LOW is the
+        stricter request and HIGH the looser configured value.
+        """
         source, output = _dirs(tmp_path)
         config = AshConfig(
-            scanners={"custom-scanner": {"options": {"severity_threshold": "LOW"}}}
+            scanners={"custom-scanner": {"options": {"severity_threshold": "HIGH"}}}
         )
         orchestrator = ASHScanOrchestrator(source_dir=source, output_dir=output)
 
-        orchestrator._restrict_severity_threshold(config, "HIGH")
+        orchestrator._restrict_severity_threshold(config, "LOW")
 
         options = (config.scanners.model_extra or {})["custom-scanner"]["options"]
-        assert options["severity_threshold"] == "HIGH"
+        assert options["severity_threshold"] == "LOW"
 
 
 def test_the_console_sink_is_made_when_no_panel_handler_is_left(restore_handlers):

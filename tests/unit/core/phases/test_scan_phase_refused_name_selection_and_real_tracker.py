@@ -248,11 +248,19 @@ class TestTheFixesHoldAgainstTheRealTracker:
         refused = results.scanner_results["FooScanner"]
         assert refused.status == ScannerStatus.ERROR
         assert refused.excluded is False
+        # The other scanner ran: its scan() was called, the real tracker holds
+        # its state, and the completeness pass counted it (the phase's row for
+        # an executed scanner is not written into scanner_results here).
         bandit.return_value.scan.assert_called()
-        assert "bandit" in results.scanner_results
-        assert results.scanner_results["bandit"].status != ScannerStatus.SKIPPED
         assert "bandit" in phase.validation_manager.scanner_states
         assert "FooScanner" not in phase.validation_manager.scanner_states
+        completeness = [
+            checkpoint
+            for checkpoint in results.validation_checkpoints
+            if isinstance(checkpoint, dict)
+            and checkpoint.get("checkpoint_name") == "result_completeness"
+        ]
+        assert completeness and completeness[-1]["actual_scanners"] == ["bandit"]
 
     def test_an_excluded_refused_scanner_is_skipped_with_the_real_tracker(
         self, mock_plugin_context, mock_progress_display

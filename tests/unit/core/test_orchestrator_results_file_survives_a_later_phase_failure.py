@@ -30,6 +30,7 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core import orchestrator as orchestrator_module
 from automated_security_helper.core.cancellation import ScanCancelled
+from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.core.phases.scan_phase import (
     SCAN_PHASE_COMPLETION_CHECKPOINT,
@@ -104,7 +105,9 @@ def test_a_report_phase_failure_leaves_the_scan_results_file(tmp_path, monkeypat
         RuntimeError("reporter raised"),
     )
 
-    with pytest.raises(RuntimeError, match="reporter raised"):
+    # _execute_scan wraps a phase's exception as ASHValidationError("Scan
+    # execution failed: ..."); the orchestrator's own callers read that type.
+    with pytest.raises(ASHValidationError, match="reporter raised"):
         orchestrator._execute_scan(phases=["scan", "report"])
 
     # Red with the single write after the try/except: the re-raise skipped it.
@@ -116,7 +119,7 @@ def test_a_convert_phase_failure_writes_no_results_file(tmp_path, monkeypatch):
         tmp_path, monkeypatch, _nothing_ran, RuntimeError("converter raised")
     )
 
-    with pytest.raises(RuntimeError, match="converter raised"):
+    with pytest.raises(ASHValidationError, match="converter raised"):
         orchestrator._execute_scan(phases=["convert", "scan", "report"])
 
     # Red at the previous tip: the engine's pre-scan, empty model was written.
@@ -128,7 +131,7 @@ def test_a_scan_phase_that_raised_midway_writes_no_results_file(tmp_path, monkey
         tmp_path, monkeypatch, _scan_phase_raised_midway, RuntimeError("scanner raised")
     )
 
-    with pytest.raises(RuntimeError, match="scanner raised"):
+    with pytest.raises(ASHValidationError, match="scanner raised"):
         orchestrator._execute_scan(phases=["scan", "report"])
 
     # Red at the previous tip: the partial model was written.
@@ -158,7 +161,7 @@ def test_a_report_over_existing_results_writes_nothing_on_failure(
         RuntimeError("reporter raised"),
     )
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ASHValidationError, match="reporter raised"):
         orchestrator._execute_scan(phases=["report"])
 
     assert not (orchestrator.output_dir / RESULTS_FILE).exists()
