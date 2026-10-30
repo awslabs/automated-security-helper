@@ -20,9 +20,13 @@
 * The shortfall record said "0 finding(s) could not be converted" and "The
   array is incomplete" for an array that held every finding and only carried
   degraded records; it names the counts that are not zero.
+* The shortfall record's uid was one fixed string for every scan and
+  repository, so a SIEM deduplicating on it merged unrelated projects' records;
+  it is derived from the scanned project's name.
 """
 
 import json
+import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -274,6 +278,38 @@ class TestShortfalls:
         assert "could not be converted" not in shortfall["finding_info"]["title"]
         assert "incomplete" not in shortfall["status_detail"].lower()
         assert shortfall["status"] == "Degraded"
+
+    @staticmethod
+    def _shortfall_uid_for(reporter, monkeypatch, project_name: str) -> str:
+        original = OcsfReporter._create_vulnerability_finding
+
+        def flaky(self, result, metadata, current_time_ms, shared_id=None):
+            if result.ruleId == "BROKEN":
+                raise RuntimeError("cannot build")
+            return original(self, result, metadata, current_time_ms, shared_id)
+
+        monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
+        model = _model(
+            Result(ruleId="BROKEN", level=Level.error, message=Message(text="x")),
+            Result(ruleId="FINE", level=Level.error, message=Message(text="y")),
+        )
+        model.metadata.project_name = project_name
+        payload = json.loads(reporter.report(model))
+        shortfall = payload[-1]
+        assert CONVERSION_SHORTFALL_LABEL in shortfall["metadata"]["labels"]
+        return shortfall["finding_info"]["uid"]
+
+    def test_the_shortfall_uid_is_one_per_project(self, reporter, monkeypatch):
+        """A fixed uid for every scan merged unrelated projects' records in a
+        SIEM that deduplicates on it, and a clean run of one never closed it."""
+        alpha = self._shortfall_uid_for(reporter, monkeypatch, "alpha")
+        alpha_again = self._shortfall_uid_for(reporter, monkeypatch, "alpha")
+        beta = self._shortfall_uid_for(reporter, monkeypatch, "beta")
+
+        assert alpha == alpha_again
+        assert alpha != beta
+        uuid.UUID(alpha)
+        uuid.UUID(beta)
 
     def test_a_shortfall_with_both_counts_names_both(self, reporter, metadata):
         record = reporter._create_shortfall_finding(2, 1, metadata, _now_ms())

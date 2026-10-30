@@ -70,8 +70,13 @@ DEGRADED_FINDING_LABEL = "ash_row_type:degraded_finding"
 #: file alone learns it is incomplete.
 CONVERSION_SHORTFALL_LABEL = "ash_row_type:conversion_shortfall"
 
-#: The ``finding_info.uid`` of the shortfall record, deterministic so a SIEM
-#: deduplicates it across runs of the same scan rather than accumulating one.
+#: The fixed part of the shortfall record's identity. Its ``finding_info.uid``
+#: is derived (:func:`_finding_uid`) from this and the scanned project's name,
+#: so a SIEM deduplicates the record across runs of one project and keeps two
+#: projects' records apart. The uid was this string itself for every scan and
+#: repository, so a SIEM that deduplicates on the uid merged unrelated
+#: repositories' shortfall records into one, which a later clean run of any of
+#: them could never close.
 CONVERSION_SHORTFALL_UID = "ash-ocsf-conversion-shortfall"
 
 #: Splits a location uri on either separator: a Windows scanner can write a
@@ -181,6 +186,25 @@ def _identity_part(value: Any) -> str:
         .replace("\\", "\\\\")
         .replace(_IDENTITY_SEPARATOR, "\\" + _IDENTITY_SEPARATOR)
     )
+
+
+def _scan_identity(model: Any) -> str:
+    """The name of the scanned project: the report metadata's, else the
+    configuration's, else "". Every read is guarded; a model this cannot read
+    still gets a shortfall record, one shared by every such scan."""
+    for holder in (
+        getattr(model, "metadata", None),
+        getattr(model, "ash_config", None),
+    ):
+        name = getattr(holder, "project_name", None)
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return ""
+
+
+def _shortfall_uid(scan_identity: str) -> str:
+    """The shortfall record's uid for the project *scan_identity* names."""
+    return _finding_uid(f"{scan_identity}|{CONVERSION_SHORTFALL_UID}")
 
 
 def _identity_key(result: Any, rule_id: str, message_text: Optional[str] = None) -> str:
@@ -966,6 +990,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         degraded: int,
         metadata: Metadata,
         current_time_ms: int,
+        scan_identity: str = "",
     ) -> Optional[Dict[str, Any]]:
         """The shortfall record as the array carries it, or None when it could
         not be built or dumped.
@@ -974,11 +999,16 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         rejected used to raise into that guard, whose answer is the error
         envelope, so one bad note about missing findings cost every finding
         that was present. The findings are kept; the loss of the note is logged
-        with the counts it would have carried.
+        with the counts it would have carried. *scan_identity* is passed on to
+        the builder (:func:`_scan_identity`).
         """
         try:
             return self._create_shortfall_finding(
-                missing, degraded, metadata, current_time_ms
+                missing,
+                degraded,
+                metadata,
+                current_time_ms,
+                scan_identity=scan_identity,
             ).model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
         except Exception as e:  # noqa: BLE001 -- the findings outrank the note
             ASH_LOGGER.error(
@@ -994,12 +1024,16 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         degraded: int,
         metadata: Metadata,
         current_time_ms: int,
+        scan_identity: str = "",
     ) -> VulnerabilityFinding:
         """One record standing for the findings this array does not carry whole.
 
         *missing* results were converted by neither the builder nor its fallback,
         or failed to serialize, and are absent; *degraded* records are present
-        but built by the fallback (:data:`DEGRADED_FINDING_LABEL`). Without this
+        but built by the fallback (:data:`DEGRADED_FINDING_LABEL`).
+        *scan_identity* names the scanned project (:func:`_scan_identity`), and
+        the record's uid is derived from it, so one project's record is the
+        same across its runs and distinct from another's. Without this
         record the array was shorter than the scan's findings and nothing in the
         file said so; the log named each one, and nothing downstream reads the
         log. Shaped like a skipped-project record: ``status_id`` 99 with
@@ -1052,7 +1086,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             time=current_time_ms,
             metadata=_metadata_with_labels(metadata, CONVERSION_SHORTFALL_LABEL),
             finding_info=FindingInfo(
-                uid=CONVERSION_SHORTFALL_UID,
+                uid=_shortfall_uid(scan_identity),
                 title=title,
                 desc=detail,
             ),
@@ -1359,7 +1393,11 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             shortfall = None
             if missing or degraded_findings_count:
                 shortfall = self._shortfall_record(
-                    missing, degraded_findings_count, metadata, current_time_ms
+                    missing,
+                    degraded_findings_count,
+                    metadata,
+                    current_time_ms,
+                    scan_identity=_scan_identity(model),
                 )
                 if shortfall is not None:
                     findings_data.append(shortfall)

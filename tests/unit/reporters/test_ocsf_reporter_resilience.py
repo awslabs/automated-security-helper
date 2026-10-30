@@ -21,9 +21,9 @@ import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
-    CONVERSION_SHORTFALL_UID,
     OcsfReporter,
     _metadata_for_project,
+    _shortfall_uid,
 )
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     FindingInfo,
@@ -631,9 +631,9 @@ class TestReportDegradation:
         converted = [f for f in findings if f["vulnerabilities"]]
         assert [f["vulnerabilities"][0]["title"] for f in converted] == ["GOOD"]
         shortfalls = [f for f in findings if not f["vulnerabilities"]]
-        assert [f["finding_info"]["uid"] for f in shortfalls] == [
-            CONVERSION_SHORTFALL_UID
-        ]
+        # The uid is derived from the scanned project's name; this model names
+        # none, so it is the unnamed scan's.
+        assert [f["finding_info"]["uid"] for f in shortfalls] == [_shortfall_uid("")]
 
     def test_when_every_finding_fails_to_serialize_an_error_response_is_returned(
         self, reporter, monkeypatch
