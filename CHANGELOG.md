@@ -5548,10 +5548,11 @@
   log line to show for it; a value that names a copy only in a project the run skips
   is logged once and not refused. A policy an MCP client delivered is refused by the
   entry's position, its value withheld.
-- **`download_file` lands what it downloads at mode `0o644`, not `0o755`.** The
-  public helper used to make every downloaded file executable. What it downloads is
-  data (a rules bundle, a release archive), so a plugin that calls it to fetch a
-  file it then runs now has to set the execute bit itself, as
+- **`download_file` lands what it downloads at mode `0o644`, not `0o755`, and takes
+  `mode=`.** The public helper used to make every downloaded file executable. What
+  it downloads is data (a rules bundle, a release archive), so the default is now
+  least privilege; a plugin that calls it to fetch a program it then runs passes
+  `mode=0o755`, and the bit is set on the staged file before it lands, as
   `install_binary_from_url` does for the binaries it installs.
 - **What an archive does to itself is an input error; what the run does is a tool
   error, and only the first can be accepted.** The archive converter graded every

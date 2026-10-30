@@ -330,7 +330,7 @@ def download_file(
     rename_to: Optional[str] = None,
     expected_sha256: Optional[str] = None,
     *,
-    mode: int = 0o755,
+    mode: int = 0o644,
 ) -> Path:
     """Download a file from a URL to the specified destination.
 
@@ -342,11 +342,12 @@ def download_file(
             while the bytes are still in the temporary file, so a mismatch leaves
             nothing at the destination. When omitted, the download is unverified
             and says so in the log rather than passing silently.
-        mode: The mode the landed file gets on POSIX. ``0o755`` by default, the
-            mode every download of this helper has always landed with, so a
-            plugin that downloads a binary through it keeps running it; a caller
-            that knows it fetches data (an archive, a rules bundle) passes
-            ``0o644``.
+        mode: The mode the landed file gets on POSIX: ``0o644`` by default, since
+            what this helper fetches is data (a rules bundle, a release archive).
+            A caller that downloads a program it will run passes ``0o755``; the
+            bit is then set on the staged file's own descriptor before the rename,
+            never by a later chmod of the landed path. Every download used to land
+            executable whatever it was; the data default is least privilege.
 
     Returns:
         Path to the downloaded file
@@ -366,7 +367,7 @@ def _download_verified(
     rename_to: Optional[str] = None,
     expected_sha256: Optional[str] = None,
     *,
-    mode: int = 0o755,
+    mode: int = 0o644,
 ) -> "tuple[Path, str]":
     """``download_file``, and also the digest of the bytes that landed.
 
