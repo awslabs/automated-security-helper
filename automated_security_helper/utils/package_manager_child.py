@@ -564,8 +564,9 @@ def package_manager_child(
         parent: Where a private directory may go that a sandboxed tool can see (the
             scanner's results directory).
         scan_root: The scanned tree. yarn's unsandboxed copy is made outside it
-            (``_yarn_copy_parent``); when no directory outside it can hold the
-            copy, yarn falls back to the sandbox's flags.
+            (``_yarn_copy_parent``), or outside the package directory when it is
+            not given; when no directory outside can hold the copy, yarn falls
+            back to the sandbox's flags.
         skip: Directories not to copy manifests from (ASH's output directory).
         roots: The trees a copied file has to resolve inside (``input_refusal``);
             ``scan_root`` when not given, else the package directory.
@@ -590,7 +591,14 @@ def package_manager_child(
         env["YARN_RC_FILENAME"] = no_yarnrc_name()
     copy_parent: Optional[Path] = None
     if binary == "yarn" and not sandboxed:
-        copy_parent = _yarn_copy_parent(Path(parent), scan_root)
+        # The tree the copy has to leave is the scanned one, else the package
+        # itself (the same fallback ``roots`` takes): with no scan_root the
+        # output directory was accepted wherever it was, so a results directory
+        # under the package put the copy inside it, and yarn read the
+        # package's own .npmrc and .yarnrc as parent-directory files.
+        copy_parent = _yarn_copy_parent(
+            Path(parent), Path(scan_root) if scan_root is not None else package_dir
+        )
     in_place_yarn = binary == "yarn" and (sandboxed or copy_parent is None)
     if in_place_yarn:
         # Every settings file is dropped: the operator's are not visible under a

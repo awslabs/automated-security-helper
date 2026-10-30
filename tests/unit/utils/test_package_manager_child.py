@@ -144,6 +144,30 @@ class TestSkipHoldingThePackage:
         ]
 
 
+class TestWhereYarnsCopyGoes:
+    def test_with_no_scan_root_the_copy_leaves_the_package(self, tmp_path, monkeypatch):
+        """A caller that passes only ``parent`` (a results directory under the
+        package) and no scan_root got the copy under the package, where yarn
+        read the package's own .npmrc and .yarnrc as parent-directory files.
+        The package directory is the tree the copy has to leave, as it is the
+        root the copied files have to resolve inside."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        parent = package / ".ash" / "ash_output" / "scanners" / "npm-audit"
+        parent.mkdir(parents=True)
+        cache_home = tmp_path / "cache-home"
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+
+        with package_manager_child(
+            "yarn", package, parent=parent, yarn_major=1
+        ) as child:
+            cwd = child.cwd
+
+        assert not cwd.is_relative_to(package), cwd
+        assert cwd.is_relative_to(cache_home / "ash"), cwd
+        assert child.leading_args == ()
+
+
 class TestLinkedDirectories:
     def test_members_below_a_linked_directory_inside_the_tree_are_listed(
         self, tmp_path
