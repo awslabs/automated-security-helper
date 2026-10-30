@@ -94,6 +94,40 @@ def test_an_empty_runs_list_adopts_the_incoming_run_once():
     assert _rule_ids(aggregated) == ["R-1"]
     assert len(aggregated.runs[0].invocations) == 1
 
+    # The adopted run is a copy: editing it leaves the incoming report as it was.
+    adopted = aggregated.runs[0]
+    adopted.tool.driver.name = "renamed"
+    adopted.results[0].ruleId = "renamed"
+    adopted.invocations[0].executionSuccessful = False
+    assert incoming.runs[0].tool.driver.name == "recorder"
+    assert incoming.runs[0].results[0].ruleId == "R-1"
+    assert incoming.runs[0].invocations[0].executionSuccessful is True
+
+
+def test_an_empty_runs_list_given_a_two_run_report_adopts_one_and_folds_the_other():
+    """Where the "added twice" bug would come back: the first run is adopted
+    whole and the loop must not fold it again, while the second run is folded
+    into it."""
+    aggregated = SarifReport(runs=[])
+    incoming = SarifReport(
+        runs=[
+            _run("first-tool", [_finding("A-1")], [{"executionSuccessful": True}]),
+            _run(
+                "second-tool",
+                [_finding("B-1"), _finding("B-2")],
+                [{"executionSuccessful": True}],
+            ),
+        ]
+    )
+
+    aggregated.merge_sarif_report(incoming)
+
+    assert len(aggregated.runs) == 1
+    assert _rule_ids(aggregated) == ["A-1", "B-1", "B-2"]
+    assert len(aggregated.runs[0].invocations) == 2
+    assert aggregated.runs[0].tool.driver.name == "first-tool"
+    assert [ext.name for ext in aggregated.runs[0].tool.extensions] == ["second-tool"]
+
 
 def test_the_same_tool_merged_twice_into_an_empty_aggregate_is_listed_once():
     # The first merge adopts the run, so the tool becomes runs[0].tool.driver; the
