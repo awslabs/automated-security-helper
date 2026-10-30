@@ -511,14 +511,27 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     def _probe_npm_version(self) -> None:
         """Record npm's version from ``npm --version``, trimmed; unknown when
-        it printed nothing. See ``validate_plugin_dependencies``."""
+        it printed nothing. See ``validate_plugin_dependencies``.
+
+        The probe directory holds an empty ``package.json``: npm 7+ loads its
+        configuration before it answers ``--version`` and walks up from the
+        working directory to the nearest directory with a ``package.json`` or
+        ``node_modules`` to find the project whose ``.npmrc`` it reads. The
+        results directory sits under the scanned root by default, so an empty
+        probe directory still read the repository's ``.npmrc``; one with a
+        manifest of its own is the project, and the walk stops there.
+        """
         probe_dir: str | None = None
         try:
             results_dir = getattr(self, "results_dir", None)
             if results_dir is not None:
                 Path(results_dir).mkdir(parents=True, exist_ok=True)
                 probe_dir = tempfile.mkdtemp(prefix="ash-npm-version-", dir=results_dir)
+                with open_for_write(Path(probe_dir) / "package.json") as handle:
+                    handle.write("{}\n")
         except OSError:
+            if probe_dir is not None:
+                shutil.rmtree(probe_dir, ignore_errors=True)
             probe_dir = None
         try:
             response = self._run_subprocess(

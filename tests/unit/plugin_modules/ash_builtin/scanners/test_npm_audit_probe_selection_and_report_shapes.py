@@ -220,6 +220,32 @@ class TestTheVersionProbe:
         assert not Path(cwd).is_relative_to(context.source_dir), cwd
         assert not Path(cwd).exists(), "the probe directory is removed after the probe"
 
+    def test_the_probe_directory_is_a_project_of_its_own(self, context, monkeypatch):
+        """npm 7+ walks up from its working directory to the nearest package.json
+        to find the project whose .npmrc it reads before answering --version.
+        The results directory sits under the scanned root by default, so an
+        empty probe directory still read the repository's .npmrc; a manifest
+        in the probe directory stops the walk there."""
+        (context.source_dir / ".npmrc").write_text(
+            "//registry.example/:_authToken=${NPM_TOKEN}\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(
+            npm_audit_scanner, "find_executable", lambda name: f"/usr/bin/{name}"
+        )
+        scanner = NpmAuditScanner(context=context, config=NpmAuditScannerConfig())
+        seen = {}
+
+        def fake_run(self, command, **kwargs):
+            manifest = Path(kwargs["cwd"]) / "package.json"
+            seen["manifest"] = manifest.read_text() if manifest.exists() else None
+            return {"stdout": "10.9.4\n", "returncode": 0}
+
+        monkeypatch.setattr(NpmAuditScanner, "_run_subprocess", fake_run)
+
+        assert scanner.validate_plugin_dependencies() is True
+        assert seen["manifest"] is not None, "the probe directory held no manifest"
+        assert json.loads(seen["manifest"]) == {}
+
 
 class TestWhichPackageManagersTheCheckNeeds:
     def _check(self, context, monkeypatch, present):
