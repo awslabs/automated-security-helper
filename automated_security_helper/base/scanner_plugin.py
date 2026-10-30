@@ -1483,7 +1483,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 scanned_files=scan_set_of(context),
                 workspace_output_dir=getattr(context, "workspace_output_dir", None),
             )
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError) as unreadable:
+            # Best effort, so the scan goes on without the exclusions -- but not
+            # silently: a TypeError here is a programming error, and an empty
+            # answer would let the tool read ASH's own output back in with
+            # nothing in the log to say so. Only the error's type is logged; its
+            # text can quote a path.
+            self._plugin_log(
+                "ASH's output directories could not be worked out for this scan "
+                f"({type(unreadable).__name__}); the tool is not told to skip them.",
+                level=logging.WARNING,
+            )
             return []
         return output_dirs_inside(dirs, target)
 
