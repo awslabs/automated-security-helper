@@ -72,7 +72,7 @@ def test_a_project_without_its_own_config_is_refused_when_the_operators_file_cha
         operator_config_digest="recorded-before-the-rewrite",
     )
 
-    with pytest.raises(ASHConfigValidationError, match="changed after"):
+    with pytest.raises(ASHConfigValidationError, match="does not hold the content"):
         _check_the_plans_operator_config(project, _settings(tmp_path, operator))
 
 
@@ -109,7 +109,7 @@ def test_a_project_with_its_own_config_is_still_refused_on_a_changed_operator_fi
         operator_config_digest="recorded-before-the-rewrite",
     )
 
-    with pytest.raises(ASHConfigValidationError, match="changed after"):
+    with pytest.raises(ASHConfigValidationError, match="does not hold the content"):
         _check_the_plans_operator_config(project, _settings(tmp_path, operator))
 
 

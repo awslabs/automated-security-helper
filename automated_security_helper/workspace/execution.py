@@ -1840,15 +1840,20 @@ def _check_the_plans_operator_config(
     # that field is None for it, and a rewrite of the operator's file between
     # plan and scan went undetected for every project without a config of its
     # own. The layering check above has already settled which file this is.
+    # The plan records the digest, not the path, for the second kind, so a
+    # mismatch here is "not the content the plan was made from", whether the
+    # same file was rewritten or another file now holds the operator's role;
+    # the message says that and names the remedy both cases share.
     if (
         operator is not None
         and project.operator_config_digest is not None
         and operator_config_digest(operator) != project.operator_config_digest
     ):
         raise ASHConfigValidationError(
-            f"The operator config {operator.as_posix()} changed after "
-            f"project '{project.key}' was planned, so the scan would not run the "
-            "plan. Resolve the workspace again."
+            f"The operator config {operator.as_posix()} does not hold the "
+            f"content project '{project.key}' was planned with (its digest "
+            "differs from the plan's), so the scan would not run the plan. "
+            "Resolve the workspace again with the same --config as the scan."
         )
 
 
