@@ -312,3 +312,30 @@ def test_a_file_named_with_an_escape_is_read_as_written(tmp_path):
     assert _matched_path_text("fixtures/a%20b.json", prefix) == "fixtures/a b.json"
     # Neither names a file: decoded, as before.
     assert _matched_path_text("fixtures/c%2Fd.json", prefix) == "fixtures/c/d.json"
+
+
+def test_the_written_spelling_is_probed_only_under_the_scan_root(tmp_path):
+    """The existence probe behind the as-written reading is confined to the scan
+    root: a spelling that climbs out of it, or is absolute, is never probed (and
+    so decodes as a URI), while one that folds back inside it is."""
+    (tmp_path / "fixtures").mkdir()
+    (tmp_path / "fixtures" / "a%2Fb.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    root = f"{tmp_path.as_posix()}/"
+    sub_root = f"{tmp_path.as_posix()}/sub/"
+
+    # Climbing out of the root reaches the file on disk, but is not probed.
+    assert (
+        _matched_path_text("../fixtures/a%2Fb.json", sub_root) == "../fixtures/a/b.json"
+    )
+    # An absolute spelling is not probed either, wherever it points.
+    assert (
+        _matched_path_text(f"{root}fixtures/a%2Fb.json", root)
+        == f"{root}fixtures/a/b.json"
+    )
+    # A spelling that folds back inside the root is probed and kept as written.
+    assert _matched_path_text("fixtures/./a%2Fb.json", root) == "fixtures/a%2Fb.json"
+    assert (
+        _matched_path_text("sub/../fixtures/a%2Fb.json", root)
+        == "sub/../fixtures/a%2Fb.json"
+    )

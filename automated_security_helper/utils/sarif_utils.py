@@ -836,19 +836,32 @@ def _only_the_spelling_as_written_names_a_file(
 ) -> bool:
     """Whether *written* names a file under the scan root that *decoded* does not.
 
-    Both spellings are looked up where the URI points: as given when absolute,
-    under ``source_dir_prefix`` otherwise. ``os.path.exists`` answers False for a
-    name the file system refuses (a NUL, an over-long component), so an odd URI
-    never raises here and falls back to the decoded reading.
+    Each spelling is probed only where it lies lexically under
+    ``source_dir_prefix``: a relative spelling is folded (``a/../b`` is ``b``)
+    and joined under the prefix. One that climbs out of the root (``../x``), is
+    absolute, or names a drive or a ``//host/share`` is not probed at all and
+    reads False, so the stat never touches a path outside the scan root (a UNC
+    spelling would otherwise reach that host). ``os.path.exists`` answers False
+    for a name the file system refuses (a NUL, an over-long component), so an
+    odd URI never raises here and falls back to the decoded reading.
     """
-    if decoded == written:
+    if decoded == written or not source_dir_prefix:
         return False
 
     def present(text: str) -> bool:
-        candidate = (
-            text if os.path.isabs(text) else os.path.join(source_dir_prefix, text)
-        )
-        return os.path.exists(candidate)
+        import posixpath
+
+        if (
+            not text
+            or os.path.isabs(text)
+            or _DRIVE_PREFIX.match(text)
+            or text.startswith(("/", "\\"))
+        ):
+            return False
+        folded = posixpath.normpath(text)
+        if folded == ".." or folded.startswith(("../", "/")):
+            return False
+        return os.path.exists(os.path.join(source_dir_prefix, folded))
 
     return present(written) and not present(decoded)
 
