@@ -114,8 +114,15 @@ Failure modes and known limitations
   built-in ``>=1.7.0,<2.0.0`` really does constrain a project that never
   mentioned bandit, so a sibling pinning ``>=2.0.0`` really is a conflict. Since
   the default is identical for every project it can never manufacture one.
-* Pins are compared pairwise. With three projects the message names the pairs
-  that clash, not a minimal explanation of the whole clash.
+* Pins are compared pairwise first, then all of a scanner's distinct pins
+  together (``scanner_pins.compare_pin_set``), since three pins can be
+  satisfiable two at a time and jointly not. The message names the pairs that
+  clash, or the whole set, not a minimal explanation of the clash.
+* Only an enabled scanner's pin is recorded and compared. A disabled scanner's
+  tool does not run, so its pin cannot conflict with another project's.
+* A refusal for a remote MCP client names a folder entry as the client wrote it
+  and the rule it broke, never the real path it resolved to, which a client
+  that supplies the workspace file could otherwise learn for any server path.
 * A project's config is loaded to read its scanner set and threshold. That runs
   the ordinary config-resolution path, so a config that emits resolution warnings
   emits them here too, during what the operator asked to be a dry run.
@@ -296,9 +303,12 @@ def _scanner_state(
         if entry is None:
             continue
         name = _scanner_display_name(field_name, config)
-        sections.append((name, bool(_field(entry, "enabled", True))))
+        on = _section_is_on(entry)
+        sections.append((name, on))
         pin = _scanner_pin(entry)
-        if pin is not None:
+        # A disabled scanner's tool does not run, so its pin constrains nothing
+        # and must not refuse the workspace over a sibling's.
+        if pin is not None and on:
             pins[name] = pin
 
     groups = _extra_scanner_groups(config)
@@ -308,12 +318,15 @@ def _scanner_state(
         if not group.unresolved:
             if bodies[group.read] is None:
                 continue
-            sections.append((group.read, _section_is_on(bodies[group.read])))
-            pin = _scanner_pin(bodies[group.read])
+            on = _section_is_on(bodies[group.read])
+            sections.append((group.read, on))
+            pin = _scanner_pin(bodies[group.read]) if on else None
         else:
             every_section_on = all(_section_is_on(body) for body in bodies.values())
             sections.append((group.read, every_section_on))
-            group_pins = {_scanner_pin(body) for body in bodies.values()}
+            group_pins = {
+                _scanner_pin(body) for body in bodies.values() if _section_is_on(body)
+            }
             pin = group_pins.pop() if len(group_pins) == 1 else None
         if pin is not None:
             pins[group.read] = pin
@@ -387,8 +400,19 @@ def _extra_scanner_groups(config: AshConfig) -> List[_ExtraScanners]:
 
 
 def _section_is_on(body: Any) -> bool:
-    """Whether a scanner section is enabled; a section with no body is not."""
-    return body is not None and bool(_field(body, "enabled", True))
+    """Whether a scanner section is enabled; a section with no body is not.
+
+    A body that is a mapping or a model is read by its ``enabled`` field, on by
+    default. A bare boolean is that boolean (``acme: false`` turns the section
+    off). Any other scalar or a list is no section body: nothing in it can
+    enable a scanner, and ``getattr(False, "enabled", True)`` read every such
+    body as enabled.
+    """
+    if body is None or isinstance(body, bool):
+        return bool(body)
+    if isinstance(body, (str, bytes, int, float, list, tuple, set, frozenset)):
+        return False
+    return bool(_field(body, "enabled", True))
 
 
 class _PossiblePins(NamedTuple):
@@ -575,18 +599,30 @@ def _project_label(config: AshConfig, key: str) -> str:
     A project that genuinely sets ``project_name`` to the default value is
     treated as not having declared one. The consequence is that its label is its
     key, which is what it would have been anyway.
+
+    A name the config read from the environment (``!ENV``) is shown by its
+    masked form (``text_without_values``), never as the value: the label is
+    printed by the plan render, the MCP resolve response, the console summary,
+    the workspace HTML table and the aggregate SARIF, none of which may carry an
+    environment value.
     """
     default = AshConfig.model_fields["project_name"].default
     declared = getattr(config, "project_name", None)
     if isinstance(declared, str) and declared.strip() and declared != default:
-        return declared
+        return text_without_values(declared, config_environment_values(config))
     return key
 
 
 def _validate_containment(
-    definition: WorkspaceDefinition,
+    definition: WorkspaceDefinition, remote_client: bool = False
 ) -> List[_Candidate]:
-    """Run Phase 0's containment check over every entry, collecting rejections."""
+    """Run Phase 0's containment check over every entry, collecting rejections.
+
+    For a remote MCP client a rejection names the entry as the client wrote it
+    and the rule it broke. The containment check's own message names the real
+    path the entry resolved to, which a client that supplies the workspace file
+    could otherwise read for any absolute path or link it names there.
+    """
     problems: List[str] = []
     candidates: List[_Candidate] = []
 
@@ -609,6 +645,13 @@ def _validate_containment(
             # Parentheses, not brackets: these messages are echoed by callers
             # that may render Rich markup, where '[outside-root]' would be read
             # as a style name and fail at render time.
+            if remote_client:
+                problems.append(
+                    f"'{folder.path}' is refused ({result.error.violation.value}); "
+                    f"the path it reaches is not shown because an MCP client "
+                    f"supplied the workspace file"
+                )
+                continue
             problems.append(f"{result.error.message} ({result.error.violation.value})")
             continue
         resolved = result.resolved
@@ -1012,7 +1055,18 @@ def _resolve_project_config(
         # look for its table; a caller's gate covers every source before any is
         # opened (config_sources.check_discovery_candidates).
         config_path = find_config_file(candidate.resolved, permit=permit_base)
-        overlay = operator if config_path is not None else None
+        # A discovered config that is the operator's own file (a link to the
+        # --config file) is not a config of the project's own: execution decides
+        # "own config" by comparing the two files, and a plan that layered the
+        # operator's file over itself was refused at scan time.
+        if (
+            config_path is not None
+            and operator is not None
+            and _same_directory(Path(config_path), Path(operator))
+        ):
+            overlay = None
+        else:
+            overlay = operator if config_path is not None else None
         if config_path is None and default_config is not None:
             config_path = Path(default_config)
         config = resolve_config(
@@ -1170,19 +1224,28 @@ def _validate_plugin_modules(
 
     Only projects that will actually be scanned are compared; a skipped project
     cannot conflict with one that runs.
+
+    Each module is named as the plan names it (``ProjectPlan.plugin_module_names``):
+    an entry a config read from the environment appears as its masked form, never
+    as the value, which is what the plan carries that map for.
     """
-    by_modules: Dict[Tuple[str, ...], List[str]] = {}
+    by_modules: Dict[Tuple[str, ...], List[ProjectPlan]] = {}
     for project in projects:
-        by_modules.setdefault(tuple(project.ash_plugin_modules), []).append(project.key)
+        by_modules.setdefault(tuple(project.ash_plugin_modules), []).append(project)
 
     if len(by_modules) <= 1:
         return
 
-    problems = [
-        f"{', '.join(sorted(keys))}: "
-        + (", ".join(modules) if modules else "no plugin modules")
-        for modules, keys in sorted(by_modules.items())
-    ]
+    problems = []
+    for modules, members in sorted(by_modules.items()):
+        names = {}
+        for member in members:
+            names.update(member.plugin_module_names)
+        shown = ", ".join(names.get(module, module) for module in modules)
+        problems.append(
+            f"{', '.join(sorted(member.key for member in members))}: "
+            + (shown if modules else "no plugin modules")
+        )
     raise _refuse(
         f"Workspace '{definition.path.as_posix()}' cannot be scanned: its "
         f"projects ask for different 'ash_plugin_modules'. Plugin registration "
@@ -1200,6 +1263,11 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
     Two projects may legitimately carry the same ``project_name``, so the label
     is never a uniqueness key. Decorating only the ambiguous ones keeps the
     common case readable.
+
+    A decorated label can equal another project's plain label (a project named
+    ``svc (api)`` beside two named ``svc``, one of them keyed ``api``), so the
+    display labels are compared once more after decorating and any that still
+    collide are decorated too. Keys are unique, so one more pass settles it.
     """
     counts: Dict[str, int] = {}
     for project in projects:
@@ -1210,6 +1278,13 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
             if counts[project.label] > 1
             else project.label
         )
+
+    shown: Dict[str, int] = {}
+    for project in projects:
+        shown[project.display_label] = shown.get(project.display_label, 0) + 1
+    for project in projects:
+        if shown[project.display_label] > 1 and project.display_label == project.label:
+            project.display_label = f"{project.label} ({project.key})"
 
 
 def _policy_document(
@@ -1352,12 +1427,24 @@ def _apply_workspace_policy(
     def client_supplied(path: Path) -> bool:
         return remote_client or config_is_client_supplied(path)
 
+    # The configs the projects declared themselves. A project with none records
+    # the operator's --config file as its config_source, and that file is the
+    # operator's, not a project's, so a policy path that is the same file is not
+    # refused as "a project's own ASH config" on its account.
+    operators_file = Path(default_config) if default_config else None
+    own_configs = [
+        Path(project.config_source)
+        for project in projects
+        if project.config_source
+        and not (
+            operators_file is not None
+            and _same_directory(Path(project.config_source), operators_file)
+        )
+    ]
     policy, source = resolve_workspace_policy(
         definition.root,
         explicit=workspace_config,
-        project_config_paths=[
-            Path(project.config_source) for project in projects if project.config_source
-        ],
+        project_config_paths=own_configs,
         permit_base=permit_base,
         client_supplied=client_supplied,
     )
@@ -1397,6 +1484,8 @@ def _apply_workspace_policy(
             project_prefix=project.relative_path,
             project_threshold=project.severity_threshold,
             project_scanners=project.scanners,
+            # A delivered file's pattern is not quoted in its refusal.
+            quote_values=not delivered,
         )
     if delivered and source is not None and workspace_policy is not None:
         _check_a_client_supplied_policy(
@@ -1461,13 +1550,27 @@ def _refuse_missing_default_config(default_config: Optional[PathLike]) -> None:
     """
     if default_config is None:
         return
-    if not str(default_config).strip() or not Path(default_config).is_file():
+    if not str(default_config).strip() or not _is_a_regular_file(default_config):
         raise ASHConfigValidationError(
             f"The default configuration file '{default_config}' (--config, or the "
-            "profile bound to the MCP session) does not exist or is not a regular "
-            "file. Name an existing config file, or omit it so that projects "
-            "without their own config use ASH's built-in defaults."
+            "profile bound to the MCP session) does not exist, is not a regular "
+            "file, or cannot be examined. Name an existing config file, or omit "
+            "it so that projects without their own config use ASH's built-in "
+            "defaults."
         )
+
+
+def _is_a_regular_file(path: PathLike) -> bool:
+    """Whether *path* is a regular file, a path that cannot be examined read as not.
+
+    ``Path.is_file()`` raised a bare ``PermissionError`` for a file under a
+    directory this process cannot search on Python 3.10-3.12, a traceback where
+    the caller owes a refusal of the named file.
+    """
+    try:
+        return Path(path).is_file()
+    except OSError:
+        return False
 
 
 def _refuse_a_default_config_that_does_not_load(default_config: Path) -> None:
@@ -1489,7 +1592,7 @@ def _refuse_a_default_config_that_does_not_load(default_config: Path) -> None:
     from automated_security_helper.core.exceptions import ASHConfigSourceError
     from automated_security_helper.utils.error_text import error_text
 
-    if not default_config.is_file():
+    if not _is_a_regular_file(default_config):
         return
     unparsed: Optional[str] = None
     try:
@@ -1617,7 +1720,7 @@ def resolve_workspace(
     """
     definition = load_workspace_file(workspace_file)
 
-    candidates = _validate_containment(definition)
+    candidates = _validate_containment(definition, remote_client=remote_client)
     _refuse_folders_that_are_not_utf8(definition, candidates)
     _refuse_config_files_that_are_not_utf8(
         workspace_config, default_config, trusted_config
@@ -1647,12 +1750,15 @@ def resolve_workspace(
     operator_digest: Optional[str] = None
     if operator is not None:
         # Once for the whole workspace, so a project with no config of its own,
-        # which uses the operator's file alone, is refused with the rest. With
-        # the call's session, so the !ENV judgement is the one each project's
+        # which uses the operator's file alone, is refused with the rest. Under
+        # the caller's gate: the file's extends chain is opened here, before any
+        # project's resolution applies the same gate to the same file. With the
+        # call's session, so the !ENV judgement is the one each project's
         # resolution makes (resolve_config reads client_config_policy.session_id).
         check_operator_config(
             operator,
             definition.root,
+            permit_base=permit_base,
             remote_client=remote_client,
             session_id=(
                 session_id
@@ -1715,7 +1821,11 @@ def resolve_workspace(
             # .ash.yaml resolves out of the project.
             config_source=_as_named(config_path),
             operator_config=_as_named(operator_config),
-            operator_config_digest=operator_digest if operator_config else None,
+            # For every project the operator's file governs: layered over the
+            # project's own config, or the project's config itself because it
+            # declares none. A rewrite of that file between plan and scan is
+            # then detectable for the second kind too.
+            operator_config_digest=operator_digest,
             scanners=scanners,
             severity_threshold=config.global_settings.severity_threshold,
             scanner_pins=pins,
