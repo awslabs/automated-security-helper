@@ -3378,7 +3378,12 @@ def merge_command(
         # are enough to enable and aim one.
         off_host_to_run = off_host_reporters_to_run(off_host_reporters, operator_config)
         log_off_host_formats_not_run(requested_off_host, off_host_to_run)
-        if off_host_to_run and (not parsed_formats or requested_off_host):
+        # Only the formats a reporter of this phase produces: the phase accounts
+        # for every requested format its reporters do not produce, so a format
+        # just named above would be named a second time with another reason, and
+        # a request naming only such formats would start a phase that runs nothing.
+        off_host_formats = off_host_formats_to_run(requested_off_host, off_host_to_run)
+        if off_host_to_run and (not parsed_formats or off_host_formats):
             off_host_context = PluginContext(
                 source_dir=Path.cwd(),
                 output_dir=output_dir_path,
@@ -3393,7 +3398,7 @@ def merge_command(
                 asharp_model=merged,
             ).execute(
                 report_dir=output_dir_path.joinpath("reports"),
-                cli_output_formats=requested_off_host or None,
+                cli_output_formats=off_host_formats or None,
                 aggregated_results=merged,
                 python_based_plugins_only=False,
             )
@@ -3466,6 +3471,23 @@ def off_host_reporters_to_run(
         extra=NO_MARKUP,
     )
     return []
+
+
+def off_host_formats_to_run(
+    requested_off_host: Sequence[str],
+    off_host_to_run: Sequence[Type[ReporterPluginBase[Any]]],
+) -> List[str]:
+    """The requested off-host formats a reporter of the off-host phase produces.
+
+    In request order, once each. A requested format whose reporter the operator
+    did not enable is :func:`log_off_host_formats_not_run`'s to name and is left
+    out here: the report phase names every requested format its own reporters do
+    not produce, so handing it the format would name it a second time, with a
+    reason (no such reporter) that is not the merge's. Empty when nothing was
+    requested, which leaves the phase to every reporter it was given.
+    """
+    running = {plugin_config_key(cls) for cls in off_host_to_run}
+    return [fmt for fmt in dict.fromkeys(requested_off_host) if fmt in running]
 
 
 def log_off_host_formats_not_run(

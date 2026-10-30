@@ -29,6 +29,7 @@ import pytest
 
 from automated_security_helper.cli.merge import (
     log_off_host_formats_not_run,
+    off_host_formats_to_run,
     off_host_reporters_to_run,
 )
 from automated_security_helper.config.ash_config import AshConfig
@@ -90,3 +91,21 @@ def test_a_requested_format_no_phase_runs_keeps_the_report_phases_line(caplog):
     assert messages[0].startswith(f"{NO_PRODUCER} 'fakeoffhost':"), messages
     assert "reporters.fakeoffhost.enabled=true" in messages[0], messages
     assert all(record.levelno == logging.ERROR for record in caplog.records)
+
+
+def test_the_off_host_phase_is_given_only_the_formats_it_runs():
+    """A format no reporter of the phase produces is not handed to the phase.
+
+    The phase accounts for every requested format its reporters do not produce,
+    so handing it the format log_off_host_formats_not_run has just named made
+    the operator read two ERROR lines for one format with two different reasons.
+    """
+    assert off_host_formats_to_run(["s3", "fakeoffhost", "s3"], [_S3]) == ["s3"]
+
+
+def test_a_request_naming_no_running_reporter_leaves_the_phase_nothing():
+    assert off_host_formats_to_run(["fakeoffhost"], [_S3]) == []
+
+
+def test_no_format_request_leaves_the_phase_to_its_own_reporters():
+    assert off_host_formats_to_run([], [_S3]) == []
