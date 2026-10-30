@@ -1838,6 +1838,105 @@ def test_a_file_written_as_an_action_that_zizmor_rejects_is_a_failed_target(repo
     assert scanner.targets_failed == 1
 
 
+_REJECTED_BROKEN_ACTION = (
+    " WARN collect_inputs: zizmor::registry::input: failed to validate "
+    "file://broken/action.yml as action: input does not match expected "
+    "validation schema\n"
+)
+
+
+def _rejected_action_counts(repo, monkeypatch, body: bytes, limit=None):
+    """zizmor rejected ``broken/action.yml`` holding *body*; what the counters say."""
+    broken = repo / "broken" / "action.yml"
+    broken.parent.mkdir()
+    broken.write_bytes(body)
+    if limit is not None:
+        monkeypatch.setattr(zizmor_module, "_ACTION_PROBE_LIMIT", limit)
+    scanner, _ = _scan_with_output(
+        repo, CAPTURED_SARIF.read_text(), stderr=_REJECTED_BROKEN_ACTION
+    )
+    return scanner.targets_attempted, scanner.targets_failed
+
+
+def test_an_action_longer_than_the_probe_reads_is_a_failed_target(repo, monkeypatch):
+    """A real action whose "runs" key sits past the read limit: the partial
+    text parses as a mapping without it, or does not parse at all. Either way
+    the file was not read whole, so it is not written off as inapplicable."""
+    body = b"name: broken\ndescription: " + b"x" * 64 + b"\nruns:\n  using: node20\n"
+
+    attempted, failed = _rejected_action_counts(repo, monkeypatch, body, limit=48)
+
+    assert (attempted, failed) == (len(EXPECTED_INPUTS) + 1, 1)
+
+
+def test_a_cut_off_action_whose_runs_key_was_read_is_a_failed_target(
+    repo, monkeypatch
+):
+    """The read stopped inside the document, but the "runs" key is in the part
+    that was read: an action, and a failed target."""
+    body = b"runs:\n  using: composite\n  steps:\n" + b"    - run: echo\n" * 40
+
+    attempted, failed = _rejected_action_counts(repo, monkeypatch, body, limit=48)
+
+    assert (attempted, failed) == (len(EXPECTED_INPUTS) + 1, 1)
+
+
+def test_an_action_the_safe_loader_refuses_is_a_failed_target(repo, monkeypatch):
+    """PyYAML's safe loader refuses an unknown tag that zizmor's parser read; the
+    raw text still shows the action's "runs" key, so the file is an action ASH
+    meant to audit and could not, not another tool's file."""
+    body = b"name: !custom broken\nruns:\n  using: composite\n  steps: []\n"
+
+    attempted, failed = _rejected_action_counts(repo, monkeypatch, body)
+
+    assert (attempted, failed) == (len(EXPECTED_INPUTS) + 1, 1)
+
+
+def test_a_rejected_file_that_cannot_be_read_is_a_failed_target(repo, monkeypatch):
+    """A rejected input the probe cannot read at all (here, the quoted path
+    names no file) is not known to be another tool's file: fail closed."""
+    scanner, _ = _scan_with_output(
+        repo, CAPTURED_SARIF.read_text(), stderr=_REJECTED_BROKEN_ACTION
+    )
+
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS) + 1
+    assert scanner.targets_failed == 1
+
+
+def test_another_tools_file_read_whole_is_still_inapplicable(repo, monkeypatch):
+    """The decision the probe exists for: a file named action.yml that parses
+    whole as something without a top-level "runs" key is dropped from the
+    attempted count, not counted as failed."""
+    body = b"name: broken\nversion: 2\nsteps:\n  - run: echo\n"
+
+    attempted, failed = _rejected_action_counts(repo, monkeypatch, body)
+
+    assert (attempted, failed) == (len(EXPECTED_INPUTS), 0)
+
+
+@pytest.mark.parametrize(
+    ("body", "answer"),
+    [
+        (b"name: x\nruns:\n  using: composite\n", True),
+        (b"name: x\nsteps: []\n", False),
+        (b"- a\n- b\n", False),
+        (b"name: !custom x\nruns:\n  using: composite\n", True),
+        (b"name: !custom x\nsteps: []\n", None),
+        (b"", False),
+    ],
+    ids=["action", "other-mapping", "sequence", "tagged-action", "tagged-other", "empty"],
+)
+def test_the_action_probe_answers_in_three_ways(tmp_path, body, answer):
+    path = tmp_path / "action.yml"
+    path.write_bytes(body)
+    assert zizmor_module._declares_a_github_action(path) is answer
+
+
+def test_the_action_probe_cannot_decide_what_it_could_not_read(tmp_path):
+    assert zizmor_module._declares_a_github_action(tmp_path / "missing.yml") is None
+    assert zizmor_module._declares_a_github_action(tmp_path) is None
+
+
 def test_a_converted_inputs_absolute_path_does_not_stay_in_the_logical_location(
     repo,
 ):

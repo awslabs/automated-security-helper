@@ -225,7 +225,8 @@ _VERSION_PATTERN = re.compile(r"zizmor\s+v?(\d+(?:\.\d+)*\S*)")
 _INPUT_ARGV_BUDGET = 24_000
 
 #: How much of a rejected ``action.yml`` is read to tell a GitHub action from a
-#: file of another tool: an action's top-level ``runs`` key is near the top.
+#: file of another tool. A file longer than this is not parsed from the partial
+#: text; its raw text decides what it can (``_declares_a_github_action``).
 _ACTION_PROBE_LIMIT = 1 << 20
 #: zizmor's input-collection warnings, e.g. ``WARN collect_inputs:
 #: zizmor::registry::input: failed to parse input: ...`` (zizmor 1.29 and 1.30).
@@ -268,23 +269,50 @@ def _quoted_input_path(path_text: str, cwd: Path) -> Path:
     return path if path.is_absolute() else Path(cwd) / path
 
 
-def _declares_a_github_action(path: Path) -> bool:
+#: A ``runs`` key at column zero of the raw text: what tells an action's
+#: metadata from another tool's file when the document cannot be parsed whole.
+_RUNS_KEY_AT_COLUMN_ZERO = re.compile(r"^runs\s*:", re.MULTILINE)
+
+
+def _declares_a_github_action(path: Path) -> Optional[bool]:
     """Whether the file at *path* is written as a GitHub action: a YAML mapping
     with a top-level ``runs`` key, which every action metadata file has.
 
     zizmor's "failed to validate <file> as action" line is the same for a file
     named ``action.yml`` that belongs to another tool and for a composite action
     whose metadata zizmor's schema rejects. The first is not applicable; the
-    second is a target ASH meant to audit and could not. A file that cannot be
-    read or parsed is not one written as an action.
+    second is a target ASH meant to audit and could not.
+
+    Three answers. True: the document is a mapping with ``runs``, or the text
+    could not be parsed whole and a ``runs`` key stands at column zero of what
+    was read. False: the whole document parsed as something else, which is the
+    one answer that makes the input inapplicable. None: it cannot be decided,
+    because the file cannot be read, or the read was cut off at
+    ``_ACTION_PROBE_LIMIT`` or PyYAML refused text zizmor's parser read (an
+    unknown tag, say) and no ``runs`` key is in the raw text either. Reading an
+    undecided file as "not an action" dropped real actions from the attempted
+    count instead of counting them failed, against the fail-closed rule the
+    result-file reader follows; the caller counts None as failed.
     """
     try:
         with path.open("rb") as handle:
-            data = handle.read(_ACTION_PROBE_LIMIT)
-        document = yaml.safe_load(data.decode("utf-8", errors="replace"))
-    except (OSError, ValueError, RecursionError, yaml.YAMLError):
-        return False
-    return isinstance(document, dict) and "runs" in document
+            data = handle.read(_ACTION_PROBE_LIMIT + 1)
+    except OSError:
+        return None
+    cut_off = len(data) > _ACTION_PROBE_LIMIT
+    text = data[:_ACTION_PROBE_LIMIT].decode("utf-8", errors="replace")
+    if not cut_off:
+        # A partial document is never parsed: cut at a line boundary it can
+        # parse as a mapping that lacks the runs key that follows the cut.
+        try:
+            document = yaml.safe_load(text)
+        except (ValueError, RecursionError, yaml.YAMLError):
+            pass
+        else:
+            return isinstance(document, dict) and "runs" in document
+    if _RUNS_KEY_AT_COLUMN_ZERO.search(text):
+        return True
+    return None
 
 
 def _joined_report(reports: List[SarifReport]) -> SarifReport:
@@ -1427,12 +1455,16 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         cwd = Path(self._plugin_context.source_dir)
         for line in rejected:
             not_an_action = _NOT_AN_ACTION_PATTERN.search(line)
+            # Only a file read whole as not an action is inapplicable; one the
+            # probe could not decide (unreadable, cut off, refused by the
+            # parser) is a target that failed, as the else branch counts.
             if (
                 not_an_action
                 and not _names_a_workflow(not_an_action.group(1), cwd)
-                and not _declares_a_github_action(
+                and _declares_a_github_action(
                     _quoted_input_path(not_an_action.group(1), cwd)
                 )
+                is False
             ):
                 self.targets_attempted = max(0, self.targets_attempted - 1)
             else:
