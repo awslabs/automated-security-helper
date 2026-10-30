@@ -1518,6 +1518,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # the quoted stderr described the wrong run.
         self.output = []
         self.errors = []
+        # The record of which of those lines are ASH's own goes with them.
+        self._plugin_log_lines = []
 
         # Only a directory can be empty: listing a file target raised
         # NotADirectoryError out of scan(), and a file is something to scan.
@@ -1821,7 +1823,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         -- ``_process_command_response`` only populates that from a RETURNED
         stderr, and only 3 of the 8 call sites ask for one. So this reads the log
         file when ``self.errors`` is empty, which is the common case rather than
-        the exotic one.
+        the exotic one. It reads it too when ``self.errors`` holds nothing but
+        ASH's own notes (``_plugin_log``: a timeout notice, the offline
+        explainer): those say what ASH did, not what the tool wrote, and are
+        kept in the message ahead of the log's text.
 
         Why the exit code needs a verdict, not just a value
         --------------------------------------------------
@@ -1888,12 +1893,24 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # cannot match a value this cut split. The log-excerpt branch below
         # does its own bounded cut inside the shared helper.
         stderr_text = "\n".join(self.errors).strip()
+        # ``errors`` also holds the notes ASH's own ``_plugin_log`` put there
+        # (a timeout notice, the offline explainer), which are not what the
+        # tool wrote: when they are all it holds, the tool's stderr log is
+        # still unread, and is read below beside them.
+        tool_said_nothing = not "\n".join(self._tool_error_lines()).strip()
         values_read = False
         read_values: Optional[Tuple[str, ...]] = None
         if stderr_text:
             values_read, read_values = True, guarded_values(self)
             if read_values is not None:
                 stderr_text = text_without_values(stderr_text, read_values)
+        # ASH's notes, kept in the message whatever the log read does.
+        notes_text = stderr_text if tool_said_nothing else ""
+        notes_part = (
+            f". Stderr: {head_and_tail(notes_text, _STDERR_EXCERPT_LIMIT)}"
+            if notes_text
+            else ""
+        )
         log_path = None
         if results_file is not None:
             log_path = (
@@ -1904,7 +1921,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # reads it when it quotes the log, and the notification block below
         # reuses that read instead of asking the hook a second time.
         log_unreadable = False
-        if not stderr_text and log_path is not None and not rejected:
+        if (not stderr_text or notes_text) and log_path is not None and not rejected:
             # The log keeps the tool's text verbatim, so a quoted env-read
             # value sits in it in clear. The whole pipeline -- the bounded
             # read with its edge trim, redaction BEFORE the cut, the cut,
@@ -1927,13 +1944,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # path -- never the raw log, which would print the env-read
             # values the redaction hides.
             trim_inputs: Tuple[str, ...] = ()
-            guarded = guarded_values(self)
+            # Not asked a second time when ASH's notes were redacted above.
+            guarded = read_values if values_read else guarded_values(self)
             values_read, read_values = True, guarded
             if guarded is None:
                 # The hook raised or gave no usable answer BEFORE the log was
                 # read, so nothing here knows whether stderr was captured:
                 # the text claims only what it can.
-                detail += f". Stderr could not be shown; see {log_path.as_posix()}"
+                detail += (
+                    f"{notes_part}. Stderr could not be shown; see "
+                    f"{log_path.as_posix()}"
+                )
                 return detail
             values: Tuple[str, ...] = guarded
             try:
@@ -1967,7 +1988,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # Raised BEFORE the log was read, so nothing here knows
                 # whether stderr was captured: the text claims only what it
                 # can.
-                detail += f". Stderr could not be shown; see {log_path.as_posix()}"
+                detail += (
+                    f"{notes_part}. Stderr could not be shown; see "
+                    f"{log_path.as_posix()}"
+                )
                 return detail
             # The excerpt helper keeps the first `keep` characters, so a keep of
             # the excerpt limit here was a head-only cut BEFORE the head-and-tail
@@ -1987,15 +2011,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 log_unreadable = os.path.lexists(log_path)
             if raw_log or read_cut:
                 try:
-                    stderr_text = shown_excerpt(
+                    excerpt = shown_excerpt(
                         raw_log, read_cut, log_path, read_bound, _show
                     )
                 except Exception:  # noqa: BLE001 -- see the comment above
                     detail += (
-                        ". Stderr was captured but could not be shown; "
-                        f"see {log_path.as_posix()}"
+                        f"{notes_part}. Stderr was captured but could not be "
+                        f"shown; see {log_path.as_posix()}"
                     )
                     return detail
+                # ASH's notes first, then the tool's text from the log.
+                stderr_text = "\n".join(part for part in (notes_text, excerpt) if part)
 
         if stderr_text:
             stderr_text = head_and_tail(stderr_text, _STDERR_EXCERPT_LIMIT)

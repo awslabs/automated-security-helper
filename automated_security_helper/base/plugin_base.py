@@ -866,6 +866,12 @@ class PluginBase(UVToolMixin, BaseModel):
     #: held reference keeps the address taken for as long as the mark stands.
     _processed_responses: list = PrivateAttr(default_factory=list)
 
+    # The lines ``_plugin_log`` itself put in ``errors``: ASH's own notes, kept
+    # apart from the lines a tool's stderr added (``_process_command_response``),
+    # so a reader that needs to know whether the tool said anything can tell the
+    # two apart. ``errors`` still holds both. See ``_tool_error_lines``.
+    _plugin_log_lines: List[str] = PrivateAttr(default_factory=list)
+
     # Whether this plugin's configuration was read from its context's resolved
     # configuration (a section ``AshConfig.get_plugin_config`` answered, as a
     # scan hands it over) rather than built by the embedding caller as a typed
@@ -1089,9 +1095,41 @@ class PluginBase(UVToolMixin, BaseModel):
         # ERROR and above: a CRITICAL message is at least as much the plugin's
         # error as an ERROR one.
         if level >= logging.ERROR or append_to_stream == "stderr":
-            self.errors.append(f"({name}) " + written)
+            line = f"({name}) " + written
+            self.errors.append(line)
+            # Remembered as ASH's own, not the tool's: ``errors`` is one list
+            # for both, and a stand-in without the list (the unbound call in
+            # the tests) records as before.
+            ours = getattr(self, "_plugin_log_lines", None)
+            if isinstance(ours, list):
+                ours.append(line)
         elif append_to_stream == "stdout":
             self.output.append(f"({name}) " + written)
+
+    def _tool_error_lines(self) -> List[str]:
+        """``errors`` without the lines ``_plugin_log`` added: what the tool's
+        stderr put there.
+
+        ``errors`` holds both, in the order they came, and stays that way for
+        every reader that wants the whole story. A reader that decides whether
+        the tool said anything (a failure message choosing between ``errors``
+        and the stderr log) asks this instead: ASH's own note ("timed out
+        after ...") is not the tool's stderr, and counted as it, it kept the
+        tool's real text in the log unread.
+
+        Each note removes one equal line, so a tool line that repeats a note
+        word for word is only dropped as many times as the note was written.
+        """
+        pending: Dict[str, int] = {}
+        for line in getattr(self, "_plugin_log_lines", None) or ():
+            pending[line] = pending.get(line, 0) + 1
+        kept: List[str] = []
+        for line in self.errors:
+            if pending.get(line):
+                pending[line] -= 1
+            else:
+                kept.append(line)
+        return kept
 
     def is_python_only(self) -> bool:
         """
