@@ -17,6 +17,7 @@ text, and knows unused-suppressions as a JSON format.
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 
@@ -291,6 +292,33 @@ def test_a_deleted_working_directory_is_the_usage_refusal(tmp_path):
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
     assert "deleted or unmounted" in result.output, result.output
+
+
+def test_a_config_with_a_null_byte_in_the_document_is_refused_as_not_found(tmp_path):
+    """argv cannot carry a null byte; a ``--cli-json-input`` document can. The
+    presence check let the ValueError ``os.stat`` raises for one escape, so the
+    command ended in a traceback where ``--config`` naming a missing file is
+    refused as not found."""
+    results = _write_results(tmp_path / "out")
+    document = tmp_path / "report.json"
+    document.write_text(
+        json.dumps(
+            {
+                "report_format": "text",
+                "output_dir": str(results.parent),
+                "config": str(tmp_path / "ash\x00.yaml"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _report("--cli-json-input", str(document))
+
+    assert result.exit_code == 3, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "Configuration file not found" in result.output, result.output
+    assert "Traceback" not in result.output, result.output
+    assert "ValueError" not in result.output, result.output
 
 
 def test_companion_files_follow_the_results_that_were_found(tmp_path, monkeypatch):
