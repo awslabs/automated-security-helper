@@ -375,12 +375,20 @@ class ScanRegistryEntry:
     def occupies_its_directory(self) -> bool:
         """Whether the scan may still run, or write, in its directory.
 
-        True while it is active, and after it was closed for as long as its
-        runner has not finished. register_scan refuses another scan of the
-        directory, and counts the scan against max_concurrent_scans, while this
-        holds.
+        True while it is active, after it was closed for as long as its runner
+        has not finished, and after that for as long as a scanner tool its stop
+        could not end (``could_not_stop``) is still running: such a tool writes
+        into the output directory on its own clock, and the runner's finish says
+        nothing about it. register_scan refuses another scan of the directory,
+        and counts the scan against max_concurrent_scans, while this holds.
         """
-        return self.is_active() or (self.has_runner and not self.runner_done.is_set())
+        if self.is_active() or (self.has_runner and not self.runner_done.is_set()):
+            return True
+        return self.a_surviving_tool_is_running()
+
+    def a_surviving_tool_is_running(self) -> bool:
+        """Whether a scanner tool the stop could not end still runs, by its pid."""
+        return any(_tool_may_be_running(pid) for _tool, pid in self.could_not_stop)
 
     def stopped_by_the_server(self) -> bool:
         """Whether a cancel, the scan timeout, or a cancelled runner task ended this scan.
@@ -394,6 +402,69 @@ class ScanRegistryEntry:
         if self.status == MCScanStatus.CANCELLED:
             return True
         return self.status == MCScanStatus.FAILED and self.cancel_event.is_set()
+
+
+def _tool_may_be_running(pid: int) -> bool:
+    """Whether a scanner tool's process, named by pid, may still be running.
+
+    False only when the pid provably names no process. On POSIX ``kill(pid, 0)``
+    delivers nothing and only asks: no such process is False; a process of
+    another user (the signal refused) is running; a pid out of range names no
+    process. On Windows signal 0 would terminate the process, so it is opened
+    for a query and its exit code read instead (``_windows_process_is_running``).
+    A pid the system has since given to another process reads as running, so
+    the directory stays held until that process ends too: a wait, never a
+    scan's output lost.
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        return _windows_process_is_running(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OverflowError, ValueError):
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _windows_process_is_running(pid: int) -> bool:
+    """The Windows probe behind ``_tool_may_be_running``.
+
+    A handle whose exit code reads STILL_ACTIVE is a running process; an open
+    refused for access is a running process of another user; any other refusal
+    is no process. A probe that cannot ask at all (no kernel32, a call that
+    raises) answers False with a debug line, so a directory is never held for
+    good by a probe that cannot answer.
+    """
+    import ctypes
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    error_access_denied = 5
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == error_access_denied
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, ValueError) as probe_error:
+        ASH_LOGGER.debug(
+            f"Could not ask whether process {pid} is running: "
+            f"{type(probe_error).__name__}"
+        )
+        return False
 
 
 def _slot_of(entry: "ScanRegistryEntry") -> Tuple[str, str]:
@@ -676,6 +747,31 @@ class ScanRegistry:
                         },
                     )
                 if owned and not entry.is_active():
+                    if entry.has_runner and entry.runner_done.is_set():
+                        # The runner is done; what holds the directory is a
+                        # scanner tool the stop could not end, still running
+                        # (occupies_its_directory). Named by tool, as the
+                        # entry's own warning is; the pid is there when the
+                        # transport admits it.
+                        tools = ", ".join(
+                            dict.fromkeys(tool for tool, _pid in entry.could_not_stop)
+                        )
+                        raise MCPResourceError(
+                            f"Directory {directory_path} has a stopped scan "
+                            f"({entry.status.value}) whose scanner tool(s) could "
+                            f"not be stopped and may still be running: {tools}",
+                            context={
+                                **named,
+                                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                                "suggestions": [
+                                    (
+                                        "End the tool's process (the scan's entry "
+                                        "names it in its warnings), then retry"
+                                    ),
+                                    "Wait for the tool to exit, then retry",
+                                ],
+                            },
+                        )
                     raise MCPResourceError(
                         f"Directory {directory_path} has a scan that is still "
                         f"stopping ({entry.status.value})",
@@ -1234,15 +1330,16 @@ class ScanRegistry:
 
         Returns:
             True if the scan was removed, False if not found, if its runner
-            has not finished, or if its output tree is being removed.
+            has not finished, if a scanner tool its stop could not end is still
+            running, or if its output tree is being removed.
 
-        An entry whose runner is still stopping is kept. The entry is what makes
-        ``register_scan`` refuse a second scan of the directory and count the
-        scan against ``max_concurrent_scans`` while the runner settles the output
-        directory (``occupies_its_directory``); deleted now, a new scan of the
-        directory would be admitted into the window in which that runner still
-        writes, and its restore of the previous results would remove what the
-        new scan had written. Remove it again once the runner is done.
+        An entry whose runner is still stopping is kept, and so is one whose
+        stop left a scanner tool running (``could_not_stop``). The entry is what
+        makes ``register_scan`` refuse a second scan of the directory and count
+        the scan against ``max_concurrent_scans`` while the directory may still
+        be written to (``occupies_its_directory``); deleted now, a new scan of
+        the directory would be admitted into the window in which that runner, or
+        that tool, still writes. Remove it again once they are done.
         """
         with self._registry_lock:
             entry = self._visible(scan_id, session_id)
@@ -1252,6 +1349,12 @@ class ScanRegistry:
                 self._logger.warning(
                     f"Scan {scan_id} is kept in the registry: its runner has not "
                     "finished settling the output directory"
+                )
+                return False
+            if entry.a_surviving_tool_is_running():
+                self._logger.warning(
+                    f"Scan {scan_id} is kept in the registry: a scanner tool its "
+                    "stop could not end is still running"
                 )
                 return False
             if entry.output_removal is not None:
