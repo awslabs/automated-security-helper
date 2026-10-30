@@ -29,8 +29,13 @@ from automated_security_helper.cli.mcp_tools import (
 pytestmark = pytest.mark.unit
 
 FINDING_ID = "bandit-B101-snowman"
-#: A title holding a character cp1252 cannot decode from its UTF-8 bytes.
-TITLE = "Use of assert detected ☃"
+#: A title whose UTF-8 bytes cp1252 cannot decode. cp1252 leaves only five
+#: bytes undefined (0x81, 0x8D, 0x8F, 0x90, 0x9D), so the character has to carry
+#: one of them: the right double quotation mark, U+201D, is E2 80 9D. The snowman
+#: this file first used (U+2603, E2 98 83) is three cp1252-defined bytes, so a
+#: cp1252 read of it did not raise; it returned the mojibake "â˜ƒ" and the three
+#: tool tests passed under a bare read_text() too.
+TITLE = "Use of assert detected ”"
 
 
 def _aggregated() -> Dict[str, Any]:
@@ -90,6 +95,10 @@ def test_explain_finding_reads_the_file_as_utf8(results_file) -> None:
     result = mcp_explain_finding(FINDING_ID, results_path=str(results_file))
 
     assert result.get("success") is True, result
+    # The title comes back as written, not as a decode that happened to succeed
+    # would render it: a read under the wrong codec that raised nothing still
+    # fails here.
+    assert result["finding"]["title"] == TITLE, result["finding"]
 
 
 def test_suggest_suppression_reads_the_file_as_utf8(results_file) -> None:
