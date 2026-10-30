@@ -852,20 +852,28 @@ def _reap_leftovers(deadline: Callable[[], float]) -> List[int]:
         tree = {os.getpid(), *leftovers}
         for child in leftovers:
             _kill_descendant(child, tree)
-        while True:
-            try:
-                reaped, _ = os.waitpid(-1, os.WNOHANG)
-            except ChildProcessError:
-                break
-            if reaped == 0:
-                break
+        _reap_exited()
     if leftovers:
         # The deadline ended the loop right after a kill pass, so every pid in
         # the last list has been signalled and most are gone: read once more,
         # bounded by the deadline (the direct children are always read), and
-        # report only what is still there, not what that pass already ended.
+        # report only what is still there, not what that pass already ended. A
+        # child the kill reached after that pass's own sweep is a zombie, still
+        # listed in /proc, until it is collected: one more sweep first.
+        _reap_exited()
         leftovers = _descendants(until=deadline)
     return leftovers
+
+
+def _reap_exited() -> None:
+    """Collect every child that has exited by now, without waiting for the rest."""
+    while True:
+        try:
+            reaped, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            break
+        if reaped == 0:
+            break
 
 
 def _die_of(died_of: int) -> int:

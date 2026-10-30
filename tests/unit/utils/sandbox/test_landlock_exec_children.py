@@ -426,6 +426,47 @@ def test_later_reap_passes_carry_the_deadline(reap_calls):
     assert survivors == []
 
 
+def test_a_child_reaped_only_after_the_last_pass_is_not_a_survivor(monkeypatch):
+    """A SIGKILLed child becomes reapable a moment after the kill, so the pass's
+    own sweep, run right after its kills, can miss it, and a zombie is still
+    listed in /proc: the re-read that names the survivors is preceded by one
+    more sweep, and a child collected there is not reported."""
+    present = {11}
+    signalled: List[int] = []
+    reapable: List[int] = []
+
+    def walk(until=None):
+        return sorted(present)
+
+    def kill(pid, tree):
+        signalled.append(pid)
+        return True
+
+    def waitpid(pid, options):
+        if reapable:
+            reaped = reapable.pop(0)
+            present.discard(reaped)
+            return (reaped, 0)
+        # The signal lands between two calls: reapable from the next one on.
+        reapable.extend(signalled)
+        signalled.clear()
+        return (0, 0)
+
+    fake_os = _Recording(os, set(), [])
+    fake_os.waitpid = waitpid
+    monkeypatch.setattr(landlock_exec, "_descendants", walk)
+    monkeypatch.setattr(landlock_exec, "_kill_descendant", kill)
+    monkeypatch.setattr(landlock_exec, "os", fake_os)
+    monkeypatch.setattr(
+        landlock_exec,
+        "time",
+        types.SimpleNamespace(monotonic=lambda: 10.0, sleep=lambda seconds: None),
+    )
+
+    assert landlock_exec._reap_leftovers(lambda: 5.0) == []
+    assert present == set()
+
+
 class _Recording:
     """A module whose named functions record their calls and return ``returns``;
     every other attribute is the real module's."""
