@@ -161,7 +161,7 @@ def test_an_infinite_number_for_an_integer_is_refused(tmp_path):
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert not mock_run.called
     assert "'shard_index'" in _flat(result.output)
-    assert "expectedajsoninteger" in _flat(result.output)
+    assert "expectedaJSONinteger" in _flat(result.output)
     assert "Traceback" not in result.output
 
 
