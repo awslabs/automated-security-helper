@@ -1117,17 +1117,14 @@ class TestVerifyThirdParty:
             f'#!/bin/sh\nPYTHONPATH="{site}" exec "{sys.executable}" "$@"\n'
         )
         python.chmod(0o755)
+        # verify_third_party asks uv for its tool directory whenever any entry has a
+        # version probe, and resolves uv on the process PATH, where the unit tool
+        # guard's stand-in is first; the stand-in records `uv tool dir` as a tool
+        # start. The fake directory above stands in for uv's answer, so uv is never
+        # asked: the libgit2 and pygit2 probes name `{uv_tool_dir}` and read it.
         monkeypatch.setattr(installer, "_uv_tool_dir", lambda: str(tools))
         self.uv_tools = tools
         self.rules = rules
-        # verify_third_party asks uv for its tool directory whenever any entry has a
-        # version probe, and resolves uv on the process PATH, where the unit tool
-        # guard's stand-in is first. The stand-in records `uv tool dir` as a tool
-        # start, so every test here failed at teardown. The only probe in the table
-        # (the rules bundle) reads its manifest from ASH_CFN_GUARD_RULES_DIR and
-        # names no `{uv_tool_dir}`, so the answer is not used; a probe that did
-        # need it would fail loudly as "uv did not answer".
-        monkeypatch.setattr(installer, "_uv_tool_dir", lambda: None)
 
     @staticmethod
     def _tree(tmp_path: Path):

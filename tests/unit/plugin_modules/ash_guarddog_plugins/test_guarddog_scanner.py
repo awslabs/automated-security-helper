@@ -2103,7 +2103,10 @@ def test_max_hits_runs_guarddogs_own_cli_in_its_own_python_through_uv(
     assert _rows(report) == [
         ("threat-runtime-obfuscation-base64exec", "HIGH", "go_suspicious/main.go", 11)
     ]
-    assert "max_hits" not in caplog.text
+    # Nothing to say about the limit: the option's own line is the only message
+    # that names it. (The scan's paths name this test, so a bare "max_hits" would
+    # match the directory in the scanner's own start-up lines.)
+    assert "scanners.guarddog.options.max_hits" not in caplog.text
 
 
 @pytest.mark.unit
@@ -2132,7 +2135,7 @@ def test_max_hits_from_the_operator_may_lower_guarddogs_limits(
 
     (call,) = _bootstrap_calls(fake)
     assert _limit_and_mode(call) == ["1", "set"]
-    assert "max_hits" not in caplog.text
+    assert "scanners.guarddog.options.max_hits" not in caplog.text
 
 
 @pytest.mark.unit

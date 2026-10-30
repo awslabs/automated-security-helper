@@ -528,15 +528,16 @@ class _Converted:
 
 def _rule_descriptor(rule_id: str, description: str | None) -> ReportingDescriptor:
     text = description or f"GuardDog rule {rule_id}"
-    return ReportingDescriptor.model_validate(
-        {
-            "id": rule_id,
-            "name": rule_id,
-            "shortDescription": {"text": text},
-            "fullDescription": {"text": text},
-            "helpUri": "https://github.com/DataDog/guarddog#heuristics",
-            "properties": {"tags": ["guarddog", "malicious-package"]},
-        }
+    # Built by keyword, as the other scanners build their SARIF driver and rules:
+    # the values are GuardDog's own rule ids and texts, not input from a config or
+    # a results file, so this is not a model validated on its own.
+    return ReportingDescriptor(
+        id=rule_id,
+        name=rule_id,
+        shortDescription={"text": text},
+        fullDescription={"text": text},
+        helpUri="https://github.com/DataDog/guarddog#heuristics",
+        properties={"tags": ["guarddog", "malicious-package"]},
     )
 
 
@@ -1743,13 +1744,11 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             runs=[
                 Run(
                     tool=Tool(
-                        driver=ToolComponent.model_validate(
-                            {
-                                "name": "GuardDog",
-                                "version": self.tool_version,
-                                "informationUri": "https://github.com/DataDog/guarddog",
-                                "rules": [rules[k] for k in sorted(rules)],
-                            }
+                        driver=ToolComponent(
+                            name="GuardDog",
+                            version=self.tool_version,
+                            informationUri="https://github.com/DataDog/guarddog",
+                            rules=[rules[k] for k in sorted(rules)],
                         )
                     ),
                     results=results,

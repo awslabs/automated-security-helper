@@ -99,8 +99,8 @@ global_settings:
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/plugin_modules/ash_hadolint_plugins/test_hadolint_scanner_behavior.py
-      line_start: 880
-      line_end: 882
+      line_start: 882
+      line_end: 884
       reason: >-
         False positive. The three lines hold the commit hadolint's v2.15.1 tag points at
         and the SHA256 of its LICENSE and ThirdPartyNotices.txt files at that commit, which
