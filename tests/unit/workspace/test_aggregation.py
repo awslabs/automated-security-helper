@@ -1608,8 +1608,20 @@ class TestStampingARunRecord:
         before.pop("validation_checkpoints")
         assert after == before
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows refuses to replace a file another handle holds open, so the "
+        "stamp returns False there by design and the inode swap has no counterpart",
+    )
     def test_the_file_is_replaced_rather_than_rewritten_in_place(self, tmp_path):
-        """A reader that opened the file before the stamp keeps reading it whole."""
+        """A reader that opened the file before the stamp keeps reading it whole.
+
+        POSIX only: the property is that the replace swaps the inode under a
+        reader. Windows will not replace a file this process still holds open
+        (``stamp_run_record`` closes its own source handle before the replace for
+        that reason), so with the test's reader open the stamp returns False and
+        leaves the file unchanged, which is the documented refusal, not the swap.
+        """
         from automated_security_helper.workspace.aggregation import stamp_run_record
 
         path = self._written(tmp_path)

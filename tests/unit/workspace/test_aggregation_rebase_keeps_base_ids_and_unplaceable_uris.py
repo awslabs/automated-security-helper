@@ -34,6 +34,8 @@ The contract these cases pin:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from automated_security_helper.workspace.aggregation import (
@@ -44,13 +46,32 @@ from automated_security_helper.workspace.plan import ProjectPlan
 
 pytestmark = pytest.mark.unit
 
-PROJECT = ProjectPlan(
-    key="api",
-    relative_path="api",
-    path="/ws/api",
-    label="api",
-    display_label="api",
-)
+
+@pytest.fixture
+def project(tmp_path):
+    """A project at ``<tmp_path>/ws/api``: rooted on POSIX, drive-qualified on Windows.
+
+    ``rebase_run_for_project`` hands the project's path to ``Path.as_uri()``,
+    which on Windows refuses a path that has a root and no drive, so the POSIX
+    literal ``/ws/api`` this file first used raised ``ValueError: relative path
+    can't be expressed as a file URI`` on every Windows row while every POSIX row
+    passed (test_aggregation.py's ``TestProjectRootUri`` records the same shape).
+    Production supplies a resolved, drive-qualified path on both platforms, and so
+    does ``tmp_path``. The URIs below are built from the same path.
+    """
+    return ProjectPlan(
+        key="api",
+        relative_path="api",
+        path=(tmp_path / "ws" / "api").as_posix(),
+        label="api",
+        display_label="api",
+    )
+
+
+def _dir_uri(path: Path) -> str:
+    """The ``file://`` URI of a directory, with the trailing separator SARIF wants."""
+    uri = path.as_uri()
+    return uri if uri.endswith("/") else uri + "/"
 
 
 def _run(*locations: dict, base_ids: dict | None = None) -> dict:
@@ -77,26 +98,27 @@ def _artifact(run: dict, index: int = 0) -> dict:
     return run["results"][0]["locations"][index]["physicalLocation"]["artifactLocation"]
 
 
-def test_a_scanner_declared_base_id_survives_beside_the_project_root():
+def test_a_scanner_declared_base_id_survives_beside_the_project_root(project, tmp_path):
+    root = _dir_uri(tmp_path / "ws" / "api")
     rebased, _ = rebase_run_for_project(
         _run(
             {"uri": "src/app.py", "uriBaseId": "%SRCROOT%"},
-            base_ids={"%SRCROOT%": {"uri": "file:///ws/api/"}},
+            base_ids={"%SRCROOT%": {"uri": root}},
         ),
-        PROJECT,
+        project,
     )
 
     table = rebased["originalUriBaseIds"]
-    assert table["%SRCROOT%"] == {"uri": "file:///ws/api/"}
-    assert table[PROJECT_ROOT_URI_BASE_ID] == {"uri": "file:///ws/api/"}
+    assert table["%SRCROOT%"] == {"uri": root}
+    assert table[PROJECT_ROOT_URI_BASE_ID] == {"uri": root}
     # The scanner's own anchor on a relative location is left alone, and it
     # still resolves because its base id is still declared.
     assert _artifact(rebased)["uriBaseId"] == "%SRCROOT%"
 
 
-def test_a_parent_component_uri_is_counted_and_not_anchored():
+def test_a_parent_component_uri_is_counted_and_not_anchored(project):
     rebased, unconvertible = rebase_run_for_project(
-        _run({"uri": "../../ws/api/src/app.py"}), PROJECT
+        _run({"uri": "../../ws/api/src/app.py"}), project
     )
 
     artifact = _artifact(rebased)
@@ -106,37 +128,47 @@ def test_a_parent_component_uri_is_counted_and_not_anchored():
     assert unconvertible == 1
 
 
-def test_a_relative_uri_under_a_scanners_own_base_is_placed_through_that_base():
-    """``%SRCROOT%`` is ``file:///``, the uri spells the path below it.
+def test_a_relative_uri_under_a_scanners_own_base_is_placed_through_that_base(
+    project, tmp_path
+):
+    """``%SRCROOT%`` is the filesystem anchor, the uri spells the path below it.
 
-    Read as project-relative, ``ws/api/src/app.py`` would be placed at
-    ``api/ws/api/src/app.py``, a file that does not exist, while a SARIF consumer
-    resolving base + uri finds ``/ws/api/src/app.py``. The workspace coordinate
+    The anchor is ``file:///`` on POSIX and ``file:///C:/`` on Windows; the uri
+    is the project file's path with the anchor removed. Read as project-relative,
+    that uri would be placed at ``api/<uri>``, a file that does not exist, while a
+    SARIF consumer resolving base + uri finds the file. The workspace coordinate
     has to agree with the consumer's.
     """
+    below_anchor = (
+        (tmp_path / "ws" / "api" / "src" / "app.py")
+        .relative_to(tmp_path.anchor)
+        .as_posix()
+    )
     rebased, unconvertible = rebase_run_for_project(
         _run(
-            {"uri": "ws/api/src/app.py", "uriBaseId": "%SRCROOT%"},
-            base_ids={"%SRCROOT%": {"uri": "file:///"}},
+            {"uri": below_anchor, "uriBaseId": "%SRCROOT%"},
+            base_ids={"%SRCROOT%": {"uri": Path(tmp_path.anchor).as_uri()}},
         ),
-        PROJECT,
+        project,
     )
 
     artifact = _artifact(rebased)
-    assert artifact["uri"] == "ws/api/src/app.py"
+    assert artifact["uri"] == below_anchor
     assert artifact["uriBaseId"] == "%SRCROOT%"
     assert rebased["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
     assert unconvertible == 0
 
 
-def test_a_relative_uri_under_a_deeper_base_is_placed_through_that_base():
+def test_a_relative_uri_under_a_deeper_base_is_placed_through_that_base(
+    project, tmp_path
+):
     """Control for the root-base case: a base with a path of its own joins too."""
     rebased, unconvertible = rebase_run_for_project(
         _run(
             {"uri": "api/src/app.py", "uriBaseId": "%SRCROOT%"},
-            base_ids={"%SRCROOT%": {"uri": "file:///ws/"}},
+            base_ids={"%SRCROOT%": {"uri": _dir_uri(tmp_path / "ws")}},
         ),
-        PROJECT,
+        project,
     )
 
     artifact = _artifact(rebased)
@@ -146,13 +178,15 @@ def test_a_relative_uri_under_a_deeper_base_is_placed_through_that_base():
     assert unconvertible == 0
 
 
-def test_a_relative_uri_under_a_base_outside_the_project_is_counted_not_anchored():
+def test_a_relative_uri_under_a_base_outside_the_project_is_counted_not_anchored(
+    project, tmp_path
+):
     rebased, unconvertible = rebase_run_for_project(
         _run(
             {"uri": "src/app.py", "uriBaseId": "%SRCROOT%"},
-            base_ids={"%SRCROOT%": {"uri": "file:///ws/web/"}},
+            base_ids={"%SRCROOT%": {"uri": _dir_uri(tmp_path / "ws" / "web")}},
         ),
-        PROJECT,
+        project,
     )
 
     artifact = _artifact(rebased)
@@ -162,10 +196,11 @@ def test_a_relative_uri_under_a_base_outside_the_project_is_counted_not_anchored
     assert unconvertible == 1
 
 
-def test_a_reduced_absolute_uri_is_anchored_to_the_project_root():
+def test_a_reduced_absolute_uri_is_anchored_to_the_project_root(project, tmp_path):
     """Control for the first case: a REWRITTEN uri takes the root's coordinates."""
+    absolute = (tmp_path / "ws" / "api" / "src" / "app.py").as_posix()
     rebased, unconvertible = rebase_run_for_project(
-        _run({"uri": "/ws/api/src/app.py", "uriBaseId": "%SRCROOT%"}), PROJECT
+        _run({"uri": absolute, "uriBaseId": "%SRCROOT%"}), project
     )
 
     artifact = _artifact(rebased)

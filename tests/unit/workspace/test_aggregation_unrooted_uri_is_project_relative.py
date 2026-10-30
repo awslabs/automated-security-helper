@@ -42,13 +42,25 @@ from automated_security_helper.workspace.plan import ProjectPlan
 
 pytestmark = pytest.mark.unit
 
-PROJECT = ProjectPlan(
-    key="api",
-    relative_path="api",
-    path="/src/api",
-    label="api",
-    display_label="api",
-)
+
+@pytest.fixture
+def project(tmp_path):
+    """A project at ``<tmp_path>/src/api``: rooted on POSIX, drive-qualified on Windows.
+
+    ``rebase_run_for_project`` hands the project's path to ``Path.as_uri()``,
+    which on Windows refuses a path that has a root and no drive, so the POSIX
+    literal ``/src/api`` this file first used raised ``ValueError`` on every
+    Windows row (test_aggregation.py's ``TestProjectRootUri`` records the shape).
+    The pure-function assertions below keep the literal: ``project_relative_uri``
+    and ``to_workspace_uri`` read it as text on every platform.
+    """
+    return ProjectPlan(
+        key="api",
+        relative_path="api",
+        path=(tmp_path / "src" / "api").as_posix(),
+        label="api",
+        display_label="api",
+    )
 
 
 def _run(uri: str) -> dict:
@@ -75,7 +87,7 @@ def _placed(run: dict) -> tuple[str, str | None, str | None]:
     )
 
 
-def test_a_src_layout_finding_is_not_relocated_to_the_project_root():
+def test_a_src_layout_finding_is_not_relocated_to_the_project_root(project):
     assert project_relative_uri("src/api/__init__.py", "/src/api") is NOT_ABSOLUTE
     assert (
         to_workspace_uri("src/api/__init__.py", "api", "/src/api")
@@ -83,7 +95,7 @@ def test_a_src_layout_finding_is_not_relocated_to_the_project_root():
     )
 
     rebased, unconvertible = rebase_run_for_project(
-        _run("src/api/__init__.py"), PROJECT
+        _run("src/api/__init__.py"), project
     )
 
     assert unconvertible == 0
@@ -94,11 +106,10 @@ def test_a_src_layout_finding_is_not_relocated_to_the_project_root():
     )
 
 
-def test_a_rooted_uri_is_reduced_once_and_both_coordinates_agree():
+def test_a_rooted_uri_is_reduced_once_and_both_coordinates_agree(project, tmp_path):
     """Control: the absolute shape still reduces, and reduces only once."""
-    rebased, unconvertible = rebase_run_for_project(
-        _run("/src/api/src/api/models.py"), PROJECT
-    )
+    absolute = (tmp_path / "src" / "api" / "src" / "api" / "models.py").as_posix()
+    rebased, unconvertible = rebase_run_for_project(_run(absolute), project)
 
     assert unconvertible == 0
     assert _placed(rebased) == (
