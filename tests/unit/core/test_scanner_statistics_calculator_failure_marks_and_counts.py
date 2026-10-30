@@ -6,6 +6,8 @@
 - A report that carries an ``exception`` is a failure's wherever it is read: not a
   partial loss, so the same reports give the same status whether or not the
   scanner has a recorded row.
+- ``verify_sarif_finding_counts`` compares the SARIF with the findings the SARIF
+  can hold: the counts a scanner recorded on a dict result are not a mismatch.
 """
 
 from __future__ import annotations
@@ -21,6 +23,15 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerTargetStatusInfo,
+)
+from automated_security_helper.schemas.sarif_schema_model import (
+    Message,
+    PropertyBag,
+    Result,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
 )
 
 pytestmark = pytest.mark.unit
@@ -146,3 +157,93 @@ class TestAnExceptionIsAFailuresMarkEverywhere:
         )
 
         assert error is False
+
+
+def _sarif(scanner_name: str, levels: list[str]) -> SarifReport:
+    return SarifReport(
+        runs=[
+            Run(
+                tool=Tool(driver=ToolComponent(name=scanner_name)),
+                results=[
+                    Result(
+                        ruleId=f"R{i}",
+                        level=level,
+                        message=Message(text="x"),
+                        properties=PropertyBag(scanner_name=scanner_name),
+                    )
+                    for i, level in enumerate(levels)
+                ],
+            )
+        ]
+    )
+
+
+def _dict_result_report(scanner_name: str, **counts) -> dict:
+    """A target report of a scanner that returned a dict instead of SARIF: the
+    processor keeps the dict as ``raw_results`` and the executor's counts beside it."""
+    return _report(
+        scanner_name,
+        raw_results={
+            "findings": [{"rule": f"R{i}"} for i in range(sum(counts.values()))]
+        },
+        severity_counts=counts,
+    )
+
+
+class TestTheSarifCompareTakesTheDictCountsBackOut:
+    """``extract_sarif_counts_for_scanner`` adds the counts recorded on a dict-result
+    report to the scanner's row, because the merged SARIF never holds those findings.
+    ``verify_sarif_finding_counts`` compared the SARIF's length with the rows' totals as
+    they stood, so every run in which a scanner returned a dict with findings was
+    reported as a mismatch while its statistics were right."""
+
+    def test_a_dict_result_beside_a_complete_sarif_is_not_a_mismatch(self):
+        model = _model({"bandit": {"source": _dict_result_report("bandit", high=3)}})
+        model.sarif = _sarif("bandit", ["error", "warning"])
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        # The row counts the dict's findings (that is the point of adding them).
+        assert stats["bandit"]["total"] == 5
+        assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True
+
+    def test_a_dict_result_alone_matches_an_empty_sarif(self):
+        model = _model({"bandit": {"source": _dict_result_report("bandit", high=3)}})
+
+        assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True
+
+    def test_a_sarif_report_whose_raw_results_were_dropped_adds_nothing(self):
+        """Control: a report with counts and no dict ``raw_results`` is a SARIF
+        report's (the processor drops the raw SARIF), so its findings are in the
+        SARIF and nothing is taken out."""
+        model = _model(
+            {
+                "bandit": {
+                    "source": _report(
+                        "bandit",
+                        severity_counts={"critical": 1, "medium": 1},
+                    )
+                }
+            }
+        )
+        model.sarif = _sarif("bandit", ["error", "warning"])
+
+        assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True
+
+    def test_a_sarif_result_no_row_accounts_for_is_still_a_mismatch(self):
+        """Control: the compare still fails on a real disagreement. A result that
+        names no scanner is counted in no row, so the SARIF holds one finding the
+        rows do not."""
+        model = _model({"bandit": {"source": _dict_result_report("bandit", high=3)}})
+        model.sarif = SarifReport(
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="unnamed")),
+                    results=[
+                        Result(ruleId="R0", level="error", message=Message(text="x"))
+                    ],
+                )
+            ]
+        )
+
+        assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is False

@@ -1951,9 +1951,11 @@ class ScannerStatisticsCalculator:
         the total number of findings calculated from the scanner statistics.
 
         The method counts the number of results in the SARIF runs and compares it with
-        the sum of total and suppressed findings from the scanner statistics. If the
-        counts match, the method returns True, indicating that the statistics calculation
-        is accurate.
+        the sum of total and suppressed findings from the scanner statistics, less the
+        findings recorded on non-SARIF (dict) target reports: those are findings the
+        merged SARIF never holds, and ``extract_sarif_counts_for_scanner`` adds them to
+        every row so the summary and the exit code see them. If the counts match, the
+        method returns True, indicating that the statistics calculation is accurate.
 
         Args:
             asharp_model: The AshAggregatedResults model containing SARIF data
@@ -1975,5 +1977,20 @@ class ScannerStatisticsCalculator:
             stats["total"] + stats["suppressed"] for stats in scanner_stats.values()
         )
 
+        # The dict-result counts are in every row (extract_sarif_counts_for_scanner
+        # adds them, whatever the SARIF holds) and in no SARIF result, so they are
+        # taken back out before the compare: a scanner that returned
+        # {"severity_counts": {"high": 3}} is not a mismatch of three on a run
+        # whose SARIF is complete.
+        dict_finding_count = 0
+        for scanner_name in scanner_stats:
+            dict_counts = ScannerStatisticsCalculator._dict_result_counts(
+                asharp_model, scanner_name
+            )
+            dict_finding_count += sum(
+                getattr(dict_counts, field)
+                for field in ("suppressed", "critical", "high", "medium", "low", "info")
+            )
+
         # Compare counts
-        return sarif_finding_count == stats_finding_count
+        return sarif_finding_count == stats_finding_count - dict_finding_count
