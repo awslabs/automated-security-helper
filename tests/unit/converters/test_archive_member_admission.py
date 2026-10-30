@@ -379,11 +379,13 @@ def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
     names = [member.filename for member in admitted]
     assert len(names) == count and len(set(names)) == count
     assert names[:3] == ["m.js", "m~2/m.js", "m~3/m.js"]
-    # Linear: one key per member before the loop, one for its destination, two
-    # per rename (the placement and its directory), one for the renamed
-    # destination and one per directory of the renamed path; never a walk over
-    # every earlier counter.
-    assert calls["n"] <= 6 * count, calls["n"]
+    # Linear, seven keys per renamed member: one before the loop (taken), one
+    # for its destination, one for the written key the rename counts from, two
+    # for the rename (the placement and its directory), one for the renamed
+    # destination and one for the renamed path's one directory; never a walk
+    # over every earlier counter. Measured 13,995 for 2,000 members (the first
+    # member costs two): the bound is the arithmetic, not a margin.
+    assert calls["n"] <= 7 * count, calls["n"]
     assert elapsed < 10, elapsed
     notices = [r.getMessage() for r in ash_log_records if r.levelno >= logging.WARNING]
     single = [n for n in notices if "is written as" in n]
